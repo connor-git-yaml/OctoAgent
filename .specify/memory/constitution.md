@@ -4,7 +4,7 @@
 > 内部代号：**ATM（Advanced Token Monster）**
 > 定位：**个人智能操作系统（Personal AI OS）**
 > 版本：v0.1
-> 来源：OctoAgent_Blueprint.md §2
+> 来源：docs/blueprint.md §2
 
 ---
 
