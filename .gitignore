@@ -1,0 +1,53 @@
+# ===== 参考资料（不纳入版本管理）=====
+_references/
+_research/
+
+# ===== 系统与 IDE =====
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+.uv/
+
+# ===== 数据与运行时 =====
+data/sqlite/*.db
+data/sqlite/*.db-wal
+data/sqlite/*.db-shm
+data/artifacts/
+data/vault/
+*.log
+
+# ===== 密钥与敏感配置 =====
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== Node（如有前端）=====
+node_modules/
+.next/
