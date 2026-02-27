@@ -92,7 +92,9 @@ octoagent/
 - 测试：每个模块需有 unit test，关键路径需有 integration test
 
 ### Git 规范
-- 分支策略：`main`（稳定）+ `dev`（开发）+ `feat/*`（功能分支）
+- Remote: `origin` → `https://github.com/connor-git-yaml/OctoAgent.git`
+- 主分支: **`master`**（不是 main）
+- 分支策略：`master`（稳定）+ `dev`（开发）+ `feat/*`（功能分支）
 - Commit 格式：`<type>(<scope>): <description>`
   - type: feat / fix / refactor / docs / test / chore
   - scope: core / gateway / kernel / worker / memory / tooling / ...
@@ -107,8 +109,12 @@ octoagent/
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| 数据库 | SQLite WAL（MVP） | 单用户场景足够，预留 Postgres 升级路径 |
+| 结构化存储 | SQLite WAL | Task/Event/Artifact 元信息，单用户足够 |
+| 语义检索 | 向量数据库（ChromaDB MVP） | 记忆/工具索引/知识库直接上 embedding，跳过 FTS 中间态 |
 | 编排 | 自研轻量 Graph/FSM | 避免引入 Temporal 的运维成本，先实现 checkpoint+resume |
 | 模型网关 | LiteLLM Proxy | 统一 alias 路由，业务代码不写死厂商型号 |
 | 执行隔离 | Docker 默认 | Agent Zero 验证过的方案，安全边界清晰 |
 | 事件溯源 | 最小 Event Sourcing | append-only events + tasks projection，先保证崩溃不丢 |
+| 门禁策略 | Safe by default + Policy Profile 可配 | 平衡安全与智能化，减少低风险场景的用户打扰 |
+| A2A 兼容 | 内部超集 + A2AStateMapper 双向映射 | 内部保留 WAITING_APPROVAL/PAUSED 等治理状态，对外映射为标准 A2A TaskState |
+| Task 终态 | SUCCEEDED/FAILED/CANCELLED/REJECTED | REJECTED 区分策略拒绝与运行时失败 |

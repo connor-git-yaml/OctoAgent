@@ -18,7 +18,7 @@
   - 未来可能加入的 1-3 名协作者（工程实现、前端、运维）
 - 约束假设（可调整）：
   - 单用户为主（你的个人 AI OS），允许未来扩展到“小团队/家庭”但不以此为第一目标
-  - 本地优先（Mac + 局域网设备），允许部分组件云端化（如 GPU worker / 远端 job runner）
+  - 本地优先（个人电脑 + 局域网设备），允许部分组件云端化（如 GPU worker / 远端 job runner）
   - 需要 7x24 长期运行能力与可恢复能力（durable & resumable）
 
 ---
@@ -50,7 +50,7 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 
 1) **Durability First（耐久优先）**  
    - 任何长任务/后台任务必须落盘：Task、Event、Artifact、Checkpoint 至少具备本地持久化。  
-   - 进程重启后：任务状态不能“消失”，要么可恢复，要么可终止到终态（FAILED/CANCELLED）。
+   - 进程重启后：任务状态不能”消失”，要么可恢复，要么可终止到终态（FAILED/CANCELLED/REJECTED）。
 
 2) **Everything is an Event（事件一等公民）**  
    - 模型调用、工具调用、状态迁移、审批、错误、回放，都必须生成事件记录。  
@@ -70,11 +70,13 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 
 6) **Degrade Gracefully（可降级）**  
    - 任一插件/外部依赖不可用时，系统不得整体不可用；必须支持 disable/降级路径。  
-   - 例如：memU 插件失效 → 记忆能力降级为本地 SQLite/FTS，不影响任务系统。
+   - 例如：memU 插件失效 → 记忆能力降级为本地向量数据库直查，不影响任务系统。
 
-7) **User-in-Control（用户始终可控）**  
-   - 任何高风险动作必须可审批；任何任务必须可取消；任何重要数据必须可删除。  
-   - “我觉得这样更好所以直接做了”是禁止行为。
+7) **User-in-Control（用户可控 + 策略可配）**
+   - 系统必须提供审批、取消、删除等控制能力（capability always available）。
+   - 所有门禁默认启用（safe by default），但用户可通过策略配置（Policy Profile）调整——包括自动批准、静默执行等。
+   - 对用户已明确授权的场景（定时任务、低风险工具链），应减少打扰、体现智能化。
+   - 在无任何策略授权的情况下，不得静默执行不可逆操作。
 
 8) **Observability is a Feature（可观测性是产品功能）**  
    - 每个任务必须可看到：当前状态、已执行步骤、消耗、产物、失败原因与下一步建议。  
@@ -153,7 +155,7 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 - UC2：长时间研究与产出（调研报告、技术方案、对比分析）
 - UC3：跨设备运维（NAS/Windows/Mac 的脚本执行、状态检查、文件同步）
 - UC4：外部聊天导入与记忆更新（微信/Telegram 历史 → SoR/Fragments）
-- UC5：有副作用的系统操作（改配置、发消息、创建日程、发送邮件）——必须审批
+- UC5：有副作用的系统操作（改配置、发消息、创建日程、发送邮件）——默认审批，可通过 Policy Profile 授权自动执行
 - UC6：项目资产治理（Projects / Skills / Scripts 组织与版本化）
 - UC7：故障恢复（崩溃、断网、provider 429、插件失效）下的自动降级与可恢复
 
@@ -188,7 +190,9 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 #### 5.1.2 Task / Event / Artifact（任务系统）
 
 - FR-TASK-1（必须）：Task 生命周期管理
-  - 状态：`CREATED → QUEUED → RUNNING → (WAITING_INPUT|WAITING_APPROVAL|PAUSED) → (SUCCEEDED|FAILED|CANCELLED)`
+  - 状态：`CREATED → QUEUED → RUNNING → (WAITING_INPUT|WAITING_APPROVAL|PAUSED) → (SUCCEEDED|FAILED|CANCELLED|REJECTED)`
+  - 终态：SUCCEEDED / FAILED / CANCELLED / REJECTED
+  - REJECTED：策略拒绝或 Worker 能力不匹配时使用，区别于运行时 FAILED
   - 支持 retry / resume / cancel
 
 - FR-TASK-2（必须）：事件流（Event Stream）
@@ -220,6 +224,8 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 - FR-A2A-3（应该）：A2A-Lite 内部协议
   - Orchestrator 与 Worker 之间使用统一消息 envelope
   - 支持 TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT
+  - 内部状态为 A2A TaskState 超集，通过 A2AStateMapper 双向映射
+  - Worker ↔ 外部 SubAgent 通信时使用标准 A2A TaskState
 
 #### 5.1.4 Skills / Tools（能力沉淀与治理）
 
@@ -242,8 +248,8 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
   - 可单元测试与回放
 
 - FR-TOOLRAG-1（可选）：Tool Index + 动态注入（Tool RAG）
-  - 先用 SQLite FTS/BM25 做工具检索与注入
-  - 后续加 embedding 向量检索（可插拔）
+  - 使用向量数据库（ChromaDB/Qdrant）做工具 embedding 检索与注入
+  - 支持按 description + 参数 + tags + examples 索引
 
 #### 5.1.5 记忆系统（Memory）
 
@@ -441,17 +447,22 @@ flowchart TB
 
 ### 7.3 数据持久化
 
-- SQLite（MVP 默认）
+- SQLite（结构化数据默认）
   - WAL 模式
   - 事件表 append-only
-  - FTS5 用于 ToolIndex / 文本检索（MVP 阶段先不引入 embedding）
+  - 用于 Task/Event/Artifact 元信息等结构化存储
 
-- PostgreSQL（可选，v0.2+）
-  - 当需要更高并发/跨机扩展/pgvector 时切换
-  - 迁移路径：SQLite → Postgres（保持 schema version）
+- 向量数据库（语义检索默认）
+  - ChromaDB（嵌入式，MVP 首选）或 Qdrant（独立部署，扩展路径）
+  - 用于 ToolIndex / 记忆检索 / 知识库
+  - 直接上 embedding 方案，不经过 FTS 中间态
+
+- PostgreSQL + pgvector（可选，v0.2+）
+  - 当需要更高并发/跨机扩展/统一存储时切换
+  - 迁移路径：SQLite + ChromaDB → Postgres + pgvector
 
 理由：
-- 单用户场景 SQLite 足够；先把系统闭环跑起来，避免早期引入过多组件。
+- 结构化数据用 SQLite 足够；语义检索直接上向量数据库，避免 FTS 到 embedding 的迁移成本。
 
 ### 7.4 模型网关
 
@@ -530,7 +541,7 @@ Task:
   task_id: "uuid"
   created_at: "..."
   updated_at: "..."
-  status: CREATED|QUEUED|RUNNING|WAITING_INPUT|WAITING_APPROVAL|PAUSED|SUCCEEDED|FAILED|CANCELLED
+  status: CREATED|QUEUED|RUNNING|WAITING_INPUT|WAITING_APPROVAL|PAUSED|SUCCEEDED|FAILED|CANCELLED|REJECTED
   title: "short"
   thread_id: "..."
   scope_id: "..."
@@ -552,7 +563,7 @@ Event:
   event_id: "ulid"
   task_id: "uuid"
   ts: "..."
-  type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
+  type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|TASK_REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
   actor: user|kernel|worker|tool|system
   payload: { ... }   # 强结构化（尽量少塞大文本）
   trace_id: "..."
@@ -707,9 +718,9 @@ ToolMeta:
 
 #### 8.5.3 Tool Index（MVP）
 
-- SQLite FTS：索引 tool 描述 + 参数 + tags + examples
+- 向量数据库（ChromaDB）：embedding 索引 tool 描述 + 参数 + tags + examples
 - Orchestrator 在运行时检索：
-  - 给出候选工具集合（Top-K）
+  - 语义相似度匹配候选工具集合（Top-K）
   - 再由 Policy Engine 过滤
   - 最终注入到 Skill 的可用工具列表（减少工具膨胀）
 
@@ -741,7 +752,12 @@ ToolMeta:
 - irreversible 工具：默认 ask
 - reversible 工具：默认 allow，但可按 project 提升为 ask
 - read-only：默认 allow
-- 任何涉及外部发送/支付/删除：永远不允许 silent allow（至少需要规则白名单或审批）
+- 任何涉及外部发送/支付/删除：默认 ask（需要策略白名单或显式审批才可 silent allow）
+
+**策略可配原则（与 Constitution 原则 7 对齐）：**
+- 所有门禁 safe by default，但用户可通过 Policy Profile 调整
+- 对用户已明确授权的场景（如定时任务、低风险工具链），自动批准以减少打扰
+- 策略变更本身是事件，可审计可回滚
 
 #### 8.6.3 审批交互
 
@@ -1007,7 +1023,7 @@ config_schema:
 
 职责：
 - 工具扫描与 schema 反射
-- ToolIndex 构建（FTS/BM25）
+- ToolIndex 构建（向量 embedding 检索）
 - ToolBroker（执行、并发、超时、结果压缩）
 - ToolResult 结构化回灌
 
@@ -1015,7 +1031,7 @@ config_schema:
 
 职责：
 - Fragments/SoR/Vault 数据模型
-- 检索（FTS + 可选向量）
+- 检索（向量语义检索）
 - 写入仲裁（WriteProposal → validate → commit）
 - Chat Import Core（dedupe、window、summarize）
 
@@ -1067,8 +1083,44 @@ A2AMessage:
 ```
 
 语义要求：
-- UPDATE 必须可投递到“正在运行的 task”；否则进入 WAITING_INPUT 并提示用户
-- CANCEL 必须推进终态（CANCELLED），不可“卡 RUNNING”
+- UPDATE 必须可投递到”正在运行的 task”；否则进入 WAITING_INPUT 并提示用户
+- CANCEL 必须推进终态（CANCELLED），不可”卡 RUNNING”
+
+#### 10.2.1 A2A 状态映射（A2A TaskState Compatibility）
+
+OctoAgent 内部状态是 A2A 协议的**超集**。内部通信（Kernel ↔ Worker）使用完整状态；对外暴露 A2A 接口时通过映射层转换。
+
+```yaml
+# OctoAgent → A2A TaskState 映射
+StateMapping:
+  CREATED:           submitted     # 合并到 submitted（已接收未处理）
+  QUEUED:            submitted
+  RUNNING:           working
+  WAITING_INPUT:     input-required
+  WAITING_APPROVAL:  input-required  # 审批对外表现为”需要输入”
+  PAUSED:            working         # 暂停是内部实现细节，对外仍为”处理中”
+  SUCCEEDED:         completed
+  FAILED:            failed
+  CANCELLED:         canceled
+  REJECTED:          rejected        # 直接映射
+
+# A2A → OctoAgent 反向映射（外部 Agent 调入时）
+ReverseMapping:
+  submitted:      QUEUED
+  working:        RUNNING
+  input-required: WAITING_INPUT
+  completed:      SUCCEEDED
+  canceled:       CANCELLED
+  failed:         FAILED
+  rejected:       REJECTED
+  auth-required:  WAITING_APPROVAL   # auth 语义映射到审批
+  unknown:        FAILED             # 降级为失败
+```
+
+设计原则：
+- **内部超集**：OctoAgent 保留 WAITING_APPROVAL、PAUSED、CREATED 等 A2A 没有的状态，满足内部治理需求
+- **外部兼容**：对外通过 A2AStateMapper 暴露标准 A2A TaskState，实现 Worker ↔ SubAgent 通信一致性
+- **映射无损**：终态（completed/canceled/failed/rejected）一一对应；非终态映射后语义明确
 
 ### 10.3 Tool Call 协议
 
@@ -1206,6 +1258,7 @@ A2AMessage:
 - [ ] TelegramChannel（pairing + thread_id）
 - [ ] Worker 框架（ops/research/dev 至少 1 个）
 - [ ] A2A-Lite 消息投递（TASK/UPDATE/CANCEL）
+- [ ] A2AStateMapper（内部状态 ↔ A2A TaskState 双向映射）
 - [ ] JobRunner docker backend + watchdog
 - [ ] 基础 memory（Fragments + SoR + 仲裁）
 
@@ -1216,7 +1269,7 @@ A2AMessage:
 - [ ] Chat Import Core（dedupe/window/summarize）
 - [ ] 微信导入插件
 - [ ] Vault 分区与授权检索
-- [ ] ToolIndex（FTS）+ 动态工具注入
+- [ ] ToolIndex（向量检索）+ 动态工具注入
 - [ ] Graph Engine（关键流程固化、可回放）
 
 ---
