@@ -28,7 +28,7 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 ### 原则 1：Durability First（耐久优先）
 
 - **MUST**：任何长任务/后台任务必须落盘 -- Task、Event、Artifact、Checkpoint 至少具备本地持久化
-- **MUST**：进程重启后，任务状态不能"消失"，要么可恢复，要么可终止到终态（FAILED/CANCELLED）
+- **MUST**：进程重启后，任务状态不能"消失"，要么可恢复，要么可终止到终态（FAILED/CANCELLED/REJECTED）
 - **MUST NOT**：不得存在仅存在于内存中、重启即丢失的关键状态
 
 ### 原则 2：Everything is an Event（事件一等公民）
@@ -61,12 +61,13 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 - **SHOULD**：降级路径应有明确的文档说明和事件记录
 - **示例**：memU 插件失效 -> 记忆能力降级为本地 SQLite/FTS，不影响任务系统
 
-### 原则 7：User-in-Control（用户始终可控）
+### 原则 7：User-in-Control（用户可控 + 策略可配）
 
-- **MUST**：任何高风险动作必须可审批
-- **MUST**：任何任务必须可取消
-- **MUST**：任何重要数据必须可删除
-- **MUST NOT**：禁止"我觉得这样更好所以直接做了"的自主决策行为
+- **MUST**：系统必须提供审批、取消、删除等控制能力（capability always available）
+- **MUST**：所有门禁（审批/取消/风险拦截）默认启用（safe by default）
+- **MUST**：用户可通过策略配置（Policy Profile）调整门禁行为——包括降级、自动批准、静默执行等
+- **SHOULD**：对用户已明确授权的场景（如定时任务、低风险工具链），系统应减少打扰、体现智能化
+- **MUST NOT**：在无任何策略授权的情况下，不得静默执行不可逆操作
 
 ### 原则 8：Observability is a Feature（可观测性是产品功能）
 
@@ -109,6 +110,14 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 - **MUST**：失败必须给出可恢复路径（重试、降级、等待输入、人工介入）
 - **MUST NOT**：不得出现无分类、无恢复路径的失败状态
 
+### 原则 14：A2A 协议兼容（A2A Protocol Compatibility）
+
+- **MUST**：内部 Task 状态机是 A2A TaskState 的超集，保留 WAITING_APPROVAL、PAUSED、CREATED 等内部治理状态
+- **MUST**：对外暴露 A2A 接口时，通过 A2AStateMapper 将内部状态映射为标准 A2A TaskState（submitted/working/input-required/completed/canceled/failed/rejected）
+- **MUST**：终态包含 REJECTED（策略拒绝/能力不匹配），区别于运行时 FAILED
+- **MUST NOT**：不得在 Kernel ↔ Worker 内部通信中丢失内部状态精度（不降级为 A2A 状态）
+- **SHOULD**：Worker ↔ 外部 SubAgent 通信使用标准 A2A TaskState，确保互操作性
+
 ---
 
 ## III. 技术栈约束
@@ -128,9 +137,11 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 
 ### 数据持久化
 
-- **MUST**：MVP 阶段使用 SQLite（WAL 模式）
+- **MUST**：结构化数据（Task/Event/Artifact 元信息）使用 SQLite（WAL 模式）
 - **MUST**：事件表 append-only
-- **SHOULD**：预留 PostgreSQL 升级路径
+- **MUST**：语义检索（记忆/工具索引/知识库）直接使用向量数据库（如 ChromaDB / Qdrant）
+- **MUST NOT**：不经过 SQLite FTS 中间态，直接上 embedding 方案
+- **SHOULD**：预留 PostgreSQL + pgvector 升级路径
 
 ### 模型网关
 
