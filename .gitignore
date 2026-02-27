@@ -2,6 +2,10 @@
 _references/
 _research/
 
+# ===== Claude Code（个人配置不提交）=====
+.claude/settings.local.json
+.claude/CLAUDE.local.md
+
 # ===== 系统与 IDE =====
 .DS_Store
 *.swp
