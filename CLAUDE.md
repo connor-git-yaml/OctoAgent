@@ -118,3 +118,4 @@ octoagent/
 | 门禁策略 | Safe by default + Policy Profile 可配 | 平衡安全与智能化，减少低风险场景的用户打扰 |
 | A2A 兼容 | 内部超集 + A2AStateMapper 双向映射 | 内部保留 WAITING_APPROVAL/PAUSED 等治理状态，对外映射为标准 A2A TaskState |
 | Task 终态 | SUCCEEDED/FAILED/CANCELLED/REJECTED | REJECTED 区分策略拒绝与运行时失败 |
+| Artifact 模型 | A2A parts 超集 + version/hash/size | 多 Part 结构对齐 A2A，保留版本化与完整性校验，支持流式追加 |

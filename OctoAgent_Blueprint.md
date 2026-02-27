@@ -200,8 +200,11 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
   - 每条事件有唯一 id、类型、时间、payload、trace_id
 
 - FR-TASK-3（必须）：Artifact 产物管理
-  - 支持文件/markdown/结构化数据/日志片段
+  - 多 Part 结构：单个 Artifact 可包含多个 Part（text/file/json/image），对齐 A2A Artifact.parts
+  - 支持 inline 内容与 URI 引用双模（小内容 inline，大文件 storage_ref）
   - artifact 版本化，任务事件中引用 artifact_id
+  - 流式追加：支持 append 模式逐步生成产物（如实时日志、增量报告）
+  - 完整性：保留 hash + size 校验（A2A 没有但我们需要）
 
 - FR-TASK-4（应该）：Checkpoint（可恢复快照）
   - Graph 节点级 checkpoint（至少保存 node_id + state snapshot）
@@ -575,18 +578,31 @@ Event:
 
 ```yaml
 Artifact:
-  artifact_id: "ulid"
+  artifact_id: "ulid"            # 全局唯一（A2A 只有 index，我们更强）
   task_id: "uuid"
   ts: "..."
-  kind: file|markdown|json|log|image|link
   name: "..."
-  storage_ref: "file:///... or s3://... or artifact://..."
-  mime: "..."
-  size: 123
-  hash: "sha256"
-  version: 1
+  description: "optional"        # 新增，对齐 A2A
+  parts:                         # 改为 parts 数组，对齐 A2A Artifact.parts
+    - type: text|file|json|image # 对应 A2A 的 TextPart/FilePart/JsonPart
+      mime: "..."                # Part 级别 MIME
+      content: "inline 或 null"  # 小内容 inline（对齐 A2A data/text）
+      uri: "file:///... 或 null" # 大文件引用（对齐 A2A FilePart.uri）
+  storage_ref: "..."             # 保留，整体大文件外部存储引用
+  size: 123                      # 保留，A2A 没有
+  hash: "sha256"                 # 保留，完整性校验
+  version: 1                     # 保留，版本化能力（A2A immutable，我们支持版本迭代）
+  append: false                  # 新增，对齐 A2A 流式追加
+  last_chunk: false              # 新增，标记流式最后一块
   meta: { ... }
 ```
+
+Part 类型说明（对齐 A2A Part 规范）：
+- `text`：纯文本 / markdown（对应 A2A TextPart）
+- `file`：文件引用或 inline Base64（对应 A2A FilePart）
+- `json`：结构化 JSON 数据（对应 A2A JsonPart）
+- `image`：图片（本质是 file 的特化，便于 UI 渲染）
+- 暂不支持 A2A 的 FormPart / IFramePart，按需扩展
 
 ---
 
@@ -1121,6 +1137,33 @@ ReverseMapping:
 - **内部超集**：OctoAgent 保留 WAITING_APPROVAL、PAUSED、CREATED 等 A2A 没有的状态，满足内部治理需求
 - **外部兼容**：对外通过 A2AStateMapper 暴露标准 A2A TaskState，实现 Worker ↔ SubAgent 通信一致性
 - **映射无损**：终态（completed/canceled/failed/rejected）一一对应；非终态映射后语义明确
+
+#### 10.2.2 A2A Artifact 映射
+
+OctoAgent Artifact 是 A2A Artifact 的**超集**（多出 artifact_id、version、hash、size）。对外暴露时通过映射层转换。
+
+```yaml
+# OctoAgent Artifact → A2A Artifact 映射
+ArtifactMapping:
+  name:        → name
+  description: → description
+  parts:       → parts            # Part 结构已对齐（text/file/json → TextPart/FilePart/JsonPart）
+  append:      → append
+  last_chunk:  → lastChunk
+  # 以下字段对外不暴露（A2A 没有，OctoAgent 独有）
+  artifact_id: → 丢弃（A2A 用 index 代替）
+  version:     → metadata.version  # 降级到 metadata
+  hash:        → metadata.hash
+  size:        → metadata.size
+  storage_ref: → 转为 parts[].uri  # storage_ref 映射到 Part 的 uri 字段
+
+# Part 类型映射
+PartTypeMapping:
+  text:  → TextPart   (content → text)
+  file:  → FilePart   (content → data[base64], uri → uri)
+  json:  → JsonPart   (content → data)
+  image: → FilePart   (mime: image/*, uri → uri)
+```
 
 ### 10.3 Tool Call 协议
 

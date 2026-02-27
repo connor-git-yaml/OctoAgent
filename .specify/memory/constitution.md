@@ -117,6 +117,9 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 - **MUST**：终态包含 REJECTED（策略拒绝/能力不匹配），区别于运行时 FAILED
 - **MUST NOT**：不得在 Kernel ↔ Worker 内部通信中丢失内部状态精度（不降级为 A2A 状态）
 - **SHOULD**：Worker ↔ 外部 SubAgent 通信使用标准 A2A TaskState，确保互操作性
+- **MUST**：Artifact 采用 A2A 兼容的 parts 多部分结构（text/file/json/image），同时保留 artifact_id、version、hash、size 等内部治理字段
+- **MUST**：Artifact 支持 append 流式追加模式（对齐 A2A append + lastChunk）
+- **SHOULD**：对外暴露 A2A Artifact 时，通过映射层转换（内部独有字段降级到 metadata）
 
 ---
 
