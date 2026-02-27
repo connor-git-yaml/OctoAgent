@@ -6,7 +6,7 @@
 
 - **Owner**: Connor Lu
 - **阶段**: v0.1（MVP 实现）
-- **蓝图文档**: `OctoAgent_Blueprint.md`（工程蓝图，所有设计决策的权威来源）
+- **蓝图文档**: `docs/blueprint.md`（工程蓝图，所有设计决策的权威来源）
 
 ## 核心架构（三层 + 外层 Loop）
 
@@ -83,7 +83,7 @@ octoagent/
 ### Spec-Driven 开发
 - 使用 Spec Driver 工作流：constitution → spec → implement → verify
 - 每个模块实现前先写 spec，spec 通过 review 后再编码
-- Blueprint (`OctoAgent_Blueprint.md`) 是所有 spec 的上游依据
+- Blueprint (`docs/blueprint.md`) 是所有 spec 的上游依据
 
 ### 代码规范
 - 类型注解：所有公共函数必须有完整类型注解
