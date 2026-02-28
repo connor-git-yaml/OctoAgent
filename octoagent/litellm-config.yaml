@@ -1,0 +1,45 @@
+# OctoAgent LiteLLM Proxy 配置
+# 文档: https://docs.litellm.ai/docs/proxy/configs
+#
+# 运行时 group 与 AliasRegistry 映射:
+#   cheap  <- router, extractor, summarizer
+#   main   <- planner, executor
+#   fallback <- fallback
+#
+# 对齐 contracts/deployment.md SS2 + provider-api.md AliasRegistry。
+
+model_list:
+  # cheap 运行时 group -- 轻量模型
+  # 语义 alias 映射: router, extractor, summarizer -> cheap
+  - model_name: "cheap"
+    litellm_params:
+      model: "gpt-4o-mini"
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # main 运行时 group -- 主力模型
+  # 语义 alias 映射: planner, executor -> main
+  - model_name: "main"
+    litellm_params:
+      model: "gpt-4o"
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # fallback 运行时 group -- 备选 provider
+  # 语义 alias 映射: fallback
+  - model_name: "fallback"
+    litellm_params:
+      model: "claude-3-5-haiku-20241022"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+litellm_settings:
+  drop_params: true        # 忽略 provider 不支持的参数
+  num_retries: 2           # 每个模型重试次数
+  request_timeout: 60      # Proxy 侧请求超时（秒）
+
+router_settings:
+  routing_strategy: "simple-shuffle"  # MVP 不需要复杂路由
+  fallbacks:
+    - {"cheap": ["fallback"]}
+    - {"main": ["fallback"]}
+
+general_settings:
+  master_key: "os.environ/LITELLM_MASTER_KEY"
