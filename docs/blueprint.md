@@ -1013,8 +1013,8 @@ octoagent/
     tooling/                 # tool schema reflection + tool broker
     memory/                  # SoR/Fragments/Vault + arbitration
     provider/                # litellm client wrappers + cost model
-    observability/           # otel setup + logging helpers
-    ui/                      # minimal web ui (optional)
+    observability/           # logfire init + structlog + event metrics
+  frontend/                    # React + Vite Web UI（M0 起步）
   plugins/
     channels/
       telegram/
@@ -1055,10 +1055,17 @@ octoagent/
 - 出站消息发送（Telegram/Web）
 - SSE/WS stream 转发（从 Kernel 订阅）
 
-对外 API（MVP）：
-- `POST /ingest_message`
-- `GET /stream/task/{task_id}`
-- `POST /approve/{approval_id}`
+对外 API（Gateway 暴露给渠道/Web UI）：
+
+- `POST /api/message`（接收用户消息）
+- `GET /api/stream/task/{task_id}`（SSE 事件流）
+- `POST /api/approve/{approval_id}`（审批决策）
+
+内部调用（Gateway → Kernel）：
+
+- `POST /kernel/ingest_message`
+- `GET /kernel/stream/task/{task_id}`
+- `POST /kernel/approvals/{approval_id}/decision`
 
 ### 9.4 apps/kernel
 
@@ -1074,6 +1081,7 @@ octoagent/
 - `Supervisor`：watchdog + stop condition
 - `ApprovalService`：审批状态机
 - `MemoryService`：read/write arbitration
+- `SchedulerService`：APScheduler wrapper，定时任务触发 → 创建 Task（UC1 例行任务）
 
 ### 9.5 workers/*
 
@@ -1085,13 +1093,35 @@ octoagent/
 - Tool Broker（schema、动态注入、执行编排）
 - 暴露内部 RPC（HTTP/gRPC 均可；MVP 用 HTTP）
 
+Worker 类型与专长（Orchestrator Router 据此派发）：
+
+- `ops`：运维与系统操作——脚本执行、设备管理、文件同步、定时巡检
+- `research`：调研与分析——信息检索、对比分析、报告生成、知识整理
+- `dev`：开发与工程——代码编写、项目构建、测试运行、技术方案实现
+
 worker 的最小端点：
 - `POST /a2a/run`（TASK）
 - `POST /a2a/update`（UPDATE）
 - `POST /a2a/cancel`（CANCEL）
 - `GET /health`
 
-### 9.6 packages/plugins
+### 9.6 packages/protocol
+
+职责：
+
+- A2AMessage envelope 定义（见 §10.2）
+- NormalizedMessage 定义（见 §8.1.1）
+- A2AStateMapper：内部状态 ↔ A2A TaskState 双向映射（见 §10.2.1）
+- A2A Artifact 映射层（见 §10.2.2）
+
+关键接口：
+
+- `A2AMessage.wrap(payload) → envelope`
+- `A2AStateMapper.to_a2a(internal_state) → a2a_state`
+- `A2AStateMapper.from_a2a(a2a_state) → internal_state`
+- `ArtifactMapper.to_a2a(artifact) → a2a_artifact`
+
+### 9.7 packages/plugins
 
 职责：
 - Plugin manifest 解析
@@ -1118,37 +1148,62 @@ config_schema:
   ...
 ```
 
-### 9.7 packages/tooling
+`plugins/` 实现目录约定（实际插件放在 repo 顶层 `plugins/` 下）：
+
+- 每个插件一个子目录，包含 `manifest.yaml` + Python 模块
+- 目录结构示例：`plugins/channels/telegram/`（manifest.yaml + adapter.py）
+- 插件实现依赖 `packages/plugins` 提供的 Loader / Manifest 解析能力
+- Channel 插件须实现 `ChannelAdapter` 协议；Tool 插件须实现 `ToolMeta` 声明
+
+### 9.8 packages/tooling
 
 职责：
+
 - 工具扫描与 schema 反射
-- ToolIndex 构建（向量 embedding 检索）
+- ToolIndex 构建（LanceDB 向量 embedding 检索，见 §8.5.3）
 - ToolBroker（执行、并发、超时、结果压缩）
 - ToolResult 结构化回灌
 
-### 9.8 packages/memory
+### 9.9 packages/memory
 
 职责：
+
 - Fragments/SoR/Vault 数据模型
-- 检索（向量语义检索）
+- 语义检索（LanceDB vector + metadata filter，见 §8.7.4）
 - 写入仲裁（WriteProposal → validate → commit）
 - Chat Import Core（dedupe、window、summarize）
 
-### 9.9 packages/provider
+### 9.10 packages/provider
 
 职责：
+
 - LiteLLM proxy client wrapper
 - alias 与策略（router/extractor/planner/executor/summarizer）
 - fallback 与错误分类
 - cost/tokens 解析
 
-### 9.10 packages/observability
+### 9.11 packages/observability
 
 职责：
+
 - Logfire init（自动 instrument Pydantic AI / FastAPI）
 - structlog 配置（dev pretty / prod JSON）
 - 统一 trace_id 贯穿 event payload
 - Event Store metrics 查询辅助（cost/tokens 聚合）
+
+### 9.12 frontend/（React + Vite Web UI）
+
+职责：
+
+- M0：TaskList + EventStream 两个核心组件
+- SSE 消费：原生 EventSource 对接 Gateway `/api/stream/task/{id}`
+- 后续扩展：Approvals 审批面板、Config 配置管理、Artifacts 查看、Memory 浏览
+
+技术栈：
+
+- React + Vite（从 M0 起步，避免迁移债务）
+- 独立于 Python 后端，通过 Gateway API 通信
+- 开发时 Vite dev server 代理到 Gateway；生产时静态文件由 Gateway 托管
 
 ---
 
