@@ -1466,25 +1466,434 @@ PartTypeMapping:
 
 ## 12. 运行与部署（Ops & Deployment）
 
-### 12.1 最小部署（单机 Docker Compose）
+> 本节覆盖从开发到生产的完整运维体系。设计原则对齐 Constitution：
+> - **C1 Durability First** → 备份、恢复验证、优雅关闭
+> - **C5 Least Privilege** → 容器安全加固、secrets 注入、网络隔离
+> - **C6 Degrade Gracefully** → 分级故障策略、熔断、降级
+> - **C8 Observability** → 健康检查、运维事件、告警通道
 
-- litellm-proxy（容器）
-- octo-kernel（容器或本地）
-- octo-gateway（容器或本地）
-- octo-worker-ops/research/dev（可选；先内置在 kernel 进程也可）
-- sqlite + artifacts 挂载到本地卷
+### 12.1 部署拓扑
 
-### 12.2 数据备份策略
+#### 12.1.1 开发拓扑（单进程）
 
-- SQLite：每日快照 + WAL 归档
-- artifacts：按 task_id 目录存放，定期 rsync 到 NAS
-- vault：单独加密备份
+MVP 开发阶段采用单进程模式，降低调试复杂度：
 
-### 12.3 故障策略
+- Gateway / Kernel / Worker 全部运行在同一 Python 进程内（FastAPI sub-app 或模块化路由）
+- SQLite 文件直接读写本地 `./data/sqlite/`
+- LiteLLM Proxy 单独容器运行（唯一外部依赖）
+- 不需要 Docker 网络编排，本地 `localhost` 通信即可
 
-- Provider 失败：LiteLLM fallback + 冷却；事件记录原因
-- Worker 失败：标记 worker unhealthy；task 进入 WAITING_INPUT 或重派发策略
-- Plugin 失败：自动 disable 并降级；记录 incident
+```
+[ 本地进程: Gateway + Kernel + Workers ]
+          ↓ HTTP
+[ Docker: litellm-proxy :4000 ]
+          ↓
+[ SQLite: ./data/sqlite/octoagent.db ]
+[ Artifacts: ./data/artifacts/ ]
+```
+
+#### 12.1.2 生产拓扑（Docker Compose 多容器）
+
+长期运行场景采用容器化部署，每个服务独立隔离：
+
+```
+                    ┌──────────────────────┐
+                    │   reverse-proxy      │  :443 (HTTPS)
+                    │   (caddy / nginx)    │
+                    └──────┬───────────────┘
+                           │
+              ┌────────────┼────────────────┐
+              ▼            ▼                ▼
+        ┌──────────┐ ┌──────────┐   ┌─────────────┐
+        │ gateway  │ │ kernel   │   │ worker-ops  │
+        │ :9000    │ │ :9001    │   │ (内部端口)  │
+        └──────────┘ └──────────┘   └─────────────┘
+              │            │                │
+              └────────────┼────────────────┘
+                           ▼
+                    ┌──────────────┐
+                    │ litellm-proxy│  :4000 (内部)
+                    └──────────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+     [ volume: ./data ]         [ Docker Socket ]
+     sqlite / artifacts / vault   (JobRunner 沙箱)
+```
+
+服务清单：
+
+| 服务 | 镜像 | 端口 | 说明 |
+|------|------|------|------|
+| reverse-proxy | caddy:2-alpine | 443, 80 | HTTPS 终止（Telegram webhook 要求）；自动 Let's Encrypt |
+| octo-gateway | 自建 | 9000（内部） | 渠道适配 + SSE 转发 |
+| octo-kernel | 自建 | 9001（内部） | Orchestrator + Policy + Event Store |
+| octo-worker-* | 自建 | 无外部端口 | Worker 进程；MVP 可先内置在 kernel 中 |
+| litellm-proxy | ghcr.io/berriai/litellm | 4000（内部） | 模型网关 |
+
+#### 12.1.3 Docker-in-Docker 策略（执行沙箱 vs 部署容器）
+
+系统存在**两层 Docker 使用**，必须明确区分：
+
+- **部署层**：系统自身的容器化（docker-compose 管理）
+- **执行层**：JobRunner 为 Worker 创建的沙箱容器（FR-EXEC-1/2）
+
+**方案选择：Docker Socket 挂载（非 DinD）**
+
+```yaml
+# kernel / worker 容器挂载宿主 Docker socket
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+- 理由：DinD 复杂度高且有安全隐患；Socket 挂载是 Agent Zero / Dify 等项目验证过的方案
+- 约束：JobRunner 创建的沙箱容器**必须**挂载到独立的 Docker network（`octo-sandbox-net`），与系统内部网络隔离
+- 沙箱容器默认：`--network=octo-sandbox-net --read-only --cap-drop=ALL --memory=512m --cpus=1`
+
+### 12.2 Docker Compose 参考配置
+
+```yaml
+# docker-compose.yml（生产参考）
+version: "3.9"
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+networks:
+  octo-internal:        # 系统内部通信
+    driver: bridge
+  octo-sandbox-net:     # JobRunner 沙箱隔离网络
+    driver: bridge
+    internal: true       # 默认禁止外部访问
+
+volumes:
+  octo-data:            # sqlite + artifacts + vault
+
+services:
+  reverse-proxy:
+    <<: *common
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      - octo-internal
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  litellm-proxy:
+    <<: *common
+    image: ghcr.io/berriai/litellm:main-latest
+    env_file: .env.litellm
+    volumes:
+      - ./deploy/litellm-config.yaml:/app/config.yaml:ro
+    networks:
+      - octo-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  gateway:
+    <<: *common
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.gateway
+    env_file: .env
+    networks:
+      - octo-internal
+    depends_on:
+      litellm-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  kernel:
+    <<: *common
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.kernel
+    env_file: .env
+    volumes:
+      - octo-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # JobRunner 沙箱
+    networks:
+      - octo-internal
+      - octo-sandbox-net   # 管理沙箱容器
+    depends_on:
+      litellm-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    user: "1000:1000"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+```
+
+#### 12.2.1 Secrets 注入策略
+
+- **绝不**将 secrets 硬编码在 docker-compose.yml 或镜像中
+- 使用 `.env` 文件（`.gitignore` 保护）注入环境变量
+- `.env` 文件分层：`.env`（通用）+ `.env.litellm`（LiteLLM 专用 API keys）
+- 生产环境可升级为 Docker Secrets 或 HashiCorp Vault
+- 对齐 Constitution C5：secrets 按 scope 分区，不进 LLM 上下文
+
+```
+# .env 示例（.gitignore 必须包含）
+OCTO_DB_PATH=/app/data/sqlite/octoagent.db
+OCTO_ARTIFACTS_DIR=/app/data/artifacts
+OCTO_VAULT_DIR=/app/data/vault
+TELEGRAM_BOT_TOKEN=ENV:...       # 由渠道插件读取
+```
+
+#### 12.2.2 服务启动顺序
+
+严格依赖链（通过 `depends_on` + `condition: service_healthy` 保证）：
+
+```
+litellm-proxy（先启动，健康检查通过）
+    → gateway + kernel（并行启动）
+        → reverse-proxy（gateway 健康后启动）
+```
+
+Worker 进程的启动策略：
+- MVP：Worker 内嵌在 kernel 进程中，无需独立启动
+- M2+：Worker 作为独立容器，depends_on kernel 健康检查
+
+### 12.3 健康检查与监控
+
+#### 12.3.1 健康检查端点
+
+每个服务必须暴露以下端点：
+
+| 端点 | 用途 | 响应 |
+|------|------|------|
+| `GET /health` | Liveness — 进程是否存活 | `200 {"status": "ok"}` |
+| `GET /ready` | Readiness — 能否接受请求（依赖就绪） | `200 {"status": "ready", "checks": {...}}` |
+
+Readiness 检查内容（级联依赖）：
+
+```json
+// GET /ready 响应示例
+{
+  "status": "ready",
+  "checks": {
+    "sqlite": "ok",
+    "litellm_proxy": "ok",
+    "disk_space_mb": 2048,
+    "artifacts_dir": "ok"
+  }
+}
+```
+
+- Docker HEALTHCHECK 使用 `/health`（liveness）
+- 反向代理使用 `/ready`（readiness）做上游健康判定
+- 对齐 §9.6 插件 Manifest 中的 `healthcheck` 字段
+
+#### 12.3.2 运维事件类型
+
+对齐 Constitution C2（Everything is Event），系统运维操作必须生成事件：
+
+```yaml
+# 新增运维事件类型（扩展 §8.1 Event.type）
+OpsEventTypes:
+  - SYSTEM_STARTED         # 进程启动完成
+  - SYSTEM_SHUTTING_DOWN   # 收到停止信号，开始优雅关闭
+  - HEALTH_DEGRADED        # 某依赖不健康（如 litellm 不可达）
+  - HEALTH_RECOVERED       # 依赖恢复
+  - BACKUP_STARTED         # 备份开始
+  - BACKUP_COMPLETED       # 备份完成
+  - BACKUP_FAILED          # 备份失败
+  - PLUGIN_DISABLED        # 插件被自动禁用
+  - CONFIG_CHANGED         # 配置变更（对齐 FR-OPS-1）
+```
+
+#### 12.3.3 告警通道
+
+故障事件必须主动通知 Owner（对齐 C7 User-in-Control + C8 Observability）：
+
+- **首选**：通过 Telegram Bot 推送告警消息（复用已有渠道基础设施）
+- **备选**：结构化日志输出（structlog JSON），由外部监控工具拾取
+- 告警级别：`info`（备份完成）/ `warn`（依赖降级）/ `critical`（数据不一致/进程异常退出）
+- 告警抑制：同类告警 5 分钟内不重复推送（防刷屏）
+
+### 12.4 数据备份与恢复
+
+#### 12.4.1 备份对象与策略
+
+| 数据 | 方案 | 频率 | 保留策略 |
+|------|------|------|---------|
+| SQLite DB | `sqlite3 .backup` 在线快照 + WAL 归档 | 每日 + 重大操作前 | 7 天滚动 + 每月 1 份永久 |
+| Artifacts | `rsync --checksum` 增量同步到 NAS | 每日 | 跟随关联 task 生命周期 |
+| Vault | `gpg --symmetric` 加密后 rsync | 每日 | 30 天滚动 + 每月 1 份永久 |
+| 配置文件 | Git 版本管理（deploy/ 目录） | 每次变更 | Git 历史 |
+| Event Store | 随 SQLite DB 备份（events 表是核心） | 同 SQLite | 同 SQLite |
+
+#### 12.4.2 SQLite 备份细节
+
+- **在线备份**：使用 `sqlite3 .backup` API（不中断服务、保证一致性快照）
+- **WAL 归档**：备份后执行 `PRAGMA wal_checkpoint(TRUNCATE)` 回收 WAL 文件
+- **可选增强（M2+）**：引入 Litestream 做实时 WAL 流复制到 NAS/S3，RPO 趋近于零
+- **备份命名**：`octoagent-{date}-{time}.db`，保留最近 7 天
+
+#### 12.4.3 Vault 加密备份
+
+- 加密方式：`gpg --symmetric --cipher-algo AES256`（对称加密，密码短语）
+- 密钥管理：备份密码存储在 Owner 的密码管理器中（不与系统共存）
+- 恢复时需要：备份文件 + 密码短语（两要素）
+
+#### 12.4.4 备份自动化
+
+- MVP：APScheduler 定时任务触发备份脚本（复用已有调度基础设施）
+- 备份前后生成运维事件（BACKUP_STARTED / BACKUP_COMPLETED / BACKUP_FAILED）
+- 备份失败时通过告警通道通知 Owner
+
+#### 12.4.5 恢复验证
+
+- **每月一次**：自动执行恢复验证（restore test）
+  - 将最新备份恢复到临时 SQLite 文件
+  - 校验 tasks projection 与 events 一致性
+  - 校验 artifact 引用完整性
+  - 结果写入运维事件
+- 恢复验证失败 → critical 告警
+
+### 12.5 故障策略与恢复
+
+#### 12.5.1 服务级故障（对齐 §8.3.5 崩溃恢复策略）
+
+| 崩溃位置 | 恢复方式 | 触发条件 |
+|----------|---------|---------|
+| Skill Pipeline 节点内 | 从最后 checkpoint 确定性恢复 | 进程重启后扫描未完成 checkpoint |
+| Worker Free Loop 内 | 重启 Loop，Event 历史注入上下文，LLM 自主判断续接点 | Docker restart policy 自动拉起 |
+| Orchestrator Free Loop 内 | 重启 Loop，扫描未完成 Task，重新派发或等待人工确认 | 同上 |
+| Gateway | 无状态，直接重启；客户端 SSE 断线重连 | 同上 |
+| LiteLLM Proxy | 容器自动重启；期间 kernel 走 fallback 或进入冷却 | 同上 |
+
+#### 12.5.2 系统级故障
+
+| 故障 | 检测方式 | 应对策略 |
+|------|---------|---------|
+| 磁盘空间不足 | `/ready` 检查 `disk_space_mb` | warn 告警 → 暂停新 task 创建 → critical 时拒绝写入 |
+| OOM（内存溢出） | Docker OOM killer 日志 | `deploy.resources.limits` 限制；OOM 后容器自动重启 |
+| 网络断开 | litellm 健康检查失败 | 进入降级模式：已有 task 暂停；新 task 排队；HEALTH_DEGRADED 事件 |
+| 宿主机重启 | Docker `restart: unless-stopped` | 全部容器按依赖顺序自动拉起；kernel 启动时执行恢复扫描 |
+| SQLite 损坏 | 启动时 `PRAGMA integrity_check` | 自动切换到最近备份；CRITICAL 告警通知 Owner |
+
+#### 12.5.3 应用级故障
+
+- **Provider 失败**：LiteLLM 内置 fallback + 冷却机制；事件记录失败原因与 fallback 路径
+- **Worker 失败**：标记 worker unhealthy；task 根据策略进入 WAITING_INPUT（等待人工）或重派发到其他 worker
+- **Plugin 失败**：自动 disable 并降级（对齐 C6）；记录 PLUGIN_DISABLED 事件；Owner 可手动重新启用
+- **熔断策略**：同一组件 5 分钟内连续失败 3 次 → 触发熔断（circuit open）→ 冷却 60 秒后 half-open 探测 → 成功则恢复
+
+#### 12.5.4 优雅关闭协议
+
+收到 `SIGTERM` 后，系统按以下顺序关闭（对齐 C1 Durability First + C2 Everything is Event）：
+
+```
+1. 写入 SYSTEM_SHUTTING_DOWN 事件
+2. 停止接受新请求（Gateway 返回 503）
+3. 等待进行中的 Skill Pipeline 节点完成（最长 30s）
+4. 对未完成 Task 保存 checkpoint（如支持）
+5. Flush 所有待写入的事件到 SQLite
+6. 关闭 SSE 连接（发送终止信号）
+7. 关闭 SQLite 连接（确保 WAL checkpoint）
+8. 退出进程
+```
+
+超时保护：整个关闭流程最长 60 秒，超时后强制退出（Docker `stop_grace_period: 60s`）。
+
+#### 12.5.5 Watchdog 集成（对齐 FR-EXEC-3）
+
+Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
+
+- **无进展检测**：Task 在 RUNNING 状态超过配置时间未产生新事件 → 触发告警
+- **策略可配**（per-task / per-worker）：
+  - `warn`：通知 Owner
+  - `degrade`：降级到 cheap 模型 / 减少工具集
+  - `cancel`：自动取消并推进终态
+- **心跳机制**：Worker 定期发送 HEARTBEAT 事件；超过 2 个周期未收到 → 标记 unhealthy
+
+### 12.6 升级与迁移
+
+#### 12.6.1 Schema 迁移策略
+
+Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
+
+- 迁移工具：使用 Python 脚本（`deploy/migrations/`），不依赖重量级 ORM
+- 迁移方向：仅支持向前迁移（forward-only），不支持回滚（备份即回滚）
+- 迁移流程：
+  1. 停止服务（维护窗口）
+  2. 执行 SQLite 备份
+  3. 运行迁移脚本
+  4. 校验 `PRAGMA integrity_check` + projection 一致性
+  5. 启动新版本
+
+#### 12.6.2 配置兼容性
+
+- 配置文件版本化（`config_version` 字段）
+- 新版本必须兼容上一版本配置（或提供自动迁移）
+- 配置变更生成 CONFIG_CHANGED 事件（对齐 FR-OPS-1），支持回滚
+
+#### 12.6.3 容器升级流程
+
+- **MVP（停机升级）**：`docker compose down && docker compose pull && docker compose up -d`
+- **M2+（最小停机）**：
+  - 先升级无状态服务（gateway）
+  - 再升级有状态服务（kernel），利用优雅关闭保证数据完整
+  - 升级前自动触发备份
+
+### 12.7 日志管理
+
+#### 12.7.1 日志策略（对齐 §9.10 packages/observability）
+
+- **开发环境**：`structlog` pretty 格式，输出到 stdout
+- **生产环境**：`structlog` JSON 格式，输出到 stdout（由 Docker 日志驱动收集）
+- 所有日志携带 `task_id` / `trace_id`（贯穿事件与日志）
+
+#### 12.7.2 日志轮转与持久化
+
+- Docker 日志驱动配置（已包含在 docker-compose 的 `x-common` 中）：
+  - `max-size: 10m`，`max-file: 3`（每个容器最多 30MB 日志）
+- 长期日志归档：定期 `docker compose logs > archive.log` 到 NAS（可选）
+- Logfire 自动采集 Pydantic AI / FastAPI 的 traces 和 spans（§9.10），无需额外配置
+
+### 12.8 SSL/TLS 与外部访问
+
+- Telegram webhook **要求 HTTPS**，因此生产部署必须配置 TLS
+- 使用 Caddy 自动 HTTPS（内置 ACME / Let's Encrypt），零配置获取证书
+- 内部服务间通信走 `octo-internal` 网络，**不加密**（Docker bridge 隔离足够）
+- 外部仅暴露 reverse-proxy 的 443/80 端口，其余服务无外部端口
 
 ---
 
