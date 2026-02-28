@@ -598,6 +598,7 @@ Task:
   title: "short"
   thread_id: "..."
   scope_id: "..."
+  parent_task_id: "optional uuid"   # 子任务层级（Orchestrator → Worker 派发时关联）
   requester: { channel, sender_id }
   assigned_worker: "worker_id"
   risk_level: low|medium|high
@@ -616,6 +617,7 @@ Event:
   task_id: "uuid"
   ts: "..."
   type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|TASK_REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
+  schema_version: 1               # 事件格式版本，便于后续兼容迁移
   actor: user|kernel|worker|tool|system
   payload: { ... }   # 强结构化（尽量少塞大文本）
   trace_id: "..."
@@ -672,7 +674,7 @@ Part 类型说明（对齐 A2A Part 规范）：
 
 - `tasks`：task_id PK，status，meta，timestamps，indexes(thread_id, status)
 - `events`：event_id PK，task_id FK，ts，type，payload_json，indexes(task_id, ts)
-- `artifacts`：artifact_id PK，task_id FK，kind，storage_ref，hash，version
+- `artifacts`：artifact_id PK，task_id FK，parts_json，storage_ref，hash，version
 - `checkpoints`：checkpoint_id PK，task_id FK，node_id，state_json，ts
 - `approvals`：approval_id PK，task_id FK，status，request_json，decision_json
 
@@ -746,6 +748,8 @@ SkillSpec:
   output_model: "PydanticModel"
   tools_allowed:
     - tool_id
+  model_alias: "planner"          # LiteLLM alias（见 §8.9.1）
+  timeout_s: 300                  # Skill 级超时
   tool_policy: sequential|parallel|mixed
   retry_policy:
     max_attempts: 3
@@ -808,7 +812,7 @@ ToolMeta:
 规则（建议默认）：
 - 工具输出 > `N` 字符：
   - 全量输出存 artifact
-  - 生成 summary（cheap 模型）
+  - 生成 summary（通过 LiteLLM `summarizer` alias）
   - 只把 summary 回灌主上下文
 - 工具输出含敏感信息：
   - 自动 redaction（屏蔽）
@@ -845,7 +849,8 @@ ToolMeta:
   - task 状态进入 WAITING_APPROVAL
 - 用户批准：
   - 写入 APPROVED 事件
-  - task 状态回到 RUNNING，Graph 从 gate 节点继续
+  - task 状态回到 RUNNING，Skill Pipeline 从 gate 节点继续
+  - 审批超时策略（可配）：超时后默认 deny 或 escalate
 
 审批载荷（建议）：
 - action summary
@@ -896,7 +901,15 @@ WriteProposal:
   confidence: 0.0-1.0
 ```
 
-#### 8.7.4 Chat Import Core（通用内核）
+#### 8.7.4 语义检索集成（LanceDB）
+
+- MemoryItem 的 embedding 存入 LanceDB（与 SQLite 元信息分离）
+- 检索时：vector 相似度 + metadata filter（partition / scope_id / status）
+- SoR 查询：先 metadata filter `status=current`，再 vector 排序
+- Fragments 查询：vector 检索 + 时间范围过滤
+- 写入时：WriteProposal commit 成功后，异步更新 LanceDB embedding
+
+#### 8.7.5 Chat Import Core（通用内核）
 
 - thread/scope 隔离：`scope_id=chat:<channel>:<thread_id>`
 - 增量去重：`msg_key = hash(sender + timestamp + normalized_text)` 或原 msg_id

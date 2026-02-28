@@ -25,7 +25,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - **语言**: Python 3.12+
 - **包管理**: uv
 - **Web/API**: FastAPI + Uvicorn + SSE
-- **数据库**: SQLite WAL（MVP），Postgres（v0.2+ 可选）
+- **数据库**: SQLite WAL
 - **Agent 框架**: Pydantic + Pydantic AI
 - **模型网关**: LiteLLM Proxy
 - **执行隔离**: Docker
