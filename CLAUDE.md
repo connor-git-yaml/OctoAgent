@@ -53,6 +53,7 @@ octoagent/
   plugins/
     channels/         # telegram/ web/ wechat_import/
     tools/            # filesystem/ docker/ ssh/ web/
+  frontend/             # React + Vite Web UI（M0 起步）
   data/               # sqlite/ artifacts/ vault/（.gitignore）
 ```
 
