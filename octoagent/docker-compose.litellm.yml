@@ -1,0 +1,30 @@
+# OctoAgent LiteLLM Proxy -- Docker Compose 配置
+#
+# 对齐 contracts/deployment.md SS1。
+# 启动: docker compose -f docker-compose.litellm.yml up -d
+# 停止: docker compose -f docker-compose.litellm.yml down
+#
+# 前提条件:
+#   1. 复制 .env.litellm.example -> .env.litellm 并填入 LLM Provider API Keys
+#   2. 复制 .env.example -> .env 并调整配置（可选）
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: octoagent-litellm
+    restart: unless-stopped
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    env_file:
+      - .env.litellm
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-octoagent-dev}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

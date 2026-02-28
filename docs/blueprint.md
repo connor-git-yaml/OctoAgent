@@ -461,7 +461,7 @@ flowchart TB
 #### 6.3.2 任务执行 → 事件/产物 → 流式输出
 
 1. Skill/Tool 执行过程中：
-   - 产生事件：MODEL_CALL、TOOL_CALL、STATE_TRANSITION、ARTIFACT_CREATED 等
+   - 产生事件：MODEL_CALL_STARTED / MODEL_CALL_COMPLETED / MODEL_CALL_FAILED、TOOL_CALL、STATE_TRANSITION、ARTIFACT_CREATED 等
 2. Gateway 订阅任务事件流（SSE），推送到 Web UI / Telegram
 3. 如果进入 WAITING_APPROVAL：  
    - UI/Telegram 展示审批卡片  
@@ -553,7 +553,7 @@ flowchart TB
   - canonical log lines + 自动绑定 trace_id / task_id
   - dev 环境 pretty print，prod 环境 JSON 输出
 - SQLite Event Store（metrics 数据源）
-  - 项目已有 append-only events 记录 MODEL_CALL / TOOL_CALL / STATE_TRANSITION
+  - 项目已有 append-only events 记录 MODEL_CALL_STARTED / MODEL_CALL_COMPLETED / MODEL_CALL_FAILED / TOOL_CALL / STATE_TRANSITION
   - cost / tokens / latency 直接 SQL 聚合查询，无需独立 metrics 服务
 
 ### 7.8 任务调度
@@ -620,7 +620,7 @@ Event:
   task_id: "uuid"
   task_seq: 1                    # 同一 task 内单调递增序号（用于确定性回放）
   ts: "..."
-  type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|TASK_REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
+  type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|MODEL_CALL_STARTED|MODEL_CALL_COMPLETED|MODEL_CALL_FAILED|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|TASK_REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
   schema_version: 1               # 事件格式版本，便于后续兼容迁移
   actor: user|kernel|worker|tool|system
   payload: { ... }   # 强结构化（默认不放原始大文本/敏感原文）
@@ -630,6 +630,8 @@ Event:
     parent_event_id: "optional"
     idempotency_key: "required for ingress/side-effects"
 ```
+
+- `MODEL_CALL` 为历史兼容事件类型（M0 / 旧 schema）；新写入默认使用 `MODEL_CALL_STARTED|MODEL_CALL_COMPLETED|MODEL_CALL_FAILED` 三段事件。
 
 ```yaml
 Artifact:
@@ -978,7 +980,7 @@ backend：
 
 ### 8.9 Provider Plane：LiteLLM alias 策略
 
-#### 8.9.1 alias 分类（建议）
+#### 8.9.1 语义 alias（业务侧）
 
 - `router`：意图分类、风险分级（小模型）
 - `extractor`：结构化抽取（小/中模型）
@@ -987,7 +989,14 @@ backend：
 - `summarizer`：摘要/压缩（小模型）
 - `fallback`：备用 provider
 
-#### 8.9.2 统一成本治理
+#### 8.9.2 运行时 alias group（Proxy 侧，M1 默认）
+
+- `cheap`：承载 `router/extractor/summarizer`
+- `main`：承载 `planner/executor`
+- `fallback`：承载 `fallback`
+- 应用层始终使用语义 alias；由 `AliasRegistry` 统一映射到运行时 group，避免业务代码直接耦合具体模型组命名。
+
+#### 8.9.3 统一成本治理
 
 - 每次模型调用写入事件：
   - model_alias、provider、latency、tokens、cost
@@ -2002,9 +2011,9 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
 ### 13.7 可观测性与成本测试（Observability & Cost）
 
 - **事件完整性**：每个 task 的关键步骤必须产生对应 event（对齐 C2 / C8）：
-  - `TASK_CREATED` / `MODEL_CALL` / `TOOL_CALL` / `TOOL_RESULT` / `STATE_TRANSITION` / `ARTIFACT_CREATED`
+  - `TASK_CREATED` / `MODEL_CALL_STARTED` / `MODEL_CALL_COMPLETED` / `TOOL_CALL` / `TOOL_RESULT` / `STATE_TRANSITION` / `ARTIFACT_CREATED`
   - 缺失任何关键 event 类型 → 测试失败
-- **成本追踪正确性**：验证每个 task 的 tokens / cost 聚合与实际 MODEL_CALL 事件 payload 一致（对齐 S6）
+- **成本追踪正确性**：验证每个 task 的 tokens / cost 聚合与实际 `MODEL_CALL_COMPLETED` 事件 payload 一致（对齐 S6）
 - **Logfire span 完整性**：关键操作（LLM 调用、工具执行、状态转移）必须生成 OTel span
 - **structlog 输出**：验证日志包含 task_id / trace_id / span_id 等结构化字段，便于关联查询
 
@@ -2013,8 +2022,8 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
 > 利用事件溯源的天然优势，验证系统确定性与可重现性（对齐 S2）。
 
 - **golden test 场景清单**（10 个典型任务事件流）：
-  1. 简单问答：单轮 USER_MESSAGE → MODEL_CALL → 回复
-  2. 工具调用：MODEL_CALL → TOOL_CALL → TOOL_RESULT → 回复
+  1. 简单问答：单轮 USER_MESSAGE → MODEL_CALL_STARTED → MODEL_CALL_COMPLETED → 回复
+  2. 工具调用：MODEL_CALL_STARTED → MODEL_CALL_COMPLETED → TOOL_CALL → TOOL_RESULT → 回复
   3. 多轮对话：多次 USER_MESSAGE 交替
   4. 审批通过：APPROVAL_REQUESTED → APPROVED → 继续执行
   5. 审批拒绝：APPROVAL_REQUESTED → REJECTED → REJECTED 终态
@@ -2106,7 +2115,7 @@ M0 实现要点与 Blueprint 偏差记录：
 
 ### M1（最小智能闭环）：LiteLLM + Skill + Tool contract（2 周）
 
-- [ ] 接入 LiteLLM Proxy + 双模型 alias 配置（cheap/main 分离）
+- [ ] 接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射
 - [ ] 实现 Pydantic Skill Runner（结构化输出）
 - [ ] 工具 schema 反射 + ToolBroker 执行
 - [ ] Policy Engine（allow/ask/deny）+ Approvals UI
@@ -2120,7 +2129,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - irreversible 工具触发审批流，approve 后继续执行
 - 工具 schema 自动反射与代码签名一致（contract test 通过）
 - 每次模型调用生成 cost/tokens 事件
-- cheap/main alias 路由正确（summarizer 走 cheap，planner 走 main）
+- 语义 alias 路由正确（router/extractor/summarizer -> cheap；planner/executor -> main；fallback -> fallback）
 
 ### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）
 
@@ -2243,7 +2252,7 @@ M0 实现要点与 Blueprint 偏差记录：
 ### 16.2 准备类（工程环境就绪，开工前完成）
 
 - [x] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）— M0 已验证
-- [ ] LiteLLM Proxy 就绪：至少 1 个 provider 可用 + cheap/main 两个 alias 配通 — M1 前置
+- [ ] LiteLLM Proxy 就绪：至少 1 个 provider 可用 + cheap/main/fallback 运行时 group 配通 — M1 前置
 - [x] SQLite schema 初始化脚本准备 — M0 已交付（lifespan 自动建表）
 - [x] CI/测试基础设施：pytest + pytest-asyncio + ruff — M0 已交付（105 tests）
 - [x] 可观测性基础：structlog + Logfire 本地配置 — M0 已交付
@@ -2319,14 +2328,19 @@ provider:
     base_url: "http://localhost:4000/v1"
     api_key: "ENV:LITELLM_API_KEY"
 
-# 对齐 §8.9.1 的 6 个 alias 分类
-models:
-  router: "alias/router"           # 意图分类、风险分级（小模型）
-  extractor: "alias/extractor"     # 结构化抽取（小/中模型）
-  planner: "alias/planner"         # 多约束规划（大模型）
-  executor: "alias/executor"       # 高风险执行前确认（大模型）
-  summarizer: "alias/summarizer"   # 摘要/压缩（小模型）
-  fallback: "alias/fallback"       # 备用 provider
+# 对齐 §8.9.1 / §8.9.2：语义 alias -> 运行时 group
+model_alias_map:
+  router: "cheap"                  # 意图分类、风险分级（小模型）
+  extractor: "cheap"               # 结构化抽取（小/中模型）
+  planner: "main"                  # 多约束规划（大模型）
+  executor: "main"                 # 高风险执行前确认（大模型）
+  summarizer: "cheap"              # 摘要/压缩（小模型）
+  fallback: "fallback"             # 备用 provider
+
+runtime_models:
+  cheap: "alias/cheap"
+  main: "alias/main"
+  fallback: "alias/fallback"
 
 storage:
   sqlite_path: "./data/sqlite/octoagent.db"

@@ -1,14 +1,18 @@
-"""健康检查路由 -- 对齐 contracts/rest-api.md §6, §7
+"""健康检查路由 -- 对齐 contracts/rest-api.md §6, §7 + Feature 002 gateway-changes.md §5
 
 GET /health: Liveness 检查，永远返回 200。
 GET /ready: Readiness 检查，包含 SQLite 连通性、artifacts_dir、磁盘空间。
+         Feature 002: 新增 profile 查询参数，支持 LiteLLM Proxy 健康检查。
 """
 
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+import structlog
+from fastapi import APIRouter, Query, Request
 from starlette.responses import JSONResponse
+
+log = structlog.get_logger()
 
 router = APIRouter()
 
@@ -20,15 +24,31 @@ async def health():
 
 
 @router.get("/ready")
-async def ready(request: Request):
+async def ready(
+    request: Request,
+    profile: str | None = Query(
+        default=None,
+        description="检查配置文件：core（默认）仅核心检查；llm/full 包含 LiteLLM Proxy 健康检查",
+    ),
+):
     """Readiness 检查 -- 验证核心依赖可用性
+
+    Feature 002 扩展：新增 profile 查询参数。
+
+    profile 参数:
+        - None / "core": 仅核心检查（M0 行为），litellm_proxy="skipped"
+        - "llm": 核心检查 + LiteLLM Proxy 真实健康检查
+        - "full": 等同于 "llm"（未来可包含更多检查）
 
     检查项：
     1. sqlite: 数据库连通性
     2. artifacts_dir: artifacts 目录可访问性
     3. disk_space_mb: 磁盘剩余空间
-    4. litellm_proxy: M0 固定返回 skipped
+    4. litellm_proxy: 根据 profile 决定是否探测 Proxy
     """
+    # 确定实际 profile（None 默认为 core）
+    effective_profile = profile or "core"
+
     checks = {}
     all_ok = True
 
@@ -68,8 +88,28 @@ async def ready(request: Request):
         checks["disk_space_mb"] = 0
         all_ok = False
 
-    # 4. LiteLLM Proxy（M0 固定 skipped）
-    checks["litellm_proxy"] = "skipped"
+    # 4. LiteLLM Proxy 健康检查（Feature 002）
+    if effective_profile in ("llm", "full"):
+        # 仅在有 litellm_client 时真实探测
+        litellm_client = getattr(request.app.state, "litellm_client", None)
+        if litellm_client is not None:
+            try:
+                proxy_healthy = await litellm_client.health_check()
+                if proxy_healthy:
+                    checks["litellm_proxy"] = "ok"
+                else:
+                    checks["litellm_proxy"] = "unreachable"
+                    all_ok = False
+            except Exception as e:
+                log.warning("health_check_error", error=str(e))
+                checks["litellm_proxy"] = "unreachable"
+                all_ok = False
+        else:
+            # Echo 模式：无 litellm_client，跳过探测
+            checks["litellm_proxy"] = "skipped"
+    else:
+        # profile=core 或默认：不探测 Proxy
+        checks["litellm_proxy"] = "skipped"
 
     status_code = 200 if all_ok else 503
     status_text = "ready" if all_ok else "not_ready"
@@ -78,7 +118,7 @@ async def ready(request: Request):
         status_code=status_code,
         content={
             "status": status_text,
-            "profile": "core",
+            "profile": effective_profile,
             "checks": checks,
         },
     )
