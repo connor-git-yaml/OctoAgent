@@ -1,9 +1,3 @@
-<!-- AUTO-GENERATED FILE. DO NOT EDIT DIRECTLY. -->
-<!-- Source: .agent-config/templates/claude.header.md + .agent-config/shared.md -->
-<!-- Regenerate: ./scripts/sync-agent-config.sh -->
-
-# OctoAgent（内部代号：ATM - Advanced Token Monster）
-
 ## 项目概述
 
 **OctoAgent** 是一个个人智能操作系统（Personal AI OS），目标是构建一套可长期运行、可观测、可恢复、可审批的 Agent 系统。
@@ -127,4 +121,3 @@ octoagent/
 | Telegram | aiogram | 原生 async + 内置 FSM（审批流）+ 与 FastAPI 共享 event loop |
 | Web UI | React + Vite | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway |
 | 可观测 | Logfire + structlog + Event Store | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
-

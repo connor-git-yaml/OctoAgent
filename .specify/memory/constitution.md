@@ -74,6 +74,9 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 - **MUST**：每个任务必须可看到：当前状态、已执行步骤、消耗、产物、失败原因与下一步建议
 - **MUST**：没有可观测性的功能不可上线
 - **SHOULD**：可观测数据应结构化，便于检索和分析
+- **MUST**：事件与日志默认遵循最小化原则，仅记录排障和审计所需字段
+- **MUST NOT**：敏感原文（secrets、凭证、隐私数据）不得直接写入 Event payload/日志，必须采用脱敏、摘要或 artifact 引用
+- **SHOULD**：定义数据保留与清理策略（日志保留期、可清理副本、审计副本边界）
 
 ---
 
@@ -123,9 +126,9 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 
 ---
 
-## III. 技术栈约束
+## III. 技术能力约束与默认基线
 
-> 以下技术选型已在蓝图中确定，是系统的技术底线约束。
+> 本节区分"能力约束"与"默认实现"：能力约束是硬规则，具体库/产品是当前阶段的推荐基线，可替换但不得降低能力。
 
 ### 语言与运行时
 
@@ -147,20 +150,22 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 
 ### 模型网关
 
-- **MUST**：统一通过 LiteLLM Proxy 访问模型
+- **MUST**：统一通过模型访问抽象层（Model Gateway）访问模型能力
 - **MUST NOT**：业务代码中不得硬编码厂商模型名，必须使用 alias
+- **SHOULD**：v0.x 默认基线使用 LiteLLM Proxy（可替换为等价能力实现）
 
 ### Agent / Workflow
 
-- **MUST**：数据模型使用 Pydantic
-- **MUST**：Skill 层使用 Pydantic AI（结构化输出 + 工具调用）
-- **MUST**：Graph Engine 使用 pydantic-graph（Pydantic AI 内置）
+- **MUST**：数据模型使用强类型 schema（Pydantic 或等价方案）
+- **SHOULD**：v0.x 默认基线的 Skill 层使用 Pydantic AI（结构化输出 + 工具调用）
+- **SHOULD**：v0.x 默认基线的 Graph Engine 使用 pydantic-graph
 
 ### 可观测
 
-- **MUST**：使用 Logfire（OTel 原生，自动 instrument Pydantic AI / FastAPI）
-- **MUST**：使用 structlog（结构化日志，绑定 trace_id / task_id）
+- **MUST**：可观测能力需支持 OTel 语义（trace/span/context 贯通）
+- **MUST**：结构化日志必须绑定 trace_id / task_id（及必要请求上下文）
 - **MUST**：metrics 数据从 Event Store（SQLite）聚合查询，不引入独立 metrics 服务
+- **SHOULD**：v0.x 默认基线使用 Logfire + structlog
 
 ---
 
@@ -173,6 +178,7 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 - **MUST**：核心 domain models 具备单元测试
 - **MUST**：事件存储的事务一致性有测试覆盖
 - **MUST**：工具 schema 反射一致性有 contract test
+- **MUST**：任何 Event schema/projection 变更都必须通过历史事件回放兼容测试（replay compatibility）
 - **SHOULD**：关键流程有集成测试覆盖
 
 ### 安全基线
