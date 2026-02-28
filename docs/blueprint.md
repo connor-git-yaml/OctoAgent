@@ -166,60 +166,62 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 ### 5.1 功能需求（Functional Requirements）
 
 > 以 “必须/应该/可选” 分级。v0.1 以“必须 + 少量应该”为主。
+> 里程碑标注约定：`[Mx]` 表示该需求最早必须落地的里程碑；`[Mx-My]` 表示分阶段交付。
 
 #### 5.1.1 多渠道接入（Channels）
 
-- FR-CH-1（必须）：支持 WebChannel
-  - 提供基础 Chat UI（SSE/WS 流式输出）
-  - 提供 Task 面板（task 列表、状态、事件、artifact）
-  - 提供 Approvals 面板（待审批动作）
+- FR-CH-1（必须，[M0-M1]）：支持 WebChannel
+  - [M0] 提供 Task 面板（task 列表、状态、事件、artifact）
+  - [M0] 提供事件流可视化（EventStream）
+  - [M1] 提供基础 Chat UI（SSE/WS 流式输出）
+  - [M1] 提供 Approvals 面板（待审批动作）
 
-- FR-CH-2（必须）：支持 TelegramChannel
+- FR-CH-2（必须，[M2]）：支持 TelegramChannel
   - 支持 webhook 或 polling（默认 webhook）
   - 支持 pairing/allowlist（绑定用户/群）
   - thread_id 映射规则稳定（DM/群）
 
-- FR-CH-3（应该）：支持 Chat Import Core（导入通用内核）
+- FR-CH-3（应该，[M2]）：支持 Chat Import Core（导入通用内核）
   - 支持增量导入去重
   - 支持窗口化摘要（chatlogs 原文 + fragments 摘要）
   - 支持在 chat scope 内维护 SoR（例如群规/约定/持续项目状态）
 
-- FR-CH-4（可选）：微信导入插件（Adapter）
+- FR-CH-4（可选，[M3]）：微信导入插件（Adapter）
   - 解析微信导出格式 → NormalizedMessage 批量投递给 Chat Import Core
 
 #### 5.1.2 Task / Event / Artifact（任务系统）
 
-- FR-TASK-1（必须）：Task 生命周期管理
+- FR-TASK-1（必须，[M0+]）：Task 生命周期管理
   - 状态：`CREATED → QUEUED → RUNNING → (WAITING_INPUT|WAITING_APPROVAL|PAUSED) → (SUCCEEDED|FAILED|CANCELLED|REJECTED)`
   - 终态：SUCCEEDED / FAILED / CANCELLED / REJECTED
   - REJECTED：策略拒绝或 Worker 能力不匹配时使用，区别于运行时 FAILED
   - 支持 retry / resume / cancel
 
-- FR-TASK-2（必须）：事件流（Event Stream）
+- FR-TASK-2（必须，[M0]）：事件流（Event Stream）
   - 对外提供 SSE：`/stream/task/{task_id}`
   - 每条事件有唯一 id、类型、时间、payload、trace_id
 
-- FR-TASK-3（必须）：Artifact 产物管理
+- FR-TASK-3（必须，[M0-M1+]）：Artifact 产物管理
   - 多 Part 结构：单个 Artifact 可包含多个 Part（text/file/json/image），对齐 A2A Artifact.parts
   - 支持 inline 内容与 URI 引用双模（小内容 inline，大文件 storage_ref）
   - artifact 版本化，任务事件中引用 artifact_id
-  - 流式追加：支持 append 模式逐步生成产物（如实时日志、增量报告）
+  - [M1+] 流式追加：支持 append 模式逐步生成产物（如实时日志、增量报告）
   - 完整性：保留 hash + size 校验（A2A 没有但我们需要）
 
-- FR-TASK-4（应该）：Checkpoint（可恢复快照）
+- FR-TASK-4（应该，[M1.5]）：Checkpoint（可恢复快照）
   - Graph 节点级 checkpoint（至少保存 node_id + state snapshot）
   - 支持“从最后成功 checkpoint 恢复”而不是全量重跑
 
 #### 5.1.3 Orchestrator + Workers（多代理/分层）
 
-- FR-A2A-1（必须）：Orchestrator（协调器）负责：
+- FR-A2A-1（必须，[M1.5]）：Orchestrator（协调器）负责：
   - 目标理解与分类
   - Worker 选择与派发
   - 全局停止条件与监督（看门狗策略）
   - 高风险动作 gate（审批/规则/双模校验）
   - 永远以 Free Loop 运行，不做模式选择
 
-- FR-A2A-2（必须）：Workers（自治智能体）具备：
+- FR-A2A-2（必须，[M1.5]）：Workers（自治智能体）具备：
   - 独立 Free Loop（LLM 驱动，自主决策下一步）
   - 独立上下文（避免主会话带宽瓶颈）
   - 可调用 Skill Pipeline（Graph）执行确定性子流程
@@ -227,7 +229,7 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
   - 可回传事件与产物
   - 可被中断/取消，并推进终态
 
-- FR-A2A-3（应该）：A2A-Lite 内部协议
+- FR-A2A-3（应该，[M2]）：A2A-Lite 内部协议
   - Orchestrator 与 Worker 之间使用统一消息 envelope
   - 支持 TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT
   - 内部状态为 A2A TaskState 超集，通过 A2AStateMapper 双向映射
@@ -289,7 +291,7 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 
 #### 5.1.7 模型与认证（Provider）
 
-- FR-LLM-1（必须）：统一模型出口（LiteLLM Proxy）
+- FR-LLM-1（必须，[M1]）：统一模型出口（LiteLLM Proxy）
   - 业务侧只用 model alias，不写厂商型号
   - 支持 fallback、限流、成本统计
 
@@ -615,16 +617,17 @@ Task:
 Event:
   event_id: "ulid"
   task_id: "uuid"
+  task_seq: 1                    # 同一 task 内单调递增序号（用于确定性回放）
   ts: "..."
   type: TASK_CREATED|USER_MESSAGE|MODEL_CALL|TOOL_CALL|TOOL_RESULT|STATE_TRANSITION|ARTIFACT_CREATED|APPROVAL_REQUESTED|APPROVED|REJECTED|TASK_REJECTED|ERROR|HEARTBEAT|CHECKPOINT_SAVED
   schema_version: 1               # 事件格式版本，便于后续兼容迁移
   actor: user|kernel|worker|tool|system
-  payload: { ... }   # 强结构化（尽量少塞大文本）
+  payload: { ... }   # 强结构化（默认不放原始大文本/敏感原文）
   trace_id: "..."
   span_id: "..."
   causality:
     parent_event_id: "optional"
-    idempotency_key: "optional"
+    idempotency_key: "required for ingress/side-effects"
 ```
 
 ```yaml
@@ -664,6 +667,7 @@ Part 类型说明（对齐 A2A Part 规范）：
 - 事实来源：Event 表（append-only）
 - Task 表：是 Event 的“物化视图”（projection），用于快速查询
 - 任何对 Task 的状态更新都必须通过写入事件触发 projection 更新
+- Event payload 默认写摘要与引用（artifact_ref），避免在事件中存储大体积/敏感原文
 
 **好处：**
 - 可回放（replay）
@@ -673,7 +677,7 @@ Part 类型说明（对齐 A2A Part 规范）：
 #### 8.2.2 SQLite 表建议（MVP）
 
 - `tasks`：task_id PK，status，meta，timestamps，indexes(thread_id, status)
-- `events`：event_id PK，task_id FK，ts，type，payload_json，indexes(task_id, ts)
+- `events`：event_id PK，task_id FK，task_seq，ts，type，payload_json，idempotency_key，indexes(task_id, task_seq), indexes(task_id, ts), unique(task_id, task_seq), unique(idempotency_key where not null)
 - `artifacts`：artifact_id PK，task_id FK，parts_json，storage_ref，hash，version
 - `checkpoints`：checkpoint_id PK，task_id FK，node_id，state_json，ts
 - `approvals`：approval_id PK，task_id FK，status，request_json，decision_json
@@ -681,6 +685,8 @@ Part 类型说明（对齐 A2A Part 规范）：
 **一致性要求：**
 - 写事件与更新 projection 必须在同一事务内（SQLite transaction）
 - events 使用 ULID/时间有序 id 便于流式读取
+- 同一 task 的 `task_seq` 必须严格单调递增（无重复、无回退）
+- 外部入口写入与带副作用动作必须携带 `idempotency_key`（用于去重与重试安全）
 
 ---
 
@@ -1701,15 +1707,21 @@ Worker 进程的启动策略：
 | `GET /health` | Liveness — 进程是否存活 | `200 {"status": "ok"}` |
 | `GET /ready` | Readiness — 能否接受请求（依赖就绪） | `200 {"status": "ready", "checks": {...}}` |
 
-Readiness 检查内容（级联依赖）：
+Readiness 检查内容（分级 profile）：
+
+- `core`（默认，M0 必须）：`sqlite`、`artifacts_dir`、`disk_space_mb`
+- `llm`（M1）：`core` + `litellm_proxy`
+- `full`（M2+）：`llm` + memory/plugins 等扩展依赖
+- 未启用组件返回 `skipped`，不应导致 profile 失败
 
 ```json
 // GET /ready 响应示例
 {
   "status": "ready",
+  "profile": "core",
   "checks": {
     "sqlite": "ok",
-    "litellm_proxy": "ok",
+    "litellm_proxy": "skipped",
     "disk_space_mb": 2048,
     "artifacts_dir": "ok"
   }
@@ -2012,6 +2024,7 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
   10. 崩溃恢复：中断 → 从 checkpoint 恢复 → 完成
 - **一致性断言**：replay 后的 tasks projection、artifacts 列表、终态必须与原始执行一致
 - **event schema 兼容**：不同 `schema_version` 的事件 replay 时正确解析
+- **发布门禁**：凡涉及 Event schema 或 projection 逻辑变更，必须通过历史事件回放套件（不通过禁止合并）
 
 ### 13.9 降级与恢复测试（Resilience）
 
