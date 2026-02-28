@@ -147,23 +147,33 @@ class TaskService:
 
         return task_id, True
 
+    # 响应摘要截断阈值（对齐 FR-002-CL-4，沿用 M0 8KB 阈值）
+    RESPONSE_SUMMARY_MAX_BYTES = 8192
+
     async def process_task_with_llm(
         self,
         task_id: str,
         user_text: str,
         llm_service,
+        model_alias: str | None = None,
     ) -> None:
         """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储
 
         流程：
         1. STATE_TRANSITION: CREATED -> RUNNING
         2. MODEL_CALL_STARTED 事件
-        3. LLM 调用（Echo/Mock）
+        3. LLM 调用（通过 LLMService -> FallbackManager）
         4. MODEL_CALL_COMPLETED 事件 + Artifact 写入
         5. ARTIFACT_CREATED 事件
         6. STATE_TRANSITION: RUNNING -> SUCCEEDED
+
+        Feature 002 变更:
+        - LLM 调用返回 ModelCallResult（替代 LLMResponse）
+        - MODEL_CALL_COMPLETED payload 填充 cost/provider/is_fallback 新字段
+        - 响应超过 8KB 截断为 response_summary + Artifact 引用
         """
         trace_id = f"trace-{task_id}"
+        effective_alias = model_alias or "main"
         try:
             # 1. STATE_TRANSITION: CREATED -> RUNNING
             await self._write_state_transition(
@@ -182,7 +192,7 @@ class TaskService:
                 type=EventType.MODEL_CALL_STARTED,
                 actor=ActorType.SYSTEM,
                 payload=ModelCallStartedPayload(
-                    model_alias="echo",
+                    model_alias=effective_alias,
                     request_summary=request_summary,
                 ).model_dump(),
                 trace_id=trace_id,
@@ -193,113 +203,149 @@ class TaskService:
             if self._sse_hub:
                 await self._sse_hub.broadcast(task_id, started_event)
 
-            # 3. LLM 调用
-            llm_response = await llm_service.call(user_text)
+            # 3. LLM 调用（返回 ModelCallResult）
+            llm_result = await llm_service.call(user_text, model_alias=model_alias)
 
-            # 4. 存储 Artifact（LLM 响应）
-            artifact_id = str(ULID())
-            content_bytes = llm_response.content.encode("utf-8")
-            artifact = Artifact(
-                artifact_id=artifact_id,
-                task_id=task_id,
-                ts=datetime.now(UTC),
-                name="llm-response",
-                description="LLM 响应内容",
-                parts=[ArtifactPart(type=PartType.TEXT, content=llm_response.content)],
+            # 4. 存储 Artifact + 写入完成事件
+            artifact_id, artifact = await self._store_llm_artifact(task_id, llm_result)
+            await self._write_model_call_completed(
+                task_id, trace_id, llm_result, artifact_id
             )
-            await self._stores.artifact_store.put_artifact(artifact, content_bytes)
-            await self._stores.conn.commit()
+            await self._write_artifact_created(task_id, trace_id, artifact_id, artifact)
 
-            # 5. MODEL_CALL_COMPLETED 事件
-            now = datetime.now(UTC)
-            seq = await self._stores.event_store.get_next_task_seq(task_id)
-            completed_event = Event(
-                event_id=str(ULID()),
-                task_id=task_id,
-                task_seq=seq,
-                ts=now,
-                type=EventType.MODEL_CALL_COMPLETED,
-                actor=ActorType.SYSTEM,
-                payload=ModelCallCompletedPayload(
-                    model_alias=llm_response.model_alias,
-                    response_summary=llm_response.content[:200],
-                    duration_ms=llm_response.duration_ms,
-                    token_usage=llm_response.token_usage,
-                    artifact_ref=artifact_id,
-                ).model_dump(),
-                trace_id=trace_id,
-            )
-            await append_event_only(
-                self._stores.conn, self._stores.event_store, completed_event
-            )
-            if self._sse_hub:
-                await self._sse_hub.broadcast(task_id, completed_event)
-
-            # 6. ARTIFACT_CREATED 事件
-            now = datetime.now(UTC)
-            seq = await self._stores.event_store.get_next_task_seq(task_id)
-            artifact_event = Event(
-                event_id=str(ULID()),
-                task_id=task_id,
-                task_seq=seq,
-                ts=now,
-                type=EventType.ARTIFACT_CREATED,
-                actor=ActorType.SYSTEM,
-                payload=ArtifactCreatedPayload(
-                    artifact_id=artifact_id,
-                    name="llm-response",
-                    size=artifact.size,
-                    part_count=len(artifact.parts),
-                ).model_dump(),
-                trace_id=trace_id,
-            )
-            await append_event_only(
-                self._stores.conn, self._stores.event_store, artifact_event
-            )
-            if self._sse_hub:
-                await self._sse_hub.broadcast(task_id, artifact_event)
-
-            # 7. STATE_TRANSITION: RUNNING -> SUCCEEDED
+            # 5. STATE_TRANSITION: RUNNING -> SUCCEEDED
             await self._write_state_transition(
                 task_id, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, trace_id
             )
 
         except Exception as e:
-            # LLM 调用失败，写入 MODEL_CALL_FAILED 事件并推进到 FAILED
-            log.error("llm_processing_failed", task_id=task_id, error=str(e))
-            try:
-                now = datetime.now(UTC)
-                seq = await self._stores.event_store.get_next_task_seq(task_id)
-                failed_event = Event(
-                    event_id=str(ULID()),
-                    task_id=task_id,
-                    task_seq=seq,
-                    ts=now,
-                    type=EventType.MODEL_CALL_FAILED,
-                    actor=ActorType.SYSTEM,
-                    payload=ModelCallFailedPayload(
-                        model_alias="echo",
-                        error_type="model",
-                        error_message=str(e),
-                        duration_ms=0,
-                    ).model_dump(),
-                    trace_id=trace_id,
-                )
-                await append_event_only(
-                    self._stores.conn, self._stores.event_store, failed_event
-                )
-                if self._sse_hub:
-                    await self._sse_hub.broadcast(task_id, failed_event)
+            await self._handle_llm_failure(task_id, trace_id, effective_alias, e)
 
-                await self._write_state_transition(
-                    task_id, TaskStatus.RUNNING, TaskStatus.FAILED, trace_id
-                )
-            except Exception as inner_e:
-                log.error(
-                    "failed_to_record_failure",
-                    task_id=task_id,
-                    error=str(inner_e),
-                )
+    async def _store_llm_artifact(self, task_id: str, llm_result) -> tuple[str, Artifact]:
+        """存储 LLM 响应为 Artifact"""
+        artifact_id = str(ULID())
+        content_bytes = llm_result.content.encode("utf-8")
+        artifact = Artifact(
+            artifact_id=artifact_id,
+            task_id=task_id,
+            ts=datetime.now(UTC),
+            name="llm-response",
+            description="LLM 响应内容",
+            parts=[ArtifactPart(type=PartType.TEXT, content=llm_result.content)],
+        )
+        await self._stores.artifact_store.put_artifact(artifact, content_bytes)
+        await self._stores.conn.commit()
+        return artifact_id, artifact
+
+    async def _write_model_call_completed(
+        self, task_id: str, trace_id: str, llm_result, artifact_id: str
+    ) -> None:
+        """写入 MODEL_CALL_COMPLETED 事件（含响应截断逻辑）"""
+        # 响应摘要截断（对齐 FR-002-CL-4）
+        response_summary = llm_result.content
+        if len(response_summary.encode("utf-8")) > self.RESPONSE_SUMMARY_MAX_BYTES:
+            truncated = response_summary.encode("utf-8")[
+                : self.RESPONSE_SUMMARY_MAX_BYTES
+            ].decode("utf-8", errors="ignore")
+            response_summary = truncated + "... [truncated, see artifact]"
+
+        now = datetime.now(UTC)
+        seq = await self._stores.event_store.get_next_task_seq(task_id)
+        event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=seq,
+            ts=now,
+            type=EventType.MODEL_CALL_COMPLETED,
+            actor=ActorType.SYSTEM,
+            payload=ModelCallCompletedPayload(
+                model_alias=llm_result.model_alias,
+                model_name=llm_result.model_name,
+                provider=llm_result.provider,
+                response_summary=response_summary,
+                duration_ms=llm_result.duration_ms,
+                token_usage={
+                    "prompt_tokens": llm_result.token_usage.prompt_tokens,
+                    "completion_tokens": llm_result.token_usage.completion_tokens,
+                    "total_tokens": llm_result.token_usage.total_tokens,
+                },
+                cost_usd=llm_result.cost_usd,
+                cost_unavailable=llm_result.cost_unavailable,
+                is_fallback=llm_result.is_fallback,
+                artifact_ref=artifact_id,
+            ).model_dump(),
+            trace_id=trace_id,
+        )
+        await append_event_only(self._stores.conn, self._stores.event_store, event)
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+
+    async def _write_artifact_created(
+        self, task_id: str, trace_id: str, artifact_id: str, artifact: Artifact
+    ) -> None:
+        """写入 ARTIFACT_CREATED 事件"""
+        now = datetime.now(UTC)
+        seq = await self._stores.event_store.get_next_task_seq(task_id)
+        event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=seq,
+            ts=now,
+            type=EventType.ARTIFACT_CREATED,
+            actor=ActorType.SYSTEM,
+            payload=ArtifactCreatedPayload(
+                artifact_id=artifact_id,
+                name="llm-response",
+                size=artifact.size,
+                part_count=len(artifact.parts),
+            ).model_dump(),
+            trace_id=trace_id,
+        )
+        await append_event_only(self._stores.conn, self._stores.event_store, event)
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+
+    async def _handle_llm_failure(
+        self, task_id: str, trace_id: str, model_alias: str, error: Exception
+    ) -> None:
+        """处理 LLM 调用失败：写入 FAILED 事件并推进到 FAILED 状态"""
+        log.error("llm_processing_failed", task_id=task_id, error=str(error))
+        try:
+            now = datetime.now(UTC)
+            seq = await self._stores.event_store.get_next_task_seq(task_id)
+            failed_event = Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=now,
+                type=EventType.MODEL_CALL_FAILED,
+                actor=ActorType.SYSTEM,
+                payload=ModelCallFailedPayload(
+                    model_alias=model_alias,
+                    model_name="",
+                    provider="",
+                    error_type="model",
+                    error_message=str(error),
+                    duration_ms=0,
+                    is_fallback=False,
+                ).model_dump(),
+                trace_id=trace_id,
+            )
+            await append_event_only(
+                self._stores.conn, self._stores.event_store, failed_event
+            )
+            if self._sse_hub:
+                await self._sse_hub.broadcast(task_id, failed_event)
+
+            await self._write_state_transition(
+                task_id, TaskStatus.RUNNING, TaskStatus.FAILED, trace_id
+            )
+        except Exception as inner_e:
+            log.error(
+                "failed_to_record_failure",
+                task_id=task_id,
+                error=str(inner_e),
+            )
 
     async def cancel_task(self, task_id: str) -> Task | None:
         """取消任务

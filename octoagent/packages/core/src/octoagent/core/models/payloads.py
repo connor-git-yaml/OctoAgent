@@ -35,25 +35,45 @@ class ModelCallStartedPayload(BaseModel):
 
 
 class ModelCallCompletedPayload(BaseModel):
-    """MODEL_CALL_COMPLETED 事件 payload"""
+    """MODEL_CALL_COMPLETED 事件 payload -- Feature 002 扩展
 
+    新增字段均有默认值，确保 M0 旧事件可正常反序列化。
+    """
+
+    # M0 已有字段
     model_alias: str
-    response_summary: str = Field(description="响应摘要")
+    response_summary: str = Field(description="响应摘要（超过 8KB 截断）")
     duration_ms: int = Field(description="调用耗时（毫秒）")
     token_usage: dict[str, int] = Field(
         default_factory=dict,
-        description="Token 用量 {prompt, completion, total}",
+        description="Token 用量（prompt_tokens/completion_tokens/total_tokens）",
     )
     artifact_ref: str | None = Field(default=None, description="完整响应的 Artifact 引用")
 
+    # Feature 002 新增字段（全部有默认值，M0 向后兼容）
+    model_name: str = Field(default="", description="实际调用的模型名称")
+    provider: str = Field(default="", description="实际 provider 名称")
+    cost_usd: float = Field(default=0.0, description="本次调用的 USD 成本")
+    cost_unavailable: bool = Field(
+        default=False,
+        description="成本数据是否不可用",
+    )
+    is_fallback: bool = Field(default=False, description="是否为降级调用")
+
 
 class ModelCallFailedPayload(BaseModel):
-    """MODEL_CALL_FAILED 事件 payload"""
+    """MODEL_CALL_FAILED 事件 payload -- Feature 002 扩展"""
 
+    # M0 已有字段
     model_alias: str
     error_type: str
     error_message: str
     duration_ms: int
+
+    # Feature 002 新增字段（全部有默认值，M0 向后兼容）
+    model_name: str = Field(default="", description="尝试调用的模型名称")
+    provider: str = Field(default="", description="尝试使用的 provider")
+    is_fallback: bool = Field(default=False, description="失败时是否已在降级模式")
 
 
 class StateTransitionPayload(BaseModel):

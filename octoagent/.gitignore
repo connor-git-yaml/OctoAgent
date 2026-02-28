@@ -18,9 +18,11 @@ data/
 *.db-wal
 *.db-shm
 
-# 环境变量
+# 环境变量（Secrets 不入版本管理）
 .env
-.env.local
+.env.*
+!.env.example
+!.env.litellm.example
 
 # IDE
 .idea/
