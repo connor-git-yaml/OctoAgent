@@ -12,7 +12,8 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：Ready-for-Implementation（待确认项见 §17）
+- 状态：M0-Delivered / M1-Ready（待确认项见 §17）
+- M0 完成日期：2026-02-28（commit `52959a7`）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
   - 未来可能加入的 1-3 名协作者（工程实现、前端、运维）
@@ -2072,25 +2073,36 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
 
 **分层策略说明**：M0-M1 聚焦核心基础设施（数据模型 + 事件系统 + 工具治理），此阶段部分”必须”级需求（Telegram、Workers、Memory）尚未引入，这属于**有意的架构分层策略**——先保证 Constitution 中 Durability First 和 Everything is an Event 的基础牢固，再叠加智能与交互能力。M1.5 补齐最小 Agent 闭环（Orchestrator + Worker），M2 扩展多渠道与治理，M3 深化增强。
 
-### M0（基础底座）：Task/Event/Artifact + 端到端验证（2 周）
+### M0（基础底座）：Task/Event/Artifact + 端到端验证 ✅ 已完成
 
-- [ ] SQLite schema + event append API + projection
-- [ ] `/ingest_message` 创建 task + 写 USER_MESSAGE 事件
-- [ ] `/stream/task/{task_id}` SSE 事件流
-- [ ] Artifact store（文件系统即可）
-- [ ] 可观测性基础：structlog 配置 + request_id/trace_id 贯穿所有日志
-- [ ] 最小 LLM 回路：hardcoded model call → 事件记录 → SSE 推送（端到端验证）
-- [ ] 最小 Web UI：能看到 task 列表与事件流
+> **完成日期**：2026-02-28 | **测试**：105 passed | **代码**：`octoagent/` | **Spec**：`.specify/features/001-implement-m0-foundation/`
 
-交付：一个可跑的”任务账本 + 事件流 + 最小 LLM 回路”系统，端到端可验证。
+- [x] SQLite schema（WAL 模式）+ event append API + projection + rebuild CLI
+- [x] `POST /api/message` 创建 task + 写 TASK_CREATED / USER_MESSAGE 事件（含 idempotency_key 去重）
+- [x] `GET /api/stream/task/{task_id}` SSE 事件流（历史回放 + 实时推送 + final 标记）
+- [x] Artifact store（inline < 4KB + 文件系统 > 4KB，含 SHA-256 校验）
+- [x] 可观测性基础：structlog + Logfire 配置 + x-request-id/trace_id 贯穿所有日志
+- [x] 最小 LLM 回路：Echo LLM → MODEL_CALL_STARTED/COMPLETED 双事件 + token_usage → SSE 推送
+- [x] 最小 Web UI：TaskList 页 + TaskDetail 页（事件时间线 + Artifact 展示）+ useSSE Hook
+- [x] Task 取消：`POST /api/tasks/{id}/cancel` → CANCELLED 终态（终态任务返回 409）
+- [x] Readiness check：`GET /ready` profile-based（core/llm/full）
 
-验收标准：
+交付：一个可跑的”任务账本 + 事件流 + 最小 LLM 回路”系统，端到端已验证。
 
-- task 创建 → 事件落盘 → LLM 调用 → SSE 推送 端到端通过
-- 进程重启后 task 状态不丢失（Durability First 验证）
-- artifact 文件可存储、可按 task_id 检索
-- Web UI 可展示 task 列表 + 事件时间线
-- 所有日志包含 request_id/trace_id
+验收标准（6/6 通过）：
+
+- [x] SC-1：task 创建 → 事件落盘 → LLM 调用 → SSE 推送 端到端通过
+- [x] SC-2：进程 kill -9 后重启，task 状态 + events + artifacts 完好（Durability First 验证）
+- [x] SC-3：Projection Rebuild 从 events 重建 task 状态，与原始一致
+- [x] SC-4：Artifact 文件可存储（inline + 文件系统双模式）、可按 task_id 检索
+- [x] SC-5：所有响应头包含 x-request-id（ULID），日志绑定 request_id/trace_id
+- [x] SC-6：Task 取消 API 正确推进到 CANCELLED 终态
+
+M0 实现要点与 Blueprint 偏差记录：
+
+- Gateway/Kernel 合并为单 FastAPI 进程（M0 阶段 Kernel 核心职责未就绪，独立进程过度设计）
+- LLM 使用 Echo 模式直连（非 LiteLLM Proxy），M1 升级仅改 base_url
+- Event payload 遵循最小化原则：摘要 + artifact_ref，原文不入 Event
 
 ### M1（最小智能闭环）：LiteLLM + Skill + Tool contract（2 周）
 
@@ -2230,11 +2242,11 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
 
 ### 16.2 准备类（工程环境就绪，开工前完成）
 
-- [ ] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）
-- [ ] LiteLLM Proxy 就绪：至少 1 个 provider 可用 + cheap/main 两个 alias 配通
-- [ ] SQLite schema 初始化脚本准备（M0 第一个交付物的前置）
-- [ ] CI/测试基础设施：pytest + 基本 Makefile/justfile
-- [ ] 可观测性基础：Logfire 账号注册（或决定先用 structlog 本地日志）
+- [x] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）— M0 已验证
+- [ ] LiteLLM Proxy 就绪：至少 1 个 provider 可用 + cheap/main 两个 alias 配通 — M1 前置
+- [x] SQLite schema 初始化脚本准备 — M0 已交付（lifespan 自动建表）
+- [x] CI/测试基础设施：pytest + pytest-asyncio + ruff — M0 已交付（105 tests）
+- [x] 可观测性基础：structlog + Logfire 本地配置 — M0 已交付
 - [ ] Telegram Bot 注册（如 M2 需要接入，提前准备 bot token + allowlist）
 - [ ] 配置诊断工具（建议实现 `octo doctor` 命令：检查 LiteLLM 可达性、Docker daemon、DB 连接）
 
