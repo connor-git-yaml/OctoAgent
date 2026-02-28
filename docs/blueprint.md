@@ -1160,8 +1160,15 @@ config_schema:
   - body: NormalizedMessage
   - returns: `{task_id}`
 
+- `GET /kernel/tasks/{task_id}`
+  - returns: Task（当前状态快照）
+
+- `POST /kernel/tasks/{task_id}/cancel`
+  - returns: `{ok, task_id}`
+
 - `GET /kernel/stream/task/{task_id}`
   - SSE events: Event（json）
+  - 终止信号：终态事件携带 `"final": true`，客户端据此关闭连接（对齐 A2A SSE 规范）
 
 - `POST /kernel/approvals/{approval_id}/decision`
   - body: `{decision: approve|reject, comment?: str}`
@@ -1170,8 +1177,10 @@ config_schema:
 
 ```yaml
 A2AMessage:
+  schema_version: "0.1"
   message_id: "uuid"
   task_id: "uuid"
+  context_id: "thread_id"       # 对齐 A2A contextId，关联对话线程
   from: "agent://kernel"
   to: "agent://worker.ops"
   type: TASK|UPDATE|CANCEL|RESULT|ERROR|HEARTBEAT
@@ -1233,8 +1242,8 @@ ArtifactMapping:
   parts:       → parts            # Part 结构已对齐（text/file/json → TextPart/FilePart/JsonPart）
   append:      → append
   last_chunk:  → lastChunk
-  # 以下字段对外不暴露（A2A 没有，OctoAgent 独有）
-  artifact_id: → 丢弃（A2A 用 index 代替）
+  # 以下字段 A2A v0.3 部分支持，其余降级到 metadata
+  artifact_id: → artifactId        # A2A v0.3 已支持 artifactId 字段
   version:     → metadata.version  # 降级到 metadata
   hash:        → metadata.hash
   size:        → metadata.size
@@ -1357,38 +1366,83 @@ PartTypeMapping:
 
 ## 14. 里程碑与交付物（Roadmap）
 
-> 这里给出“可以直接开工”的拆解顺序，按收益/风险比排序。
+> 这里给出”可以直接开工”的拆解顺序，按收益/风险比排序。
 
-### M0（基础底座）：Task/Event/Artifact（1-2 周）
+**分层策略说明**：M0-M1 聚焦核心基础设施（数据模型 + 事件系统 + 工具治理），此阶段部分”必须”级需求（Telegram、Workers、Memory）尚未引入，这属于**有意的架构分层策略**——先保证 Constitution 中 Durability First 和 Everything is an Event 的基础牢固，再叠加智能与交互能力。M1.5 补齐最小 Agent 闭环（Orchestrator + Worker），M2 扩展多渠道与治理，M3 深化增强。
+
+### M0（基础底座）：Task/Event/Artifact + 端到端验证（2 周）
 
 - [ ] SQLite schema + event append API + projection
 - [ ] `/ingest_message` 创建 task + 写 USER_MESSAGE 事件
 - [ ] `/stream/task/{task_id}` SSE 事件流
 - [ ] Artifact store（文件系统即可）
+- [ ] 可观测性基础：structlog 配置 + request_id/trace_id 贯穿所有日志
+- [ ] 最小 LLM 回路：hardcoded model call → 事件记录 → SSE 推送（端到端验证）
 - [ ] 最小 Web UI：能看到 task 列表与事件流
 
-交付：一个可跑的“任务账本 + 事件流”系统（哪怕还没有智能）
+交付：一个可跑的”任务账本 + 事件流 + 最小 LLM 回路”系统，端到端可验证。
 
-### M1（最小智能闭环）：LiteLLM + Skill + Tool contract（1-2 周）
+验收标准：
 
-- [ ] 接入 LiteLLM Proxy
+- task 创建 → 事件落盘 → LLM 调用 → SSE 推送 端到端通过
+- 进程重启后 task 状态不丢失（Durability First 验证）
+- artifact 文件可存储、可按 task_id 检索
+- Web UI 可展示 task 列表 + 事件时间线
+- 所有日志包含 request_id/trace_id
+
+### M1（最小智能闭环）：LiteLLM + Skill + Tool contract（2 周）
+
+- [ ] 接入 LiteLLM Proxy + 双模型 alias 配置（cheap/main 分离）
 - [ ] 实现 Pydantic Skill Runner（结构化输出）
 - [ ] 工具 schema 反射 + ToolBroker 执行
 - [ ] Policy Engine（allow/ask/deny）+ Approvals UI
 - [ ] 工具输出压缩（summarizer）
 
-交付：能安全调用工具、能审批、能产出 artifacts
+交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性。
 
-### M2（多渠道与多 worker）：Telegram + Worker + JobRunner（2-4 周）
+验收标准：
 
-- [ ] TelegramChannel（pairing + thread_id）
-- [ ] Worker 框架（ops/research/dev 至少 1 个）
-- [ ] A2A-Lite 消息投递（TASK/UPDATE/CANCEL）
+- LLM 调用 → 结构化输出 → 工具执行 端到端通过
+- irreversible 工具触发审批流，approve 后继续执行
+- 工具 schema 自动反射与代码签名一致（contract test 通过）
+- 每次模型调用生成 cost/tokens 事件
+- cheap/main alias 路由正确（summarizer 走 cheap，planner 走 main）
+
+### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）
+
+- [ ] 简化版 Orchestrator（目标理解 + 单 Worker 直连，无多 Worker 派发逻辑）
+- [ ] 通用 Worker 框架（Free Loop，可调 Skill + ToolBroker）
+- [ ] Checkpoint 基础（node_id + state snapshot，支持”从最后成功 checkpoint 恢复”）
+- [ ] Watchdog 基础（检测无进展 + 自动提醒，策略可配）
+- [ ] Logfire 接入（自动 instrument Pydantic AI + FastAPI）
+
+交付：具备最小自治 Agent 能力——Orchestrator 接收任务、派发 Worker、Worker 自主执行并回传结果；任务可恢复、可监控。
+
+验收标准：
+
+- 用户消息 → Orchestrator 路由 → Worker 执行 → 结果回传 端到端通过
+- Worker 中断后可从 checkpoint 恢复，不需全量重跑
+- 无进展任务被 watchdog 检测并触发提醒
+- Logfire 面板可查看 trace 链路（Gateway → Kernel → Worker → LLM）
+
+### M2（多渠道与治理）：Telegram + A2A + JobRunner + Memory（3-4 周）
+
+- [ ] TelegramChannel（pairing + webhook + thread_id 映射）
+- [ ] A2A-Lite 消息投递（TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT）
 - [ ] A2AStateMapper（内部状态 ↔ A2A TaskState 双向映射）
-- [ ] JobRunner docker backend + watchdog
+- [ ] JobRunner docker backend（start/stream_logs/cancel/status/artifacts）
 - [ ] 基础 memory（Fragments + SoR + 仲裁）
+- [ ] 配置管理（system/user/project 分层 + 变更事件）
 
-交付：长任务可分工、可中断、可恢复；多渠道可用
+交付：长任务可分工、可中断、可恢复；多渠道可用；记忆可持久化；配置可管理。
+
+验收标准：
+
+- Telegram 消息 → NormalizedMessage → Task 创建 端到端通过
+- A2A-Lite 消息在 Orchestrator ↔ Worker 间可靠投递
+- Worker 在 Docker 内执行代码并返回 artifacts
+- memory 写入经仲裁（WriteProposal → 验证 → commit），SoR 同 subject_key 只有 1 条 current
+- 配置变更生成事件并可回滚
 
 ### M3（增强）：Chat Import Core + Vault + ToolIndex（后续）
 
@@ -1397,6 +1451,16 @@ PartTypeMapping:
 - [ ] Vault 分区与授权检索
 - [ ] ToolIndex（向量检索）+ 动态工具注入
 - [ ] Skill Pipeline Engine（关键子流程固化、可回放）
+- [ ] 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发
+
+交付：完整的增强能力——聊天导入、敏感数据治理、动态工具发现、确定性子流程编排。
+
+验收标准：
+
+- Chat Import 增量导入去重 + 窗口化摘要生成正确
+- Vault 分区默认不可检索，授权后可查
+- ToolIndex 向量检索精度满足 top-5 命中率 > 80%
+- Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL）
 
 ---
 
