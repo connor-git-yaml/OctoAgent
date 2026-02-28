@@ -7,6 +7,10 @@ _research/
 .claude/CLAUDE.local.md
 CLAUDE.local.md
 
+# ===== Codex（个人配置不提交）=====
+AGENTS.local.md
+.codex/settings.local.json
+
 # ===== 系统与 IDE =====
 .DS_Store
 *.swp
