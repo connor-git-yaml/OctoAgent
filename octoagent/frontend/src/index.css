@@ -1,0 +1,234 @@
+/* 全局基础样式 -- 无 CSS 框架，纯手写 */
+
+/* CSS Reset */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* 任务状态颜色 */
+  --color-created: #9ca3af;    /* 灰色 */
+  --color-running: #3b82f6;    /* 蓝色 */
+  --color-succeeded: #22c55e;  /* 绿色 */
+  --color-failed: #ef4444;     /* 红色 */
+  --color-cancelled: #eab308;  /* 黄色 */
+
+  /* 基础颜色 */
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-text: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-border: #e2e8f0;
+  --color-accent: #3b82f6;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* 字体 */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+body {
+  background-color: var(--color-bg);
+  min-height: 100vh;
+}
+
+#root {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-lg);
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* 状态标签 */
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+}
+
+.status-badge.CREATED { background-color: var(--color-created); }
+.status-badge.RUNNING { background-color: var(--color-running); }
+.status-badge.SUCCEEDED { background-color: var(--color-succeeded); }
+.status-badge.FAILED { background-color: var(--color-failed); }
+.status-badge.CANCELLED { background-color: var(--color-cancelled); }
+
+/* 卡片 */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+/* 页面标题 */
+h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: var(--space-lg);
+  color: var(--color-text);
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+  color: var(--color-text);
+}
+
+/* 事件时间线 */
+.timeline {
+  position: relative;
+  padding-left: var(--space-lg);
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: var(--space-md);
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--space-lg) + 4px);
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid var(--color-surface);
+}
+
+.timeline-item .event-type {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.timeline-item .event-time {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-left: var(--space-sm);
+}
+
+.timeline-item .event-payload {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-bg);
+  border-radius: 4px;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 加载状态 */
+.loading {
+  text-align: center;
+  padding: var(--space-xl);
+  color: var(--color-text-secondary);
+}
+
+/* 错误状态 */
+.error {
+  text-align: center;
+  padding: var(--space-xl);
+  color: var(--color-failed);
+}
+
+/* 任务列表项 */
+.task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.task-item:hover {
+  background-color: var(--color-bg);
+}
+
+.task-item .task-title {
+  font-weight: 500;
+  flex: 1;
+  margin-right: var(--space-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-item .task-time {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* 返回链接 */
+.back-link {
+  display: inline-block;
+  margin-bottom: var(--space-md);
+  font-size: 13px;
+}
+
+/* 任务详情头部 */
+.task-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.task-header h1 {
+  margin-bottom: 0;
+}
+
+/* SSE 连接状态指示器 */
+.sse-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: var(--space-sm);
+}
+
+.sse-indicator.connected { background-color: var(--color-succeeded); }
+.sse-indicator.disconnected { background-color: var(--color-failed); }
+.sse-indicator.closed { background-color: var(--color-created); }

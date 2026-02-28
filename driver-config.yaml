@@ -1,0 +1,154 @@
+# Spec Driver - 驱动配置文件
+# 文件位置: 项目根目录/driver-config.yaml 或 .specify/driver-config.yaml
+# 首次使用时由 init-project.sh 交互式引导创建
+
+# ═══════════════════════════════════════
+# 模型预设
+# ═══════════════════════════════════════
+# 可选值: balanced | quality-first | cost-efficient
+#
+# balanced（默认）:
+#   重分析任务（调研、规范、规划、分析）使用 Opus
+#   执行任务（澄清、检查表、任务分解、实现、验证）使用 Sonnet
+#
+# quality-first:
+#   所有阶段均使用 Opus（最高质量，成本较高）
+#
+# cost-efficient:
+#   所有阶段均使用 Sonnet（成本最低，适合探索性需求）
+#
+preset: quality-first
+
+# ═══════════════════════════════════════
+# 子代理模型配置（覆盖预设）
+# ═══════════════════════════════════════
+# 每个子代理可独立配置 model 字段
+# 可选值: opus | sonnet
+# 取消注释并修改以覆盖预设中的默认值
+#
+agents:
+  # --- 重分析任务（balanced 预设下默认 opus）---
+  product-research:
+    model: opus
+  tech-research:
+    model: opus
+  specify:
+    model: opus
+  plan:
+    model: opus
+  analyze:
+    model: opus
+
+  # --- 执行任务（balanced 预设下默认 sonnet）---
+  clarify:
+    model: opus
+  checklist:
+    model: opus
+  tasks:
+    model: opus
+  implement:
+    model: opus
+  verify:
+    model: opus
+
+# ═══════════════════════════════════════
+# 调研阶段配置（Feature 模式）
+# ═══════════════════════════════════════
+# 控制 Feature 模式中调研阶段的行为
+# Story 模式和 Fix 模式不受此配置影响
+#
+# default_mode 可选值:
+#   auto          — 由编排器根据需求特征智能推荐（默认）
+#   full          — 完整调研（产品+技术+汇总），与当前版本行为一致
+#   tech-only     — 仅技术调研（跳过产品调研和汇总）
+#   product-only  — 仅产品调研（跳过技术调研和汇总）
+#   codebase-scan — 代码库上下文扫描（与 Story 模式相同）
+#   skip          — 跳过调研（不执行任何调研步骤）
+#   custom        — 自定义步骤组合（需配置 custom_steps）
+#
+research:
+  default_mode: auto
+
+  # 自定义步骤（仅当 default_mode: custom 时生效）
+  # 可选步骤: product-research, tech-research, codebase-scan, synthesis
+  # 注意: synthesis 依赖 product-research 和 tech-research 的输出
+  custom_steps: []
+
+# ═══════════════════════════════════════
+# 验证阶段配置
+# ═══════════════════════════════════════
+verification:
+  # 自定义构建/Lint/测试命令
+  # 键名为语言标识（小写），覆盖自动检测的默认命令
+  # 取消注释并修改以使用自定义命令
+  commands: {}
+    # typescript:
+    #   build: "npm run build"
+    #   lint: "npm run lint"
+    #   test: "npm test"
+    # python:
+    #   lint: "ruff check ."
+    #   test: "pytest -v"
+    # rust:
+    #   lint: "cargo clippy -- -D warnings"
+    #   test: "cargo test --all-features"
+
+  # Monorepo 子项目检测
+  monorepo:
+    enabled: true  # 是否启用 Monorepo 子项目自动检测
+
+# ═══════════════════════════════════════
+# 质量门配置
+# ═══════════════════════════════════════
+quality_gates:
+  # WARNING 级别发现时自动继续（不暂停）
+  auto_continue_on_warning: true
+  # CRITICAL 级别发现时暂停（此设置不可关闭，仅供参考）
+  pause_on_critical: true
+
+# ═══════════════════════════════════════
+# 门禁策略
+# ═══════════════════════════════════════
+# 控制质量门（Quality Gate）在流程中的暂停行为
+#
+# strict:     所有门禁暂停等待确认（最高人工控制权）
+# balanced:   关键门禁暂停，非关键自动继续（默认，推荐）
+# autonomous: 仅失败或 CRITICAL 问题时暂停（最低中断）
+#
+# 注：GATE_DESIGN 在 feature 模式下始终暂停（硬门禁），不受此配置影响
+gate_policy: balanced
+
+# ═══════════════════════════════════════
+# 门禁级配置（高级，可选）
+# ═══════════════════════════════════════
+# 对每个门禁独立配置，优先于 gate_policy
+# 可选值: always（始终暂停）| auto（始终自动继续）| on_failure（仅失败时暂停）
+#
+# gates:
+#   GATE_RESEARCH:
+#     pause: auto
+#   GATE_DESIGN:
+#     pause: always
+#   GATE_ANALYSIS:
+#     pause: auto
+#   GATE_TASKS:
+#     pause: always
+#   GATE_VERIFY:
+#     pause: always
+
+# ═══════════════════════════════════════
+# 子代理重试策略
+# ═══════════════════════════════════════
+retry:
+  # 子代理失败后自动重试的最大次数
+  # 超过此次数后暂停，等待用户决策（重试/跳过/中止）
+  max_attempts: 2
+
+# ═══════════════════════════════════════
+# 进度输出配置
+# ═══════════════════════════════════════
+progress:
+  # 阶段开始/完成时输出进度信息（如 "[3/10] 正在执行技术规划..."）
+  show_stage_progress: true
+  # 阶段完成时输出关键产出摘要
+  show_stage_summary: true
