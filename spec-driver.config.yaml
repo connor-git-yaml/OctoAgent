@@ -1,10 +1,69 @@
 # Spec Driver - 驱动配置文件
 # 项目: OctoAgent (ATM)
+# 文件位置: 项目根目录/spec-driver.config.yaml
 
+# ═══════════════════════════════════════
+# 模型预设
+# ═══════════════════════════════════════
+# 可选值: balanced | quality-first | cost-efficient
+#
+# balanced（默认）:
+#   重分析任务（调研、规范、规划、分析）使用 Opus
+#   执行任务（澄清、检查表、任务分解、实现、验证）使用 Sonnet
+#
+# quality-first:
+#   所有阶段均使用 Opus（最高质量，成本较高）
+#
+# cost-efficient:
+#   所有阶段均使用 Sonnet（成本最低，适合探索性需求）
+#
 preset: quality-first
 
-agents: {}
+# ═══════════════════════════════════════
+# 子代理模型配置（覆盖预设）
+# ═══════════════════════════════════════
+# 每个子代理可独立配置 model 字段
+# 可选值:
+# - Claude 逻辑名: opus | sonnet（推荐，跨端可移植）
+# - 运行时原生模型名: 例如 gpt-5 / gpt-5-mini / o3（按运行时支持情况）
+# 默认不配置（全部跟随 preset）
+# 仅当某个子代理需要单独模型时，取消注释对应条目
+#
+agents:
+  # --- 重分析任务（balanced 预设下默认 opus）---
+  # product-research:
+  #   model: opus
+  # tech-research:
+  #   model: opus
+  # specify:
+  #   model: opus
+  # plan:
+  #   model: opus
+  # analyze:
+  #   model: opus
 
+  # --- 执行任务（balanced 预设下默认 sonnet）---
+  # clarify:
+  #   model: sonnet
+  # checklist:
+  #   model: sonnet
+  # tasks:
+  #   model: sonnet
+  # implement:
+  #   model: sonnet
+  # verify:
+  #   model: sonnet
+
+# ═══════════════════════════════════════
+# 模型运行时兼容（Claude / Codex）
+# ═══════════════════════════════════════
+# 目的: 保留现有 preset/agents 语义，同时允许在不同运行时自动映射模型名。
+#
+# runtime:
+#   auto   - 自动识别运行时（检测到 Codex 环境则按 codex 映射）
+#   claude - 强制按 Claude 映射
+#   codex  - 强制按 Codex 映射
+#
 model_compat:
   runtime: auto
   aliases:
@@ -21,24 +80,83 @@ model_compat:
     codex: gpt-5
     claude: sonnet
 
+# ═══════════════════════════════════════
+# 调研阶段配置（Feature 模式）
+# ═══════════════════════════════════════
+# default_mode 可选值:
+#   auto          — 由编排器根据需求特征智能推荐（默认）
+#   full          — 完整调研（产品+技术+汇总）
+#   tech-only     — 仅技术调研
+#   product-only  — 仅产品调研
+#   codebase-scan — 代码库上下文扫描
+#   skip          — 跳过调研
+#   custom        — 自定义步骤组合（需配置 custom_steps）
+#
 research:
   default_mode: auto
+
+  # 自定义步骤（仅当 default_mode: custom 时生效）
+  # 可选步骤: product-research, tech-research, codebase-scan, synthesis
   custom_steps: []
 
+# ═══════════════════════════════════════
+# 验证阶段配置
+# ═══════════════════════════════════════
 verification:
+  # 自定义构建/Lint/测试命令（覆盖自动检测）
+  # python:
+  #   lint: "ruff check ."
+  #   test: "pytest -v"
   commands: {}
+
+  # Monorepo 子项目检测
   monorepo:
     enabled: true
 
+# ═══════════════════════════════════════
+# 质量门配置
+# ═══════════════════════════════════════
 quality_gates:
   auto_continue_on_warning: true
   pause_on_critical: true
 
+# ═══════════════════════════════════════
+# 门禁策略
+# ═══════════════════════════════════════
+# strict:     所有门禁暂停等待确认
+# balanced:   关键门禁暂停，非关键自动继续（默认）
+# autonomous: 仅失败或 CRITICAL 时暂停
+#
+# 注：GATE_DESIGN 在 feature 模式下始终暂停（硬门禁），不受此配置影响
 gate_policy: balanced
 
+# ═══════════════════════════════════════
+# 门禁级配置（高级，可选）
+# ═══════════════════════════════════════
+# 对每个门禁独立配置，优先于 gate_policy
+# 可选值: always | auto | on_failure
+#
+# gates:
+#   GATE_RESEARCH:
+#     pause: auto
+#   GATE_DESIGN:
+#     pause: always
+#   GATE_ANALYSIS:
+#     pause: auto
+#   GATE_TASKS:
+#     pause: always
+#   GATE_VERIFY:
+#     pause: always
+
+# ═══════════════════════════════════════
+# 子代理重试策略
+# ═══════════════════════════════════════
 retry:
   max_attempts: 2
 
+# ═══════════════════════════════════════
+# 进度输出配置
+# ═══════════════════════════════════════
 progress:
   show_stage_progress: true
   show_stage_summary: true
