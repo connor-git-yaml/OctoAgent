@@ -1,0 +1,44 @@
+# Spec Driver - 驱动配置文件
+# 项目: OctoAgent (ATM)
+
+preset: quality-first
+
+agents: {}
+
+model_compat:
+  runtime: auto
+  aliases:
+    codex:
+      opus: gpt-5
+      sonnet: gpt-5-mini
+      haiku: gpt-5-mini
+    claude:
+      gpt-5: opus
+      gpt-5-mini: sonnet
+      o3: opus
+      o4-mini: sonnet
+  defaults:
+    codex: gpt-5
+    claude: sonnet
+
+research:
+  default_mode: auto
+  custom_steps: []
+
+verification:
+  commands: {}
+  monorepo:
+    enabled: true
+
+quality_gates:
+  auto_continue_on_warning: true
+  pause_on_critical: true
+
+gate_policy: balanced
+
+retry:
+  max_attempts: 2
+
+progress:
+  show_stage_progress: true
+  show_stage_summary: true
