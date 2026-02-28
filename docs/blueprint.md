@@ -1339,36 +1339,128 @@ PartTypeMapping:
 
 **冲突：** SQLite 并发能力有限。  
 **收敛：**
+
 - 单用户场景使用 WAL + 单写多读即可；  
 - 单用户场景 SQLite WAL 足够，暂不引入额外数据库。
 
 ### 11.3 Free Loop 自由度 vs 安全门禁
 
-**冲突：** Free Loop 容易越权执行高风险动作。  
+**冲突：** Free Loop 容易越权执行高风险动作。
 **收敛：**
-- mode 不是安全边界；安全边界在 Policy Engine。  
-- 即使是 Free Loop，也必须通过 tool broker + policy；不可直接调用外部系统。
+
+- mode 不是安全边界；安全边界分两层纵深防御：
+  1. **工具级**（不可绕过）：ToolBroker + Policy Engine — 无论 Worker 走 Free Loop 直接调 Tool 还是走 Skill Pipeline，所有工具调用都必须经过此链路。
+  2. **任务级**：Orchestrator Supervisor + Watchdog — 预算阈值、超时、无进展检测，提供全局监督。
+- 即使 Policy Engine 失效，Docker 隔离作为最后防线（§12.1 执行隔离）。
 
 ### 11.4 Tool RAG 动态注入 vs 可预测性
 
-**冲突：** 动态注入工具会导致行为不稳定。  
+**冲突：** 动态注入工具会导致行为不稳定。
 **收敛：**
-- ToolIndex 的检索结果必须写事件（记录当时注入的工具集合与版本）。  
-- 对关键 Graph，工具集合固定在 Graph 版本里（不动态注入）。
+
+- ToolIndex 的检索结果必须写事件（记录当时注入的工具集合与 schema 版本 hash）。
+- 对关键 Skill Pipeline，工具集合固定在 SkillSpec.tools_allowed 里（§8.4.1），不动态注入。
+- 动态注入的工具应有来源验证；ToolIndex 检索失败时降级到固定基础工具集。
 
 ### 11.5 记忆自动写入 vs 记忆污染
 
-**冲突：** 自动写记忆容易污染 SoR。  
+**冲突：** 自动写记忆容易污染 SoR。
 **收敛：**
-- 禁止直接写 SoR；必须 WriteProposal + 仲裁。  
+
+- 禁止直接写 SoR；必须 WriteProposal + 仲裁。
 - 仲裁默认严格：证据不足/冲突不明 → 不写（NONE）或进入待确认。
+- 所有仲裁结果（包括 NONE）写入事件，便于分析仲裁质量。
 
 ### 11.6 多 Channel 实时接入 vs 导入一致性
 
-**冲突：** 实时渠道与离线导入格式差异大。  
+**冲突：** 实时渠道与离线导入格式差异大。
 **收敛：**
-- 统一入口：NormalizedMessage + scope/thread 模型。  
+
+- 统一入口：NormalizedMessage + scope/thread 模型。
 - 渠道差异只存在于 Adapter；内核只处理标准消息流。
+- 离线导入幂等保证：基于 `msg_key = hash(sender + timestamp + normalized_text)` 去重（§8.7.5）。
+- 时序交叉（历史导入 ts 早于已有实时消息）：以物理时间排序，导入消息按原始 ts 插入。
+
+### 11.7 Policy Profile 可配 vs 安全门禁不可绕过
+
+**冲突：** §8.6.2 允许用户通过 Policy Profile 调整门禁，包括"自动批准"和"静默执行"。但 Constitution §4 要求"不可逆操作必须二段式（Plan → Gate → Execute），绕过 Gate 视为严重缺陷"。如果 Policy Profile 将 irreversible 工具设为 `allow`，是否算"绕过 Gate"？
+**收敛：**
+
+- 明确区分 **Gate 的存在** 与 **Gate 的决策**。Policy Profile 改变的是 Gate 的决策结果（从 `ask` 变为 `allow`），但 Gate 链路本身（Plan → 策略评估 → Execute）仍然存在且执行，决策链条不可缩短。
+- 即使 Policy Profile 设为 `allow`，仍必须：(1) 生成 Plan 事件；(2) Policy Engine 评估并记录决策事件（含引用的 Policy Profile）；(3) 才能 Execute。
+- 安全底线：标记为 `policy_override_prohibited` 的动作（如 `delete_production_data`、`send_payment`）即使用户配了 `allow` 也强制 `ask`。
+
+### 11.8 Free Loop 停止条件 vs 成本控制
+
+**冲突：** Orchestrator/Workers "永远以 Free Loop 运行"（§8.3.1），每轮循环产生模型调用开销。若 Worker 陷入"推理但无进展"的循环，成本会快速累积。
+**收敛：**
+
+- Free Loop 必须内置**三道刹车**：
+  1. **轮次上限**（max_iterations_per_task）：Worker 对单任务的推理轮次有硬上限，超过后进入 WAITING_INPUT 或 FAILED。
+  2. **预算阈值**（来自 §8.9.2）：per-task 成本超限后自动降级（切换 cheap 模型）或暂停。
+  3. **无进展检测**（Watchdog）：连续 N 轮没有产生工具调用或状态变更 → 自动暂停并通知用户。
+- Watchdog 从"应该"（FR-EXEC-3）提升为 Free Loop 安全运行的**必要条件**。
+
+### 11.9 A2A 状态映射信息损耗 vs 内部治理需求
+
+**冲突：** §10.2.1 中 WAITING_APPROVAL → input-required、PAUSED → working 存在语义损耗。外部 SubAgent 看到 `working` 可能误以为任务正在执行，实际已暂停。
+**收敛：**
+
+- 接受这个语义压缩——A2A 协议本身就不区分这些状态。
+- 在 A2A 消息的 `metadata` 中附加 `internal_status` 字段（可选），供知道 OctoAgent 扩展语义的客户端使用。
+- 反向映射 `unknown → FAILED` 的降级必须写事件记录，因为可能掩盖外部 Agent 的真实状态。
+
+### 11.10 Artifact 流式追加 vs Event Store 事件膨胀
+
+**冲突：** Artifact 支持 `append: true` 的流式追加模式。若每次追加都生成 ARTIFACT_CREATED 事件，长时间流式产物（如 10 分钟实时日志）会产生大量事件，影响 SQLite 性能和事件流可读性。若不生成事件，又违反 Constitution §2（Everything is an Event）。
+**收敛：**
+
+- 流式 Artifact 采用**分层事件策略**：
+  - 首次创建：生成 `ARTIFACT_CREATED` 事件（含 artifact_id、name、append=true）。
+  - 中间追加：**不逐 chunk 写事件**，追加数据直接写入 Artifact Store（文件系统）。
+  - 最终完成：生成 `ARTIFACT_COMPLETED` 事件（last_chunk=true，附带最终 hash + size）。
+- 中间 chunk 的细粒度追踪通过 structlog + Logfire trace span 记录，不进入 Event Store。
+
+### 11.11 REJECTED 终态 vs retry/resume 语义
+
+**冲突：** REJECTED 作为终态（策略拒绝/能力不匹配），但 FR-TASK-1 声称"支持 retry / resume / cancel"。REJECTED 的任务是否允许 retry？策略没变则永远被拒绝。
+**收敛：**
+
+- REJECTED 是**不可重试的终态**，语义为"系统主动拒绝"：
+  - Policy 拒绝 → REJECTED（用户需修改策略或任务描述后**新建任务**，不 retry 原任务）。
+  - Worker 能力不匹配 → REJECTED（Orchestrator 可自动新建任务并 re-route 到另一 Worker，原任务保持 REJECTED）。
+  - 运行时错误 → FAILED（支持 retry / resume）。
+- Event 中记录 `rejection_reason: policy_denied | capability_mismatch | budget_exceeded | ...`，支持 UI 差异化展示。
+
+### 11.12 双存储（SQLite + 向量数据库）一致性窗口
+
+**冲突：** §7.3 设计了 SQLite（结构化）+ 向量数据库（embedding 语义检索）双存储。写入流程"commit 成功后异步更新向量索引"存在一致性窗口：SQLite 已 commit 但向量索引尚未更新，此时语义检索会漏掉最新数据。
+**收敛：**
+
+- 接受最终一致性（eventual consistency）——单用户场景下毫秒到秒级延迟可接受。
+- 向量写入失败时记录事件并触发异步重试。
+- 关键查询（如 SoR.current）走 SQLite metadata filter 优先，不依赖向量检索实时性。
+- 提供手动 re-index 运维接口用于异常恢复。
+
+### 11.13 Checkpoint 持久化 vs SQLite 事务边界
+
+**冲突：** §8.3.4 要求 Skill Pipeline 每个节点结束后写 checkpoint，§8.2.2 要求"写事件与更新 projection 必须在同一事务内"。checkpoint、event、projection 三者是否必须同一事务？
+**收敛：**
+
+- 采用 **checkpoint + 事件原子写入**：节点完成后，在同一个 SQLite 事务中写入 (1) checkpoint (2) STATE_TRANSITION 事件 (3) 更新 tasks projection。
+- 节点执行本身（模型调用、工具执行）在事务**之外**完成；只有结果元数据持久化在事务内，事务不会阻塞。
+- 崩溃恢复时 checkpoint 和事件流始终一致——要么都写了，要么都没写。
+
+### 11.14 上下文窗口管理 vs 任务完整性
+
+**冲突：** 长任务的上下文可能超出模型 context window，截断会丢失关键信息，影响任务质量和连续性。
+**收敛：**
+
+- Orchestrator/Worker 层实现上下文管理策略：
+  - checkpoint 保证任务状态完整性（不依赖 context window 保持状态）。
+  - 对话历史在接近 context 上限时自动压缩（保留关键事实 + 最近 N 轮原文）。
+  - 工具调用结果只回灌 summary + structured fields，全量输出走 Artifact（§10.3 已定义）。
+- 压缩策略写事件记录（记录压缩前后 token 数），支持审计。
 
 ---
 
@@ -1398,24 +1490,157 @@ PartTypeMapping:
 
 ## 13. 测试策略（Testing Strategy）
 
-### 13.1 单元测试（Unit）
+> 测试策略按层级递进：基础设施 → 单元 → LLM 交互 → 集成 → 编排 → 安全 → 可观测 → 回放 → 韧性。
+> 每层都需与 Constitution（C1-C8）和成功判据（S1-S6）对齐，见 §13.10 覆盖矩阵。
 
-- domain models 校验
-- event store 事务一致性
-- tool schema 反射一致性（contract tests）
-- policy engine 决策矩阵
+### 13.1 测试基础设施（Test Infrastructure）
 
-### 13.2 集成测试（Integration）
+- **框架**：pytest + anyio（async 测试）+ pytest-asyncio
+- **全局 LLM 安全锁**：测试环境设置 `ALLOW_MODEL_REQUESTS = False`，防止意外调用真实 LLM API
+- **conftest.py 核心 fixture**：
+  - `InMemoryEventStore`：内存实现的 Event Store，替代 SQLite 加速单元测试
+  - `TestModel` / `FunctionModel`：Pydantic AI 提供的确定性 LLM mock（零成本、类型安全）
+  - `dirty-equals`：处理非确定性字段（`IsStr()`、`IsDatetime()`），用于事件断言
+  - `inline-snapshot`：结构化输出断言，自动更新预期值
+- **VCR 录制回放**：pytest-recording + vcrpy 录制真实 LiteLLM 请求，集成测试回放时无需网络
+- **Logfire 测试隔离**：每个测试后 `logfire.shutdown(flush=False)`，防止 OTel span 跨测试泄漏
+- **测试目录结构**：
+  ```
+  tests/
+    unit/           # 纯逻辑、无 IO
+    integration/    # 真实 SQLite + Docker + SSE
+    replay/         # golden test 事件流回放
+    evals/          # LLM 输出质量评估（预留）
+    conftest.py     # 全局 fixture + 安全锁
+  ```
 
-- task 执行：从 ingest_message 到 stream events
-- approval flow：ask → approve → resume
-- worker 执行：jobrunner docker backend
-- memory arbitration：write proposal → commit
+### 13.2 单元测试（Unit）
 
-### 13.3 回放测试（Replay）
+- **domain models**：
+  - Task 状态机转移覆盖：所有合法转移路径 + 非法转移拒绝
+  - Pydantic validator / serializer 正确性（NormalizedMessage / Event / Artifact）
+  - Artifact parts 多部分结构校验（对齐 A2A Part 规范）
+- **event store 事务一致性**：写事件 + 更新 projection 必须在同一事务内（原子性）
+- **tool schema 反射一致性**（contract tests）：schema 生成与函数签名 + 类型注解 + docstring 一致（对齐 C3）
+- **policy engine 决策矩阵**：allow / ask / deny 全路径覆盖；Policy Profile 优先级测试
+- **A2AStateMapper 映射**：内部状态 ↔ A2A TaskState 双向映射幂等性；终态一一对应
+- **成本计算逻辑**：按 model alias 聚合 tokens/cost 正确性（对齐 S6）
+- **memory 模型**：SoR current 唯一性约束；Fragments append-only 不可变性（对齐 S5）
 
-- 选取 10 个典型任务事件流作为 golden test
-- replay 后的 tasks projection 与 artifacts 列表必须一致
+### 13.3 LLM 交互测试（LLM Interaction）
+
+> Agent 系统最核心也最难测的部分。借鉴 Pydantic AI 的 TestModel / FunctionModel 模式。
+
+- **TestModel override**：自动调用所有注册工具，生成 schema 兼容参数，验证工具调用链路正确
+- **FunctionModel**：精确控制 LLM 响应，适用于测试 Orchestrator 多轮决策路径、Worker 分支逻辑
+- **LiteLLM alias 路由**：测试环境通过 alias 将请求路由到 mock 后端，验证 Provider 抽象层
+- **非确定性输出策略**：
+  - 验证输出结构 / 必填字段 / 类型，而非精确字符串
+  - 使用 dirty-equals（`IsStr(regex=...)`）做模糊匹配
+  - 关键路径使用 FunctionModel 保证确定性
+- **预留：LLM-as-Judge 评估**：pydantic-evals 或自定义 judge 函数，评判 Agent 输出质量（后续迭代）
+
+### 13.4 集成测试（Integration）
+
+- **task 全流程**：从 `ingest_message` → task 创建 → Worker 派发 → stream events → 终态
+- **approval flow**：ask → approve → resume；ask → reject → REJECTED 终态（对齐 C4 / C7）
+- **worker 执行**：JobRunner docker backend 启动 / 执行 / 产物回收 / 超时处理
+- **memory arbitration**：WriteProposal → 冲突检测 → commit；SoR current/superseded 转换一致性（对齐 S5）
+- **Skill Pipeline checkpoint**：
+  - 正常路径：Pipeline 从起点到终点，验证每个节点 checkpoint 写入
+  - 恢复路径：从任意中间 checkpoint 恢复，不重跑已完成节点
+  - 中断路径：WAITING_APPROVAL → 审批后从中断点继续
+- **多渠道消息路由**：同一 thread_id 的消息落到同一 scope_id；不同渠道的消息隔离（对齐 S4）
+- **SSE 事件流**：`/stream/task/{task_id}` 端到端验证事件顺序与完整性
+
+### 13.5 编排与循环测试（Orchestration & Loop）
+
+> Orchestrator 和 Workers 都是 Free Loop，需要专门验证循环控制与异常恢复。
+
+- **Orchestrator 路由决策**：给定 NormalizedMessage，验证目标分类、Worker 选择、risk_level 评估
+- **Worker Free Loop 终止**：验证正常完成、budget 耗尽、deadline 到期、用户取消等终止条件
+- **死循环检测**：
+  - 输出相似度阈值（连续 N 轮输出 similarity > 0.85 → 强制中断）
+  - 最大迭代次数限制（硬上限）
+  - 测试验证检测机制能正确触发并生成 ERROR 事件
+- **Worker 崩溃恢复**：模拟 Worker 进程中断，验证从 Event 历史恢复状态、从最后 checkpoint 续跑（对齐 C1 / S1）
+- **多 Worker 协作**：Orchestrator 派发子任务 → Workers 并行执行 → 事件回传 → Orchestrator 汇总
+
+### 13.6 安全与策略测试（Security & Policy）
+
+- **Docker 沙箱隔离**：验证工具执行在容器内，无法访问宿主文件系统 / 网络（除白名单）
+- **secrets 不泄漏**：验证 Vault 中的 secrets 不出现在 LLM 上下文、Event payload、日志输出中（对齐 C5）
+- **Two-Phase 门禁端到端**：不可逆操作必须经历 Plan → Gate → Execute；跳过 Gate 的请求被拒绝（对齐 C4）
+- **工具权限分级**：
+  - `read-only` 工具：默认 allow，无需审批
+  - `reversible` 工具：默认 allow，可配置为 ask
+  - `irreversible` 工具：默认 ask，必须审批后执行
+- **未签名插件拒绝**：未通过 manifest 校验的插件默认禁用
+
+### 13.7 可观测性与成本测试（Observability & Cost）
+
+- **事件完整性**：每个 task 的关键步骤必须产生对应 event（对齐 C2 / C8）：
+  - `TASK_CREATED` / `MODEL_CALL` / `TOOL_CALL` / `TOOL_RESULT` / `STATE_TRANSITION` / `ARTIFACT_CREATED`
+  - 缺失任何关键 event 类型 → 测试失败
+- **成本追踪正确性**：验证每个 task 的 tokens / cost 聚合与实际 MODEL_CALL 事件 payload 一致（对齐 S6）
+- **Logfire span 完整性**：关键操作（LLM 调用、工具执行、状态转移）必须生成 OTel span
+- **structlog 输出**：验证日志包含 task_id / trace_id / span_id 等结构化字段，便于关联查询
+
+### 13.8 回放测试（Replay / Golden Tests）
+
+> 利用事件溯源的天然优势，验证系统确定性与可重现性（对齐 S2）。
+
+- **golden test 场景清单**（10 个典型任务事件流）：
+  1. 简单问答：单轮 USER_MESSAGE → MODEL_CALL → 回复
+  2. 工具调用：MODEL_CALL → TOOL_CALL → TOOL_RESULT → 回复
+  3. 多轮对话：多次 USER_MESSAGE 交替
+  4. 审批通过：APPROVAL_REQUESTED → APPROVED → 继续执行
+  5. 审批拒绝：APPROVAL_REQUESTED → REJECTED → REJECTED 终态
+  6. 长任务 + checkpoint：多节点 Pipeline，中间有 CHECKPOINT_SAVED
+  7. 任务取消：用户主动 CANCELLED
+  8. 工具失败 + 重试：TOOL_CALL → ERROR → 重试 → 成功
+  9. 子任务派发：Orchestrator → Worker 子任务 → 回传
+  10. 崩溃恢复：中断 → 从 checkpoint 恢复 → 完成
+- **一致性断言**：replay 后的 tasks projection、artifacts 列表、终态必须与原始执行一致
+- **event schema 兼容**：不同 `schema_version` 的事件 replay 时正确解析
+
+### 13.9 降级与恢复测试（Resilience）
+
+> 验证 Constitution C1（Durability First）和 C6（Degrade Gracefully）。
+
+- **进程崩溃恢复**：
+  - 模拟 kernel/worker 进程崩溃后重启
+  - 所有未完成任务在 UI 中可见，且能 resume 或 cancel（对齐 S1）
+- **Provider 不可用**：
+  - 模拟 LLM Provider 返回 429 / 500 / 超时
+  - 验证 LiteLLM fallback 机制触发，切换到备选模型
+  - 验证事件记录失败原因（对齐 C6）
+- **插件崩溃隔离**：
+  - 单个插件 / 工具抛异常不导致整体系统不可用
+  - 自动 disable 故障插件并记录 incident（对齐 C6）
+- **SQLite WAL 并发一致性**：
+  - 模拟两个 task 同时写事件，验证 projection 最终一致
+  - 模拟数据库崩溃，验证 WAL 恢复后 projection 可从 events 重建
+- **网络中断**：Telegram / Web 渠道断连后重连，消息不丢失、不重复
+
+### 13.10 测试覆盖对齐矩阵
+
+| Constitution / 成功判据 | 对应测试 |
+|------------------------|---------|
+| C1 Durability First | §13.8 回放测试、§13.9 崩溃恢复 |
+| C2 Everything is Event | §13.7 事件完整性 |
+| C3 Tools are Contracts | §13.2 contract tests |
+| C4 Side-effect Two-Phase | §13.4 approval flow、§13.6 Two-Phase 门禁 |
+| C5 Least Privilege | §13.6 secrets 不泄漏 |
+| C6 Degrade Gracefully | §13.9 Provider / 插件降级 |
+| C7 User-in-Control | §13.4 approval flow、§13.5 用户取消 |
+| C8 Observability is Feature | §13.7 事件完整性、Logfire span |
+| S1 重启后可恢复 | §13.9 进程崩溃恢复 |
+| S2 任务可完整回放 | §13.8 golden tests |
+| S3 高风险需审批 | §13.4 approval flow、§13.6 权限分级 |
+| S4 多渠道一致性 | §13.4 多渠道消息路由 |
+| S5 记忆一致性 | §13.2 memory 模型、§13.4 memory arbitration |
+| S6 成本可见 | §13.2 成本计算、§13.7 成本追踪 |
 
 ---
 
@@ -1521,30 +1746,75 @@ PartTypeMapping:
 
 ## 15. 风险清单与缓解（Risks & Mitigations）
 
-1) Provider/订阅认证不稳定  
+> 每条风险附带检测指标与触发阈值，确保可操作化。
+
+1) **Provider/订阅认证不稳定**
    - 缓解：统一走 LiteLLM；alias + fallback；不要把认证逻辑散落在业务代码
+   - 检测：连续 N 次（建议 3）同 provider 调用失败 → 自动切换 fallback + 写 incident 事件
+   - 阈值：单任务内 provider 切换 > 2 次 → 暂停任务并通知用户
 
-2) Tool/插件供应链风险  
+2) **Tool/插件供应链风险**
    - 缓解：manifest + health gate；默认禁用未签名/未测试插件；工具分级与审批
+   - 检测：插件 healthcheck 连续失败 > 3 次 → 自动 disable + 降级
+   - 阈值：未在 manifest 注册的工具调用 → 直接 deny
 
-3) 记忆污染  
+3) **记忆污染**
    - 缓解：WriteProposal + 仲裁；证据与版本化；Vault 默认不可检索
+   - 检测：WriteProposal confidence < 0.5 → 默认 NONE（不写入）；同 subject_key 短时间内多次冲突写入 → 告警
+   - 阈值：单任务内 SoR 写入 > 10 条 → 需人工确认
 
-4) 长任务失控与成本爆炸  
+4) **长任务失控与成本爆炸**
    - 缓解：预算阈值；utility 模型做压缩；watchdog；可暂停/可取消
+   - 检测指标：
+     - Worker Free Loop 迭代次数（建议默认上限 50，参考 CrewAI max_iter=20）
+     - Skill Pipeline 单节点重试次数（建议默认上限 3）
+     - 无进展检测（连续 N 个心跳周期无新事件 → watchdog 介入）
+   - 阈值：per-task 预算分三级：
+     - 软阈值（80%）→ 降级到 cheap 模型
+     - 硬阈值（100%）→ 暂停等待用户确认
+     - 绝对上限（150%）→ 强制终止
+   - 参考：AutoGPT 将剩余预算注入 Agent 上下文做自感知，建议效仿
 
-5) SQLite 扩展瓶颈  
+5) **SQLite 扩展瓶颈**
    - 缓解：明确升级到 Postgres 的触发条件（并发写冲突/跨机 worker）
+   - 触发条件：WAL 文件持续 > 100MB；或需要跨机 Worker 共享数据库
+
+6) **LLM 幻觉与输出质量不可靠**
+   - 缓解：Skill OutputModel 强校验（Pydantic 解析失败 → 重试）；guardrails 函数校验业务规则
+   - 检测：OutputModel 校验失败率 > 30% → 升级模型或调整 prompt
+   - 阈值：单 Skill 连续校验失败 > max_retries（默认 3）→ 标记任务 FAILED + 写 ERROR 事件
+
+7) **上下文窗口溢出**
+   - 缓解：工具输出压缩（§8.5.4）；长任务分段；utility 模型摘要；Free Loop 迭代上限
+   - 检测：单次 LLM 调用 token 数 > context_window × 80% → 触发 Context GC
+   - 阈值：工具输出 > 4000 字符 → 自动压缩为 summary + artifact 引用
+
+8) **安全攻击面（Prompt Injection / 信息泄露）**
+   - 缓解：Docker 隔离（§8.8.3）；secrets 不进 LLM 上下文（Constitution 5）；Vault 分区；输入消毒
+   - 检测：工具输出含已知敏感模式（API key / token / password）→ 自动 redaction + 存 Vault
+   - 阈值：用户输入含已知注入模式 → 写告警事件 + 不透传到 LLM
 
 ---
 
 ## 16. 实现前检查清单（Pre-Implementation Checklist）
+
+### 16.1 决策类（需要拍板，影响架构）
 
 - [ ] 明确 v0.1 的 P0 场景（建议：早报/日报 + 局域网运维 + 调研报告）
 - [ ] 确定第一批高风险工具清单与默认策略（哪些必须审批）
 - [ ] 确定 secrets 分区方案（哪些放 Vault、哪些放 provider）
 - [ ] 确定本地运行拓扑（单进程/多进程/容器化）
 - [ ] 确定 UI 最小形态（task 面板字段 + 审批交互）
+
+### 16.2 准备类（工程环境就绪，开工前完成）
+
+- [ ] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）
+- [ ] LiteLLM Proxy 就绪：至少 1 个 provider 可用 + cheap/main 两个 alias 配通
+- [ ] SQLite schema 初始化脚本准备（M0 第一个交付物的前置）
+- [ ] CI/测试基础设施：pytest + 基本 Makefile/justfile
+- [ ] 可观测性基础：Logfire 账号注册（或决定先用 structlog 本地日志）
+- [ ] Telegram Bot 注册（如 M2 需要接入，提前准备 bot token + allowlist）
+- [ ] 配置诊断工具（建议实现 `octo doctor` 命令：检查 LiteLLM 可达性、Docker daemon、DB 连接）
 
 ---
 
@@ -1559,23 +1829,45 @@ PartTypeMapping:
 5) **设备控制方式**：LAN 设备是否统一走 SSH？是否存在需要安装 agent 的设备？
 6) **数据存储位置**：SQLite/artifacts/vault 放本机还是 NAS？备份周期与保留期？
 7) **预算策略**：是否需要 per-task 的硬预算上限？超过后自动暂停还是自动降级？
+8) **错误上报渠道**：watchdog 检测到异常（长任务无进展、Worker 崩溃、预算超限）时，通过什么渠道通知你？Telegram 推送 / Web UI 告警 / 两者都要？
+9) **Free Loop 迭代上限**：Worker 单次任务最多允许多少轮 LLM 调用？建议默认 50（参考：CrewAI 默认 20，LangGraph 默认 1000）。是否需要 per-worker 可配？
 
 ---
 
 ## 附录 A：术语表（Glossary）
 
-- Orchestrator Loop：Free Loop 驱动的路由与监督层（目标理解、Worker 派发、全局停止条件）
+**架构层级：**
+
+- Free Loop：LLM 驱动的自主推理循环，Orchestrator 和 Workers 的核心运行模式——自主决策下一步行动，不预设固定流程
+- Orchestrator（协调器）：Free Loop 驱动的路由与监督层（目标理解、Worker 派发、全局停止条件）
+- Worker（自治智能体）：Free Loop 驱动的执行层，独立上下文、自主决策，可调用 Skill/Tool/Skill Pipeline
+- Gateway：渠道适配层，负责消息标准化（NormalizedMessage）、出站发送、SSE/WS 流式推送
 - Skill Pipeline（Graph Engine）：Worker 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
-- Skill：强类型执行单元（Input/Output contract）
+- Skill：强类型执行单元（Input/Output contract，Pydantic 模型校验输入输出）
 - Tool：可被 LLM 调用的函数/能力（schema 反射 + 风险标注）
-- Policy Engine：工具与副作用门禁（allow/ask/deny）
-- Task：可追踪的工作单元（状态机）
-- Event：不可变事件记录（append-only）
-- Artifact：任务产物（文件/报告/日志等）
-- SoR：Source of Record，权威记忆线（current/superseded）
-- Fragments：事件记忆线（证据与回放）
-- Vault：敏感数据分区（默认不可检索）
-- LiteLLM Proxy：模型网关，alias 路由与治理层
+- Policy Engine：工具与副作用门禁（allow/ask/deny），支持 per-project/per-channel 策略覆盖
+- JobRunner：执行隔离层，统一接口（start/status/cancel/stream_logs/collect_artifacts），后端支持 Docker/SSH/远程
+
+**数据模型：**
+
+- Task：可追踪的工作单元（状态机：CREATED → QUEUED → RUNNING → ... → 终态）
+- Event：不可变事件记录（append-only），系统的事实来源
+- Artifact：任务产物（多 Part 结构：text/file/json/image，支持版本化与流式追加）
+- Checkpoint：Skill Pipeline 节点级快照（node_id + state），用于崩溃后确定性恢复
+- NormalizedMessage：统一消息格式，屏蔽渠道差异（Telegram/Web/导入 → 统一结构）
+- A2A-Lite：内部 Agent 间通信协议 envelope（TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT）
+
+**记忆系统：**
+
+- SoR：Source of Record，权威记忆线（同 subject_key 永远只有 1 条 current；旧版标记 superseded）
+- Fragments：事件记忆线（append-only，保存对话/工具执行/摘要，用于证据与回放）
+- Vault：敏感数据分区（默认不可检索，需要授权才能访问）
+- WriteProposal：记忆写入提案（ADD/UPDATE/DELETE/NONE），必须经仲裁器验证后才能提交
+
+**基础设施：**
+
+- LiteLLM Proxy：模型网关，alias 路由（router/extractor/planner/executor/summarizer/fallback）与治理层
+- Thread / Scope：消息关联维度；thread_id 标识对话线程，scope_id 标识归属范围（如 `chat:telegram:123`）
 
 ---
 
@@ -1587,24 +1879,47 @@ PartTypeMapping:
 system:
   timezone: "Asia/Singapore"
   base_url: "http://localhost:9000"
+
 provider:
   litellm:
     base_url: "http://localhost:4000/v1"
-    api_key: "internal-token"
+    api_key: "ENV:LITELLM_API_KEY"
+
+# 对齐 §8.9.1 的 6 个 alias 分类
 models:
-  router: "alias/router"
-  planner: "alias/planner"
-  executor: "alias/executor"
-  summarizer: "alias/summarizer"
+  router: "alias/router"           # 意图分类、风险分级（小模型）
+  extractor: "alias/extractor"     # 结构化抽取（小/中模型）
+  planner: "alias/planner"         # 多约束规划（大模型）
+  executor: "alias/executor"       # 高风险执行前确认（大模型）
+  summarizer: "alias/summarizer"   # 摘要/压缩（小模型）
+  fallback: "alias/fallback"       # 备用 provider
+
 storage:
   sqlite_path: "./data/sqlite/octoagent.db"
   artifacts_dir: "./data/artifacts"
   vault_dir: "./data/vault"
+  lancedb_path: "./data/lancedb"   # 向量数据库（Memory + ToolIndex）
+
+# 对齐 §8.6 Policy Engine
 policy:
   default:
     read_only: allow
     reversible: allow
     irreversible: ask
+  # per-project 策略覆盖示例
+  # projects:
+  #   ops:
+  #     reversible: ask            # ops 项目提升到 ask
+
+# 对齐 §15 风险阈值
+limits:
+  worker_max_iterations: 50        # Free Loop 单任务迭代上限
+  skill_max_retries: 3             # Skill Pipeline 节点重试上限
+  tool_output_max_chars: 4000      # 超过此值自动压缩为 summary + artifact
+
+observability:
+  logfire_token: "ENV:LOGFIRE_TOKEN"
+  log_format: "dev"                # dev（pretty print）| json（生产）
 ```
 
 ### B.2 telegram.yaml（示例）
