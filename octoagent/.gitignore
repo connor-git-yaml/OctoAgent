@@ -42,8 +42,10 @@ frontend/dist/
 # uv
 .python-version
 
-# pytest
+# pytest / coverage
 .pytest_cache/
+.coverage
+htmlcov/
 
 # ruff
 .ruff_cache/
