@@ -124,8 +124,8 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 - NG2：不在 v0.x 阶段支持“企业级多租户/权限体系/复杂 RBAC”
 - NG3：不在 v0.x 阶段追求“全自动无人值守做所有高风险动作”  
   - 高风险动作必须默认需要审批或强规则门禁
-- NG4：不在 v0.x 阶段把所有工作流都图化  
-  - 允许 Free Loop（自由自治）存在；但关键流程必须逐步固化为 Graph
+- NG4：不在 v0.x 阶段把所有子流程都 Pipeline 化
+  - Orchestrator 和 Workers 永远 Free Loop；Skill Pipeline（Graph）仅用于有副作用/需要 checkpoint 的子流程，按需引入
 
 ### 3.3 成功判据（Success Metrics）
 
@@ -213,13 +213,16 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 #### 5.1.3 Orchestrator + Workers（多代理/分层）
 
 - FR-A2A-1（必须）：Orchestrator（协调器）负责：
-  - 目标理解、路径选择（Free Loop vs Graph）
+  - 目标理解与分类
   - Worker 选择与派发
   - 全局停止条件与监督（看门狗策略）
   - 高风险动作 gate（审批/规则/双模校验）
+  - 永远以 Free Loop 运行，不做模式选择
 
-- FR-A2A-2（必须）：Workers（执行者）具备：
+- FR-A2A-2（必须）：Workers（自治智能体）具备：
+  - 独立 Free Loop（LLM 驱动，自主决策下一步）
   - 独立上下文（避免主会话带宽瓶颈）
+  - 可调用 Skill Pipeline（Graph）执行确定性子流程
   - 可隔离执行环境（Docker/SSH）
   - 可回传事件与产物
   - 可被中断/取消，并推进终态
@@ -251,7 +254,7 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
   - 可单元测试与回放
 
 - FR-TOOLRAG-1（可选）：Tool Index + 动态注入（Tool RAG）
-  - 使用向量数据库（ChromaDB/Qdrant）做工具 embedding 检索与注入
+  - 使用向量数据库（LanceDB）做工具 embedding 检索与注入
   - 支持按 description + 参数 + tags + examples 索引
 
 #### 5.1.5 记忆系统（Memory）
@@ -334,68 +337,111 @@ Constitution 是“不可谈判的硬规则”，用于防止系统在实现过�
 
 ### 6.1 分层架构
 
-OctoAgent 采用“**三层 + 外层 Loop**”的统一架构：
+OctoAgent 采用”**全层 Free Loop + Skill Pipeline**”的统一架构：
 
-- **外层 Orchestrator Loop（自由自治层）**  
-  负责理解目标、记忆检索与压缩、选择执行模式（Free/Graph）、选择 worker/skill、全局停止条件。
+- **Orchestrator（路由与监督层）**
+  永远以 Free Loop 运行。负责理解目标、记忆检索与压缩、Worker 选择与派发、全局停止条件与监督。
 
-- **Agent Graph（流程/控制层）**  
-  把关键流程建模为 DAG/FSM：路径收敛、状态推进、回退/重试策略、风险门禁、可回放。
+- **Workers（自治智能体层）**
+  永远以 Free Loop 运行。每个 Worker 是独立的 LLM 驱动智能体，自主决策下一步行动。
+  当需要执行有结构的子流程时，调用 Skill Pipeline（Graph）。
 
-- **Pydantic Skills（强类型执行层）**  
+- **Skill Pipeline / Graph（确定性流程编排）**
+  Worker 的工具而非独立执行模式。把关键子流程建模为 DAG/FSM：
+  节点级 checkpoint、回退/重试策略、风险门禁、可回放。
+
+- **Pydantic Skills（强类型执行层）**
   每个节点以 contract 为中心：结构化输出、工具参数校验、并行工具调用、框架化重试/审批。
 
-- **LiteLLM Proxy（模型网关/治理层）**  
+- **LiteLLM Proxy（模型网关/治理层）**
   统一模型出口：alias 路由、fallback、限流、成本统计、日志审计。
+
+> **设计原则**：Orchestrator 和 Workers 保持最大灵活性（Free Loop），确定性只在需要的地方引入（Skill Pipeline）。Graph 不是”执行模式”，而是 Worker 手中的编排工具。
 
 ### 6.2 逻辑组件图（Mermaid）
 
 ```mermaid
 flowchart TB
-  subgraph Channels["Channels (Plugins)"]
-    TG[TelegramChannel]
-    WEB[WebChannel]
-    IMP[Chat Import Adapters<br/>(WeChat/Slack/...)]
+  subgraph Channels["📡 Channels"]
+    direction LR
+    TG["🤖 Telegram"]
+    WEB["🌐 Web UI"]
+    IMP["📥 Chat Import<br/><small>WeChat / Slack / ...</small>"]
   end
 
-  subgraph Gateway["OctoGateway"]
-    IN[Ingest: NormalizedMessage]
-    OUT[Outbound: send/notify]
-    STRM[Stream: SSE/WS]
+  subgraph Gateway["🚪 OctoGateway"]
+    direction LR
+    IN["Ingest<br/><small>NormalizedMessage</small>"]
+    OUT["Outbound<br/><small>send / notify</small>"]
+    STRM["Stream<br/><small>SSE / WebSocket</small>"]
   end
 
-  subgraph Kernel["OctoKernel (Orchestrator + Control Plane)"]
-    ROUTER[Orchestrator Loop<br/>route & supervise]
-    GRAPH[Graph Engine<br/>DAG/FSM + checkpoint]
-    SKILLS[Pydantic Skills]
-    TOOLS[Tool Broker<br/>schema & execution]
-    POLICY[Policy Engine<br/>allow/ask/deny + approvals]
-    TASKS[(Task/Event Store)]
-    ART[(Artifact Store)]
-    MEM[Memory Core<br/>SoR/Fragments/Vault]
+  subgraph Kernel["🧠 OctoKernel"]
+    direction TB
+    ROUTER["Orchestrator<br/><small>Free Loop: 目标理解 → 路由 → 监督</small>"]
+    POLICY["Policy Engine<br/><small>allow / ask / deny</small>"]
+
+    subgraph Store["State & Memory"]
+      direction LR
+      TASKS[("Task / Event<br/>Store")]
+      ART[("Artifact<br/>Store")]
+      MEM[("Memory<br/><small>SoR / Fragments / Vault</small>")]
+    end
+
+    ROUTER --> POLICY
+    POLICY -.->|event append| Store
   end
 
-  subgraph Exec["Execution Plane"]
-    W1[Worker: ops]
-    W2[Worker: research]
-    W3[Worker: dev]
-    JR[JobRunner<br/>docker/ssh/remote]
+  subgraph Exec["⚙️ Worker Plane（自治智能体）"]
+    direction TB
+
+    subgraph Workers["Free Loop Agents"]
+      direction LR
+      W1["Worker<br/><small>ops</small>"]
+      W2["Worker<br/><small>research</small>"]
+      W3["Worker<br/><small>dev</small>"]
+    end
+
+    subgraph Capabilities["Worker 能力"]
+      direction LR
+      SKILLS["Pydantic Skills<br/><small>强类型 contract</small>"]
+      GRAPH["Skill Pipeline<br/><small>DAG / FSM + checkpoint</small>"]
+      TOOLS["Tool Broker<br/><small>schema 反射 + 执行</small>"]
+    end
+
+    JR["JobRunner<br/><small>docker / ssh / remote</small>"]
+
+    Workers -->|"自主决策"| Capabilities
+    Capabilities -->|job spec| JR
   end
 
-  subgraph Provider["Provider Plane"]
-    LLM[LiteLLM Proxy<br/>alias+fallback+cost]
+  subgraph Provider["☁️ Provider Plane"]
+    LLM["LiteLLM Proxy<br/><small>alias 路由 + fallback + 成本统计</small>"]
   end
 
-  Channels --> Gateway
-  Gateway --> Kernel
-  Kernel --> Exec
-  Exec --> Provider
-  Kernel --> Provider
+  Channels -->|"消息入站"| Gateway
+  Gateway -->|"NormalizedMessage"| Kernel
+  Kernel -->|"A2A-Lite 派发"| Exec
+  Exec -->|"LLM 调用"| Provider
+  Exec -.->|"事件回传"| Kernel
+  Gateway -.->|"SSE 事件推送"| Channels
 
-  TASKS --- Kernel
-  ART --- Kernel
-  MEM --- Kernel
-  STRM --> Gateway
+  %% 样式定义
+  classDef channel fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+  classDef gateway fill:#fff3e0,stroke:#e65100,color:#bf360c
+  classDef kernel fill:#f3e5f5,stroke:#6a1b9a,color:#4a148c
+  classDef worker fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+  classDef provider fill:#fce4ec,stroke:#c62828,color:#b71c1c
+  classDef store fill:#ede7f6,stroke:#4527a0,color:#311b92
+  classDef capability fill:#e0f2f1,stroke:#00695c,color:#004d40
+
+  class TG,WEB,IMP channel
+  class IN,OUT,STRM gateway
+  class ROUTER,POLICY kernel
+  class TASKS,ART,MEM store
+  class W1,W2,W3,JR worker
+  class SKILLS,GRAPH,TOOLS capability
+  class LLM provider
 ```
 
 ### 6.3 数据与控制流（关键路径）
@@ -406,8 +452,8 @@ flowchart TB
 2. Gateway 调 `POST /ingest_message` 投递到 Kernel
 3. Kernel：
    - 创建 Task（若是新请求）或产生 UPDATE 事件（若是追加信息）
-   - Orchestrator Loop 分类/路由 → 选择 Free Loop 或 Graph
-   - 派发到 Worker 或直接执行 Skill（小任务）
+   - Orchestrator Loop 分类/路由 → 选择 Worker 并派发
+   - Worker 以 Free Loop 执行，自主决定调用 Skill 或 Skill Pipeline（Graph）
 
 #### 6.3.2 任务执行 → 事件/产物 → 流式输出
 
@@ -421,9 +467,9 @@ flowchart TB
 #### 6.3.3 崩溃恢复
 
 - Kernel 重启：
-  - 扫描 Task Store：所有 RUNNING/WAITING_* 的任务进入“恢复队列”
-  - 对有 checkpoint 的 Graph：从最后 checkpoint 继续
-  - 对没有 checkpoint 的 Free Loop：进入“需要人工确认”或自动重启策略（可配置）
+  - 扫描 Task Store：所有 RUNNING/WAITING_* 的任务进入”恢复队列”
+  - Skill Pipeline（Graph）内崩溃：从最后 checkpoint 继续（确定性恢复）
+  - Worker Free Loop 内崩溃：重启 Free Loop，将之前的 Event 历史注入为上下文，由 LLM 自主判断从哪里继续（可配置为”需要人工确认”）
 
 ---
 
@@ -456,16 +502,10 @@ flowchart TB
   - 用于 Task/Event/Artifact 元信息等结构化存储
 
 - 向量数据库（语义检索默认）
-  - ChromaDB（嵌入式，MVP 首选）或 Qdrant（独立部署，扩展路径）
+  - LanceDB（嵌入式 in-process，MVP 首选）
   - 用于 ToolIndex / 记忆检索 / 知识库
   - 直接上 embedding 方案，不经过 FTS 中间态
-
-- PostgreSQL + pgvector（可选，v0.2+）
-  - 当需要更高并发/跨机扩展/统一存储时切换
-  - 迁移路径：SQLite + ChromaDB → Postgres + pgvector
-
-理由：
-- 结构化数据用 SQLite 足够；语义检索直接上向量数据库，避免 FTS 到 embedding 的迁移成本。
+  - 原生支持版本化 Lance 格式、混合检索（vector + FTS + SQL）、增量更新
 
 ### 7.4 模型网关
 
@@ -479,29 +519,39 @@ flowchart TB
 
 - Pydantic（数据模型、输入输出校验）
 - Pydantic AI（Skill 层，结构化输出 + 工具调用）
-- Graph Engine：优先实现“轻量 Graph/FSM + checkpoint”，并保留：
-  - 后续可替换为 pydantic-graph / LangGraph（若需要更强 interrupt/replay）
+- Graph Engine：pydantic-graph（Pydantic AI 内置子模块）
+  - 与 Skills 层同生态，类型体系一脉相承
+  - 内置 checkpoint persistence、HITL（iter/resume）、async nodes
+  - 仅需薄包装：事件发射（节点迁移 → Event Store）+ SQLite persistence adapter
 
 理由：
-- Contract 优先：把“约束”从 prompt 转移到 schema；
-- Graph 只用于关键流程；自由任务用 Orchestrator Loop。
+- Contract 优先：把”约束”从 prompt 转移到 schema；
+- Orchestrator 和 Workers 永远 Free Loop；Skill Pipeline（pydantic-graph）仅用于有副作用/需要 checkpoint 的子流程，由 Worker 按需调用；
+- pydantic-graph 作为 Pydantic AI 子包，零额外依赖，避免自研 checkpoint/HITL 的开发成本。
 
 ### 7.6 Channel 适配
 
-- Telegram：aiogram（建议）或 python-telegram-bot（二选一）
-- Web：自研最小 UI（React 可后做，先用简单前端）
-
-理由：
-- 先满足生产可用；UI 体验可迭代。
+- Telegram：aiogram
+  - 原生 async（与 FastAPI 共享 event loop）
+  - 内置 FSM（适配 WAITING_APPROVAL/WAITING_INPUT 审批流）
+  - webhook 模式
+- Web UI：React + Vite
+  - 从 M0 开始使用，避免迁移债务
+  - SSE 消费用原生 EventSource 对接 Gateway `/stream/task/{id}`
+  - M0 仅需 TaskList + EventStream 两个组件；后续 Approvals/Config/Artifacts 自然扩展
 
 ### 7.7 可观测
 
-- OpenTelemetry（traces）
-- Prometheus（metrics）
-- 结构化日志（JSON logging）
-
-理由：
-- 事件流是主干，但基础的 metrics/traces 对排障极关键。
+- Logfire（Pydantic 团队出品，OTel 原生）
+  - 自动 instrument Pydantic AI / pydantic-graph / FastAPI，零手动打点
+  - 内置 LLM 可观测：token 计数、cost 追踪、流式调用追踪、tool inspection
+  - 底层是 OpenTelemetry 协议，满足 OTel 兼容要求
+- structlog（结构化日志）
+  - canonical log lines + 自动绑定 trace_id / task_id
+  - dev 环境 pretty print，prod 环境 JSON 输出
+- SQLite Event Store（metrics 数据源）
+  - 项目已有 append-only events 记录 MODEL_CALL / TOOL_CALL / STATE_TRANSITION
+  - cost / tokens / latency 直接 SQL 聚合查询，无需独立 metrics 服务
 
 ### 7.8 任务调度
 
@@ -549,7 +599,6 @@ Task:
   thread_id: "..."
   scope_id: "..."
   requester: { channel, sender_id }
-  mode: FREE|GRAPH
   assigned_worker: "worker_id"
   risk_level: low|medium|high
   budget:
@@ -633,40 +682,54 @@ Part 类型说明（对齐 A2A Part 规范）：
 
 ---
 
-### 8.3 执行模式：Free Loop vs Graph
+### 8.3 编排模型：全层 Free Loop + Skill Pipeline
 
-#### 8.3.1 为什么需要双模式
+#### 8.3.1 设计原则
 
-- Free Loop：适合探索/写作/试错；成本低、自由度高
-- Graph：适合关键流程/有副作用/需要 SLA/需要可审计回放
+Orchestrator 和 Workers **永远以 Free Loop 运行**，保证最大灵活性和自主决策能力。
+确定性编排（Graph）**下沉为 Worker 的工具**——Skill Pipeline，仅在需要时由 Worker 主动调用。
 
-#### 8.3.2 模式选择策略（建议默认规则）
+- **Free Loop**（Orchestrator / Workers）：LLM 驱动的推理循环，自主决策下一步行动
+- **Skill Pipeline**（Worker 的子流程）：确定性 DAG/FSM，用于有副作用/需要 checkpoint/需要审计的子任务
 
-满足任一条件 → Graph：
+> Graph 不是”执行模式的一种选择”，而是 Worker 手中的编排工具——类似于 Worker 可以调用单个 Skill，也可以调用一条 Skill Pipeline。
+
+#### 8.3.2 Worker 何时调用 Skill Pipeline（建议默认规则）
+
+Worker 在 Free Loop 中自主决策。满足任一条件时，倾向于使用 Skill Pipeline：
 - 有不可逆副作用（发消息/改配置/支付/删除）
-- 对接“正式系统”（calendar/email/生产配置）
+- 对接”正式系统”（calendar/email/生产配置）
 - 需要可审计/可回放（对外承诺、重要决策）
 - 需要强 SLA（定时任务、稳定交付）
+- 多步骤流程需要节点级 checkpoint（崩溃后可从中间恢复）
 
-否则 → Free Loop。
+其余情况，Worker 在 Free Loop 中直接调用单个 Skill 或 Tool 即可。
 
-#### 8.3.3 Graph 类型
+#### 8.3.3 Skill Pipeline 类型
 
 - DAG：一次性流水线（抽取→规划→执行→总结）
 - FSM：多轮交互、审批、等待外部事件（审批通过→执行，否则回退）
 
-#### 8.3.4 Graph Engine MVP 要求
+#### 8.3.4 Skill Pipeline Engine MVP 要求（基于 pydantic-graph）
 
-- 节点 contract 校验（输入/输出）
-- checkpoint（每个节点结束写 checkpoint）
+- 节点 contract 校验（输入/输出）— pydantic-graph 原生类型安全
+- checkpoint（每个节点结束写 checkpoint）— pydantic-graph 内置 persistence，需适配 SQLite
 - retry 策略：
   - 同模型重试
   - 升级模型（cheap → main）
   - 切换 provider（由 LiteLLM 处理）
-- interrupt：
+- interrupt（HITL）— pydantic-graph 内置 iter/resume：
   - WAITING_APPROVAL
   - WAITING_INPUT
-- 事件化：节点运行与迁移必须发事件
+- 事件化：节点运行与迁移必须发事件 — 需薄包装 EventEmitter
+
+#### 8.3.5 崩溃恢复策略
+
+| 崩溃位置                   | 恢复方式                                                       |
+| -------------------------- | -------------------------------------------------------------- |
+| Skill Pipeline 节点内      | 从最后 checkpoint 确定性恢复                                   |
+| Worker Free Loop 内        | 重启 Loop，将 Event 历史注入为上下文，LLM 自主判断续接点       |
+| Orchestrator Free Loop 内  | 重启 Loop，扫描未完成 Task，重新派发或等待人工确认             |
 
 ---
 
@@ -734,7 +797,7 @@ ToolMeta:
 
 #### 8.5.3 Tool Index（MVP）
 
-- 向量数据库（ChromaDB）：embedding 索引 tool 描述 + 参数 + tags + examples
+- 向量数据库（LanceDB）：embedding 索引 tool 描述 + 参数 + tags + examples
 - Orchestrator 在运行时检索：
   - 语义相似度匹配候选工具集合（Top-K）
   - 再由 Policy Engine 过滤
@@ -849,12 +912,17 @@ WriteProposal:
 
 #### 8.8.1 Worker 责任边界
 
+**Worker 是自治智能体**，以 Free Loop（LLM 驱动循环）运行，自主决策下一步行动。
+
 Worker 不负责：
 - 多渠道 I/O（由 Gateway 负责）
 - 全局策略决策（由 Kernel Policy 负责）
+- 全局路由与监督（由 Orchestrator 负责）
 
 Worker 负责：
-- 执行具体任务（skills/tools/jobs）
+
+- 以 Free Loop 自主执行任务
+- 决策何时调用单个 Skill、Skill Pipeline（Graph）、或 Tool
 - 维护 project workspace
 - 产出 artifact
 - 回传事件与心跳
@@ -982,24 +1050,26 @@ octoagent/
 ### 9.4 apps/kernel
 
 职责：
-- Orchestrator Loop（模式选择、路由、监督）
-- Graph Engine（DAG/FSM + checkpoint）
-- Skill Runner（Pydantic AI）
-- Tool Broker（schema、动态注入、执行编排）
+
+- Orchestrator Loop（目标理解、路由、监督；永远 Free Loop）
 - Policy Engine（allow/ask/deny + approvals）
 - Memory Core（检索、写入提案、仲裁、commit）
 
 关键内部组件：
-- `Router`：决定 worker/mode
+
+- `Router`：决定 worker 派发
 - `Supervisor`：watchdog + stop condition
 - `ApprovalService`：审批状态机
 - `MemoryService`：read/write arbitration
 
 ### 9.5 workers/*
 
-每个 worker：
+每个 worker 是自治智能体（Free Loop），具备：
+
 - 独立运行（进程/容器均可）
 - 拥有自己的工作目录（project workspace）
+- Skill Runner（Pydantic AI）+ Skill Pipeline（pydantic-graph）
+- Tool Broker（schema、动态注入、执行编排）
 - 暴露内部 RPC（HTTP/gRPC 均可；MVP 用 HTTP）
 
 worker 的最小端点：
@@ -1062,10 +1132,10 @@ config_schema:
 ### 9.10 packages/observability
 
 职责：
-- otel tracer init
-- structured logger
-- metrics registry
+- Logfire init（自动 instrument Pydantic AI / FastAPI）
+- structlog 配置（dev pretty / prod JSON）
 - 统一 trace_id 贯穿 event payload
+- Event Store metrics 查询辅助（cost/tokens 聚合）
 
 ---
 
@@ -1193,7 +1263,7 @@ PartTypeMapping:
 **冲突：** SQLite 并发能力有限。  
 **收敛：**
 - 单用户场景使用 WAL + 单写多读即可；  
-- 明确升级路径：当出现“多进程写入冲突/跨机 worker”需求时，迁移到 Postgres。
+- 单用户场景 SQLite WAL 足够，暂不引入额外数据库。
 
 ### 11.3 Free Loop 自由度 vs 安全门禁
 
@@ -1313,7 +1383,7 @@ PartTypeMapping:
 - [ ] 微信导入插件
 - [ ] Vault 分区与授权检索
 - [ ] ToolIndex（向量检索）+ 动态工具注入
-- [ ] Graph Engine（关键流程固化、可回放）
+- [ ] Skill Pipeline Engine（关键子流程固化、可回放）
 
 ---
 
@@ -1362,8 +1432,8 @@ PartTypeMapping:
 
 ## 附录 A：术语表（Glossary）
 
-- Orchestrator Loop：自由自治层，负责路由与监督
-- Graph Engine：关键流程控制层（DAG/FSM）
+- Orchestrator Loop：Free Loop 驱动的路由与监督层（目标理解、Worker 派发、全局停止条件）
+- Skill Pipeline（Graph Engine）：Worker 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
 - Skill：强类型执行单元（Input/Output contract）
 - Tool：可被 LLM 调用的函数/能力（schema 反射 + 风险标注）
 - Policy Engine：工具与副作用门禁（allow/ask/deny）

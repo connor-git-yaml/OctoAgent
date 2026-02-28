@@ -142,9 +142,8 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 
 - **MUST**：结构化数据（Task/Event/Artifact 元信息）使用 SQLite（WAL 模式）
 - **MUST**：事件表 append-only
-- **MUST**：语义检索（记忆/工具索引/知识库）直接使用向量数据库（如 ChromaDB / Qdrant）
+- **MUST**：语义检索（记忆/工具索引/知识库）直接使用向量数据库（LanceDB）
 - **MUST NOT**：不经过 SQLite FTS 中间态，直接上 embedding 方案
-- **SHOULD**：预留 PostgreSQL + pgvector 升级路径
 
 ### 模型网关
 
@@ -155,13 +154,13 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 
 - **MUST**：数据模型使用 Pydantic
 - **MUST**：Skill 层使用 Pydantic AI（结构化输出 + 工具调用）
-- **SHOULD**：Graph Engine 保留可替换能力（pydantic-graph / LangGraph）
+- **MUST**：Graph Engine 使用 pydantic-graph（Pydantic AI 内置）
 
 ### 可观测
 
-- **MUST**：使用 OpenTelemetry（traces）
-- **MUST**：使用结构化日志（JSON logging）
-- **SHOULD**：使用 Prometheus（metrics）
+- **MUST**：使用 Logfire（OTel 原生，自动 instrument Pydantic AI / FastAPI）
+- **MUST**：使用 structlog（结构化日志，绑定 trace_id / task_id）
+- **MUST**：metrics 数据从 Event Store（SQLite）聚合查询，不引入独立 metrics 服务
 
 ---
 
@@ -194,7 +193,7 @@ OctoAgent 是一个个人智能操作系统（Personal AI OS），而非聊天�
 > 明确记录的战略性取舍，避免实现过程中反复讨论。
 
 1. **不追求通用多智能体平台**：先把"单体 OS"打牢，不在早期追求可扩展的多代理生态
-2. **不引入重量级编排器**：先用 SQLite Event Store + Checkpoint + Watchdog 达到 80/20，预留 Temporal 升级路径
+2. **不引入重量级编排器**：使用 pydantic-graph（嵌入式）+ SQLite Event Store + Watchdog，不引入 Temporal 等需要独立服务的编排器
 3. **不绑死任何外部依赖**：所有外部依赖（Provider、Channel、Memory 实现）都必须可替换、可降级
 4. **Free Loop 与 Graph 双模式共存**：自由任务用 Free Loop，关键流程用 Graph；安全边界始终在 Policy Engine
 5. **本地优先**：Mac + 局域网设备为主，允许部分组件云端化但不以此为第一目标
