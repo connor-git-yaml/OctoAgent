@@ -1,0 +1,42 @@
+[project]
+name = "octoagent"
+version = "0.1.0"
+description = "OctoAgent - Personal AI OS (M0 Foundation)"
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff",
+    "aiosqlite>=0.21",
+    "octoagent-core",
+    "octoagent-gateway",
+]
+
+[tool.uv.sources]
+octoagent-core = { workspace = true }
+octoagent-gateway = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "packages/core",
+    "apps/gateway",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["B008", "B017"]  # B008: FastAPI Depends() 标准模式; B017: 测试中 pytest.raises(Exception)
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages/core/tests", "apps/gateway/tests", "tests"]
+consider_namespace_packages = true
