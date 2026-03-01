@@ -24,6 +24,9 @@ from .payloads import (
     ModelCallStartedPayload,
     StateTransitionPayload,
     TaskCreatedPayload,
+    ToolCallCompletedPayload,
+    ToolCallFailedPayload,
+    ToolCallStartedPayload,
     UserMessagePayload,
 )
 from .task import RequesterInfo, Task, TaskPointers
@@ -61,4 +64,8 @@ __all__ = [
     "StateTransitionPayload",
     "ArtifactCreatedPayload",
     "ErrorPayload",
+    # Feature 004: 工具调用 Payloads
+    "ToolCallStartedPayload",
+    "ToolCallCompletedPayload",
+    "ToolCallFailedPayload",
 ]

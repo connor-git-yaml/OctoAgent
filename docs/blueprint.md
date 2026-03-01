@@ -804,7 +804,7 @@ ToolMeta:
     - capability: "device.ssh"
     - permission: "proj:ops:write"
   outputs:
-    max_inline_chars: 4000
+    max_inline_chars: 500
     store_full_as_artifact: true
 ```
 
@@ -818,7 +818,7 @@ ToolMeta:
 
 #### 8.5.4 Tool Profile 分级（M1）
 
-> 参考实现：OpenClaw `tool-catalog.ts` 的 minimal/coding/messaging/full 四级 profile。
+> 参考实现：OpenClaw `tool-catalog.ts` 的四级 profile。OctoAgent 采用 minimal/standard/privileged 三级命名（`privileged` 语义比 `full` 更精确，对齐 Constitution C5 Least Privilege）。
 
 Tool Profile 控制不同场景下可用的工具集，作为 Policy Engine 的**第一道过滤层**：
 
@@ -826,24 +826,69 @@ Tool Profile 控制不同场景下可用的工具集，作为 Policy Engine 的*
 |---------|-------------|---------|
 | `minimal` | 只读工具（echo, datetime, status 查询） | 低风险任务、初始对话 |
 | `standard` | 读写工具（file_read, file_write, 数据库查询） | 常规任务 |
-| `full` | 全部工具（含 exec, docker, 外部 API） | 高权限任务（需显式授权） |
+| `privileged` | 全部工具（含 exec, docker, 外部 API） | 高权限任务（需显式授权） |
 
 - Skill Manifest 通过 `tool_profile` 字段声明所需 Profile（§8.4.1）
 - Orchestrator 可根据任务风险等级动态选择 Profile
 - Profile 过滤在 Policy Engine Pipeline 的 Layer 1 执行（§8.6.4）
-- M1 实现 `minimal` + `standard` 两级；`full` 在 M1.5 引入 Docker 执行后激活
+- M1 实现 `minimal` + `standard` 两级；`privileged` 在 M1.5 引入 Docker 执行后激活
 
 #### 8.5.5 工具输出压缩（Context GC）
 
 规则（建议默认）：
 
-- 工具输出 > `max_inline_chars`（默认 4000）字符：
+- 工具输出 > `max_inline_chars`（默认 500）字符：
   - 全量输出存 artifact
   - **M1 Phase 1**（Feature 004）：裁切后保留 artifact 路径引用在上下文中（参考 AgentZero `_90_save_tool_call_file.py`，零 LLM 依赖）
   - **M1 Phase 2**（Feature 005 就绪后）：可选启用 summarizer（通过 cheap alias 生成摘要回灌上下文）
 - 工具输出含敏感信息：
   - 自动 redaction（屏蔽）
   - 存入 Vault 分区（需要授权检索）
+
+#### 8.5.6 后续演进方向（Feature 004 对标洞见）
+
+> Feature 004 交付后，与 Agent Zero、OpenClaw 工具系统对标分析的关键发现。以下能力按优先级排列，标注目标 Feature。
+
+##### 交互式工具执行（M2, Feature 009）
+
+Agent Zero 支持 Shell Session 保持 + 增量输出 + 提示符检测（`LocalInteractiveSession` / `SSHInteractiveSession`），工具可以多轮交互。当前 ToolBroker 为"一进一出"模型（`execute() → ToolResult`），不支持多轮。
+
+- 演进方向：ToolResult 增加 `continuation_token` 字段 + Broker 支持 `resume(token, input)` 方法
+- 参考：Agent Zero `python/helpers/docker.py`、`code_execution_tool.py`
+
+##### 工具循环检测（M1.5, Feature 004-b 增强）
+
+OpenClaw 通过 bucket strategy 检测工具被反复调用的异常模式（LLM 陷入死循环）。当前 ToolBroker 无此防护。
+
+- 演进方向：作为 BeforeHook 实现 `ToolLoopGuard`，per-task 维度计数，超阈值生成 WARNING 事件
+- 参考：OpenClaw `src/agents/pi-tools.before-tool-call.ts`
+
+##### 细粒度超时分级（M1.5, Feature 004-b 增强）
+
+Agent Zero 对代码执行工具使用 4 层超时：`first_output`（30s）/ `between_output`（15s）/ `max_exec`（180s）/ `dialog_timeout`（60s）。当前 ToolMeta 仅有单一 `timeout_seconds`。
+
+- 演进方向：ToolMeta 增加 `timeout_config: TimeoutConfig` 嵌套对象，按阶段拆分超时
+- 适用场景：Docker 执行、SSH 远程命令等长时工具
+
+##### MCP 工具集成（M1, Feature 007）
+
+Agent Zero 已原生支持 MCP 协议（stdio + SSE），可发现和调用外部 MCP Server 暴露的工具。
+
+- 演进方向：MCP tools 默认注册为 `standard` Profile（可通过配置覆盖为 `privileged`），区分 Tool vs Resource
+- 参考：Agent Zero `python/tools/mcp_tool.py`
+
+##### 插件加载隔离 + 诊断（M1.5）
+
+OpenClaw 单个插件加载失败不影响其他插件和核心工具，失败信息记录到 `registry.diagnostics[]`。当前 Broker 注册失败会抛异常。
+
+- 演进方向：`ToolBroker.register()` 增加 `try_register()` 变体，失败工具进 `_diagnostics` 列表
+- 参考：OpenClaw `src/plugins/loader.ts`
+
+##### 敏感参数标记（M2, UI 集成）
+
+OpenClaw 的 `ChannelConfigUiHint` 支持 `sensitive: true` 标记，UI 自动隐藏输入。
+
+- 演进方向：ToolMeta 增加 `sensitive_params: list[str]` 字段，Web UI 渲染时自动遮蔽
 
 ---
 
@@ -2375,21 +2420,21 @@ M0 实现要点与 Blueprint 偏差记录：
 
 - [x] 接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射 — Feature 002 已交付
 - [x] 语义 alias → 运行时 group 映射 + FallbackManager + 成本双通道记录 — Feature 002 已交付
-- [ ] Auth Adapter + DX 工具（§8.9.4 + §12.9）— Feature 003：完整 Auth 基础设施 + 三种认证模式 + DX 工具
+- [x] Auth Adapter + DX 工具（§8.9.4 + §12.9）— Feature 003 已交付（253 tests）
   - 凭证数据模型（ApiKey/Token/OAuth 三种类型定义）+ AuthAdapter 接口
-  - ApiKeyAdapter（支持 OpenAI、OpenRouter、Anthropic 等标准 API Key Provider）
-  - AnthropicSetupTokenAdapter（`sk-ant-oat01-` 验证 + 24h TTL 过期检测）
-  - CodexOAuthAdapter（Device Flow 授权 → 轮询 → token 交换 → 持久化）
-  - Credential Store（`~/.octoagent/auth-profiles.json` + 文件锁）+ Handler Chain
-  - `octo init` 引导式认证配置（§12.9.1）
-  - `octo doctor` 凭证诊断（§12.9.2）+ dotenv 自动加载（§12.9.3）
-  - 凭证生命周期事件（CREDENTIAL_LOADED / CREDENTIAL_EXPIRED，C2 合规）
-- [ ] 实现 Pydantic Skill Runner（结构化输出）
-- [ ] 工具 schema 反射 + ToolBroker 执行
-- [ ] Policy Engine（allow/ask/deny）+ Approvals UI
-- [ ] 工具输出压缩（summarizer）
+  - ApiKeyAdapter + SetupTokenAdapter + CodexOAuthAdapter（Device Flow）
+  - Credential Store + Handler Chain + `octo init` / `octo doctor` + dotenv 自动加载
+- [x] OAuth Authorization Code + PKCE + Per-Provider Auth — Feature 003-b 已交付（404 tests）
+  - PKCE 生成器 + 本地回调服务器 + Per-Provider OAuth 注册表
+  - 多认证路由隔离（HandlerChainResult 路由覆盖）+ Codex Reasoning 配置
+  - 环境检测 + 手动粘贴降级 + Token 自动刷新
+- [ ] 工具 schema 反射 + ToolBroker 执行 — Feature 004（Track A，与 005/006 并行）
+- [ ] 实现 Pydantic Skill Runner（结构化输出）— Feature 005（Track B，与 004/006 并行）
+- [ ] Policy Engine（allow/ask/deny）+ Approvals UI — Feature 006（Track C，与 004/005 并行）
+- [ ] 端到端集成 + M1 验收 — Feature 007（004+005+006 完成后串行）
+- [ ] 工具输出压缩（summarizer）— 含在 Feature 004（路径引用）+ 007（可选激活）
 
-交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性；三种认证模式全部就绪（API Key + Setup Token + Codex OAuth）。
+交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性；三种认证模式全部就绪（API Key + Setup Token + OAuth PKCE）。
 
 验收标准：
 
@@ -2399,6 +2444,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - 每次模型调用生成 cost/tokens 事件
 - 语义 alias 路由正确（router/extractor/summarizer -> cheap；planner/executor -> main；fallback -> fallback）
 - Auth：OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
+- Auth：OAuth PKCE 全流程（本地回调 + 手动降级 + Token 自动刷新）
 - Auth：`octo init` 引导新用户完成认证配置，`octo doctor` 诊断凭证状态
 - Auth：凭证不出现在日志/事件/LLM 上下文中（C5 合规）
 

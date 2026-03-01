@@ -14,7 +14,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 
 - **Orchestrator**：路由与监督层，永远 Free Loop（目标理解、Worker 派发、全局监督）
 - **Workers**：自治智能体层，永远 Free Loop（自主决策，按需调用 Skill Pipeline）
-- **Skill Pipeline / Graph**：Worker 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
+- **Skill Pipeline / Graph**：Subagent 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
 - **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
 

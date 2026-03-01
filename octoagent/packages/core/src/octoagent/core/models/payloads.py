@@ -100,3 +100,54 @@ class ErrorPayload(BaseModel):
     error_message: str
     recoverable: bool = Field(default=False)
     recovery_hint: str = Field(default="")
+
+
+# Feature 004: 工具调用 Payload 类型 -- 对齐 FR-014
+
+
+class ToolCallStartedPayload(BaseModel):
+    """TOOL_CALL_STARTED 事件 payload -- 对齐 spec FR-014"""
+
+    tool_name: str = Field(description="工具名称")
+    tool_group: str = Field(description="工具分组")
+    side_effect_level: str = Field(description="副作用等级")
+    args_summary: str = Field(description="参数摘要（脱敏后）")
+    timeout_seconds: float | None = Field(
+        default=None,
+        description="声明式超时",
+    )
+
+
+class ToolCallCompletedPayload(BaseModel):
+    """TOOL_CALL_COMPLETED 事件 payload -- 对齐 spec FR-014"""
+
+    tool_name: str = Field(description="工具名称")
+    duration_ms: int = Field(description="执行耗时（毫秒）")
+    output_summary: str = Field(description="输出摘要（脱敏后）")
+    truncated: bool = Field(
+        default=False,
+        description="输出是否被裁切",
+    )
+    artifact_ref: str | None = Field(
+        default=None,
+        description="完整输出的 Artifact 引用",
+    )
+
+
+class ToolCallFailedPayload(BaseModel):
+    """TOOL_CALL_FAILED 事件 payload -- 对齐 spec FR-014"""
+
+    tool_name: str = Field(description="工具名称")
+    duration_ms: int = Field(description="执行耗时（毫秒）")
+    error_type: str = Field(
+        description="错误分类（timeout / exception / rejection / hook_failure）"
+    )
+    error_message: str = Field(description="错误信息（脱敏后）")
+    recoverable: bool = Field(
+        default=False,
+        description="是否可恢复",
+    )
+    recovery_hint: str = Field(
+        default="",
+        description="恢复建议",
+    )
