@@ -91,4 +91,5 @@ class TestHealthCheck:
             assert resp.status_code == 503
             data = resp.json()
             assert data["status"] == "not_ready"
-            assert "error" in data["checks"]["sqlite"]
+            assert data["checks"]["sqlite"] == "unavailable"
+            assert "closed" not in str(data["checks"]["sqlite"]).lower()
