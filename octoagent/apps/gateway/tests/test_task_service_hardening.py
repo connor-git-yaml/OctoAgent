@@ -2,9 +2,12 @@
 
 覆盖修复项：
 1. 幂等键并发冲突时返回已存在 task，不抛 500
-2. task_seq 冲突时自动重试
-3. MODEL_CALL_FAILED 事件不暴露底层异常细节
-4. 失败事件落盘再次失败时，任务不会卡在 RUNNING
+2. 初始 task+events 创建原子提交，失败时回滚
+3. task_seq 冲突时自动重试
+4. 模型后台处理遇到状态冲突时安全跳过，不覆写终态
+5. MODEL_CALL_FAILED 事件不暴露底层异常细节
+6. 失败事件落盘再次失败时，任务不会卡在 RUNNING
+7. 终态后 task lock 自动清理
 """
 
 import os
@@ -12,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
+import pytest
 import pytest_asyncio
 from octoagent.core.models import ActorType, Event, EventType, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
@@ -78,6 +82,35 @@ class TestTaskServiceHardening:
         tasks = await store_group.task_store.list_tasks()
         assert len(tasks) == 1
 
+    async def test_create_task_initial_events_atomic_rollback(
+        self, service_with_store, monkeypatch
+    ):
+        service, store_group = service_with_store
+        real_append = store_group.event_store.append_event
+        call_count = 0
+
+        async def fail_on_second_event(event):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("inject append failure")
+            return await real_append(event)
+
+        monkeypatch.setattr(store_group.event_store, "append_event", fail_on_second_event)
+
+        with pytest.raises(RuntimeError):
+            await service.create_task(
+                NormalizedMessage(
+                    text="atomic-rollback",
+                    idempotency_key="atomic-rollback-001",
+                )
+            )
+
+        tasks = await store_group.task_store.list_tasks()
+        assert tasks == []
+        events = await store_group.event_store.get_all_events()
+        assert events == []
+
     async def test_append_event_retries_on_task_seq_conflict(
         self, service_with_store, monkeypatch
     ):
@@ -122,6 +155,39 @@ class TestTaskServiceHardening:
         events = await store_group.event_store.get_events_for_task(task_id)
         assert any(e.event_id == "01JRETRY000000000000000001" for e in events)
 
+    async def test_process_task_skips_on_state_conflict(self, service_with_store):
+        service, store_group = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="state-conflict",
+                idempotency_key="state-conflict-001",
+            )
+        )
+        await service.cancel_task(task_id)
+
+        class NeverCalledLLM:
+            called = False
+
+            async def call(self, *args, **kwargs):  # pragma: no cover - 不应被调用
+                self.called = True
+                raise AssertionError("llm should not be called")
+
+        llm = NeverCalledLLM()
+        await service.process_task_with_llm(
+            task_id=task_id,
+            user_text="should-skip",
+            llm_service=llm,
+        )
+
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.CANCELLED
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        event_types = {e.type for e in events}
+        assert EventType.MODEL_CALL_STARTED not in event_types
+        assert llm.called is False
+
     async def test_llm_failure_event_hides_internal_error_detail(
         self, service_with_store
     ):
@@ -157,6 +223,17 @@ class TestTaskServiceHardening:
         task = await store_group.task_store.get_task(task_id)
         assert task is not None
         assert task.status == TaskStatus.FAILED
+
+    async def test_terminal_transition_cleans_up_task_lock(self, service_with_store):
+        service, _ = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="cleanup-lock",
+                idempotency_key="cleanup-lock-001",
+            )
+        )
+        await service.cancel_task(task_id)
+        assert task_id not in TaskService._task_locks
 
     async def test_force_failed_when_failure_event_write_fails(
         self, service_with_store, monkeypatch

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from octoagent.provider.client import LiteLLMClient
-from octoagent.provider.exceptions import ProxyUnreachableError
+from octoagent.provider.exceptions import ProviderError, ProxyUnreachableError
 from octoagent.provider.models import ModelCallResult
 
 
@@ -138,6 +138,27 @@ class TestLiteLLMClientComplete:
         assert result.token_usage.prompt_tokens == 50
         assert result.token_usage.completion_tokens == 100
         assert result.token_usage.total_tokens == 150
+
+    @patch("octoagent.provider.client.log.error")
+    @patch("octoagent.provider.client.acompletion")
+    async def test_error_log_redacts_sensitive_tokens(
+        self, mock_acompletion, mock_log_error, client
+    ):
+        """异常日志应脱敏，避免 api_key/token 泄露"""
+        mock_acompletion.side_effect = RuntimeError(
+            "upstream failed api_key=sk-secret token=tok-abc"
+        )
+
+        with pytest.raises(ProviderError):
+            await client.complete(
+                messages=[{"role": "user", "content": "test"}],
+            )
+
+        assert mock_log_error.call_count == 1
+        _, kwargs = mock_log_error.call_args
+        assert "sk-secret" not in kwargs["error"]
+        assert "tok-abc" not in kwargs["error"]
+        assert "[REDACTED]" in kwargs["error"]
 
 
 class TestLiteLLMClientHealthCheck:
