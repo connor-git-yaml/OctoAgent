@@ -1,7 +1,8 @@
-"""FastAPI 应用主文件 -- Feature 002 版本
+"""FastAPI 应用主文件 -- Feature 002 + 003 版本
 
-对齐 contracts/gateway-changes.md SS2。
+对齐 contracts/gateway-changes.md SS2 + dx-cli-api.md FR-009。
 app 创建 + lifespan 管理：DB 初始化/关闭 + LLM 组件初始化 + 路由注册。
+启动时自动加载 .env（override=False）。
 """
 
 from collections.abc import AsyncGenerator
@@ -9,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
+from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from octoagent.core.config import get_artifacts_dir, get_db_path
@@ -99,6 +101,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
+    # Feature 003: 自动加载 .env（override=False，不覆盖已有环境变量）
+    load_project_dotenv(override=False)
+
     app = FastAPI(
         title="OctoAgent Gateway",
         version="0.1.0",
