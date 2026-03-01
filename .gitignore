@@ -46,6 +46,10 @@ data/artifacts/
 data/vault/
 *.log
 
+# ===== Spec Driver 本地上下文（不提交）=====
+.specify/project-context.yaml
+.specify/project-context.md
+
 # ===== 密钥与敏感配置 =====
 .env
 .env.*
