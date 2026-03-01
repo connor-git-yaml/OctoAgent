@@ -98,8 +98,11 @@ class LiteLLMClient:
 
         try:
             # 构建调用参数
+            # model 加 "openai/" 前缀：告诉本地 LiteLLM SDK 将请求视为
+            # OpenAI 兼容端点直接转发到 Proxy，由 Proxy 负责路由到真实模型。
+            proxy_model = f"openai/{model_alias}"
             call_kwargs = {
-                "model": model_alias,
+                "model": proxy_model,
                 "messages": messages,
                 "api_base": self._proxy_base_url,
                 "api_key": self._proxy_api_key or "no-key",
