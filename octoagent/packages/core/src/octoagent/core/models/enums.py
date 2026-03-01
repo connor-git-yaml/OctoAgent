@@ -61,6 +61,11 @@ class EventType(StrEnum):
     ARTIFACT_CREATED = "ARTIFACT_CREATED"
     ERROR = "ERROR"
 
+    # Feature 003: 凭证生命周期事件 -- 对齐 FR-012
+    CREDENTIAL_LOADED = "CREDENTIAL_LOADED"
+    CREDENTIAL_EXPIRED = "CREDENTIAL_EXPIRED"
+    CREDENTIAL_FAILED = "CREDENTIAL_FAILED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

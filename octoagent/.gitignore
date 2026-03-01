@@ -52,3 +52,10 @@ htmlcov/
 
 # Logfire
 .logfire/
+
+# Feature 003: 凭证存储（敏感数据不入版本管理）
+auth-profiles.json
+auth-profiles.json.lock
+auth-profiles.json.corrupted
+.octoagent/
+litellm-config.yaml

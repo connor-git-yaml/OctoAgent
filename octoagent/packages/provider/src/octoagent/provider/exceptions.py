@@ -45,3 +45,30 @@ class CostCalculationError(ProviderError):
 
     def __init__(self, message: str = "成本计算失败") -> None:
         super().__init__(message, recoverable=True)
+
+
+# --- Feature 003: 凭证异常体系 -- 对齐 data-model.md SS8 ---
+
+
+class CredentialError(ProviderError):
+    """凭证相关错误基类"""
+
+    def __init__(self, message: str, provider: str = "") -> None:
+        super().__init__(message, recoverable=True)
+        self.provider = provider
+
+
+class CredentialNotFoundError(CredentialError):
+    """凭证未找到"""
+
+
+class CredentialExpiredError(CredentialError):
+    """凭证已过期"""
+
+
+class CredentialValidationError(CredentialError):
+    """凭证格式校验失败"""
+
+
+class OAuthFlowError(CredentialError):
+    """OAuth 流程错误（授权超时、端点不可达等）"""
