@@ -20,7 +20,12 @@ log = structlog.get_logger()
 
 
 class DeviceFlowConfig(BaseModel):
-    """Device Flow 配置"""
+    """Device Flow 配置
+
+    .. deprecated:: 003-b
+        使用 OAuthProviderConfig 替代。
+        现有 Device Flow 逻辑通过 OAuthProviderConfig.to_device_flow_config() 获取兼容配置。
+    """
 
     authorization_endpoint: str = Field(
         default="https://auth0.openai.com/oauth/device/code",

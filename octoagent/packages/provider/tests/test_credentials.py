@@ -127,3 +127,68 @@ class TestDiscriminatedUnion:
         adapter = TypeAdapter(Credential)
         with pytest.raises(Exception):
             adapter.validate_python({"type": "unknown", "provider": "x"})
+
+
+class TestOAuthCredentialAccountId:
+    """OAuthCredential account_id 向后兼容测试 -- T028
+
+    验证: 无 account_id 的旧数据反序列化 -> account_id=None；
+    有 account_id 的数据正确读取。对齐 FR-010。
+    """
+
+    def test_old_data_without_account_id(self) -> None:
+        """旧数据不含 account_id 字段，反序列化后 account_id=None"""
+        now = datetime.now(tz=timezone.utc)
+        data = {
+            "type": "oauth",
+            "provider": "openai-codex",
+            "access_token": "at-old-format",
+            "expires_at": now.isoformat(),
+        }
+        adapter = TypeAdapter(Credential)
+        cred = adapter.validate_python(data)
+        assert isinstance(cred, OAuthCredential)
+        assert cred.account_id is None
+
+    def test_data_with_account_id(self) -> None:
+        """含 account_id 的数据正确读取"""
+        now = datetime.now(tz=timezone.utc)
+        data = {
+            "type": "oauth",
+            "provider": "openai-codex",
+            "access_token": "at-new-format",
+            "expires_at": now.isoformat(),
+            "account_id": "user-12345",
+        }
+        adapter = TypeAdapter(Credential)
+        cred = adapter.validate_python(data)
+        assert isinstance(cred, OAuthCredential)
+        assert cred.account_id == "user-12345"
+
+    def test_account_id_none_explicit(self) -> None:
+        """显式传入 account_id=None 正常工作"""
+        now = datetime.now(tz=timezone.utc)
+        cred = OAuthCredential(
+            provider="openai-codex",
+            access_token=SecretStr("at-explicit-none"),
+            expires_at=now,
+            account_id=None,
+        )
+        assert cred.account_id is None
+
+    def test_account_id_roundtrip_json(self) -> None:
+        """account_id 经 JSON 序列化/反序列化后保持一致"""
+        now = datetime.now(tz=timezone.utc)
+        cred = OAuthCredential(
+            provider="openai-codex",
+            access_token=SecretStr("at-roundtrip"),
+            expires_at=now,
+            account_id="acct-roundtrip",
+        )
+        # model_dump(mode='python') 保留原始类型
+        dumped = cred.model_dump(mode="python")
+        assert dumped["account_id"] == "acct-roundtrip"
+
+        # 从 dict 重建
+        restored = OAuthCredential.model_validate(dumped)
+        assert restored.account_id == "acct-roundtrip"

@@ -34,7 +34,13 @@ from ..auth.credentials import (
     OAuthCredential,
     TokenCredential,
 )
+from ..auth.environment import detect_environment
 from ..auth.oauth import DeviceFlowConfig, poll_for_token, start_device_flow
+from ..auth.oauth_flows import run_auth_code_pkce_flow
+from ..auth.oauth_provider import (
+    DISPLAY_TO_CANONICAL,
+    OAuthProviderRegistry,
+)
 from ..auth.profile import ProviderProfile
 from ..auth.store import CredentialStore
 from ..auth.validators import validate_api_key, validate_setup_token
@@ -55,6 +61,11 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "auth_modes": ["api_key", "oauth"],
         "env_key": "OPENAI_API_KEY",
     },
+    "github": {
+        "name": "GitHub Copilot",
+        "auth_modes": ["oauth"],
+        "env_key": "GITHUB_TOKEN",
+    },
     "anthropic": {
         "name": "Anthropic",
         "auth_modes": ["api_key", "token"],
@@ -66,7 +77,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
 AUTH_MODE_LABELS: dict[str, str] = {
     "api_key": "API Key（标准密钥）",
     "token": "Setup Token（免费试用）",
-    "oauth": "Codex OAuth（免费试用，Device Flow）",
+    "oauth": "OAuth PKCE（免费试用，浏览器授权）",
 }
 
 # Setup Token 默认 TTL（小时）
@@ -109,7 +120,7 @@ def _select_llm_mode() -> str:
 def _select_provider() -> str:
     """选择 Provider"""
     choices = [
-        questionary.Choice(f"{info['name']}", value=key)
+        questionary.Choice(_build_provider_choice_label(key, info), value=key)
         for key, info in PROVIDERS.items()
     ]
     return questionary.select(
@@ -126,14 +137,45 @@ def _select_auth_mode(provider: str) -> str:
     if len(modes) == 1:
         return modes[0]
 
-    choices = [
-        questionary.Choice(AUTH_MODE_LABELS.get(m, m), value=m)
-        for m in modes
-    ]
+    choices: list[questionary.Choice] = []
+    for mode in modes:
+        if mode == "oauth":
+            label = _resolve_oauth_mode_label(provider)
+        else:
+            label = AUTH_MODE_LABELS.get(mode, mode)
+        choices.append(questionary.Choice(label, value=mode))
+
     return questionary.select(
         "选择认证模式:",
         choices=choices,
     ).ask() or modes[0]
+
+
+def _resolve_oauth_mode_label(provider: str) -> str:
+    """根据 provider 的 flow_type 生成 OAuth 模式标签"""
+    canonical_id = DISPLAY_TO_CANONICAL.get(provider, provider)
+    config = OAuthProviderRegistry().get(canonical_id)
+    if config is None:
+        return AUTH_MODE_LABELS["oauth"]
+
+    flow_labels = {
+        "auth_code_pkce": "OAuth PKCE（免费试用，浏览器授权）",
+        "device_flow": "OAuth Device Flow（设备码授权）",
+        "device_flow_pkce": "OAuth Device Flow + PKCE（设备码授权）",
+    }
+    return flow_labels.get(config.flow_type, AUTH_MODE_LABELS["oauth"])
+
+
+def _build_provider_choice_label(provider: str, info: dict[str, Any]) -> str:
+    """构建 Provider 选择项标签（附带 OAuth 流程类型）"""
+    name = str(info.get("name", provider))
+    oauth_modes = info.get("auth_modes", [])
+    if "oauth" not in oauth_modes:
+        return name
+
+    oauth_label = _resolve_oauth_mode_label(provider)
+    short = oauth_label.split("（", 1)[0]
+    return f"{name} ({short})"
 
 
 def _input_api_key(provider: str) -> ApiKeyCredential:
@@ -175,6 +217,53 @@ def _input_setup_token() -> TokenCredential:
         console.print(
             "[red]Setup Token 格式无效，必须以 sk-ant-oat01- 开头。[/red]",
         )
+
+
+async def _run_oauth_pkce_flow(
+    provider: str,
+    force_manual: bool = False,
+) -> OAuthCredential | None:
+    """执行 OAuth PKCE 流程
+
+    根据 provider display_id 从注册表获取 canonical_id，
+    然后调用 run_auth_code_pkce_flow() 完成授权。
+
+    Args:
+        provider: Provider display_id（如 "openai"）
+        force_manual: 是否强制手动模式
+
+    Returns:
+        OAuthCredential 实例，失败返回 None
+    """
+    # 解析 canonical_id
+    canonical_id = DISPLAY_TO_CANONICAL.get(provider, provider)
+    registry = OAuthProviderRegistry()
+    config = registry.get(canonical_id)
+    if config is None:
+        console.print(f"[red]未找到 Provider 配置: {canonical_id}[/red]")
+        return None
+
+    # 检测环境
+    env = detect_environment(force_manual=force_manual)
+
+    try:
+        console.print("[dim]正在发起 OAuth PKCE 授权...[/dim]")
+
+        def _on_status(msg: str) -> None:
+            console.print(f"[dim]{msg}[/dim]")
+
+        credential = await run_auth_code_pkce_flow(
+            config=config,
+            registry=registry,
+            env=env,
+            on_status=_on_status,
+        )
+        console.print("[green]OAuth 授权成功![/green]")
+        return credential
+    except Exception as exc:
+        console.print(f"[red]OAuth PKCE 授权失败: {exc}[/red]")
+        console.print("[yellow]建议切换到 API Key 模式。[/yellow]")
+        return None
 
 
 async def _run_oauth_device_flow() -> OAuthCredential | None:
@@ -331,6 +420,7 @@ def _get_default_model(provider: str) -> str:
     defaults = {
         "openrouter": "openrouter/auto",
         "openai": "gpt-4o",
+        "github": "github/gpt-4.1-mini",
         "anthropic": "claude-sonnet-4-20250514",
     }
     return defaults.get(provider, "openrouter/auto")
@@ -341,6 +431,7 @@ def _get_cheap_model(provider: str) -> str:
     defaults = {
         "openrouter": "openrouter/auto",
         "openai": "gpt-4o-mini",
+        "github": "github/gpt-4.1-nano",
         "anthropic": "claude-haiku-4-20250414",
     }
     return defaults.get(provider, "openrouter/auto")
@@ -349,6 +440,7 @@ def _get_cheap_model(provider: str) -> str:
 def run_init_wizard(
     project_root: Path | None = None,
     store: CredentialStore | None = None,
+    manual_oauth: bool = False,
 ) -> InitConfig:
     """执行交互式引导配置
 
@@ -386,10 +478,12 @@ def run_init_wizard(
     credential: Credential | None = None
     provider = ""
     auth_mode = "api_key"
+    profile_provider = ""
 
     if llm_mode == "litellm":
         # 步骤 2: 选择 Provider
         provider = _select_provider()
+        profile_provider = provider
 
         # 步骤 3: 选择认证模式
         auth_mode = _select_auth_mode(provider)
@@ -400,15 +494,25 @@ def run_init_wizard(
         elif auth_mode == "token":
             credential = _input_setup_token()
         elif auth_mode == "oauth":
-            credential = asyncio.run(_run_oauth_device_flow())
+            # 003-b: 根据 Provider 的 flow_type 选择 PKCE 或 Device Flow
+            canonical_id = DISPLAY_TO_CANONICAL.get(provider, provider)
+            profile_provider = canonical_id
+            _registry = OAuthProviderRegistry()
+            provider_config = _registry.get(canonical_id)
+            if provider_config and provider_config.flow_type == "auth_code_pkce":
+                credential = asyncio.run(
+                    _run_oauth_pkce_flow(provider, force_manual=manual_oauth)
+                )
+            else:
+                credential = asyncio.run(_run_oauth_device_flow())
 
         # 步骤 5: 存入 credential store
         if credential is not None:
             now = datetime.now(tz=UTC)
-            profile_name = f"{provider}-default"
+            profile_name = f"{profile_provider}-default"
             profile = ProviderProfile(
                 name=profile_name,
-                provider=provider,
+                provider=profile_provider,
                 auth_mode=auth_mode,  # type: ignore[arg-type]
                 credential=credential,
                 is_default=True,

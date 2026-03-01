@@ -2,6 +2,8 @@
 
 记录凭证生命周期到 Event Store（仅元信息，不含凭证值）。
 对齐 Constitution C2（Everything is an Event）和 C5（Least Privilege）。
+
+003-b 扩展: 新增 emit_oauth_event() 支持 OAuth 流程事件。
 """
 
 from __future__ import annotations
@@ -12,6 +14,14 @@ import structlog
 from octoagent.core.models.enums import EventType
 
 log = structlog.get_logger()
+
+# OAuth 事件 payload 中禁止出现的敏感字段名
+_SENSITIVE_FIELDS = frozenset({
+    "access_token",
+    "refresh_token",
+    "code_verifier",
+    "state",
+})
 
 
 class EventStoreProtocol(Protocol):
@@ -72,6 +82,69 @@ async def emit_credential_event(
             # Event Store 写入失败不应阻断凭证操作（C6: Degrade Gracefully）
             log.warning(
                 "credential_event_store_failed",
+                event_type=event_type.value,
+                error=str(exc),
+            )
+
+
+async def emit_oauth_event(
+    event_store: EventStoreProtocol | None,
+    event_type: EventType,
+    provider_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """发射 OAuth 流程事件到 Event Store
+
+    复用 emit_credential_event 的 Event Store 写入逻辑。
+    payload 中 MUST NOT 包含 access_token, refresh_token,
+    code_verifier, state 的明文值。
+
+    支持四种事件类型:
+    - OAUTH_STARTED: {provider_id, flow_type, environment_mode}
+    - OAUTH_SUCCEEDED: {provider_id, token_type, expires_in, has_refresh_token, has_account_id}
+    - OAUTH_FAILED: {provider_id, failure_reason, failure_stage}
+    - OAUTH_REFRESHED: {provider_id, new_expires_in}
+
+    Args:
+        event_store: Event Store 实例（None 时仅记录日志）
+        event_type: OAUTH_STARTED / OAUTH_SUCCEEDED / OAUTH_FAILED / OAUTH_REFRESHED
+        provider_id: Provider canonical_id
+        payload: 事件负载（已脱敏）
+    """
+    # 安全检查：确保 payload 中不含敏感字段
+    for field in _SENSITIVE_FIELDS:
+        if field in payload:
+            log.error(
+                "oauth_event_sensitive_field_detected",
+                field=field,
+                event_type=event_type.value,
+            )
+            # 移除敏感字段而非阻断
+            del payload[field]
+
+    # 添加 provider_id 到 payload（如未包含）
+    safe_payload: dict[str, Any] = {"provider_id": provider_id, **payload}
+
+    # 结构化日志记录（始终执行）
+    log.info(
+        "oauth_event",
+        event_type=event_type.value,
+        provider_id=provider_id,
+    )
+
+    # 写入 Event Store（如果可用）
+    if event_store is not None:
+        try:
+            await event_store.append(
+                task_id="system",
+                event_type=event_type.value,
+                actor_type="system",
+                payload=safe_payload,
+            )
+        except Exception as exc:
+            # Event Store 写入失败不应阻断 OAuth 操作（C6: Degrade Gracefully）
+            log.warning(
+                "oauth_event_store_failed",
                 event_type=event_type.value,
                 error=str(exc),
             )

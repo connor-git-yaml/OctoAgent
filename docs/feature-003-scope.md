@@ -1,7 +1,7 @@
 # Feature 003: Auth Adapter + DX 工具 — Scope 冻结 v3
 
-> **状态**: Frozen v3 — Spec-Driven 流程进行中（合并原 003.5）
-> **日期**: 2026-03-01（v3 修订）
+> **状态**: ✅ 已交付（003 基础 + 003-b OAuth PKCE + 多认证路由隔离 + Reasoning 配置）
+> **日期**: 2026-03-01（v3 修订）| 交付日期: 2026-03-01
 > **依赖**: Feature 002 ✅（已交付）
 > **并行**: 可与 Feature 004（Tool Contract）同时开发
 
@@ -70,15 +70,47 @@
 
 ## 验收标准
 
-- [ ] OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
-- [ ] Anthropic Setup Token → credential store → LiteLLM Proxy → 真实 LLM 调用成功（零成本）
-- [ ] Codex OAuth Device Flow 授权 → token 持久化 → 调用成功
-- [ ] `octo init` 引导新用户完成首次配置（<3 分钟）
-- [ ] `octo doctor` 正确诊断：缺失 .env / 无效 Key / 过期 Token / Proxy 不可达
-- [ ] `octo doctor --live` 发送 cheap 模型 ping 验证端到端连通
-- [ ] Gateway 启动自动加载 .env，无需手动 source
-- [ ] credential store 凭证不出现在日志/事件/LLM 上下文中（C5 合规）
-- [ ] 凭证加载/过期事件记录到 Event Store（C2 合规）
+- [x] OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
+- [x] Anthropic Setup Token → credential store → LiteLLM Proxy → 真实 LLM 调用成功（零成本）
+- [x] Codex OAuth Device Flow 授权 → token 持久化 → 调用成功
+- [x] `octo init` 引导新用户完成首次配置（<3 分钟）
+- [x] `octo doctor` 正确诊断：缺失 .env / 无效 Key / 过期 Token / Proxy 不可达
+- [x] `octo doctor --live` 发送 cheap 模型 ping 验证端到端连通
+- [x] Gateway 启动自动加载 .env，无需手动 source
+- [x] credential store 凭证不出现在日志/事件/LLM 上下文中（C5 合规）
+- [x] 凭证加载/过期事件记录到 Event Store（C2 合规）
+
+---
+
+## 003-b 后续交付成果（实现阶段补充）
+
+003-b（OAuth PKCE）交付后，在集成验证阶段发现并实现了以下增量能力：
+
+### 多认证路由隔离
+
+JWT OAuth 路径需要绕过 LiteLLM Proxy 直连 `chatgpt.com/backend-api`，而 API Key 路径继续走 Proxy。为避免不同认证方案互相干扰：
+
+- **HandlerChainResult** 扩展 `api_base_url: str | None` 和 `extra_headers: dict[str, str]` 字段，JWT 路径填充路由覆盖信息，API Key 路径保持默认值（None / {}）
+- **LiteLLMClient.complete()** 新增 `api_base`、`api_key`、`extra_headers` keyword-only 参数，支持按调用覆盖路由
+- **PkceOAuthAdapter** 已有的 `get_api_base_url()` / `get_extra_headers()` 通过 HandlerChain `_extract_routing()` 自动提取
+
+### Codex Reasoning/Thinking 模式配置
+
+Codex 模型（gpt-5.3-codex）支持 reasoning effort 级别（none / low / medium / high / xhigh）：
+
+- **ReasoningConfig** 模型（Pydantic BaseModel）：`effort` + `summary` 字段，提供 `to_responses_api_param()` 方法
+- **LiteLLMClient.complete()** 新增 `reasoning: ReasoningConfig | None` 参数
+- **E2E 脚本**（`scripts/test_codex_e2e.py`）支持 `--reasoning-effort` / `--reasoning-summary` CLI 参数
+
+### E2E 验证发现
+
+- ChatGPT backend API（Codex Responses API）要求 `stream=true` + `store=false`
+- 模型名为 `gpt-5.3-codex`（非 codex-mini / o4-mini）
+- 请求格式为 Responses API（`input[]` + `instructions`），非 Chat Completions
+
+### 测试覆盖
+
+- 003 基础: 381 个测试 → 003-b 交付: 391 个测试 → 路由隔离 + Reasoning: **404 个测试**
 
 ## Spec-Driven 流程就绪检查
 

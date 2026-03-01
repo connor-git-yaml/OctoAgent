@@ -10,7 +10,7 @@ import httpx
 import pytest
 from octoagent.provider.client import LiteLLMClient
 from octoagent.provider.exceptions import ProviderError, ProxyUnreachableError
-from octoagent.provider.models import ModelCallResult
+from octoagent.provider.models import ModelCallResult, ReasoningConfig
 
 
 @pytest.fixture
@@ -161,6 +161,88 @@ class TestLiteLLMClientComplete:
         assert "[REDACTED]" in kwargs["error"]
 
 
+class TestLiteLLMClientRoutingOverrides:
+    """路由覆盖测试（003-b JWT 方案多认证隔离）"""
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_api_base_override(self, mock_acompletion, client):
+        """api_base 覆盖优先于实例默认 Proxy URL"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            api_base="https://chatgpt.com/backend-api",
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_api_key_override(self, mock_acompletion, client):
+        """api_key 覆盖优先于实例默认 Proxy key"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            api_key="jwt-access-token",
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["api_key"] == "jwt-access-token"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_extra_headers_passed(self, mock_acompletion, client):
+        """extra_headers 传递给 LiteLLM SDK"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        headers = {
+            "chatgpt-account-id": "acct-123",
+            "OpenAI-Beta": "responses=experimental",
+        }
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            extra_headers=headers,
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["extra_headers"] == headers
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_no_override_uses_defaults(self, mock_acompletion, client):
+        """不传覆盖参数时使用实例默认值"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["api_base"] == "http://localhost:4000"
+        assert call_kwargs["api_key"] == "sk-test"
+        assert "extra_headers" not in call_kwargs
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_full_jwt_routing(self, mock_acompletion, client):
+        """完整 JWT 路由覆盖（模拟 HandlerChainResult 传递）"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            api_base="https://chatgpt.com/backend-api",
+            api_key="jwt-token-value",
+            extra_headers={
+                "chatgpt-account-id": "acct-e2e",
+                "OpenAI-Beta": "responses=experimental",
+                "originator": "octoagent",
+            },
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api"
+        assert call_kwargs["api_key"] == "jwt-token-value"
+        assert call_kwargs["extra_headers"]["chatgpt-account-id"] == "acct-e2e"
+
+
 class TestLiteLLMClientHealthCheck:
     """health_check() 方法测试"""
 
@@ -199,3 +281,77 @@ class TestLiteLLMClientHealthCheck:
 
         result = await client.health_check()
         assert result is False
+
+
+class TestLiteLLMClientReasoning:
+    """reasoning 参数传递测试"""
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_reasoning_effort_passed(self, mock_acompletion, client):
+        """ReasoningConfig.effort 作为 reasoning_effort 传递给 LiteLLM"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            reasoning=ReasoningConfig(effort="high"),
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "high"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_reasoning_xhigh(self, mock_acompletion, client):
+        """xhigh 级别正确传递"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            reasoning=ReasoningConfig(effort="xhigh"),
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "xhigh"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_reasoning_none_effort(self, mock_acompletion, client):
+        """effort=none 正确传递（禁用推理）"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            reasoning=ReasoningConfig(effort="none"),
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "none"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_no_reasoning_omits_param(self, mock_acompletion, client):
+        """不传 reasoning 时不包含 reasoning_effort"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert "reasoning_effort" not in call_kwargs
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_reasoning_with_routing_overrides(self, mock_acompletion, client):
+        """reasoning 与路由覆盖参数共存"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            api_base="https://chatgpt.com/backend-api",
+            api_key="jwt-token",
+            extra_headers={"chatgpt-account-id": "acct-123"},
+            reasoning=ReasoningConfig(effort="high", summary="auto"),
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api"
+        assert call_kwargs["api_key"] == "jwt-token"
+        assert call_kwargs["extra_headers"]["chatgpt-account-id"] == "acct-123"
+        assert call_kwargs["reasoning_effort"] == "high"

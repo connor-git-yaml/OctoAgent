@@ -1,9 +1,42 @@
-"""数据模型 -- TokenUsage + ModelCallResult
+"""数据模型 -- TokenUsage + ModelCallResult + ReasoningConfig
 
 对齐 data-model.md SS2.1 / SS2.2，替代 M0 LLMResponse dataclass。
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+# Codex / o-系列模型支持的 reasoning effort 级别
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh"]
+
+# Reasoning summary 模式（Responses API 专用）
+ReasoningSummary = Literal["auto", "concise", "detailed"]
+
+
+class ReasoningConfig(BaseModel):
+    """Reasoning / Thinking 模式配置
+
+    适用于支持推理模式的模型（如 gpt-5.3-codex、o-系列）。
+    Responses API 使用 reasoning 对象: {"effort": "high", "summary": "auto"}
+    Chat Completions API 使用顶层 reasoning_effort: "high"
+    """
+
+    effort: ReasoningEffort = Field(
+        default="medium",
+        description="推理深度级别: none / low / medium / high / xhigh",
+    )
+    summary: ReasoningSummary | None = Field(
+        default=None,
+        description="推理摘要模式（仅 Responses API）: auto / concise / detailed；None 表示不传",
+    )
+
+    def to_responses_api_param(self) -> dict:
+        """转换为 Responses API 的 reasoning 参数对象"""
+        param: dict = {"effort": self.effort}
+        if self.summary is not None:
+            param["summary"] = self.summary
+        return param
 
 
 class TokenUsage(BaseModel):

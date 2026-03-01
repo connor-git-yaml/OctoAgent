@@ -598,3 +598,141 @@ class TestHandlerChainResult:
         data = result.model_dump()
         assert data["source"] == "env"
         assert data["adapter"] == "EnvVarAdapter"
+
+    def test_routing_defaults_empty(self) -> None:
+        """路由字段默认值为空（不影响非 OAuth 路径）"""
+        result = HandlerChainResult(
+            provider="openai",
+            credential_value="sk-test",
+            source="store",
+            adapter="ApiKeyAuthAdapter",
+        )
+        assert result.api_base_url is None
+        assert result.extra_headers == {}
+
+    def test_routing_fields_populated(self) -> None:
+        """路由字段可显式设置"""
+        result = HandlerChainResult(
+            provider="openai-codex",
+            credential_value="jwt-token",
+            source="profile",
+            adapter="PkceOAuthAdapter",
+            api_base_url="https://chatgpt.com/backend-api",
+            extra_headers={
+                "chatgpt-account-id": "acct-123",
+                "OpenAI-Beta": "responses=experimental",
+            },
+        )
+        assert result.api_base_url == "https://chatgpt.com/backend-api"
+        assert result.extra_headers["chatgpt-account-id"] == "acct-123"
+
+
+class TestRoutingExtraction:
+    """路由信息提取测试（003-b JWT 方案多认证隔离）"""
+
+    async def test_api_key_no_routing(self, tmp_path: Path) -> None:
+        """API Key adapter 不产生路由覆盖"""
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        profile = _make_api_key_profile(
+            name="openai-key",
+            provider="openai",
+            is_default=True,
+        )
+        store.set_profile(profile)
+
+        chain = HandlerChain(store=store)
+        chain.register_adapter_factory("openai", _api_key_factory)
+
+        result = await chain.resolve(provider="openai")
+        assert result.api_base_url is None
+        assert result.extra_headers == {}
+
+    async def test_pkce_oauth_populates_routing(self, tmp_path: Path) -> None:
+        """PkceOAuthAdapter 产生路由覆盖（api_base_url + extra_headers）"""
+        from octoagent.provider.auth.oauth_provider import (
+            BUILTIN_PROVIDERS,
+            OAuthProviderConfig,
+        )
+
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = _now()
+        oauth_cred = OAuthCredential(
+            provider="openai-codex",
+            access_token=SecretStr("jwt-access-token"),
+            refresh_token=SecretStr("refresh-token"),
+            expires_at=now + timedelta(hours=1),
+            account_id="acct-test-123",
+        )
+        profile = ProviderProfile(
+            name="openai-codex-default",
+            provider="openai-codex",
+            auth_mode="oauth",
+            credential=oauth_cred,
+            is_default=True,
+            created_at=now,
+            updated_at=now,
+        )
+        store.set_profile(profile)
+
+        config = BUILTIN_PROVIDERS["openai-codex"]
+        chain = HandlerChain(store=store)
+        chain.register_pkce_oauth_factory(
+            provider="openai-codex",
+            provider_config=config,
+            profile_name="openai-codex-default",
+        )
+
+        result = await chain.resolve(provider="openai-codex")
+        assert result.adapter == "PkceOAuthAdapter"
+        assert result.credential_value == "jwt-access-token"
+        # 路由覆盖
+        assert result.api_base_url == "https://chatgpt.com/backend-api"
+        assert result.extra_headers["chatgpt-account-id"] == "acct-test-123"
+        assert result.extra_headers["OpenAI-Beta"] == "responses=experimental"
+        assert result.extra_headers["originator"] == "octoagent"
+
+    async def test_pkce_oauth_no_routing_when_no_api_base(
+        self, tmp_path: Path
+    ) -> None:
+        """PkceOAuthAdapter 无 api_base_url 配置时不产生路由覆盖"""
+        from octoagent.provider.auth.oauth_provider import OAuthProviderConfig
+
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = _now()
+        oauth_cred = OAuthCredential(
+            provider="custom-provider",
+            access_token=SecretStr("custom-token"),
+            refresh_token=SecretStr("custom-refresh"),
+            expires_at=now + timedelta(hours=1),
+        )
+        profile = ProviderProfile(
+            name="custom-default",
+            provider="custom-provider",
+            auth_mode="oauth",
+            credential=oauth_cred,
+            is_default=True,
+            created_at=now,
+            updated_at=now,
+        )
+        store.set_profile(profile)
+
+        # 无 api_base_url 的自定义 Provider
+        config = OAuthProviderConfig(
+            provider_id="custom-provider",
+            display_name="Custom Provider",
+            flow_type="auth_code_pkce",
+            authorization_endpoint="https://custom.com/auth",
+            token_endpoint="https://custom.com/token",
+            client_id="custom-client",
+        )
+        chain = HandlerChain(store=store)
+        chain.register_pkce_oauth_factory(
+            provider="custom-provider",
+            provider_config=config,
+            profile_name="custom-default",
+        )
+
+        result = await chain.resolve(provider="custom-provider")
+        assert result.adapter == "PkceOAuthAdapter"
+        assert result.api_base_url is None
+        assert result.extra_headers == {}

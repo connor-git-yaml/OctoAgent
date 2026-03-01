@@ -1144,7 +1144,7 @@ backend：
    - `octo init` 引导时调用对应 handler 完成认证配置
    - 运行时解析优先级：显式 profile → auth-profiles.json → 环境变量 → 默认值
 
-5. **Token 自动刷新**（参考 OpenClaw `refreshOAuthTokenWithLock`，M1 实现 Setup Token 过期检测，M2 实现完整 OAuth 刷新）：
+5. **Token 自动刷新**（参考 OpenClaw `refreshOAuthTokenWithLock`，M1 实现 Setup Token 过期检测，M1.5 实现完整 OAuth 刷新）：
    - 每次 LLM 调用前检查 `expires_at`
    - 过期时获取文件锁 → 调用 `adapter.refresh()` → 持久化新凭证
    - 刷新失败时降级到 fallback Provider（对齐 C6）
@@ -1156,12 +1156,32 @@ backend：
    - OAuth/Token 类型：动态更新 Proxy 配置（LiteLLM Proxy 支持 `/model/update` API）
    - 或通过 `litellm-config.yaml` 的 `get_key_from_env` 配合环境变量刷新
 
+7. **OAuth Authorization Code + PKCE 流程**（Feature 003-b，M1.5 已交付）：
+   - 支持 Authorization Code + PKCE（RFC 7636）标准流程，取代纯 Device Flow
+   - `OAuthProviderRegistry` 注册表管理多 Provider 的 OAuth 配置（内置 openai-codex + github-copilot）
+   - `PkceOAuthAdapter` 适配器继承 `AuthAdapter`，实现 PKCE 流程编排
+   - 环境检测（SSH/容器/无 GUI）自动选择浏览器 / 手动粘贴模式
+   - 本地回调服务器（`127.0.0.1:1455`）接收授权码，端口冲突自动降级到手动模式
+   - JWT access_token 直连 ChatGPT Backend API（Codex Responses API），不经过 LiteLLM Proxy
+
+8. **多认证路由隔离**（Feature 003-b 集成阶段发现）：
+   - JWT OAuth 路径需绕过 LiteLLM Proxy 直连 `chatgpt.com/backend-api`，API Key 路径继续走 Proxy
+   - `HandlerChainResult` 扩展 `api_base_url: str | None` 和 `extra_headers: dict[str, str]` 字段
+   - `LiteLLMClient.complete()` 新增 `api_base`、`api_key`、`extra_headers` keyword-only 参数，支持按调用覆盖路由
+   - `PkceOAuthAdapter` 通过 `get_api_base_url()` / `get_extra_headers()` 提供路由覆盖信息
+
+9. **Codex Reasoning/Thinking 模式**（Feature 003-b 增量能力）：
+   - `ReasoningConfig` 模型：`effort`（none/low/medium/high/xhigh）+ `summary`（auto/concise/detailed）
+   - `LiteLLMClient.complete()` 新增 `reasoning: ReasoningConfig | None` 参数
+   - 双路径适配：Responses API 使用嵌套 `reasoning` 对象，Chat Completions API 使用顶层 `reasoning_effort` 字符串
+
 **扩展原则**：
 
 - 业务代码（Kernel/Worker/Skill）永远不感知具体 Provider 或认证方式
 - Provider 变更的影响范围限定在 `litellm-config.yaml` + `.env.litellm`
 - Auth Adapter 变更的影响范围限定在 `packages/provider/auth/`
 - 新增 Provider 只需实现对应 `AuthAdapter` 子类 + 注册到 Handler Chain
+- JWT 直连路径通过 HandlerChainResult 路由覆盖实现，不影响 API Key 路径的默认行为
 
 ---
 
