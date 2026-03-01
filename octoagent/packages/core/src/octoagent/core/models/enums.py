@@ -72,6 +72,11 @@ class EventType(StrEnum):
     OAUTH_FAILED = "OAUTH_FAILED"
     OAUTH_REFRESHED = "OAUTH_REFRESHED"
 
+    # Feature 004: 工具调用事件 -- 对齐 FR-014
+    TOOL_CALL_STARTED = "TOOL_CALL_STARTED"
+    TOOL_CALL_COMPLETED = "TOOL_CALL_COMPLETED"
+    TOOL_CALL_FAILED = "TOOL_CALL_FAILED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""
