@@ -14,7 +14,11 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from octoagent.provider.auth.credentials import ApiKeyCredential, TokenCredential
+from octoagent.provider.auth.credentials import (
+    ApiKeyCredential,
+    OAuthCredential,
+    TokenCredential,
+)
 from octoagent.provider.auth.profile import CredentialStoreData, ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 
@@ -161,3 +165,42 @@ class TestCredentialStoreCRUD:
         result = store.get_profile("update-me")
         assert result is not None
         assert result.provider == "anthropic"
+
+
+class TestProviderIdMigration:
+    """Provider ID 迁移策略"""
+
+    def test_oauth_openai_display_id_migrates_to_canonical(self, tmp_path: Path) -> None:
+        """OAuth profile 中 openai -> openai-codex"""
+        now = datetime.now(tz=timezone.utc)
+        store = CredentialStore(store_path=tmp_path / "store.json")
+        store.set_profile(
+            ProviderProfile(
+                name="openai-oauth",
+                provider="openai",
+                auth_mode="oauth",
+                credential=OAuthCredential(
+                    provider="openai",
+                    access_token=SecretStr("access"),
+                    expires_at=now,
+                ),
+                is_default=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        loaded = store.get_default_profile()
+        assert loaded is not None
+        assert loaded.provider == "openai-codex"
+        assert loaded.credential.provider == "openai-codex"
+
+    def test_api_key_openai_provider_kept_as_openai(self, tmp_path: Path) -> None:
+        """非 OAuth profile 不做 openai -> openai-codex 迁移"""
+        store = CredentialStore(store_path=tmp_path / "store.json")
+        store.set_profile(_make_profile(name="openai-api-key", provider="openai"))
+
+        loaded = store.get_profile("openai-api-key")
+        assert loaded is not None
+        assert loaded.provider == "openai"
+        assert loaded.credential.provider == "openai"

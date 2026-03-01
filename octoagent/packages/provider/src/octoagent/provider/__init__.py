@@ -19,10 +19,14 @@ from .auth import (
     HandlerChain,
     HandlerChainResult,
     OAuthCredential,
+    OAuthProviderConfig,
+    OAuthProviderRegistry,
+    PkceOAuthAdapter,
     ProviderProfile,
     SetupTokenAuthAdapter,
     TokenCredential,
     emit_credential_event,
+    emit_oauth_event,
     mask_secret,
     validate_api_key,
     validate_setup_token,
@@ -51,11 +55,12 @@ from .exceptions import (
     ProxyUnreachableError,
 )
 from .fallback import FallbackManager
-from .models import ModelCallResult, TokenUsage
+from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
 __all__ = [
     # Provider 核心
     "ModelCallResult",
+    "ReasoningConfig",
     "TokenUsage",
     "LiteLLMClient",
     "AliasConfig",
@@ -79,6 +84,7 @@ __all__ = [
     "ApiKeyAuthAdapter",
     "SetupTokenAuthAdapter",
     "CodexOAuthAdapter",
+    "PkceOAuthAdapter",
     "ApiKeyCredential",
     "TokenCredential",
     "OAuthCredential",
@@ -86,12 +92,15 @@ __all__ = [
     "CredentialStore",
     "CredentialStoreData",
     "ProviderProfile",
+    "OAuthProviderConfig",
+    "OAuthProviderRegistry",
     "HandlerChain",
     "HandlerChainResult",
     "mask_secret",
     "validate_api_key",
     "validate_setup_token",
     "emit_credential_event",
+    "emit_oauth_event",
     # DX 工具
     "load_project_dotenv",
 ]

@@ -69,13 +69,36 @@ class SetupTokenAuthAdapter(AuthAdapter):
     async def refresh(self) -> str | None: ... # 返回 None（不支持自动刷新）
     def is_expired(self) -> bool: ...          # 基于 acquired_at + TTL 计算
 
-# CodexOAuthAdapter -- FR-005
+# CodexOAuthAdapter -- FR-005 (Device Flow, 已废弃)
 class CodexOAuthAdapter(AuthAdapter):
     def __init__(self, credential: OAuthCredential) -> None: ...
     async def resolve(self) -> str: ...       # 返回 access_token
-    async def refresh(self) -> str | None: ... # M1: 返回 None; M2: 实现刷新
+    async def refresh(self) -> str | None: ... # 返回 None（不支持刷新）
+    def is_expired(self) -> bool: ...          # 基于 expires_at 判断
+
+# PkceOAuthAdapter -- FR-006 (003-b: Auth Code + PKCE, 推荐)
+class PkceOAuthAdapter(AuthAdapter):
+    def __init__(
+        self,
+        credential: OAuthCredential,
+        provider_config: OAuthProviderConfig,  # 注入 Provider 配置
+        store: CredentialStore,                # 注入 CredentialStore（刷新后回写）
+        profile_name: str,                     # 对应的 profile 名称
+        event_store: EventStoreProtocol | None = None,  # 可选事件存储
+    ) -> None: ...
+    async def resolve(self) -> str: ...       # 检测过期 -> 自动刷新 -> 返回 access_token
+    async def refresh(self) -> str | None: ... # httpx POST token 端点 (grant_type=refresh_token)
+                                               # -> 更新内存凭证 + CredentialStore 回写
+                                               # -> 发射 OAUTH_REFRESHED 事件
+                                               # -> 返回新 access_token
+                                               # invalid_grant: 清除凭证返回 None
     def is_expired(self) -> bool: ...          # 基于 expires_at 判断
 ```
+
+> **003-b 说明**: `PkceOAuthAdapter` 是推荐的 OAuth Adapter，支持自动 token 刷新。
+> `CodexOAuthAdapter` 仍保留以兼容旧 Device Flow 凭证，但新流程应使用 `PkceOAuthAdapter`。
+> `PkceOAuthAdapter.refresh()` 通过构造注入的 `CredentialStore` 实现刷新后自动回写，
+> 确保凭证持久化与内存状态一致。
 
 ---
 

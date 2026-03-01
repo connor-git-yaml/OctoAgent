@@ -3,13 +3,17 @@
 Chain of Responsibility 模式的凭证解析链。
 解析优先级: 显式 profile > credential store > 环境变量 > 默认值。
 所有 handler 均无有效凭证时发出 CREDENTIAL_FAILED 事件 + 降级到 echo 模式（EC-4）。
+
+003-b: 支持 PkceOAuthAdapter 注册，factory 通过闭包捕获
+OAuthProviderConfig + CredentialStore + profile_name。
+注册示例见 register_pkce_oauth_factory() 便捷函数。
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 from octoagent.core.models.enums import EventType
@@ -19,6 +23,9 @@ from .adapter import AuthAdapter
 from .credentials import Credential
 from .events import EventStoreProtocol, emit_credential_event
 from .store import CredentialStore
+
+if TYPE_CHECKING:
+    from .oauth_provider import OAuthProviderConfig
 
 log = structlog.get_logger()
 
@@ -39,6 +46,18 @@ class HandlerChainResult(BaseModel):
         description="凭证来源",
     )
     adapter: str = Field(description="匹配的 AuthAdapter 类名")
+
+    # 路由覆盖（003-b JWT 方案）
+    # JWT OAuth 路径需要绕过 Proxy，直接调用 Provider API
+    # 非 OAuth 路径保持 None / {}，调用方使用默认 Proxy 路由
+    api_base_url: str | None = Field(
+        default=None,
+        description="LLM API base URL 覆盖；None 表示使用调用方默认值（如 Proxy URL）",
+    )
+    extra_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="LLM API 调用附加 headers（如 chatgpt-account-id）",
+    )
 
 
 class HandlerChain:
@@ -158,6 +177,7 @@ class HandlerChain:
                         credential_value=refreshed,
                         source=source,
                         adapter=type(adapter).__name__,
+                        **self._extract_routing(adapter),
                     )
                 log.debug("credential_expired_no_refresh", provider=profile.provider)
                 return None
@@ -173,6 +193,7 @@ class HandlerChain:
                 credential_value=value,
                 source=source,
                 adapter=type(adapter).__name__,
+                **self._extract_routing(adapter),
             )
         except Exception as exc:
             log.debug(
@@ -259,6 +280,24 @@ class HandlerChain:
             adapter="EchoFallback",
         )
 
+    @staticmethod
+    def _extract_routing(adapter: AuthAdapter) -> dict:
+        """从 adapter 提取路由覆盖信息（003-b JWT 方案）
+
+        仅当 adapter 提供 get_api_base_url() / get_extra_headers() 时填充。
+        非 OAuth adapter 返回空 dict，不影响 HandlerChainResult 默认值。
+        """
+        routing: dict = {}
+        if hasattr(adapter, "get_api_base_url"):
+            api_base = adapter.get_api_base_url()
+            if api_base is not None:
+                routing["api_base_url"] = api_base
+        if hasattr(adapter, "get_extra_headers"):
+            headers = adapter.get_extra_headers()
+            if headers:
+                routing["extra_headers"] = headers
+        return routing
+
     def _create_adapter(
         self,
         provider: str,
@@ -301,3 +340,38 @@ class HandlerChain:
             credential_type=credential_type,
             extra={"source": source},
         )
+
+    def register_pkce_oauth_factory(
+        self,
+        provider: str,
+        provider_config: OAuthProviderConfig,
+        profile_name: str,
+    ) -> None:
+        """注册 PkceOAuthAdapter factory（003-b 便捷方法）
+
+        factory 通过闭包捕获 OAuthProviderConfig + CredentialStore + profile_name。
+
+        Args:
+            provider: Provider canonical_id（如 "openai-codex"）
+            provider_config: OAuthProviderConfig 实例
+            profile_name: Profile 名称（用于 store 更新）
+        """
+        from .pkce_oauth_adapter import PkceOAuthAdapter
+
+        store = self._store
+        event_store = self._event_store
+
+        def _factory(cred: Credential) -> AuthAdapter:
+            from .credentials import OAuthCredential
+
+            if not isinstance(cred, OAuthCredential):
+                raise TypeError(f"PkceOAuthAdapter 需要 OAuthCredential，收到 {type(cred)}")
+            return PkceOAuthAdapter(
+                credential=cred,
+                provider_config=provider_config,
+                store=store,
+                profile_name=profile_name,
+                event_store=event_store,
+            )
+
+        self.register_adapter_factory(provider, _factory)

@@ -66,6 +66,12 @@ class EventType(StrEnum):
     CREDENTIAL_EXPIRED = "CREDENTIAL_EXPIRED"
     CREDENTIAL_FAILED = "CREDENTIAL_FAILED"
 
+    # Feature 003-b: OAuth 流程事件 -- 对齐 FR-012
+    OAUTH_STARTED = "OAUTH_STARTED"
+    OAUTH_SUCCEEDED = "OAUTH_SUCCEEDED"
+    OAUTH_FAILED = "OAUTH_FAILED"
+    OAUTH_REFRESHED = "OAUTH_REFRESHED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

@@ -46,18 +46,25 @@ class TokenCredential(BaseModel):
 class OAuthCredential(BaseModel):
     """OAuth 凭证 -- 访问令牌 + 刷新令牌
 
-    适用 Provider: OpenAI Codex（Device Flow）
+    适用 Provider: OpenAI Codex（Device Flow / Auth Code + PKCE）
     特征: 有过期时间，支持 token 刷新
+
+    003-b 扩展: 新增 account_id 可选字段
     """
 
     type: Literal["oauth"] = "oauth"
-    provider: str = Field(description="Provider 标识")
+    provider: str = Field(description="Provider 标识 (canonical_id)")
     access_token: SecretStr = Field(description="访问令牌")
     refresh_token: SecretStr = Field(
         default=SecretStr(""),
-        description="刷新令牌（Device Flow 可能不提供）",
+        description="刷新令牌（部分 Provider 可能不提供）",
     )
     expires_at: datetime = Field(description="访问令牌过期时间")
+    # --- 003-b 新增 ---
+    account_id: str | None = Field(
+        default=None,
+        description="账户 ID（从 token 端点响应提取，可选）",
+    )
 
 
 # Discriminated Union -- 通过 type 字段自动区分凭证类型

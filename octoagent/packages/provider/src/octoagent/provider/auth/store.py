@@ -33,6 +33,18 @@ _DEFAULT_STORE_FILE = "auth-profiles.json"
 _LOCK_SUFFIX = ".lock"
 _FILE_PERMISSION = 0o600
 
+# Provider ID 迁移映射表 -- 003-b
+# 旧值 -> canonical_id。读取时自动迁移，写入时已使用新值。
+_PROVIDER_ID_MIGRATION: dict[str, str] = {
+    "codex": "openai-codex",
+}
+
+# 仅 OAuth profile 适用的 display_id -> canonical_id 映射。
+_OAUTH_DISPLAY_ID_MIGRATION: dict[str, str] = {
+    "openai": "openai-codex",
+    "github": "github-copilot",
+}
+
 
 def _secret_json_encoder(obj: object) -> str:
     """JSON 编码器：将 SecretStr 和 datetime 转为可序列化类型
@@ -92,7 +104,10 @@ class CredentialStore:
             try:
                 raw = self._path.read_text(encoding="utf-8")
                 data = json.loads(raw)
-                return CredentialStoreData.model_validate(data)
+                store_data = CredentialStoreData.model_validate(data)
+                # 003-b: Provider ID 迁移 -- 读取时自动规范化旧 provider 值
+                self._migrate_provider_ids(store_data)
+                return store_data
             except (json.JSONDecodeError, ValueError) as exc:
                 # 文件损坏：备份并返回空 store (EC-2)
                 backup_path = self._path.with_suffix(".json.corrupted")
@@ -147,6 +162,32 @@ class CredentialStore:
                 with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
                 raise
+
+    @staticmethod
+    def _migrate_provider_ids(store_data: CredentialStoreData) -> None:
+        """迁移旧 Provider ID 到 canonical_id -- 003-b
+
+        读取时自动将旧值（如 "codex"）映射为新值（如 "openai-codex"）。
+        对 OAuth profile 额外支持 display_id（如 "openai"）到 canonical_id 的迁移。
+        同时迁移 profile.provider 和 profile.credential.provider 两个字段。
+        """
+        for profile in store_data.profiles.values():
+            old_provider = profile.provider
+            canonical = _PROVIDER_ID_MIGRATION.get(old_provider)
+            if canonical is None and profile.auth_mode == "oauth":
+                canonical = _OAUTH_DISPLAY_ID_MIGRATION.get(old_provider)
+
+            if canonical is None:
+                continue
+
+            profile.provider = canonical
+            profile.credential.provider = canonical
+            log.info(
+                "provider_id_migrated",
+                profile=profile.name,
+                old=old_provider,
+                new=canonical,
+            )
 
     def get_profile(self, name: str) -> ProviderProfile | None:
         """按名称获取 profile"""

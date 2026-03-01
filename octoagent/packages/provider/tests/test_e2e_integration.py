@@ -158,7 +158,7 @@ class TestSC003_CodexOAuthPath:
         """OAuth adapter resolve 正常"""
         now = _now()
         credential = OAuthCredential(
-            provider="codex",
+            provider="openai-codex",
             access_token=SecretStr("oauth-e2e-token"),
             expires_at=now + timedelta(hours=1),
         )

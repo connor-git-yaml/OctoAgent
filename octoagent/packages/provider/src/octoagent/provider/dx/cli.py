@@ -19,12 +19,18 @@ def main() -> None:
 
 
 @main.command()
-def init() -> None:
+@click.option(
+    "--manual-oauth",
+    is_flag=True,
+    default=False,
+    help="强制使用手动 OAuth 模式（粘贴 redirect URL）",
+)
+def init(manual_oauth: bool) -> None:
     """交互式引导配置 -- FR-007"""
     from .init_wizard import run_init_wizard
 
     try:
-        run_init_wizard()
+        run_init_wizard(manual_oauth=manual_oauth)
     except KeyboardInterrupt:
         console.print("\n[yellow]初始化已取消。[/yellow]")
     except Exception as exc:

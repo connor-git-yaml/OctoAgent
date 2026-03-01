@@ -12,7 +12,7 @@ import structlog
 
 from .cost import CostTracker
 from .exceptions import ProviderError, ProxyUnreachableError
-from .models import ModelCallResult
+from .models import ModelCallResult, ReasoningConfig
 
 log = structlog.get_logger()
 
@@ -91,6 +91,11 @@ class LiteLLMClient:
         model_alias: str = "main",
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        *,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        reasoning: ReasoningConfig | None = None,
         **kwargs,
     ) -> ModelCallResult:
         """发送 chat completion 请求到 LiteLLM Proxy
@@ -100,6 +105,10 @@ class LiteLLMClient:
             model_alias: 运行时 group 名称（由 AliasRegistry.resolve() 提供）
             temperature: 采样温度
             max_tokens: 最大生成 token 数，None 使用模型默认
+            api_base: API base URL 覆盖（如 JWT 方案直连 Provider API）
+            api_key: API key 覆盖（如 JWT access_token 作为 Bearer token）
+            extra_headers: 附加 HTTP headers（如 chatgpt-account-id）
+            reasoning: Reasoning 配置（用于 Codex/o-系列模型的思考模式）
             **kwargs: 其他 LiteLLM 支持的参数
 
         Returns:
@@ -111,6 +120,10 @@ class LiteLLMClient:
         """
         start_time = time.monotonic()
 
+        # 路由决策：覆盖参数优先于实例默认值
+        resolved_api_base = api_base or self._proxy_base_url
+        resolved_api_key = api_key or self._proxy_api_key or "no-key"
+
         try:
             # 构建调用参数
             # model 加 "openai/" 前缀：告诉本地 LiteLLM SDK 将请求视为
@@ -119,19 +132,25 @@ class LiteLLMClient:
             call_kwargs = {
                 "model": proxy_model,
                 "messages": messages,
-                "api_base": self._proxy_base_url,
-                "api_key": self._proxy_api_key or "no-key",
+                "api_base": resolved_api_base,
+                "api_key": resolved_api_key,
                 "temperature": temperature,
                 "timeout": self._timeout_s,
                 **kwargs,
             }
             if max_tokens is not None:
                 call_kwargs["max_tokens"] = max_tokens
+            if extra_headers:
+                call_kwargs["extra_headers"] = extra_headers
+            # Chat Completions API 使用顶层 reasoning_effort 字符串
+            if reasoning is not None:
+                call_kwargs["reasoning_effort"] = reasoning.effort
 
             log.debug(
                 "litellm_call_start",
                 model_alias=model_alias,
                 message_count=len(messages),
+                routing_override=api_base is not None,
             )
 
             # 调用 LiteLLM SDK

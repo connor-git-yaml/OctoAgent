@@ -4,8 +4,60 @@
 """
 
 import pytest
-from octoagent.provider.models import ModelCallResult, TokenUsage
+from octoagent.provider.models import ModelCallResult, ReasoningConfig, TokenUsage
 from pydantic import ValidationError
+
+
+class TestReasoningConfig:
+    """ReasoningConfig 数据模型测试"""
+
+    def test_default_values(self):
+        """默认 effort=medium, summary=None"""
+        config = ReasoningConfig()
+        assert config.effort == "medium"
+        assert config.summary is None
+
+    def test_all_effort_levels(self):
+        """所有 effort 级别均合法"""
+        for level in ("none", "low", "medium", "high", "xhigh"):
+            config = ReasoningConfig(effort=level)
+            assert config.effort == level
+
+    def test_invalid_effort_rejected(self):
+        """非法 effort 级别被拒绝"""
+        with pytest.raises(ValidationError):
+            ReasoningConfig(effort="ultra")
+
+    def test_summary_modes(self):
+        """所有 summary 模式均合法"""
+        for mode in ("auto", "concise", "detailed"):
+            config = ReasoningConfig(summary=mode)
+            assert config.summary == mode
+
+    def test_invalid_summary_rejected(self):
+        """非法 summary 模式被拒绝"""
+        with pytest.raises(ValidationError):
+            ReasoningConfig(summary="verbose")
+
+    def test_to_responses_api_param_without_summary(self):
+        """转换为 Responses API 参数（无 summary）"""
+        config = ReasoningConfig(effort="high")
+        param = config.to_responses_api_param()
+        assert param == {"effort": "high"}
+        assert "summary" not in param
+
+    def test_to_responses_api_param_with_summary(self):
+        """转换为 Responses API 参数（含 summary）"""
+        config = ReasoningConfig(effort="xhigh", summary="auto")
+        param = config.to_responses_api_param()
+        assert param == {"effort": "xhigh", "summary": "auto"}
+
+    def test_serialization_roundtrip(self):
+        """序列化/反序列化往返"""
+        original = ReasoningConfig(effort="high", summary="concise")
+        data = original.model_dump()
+        restored = ReasoningConfig(**data)
+        assert restored == original
 
 
 class TestTokenUsage:
