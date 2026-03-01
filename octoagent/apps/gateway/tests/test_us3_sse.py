@@ -203,3 +203,35 @@ class TestSSE:
 
         await sse_hub.unsubscribe("test-task-sub", queue)
         assert "test-task-sub" not in sse_hub._subscribers
+
+    async def test_sse_hub_removes_full_queue_subscriber(self):
+        """慢订阅者队列满时自动移除，避免内存膨胀"""
+        sse_hub = SSEHub(queue_maxsize=1)
+        task_id = "01JTESTSSEQUEUEFULL000000001"
+        queue = await sse_hub.subscribe(task_id)
+
+        first_event = Event(
+            event_id="01JTESTSSEEVT00000000000001",
+            task_id=task_id,
+            task_seq=1,
+            ts=datetime.now(UTC),
+            type=EventType.USER_MESSAGE,
+            actor=ActorType.USER,
+            payload={},
+            trace_id=f"trace-{task_id}",
+        )
+        second_event = Event(
+            event_id="01JTESTSSEEVT00000000000002",
+            task_id=task_id,
+            task_seq=2,
+            ts=datetime.now(UTC),
+            type=EventType.USER_MESSAGE,
+            actor=ActorType.USER,
+            payload={},
+            trace_id=f"trace-{task_id}",
+        )
+
+        await sse_hub.broadcast(task_id, first_event)
+        await sse_hub.broadcast(task_id, second_event)
+
+        assert task_id not in sse_hub._subscribers or queue not in sse_hub._subscribers[task_id]

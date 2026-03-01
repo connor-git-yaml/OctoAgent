@@ -13,9 +13,10 @@ from octoagent.core.models.event import Event
 class SSEHub:
     """SSE 事件广播器 -- 基于 asyncio.Queue 的发布/订阅模式"""
 
-    def __init__(self) -> None:
+    def __init__(self, queue_maxsize: int = 100) -> None:
         # task_id -> set of asyncio.Queue
         self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        self._queue_maxsize = queue_maxsize
 
     async def subscribe(self, task_id: str) -> asyncio.Queue:
         """订阅指定任务的事件流
@@ -26,7 +27,7 @@ class SSEHub:
         Returns:
             asyncio.Queue 实例，新事件会被推送到此队列
         """
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=self._queue_maxsize)
         self._subscribers[task_id].add(queue)
         return queue
 
@@ -58,3 +59,5 @@ class SSEHub:
         # 清理已满的队列
         for q in dead_queues:
             self._subscribers[task_id].discard(q)
+        if task_id in self._subscribers and not self._subscribers[task_id]:
+            del self._subscribers[task_id]

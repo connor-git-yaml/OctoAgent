@@ -4,6 +4,7 @@
 通过 litellm.acompletion() 调用 Proxy，内部集成 CostTracker。
 """
 
+import re
 import time
 
 import httpx
@@ -42,6 +43,20 @@ def _is_connection_error(e: Exception) -> bool:
     # LiteLLM 的 APIConnectionError 也属于连接类错误
     error_name = type(e).__name__
     return error_name in ("APIConnectionError", "APITimeoutError")
+
+
+_SENSITIVE_PATTERNS = [
+    re.compile(r"(?i)\b(api[_-]?key|token|authorization)\b\s*[=:]\s*[^\s,;]+"),
+    re.compile(r"(?i)\bbearer\s+[a-z0-9._\-]+"),
+]
+
+
+def _redact_sensitive_text(text: str) -> str:
+    """对异常文本做轻量脱敏，避免凭证进入日志。"""
+    redacted = text
+    for pattern in _SENSITIVE_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
 
 
 class LiteLLMClient:
@@ -166,10 +181,11 @@ class LiteLLMClient:
             raise
         except Exception as e:
             duration_ms = int((time.monotonic() - start_time) * 1000)
+            sanitized_error = _redact_sensitive_text(str(e))
             log.error(
                 "litellm_call_failed",
                 model_alias=model_alias,
-                error=str(e),
+                error=sanitized_error,
                 error_type=type(e).__name__,
                 duration_ms=duration_ms,
             )
@@ -182,7 +198,7 @@ class LiteLLMClient:
             else:
                 # LiteLLM SDK 业务错误（模型不存在、配额耗尽、invalid request 等）
                 raise ProviderError(
-                    message=f"LLM 调用失败: {e}",
+                    message=f"LLM 调用失败: {sanitized_error}",
                     recoverable=True,
                 ) from e
 
@@ -203,5 +219,5 @@ class LiteLLMClient:
                 resp = await http_client.get(url, timeout=HEALTH_CHECK_TIMEOUT_S)
                 return resp.status_code == 200
         except Exception as e:
-            log.debug("health_check_failed", url=url, error=str(e))
+            log.debug("health_check_failed", url=url, error=_redact_sensitive_text(str(e)))
             return False

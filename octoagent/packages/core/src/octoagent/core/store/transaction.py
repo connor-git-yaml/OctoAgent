@@ -6,9 +6,55 @@
 
 import aiosqlite
 
+from ..models.task import Task
 from ..models.event import Event
 from .event_store import SqliteEventStore
 from .task_store import SqliteTaskStore
+
+
+class TaskStatusConflictError(RuntimeError):
+    """任务状态并发冲突（CAS 失败）"""
+
+
+async def create_task_with_initial_events(
+    conn: aiosqlite.Connection,
+    task_store: SqliteTaskStore,
+    event_store: SqliteEventStore,
+    task: Task,
+    events: list[Event],
+) -> None:
+    """原子创建 Task + 初始事件
+
+    在同一事务内完成：
+    1. create_task
+    2. append 初始事件（如 TASK_CREATED / USER_MESSAGE）
+    3. 更新 pointers.latest_event_id
+    """
+    try:
+        await task_store.create_task(task)
+
+        latest_event_id = ""
+        latest_updated_at = task.updated_at.isoformat()
+        for event in events:
+            await event_store.append_event(event)
+            latest_event_id = event.event_id
+            latest_updated_at = event.ts.isoformat()
+
+        if latest_event_id:
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET updated_at = ?,
+                    pointers = json_set(pointers, '$.latest_event_id', ?)
+                WHERE task_id = ?
+                """,
+                (latest_updated_at, latest_event_id, task.task_id),
+            )
+
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
 
 
 async def append_event_and_update_task(
@@ -17,6 +63,7 @@ async def append_event_and_update_task(
     task_store: SqliteTaskStore,
     event: Event,
     new_status: str | None = None,
+    expected_status: str | None = None,
 ) -> None:
     """在同一事务内原子提交事件写入和 Task projection 更新
 
@@ -36,12 +83,36 @@ async def append_event_and_update_task(
 
         # 如果需要更新任务状态
         if new_status is not None:
-            await task_store.update_task_status(
-                task_id=event.task_id,
-                status=new_status,
-                updated_at=event.ts.isoformat(),
-                latest_event_id=event.event_id,
-            )
+            if expected_status is None:
+                await task_store.update_task_status(
+                    task_id=event.task_id,
+                    status=new_status,
+                    updated_at=event.ts.isoformat(),
+                    latest_event_id=event.event_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = ?, updated_at = ?,
+                        pointers = json_set(pointers, '$.latest_event_id', ?)
+                    WHERE task_id = ? AND status = ?
+                    """,
+                    (
+                        new_status,
+                        event.ts.isoformat(),
+                        event.event_id,
+                        event.task_id,
+                        expected_status,
+                    ),
+                )
+                cursor = await conn.execute("SELECT changes()")
+                row = await cursor.fetchone()
+                updated_rows = int(row[0]) if row else 0
+                if updated_rows == 0:
+                    raise TaskStatusConflictError(
+                        f"Task {event.task_id} status mismatch, expected {expected_status}"
+                    )
         else:
             # 不更新状态时只更新 pointers.latest_event_id 和 updated_at
             await conn.execute(

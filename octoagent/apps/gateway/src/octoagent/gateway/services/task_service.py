@@ -40,7 +40,12 @@ from octoagent.core.models.payloads import (
     UserMessagePayload,
 )
 from octoagent.core.store import StoreGroup
-from octoagent.core.store.transaction import append_event_and_update_task, append_event_only
+from octoagent.core.store.transaction import (
+    TaskStatusConflictError,
+    append_event_and_update_task,
+    append_event_only,
+    create_task_with_initial_events,
+)
 from ulid import ULID
 
 log = structlog.get_logger()
@@ -79,7 +84,7 @@ class TaskService:
         trace_id = f"trace-{task_id}"
         scope_id = message.scope_id or f"chat:{message.channel}:{message.thread_id}"
 
-        # 创建 Task projection
+        # 先构建 Task 与初始事件，后续单事务提交（避免 task 与 events 分离落盘）
         task = Task(
             task_id=task_id,
             created_at=now,
@@ -93,10 +98,8 @@ class TaskService:
                 sender_id=message.sender_id,
             ),
         )
-        await self._stores.task_store.create_task(task)
-        await self._stores.conn.commit()
 
-        # 写入 TASK_CREATED 事件
+        # TASK_CREATED 事件
         event_1_id = str(ULID())
         event_1 = Event(
             event_id=event_1_id,
@@ -115,32 +118,8 @@ class TaskService:
             trace_id=trace_id,
             causality=EventCausality(idempotency_key=message.idempotency_key),
         )
-        try:
-            await append_event_only(
-                self._stores.conn,
-                self._stores.event_store,
-                event_1,
-            )
-        except aiosqlite.IntegrityError as e:
-            if self._is_idempotency_conflict(e):
-                # 并发重复请求：清理当前临时 task 并返回已存在 task_id，避免 500
-                await self._stores.conn.execute(
-                    "DELETE FROM tasks WHERE task_id = ?",
-                    (task_id,),
-                )
-                await self._stores.conn.commit()
-                existing_task_id = await self._stores.event_store.check_idempotency_key(
-                    message.idempotency_key
-                )
-                if existing_task_id:
-                    return existing_task_id, False
-            raise
 
-        # 广播 TASK_CREATED 事件
-        if self._sse_hub:
-            await self._sse_hub.broadcast(task_id, event_1)
-
-        # 写入 USER_MESSAGE 事件
+        # USER_MESSAGE 事件
         text_preview = message.text[:MESSAGE_PREVIEW_LENGTH]
         event_2_id = str(ULID())
         event_2 = Event(
@@ -157,11 +136,29 @@ class TaskService:
             ).model_dump(),
             trace_id=trace_id,
         )
-        await append_event_only(
-            self._stores.conn,
-            self._stores.event_store,
-            event_2,
-        )
+
+        # 单事务写入 task + 两条初始事件
+        try:
+            await create_task_with_initial_events(
+                self._stores.conn,
+                self._stores.task_store,
+                self._stores.event_store,
+                task,
+                [event_1, event_2],
+            )
+        except aiosqlite.IntegrityError as e:
+            if self._is_idempotency_conflict(e):
+                # 并发重复请求：回查幂等键并返回已存在 task_id，避免 500
+                existing_task_id = await self._stores.event_store.check_idempotency_key(
+                    message.idempotency_key
+                )
+                if existing_task_id:
+                    return existing_task_id, False
+            raise
+
+        # 广播 TASK_CREATED 事件
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event_1)
 
         # 广播 USER_MESSAGE 事件
         if self._sse_hub:
@@ -238,6 +235,12 @@ class TaskService:
                 task_id, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, trace_id
             )
 
+        except TaskStatusConflictError:
+            log.info(
+                "task_state_conflict_skip_processing",
+                task_id=task_id,
+            )
+            return
         except Exception as e:
             await self._handle_llm_failure(task_id, trace_id, effective_alias, e)
 
@@ -359,9 +362,15 @@ class TaskService:
             if self._sse_hub:
                 await self._sse_hub.broadcast(task_id, failed_event)
 
-            await self._write_state_transition(
-                task_id, TaskStatus.RUNNING, TaskStatus.FAILED, trace_id
-            )
+            try:
+                await self._write_state_transition(
+                    task_id, TaskStatus.RUNNING, TaskStatus.FAILED, trace_id
+                )
+            except TaskStatusConflictError:
+                log.warning(
+                    "skip_failure_transition_due_state_conflict",
+                    task_id=task_id,
+                )
         except Exception as inner_e:
             log.error(
                 "failed_to_record_failure",
@@ -411,6 +420,7 @@ class TaskService:
         event = await self._append_event_and_update_task_with_retry(
             task_id=task_id,
             new_status=to_status.value,
+            expected_status=from_status.value,
             event_builder=lambda seq: Event(
                 event_id=str(ULID()),
                 task_id=task_id,
@@ -492,10 +502,13 @@ class TaskService:
         self,
         task_id: str,
         new_status: str,
+        expected_status: str | None,
         event_builder,
     ) -> Event:
         """写事件并更新 projection，在 task_seq 冲突时重试。"""
         lock = await self._get_task_lock(task_id)
+        cleanup_lock = False
+        result_event: Event | None = None
         async with lock:
             for attempt in range(1, self._max_task_seq_retries + 1):
                 seq = await self._stores.event_store.get_next_task_seq(task_id)
@@ -507,8 +520,14 @@ class TaskService:
                         self._stores.task_store,
                         event,
                         new_status,
+                        expected_status,
                     )
-                    return event
+                    try:
+                        cleanup_lock = TaskStatus(new_status) in TERMINAL_STATES
+                    except ValueError:
+                        cleanup_lock = False
+                    result_event = event
+                    break
                 except aiosqlite.IntegrityError as e:
                     if self._is_task_seq_conflict(e) and attempt < self._max_task_seq_retries:
                         log.warning(
@@ -518,8 +537,22 @@ class TaskService:
                         )
                         continue
                     raise
+            else:
+                raise RuntimeError("failed to append state transition after retries")
+        if cleanup_lock:
+            await self._cleanup_task_lock(task_id)
 
-        raise RuntimeError("failed to append state transition after retries")
+        if result_event is None:
+            raise RuntimeError("failed to append state transition after retries")
+        return result_event
+
+    @classmethod
+    async def _cleanup_task_lock(cls, task_id: str) -> None:
+        """任务终态后清理 lock，避免全局字典无限增长。"""
+        async with cls._task_locks_guard:
+            lock = cls._task_locks.get(task_id)
+            if lock is not None and not lock.locked():
+                cls._task_locks.pop(task_id, None)
 
     async def _force_mark_failed_without_event(self, task_id: str) -> None:
         """兜底：失败事件落盘再次失败时，至少将任务推进到 FAILED，避免卡 RUNNING。"""
@@ -541,6 +574,7 @@ class TaskService:
                 "task_force_failed_without_event",
                 task_id=task_id,
             )
+            await self._cleanup_task_lock(task_id)
         except Exception as e:
             await self._stores.conn.rollback()
             log.error(
