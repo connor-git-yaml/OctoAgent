@@ -110,7 +110,7 @@ class TestLiteLLMClientComplete:
         )
 
         call_kwargs = mock_acompletion.call_args
-        assert call_kwargs.kwargs["model"] == "cheap"
+        assert call_kwargs.kwargs["model"] == "openai/cheap"
 
     @patch("octoagent.provider.client.acompletion")
     async def test_cost_tracked(self, mock_acompletion, client):
