@@ -43,12 +43,15 @@ async def append_event_and_update_task(
                 latest_event_id=event.event_id,
             )
         else:
-            # 即使不更新状态，也更新 latest_event_id 和 updated_at
-            await task_store.update_task_status(
-                task_id=event.task_id,
-                status="",  # 不更新状态时需要特殊处理
-                updated_at=event.ts.isoformat(),
-                latest_event_id=event.event_id,
+            # 不更新状态时只更新 pointers.latest_event_id 和 updated_at
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET updated_at = ?,
+                    pointers = json_set(pointers, '$.latest_event_id', ?)
+                WHERE task_id = ?
+                """,
+                (event.ts.isoformat(), event.event_id, event.task_id),
             )
 
         # 原子提交

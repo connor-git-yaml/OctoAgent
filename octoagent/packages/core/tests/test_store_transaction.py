@@ -136,3 +136,39 @@ class TestTransactionAtomicity:
         current_task = await task_store.get_task("01JTEST000000000000000002")
         assert current_task is not None
         assert current_task.status == TaskStatus.RUNNING
+
+    async def test_append_without_status_keeps_original_status(self, stores):
+        """new_status=None 时不应将状态写成空字符串"""
+        task_store, event_store, conn = stores
+        now = datetime.now(UTC)
+
+        task = Task(
+            task_id="01JTEST000000000000000003",
+            created_at=now,
+            updated_at=now,
+            title="状态保持测试",
+            requester=RequesterInfo(channel="web", sender_id="owner"),
+        )
+        await task_store.create_task(task)
+        await conn.commit()
+
+        event = Event(
+            event_id="01JEVT000000000000000099",
+            task_id="01JTEST000000000000000003",
+            task_seq=1,
+            ts=now,
+            type=EventType.USER_MESSAGE,
+            actor=ActorType.USER,
+            trace_id="trace-003",
+        )
+        await append_event_and_update_task(
+            conn,
+            event_store,
+            task_store,
+            event,
+            new_status=None,
+        )
+
+        updated_task = await task_store.get_task("01JTEST000000000000000003")
+        assert updated_task is not None
+        assert updated_task.status == TaskStatus.CREATED

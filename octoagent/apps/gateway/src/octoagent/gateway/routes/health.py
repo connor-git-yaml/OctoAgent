@@ -59,7 +59,11 @@ async def ready(
         await cursor.fetchone()
         checks["sqlite"] = "ok"
     except Exception as e:
-        checks["sqlite"] = f"error: {str(e)}"
+        log.warning(
+            "ready_sqlite_check_failed",
+            error_type=type(e).__name__,
+        )
+        checks["sqlite"] = "unavailable"
         all_ok = False
 
     # 2. Artifacts 目录检查
@@ -76,7 +80,11 @@ async def ready(
         else:
             checks["artifacts_dir"] = "ok"
     except Exception as e:
-        checks["artifacts_dir"] = f"error: {str(e)}"
+        log.warning(
+            "ready_artifacts_check_failed",
+            error_type=type(e).__name__,
+        )
+        checks["artifacts_dir"] = "unavailable"
         all_ok = False
 
     # 3. 磁盘空间检查

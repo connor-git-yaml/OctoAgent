@@ -7,8 +7,10 @@
 4. 异步启动后台 LLM 处理
 """
 
+import asyncio
 from datetime import UTC, datetime
 
+import aiosqlite
 import structlog
 from octoagent.core.config import (
     MESSAGE_PREVIEW_LENGTH,
@@ -24,6 +26,7 @@ from octoagent.core.models import (
     RequesterInfo,
     Task,
     TaskStatus,
+    TERMINAL_STATES,
     validate_transition,
 )
 from octoagent.core.models.message import NormalizedMessage
@@ -45,6 +48,10 @@ log = structlog.get_logger()
 
 class TaskService:
     """任务业务服务"""
+
+    _task_locks: dict[str, asyncio.Lock] = {}
+    _task_locks_guard = asyncio.Lock()
+    _max_task_seq_retries = 3
 
     def __init__(self, store_group: StoreGroup, sse_hub=None) -> None:
         self._stores = store_group
@@ -108,11 +115,26 @@ class TaskService:
             trace_id=trace_id,
             causality=EventCausality(idempotency_key=message.idempotency_key),
         )
-        await append_event_only(
-            self._stores.conn,
-            self._stores.event_store,
-            event_1,
-        )
+        try:
+            await append_event_only(
+                self._stores.conn,
+                self._stores.event_store,
+                event_1,
+            )
+        except aiosqlite.IntegrityError as e:
+            if self._is_idempotency_conflict(e):
+                # 并发重复请求：清理当前临时 task 并返回已存在 task_id，避免 500
+                await self._stores.conn.execute(
+                    "DELETE FROM tasks WHERE task_id = ?",
+                    (task_id,),
+                )
+                await self._stores.conn.commit()
+                existing_task_id = await self._stores.event_store.check_idempotency_key(
+                    message.idempotency_key
+                )
+                if existing_task_id:
+                    return existing_task_id, False
+            raise
 
         # 广播 TASK_CREATED 事件
         if self._sse_hub:
@@ -181,24 +203,22 @@ class TaskService:
             )
 
             # 2. MODEL_CALL_STARTED 事件
-            now = datetime.now(UTC)
-            seq = await self._stores.event_store.get_next_task_seq(task_id)
             request_summary = f"User asks: {user_text[:100]}"
-            started_event = Event(
-                event_id=str(ULID()),
+            started_event = await self._append_event_only_with_retry(
                 task_id=task_id,
-                task_seq=seq,
-                ts=now,
-                type=EventType.MODEL_CALL_STARTED,
-                actor=ActorType.SYSTEM,
-                payload=ModelCallStartedPayload(
-                    model_alias=effective_alias,
-                    request_summary=request_summary,
-                ).model_dump(),
-                trace_id=trace_id,
-            )
-            await append_event_only(
-                self._stores.conn, self._stores.event_store, started_event
+                event_builder=lambda seq: Event(
+                    event_id=str(ULID()),
+                    task_id=task_id,
+                    task_seq=seq,
+                    ts=datetime.now(UTC),
+                    type=EventType.MODEL_CALL_STARTED,
+                    actor=ActorType.SYSTEM,
+                    payload=ModelCallStartedPayload(
+                        model_alias=effective_alias,
+                        request_summary=request_summary,
+                    ).model_dump(),
+                    trace_id=trace_id,
+                ),
             )
             if self._sse_hub:
                 await self._sse_hub.broadcast(task_id, started_event)
@@ -249,34 +269,34 @@ class TaskService:
             ].decode("utf-8", errors="ignore")
             response_summary = truncated + "... [truncated, see artifact]"
 
-        now = datetime.now(UTC)
-        seq = await self._stores.event_store.get_next_task_seq(task_id)
-        event = Event(
-            event_id=str(ULID()),
+        event = await self._append_event_only_with_retry(
             task_id=task_id,
-            task_seq=seq,
-            ts=now,
-            type=EventType.MODEL_CALL_COMPLETED,
-            actor=ActorType.SYSTEM,
-            payload=ModelCallCompletedPayload(
-                model_alias=llm_result.model_alias,
-                model_name=llm_result.model_name,
-                provider=llm_result.provider,
-                response_summary=response_summary,
-                duration_ms=llm_result.duration_ms,
-                token_usage={
-                    "prompt_tokens": llm_result.token_usage.prompt_tokens,
-                    "completion_tokens": llm_result.token_usage.completion_tokens,
-                    "total_tokens": llm_result.token_usage.total_tokens,
-                },
-                cost_usd=llm_result.cost_usd,
-                cost_unavailable=llm_result.cost_unavailable,
-                is_fallback=llm_result.is_fallback,
-                artifact_ref=artifact_id,
-            ).model_dump(),
-            trace_id=trace_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.MODEL_CALL_COMPLETED,
+                actor=ActorType.SYSTEM,
+                payload=ModelCallCompletedPayload(
+                    model_alias=llm_result.model_alias,
+                    model_name=llm_result.model_name,
+                    provider=llm_result.provider,
+                    response_summary=response_summary,
+                    duration_ms=llm_result.duration_ms,
+                    token_usage={
+                        "prompt_tokens": llm_result.token_usage.prompt_tokens,
+                        "completion_tokens": llm_result.token_usage.completion_tokens,
+                        "total_tokens": llm_result.token_usage.total_tokens,
+                    },
+                    cost_usd=llm_result.cost_usd,
+                    cost_unavailable=llm_result.cost_unavailable,
+                    is_fallback=llm_result.is_fallback,
+                    artifact_ref=artifact_id,
+                ).model_dump(),
+                trace_id=trace_id,
+            ),
         )
-        await append_event_only(self._stores.conn, self._stores.event_store, event)
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
 
@@ -284,24 +304,24 @@ class TaskService:
         self, task_id: str, trace_id: str, artifact_id: str, artifact: Artifact
     ) -> None:
         """写入 ARTIFACT_CREATED 事件"""
-        now = datetime.now(UTC)
-        seq = await self._stores.event_store.get_next_task_seq(task_id)
-        event = Event(
-            event_id=str(ULID()),
+        event = await self._append_event_only_with_retry(
             task_id=task_id,
-            task_seq=seq,
-            ts=now,
-            type=EventType.ARTIFACT_CREATED,
-            actor=ActorType.SYSTEM,
-            payload=ArtifactCreatedPayload(
-                artifact_id=artifact_id,
-                name="llm-response",
-                size=artifact.size,
-                part_count=len(artifact.parts),
-            ).model_dump(),
-            trace_id=trace_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.ARTIFACT_CREATED,
+                actor=ActorType.SYSTEM,
+                payload=ArtifactCreatedPayload(
+                    artifact_id=artifact_id,
+                    name="llm-response",
+                    size=artifact.size,
+                    part_count=len(artifact.parts),
+                ).model_dump(),
+                trace_id=trace_id,
+            ),
         )
-        await append_event_only(self._stores.conn, self._stores.event_store, event)
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
 
@@ -309,30 +329,32 @@ class TaskService:
         self, task_id: str, trace_id: str, model_alias: str, error: Exception
     ) -> None:
         """处理 LLM 调用失败：写入 FAILED 事件并推进到 FAILED 状态"""
-        log.error("llm_processing_failed", task_id=task_id, error=str(error))
+        log.error(
+            "llm_processing_failed",
+            task_id=task_id,
+            error_type=type(error).__name__,
+        )
         try:
-            now = datetime.now(UTC)
-            seq = await self._stores.event_store.get_next_task_seq(task_id)
-            failed_event = Event(
-                event_id=str(ULID()),
+            failed_event = await self._append_event_only_with_retry(
                 task_id=task_id,
-                task_seq=seq,
-                ts=now,
-                type=EventType.MODEL_CALL_FAILED,
-                actor=ActorType.SYSTEM,
-                payload=ModelCallFailedPayload(
-                    model_alias=model_alias,
-                    model_name="",
-                    provider="",
-                    error_type="model",
-                    error_message=str(error),
-                    duration_ms=0,
-                    is_fallback=False,
-                ).model_dump(),
-                trace_id=trace_id,
-            )
-            await append_event_only(
-                self._stores.conn, self._stores.event_store, failed_event
+                event_builder=lambda seq: Event(
+                    event_id=str(ULID()),
+                    task_id=task_id,
+                    task_seq=seq,
+                    ts=datetime.now(UTC),
+                    type=EventType.MODEL_CALL_FAILED,
+                    actor=ActorType.SYSTEM,
+                    payload=ModelCallFailedPayload(
+                        model_alias=model_alias,
+                        model_name="",
+                        provider="",
+                        error_type=type(error).__name__,
+                        error_message="LLM 调用失败，请查看服务端日志",
+                        duration_ms=0,
+                        is_fallback=False,
+                    ).model_dump(),
+                    trace_id=trace_id,
+                ),
             )
             if self._sse_hub:
                 await self._sse_hub.broadcast(task_id, failed_event)
@@ -344,8 +366,9 @@ class TaskService:
             log.error(
                 "failed_to_record_failure",
                 task_id=task_id,
-                error=str(inner_e),
+                error_type=type(inner_e).__name__,
             )
+            await self._force_mark_failed_without_event(task_id)
 
     async def cancel_task(self, task_id: str) -> Task | None:
         """取消任务
@@ -359,8 +382,6 @@ class TaskService:
         task = await self._stores.task_store.get_task(task_id)
         if task is None:
             return None
-
-        from octoagent.core.models.enums import TERMINAL_STATES
 
         if task.status in TERMINAL_STATES:
             raise ValueError(f"Task is already in terminal state: {task.status}")
@@ -387,28 +408,23 @@ class TaskService:
         reason: str = "",
     ) -> Event:
         """写入 STATE_TRANSITION 事件并更新 Task projection"""
-        now = datetime.now(UTC)
-        seq = await self._stores.event_store.get_next_task_seq(task_id)
-        event = Event(
-            event_id=str(ULID()),
+        event = await self._append_event_and_update_task_with_retry(
             task_id=task_id,
-            task_seq=seq,
-            ts=now,
-            type=EventType.STATE_TRANSITION,
-            actor=ActorType.SYSTEM,
-            payload=StateTransitionPayload(
-                from_status=from_status,
-                to_status=to_status,
-                reason=reason,
-            ).model_dump(),
-            trace_id=trace_id,
-        )
-        await append_event_and_update_task(
-            self._stores.conn,
-            self._stores.event_store,
-            self._stores.task_store,
-            event,
-            to_status.value,
+            new_status=to_status.value,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.STATE_TRANSITION,
+                actor=ActorType.SYSTEM,
+                payload=StateTransitionPayload(
+                    from_status=from_status,
+                    to_status=to_status,
+                    reason=reason,
+                ).model_dump(),
+                trace_id=trace_id,
+            ),
         )
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
@@ -421,3 +437,114 @@ class TaskService:
     async def list_tasks(self, status: str | None = None) -> list[Task]:
         """查询任务列表"""
         return await self._stores.task_store.list_tasks(status)
+
+    @classmethod
+    async def _get_task_lock(cls, task_id: str) -> asyncio.Lock:
+        """获取 task 级别锁，序列化同一任务的事件写入。"""
+        async with cls._task_locks_guard:
+            lock = cls._task_locks.get(task_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                cls._task_locks[task_id] = lock
+            return lock
+
+    @staticmethod
+    def _is_task_seq_conflict(error: Exception) -> bool:
+        if not isinstance(error, aiosqlite.IntegrityError):
+            return False
+        text = str(error)
+        return "idx_events_task_seq" in text or "events.task_id, events.task_seq" in text
+
+    @staticmethod
+    def _is_idempotency_conflict(error: Exception) -> bool:
+        if not isinstance(error, aiosqlite.IntegrityError):
+            return False
+        text = str(error)
+        return "idx_events_idempotency_key" in text or "events.idempotency_key" in text
+
+    async def _append_event_only_with_retry(self, task_id: str, event_builder):
+        """写事件并在 task_seq 冲突时重试。"""
+        lock = await self._get_task_lock(task_id)
+        async with lock:
+            for attempt in range(1, self._max_task_seq_retries + 1):
+                seq = await self._stores.event_store.get_next_task_seq(task_id)
+                event = event_builder(seq)
+                try:
+                    await append_event_only(
+                        self._stores.conn,
+                        self._stores.event_store,
+                        event,
+                    )
+                    return event
+                except aiosqlite.IntegrityError as e:
+                    if self._is_task_seq_conflict(e) and attempt < self._max_task_seq_retries:
+                        log.warning(
+                            "task_seq_conflict_retry",
+                            task_id=task_id,
+                            attempt=attempt,
+                        )
+                        continue
+                    raise
+
+        raise RuntimeError("failed to append event after retries")
+
+    async def _append_event_and_update_task_with_retry(
+        self,
+        task_id: str,
+        new_status: str,
+        event_builder,
+    ) -> Event:
+        """写事件并更新 projection，在 task_seq 冲突时重试。"""
+        lock = await self._get_task_lock(task_id)
+        async with lock:
+            for attempt in range(1, self._max_task_seq_retries + 1):
+                seq = await self._stores.event_store.get_next_task_seq(task_id)
+                event = event_builder(seq)
+                try:
+                    await append_event_and_update_task(
+                        self._stores.conn,
+                        self._stores.event_store,
+                        self._stores.task_store,
+                        event,
+                        new_status,
+                    )
+                    return event
+                except aiosqlite.IntegrityError as e:
+                    if self._is_task_seq_conflict(e) and attempt < self._max_task_seq_retries:
+                        log.warning(
+                            "task_seq_conflict_retry",
+                            task_id=task_id,
+                            attempt=attempt,
+                        )
+                        continue
+                    raise
+
+        raise RuntimeError("failed to append state transition after retries")
+
+    async def _force_mark_failed_without_event(self, task_id: str) -> None:
+        """兜底：失败事件落盘再次失败时，至少将任务推进到 FAILED，避免卡 RUNNING。"""
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+        if not validate_transition(task.status, TaskStatus.FAILED):
+            return
+
+        try:
+            await self._stores.task_store.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.FAILED.value,
+                updated_at=datetime.now(UTC).isoformat(),
+                latest_event_id=task.pointers.latest_event_id or "",
+            )
+            await self._stores.conn.commit()
+            log.warning(
+                "task_force_failed_without_event",
+                task_id=task_id,
+            )
+        except Exception as e:
+            await self._stores.conn.rollback()
+            log.error(
+                "task_force_failed_update_error",
+                task_id=task_id,
+                error_type=type(e).__name__,
+            )
