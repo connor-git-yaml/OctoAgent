@@ -780,6 +780,37 @@ SkillSpec:
 5. 工具结果回灌模型（结构化）
 6. 输出最终结果（校验 + 产物）
 
+#### 8.4.3 SkillRunner 演进方向（竞品源码深度分析）
+
+> Agent Zero / OpenClaw 源码深度分析的关键发现，指导 Feature 005 SkillRunner 设计。
+
+##### 循环控制与终止
+
+Agent Zero 使用双层循环（外层 monologue loop + 内层 message_loop），工具可通过返回 `Response(break_loop=True)` 终止内层循环。OctoAgent SkillRunner 应借鉴此模式：
+
+- OutputModel 增加 `complete: bool` 字段，Skill 判定任务完成时主动通知 SkillRunner 停止迭代
+- 重复调用检测：hash 每轮 tool_calls 签名，连续 3 次相同签名触发告警并终止（参考 OpenClaw 4 型循环检测）
+
+##### 异常分流
+
+Agent Zero 使用三层异常处理：InterventionException（暂停等审批）→ RepairableException（重试修复）→ Generic（报告失败）。SkillRunner 应实现类似分流：
+
+- `SkillRepeatError`：可重试（如 LLM 输出格式不符，自动重试含错误反馈）
+- `SkillValidationError`：需修复输入后重试（参考 OpenClaw `ToolInputError` 即时通知 LLM）
+- `ToolExecutionError`：不可恢复，记录并报告
+
+##### 生命周期钩子
+
+Agent Zero 提供 15+ Extension hook 点（monologue_start/end、message_loop_start/end、before/after_llm_call、tool_execute_before/after 等）。SkillRunner 应在关键点提供钩子：
+
+- `skill_start` / `skill_end`：Skill 级可观测
+- `before_llm_call` / `after_llm_call`：模型调用拦截
+- `before_tool_execute` / `after_tool_execute`：工具执行拦截（与 ToolBroker Hook Chain 协作）
+
+##### Context Budget Guard
+
+OpenClaw 的 tool-result-context-guard 在工具返回结果超出 context 预算时自动截断。SkillRunner 应在工具结果回灌前检查 context 预算，超限时使用 artifact 路径引用替代全文。
+
 ---
 
 ### 8.5 Tooling：工具契约 + 动态注入 + 安全门禁
@@ -978,6 +1009,36 @@ Layer 4: Group 级策略（M2+）
 - M1 实现 Layer 1 + Layer 2（Profile + Global）
 - M2 扩展 Layer 3 + Layer 4（Agent + Group）
 - Safe Bins 白名单（参考 OpenClaw `DEFAULT_SAFE_BINS`）：对 exec 类工具，预置安全命令列表（git, python, npm, node 等），匹配白名单的命令可跳过 ask 直接 allow
+
+#### 8.6.5 Policy Engine 演进方向（竞品源码深度分析）
+
+> OpenClaw / AgentStudio / Agent Zero 源码深度分析的关键发现，指导 Feature 006 设计。
+
+##### Label 决策追踪（OpenClaw，高优先级）
+
+OpenClaw 的 Policy Pipeline 每层决策附带 label（如 `{ decision: "allow", label: "workspace:allowlist" }`），完整追溯决策来源。OctoAgent 的 PolicyEngine 每个 Decision 必须包含 label 字段，记录是哪一层、哪条规则产生了该决策。这是审计合规的基础。
+
+##### consumeAllowOnce 原子审批消费（OpenClaw，高优先级）
+
+OpenClaw `exec-approval-manager.ts` 实现原子性一次性审批令牌消费，防止同一审批被重放。配合 15s 宽限期（审批通过后保留 15s，允许迟到的 await 调用找到已解决条目）和幂等注册（同 ID 不重复添加到审批队列）。OctoAgent 直接采用此模式，但审批状态必须持久化到 Event Store（Agent Zero 仅内存存储是反模式）。
+
+##### Provider Pipeline + Fast-Fail（AgentStudio，中优先级）
+
+AgentStudio Pre-Send Guard 的 Provider Pipeline 支持 allow/block/rewrite/require_confirm 四种决策。借鉴点：
+
+- 可插拔 Provider 链式评估
+- block 决策立即短路返回（AgentStudio 未实现此 fast-fail，是反模式）
+- 每个 Provider 声明 `failureStrategy`：`block_on_failure`（强制型）vs `continue_on_failure`（建议型）
+
+##### 前端审批 UX（OpenClaw，中优先级）
+
+OpenClaw 前端提供三按钮决策（Allow Once / Always Allow / Deny）+ 队列 Badge（`"3 pending"`）+ 独立过期倒计时。M1 Approvals 面板直接采用此 UX 模式；Telegram 渠道通过 inline keyboard 实现等价交互。
+
+##### 必须避免的反模式
+
+1. **审批状态非持久化**（Agent Zero）— 进程重启丢失所有审批状态 → 必须写入 Event Store
+2. **轮询等待**（Agent Zero `asyncio.sleep(0.1)`）— CPU 浪费 → 使用 `asyncio.Event` + SSE 事件驱动
+3. **枚举值部分实现**（AgentStudio `require_confirm`）— 定义了 4 种决策但只实现 3 种 → Python 用 exhaustive match + `assert_never()` 确保全覆盖
 
 ---
 
