@@ -816,13 +816,31 @@ ToolMeta:
   - 再由 Policy Engine 过滤
   - 最终注入到 Skill 的可用工具列表（减少工具膨胀）
 
-#### 8.5.4 工具输出压缩（Context GC）
+#### 8.5.4 Tool Profile 分级（M1）
+
+> 参考实现：OpenClaw `tool-catalog.ts` 的 minimal/coding/messaging/full 四级 profile。
+
+Tool Profile 控制不同场景下可用的工具集，作为 Policy Engine 的**第一道过滤层**：
+
+| Profile | 包含工具类型 | 适用场景 |
+|---------|-------------|---------|
+| `minimal` | 只读工具（echo, datetime, status 查询） | 低风险任务、初始对话 |
+| `standard` | 读写工具（file_read, file_write, 数据库查询） | 常规任务 |
+| `full` | 全部工具（含 exec, docker, 外部 API） | 高权限任务（需显式授权） |
+
+- Skill Manifest 通过 `tool_profile` 字段声明所需 Profile（§8.4.1）
+- Orchestrator 可根据任务风险等级动态选择 Profile
+- Profile 过滤在 Policy Engine Pipeline 的 Layer 1 执行（§8.6.4）
+- M1 实现 `minimal` + `standard` 两级；`full` 在 M1.5 引入 Docker 执行后激活
+
+#### 8.5.5 工具输出压缩（Context GC）
 
 规则（建议默认）：
-- 工具输出 > `N` 字符：
+
+- 工具输出 > `max_inline_chars`（默认 4000）字符：
   - 全量输出存 artifact
-  - 生成 summary（通过 LiteLLM `summarizer` alias）
-  - 只把 summary 回灌主上下文
+  - **M1 Phase 1**（Feature 004）：裁切后保留 artifact 路径引用在上下文中（参考 AgentZero `_90_save_tool_call_file.py`，零 LLM 依赖）
+  - **M1 Phase 2**（Feature 005 就绪后）：可选启用 summarizer（通过 cheap alias 生成摘要回灌上下文）
 - 工具输出含敏感信息：
   - 自动 redaction（屏蔽）
   - 存入 Vault 分区（需要授权检索）
@@ -851,22 +869,70 @@ ToolMeta:
 - 对用户已明确授权的场景（如定时任务、低风险工具链），自动批准以减少打扰
 - 策略变更本身是事件，可审计可回滚
 
-#### 8.6.3 审批交互
+#### 8.6.3 审批交互：Two-Phase Approval（M1）
+
+> 参考实现：OpenClaw `exec-approvals.ts` 的 register → wait 双阶段模式。
+
+**Two-Phase 设计**（防并发竞态）：
+
+```python
+# Phase 1: 注册审批请求（立即返回 approval_id，防止竞态）
+approval = await approval_service.register(
+    task_id=..., tool_call=..., risk_explanation=...
+)  # → { approval_id, expires_at }
+
+# Phase 2: 阻塞等待用户决策
+decision = await approval_service.wait_for_decision(
+    approval_id, timeout_s=120
+)  # → allow / deny
+```
+
+- 分离"注册请求"与"等待决策"两个操作，避免同一审批被重复处理
+- 超时默认策略：`deny`（参考 OpenClaw `DEFAULT_ASK_FALLBACK = "deny"`，120s）
+- 用户可配置超时后 escalate（通知 Owner）而非直接 deny
+
+**审批状态流转**：
 
 - 触发 ask：
-  - 写入 APPROVAL_REQUESTED 事件
+  - 写入 APPROVAL_REQUESTED 事件（含 approval_id）
   - task 状态进入 WAITING_APPROVAL
 - 用户批准：
   - 写入 APPROVED 事件
   - task 状态回到 RUNNING，Skill Pipeline 从 gate 节点继续
-  - 审批超时策略（可配）：超时后默认 deny 或 escalate
+- 用户拒绝：
+  - 写入 REJECTED 事件
+  - task 进入终态
+- 超时：
+  - 按配置执行 deny 或 escalate
 
 审批载荷（建议）：
+
 - action summary
 - risk explanation
 - idempotency_key
 - dry_run 结果（若有）
 - rollback/compensation 提示
+
+#### 8.6.4 多层 Policy Pipeline（M1）
+
+> 参考实现：OpenClaw `tool-policy-pipeline.ts` 的 profile → global → agent → group 四层管道。
+
+策略以 Pipeline 形式逐层执行，每层可**收紧**但不可**放松**上层决策：
+
+```
+Layer 1: Tool Profile 过滤（§8.5.4）
+    → 不在当前 Profile 中的工具直接 deny
+Layer 2: Global 规则（§8.6.2 默认策略）
+    → side_effect 驱动的 allow/ask/deny
+Layer 3: Agent 级策略（M2+）
+    → per-agent 工具白名单/黑名单
+Layer 4: Group 级策略（M2+）
+    → per-project / per-channel 策略覆盖
+```
+
+- M1 实现 Layer 1 + Layer 2（Profile + Global）
+- M2 扩展 Layer 3 + Layer 4（Agent + Group）
+- Safe Bins 白名单（参考 OpenClaw `DEFAULT_SAFE_BINS`）：对 exec 类工具，预置安全命令列表（git, python, npm, node 等），匹配白名单的命令可跳过 ask 直接 allow
 
 ---
 
@@ -1002,6 +1068,100 @@ backend：
   - model_alias、provider、latency、tokens、cost
 - per-task 预算阈值触发策略：
   - 超预算 → 降级到 cheap 模型 / 提示用户 / 暂停等待确认
+
+#### 8.9.4 多 Provider 扩展与 Auth Adapter（M1）
+
+> 目标：新增 Provider 时**零代码变更**（仅修改 litellm-config.yaml），同时支持非标准认证模式。
+
+**当前架构**（M0/M1）：
+
+- 业务代码通过语义 alias（`router`/`planner`/...）调用 → AliasRegistry 映射到运行时 group（`cheap`/`main`/`fallback`）→ LiteLLM Proxy 路由到真实模型
+- 新增 Provider 只需在 `litellm-config.yaml` 中添加 `model_list` 条目，支持 100+ Provider（OpenAI、Anthropic、OpenRouter、Azure、Google、本地 Ollama 等）
+- 示例：从 OpenAI 切换到 OpenRouter 仅需修改 `model` 前缀和 `api_key` 环境变量名
+
+**Auth Adapter 抽象层**（M1 基础 + M1.5 增强）：
+
+> 参考实现：OpenClaw（`_references/opensource/openclaw/src/agents/auth-profiles/`）
+> 已验证支持 OpenAI（API Key + Codex OAuth）、Anthropic（Setup Token + API Key）、Google、GitHub Copilot 等。
+
+不同 Provider 存在多种认证模式，需要统一抽象：
+
+| 认证模式 | 代表 Provider | 说明 | OpenClaw 参考 |
+|----------|--------------|------|--------------|
+| 标准 API Key | OpenAI / Anthropic / OpenRouter | `Authorization: Bearer sk-xxx`，LiteLLM 原生支持 | `ApiKeyCredential` type |
+| Setup Token | Anthropic Claude Code | `sk-ant-oat01-...` 格式，有过期时间，需 `claude setup-token` 生成 | `TokenCredential` type |
+| OAuth / Device Flow | OpenAI Codex / Google Gemini CLI | 需要 token 刷新、设备授权流程 | `OAuthCredential` type + pi-ai 库 |
+| 平台托管 | Azure OpenAI / GCP Vertex AI | 需要 Azure AD token 或 GCP service account | LiteLLM Proxy 内置支持 |
+| 本地部署 | Ollama / vLLM / LocalAI | 无认证或自定义 header | 直接配置 `api_base` |
+
+**设计方向**（参考 OpenClaw 双层架构，M1 实现）：
+
+1. **Config / Credential 分离**：
+   - Config 层（`.env` 或 `octoagent.yaml`）：声明 profile 元数据（provider, mode）
+   - Credential 层（`auth-profiles.json`，`.gitignore` 保护）：存储实际凭证
+   - 对齐 Constitution C5（Least Privilege）：凭证与配置物理隔离
+
+2. **三种凭证类型**（对齐 OpenClaw 模型）：
+
+   ```python
+   # packages/provider/auth/credentials.py
+   class ApiKeyCredential(BaseModel):
+       type: Literal["api_key"] = "api_key"
+       provider: str
+       key: SecretStr
+
+   class TokenCredential(BaseModel):
+       type: Literal["token"] = "token"
+       provider: str
+       token: SecretStr
+       expires_at: datetime | None = None  # Setup Token 有过期时间
+
+   class OAuthCredential(BaseModel):
+       type: Literal["oauth"] = "oauth"
+       provider: str
+       access_token: SecretStr
+       refresh_token: SecretStr
+       expires_at: datetime
+   ```
+
+3. **AuthAdapter 接口**（`packages/provider/auth/adapter.py`）：
+
+   ```python
+   class AuthAdapter(ABC):
+       @abstractmethod
+       async def resolve(self) -> str:
+           """返回可用的 API key / access token"""
+       @abstractmethod
+       async def refresh(self) -> str | None:
+           """刷新凭证，返回新 token；不支持刷新返回 None"""
+       @abstractmethod
+       def is_expired(self) -> bool:
+           """检查凭证是否过期"""
+   ```
+
+4. **Handler Chain 模式**（参考 OpenClaw `applyAuthChoice`）：
+   - 每个 Provider 一个 handler，Chain of Responsibility 依次匹配
+   - `octo init` 引导时调用对应 handler 完成认证配置
+   - 运行时解析优先级：显式 profile → auth-profiles.json → 环境变量 → 默认值
+
+5. **Token 自动刷新**（参考 OpenClaw `refreshOAuthTokenWithLock`，M1 实现 Setup Token 过期检测，M2 实现完整 OAuth 刷新）：
+   - 每次 LLM 调用前检查 `expires_at`
+   - 过期时获取文件锁 → 调用 `adapter.refresh()` → 持久化新凭证
+   - 刷新失败时降级到 fallback Provider（对齐 C6）
+   - LiteLLM Proxy 已内置 Azure AD / Vertex AI 刷新，优先复用 Proxy 能力
+   - 仅当 Proxy 不支持的认证模式（如 Codex Device Flow、Anthropic Setup Token）才在应用层实现
+
+6. **凭证注入到 LiteLLM Proxy**：
+   - API Key 类型：写入 `.env.litellm` 环境变量
+   - OAuth/Token 类型：动态更新 Proxy 配置（LiteLLM Proxy 支持 `/model/update` API）
+   - 或通过 `litellm-config.yaml` 的 `get_key_from_env` 配合环境变量刷新
+
+**扩展原则**：
+
+- 业务代码（Kernel/Worker/Skill）永远不感知具体 Provider 或认证方式
+- Provider 变更的影响范围限定在 `litellm-config.yaml` + `.env.litellm`
+- Auth Adapter 变更的影响范围限定在 `packages/provider/auth/`
+- 新增 Provider 只需实现对应 `AuthAdapter` 子类 + 注册到 Handler Chain
 
 ---
 
@@ -1917,6 +2077,84 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
 - 内部服务间通信走 `octo-internal` 网络，**不加密**（Docker bridge 隔离足够）
 - 外部仅暴露 reverse-proxy 的 443/80 端口，其余服务无外部端口
 
+### 12.9 开发者体验（Developer Experience / DX）
+
+> 目标：降低首次部署和日常运维的认知负担，让 `git clone` 到 `第一次成功调用 LLM` 的路径尽可能短。
+> 对齐 Constitution C7（User-in-Control）+ C6（Degrade Gracefully）。
+
+#### 12.9.1 `octo init` — 交互式引导配置（M1）
+
+首次 clone 后，运行 `octo init` 完成环境初始化：
+
+1. **检测运行模式**：提示选择 `echo`（零依赖开发）或 `litellm`（真实 LLM）
+2. **Provider 配置**：
+   - 列出支持的 Provider（OpenRouter / OpenAI / Anthropic / Azure / 本地 Ollama）
+   - 引导填写 API Key，自动生成 `.env.litellm`
+   - 根据选择的 Provider 自动生成对应的 `litellm-config.yaml`（model 前缀 + api_key 环境变量名）
+3. **Master Key 生成**：自动生成随机 `LITELLM_MASTER_KEY`，写入 `.env`
+4. **Docker 检测**：检查 Docker daemon 是否可用，提示安装或跳过（echo 模式不需要）
+5. **输出摘要**：列出生成的文件和下一步操作
+
+产出文件：`.env`、`.env.litellm`、`litellm-config.yaml`（均已在 `.gitignore` 中）
+
+#### 12.9.2 `octo doctor` — 配置诊断（M1）
+
+> 对齐 §16.2 已记录的检查项。
+
+运行 `octo doctor` 执行全面环境健康检查：
+
+```
+$ octo doctor
+
+OctoAgent Environment Check
+────────────────────────────
+✅ Python 3.12.x
+✅ uv installed
+✅ .env exists
+✅ .env.litellm exists
+✅ OCTOAGENT_LLM_MODE = litellm
+✅ LITELLM_PROXY_KEY set (not empty)
+✅ LITELLM_MASTER_KEY matches LITELLM_PROXY_KEY
+✅ Docker daemon running
+✅ litellm-proxy container healthy
+✅ LiteLLM Proxy reachable (http://localhost:4000/health)
+✅ SQLite DB writable
+✅ data/artifacts/ directory exists
+⚠️  OPENROUTER_API_KEY set but not validated (use --live to test)
+
+All checks passed! Run `octo start` to launch.
+```
+
+检查项分级：
+
+- **必须通过**（❌ 阻断启动）：Python 版本、.env 存在、DB 可写
+- **建议通过**（⚠️ 可降级运行）：Docker、Proxy 可达、API Key 有效性
+- `--live` 标志：发送一个 cheap 模型 ping 请求验证端到端连通性
+
+#### 12.9.3 dotenv 自动加载（M1）
+
+当前问题：`uvicorn` 不自动加载 `.env`，开发者必须手动 `source .env`。
+
+解决方案：
+
+- Gateway `main.py` 启动时使用 `python-dotenv` 自动加载 `.env`（已在 M1 依赖中）
+- 加载优先级：环境变量 > `.env` 文件（不覆盖已设置的环境变量）
+- 仅在开发模式加载（生产环境由 Docker `env_file` 注入）
+
+```python
+# apps/gateway/src/octoagent/gateway/main.py
+from dotenv import load_dotenv
+load_dotenv()  # 开发便利；生产环境由容器 env_file 覆盖
+```
+
+#### 12.9.4 `octo start` — 一键启动（M2）
+
+统一启动入口，根据 `.env` 配置自动决定启动方式：
+
+- `echo` 模式：仅启动 Gateway（uvicorn）
+- `litellm` 模式：先确认 litellm-proxy 容器运行 → 启动 Gateway
+- `full` 模式（M2+）：`docker compose up -d` 启动全部服务
+
 ---
 
 ## 13. 测试策略（Testing Strategy）
@@ -2113,15 +2351,25 @@ M0 实现要点与 Blueprint 偏差记录：
 - LLM 使用 Echo 模式直连（非 LiteLLM Proxy），M1 升级仅改 base_url
 - Event payload 遵循最小化原则：摘要 + artifact_ref，原文不入 Event
 
-### M1（最小智能闭环）：LiteLLM + Skill + Tool contract（2 周）
+### M1（最小智能闭环）：LiteLLM + Auth + Skill + Tool contract（2 周）
 
-- [ ] 接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射
+- [x] 接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射 — Feature 002 已交付
+- [x] 语义 alias → 运行时 group 映射 + FallbackManager + 成本双通道记录 — Feature 002 已交付
+- [ ] Auth Adapter + DX 工具（§8.9.4 + §12.9）— Feature 003：完整 Auth 基础设施 + 三种认证模式 + DX 工具
+  - 凭证数据模型（ApiKey/Token/OAuth 三种类型定义）+ AuthAdapter 接口
+  - ApiKeyAdapter（支持 OpenAI、OpenRouter、Anthropic 等标准 API Key Provider）
+  - AnthropicSetupTokenAdapter（`sk-ant-oat01-` 验证 + 24h TTL 过期检测）
+  - CodexOAuthAdapter（Device Flow 授权 → 轮询 → token 交换 → 持久化）
+  - Credential Store（`~/.octoagent/auth-profiles.json` + 文件锁）+ Handler Chain
+  - `octo init` 引导式认证配置（§12.9.1）
+  - `octo doctor` 凭证诊断（§12.9.2）+ dotenv 自动加载（§12.9.3）
+  - 凭证生命周期事件（CREDENTIAL_LOADED / CREDENTIAL_EXPIRED，C2 合规）
 - [ ] 实现 Pydantic Skill Runner（结构化输出）
 - [ ] 工具 schema 反射 + ToolBroker 执行
 - [ ] Policy Engine（allow/ask/deny）+ Approvals UI
 - [ ] 工具输出压缩（summarizer）
 
-交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性。
+交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性；三种认证模式全部就绪（API Key + Setup Token + Codex OAuth）。
 
 验收标准：
 
@@ -2130,6 +2378,9 @@ M0 实现要点与 Blueprint 偏差记录：
 - 工具 schema 自动反射与代码签名一致（contract test 通过）
 - 每次模型调用生成 cost/tokens 事件
 - 语义 alias 路由正确（router/extractor/summarizer -> cheap；planner/executor -> main；fallback -> fallback）
+- Auth：OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
+- Auth：`octo init` 引导新用户完成认证配置，`octo doctor` 诊断凭证状态
+- Auth：凭证不出现在日志/事件/LLM 上下文中（C5 合规）
 
 ### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）
 
@@ -2257,7 +2508,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - [x] CI/测试基础设施：pytest + pytest-asyncio + ruff — M0 已交付（105 tests）
 - [x] 可观测性基础：structlog + Logfire 本地配置 — M0 已交付
 - [ ] Telegram Bot 注册（如 M2 需要接入，提前准备 bot token + allowlist）
-- [ ] 配置诊断工具（建议实现 `octo doctor` 命令：检查 LiteLLM 可达性、Docker daemon、DB 连接）
+- [ ] 配置诊断工具 `octo doctor` + 引导配置 `octo init`（详见 §12.9）
 
 ---
 
