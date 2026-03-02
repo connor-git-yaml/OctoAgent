@@ -2494,6 +2494,12 @@ M0 实现要点与 Blueprint 偏差记录：
 - [ ] Policy Engine（allow/ask/deny）+ Approvals UI — Feature 006（Track C，与 004/005 并行）
 - [ ] 端到端集成 + M1 验收 — Feature 007（004+005+006 完成后串行）
 - [ ] 工具输出压缩（summarizer）— 含在 Feature 004（路径引用）+ 007（可选激活）
+- [ ] Feature 007 集成补齐运行治理能力（随 007 一并交付）：
+  - Task Journal（TASK_MILESTONE / TASK_HEARTBEAT 事件 + 投影视图）
+  - Runner 漂移检测（stale-progress + status drift detector，含修复建议）
+  - Schedule Job Contract（payload 模板 + preflight + retry/backoff + delivery ack）
+  - 运行治理视图（运行中 / 疑似卡死 / 已漂移 / 待审批）
+  - Secret Hygiene 收口（配置快照/运行日志/事件统一脱敏 + 漏检扫描）
 
 交付：能安全调用工具、能审批、能产出 artifacts；模型调用有成本可见性；三种认证模式全部就绪（API Key + Setup Token + OAuth PKCE）。
 
