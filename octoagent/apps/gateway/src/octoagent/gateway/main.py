@@ -29,6 +29,7 @@ from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
 from .routes import approvals, cancel, chat, health, message, stream, tasks
 from .services.llm_service import LLMService
+from .services.task_runner import TaskRunner
 from .services.sse_hub import SSEHub
 from .sse.approval_events import SSEApprovalBroadcaster
 
@@ -107,6 +108,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.llm_service = llm_service
     app.state.alias_registry = alias_registry
     app.state.background_tasks: set[asyncio.Task] = set()
+    app.state.task_runner = TaskRunner(
+        store_group=store_group,
+        sse_hub=app.state.sse_hub,
+        llm_service=llm_service,
+    )
+    await app.state.task_runner.startup()
 
     yield
 
@@ -137,6 +144,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     )
 
     # 关闭：清理数据库连接
+    if hasattr(app.state, "task_runner") and app.state.task_runner:
+        await app.state.task_runner.shutdown()
     if hasattr(app.state, "store_group") and app.state.store_group:
         await app.state.store_group.conn.close()
 

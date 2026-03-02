@@ -347,7 +347,9 @@ class ApprovalRequestedEventPayload(BaseModel):
     tool_args_summary: str  # 脱敏后
     risk_explanation: str
     policy_label: str
+    side_effect_level: str = ""
     expires_at: str  # ISO 格式
+    created_at: str = ""  # ISO 格式
 
 
 class ApprovalResolvedEventPayload(BaseModel):
@@ -358,6 +360,7 @@ class ApprovalResolvedEventPayload(BaseModel):
 
     approval_id: str
     task_id: str
+    tool_name: str = ""
     decision: str  # allow-once / allow-always / deny
     resolved_by: str
     resolved_at: str  # ISO 格式

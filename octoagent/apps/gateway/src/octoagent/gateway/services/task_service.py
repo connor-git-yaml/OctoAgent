@@ -582,3 +582,21 @@ class TaskService:
                 task_id=task_id,
                 error_type=type(e).__name__,
             )
+
+    async def mark_running_task_failed_for_recovery(
+        self,
+        task_id: str,
+        reason: str,
+    ) -> None:
+        """恢复流程使用：将卡在 RUNNING 的任务推进到 FAILED。"""
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            return
+        if task.status != TaskStatus.RUNNING:
+            return
+        await self._handle_llm_failure(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            model_alias="main",
+            error=RuntimeError(reason),
+        )

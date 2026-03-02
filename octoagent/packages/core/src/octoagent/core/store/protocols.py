@@ -63,6 +63,10 @@ class EventStore(Protocol):
         """获取指定任务的下一个 task_seq（MAX+1）"""
         ...
 
+    async def get_all_events(self) -> list[Event]:
+        """查询全部事件（用于启动恢复等全量扫描场景）"""
+        ...
+
     async def check_idempotency_key(self, key: str) -> str | None:
         """检查幂等键是否已存在，返回关联的 task_id 或 None"""
         ...

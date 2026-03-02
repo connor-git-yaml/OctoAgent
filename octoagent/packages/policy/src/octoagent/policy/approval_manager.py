@@ -10,12 +10,15 @@ FR-010 (超时自动 deny), FR-011 (持久化与恢复)。
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+import aiosqlite
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event, EventCausality
+from octoagent.tooling.models import SideEffectLevel
 from ulid import ULID
 
 from .models import (
@@ -41,6 +44,10 @@ class EventStoreProtocol(Protocol):
 
     async def get_next_task_seq(self, task_id: str) -> int:
         """获取指定 task 的下一个序列号"""
+        ...
+
+    async def get_all_events(self) -> list[Any]:
+        """查询全量事件（用于启动恢复）"""
         ...
 
 
@@ -127,13 +134,13 @@ class ApprovalManager:
             )
             return record
 
+        # Event Store 双写（失败时不落内存状态，避免“有 pending 无事件”）
+        await self._write_approval_requested_event(request)
+
         # 创建新的 PendingApproval
         record = ApprovalRecord(request=request)
         pending = PendingApproval(record=record)
         self._pending[request.approval_id] = pending
-
-        # Event Store 双写
-        await self._write_approval_requested_event(request)
 
         # SSE 推送
         await self._broadcast_approval_event(
@@ -236,7 +243,12 @@ class ApprovalManager:
 
         now = datetime.now(UTC)
 
-        # 更新记录
+        # 更新记录（先更新内存态，再写事件；写失败则回滚内存态）
+        prev_status = pending.record.status
+        prev_decision = pending.record.decision
+        prev_resolved_at = pending.record.resolved_at
+        prev_resolved_by = pending.record.resolved_by
+
         if decision == ApprovalDecision.DENY:
             pending.record.status = ApprovalStatus.REJECTED
         else:
@@ -245,6 +257,29 @@ class ApprovalManager:
         pending.record.decision = decision
         pending.record.resolved_at = now
         pending.record.resolved_by = resolved_by
+
+        # Event Store 双写
+        event_type_str = (
+            "APPROVAL_APPROVED"
+            if pending.record.status == ApprovalStatus.APPROVED
+            else "APPROVAL_REJECTED"
+        )
+        try:
+            await self._write_approval_resolved_event(
+                approval_id=approval_id,
+                task_id=pending.record.request.task_id,
+                tool_name=pending.record.request.tool_name,
+                decision=decision,
+                resolved_by=resolved_by,
+                resolved_at=now,
+                event_type_str=event_type_str,
+            )
+        except Exception:
+            pending.record.status = prev_status
+            pending.record.decision = prev_decision
+            pending.record.resolved_at = prev_resolved_at
+            pending.record.resolved_by = prev_resolved_by
+            raise
 
         # 取消超时定时器
         if pending.timer_handle is not None:
@@ -262,21 +297,6 @@ class ApprovalManager:
 
         # 设置 asyncio.Event（唤醒等待方）
         pending.event.set()
-
-        # Event Store 双写
-        event_type_str = (
-            "APPROVAL_APPROVED"
-            if pending.record.status == ApprovalStatus.APPROVED
-            else "APPROVAL_REJECTED"
-        )
-        await self._write_approval_resolved_event(
-            approval_id=approval_id,
-            task_id=pending.record.request.task_id,
-            decision=decision,
-            resolved_by=resolved_by,
-            resolved_at=now,
-            event_type_str=event_type_str,
-        )
 
         # SSE 推送
         await self._broadcast_approval_event(
@@ -371,20 +391,30 @@ class ApprovalManager:
 
         now = datetime.now(UTC)
 
-        # 标记过期
+        # 标记过期（写事件失败则回滚）
+        prev_status = pending.record.status
+        prev_resolved_at = pending.record.resolved_at
+        prev_resolved_by = pending.record.resolved_by
+
         pending.record.status = ApprovalStatus.EXPIRED
         pending.record.resolved_at = now
         pending.record.resolved_by = "system:timeout"
 
+        # Event Store 双写
+        try:
+            await self._write_approval_expired_event(
+                approval_id=approval_id,
+                task_id=pending.record.request.task_id,
+                expired_at=now,
+            )
+        except Exception:
+            pending.record.status = prev_status
+            pending.record.resolved_at = prev_resolved_at
+            pending.record.resolved_by = prev_resolved_by
+            raise
+
         # 唤醒等待方
         pending.event.set()
-
-        # Event Store 双写
-        await self._write_approval_expired_event(
-            approval_id=approval_id,
-            task_id=pending.record.request.task_id,
-            expired_at=now,
-        )
 
         # SSE 推送
         await self._broadcast_approval_event(
@@ -431,50 +461,82 @@ class ApprovalManager:
         Returns:
             恢复的 pending 审批数量
 
-        注: 当前为简化实现，依赖外部传入事件数据。
-        完整实现需要 Event Store 的 query_by_type 方法。
         """
-        # M1 简化实现: 恢复内存中已有的 pending 审批
-        # 完整实现需要从 Event Store 扫描 APPROVAL_REQUESTED 事件
-        # 并检查是否有配对的 APPROVED/REJECTED/EXPIRED 事件
         recovered = 0
         now = datetime.now(UTC)
 
+        getter = getattr(self._event_store, "get_all_events", None) if self._event_store else None
+        if not callable(getter):
+            return await self._recover_from_memory_pending(now)
+
+        self._pending.clear()
+        events = await self._load_events_for_recovery()
+        if not events:
+            logger.info("审批恢复完成: 恢复 %d 个 pending 审批", recovered)
+            return recovered
+
+        requested: dict[str, ApprovalRequest] = {}
+        resolved: set[str] = set()
+
+        for event in events:
+            event_type = event.type
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            if event_type == EventType.APPROVAL_REQUESTED:
+                req = self._approval_request_from_event(event)
+                if req is not None:
+                    requested[req.approval_id] = req
+            elif event_type in {
+                EventType.APPROVAL_APPROVED,
+                EventType.APPROVAL_REJECTED,
+                EventType.APPROVAL_EXPIRED,
+            }:
+                approval_id = str(payload.get("approval_id", "")).strip()
+                if approval_id:
+                    resolved.add(approval_id)
+                decision = str(payload.get("decision", "")).strip()
+                tool_name = str(payload.get("tool_name", "")).strip()
+                if decision == ApprovalDecision.ALLOW_ALWAYS.value and tool_name:
+                    self._allow_always[tool_name] = True
+
+        for approval_id, request in requested.items():
+            if approval_id in resolved:
+                continue
+
+            pending = PendingApproval(record=ApprovalRecord(request=request))
+
+            if request.expires_at < now:
+                pending.record.status = ApprovalStatus.EXPIRED
+                pending.record.resolved_at = now
+                pending.record.resolved_by = "system:recovery-expired"
+                pending.event.set()
+                await self._write_approval_expired_event(
+                    approval_id=approval_id,
+                    task_id=request.task_id,
+                    expired_at=now,
+                )
+                continue
+
+            self._pending[approval_id] = pending
+            self._rearm_timeout_timer(approval_id, request.expires_at, now)
+            recovered += 1
+
+        logger.info("审批恢复完成: 恢复 %d 个 pending 审批", recovered)
+        return recovered
+
+    async def _recover_from_memory_pending(self, now: datetime) -> int:
+        """兼容无 Event Store 场景（测试桩）"""
+        recovered = 0
         for approval_id, pending in list(self._pending.items()):
             if pending.record.status != ApprovalStatus.PENDING:
                 continue
-
-            # 检查是否已过期
             if pending.record.request.expires_at < now:
                 pending.record.status = ApprovalStatus.EXPIRED
                 pending.record.resolved_at = now
                 pending.record.resolved_by = "system:recovery-expired"
                 pending.event.set()
-                logger.info(
-                    "恢复时发现已过期审批: %s",
-                    approval_id,
-                )
                 continue
-
-            # 重建超时定时器
-            remaining = (pending.record.request.expires_at - now).total_seconds()
-            if remaining > 0:
-                try:
-                    loop = asyncio.get_running_loop()
-                    handle = loop.call_later(
-                        remaining,
-                        lambda aid=approval_id: asyncio.ensure_future(
-                            self._handle_timeout(aid)
-                        ),
-                    )
-                    pending.timer_handle = handle
-                except RuntimeError:
-                    pass
-
-            # 重建 asyncio.Event（新的 event 对象）
-            pending.event = asyncio.Event()
+            self._rearm_timeout_timer(approval_id, pending.record.request.expires_at, now)
             recovered += 1
-
         logger.info("审批恢复完成: 恢复 %d 个 pending 审批", recovered)
         return recovered
 
@@ -511,7 +573,7 @@ class ApprovalManager:
         """通用事件写入 helper（减少三个 _write_approval_*_event 的重复代码）"""
         if self._event_store is None:
             return
-        try:
+        for attempt in range(1, 4):
             seq = await self._event_store.get_next_task_seq(task_id)
             event = Event(
                 event_id=str(ULID()),
@@ -524,9 +586,18 @@ class ApprovalManager:
                 trace_id=task_id,
                 causality=EventCausality(idempotency_key=idempotency_key),
             )
-            await self._event_store.append_event(event)
-        except Exception as e:
-            logger.error("写入 %s 事件失败: %s", event_type.value, e)
+            try:
+                await self._event_store.append_event(event)
+                await self._commit_event_store()
+                return
+            except aiosqlite.IntegrityError as e:
+                await self._rollback_event_store()
+                if self._is_task_seq_conflict(e) and attempt < 3:
+                    continue
+                raise
+            except Exception:
+                await self._rollback_event_store()
+                raise
 
     async def _write_approval_requested_event(
         self,
@@ -544,7 +615,9 @@ class ApprovalManager:
                 tool_args_summary=request.tool_args_summary,
                 risk_explanation=request.risk_explanation,
                 policy_label=request.policy_label,
+                side_effect_level=request.side_effect_level.value,
                 expires_at=request.expires_at.isoformat(),
+                created_at=request.created_at.isoformat(),
             ).model_dump(),
             idempotency_key=f"approval-req-{request.approval_id}",
         )
@@ -553,6 +626,7 @@ class ApprovalManager:
         self,
         approval_id: str,
         task_id: str,
+        tool_name: str,
         decision: ApprovalDecision,
         resolved_by: str,
         resolved_at: datetime,
@@ -566,6 +640,7 @@ class ApprovalManager:
             payload=ApprovalResolvedEventPayload(
                 approval_id=approval_id,
                 task_id=task_id,
+                tool_name=tool_name,
                 decision=decision.value,
                 resolved_by=resolved_by,
                 resolved_at=resolved_at.isoformat(),
@@ -612,3 +687,100 @@ class ApprovalManager:
             )
         except Exception as e:
             logger.error("广播 SSE 事件 '%s' 失败: %s", event_type, e)
+
+    async def _load_events_for_recovery(self) -> list[Any]:
+        if self._event_store is None:
+            return []
+        getter = getattr(self._event_store, "get_all_events", None)
+        if not callable(getter):
+            return []
+        events = await getter()
+        return [
+            e
+            for e in events
+            if e.type
+            in {
+                EventType.APPROVAL_REQUESTED,
+                EventType.APPROVAL_APPROVED,
+                EventType.APPROVAL_REJECTED,
+                EventType.APPROVAL_EXPIRED,
+            }
+        ]
+
+    def _approval_request_from_event(self, event: Any) -> ApprovalRequest | None:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        approval_id = str(payload.get("approval_id", "")).strip()
+        task_id = str(payload.get("task_id", "")).strip()
+        tool_name = str(payload.get("tool_name", "")).strip()
+        if not approval_id or not task_id or not tool_name:
+            return None
+
+        expires_at_text = str(payload.get("expires_at", "")).strip()
+        created_at_text = str(payload.get("created_at", "")).strip()
+        try:
+            expires_at = datetime.fromisoformat(expires_at_text)
+        except ValueError:
+            return None
+
+        created_at = event.ts
+        if created_at_text:
+            with contextlib.suppress(ValueError):
+                created_at = datetime.fromisoformat(created_at_text)
+
+        side_effect_raw = str(payload.get("side_effect_level", "")).strip().lower()
+        side_effect = SideEffectLevel.IRREVERSIBLE
+        if side_effect_raw:
+            with contextlib.suppress(ValueError):
+                side_effect = SideEffectLevel(side_effect_raw)
+
+        return ApprovalRequest(
+            approval_id=approval_id,
+            task_id=task_id,
+            tool_name=tool_name,
+            tool_args_summary=str(payload.get("tool_args_summary", "")),
+            risk_explanation=str(payload.get("risk_explanation", "")),
+            policy_label=str(payload.get("policy_label", "")),
+            side_effect_level=side_effect,
+            expires_at=expires_at,
+            created_at=created_at,
+        )
+
+    def _rearm_timeout_timer(
+        self,
+        approval_id: str,
+        expires_at: datetime,
+        now: datetime,
+    ) -> None:
+        remaining = (expires_at - now).total_seconds()
+        if remaining <= 0:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        handle = loop.call_later(
+            remaining,
+            lambda aid=approval_id: asyncio.ensure_future(self._handle_timeout(aid)),
+        )
+        pending = self._pending.get(approval_id)
+        if pending is not None:
+            pending.timer_handle = handle
+            pending.event = asyncio.Event()
+
+    @staticmethod
+    def _is_task_seq_conflict(error: Exception) -> bool:
+        if not isinstance(error, aiosqlite.IntegrityError):
+            return False
+        text = str(error)
+        return "idx_events_task_seq" in text or "events.task_id, events.task_seq" in text
+
+    async def _commit_event_store(self) -> None:
+        conn = getattr(self._event_store, "_conn", None)
+        if conn is not None and hasattr(conn, "commit"):
+            await conn.commit()
+
+    async def _rollback_event_store(self) -> None:
+        conn = getattr(self._event_store, "_conn", None)
+        if conn is not None and hasattr(conn, "rollback"):
+            with contextlib.suppress(Exception):
+                await conn.rollback()

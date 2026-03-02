@@ -64,15 +64,19 @@ async def send_chat_message(
                     hasattr(request.app.state, "llm_service")
                     and request.app.state.llm_service
                 ):
-                    task = asyncio.create_task(
-                        service.process_task_with_llm(
-                            task_id,
-                            body.message,
-                            request.app.state.llm_service,
+                    task_runner = getattr(request.app.state, "task_runner", None)
+                    if task_runner is not None:
+                        await task_runner.enqueue(task_id, body.message)
+                    else:
+                        task = asyncio.create_task(
+                            service.process_task_with_llm(
+                                task_id,
+                                body.message,
+                                request.app.state.llm_service,
+                            )
                         )
-                    )
-                    _background_tasks.add(task)
-                    task.add_done_callback(_background_tasks.discard)
+                        _background_tasks.add(task)
+                        task.add_done_callback(_background_tasks.discard)
         except Exception:
             # 降级: Task 创建失败时仍返回 task_id，记录日志便于排查
             logger.warning("Task 创建失败，降级返回 task_id", exc_info=True)
