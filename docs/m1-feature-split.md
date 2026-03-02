@@ -1,10 +1,10 @@
-# M1 Feature 拆分方案（v6）
+# M1 Feature 拆分方案（v7）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）
 > **依据**: Blueprint §14（M1 定义）+ Feature 001/002/003/003-b 交付经验 + 参考项目调研
-> **状态**: v6 — 007 Phase 1-3 复盘优化与真实联调测试完成，待合并
+> **状态**: v7 — Feature 007 已合并 master，M1 收口完成；M1.5 拆解已启动
 > **日期**: 2026-03-02
-> **变更记录**: v1(2026-02-28) → v2(2026-03-01) Feature 002 已交付，新增 Feature 003 Auth+DX → v3(2026-03-01) Feature 003+003-b 已交付(404 tests)，新增 3-track 并行策略 + Feature 007 集成阶段 → v4(2026-03-01) Feature 004 已交付(607 tests)，新增对标洞见（AZ/OC 对比）+ 005/006/007 借鉴项 → v5(2026-03-02) Feature 005/006 竞品源码深度分析——Agent Zero 循环控制/Extension 钩子/SKILL.md + OpenClaw Policy Pipeline/consumeAllowOnce/循环检测 + AgentStudio Pre-Send Guard 反模式 → v6(2026-03-02) Feature 007 完成 Phase 1-3 复盘优化 + 真实组件联调测试（待合并）
+> **变更记录**: v1(2026-02-28) → v2(2026-03-01) Feature 002 已交付，新增 Feature 003 Auth+DX → v3(2026-03-01) Feature 003+003-b 已交付(404 tests)，新增 3-track 并行策略 + Feature 007 集成阶段 → v4(2026-03-01) Feature 004 已交付(607 tests)，新增对标洞见（AZ/OC 对比）+ 005/006/007 借鉴项 → v5(2026-03-02) Feature 005/006 竞品源码深度分析——Agent Zero 循环控制/Extension 钩子/SKILL.md + OpenClaw Policy Pipeline/consumeAllowOnce/循环检测 + AgentStudio Pre-Send Guard 反模式 → v6(2026-03-02) Feature 007 完成 Phase 1-3 复盘优化 + 真实组件联调测试（待合并） → v7(2026-03-02) Feature 007 已合并 master，新增 M1.5 拆解文档 `docs/m1.5-feature-split.md`
 
 ---
 

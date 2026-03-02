@@ -2489,12 +2489,12 @@ M0 实现要点与 Blueprint 偏差记录：
   - PKCE 生成器 + 本地回调服务器 + Per-Provider OAuth 注册表
   - 多认证路由隔离（HandlerChainResult 路由覆盖）+ Codex Reasoning 配置
   - 环境检测 + 手动粘贴降级 + Token 自动刷新
-- [ ] 工具 schema 反射 + ToolBroker 执行 — Feature 004（Track A，与 005/006 并行）
-- [ ] 实现 Pydantic Skill Runner（结构化输出）— Feature 005（Track B，与 004/006 并行）
-- [ ] Policy Engine（allow/ask/deny）+ Approvals UI — Feature 006（Track C，与 004/005 并行）
-- [ ] 端到端集成 + M1 验收 — Feature 007（004+005+006 完成后串行；进行中：Phase 1-3 优化 + 真实联调测试已完成，待合并）
-- [ ] 工具输出压缩（summarizer）— 含在 Feature 004（路径引用）+ 007（可选激活）
-- [ ] Feature 007 集成补齐运行治理能力（随 007 一并交付）：
+- [x] 工具 schema 反射 + ToolBroker 执行 — Feature 004 已交付
+- [x] 实现 Pydantic Skill Runner（结构化输出）— Feature 005 已交付
+- [x] Policy Engine（allow/ask/deny）+ Approvals UI — Feature 006 已交付
+- [x] 端到端集成 + M1 验收 — Feature 007 已交付并合入 master（2026-03-02）
+- [x] 工具输出压缩（summarizer）— Feature 004（路径引用）+ 007（可选激活）已就绪
+- [x] Feature 007 集成补齐运行治理能力（随 007 一并交付）：
   - Task Journal（TASK_MILESTONE / TASK_HEARTBEAT 事件 + 投影视图）
   - Runner 漂移检测（stale-progress + status drift detector，含修复建议）
   - Schedule Job Contract（payload 模板 + preflight + retry/backoff + delivery ack）
@@ -2515,7 +2515,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - Auth：`octo init` 引导新用户完成认证配置，`octo doctor` 诊断凭证状态
 - Auth：凭证不出现在日志/事件/LLM 上下文中（C5 合规）
 
-Feature 007（进行中）当前验证快照（2026-03-02）：
+Feature 007（已完成）验证快照（2026-03-02）：
 
 - 已新增真实联调测试：`octoagent/tests/integration/test_f007_e2e_integration.py`
 - 已验证链路：`SkillRunner -> ToolBroker -> PolicyCheckHook -> ApprovalManager`
@@ -2524,20 +2524,32 @@ Feature 007（进行中）当前验证快照（2026-03-02）：
 
 ### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）
 
-- [ ] 简化版 Orchestrator（目标理解 + 单 Worker 直连，无多 Worker 派发逻辑）
+- 拆解文档：`docs/m1.5-feature-split.md`（并行化 Feature 规划）
+- [ ] 简化版 Orchestrator（目标理解 + 单活 Worker 直连 + 可扩展派发契约）
 - [ ] 通用 Worker 框架（Free Loop，可调 Skill + ToolBroker）
 - [ ] Checkpoint 基础（node_id + state snapshot，支持”从最后成功 checkpoint 恢复”）
 - [ ] Watchdog 基础（检测无进展 + 自动提醒，策略可配）
 - [ ] Logfire 接入（自动 instrument Pydantic AI + FastAPI）
+- [ ] 插件加载隔离 + 诊断（should-have：诊断先行，进程隔离可后补）
+
+M1.5 执行约束（2026-03-02 调研复核）：
+
+- 控制平面契约必须版本化：`DispatchEnvelope` 至少包含 `contract_version`、`route_reason`、`worker_capability`、`hop_count/max_hops`
+- Checkpoint 恢复必须幂等：定义 checkpoint 与关键事件的事务边界，重复恢复不得重复执行副作用
+- Watchdog 必须有默认阈值：heartbeat 周期、无进展窗口、cooldown 必须内置默认值，并可配置
 
 交付：具备最小自治 Agent 能力——Orchestrator 接收任务、派发 Worker、Worker 自主执行并回传结果；任务可恢复、可监控。
 
 验收标准：
 
 - 用户消息 → Orchestrator 路由 → Worker 执行 → 结果回传 端到端通过
+- `DispatchEnvelope` 版本字段与跳数保护生效（`hop_count <= max_hops`）
 - Worker 中断后可从 checkpoint 恢复，不需全量重跑
+- 重复恢复幂等（不重复执行已落盘副作用）
 - 无进展任务被 watchdog 检测并触发提醒
+- 默认 watchdog 阈值生效（heartbeat/no-progress/cooldown）
 - Logfire 面板可查看 trace 链路（Gateway → Kernel → Worker → LLM）
+- `task_id/trace_id/span_id` 在关键链路透传一致并可校验
 
 ### M2（多渠道与治理）：Telegram + A2A + JobRunner + Memory（3-4 周）
 
