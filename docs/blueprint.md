@@ -2492,7 +2492,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - [ ] 工具 schema 反射 + ToolBroker 执行 — Feature 004（Track A，与 005/006 并行）
 - [ ] 实现 Pydantic Skill Runner（结构化输出）— Feature 005（Track B，与 004/006 并行）
 - [ ] Policy Engine（allow/ask/deny）+ Approvals UI — Feature 006（Track C，与 004/005 并行）
-- [ ] 端到端集成 + M1 验收 — Feature 007（004+005+006 完成后串行）
+- [ ] 端到端集成 + M1 验收 — Feature 007（004+005+006 完成后串行；进行中：Phase 1-3 优化 + 真实联调测试已完成，待合并）
 - [ ] 工具输出压缩（summarizer）— 含在 Feature 004（路径引用）+ 007（可选激活）
 - [ ] Feature 007 集成补齐运行治理能力（随 007 一并交付）：
   - Task Journal（TASK_MILESTONE / TASK_HEARTBEAT 事件 + 投影视图）
@@ -2514,6 +2514,13 @@ M0 实现要点与 Blueprint 偏差记录：
 - Auth：OAuth PKCE 全流程（本地回调 + 手动降级 + Token 自动刷新）
 - Auth：`octo init` 引导新用户完成认证配置，`octo doctor` 诊断凭证状态
 - Auth：凭证不出现在日志/事件/LLM 上下文中（C5 合规）
+
+Feature 007（进行中）当前验证快照（2026-03-02）：
+
+- 已新增真实联调测试：`octoagent/tests/integration/test_f007_e2e_integration.py`
+- 已验证链路：`SkillRunner -> ToolBroker -> PolicyCheckHook -> ApprovalManager`
+- 已验证事件链：`POLICY_DECISION / APPROVAL_REQUESTED / APPROVAL_APPROVED / TOOL_CALL_*`
+- 说明：本轮按范围控制不改 Gateway 主聊天链路（主链路重构移至 M1.5 评估）
 
 ### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）
 
