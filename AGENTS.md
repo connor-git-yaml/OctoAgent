@@ -26,7 +26,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 
 - **Orchestrator**：路由与监督层，永远 Free Loop（目标理解、Worker 派发、全局监督）
 - **Workers**：自治智能体层，永远 Free Loop（自主决策，按需调用 Skill Pipeline）
-- **Skill Pipeline / Graph**：Worker 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
+- **Skill Pipeline / Graph**：Subagent 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
 - **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
 
@@ -133,4 +133,11 @@ octoagent/
 | Telegram | aiogram | 原生 async + 内置 FSM（审批流）+ 与 FastAPI 共享 event loop |
 | Web UI | React + Vite | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway |
 | 可观测 | Logfire + structlog + Event Store | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
+
+## 项目级 Skills（Codex + Claude 通用）
+
+- `milestone-blueprint-split-sync`  
+  - 路径：`skills/milestone-blueprint-split-sync/SKILL.md`  
+  - 用途：把“blueprint 需求提取 -> 里程碑 Feature 并行拆解 -> 调研复核 -> 回写 blueprint -> 一致性校验”固化为可复用流程。  
+  - 触发示例：`使用 [$milestone-blueprint-split-sync](skills/milestone-blueprint-split-sync/SKILL.md) 从 M2/M3 开始拆解并回写 blueprint。`
 

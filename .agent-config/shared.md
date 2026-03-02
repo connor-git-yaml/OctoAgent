@@ -121,3 +121,10 @@ octoagent/
 | Telegram | aiogram | 原生 async + 内置 FSM（审批流）+ 与 FastAPI 共享 event loop |
 | Web UI | React + Vite | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway |
 | 可观测 | Logfire + structlog + Event Store | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
+
+## 项目级 Skills（Codex + Claude 通用）
+
+- `milestone-blueprint-split-sync`  
+  - 路径：`skills/milestone-blueprint-split-sync/SKILL.md`  
+  - 用途：把“blueprint 需求提取 -> 里程碑 Feature 并行拆解 -> 调研复核 -> 回写 blueprint -> 一致性校验”固化为可复用流程。  
+  - 触发示例：`使用 [$milestone-blueprint-split-sync](skills/milestone-blueprint-split-sync/SKILL.md) 从 M2/M3 开始拆解并回写 blueprint。`
