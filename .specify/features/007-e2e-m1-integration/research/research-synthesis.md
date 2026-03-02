@@ -24,7 +24,9 @@
 
 ## 关键风险
 
-- [参考路径缺失] `_references/opensource/agent-zero/python/tools/mcp_tool.py`
+- MCP 参考路径已确认：
+  - `_references/opensource/agent-zero/python/helpers/mcp_handler.py`
+  - `_references/opensource/agent-zero/prompts/agent.system.mcp_tools.md`
 - SkillRunner 真实生产模型客户端暂未统一（本轮使用受控测试客户端验证集成契约）。
 
 ## 执行策略

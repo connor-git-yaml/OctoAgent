@@ -24,7 +24,9 @@
   - `_references/opensource/agent-zero/python/tools/skills_tool.py`
   - `_references/opensource/agent-zero/python/tools/code_execution_tool.py`
 
-[参考路径缺失] `_references/opensource/agent-zero/python/tools/mcp_tool.py`
+[参考路径确认]
+- `_references/opensource/agent-zero/python/helpers/mcp_handler.py`
+- `_references/opensource/agent-zero/prompts/agent.system.mcp_tools.md`
 
 ## 当前代码现状（2026-03-02）
 
@@ -96,7 +98,7 @@
 
 ## 风险与后续
 
-- 风险 1: Blueprint 里“MCP 一等工具注册”引用的 Agent Zero `mcp_tool.py` 在当前参考树缺失。
+- 风险 1: MCP 一等工具原生注册能力仍未纳入 007 实施范围（非路径缺失问题）。
   - 处理: 007 先做本地工具注册路径验证；MCP 原生注册留到 M1.5/后续补充。
 - 风险 2: SkillRunner 生产模型客户端尚无统一实现。
   - 处理: 007 联调测试使用受控 `QueueModelClient`，避免引入网络不稳定性；后续再补真实 StructuredModelClient。
