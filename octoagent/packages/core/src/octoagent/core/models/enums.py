@@ -77,6 +77,11 @@ class EventType(StrEnum):
     TOOL_CALL_COMPLETED = "TOOL_CALL_COMPLETED"
     TOOL_CALL_FAILED = "TOOL_CALL_FAILED"
 
+    # Feature 005: SkillRunner 生命周期事件
+    SKILL_STARTED = "SKILL_STARTED"
+    SKILL_COMPLETED = "SKILL_COMPLETED"
+    SKILL_FAILED = "SKILL_FAILED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""
