@@ -16,6 +16,7 @@ from octoagent.core.config import (
     MESSAGE_PREVIEW_LENGTH,
 )
 from octoagent.core.models import (
+    TERMINAL_STATES,
     ActorType,
     Artifact,
     ArtifactPart,
@@ -26,7 +27,6 @@ from octoagent.core.models import (
     RequesterInfo,
     Task,
     TaskStatus,
-    TERMINAL_STATES,
     validate_transition,
 )
 from octoagent.core.models.message import NormalizedMessage

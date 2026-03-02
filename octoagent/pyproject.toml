@@ -19,6 +19,7 @@ dev = [
     "octoagent-provider",
     "octoagent-gateway",
     "octoagent-tooling",
+    "octoagent-policy",
 ]
 
 [tool.uv.sources]
@@ -26,12 +27,14 @@ octoagent-core = { workspace = true }
 octoagent-provider = { workspace = true }
 octoagent-gateway = { workspace = true }
 octoagent-tooling = { workspace = true }
+octoagent-policy = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "packages/core",
     "packages/provider",
     "packages/tooling",
+    "packages/policy",
     "apps/gateway",
 ]
 
@@ -45,5 +48,5 @@ ignore = ["B008", "B017"]  # B008: FastAPI Depends() 标准模式; B017: 测试�
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages/core/tests", "packages/provider/tests", "packages/tooling/tests", "apps/gateway/tests", "tests"]
+testpaths = ["packages/core/tests", "packages/provider/tests", "packages/tooling/tests", "packages/policy/tests", "apps/gateway/tests", "tests"]
 consider_namespace_packages = true
