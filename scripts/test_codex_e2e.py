@@ -4,10 +4,10 @@
 通过 HandlerChain 解析凭证 + 路由信息，直接调用 ChatGPT backend API。
 验证 JWT OAuth 全链路：CredentialStore → HandlerChain → API 调用。
 
-用法:
-    uv run python scripts/test_codex_e2e.py
-    uv run python scripts/test_codex_e2e.py --prompt "用 Python 写一个快排"
-    uv run python scripts/test_codex_e2e.py --stream
+用法（从 repo 根目录执行）:
+    cd octoagent && uv run python ../scripts/test_codex_e2e.py
+    cd octoagent && uv run python ../scripts/test_codex_e2e.py --prompt "用 Python 写一个快排"
+    cd octoagent && uv run python ../scripts/test_codex_e2e.py --stream
 """
 
 from __future__ import annotations
