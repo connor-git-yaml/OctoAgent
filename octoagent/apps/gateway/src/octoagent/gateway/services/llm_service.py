@@ -53,8 +53,12 @@ class LLMProvider(ABC):
         Feature 002 起使用 FallbackManager + EchoMessageAdapter 替代。
     """
 
+    _SUPPRESS_LLM_PROVIDER_DEPRECATION_WARNING: bool = False
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        if getattr(cls, "_SUPPRESS_LLM_PROVIDER_DEPRECATION_WARNING", False):
+            return
         warnings.warn(
             f"{cls.__name__} 继承自已废弃的 LLMProvider，"
             "请迁移到 FallbackManager + EchoMessageAdapter 模式。",
@@ -75,6 +79,8 @@ class EchoProvider(LLMProvider):
         Feature 002 起使用 EchoMessageAdapter 替代。
         保留供 M0 旧测试兼容。
     """
+
+    _SUPPRESS_LLM_PROVIDER_DEPRECATION_WARNING = True
 
     def __init__(self, model_alias: str = "echo") -> None:
         self._model_alias = model_alias
@@ -103,6 +109,8 @@ class MockProvider(LLMProvider):
     .. deprecated:: 0.2.0
         Feature 002 起使用 Mock ModelCallResult 替代。
     """
+
+    _SUPPRESS_LLM_PROVIDER_DEPRECATION_WARNING = True
 
     def __init__(
         self,
