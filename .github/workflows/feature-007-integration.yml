@@ -1,0 +1,40 @@
+name: feature-007-integration
+
+on:
+  pull_request:
+    paths:
+      - "octoagent/**"
+      - ".github/workflows/feature-007-integration.yml"
+  push:
+    branches:
+      - "master"
+      - "dev"
+      - "feat/**"
+      - "codex/**"
+    paths:
+      - "octoagent/**"
+      - ".github/workflows/feature-007-integration.yml"
+
+jobs:
+  f007-integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: octoagent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Dependencies
+        run: uv sync --dev
+
+      - name: Run Feature 007 Integration Tests
+        run: uv run pytest tests/integration/test_f007_e2e_integration.py -q
