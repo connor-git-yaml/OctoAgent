@@ -8,6 +8,7 @@ members = [
     "octoagent-core",
     "octoagent-gateway",
     "octoagent-provider",
+    "octoagent-skills",
     "octoagent-tooling",
 ]
 
@@ -1024,6 +1025,7 @@ dev = [
     { name = "octoagent-core" },
     { name = "octoagent-gateway" },
     { name = "octoagent-provider" },
+    { name = "octoagent-skills" },
     { name = "octoagent-tooling" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1040,6 +1042,7 @@ dev = [
     { name = "octoagent-core", editable = "packages/core" },
     { name = "octoagent-gateway", editable = "apps/gateway" },
     { name = "octoagent-provider", editable = "packages/provider" },
+    { name = "octoagent-skills", editable = "packages/skills" },
     { name = "octoagent-tooling", editable = "packages/tooling" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
@@ -1147,6 +1150,34 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0,<2.0" },
     { name = "questionary", specifier = ">=2.0,<3.0" },
     { name = "rich", specifier = ">=13.0,<14.0" },
+    { name = "structlog", specifier = ">=25.1,<26.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "octoagent-skills"
+version = "0.1.0"
+source = { editable = "packages/skills" }
+dependencies = [
+    { name = "octoagent-core" },
+    { name = "octoagent-tooling" },
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "octoagent-core", editable = "packages/core" },
+    { name = "octoagent-tooling", editable = "packages/tooling" },
+    { name = "pydantic", specifier = ">=2.10,<3.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "structlog", specifier = ">=25.1,<26.0" },
 ]
 provides-extras = ["dev"]

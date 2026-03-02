@@ -61,6 +61,9 @@ class TestEnums:
         assert EventType.STATE_TRANSITION == "STATE_TRANSITION"
         assert EventType.ARTIFACT_CREATED == "ARTIFACT_CREATED"
         assert EventType.ERROR == "ERROR"
+        assert EventType.SKILL_STARTED == "SKILL_STARTED"
+        assert EventType.SKILL_COMPLETED == "SKILL_COMPLETED"
+        assert EventType.SKILL_FAILED == "SKILL_FAILED"
 
     def test_actor_type_values(self):
         """ActorType 枚举值正确"""
