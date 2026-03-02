@@ -5,6 +5,7 @@ Store 实例通过 app.state 管理，在 lifespan 中初始化/清理。
 
 from fastapi import Request
 from octoagent.core.store import StoreGroup
+from octoagent.policy.approval_manager import ApprovalManager
 
 
 def get_store_group(request: Request) -> StoreGroup:
@@ -15,3 +16,12 @@ def get_store_group(request: Request) -> StoreGroup:
 def get_sse_hub(request: Request):
     """从 app.state 获取 SSEHub 实例"""
     return request.app.state.sse_hub
+
+
+def get_approval_manager(request: Request) -> ApprovalManager:
+    """从 app.state 获取 ApprovalManager 实例
+
+    Feature 006: PolicyEngine 在 lifespan 中初始化，
+    ApprovalManager 通过 PolicyEngine 获取。
+    """
+    return request.app.state.approval_manager

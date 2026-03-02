@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
-from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from octoagent.core.config import get_artifacts_dir, get_db_path
@@ -22,13 +21,15 @@ from octoagent.provider import (
     LiteLLMClient,
     load_provider_config,
 )
+from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .routes import cancel, health, message, stream, tasks
+from .routes import approvals, cancel, chat, health, message, stream, tasks
 from .services.llm_service import LLMService
 from .services.sse_hub import SSEHub
+from .sse.approval_events import SSEApprovalBroadcaster
 
 log = structlog.get_logger()
 
@@ -44,6 +45,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 初始化 SSEHub
     app.state.sse_hub = SSEHub()
+
+    # Feature 006: 初始化 PolicyEngine
+    from octoagent.policy.policy_engine import PolicyEngine
+
+    sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
+    policy_engine = PolicyEngine(
+        event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+        sse_broadcaster=sse_broadcaster,
+    )
+    await policy_engine.startup()
+    app.state.policy_engine = policy_engine
+    app.state.approval_manager = policy_engine.approval_manager
 
     # LLM 服务初始化（根据配置选择模式）
     provider_config = load_provider_config()
@@ -125,6 +138,8 @@ def create_app() -> FastAPI:
     app.include_router(cancel.router, tags=["cancel"])
     app.include_router(stream.router, tags=["stream"])
     app.include_router(health.router, tags=["health"])
+    app.include_router(approvals.router, tags=["approvals"])
+    app.include_router(chat.router, tags=["chat"])
 
     # 挂载前端静态文件（frontend/dist/ -> /）
     # 在所有 API 路由之后挂载，确保 API 优先匹配

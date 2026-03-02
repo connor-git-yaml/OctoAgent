@@ -11,11 +11,13 @@ dependencies = [
     "logfire>=3.0",
     "octoagent-core",
     "octoagent-provider",
+    "octoagent-policy",
 ]
 
 [tool.uv.sources]
 octoagent-core = { workspace = true }
 octoagent-provider = { workspace = true }
+octoagent-policy = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
