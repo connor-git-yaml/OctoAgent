@@ -264,6 +264,10 @@ class EventGenerationHook:
             payload=sanitized_payload,
             trace_id=context.trace_id,
         )
+        append_committed = getattr(self._event_store, "append_event_committed", None)
+        if callable(append_committed):
+            await append_committed(event, update_task_pointer=True)
+            return
         await self._event_store.append_event(event)
 
     async def _emit_failed_event(
@@ -294,4 +298,8 @@ class EventGenerationHook:
             payload=sanitized_payload,
             trace_id=context.trace_id,
         )
+        append_committed = getattr(self._event_store, "append_event_committed", None)
+        if callable(append_committed):
+            await append_committed(event, update_task_pointer=True)
+            return
         await self._event_store.append_event(event)

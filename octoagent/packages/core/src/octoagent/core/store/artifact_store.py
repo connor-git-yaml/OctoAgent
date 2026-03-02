@@ -123,8 +123,8 @@ class SqliteArtifactStore:
 
         # 优先从文件系统读取
         if artifact.storage_ref:
-            file_path = Path(artifact.storage_ref)
-            if file_path.exists():
+            file_path = self._resolve_storage_ref(artifact.storage_ref)
+            if file_path is not None and file_path.exists() and file_path.is_file():
                 return file_path.read_bytes()
 
         # 从 inline content 返回
@@ -137,6 +137,22 @@ class SqliteArtifactStore:
     def _get_artifact_path(self, task_id: str, artifact_id: str) -> Path:
         """获取 Artifact 文件存储路径"""
         return self._artifacts_dir / task_id / artifact_id
+
+    def _resolve_storage_ref(self, storage_ref: str) -> Path | None:
+        """解析并校验 storage_ref，拒绝 artifacts_dir 之外的路径。"""
+        base_dir = self._artifacts_dir.resolve()
+        candidate = Path(storage_ref)
+        if not candidate.is_absolute():
+            candidate = (base_dir / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+
+        try:
+            candidate.relative_to(base_dir)
+        except ValueError:
+            return None
+
+        return candidate
 
     @staticmethod
     def _row_to_artifact(row: aiosqlite.Row) -> Artifact:

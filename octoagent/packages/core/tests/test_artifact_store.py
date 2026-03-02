@@ -143,3 +143,25 @@ class TestArtifactStore:
         artifact_store, _, _ = stores
         result = await artifact_store.get_artifact_content("nonexistent")
         assert result is None
+
+    async def test_storage_ref_path_traversal_rejected(self, stores, tmp_path: Path):
+        """storage_ref 指向 artifacts_dir 外部路径时拒绝读取"""
+        artifact_store, conn, _ = stores
+        now = datetime.now(UTC)
+
+        outside_file = tmp_path / "outside-secret.txt"
+        outside_file.write_text("secret", encoding="utf-8")
+
+        artifact = Artifact(
+            artifact_id="01JART_OUTSIDE_00000000001",
+            task_id="01JTEST_ART_00000000000001",
+            ts=now,
+            name="outside-ref",
+            parts=[ArtifactPart(type=PartType.FILE)],
+            storage_ref=str(outside_file),
+        )
+        await artifact_store.put_artifact(artifact, content=None)
+        await conn.commit()
+
+        result = await artifact_store.get_artifact_content("01JART_OUTSIDE_00000000001")
+        assert result is None

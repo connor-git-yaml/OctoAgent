@@ -436,6 +436,10 @@ class SkillRunner:
             payload=payload,
             trace_id=execution_context.trace_id,
         )
+        append_committed = getattr(self._event_store, "append_event_committed", None)
+        if callable(append_committed):
+            await append_committed(event, update_task_pointer=True)
+            return
         await self._event_store.append_event(event)
 
     async def _emit_skill_started(

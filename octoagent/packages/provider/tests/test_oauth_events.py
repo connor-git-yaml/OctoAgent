@@ -15,13 +15,25 @@ from octoagent.core.models.enums import EventType
 from octoagent.provider.auth.events import emit_oauth_event
 
 
+def _make_event_store() -> AsyncMock:
+    store = AsyncMock()
+    store.get_next_task_seq = AsyncMock(return_value=1)
+    store.append_event = AsyncMock()
+    return store
+
+
+def _get_payload(store: AsyncMock) -> dict:
+    call = store.append_event.call_args
+    event = call.args[0] if call.args else call.kwargs["event"]
+    return event.payload
+
+
 class TestOAuthStartedEvent:
     """OAUTH_STARTED 事件"""
 
     async def test_payload_structure(self) -> None:
         """payload 包含 provider_id, flow_type, environment_mode"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -33,16 +45,14 @@ class TestOAuthStartedEvent:
             },
         )
 
-        mock_store.append.assert_called_once()
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        mock_store.append_event.assert_called_once()
+        payload = _get_payload(mock_store)
         assert payload["provider_id"] == "openai-codex"
         assert payload["flow_type"] == "auth_code_pkce"
         assert payload["environment_mode"] == "auto"
-        event_type = call_kwargs.kwargs.get("event_type") or call_kwargs[1].get(
-            "event_type"
-        )
-        assert event_type == "OAUTH_STARTED"
+        call = mock_store.append_event.call_args
+        event = call.args[0] if call.args else call.kwargs["event"]
+        assert event.type.value == "OAUTH_STARTED"
 
 
 class TestOAuthSucceededEvent:
@@ -50,8 +60,7 @@ class TestOAuthSucceededEvent:
 
     async def test_payload_structure(self) -> None:
         """payload 包含 provider_id, token_type, expires_in, has_refresh_token, has_account_id"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -65,9 +74,8 @@ class TestOAuthSucceededEvent:
             },
         )
 
-        mock_store.append.assert_called_once()
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        mock_store.append_event.assert_called_once()
+        payload = _get_payload(mock_store)
         assert payload["token_type"] == "Bearer"
         assert payload["expires_in"] == 3600
         assert payload["has_refresh_token"] is True
@@ -79,8 +87,7 @@ class TestOAuthFailedEvent:
 
     async def test_payload_structure(self) -> None:
         """payload 包含 provider_id, failure_reason, failure_stage"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -92,9 +99,8 @@ class TestOAuthFailedEvent:
             },
         )
 
-        mock_store.append.assert_called_once()
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        mock_store.append_event.assert_called_once()
+        payload = _get_payload(mock_store)
         assert payload["failure_reason"] == "Token 交换失败"
         assert payload["failure_stage"] == "token_exchange"
 
@@ -104,8 +110,7 @@ class TestOAuthRefreshedEvent:
 
     async def test_payload_structure(self) -> None:
         """payload 包含 provider_id, new_expires_in"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -116,9 +121,8 @@ class TestOAuthRefreshedEvent:
             },
         )
 
-        mock_store.append.assert_called_once()
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        mock_store.append_event.assert_called_once()
+        payload = _get_payload(mock_store)
         assert payload["new_expires_in"] == 7200
 
 
@@ -127,8 +131,7 @@ class TestSensitiveFieldProtection:
 
     async def test_access_token_stripped(self) -> None:
         """access_token 字段会被移除"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -140,14 +143,12 @@ class TestSensitiveFieldProtection:
             },
         )
 
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        payload = _get_payload(mock_store)
         assert "access_token" not in payload
 
     async def test_refresh_token_stripped(self) -> None:
         """refresh_token 字段会被移除"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -159,14 +160,12 @@ class TestSensitiveFieldProtection:
             },
         )
 
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        payload = _get_payload(mock_store)
         assert "refresh_token" not in payload
 
     async def test_code_verifier_stripped(self) -> None:
         """code_verifier 字段会被移除"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -178,14 +177,12 @@ class TestSensitiveFieldProtection:
             },
         )
 
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        payload = _get_payload(mock_store)
         assert "code_verifier" not in payload
 
     async def test_state_stripped(self) -> None:
         """state 字段会被移除"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock()
+        mock_store = _make_event_store()
 
         await emit_oauth_event(
             event_store=mock_store,
@@ -197,8 +194,7 @@ class TestSensitiveFieldProtection:
             },
         )
 
-        call_kwargs = mock_store.append.call_args
-        payload = call_kwargs.kwargs.get("payload") or call_kwargs[1].get("payload")
+        payload = _get_payload(mock_store)
         assert "state" not in payload
 
 
@@ -221,8 +217,8 @@ class TestEventStoreFailureGraceful:
 
     async def test_store_failure_does_not_raise(self) -> None:
         """Event Store 写入失败不阻断"""
-        mock_store = AsyncMock()
-        mock_store.append = AsyncMock(side_effect=RuntimeError("Store unavailable"))
+        mock_store = _make_event_store()
+        mock_store.append_event = AsyncMock(side_effect=RuntimeError("Store unavailable"))
 
         # 不应抛出异常
         await emit_oauth_event(

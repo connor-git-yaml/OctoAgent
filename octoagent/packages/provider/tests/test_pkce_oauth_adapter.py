@@ -170,7 +170,8 @@ class TestRefresh:
         store.set_profile(profile)
 
         mock_event_store = AsyncMock()
-        mock_event_store.append = AsyncMock()
+        mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
+        mock_event_store.append_event = AsyncMock()
 
         adapter = PkceOAuthAdapter(
             credential=credential,
@@ -194,11 +195,11 @@ class TestRefresh:
             await adapter.refresh()
 
         # 验证事件被发射
-        calls = mock_event_store.append.call_args_list
-        event_types = [
-            c.kwargs.get("event_type", c[0][1] if len(c[0]) > 1 else None)
-            for c in calls
-        ]
+        calls = mock_event_store.append_event.call_args_list
+        event_types = []
+        for call in calls:
+            event = call.args[0] if call.args else call.kwargs["event"]
+            event_types.append(event.type.value)
         assert "OAUTH_REFRESHED" in event_types
 
     async def test_invalid_grant_clears_credential(self, tmp_path: Path) -> None:
