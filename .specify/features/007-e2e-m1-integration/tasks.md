@@ -18,3 +18,9 @@
 - [x] T008 执行 Feature 007 新增测试并修复失败。
 - [x] T009 运行关键回归（004/005/006 相关）。
 - [x] T010 产出 verification report（映射 Blueprint §14 M1 核心验收条目）。
+
+## Phase D - 验证闭环补强（Phase 7a/7b）
+
+- [x] T011 产出 Spec 合规审查报告（verification/spec-review.md）。
+- [x] T012 产出代码质量审查报告（verification/quality-review.md）。
+- [x] T013 合并 7a/7b/7c 结果并记录 GATE_VERIFY 决策。
