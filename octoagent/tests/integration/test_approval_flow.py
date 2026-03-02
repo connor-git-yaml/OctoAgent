@@ -283,6 +283,21 @@ class TestPolicyConfigChangedEvent:
         assert payload["old_profile"]["name"] == "default"
         assert payload["new_profile"]["name"] == "strict"
 
+    async def test_update_profile_twice_uses_incremental_task_seq(self) -> None:
+        """连续更新配置时 task_seq 应递增，避免唯一键冲突。"""
+        event_store = MockEventStore()
+        engine = PolicyEngine(
+            profile=DEFAULT_PROFILE,
+            event_store=event_store,
+        )
+
+        await engine.update_profile(STRICT_PROFILE)
+        await engine.update_profile(DEFAULT_PROFILE)
+
+        assert len(event_store.events) >= 2
+        last_two = event_store.events[-2:]
+        assert [event.task_seq for event in last_two] == [1, 2]
+
     async def test_update_profile_diff_calculation(self) -> None:
         """配置差异计算正确"""
         event_store = MockEventStore()

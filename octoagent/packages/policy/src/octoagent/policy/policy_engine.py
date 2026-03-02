@@ -249,35 +249,36 @@ class PolicyEngine:
         if self._event_store is None:
             return
 
-        try:
-            from octoagent.core.models.enums import ActorType, EventType
-            from octoagent.core.models.event import Event, EventCausality
-            from ulid import ULID
+        from octoagent.core.models.enums import ActorType, EventType
+        from octoagent.core.models.event import Event, EventCausality
+        from ulid import ULID
 
-            now = datetime.now(UTC)
+        now = datetime.now(UTC)
+        seq = await self._event_store.get_next_task_seq("system")
 
-            # 计算差异
-            diff = self._compute_profile_diff(old_profile, new_profile)
+        # 计算差异
+        diff = self._compute_profile_diff(old_profile, new_profile)
 
-            event = Event(
-                event_id=str(ULID()),
-                task_id="system",  # 配置变更不关联特定 task
-                task_seq=0,
-                ts=now,
-                type=EventType.POLICY_CONFIG_CHANGED,
-                actor=ActorType.USER,
-                payload={
-                    "old_profile": old_profile.model_dump(),
-                    "new_profile": new_profile.model_dump(),
-                    "diff": diff,
-                    "changed_at": now.isoformat(),
-                },
-                trace_id="system",
-                causality=EventCausality(),
-            )
-            await self._event_store.append_event(event)
-        except Exception as e:
-            logger.error("写入 POLICY_CONFIG_CHANGED 事件失败: %s", e)
+        event = Event(
+            event_id=str(ULID()),
+            task_id="system",  # 配置变更不关联特定 task
+            task_seq=seq,
+            ts=now,
+            type=EventType.POLICY_CONFIG_CHANGED,
+            actor=ActorType.USER,
+            payload={
+                "old_profile": old_profile.model_dump(),
+                "new_profile": new_profile.model_dump(),
+                "diff": diff,
+                "changed_at": now.isoformat(),
+            },
+            trace_id="system",
+            causality=EventCausality(),
+        )
+        await self._event_store.append_event(event)
+        conn = getattr(self._event_store, "_conn", None)
+        if conn is not None and hasattr(conn, "commit"):
+            await conn.commit()
 
     @staticmethod
     def _compute_profile_diff(

@@ -9,11 +9,12 @@ FR-028 (参数脱敏)。
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import aiosqlite
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event, EventCausality
 from octoagent.tooling.models import (
@@ -161,7 +162,7 @@ class PolicyCheckHook:
         expires_at = now + timedelta(seconds=timeout_s)
 
         # 构造审批请求
-        approval_id = str(uuid.uuid4())
+        approval_id = str(ULID())
         request = ApprovalRequest(
             approval_id=approval_id,
             task_id=context.task_id,
@@ -237,7 +238,7 @@ class PolicyCheckHook:
         if self._event_store is None:
             return
 
-        try:
+        for attempt in range(1, 4):
             seq = await self._event_store.get_next_task_seq(context.task_id)
             now = datetime.now(UTC)
 
@@ -268,6 +269,33 @@ class PolicyCheckHook:
                 trace_id=context.trace_id,
                 causality=EventCausality(),
             )
-            await self._event_store.append_event(event)
-        except Exception as e:
-            logger.error("写入 POLICY_DECISION 事件失败: %s", e)
+            try:
+                await self._event_store.append_event(event)
+                await self._commit_event_store()
+                return
+            except aiosqlite.IntegrityError as e:
+                await self._rollback_event_store()
+                if self._is_task_seq_conflict(e) and attempt < 3:
+                    continue
+                raise
+            except Exception:
+                await self._rollback_event_store()
+                raise
+
+    @staticmethod
+    def _is_task_seq_conflict(error: Exception) -> bool:
+        if not isinstance(error, aiosqlite.IntegrityError):
+            return False
+        text = str(error)
+        return "idx_events_task_seq" in text or "events.task_id, events.task_seq" in text
+
+    async def _commit_event_store(self) -> None:
+        conn = getattr(self._event_store, "_conn", None)
+        if conn is not None and hasattr(conn, "commit"):
+            await conn.commit()
+
+    async def _rollback_event_store(self) -> None:
+        conn = getattr(self._event_store, "_conn", None)
+        if conn is not None and hasattr(conn, "rollback"):
+            with contextlib.suppress(Exception):
+                await conn.rollback()

@@ -64,17 +64,21 @@ async def receive_message(
     if created:
         # 异步启动后台 LLM 处理（如果有）
         if hasattr(request.app.state, "llm_service") and request.app.state.llm_service:
-            background_task = asyncio.create_task(
-                service.process_task_with_llm(
-                    task_id,
-                    msg.text,
-                    request.app.state.llm_service,
+            task_runner = getattr(request.app.state, "task_runner", None)
+            if task_runner is not None:
+                await task_runner.enqueue(task_id, msg.text)
+            else:
+                background_task = asyncio.create_task(
+                    service.process_task_with_llm(
+                        task_id,
+                        msg.text,
+                        request.app.state.llm_service,
+                    )
                 )
-            )
-            background_tasks = getattr(request.app.state, "background_tasks", None)
-            if isinstance(background_tasks, set):
-                background_tasks.add(background_task)
-                background_task.add_done_callback(background_tasks.discard)
+                background_tasks = getattr(request.app.state, "background_tasks", None)
+                if isinstance(background_tasks, set):
+                    background_tasks.add(background_task)
+                    background_task.add_done_callback(background_tasks.discard)
 
         return JSONResponse(
             status_code=201,

@@ -11,10 +11,11 @@
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
+from octoagent.core.models import ActorType, Event, EventCausality, EventType
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import (
     ApprovalDecision,
@@ -289,3 +290,115 @@ class TestRecoverFromStore:
 
         recovered = await manager.recover_from_store()
         assert recovered == 1
+
+    async def test_recover_from_event_store_pending(self) -> None:
+        """有 Event Store 时从 APPROVAL_REQUESTED 重建 pending。"""
+
+        class MockRecoveryStore:
+            def __init__(self) -> None:
+                self._events = [
+                    Event(
+                        event_id="evt-req-1",
+                        task_id="task-001",
+                        task_seq=1,
+                        ts=datetime.now(UTC),
+                        type=EventType.APPROVAL_REQUESTED,
+                        actor=ActorType.SYSTEM,
+                        payload={
+                            "approval_id": "recover-001",
+                            "task_id": "task-001",
+                            "tool_name": "shell_exec",
+                            "tool_args_summary": "cmd: echo test",
+                            "risk_explanation": "irreversible",
+                            "policy_label": "global.irreversible",
+                            "side_effect_level": "irreversible",
+                            "expires_at": (
+                                datetime.now(UTC) + timedelta(seconds=600)
+                            ).isoformat(),
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                        trace_id="trace-001",
+                        causality=EventCausality(),
+                    )
+                ]
+
+            async def append_event(self, event):
+                self._events.append(event)
+
+            async def get_next_task_seq(self, task_id: str) -> int:
+                return len(self._events) + 1
+
+            async def get_all_events(self):
+                return self._events
+
+        manager = ApprovalManager(event_store=MockRecoveryStore())
+        recovered = await manager.recover_from_store()
+
+        assert recovered == 1
+        pending = manager.get_pending_approvals()
+        assert len(pending) == 1
+        assert pending[0].request.approval_id == "recover-001"
+
+    async def test_recover_skips_resolved_approval(self) -> None:
+        """APPROVAL_APPROVED 存在时不应恢复为 pending。"""
+
+        now = datetime.now(UTC)
+
+        class MockRecoveryStore:
+            def __init__(self) -> None:
+                self._events = [
+                    Event(
+                        event_id="evt-req-2",
+                        task_id="task-002",
+                        task_seq=1,
+                        ts=now,
+                        type=EventType.APPROVAL_REQUESTED,
+                        actor=ActorType.SYSTEM,
+                        payload={
+                            "approval_id": "recover-002",
+                            "task_id": "task-002",
+                            "tool_name": "shell_exec",
+                            "tool_args_summary": "cmd: echo test",
+                            "risk_explanation": "irreversible",
+                            "policy_label": "global.irreversible",
+                            "side_effect_level": "irreversible",
+                            "expires_at": (now + timedelta(seconds=600)).isoformat(),
+                            "created_at": now.isoformat(),
+                        },
+                        trace_id="trace-002",
+                        causality=EventCausality(),
+                    ),
+                    Event(
+                        event_id="evt-app-2",
+                        task_id="task-002",
+                        task_seq=2,
+                        ts=now,
+                        type=EventType.APPROVAL_APPROVED,
+                        actor=ActorType.USER,
+                        payload={
+                            "approval_id": "recover-002",
+                            "task_id": "task-002",
+                            "tool_name": "shell_exec",
+                            "decision": "allow-once",
+                            "resolved_by": "user:web",
+                            "resolved_at": now.isoformat(),
+                        },
+                        trace_id="trace-002",
+                        causality=EventCausality(),
+                    ),
+                ]
+
+            async def append_event(self, event):
+                self._events.append(event)
+
+            async def get_next_task_seq(self, task_id: str) -> int:
+                return len(self._events) + 1
+
+            async def get_all_events(self):
+                return self._events
+
+        manager = ApprovalManager(event_store=MockRecoveryStore())
+        recovered = await manager.recover_from_store()
+
+        assert recovered == 0
+        assert manager.get_pending_approvals() == []

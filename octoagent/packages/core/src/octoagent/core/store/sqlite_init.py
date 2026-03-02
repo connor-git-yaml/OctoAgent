@@ -82,6 +82,29 @@ _ARTIFACTS_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_artifacts_task_id ON artifacts(task_id);",
 ]
 
+# task_jobs 表 DDL（后台任务可恢复执行）
+_TASK_JOBS_DDL = """
+CREATE TABLE IF NOT EXISTS task_jobs (
+    task_id      TEXT PRIMARY KEY,
+    user_text    TEXT NOT NULL DEFAULT '',
+    model_alias  TEXT,
+    status       TEXT NOT NULL DEFAULT 'QUEUED',
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    last_error   TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    started_at   TEXT,
+    finished_at  TEXT,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
+_TASK_JOBS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_task_jobs_status ON task_jobs(status);",
+    "CREATE INDEX IF NOT EXISTS idx_task_jobs_updated_at ON task_jobs(updated_at DESC);",
+]
+
 
 async def init_db(conn: aiosqlite.Connection) -> None:
     """初始化数据库：设置 PRAGMA + 创建表 + 创建索引
@@ -98,9 +121,10 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_TASKS_DDL)
     await conn.execute(_EVENTS_DDL)
     await conn.execute(_ARTIFACTS_DDL)
+    await conn.execute(_TASK_JOBS_DDL)
 
     # 创建索引
-    for idx_sql in _TASKS_INDEXES + _EVENTS_INDEXES + _ARTIFACTS_INDEXES:
+    for idx_sql in _TASKS_INDEXES + _EVENTS_INDEXES + _ARTIFACTS_INDEXES + _TASK_JOBS_INDEXES:
         await conn.execute(idx_sql)
 
     await conn.commit()
