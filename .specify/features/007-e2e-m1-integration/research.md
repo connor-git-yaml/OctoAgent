@@ -14,8 +14,10 @@
 
 1. 007 应聚焦“集成验收层”，避免把 M1.5 的运行时重构提前到 M1。
 2. 先固化 `SkillRunner -> ToolBroker -> PolicyHook -> Approval` 的测试契约，再考虑 Gateway 主链路切换。
-3. 对 Blueprint 中提及但参考树缺失的 `mcp_tool.py` 保留风险标注，避免基于不存在实现做错误设计。
+3. 对 MCP 一等工具注册保持范围外处理，但保留已确认的参考证据路径，避免基于错误路径做设计。
 
 ## 风险
 
-- [参考路径缺失] `_references/opensource/agent-zero/python/tools/mcp_tool.py`
+- MCP 参考路径已确认：
+  - `_references/opensource/agent-zero/python/helpers/mcp_handler.py`
+  - `_references/opensource/agent-zero/prompts/agent.system.mcp_tools.md`

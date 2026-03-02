@@ -906,7 +906,7 @@ Agent Zero 对代码执行工具使用 4 层超时：`first_output`（30s）/ `b
 Agent Zero 已原生支持 MCP 协议（stdio + SSE），可发现和调用外部 MCP Server 暴露的工具。
 
 - 演进方向：MCP tools 默认注册为 `standard` Profile（可通过配置覆盖为 `privileged`），区分 Tool vs Resource
-- 参考：Agent Zero `python/tools/mcp_tool.py`
+- 参考：Agent Zero `python/helpers/mcp_handler.py`、`prompts/agent.system.mcp_tools.md`
 
 ##### 插件加载隔离 + 诊断（M1.5）
 

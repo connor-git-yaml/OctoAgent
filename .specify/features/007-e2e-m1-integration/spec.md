@@ -27,7 +27,7 @@
 ### OUT
 
 - 不改造 Gateway 聊天主链路为 SkillRunner 驱动（该项归 M1.5/M2）。
-- 不在本轮引入完整 MCP 一等工具注册实现（参考路径缺失，保留风险）。
+- 不在本轮引入完整 MCP 一等工具注册实现（已补齐参考路径，但该能力仍属后续里程碑范围）。
 - 不扩展多渠道（Telegram/WeChat）新能力。
 
 ## 用户故事
@@ -55,7 +55,7 @@
 - **FR-002**: MUST 在集成测试中使用真实 `reflect_tool_schema()` + `@tool_contract`，验证 schema 与函数签名一致。
 - **FR-003**: MUST 验证 irreversible 工具在 Policy 下进入审批流程，并在 approve 后继续执行。
 - **FR-004**: MUST 产出 Feature 007 全套 spec-driver 制品（`spec.md/plan.md/tasks.md/checklists/verification`）。
-- **FR-005**: SHOULD 在 verification report 中明确标注参考实现缺失路径风险（`mcp_tool.py`）。
+- **FR-005**: SHOULD 在 verification report 中明确标注 MCP 原生注册未纳入本轮范围，并给出已对齐参考路径证据（`mcp_handler.py` / `agent.system.mcp_tools.md`）。
 
 ## 设计替代方案评审
 
@@ -90,4 +90,4 @@
 ## 约束与假设
 
 - 假设 004/005/006 的核心能力已在各自 feature 中交付；007 仅负责“联调 + 验收闭环”。
-- 对 `agent-zero/python/tools/mcp_tool.py` 的缺失不做臆造实现，按风险处理。
+- 对 MCP 一等工具注册保持范围外处理，仅记录后续里程碑与参考路径证据，不做臆造实现。

@@ -55,8 +55,9 @@
 
 ## 5. 风险与限制
 
-- [参考路径缺失] `_references/opensource/agent-zero/python/tools/mcp_tool.py`
-  - 影响: 无法对该具体实现做源码级对标。
+- MCP 一等工具原生注册仍未纳入 007 范围（已补齐参考路径）
+  - 参考: `_references/opensource/agent-zero/python/helpers/mcp_handler.py`
+  - 参考: `_references/opensource/agent-zero/prompts/agent.system.mcp_tools.md`
   - 处理: 本轮仅验证本地工具注册与联调路径，MCP 原生一等工具注册留待后续里程碑。
 
 - 运行时主链路未切换到 SkillRunner
