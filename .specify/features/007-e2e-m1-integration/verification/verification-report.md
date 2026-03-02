@@ -16,6 +16,8 @@
 - `.specify/features/007-e2e-m1-integration/plan.md`
 - `.specify/features/007-e2e-m1-integration/tasks.md`
 - `.specify/features/007-e2e-m1-integration/checklists/requirements.md`
+- `.specify/features/007-e2e-m1-integration/verification/spec-review.md`
+- `.specify/features/007-e2e-m1-integration/verification/quality-review.md`
 - `.specify/features/007-e2e-m1-integration/verification/verification-report.md`
 
 ### 本轮更新
@@ -42,7 +44,26 @@
 - 结果: `58 passed`
 - 覆盖: M1 中 002/003 关键能力（alias/cost/auth）
 
-## 4. Blueprint §14 M1 验收映射
+### 静态检查（增量）
+
+- `uv run ruff check apps/gateway/src/octoagent/gateway/services/llm_service.py apps/gateway/tests/test_llm_service_legacy_compat.py tests/integration/test_f007_e2e_integration.py`
+- 结果: `All checks passed`
+
+## 4. Phase 7a/7b 审查结果（[回退:串行]）
+
+### Spec 合规审查（7a）
+
+- 报告: `verification/spec-review.md`
+- 结论: PASS（FR 覆盖率 5/5，100%）
+- 分级: CRITICAL 0 / WARNING 0 / INFO 2
+
+### 代码质量审查（7b）
+
+- 报告: `verification/quality-review.md`
+- 结论: PASS（总体质量 GOOD）
+- 分级: CRITICAL 0 / WARNING 0 / INFO 2
+
+## 5. Blueprint §14 M1 验收映射
 
 | Blueprint 验收条目 | 证据 | 结论 |
 |---|---|---|
@@ -53,7 +74,7 @@
 | 语义 alias 路由正确 | `packages/provider/tests/test_alias.py` | PASS |
 | API Key / Setup Token / OAuth PKCE 核心能力 | `test_api_key_adapter.py` / `test_setup_token_adapter.py` / `test_pkce.py` / `test_codex_oauth_adapter.py` | PASS |
 
-## 5. 风险与限制
+## 6. 风险与限制
 
 - MCP 一等工具原生注册仍未纳入 007 范围（已补齐参考路径）
   - 参考: `_references/opensource/agent-zero/python/helpers/mcp_handler.py`
@@ -63,7 +84,12 @@
 - 运行时主链路未切换到 SkillRunner
   - 说明: 属于有意范围控制（Feature 007 不做主链路重构）。
 
-## 6. 结论与建议
+## 7. GATE_VERIFY 结论
+
+- `[GATE] GATE_VERIFY | policy=balanced | override=无 | decision=PAUSE | reason=关键门禁默认 always`
+- 处置: 用户已明确指令“流程继续往下推进”，本轮按授权继续并收口。
+
+## 8. 结论与建议
 
 - Feature 007 在定义范围内已完成，并提供可复验的测试证据。
 - 建议下一步进入 M1.5 时，再评估是否将 Gateway 主处理链路统一到 SkillRunner 执行平面。
