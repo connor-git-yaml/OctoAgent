@@ -79,14 +79,11 @@ class TestCredentialEventPayload:
         recorded_events: list[dict] = []
 
         class MockEventStore:
-            async def append(
-                self,
-                task_id: str,
-                event_type: str,
-                actor_type: str,
-                payload: dict,
-            ) -> None:
-                recorded_events.append(payload)
+            async def get_next_task_seq(self, task_id: str) -> int:
+                return 1
+
+            async def append_event(self, event) -> None:
+                recorded_events.append(event.payload)
 
         store = MockEventStore()
         await emit_credential_event(

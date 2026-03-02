@@ -108,16 +108,20 @@ async def rebuild_all(
 
     # 3. 临时禁用外键约束，清空 tasks 表后重建
     await conn.execute("PRAGMA foreign_keys = OFF")
-    await conn.execute("DELETE FROM tasks")
+    try:
+        await conn.execute("DELETE FROM tasks")
 
-    # 4. 写入重建后的所有 Task
-    for task in tasks.values():
-        await task_store.create_task(task)
+        # 4. 写入重建后的所有 Task
+        for task in tasks.values():
+            await task_store.create_task(task)
 
-    await conn.commit()
-
-    # 5. 恢复外键约束
-    await conn.execute("PRAGMA foreign_keys = ON")
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        # 5. 无论重建是否成功都恢复外键约束
+        await conn.execute("PRAGMA foreign_keys = ON")
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
     await log.ainfo(

@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import structlog
-from octoagent.core.models.enums import EventType
+from octoagent.core.models.enums import ActorType, EventType
+from octoagent.core.models.event import Event
+from ulid import ULID
 
 log = structlog.get_logger()
 
@@ -27,13 +30,9 @@ _SENSITIVE_FIELDS = frozenset({
 class EventStoreProtocol(Protocol):
     """Event Store 协议（松耦合，不强依赖具体实现）"""
 
-    async def append(
-        self,
-        task_id: str,
-        event_type: str,
-        actor_type: str,
-        payload: dict[str, Any],
-    ) -> Any: ...
+    async def append_event(self, event: Event) -> Any: ...
+
+    async def get_next_task_seq(self, task_id: str) -> int: ...
 
 
 async def emit_credential_event(
@@ -72,10 +71,9 @@ async def emit_credential_event(
     # 写入 Event Store（如果可用）
     if event_store is not None:
         try:
-            await event_store.append(
-                task_id="system",
-                event_type=event_type.value,
-                actor_type="system",
+            await _append_system_event(
+                event_store=event_store,
+                event_type=event_type,
                 payload=payload,
             )
         except Exception as exc:
@@ -135,10 +133,9 @@ async def emit_oauth_event(
     # 写入 Event Store（如果可用）
     if event_store is not None:
         try:
-            await event_store.append(
-                task_id="system",
-                event_type=event_type.value,
-                actor_type="system",
+            await _append_system_event(
+                event_store=event_store,
+                event_type=event_type,
                 payload=safe_payload,
             )
         except Exception as exc:
@@ -148,3 +145,48 @@ async def emit_oauth_event(
                 event_type=event_type.value,
                 error=str(exc),
             )
+
+
+async def _append_system_event(
+    *,
+    event_store: EventStoreProtocol,
+    event_type: EventType,
+    payload: dict[str, Any],
+) -> None:
+    """写入 system task 事件，兼容新旧 EventStore 接口。"""
+    task_id = "system"
+    append_event = getattr(event_store, "append_event", None)
+    get_next_task_seq = getattr(event_store, "get_next_task_seq", None)
+    if callable(append_event) and callable(get_next_task_seq):
+        event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=await get_next_task_seq(task_id),
+            ts=datetime.now(UTC),
+            type=event_type,
+            actor=ActorType.SYSTEM,
+            payload=payload,
+            trace_id="trace-system",
+        )
+        has_committed_api = hasattr(type(event_store), "append_event_committed")
+        if not has_committed_api and hasattr(event_store, "__dict__"):
+            has_committed_api = "append_event_committed" in event_store.__dict__
+
+        if has_committed_api:
+            await event_store.append_event_committed(event, update_task_pointer=False)
+            return
+        await append_event(event)
+        return
+
+    # 兼容旧 mock（append 接口）
+    legacy_append = getattr(event_store, "append", None)
+    if callable(legacy_append):
+        await legacy_append(
+            task_id=task_id,
+            event_type=event_type.value,
+            actor_type="system",
+            payload=payload,
+        )
+        return
+
+    raise AttributeError("event_store does not provide append_event/get_next_task_seq or append")

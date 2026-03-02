@@ -86,6 +86,29 @@ def _make_remote_env() -> EnvironmentContext:
     )
 
 
+def _make_event_store() -> AsyncMock:
+    store = AsyncMock()
+    store.get_next_task_seq = AsyncMock(return_value=1)
+    store.append_event = AsyncMock()
+    return store
+
+
+def _event_types(store: AsyncMock) -> list[str]:
+    types: list[str] = []
+    for call in store.append_event.call_args_list:
+        event = call.args[0] if call.args else call.kwargs["event"]
+        types.append(event.type.value)
+    return types
+
+
+def _first_payload_by_type(store: AsyncMock, event_type: str) -> dict:
+    for call in store.append_event.call_args_list:
+        event = call.args[0] if call.args else call.kwargs["event"]
+        if event.type.value == event_type:
+            return event.payload
+    raise AssertionError(f"未找到事件类型: {event_type}")
+
+
 class TestBuildAuthorizeUrl:
     """build_authorize_url() 测试"""
 
@@ -263,8 +286,7 @@ class TestRunAuthCodePkceFlow:
         registry = _make_registry(config)
         env = _make_local_env()
 
-        mock_event_store = AsyncMock()
-        mock_event_store.append = AsyncMock()
+        mock_event_store = _make_event_store()
 
         curl_resp = {
             "access_token": "token",
@@ -288,8 +310,7 @@ class TestRunAuthCodePkceFlow:
             )
 
         # 至少发射 OAUTH_STARTED 和 OAUTH_SUCCEEDED
-        calls = mock_event_store.append.call_args_list
-        event_types = [c.kwargs.get("event_type") or c[1].get("event_type", c[0][1] if len(c[0]) > 1 else None) for c in calls]
+        event_types = _event_types(mock_event_store)
         assert "OAUTH_STARTED" in event_types
         assert "OAUTH_SUCCEEDED" in event_types
 
@@ -299,8 +320,7 @@ class TestRunAuthCodePkceFlow:
         registry = _make_registry(config)
         env = _make_remote_env()
 
-        mock_event_store = AsyncMock()
-        mock_event_store.append = AsyncMock()
+        mock_event_store = _make_event_store()
 
         with (
             patch("octoagent.provider.auth.oauth_flows.manual_paste_flow") as mock_manual,
@@ -320,21 +340,11 @@ class TestRunAuthCodePkceFlow:
                     event_store=mock_event_store,
                 )
 
-        calls = mock_event_store.append.call_args_list
-        event_types = [
-            c.kwargs.get("event_type")
-            or c[1].get("event_type", c[0][1] if len(c[0]) > 1 else None)
-            for c in calls
-        ]
+        event_types = _event_types(mock_event_store)
         assert "OAUTH_STARTED" in event_types
         assert "OAUTH_FAILED" in event_types
 
-        failed_call = next(
-            c
-            for c in calls
-            if (c.kwargs.get("event_type") or c[1].get("event_type")) == "OAUTH_FAILED"
-        )
-        failed_payload = failed_call.kwargs.get("payload") or failed_call[1].get("payload")
+        failed_payload = _first_payload_by_type(mock_event_store, "OAUTH_FAILED")
         assert failed_payload["failure_stage"] == "manual_callback"
 
     async def test_failed_event_emitted_on_token_exchange_error(self) -> None:
@@ -343,8 +353,7 @@ class TestRunAuthCodePkceFlow:
         registry = _make_registry(config)
         env = _make_local_env()
 
-        mock_event_store = AsyncMock()
-        mock_event_store.append = AsyncMock()
+        mock_event_store = _make_event_store()
 
         with (
             patch("octoagent.provider.auth.oauth_flows.webbrowser.open"),
@@ -371,13 +380,7 @@ class TestRunAuthCodePkceFlow:
                     event_store=mock_event_store,
                 )
 
-        calls = mock_event_store.append.call_args_list
-        failed_call = next(
-            c
-            for c in calls
-            if (c.kwargs.get("event_type") or c[1].get("event_type")) == "OAUTH_FAILED"
-        )
-        failed_payload = failed_call.kwargs.get("payload") or failed_call[1].get("payload")
+        failed_payload = _first_payload_by_type(mock_event_store, "OAUTH_FAILED")
         assert failed_payload["failure_stage"] == "token_exchange"
 
 

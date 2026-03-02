@@ -4,6 +4,7 @@
 task_seq 同一 task 内严格单调递增。
 """
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -18,6 +19,9 @@ class SqliteEventStore:
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
+        self._task_locks: dict[str, asyncio.Lock] = {}
+        self._task_locks_guard = asyncio.Lock()
+        self._max_task_seq_retries = 3
 
     async def append_event(self, event: Event) -> None:
         """追加事件（append-only）
@@ -46,6 +50,57 @@ class SqliteEventStore:
                 event.causality.idempotency_key,
             ),
         )
+
+    async def append_event_committed(
+        self,
+        event: Event,
+        *,
+        update_task_pointer: bool = True,
+    ) -> Event:
+        """追加事件并提交事务（含 task_seq 冲突重试）
+
+        用于非事务聚合场景（如 Skills/Tooling 的单事件写入），
+        在同一连接内完成 append + 可选 pointers 更新 + commit。
+        """
+        lock = await self._get_task_lock(event.task_id)
+        async with lock:
+            current_event = event
+            for attempt in range(1, self._max_task_seq_retries + 1):
+                try:
+                    await self.append_event(current_event)
+                    if update_task_pointer:
+                        await self._conn.execute(
+                            """
+                            UPDATE tasks
+                            SET updated_at = ?,
+                                pointers = json_set(pointers, '$.latest_event_id', ?)
+                            WHERE task_id = ?
+                            """,
+                            (
+                                current_event.ts.isoformat(),
+                                current_event.event_id,
+                                current_event.task_id,
+                            ),
+                        )
+                    await self._conn.commit()
+                    return current_event
+                except aiosqlite.IntegrityError as exc:
+                    await self._conn.rollback()
+                    if (
+                        self._is_task_seq_conflict(exc)
+                        and attempt < self._max_task_seq_retries
+                    ):
+                        next_seq = await self.get_next_task_seq(current_event.task_id)
+                        current_event = current_event.model_copy(
+                            update={"task_seq": next_seq}
+                        )
+                        continue
+                    raise
+                except Exception:
+                    await self._conn.rollback()
+                    raise
+
+        raise RuntimeError("failed to append event after retries")
 
     async def get_events_for_task(self, task_id: str) -> list[Event]:
         """查询指定任务的所有事件，按 task_seq 正序"""
@@ -87,6 +142,21 @@ class SqliteEventStore:
         )
         row = await cursor.fetchone()
         return (row[0] if row else 0) + 1
+
+    @staticmethod
+    def _is_task_seq_conflict(error: Exception) -> bool:
+        if not isinstance(error, aiosqlite.IntegrityError):
+            return False
+        text = str(error)
+        return "idx_events_task_seq" in text or "events.task_id, events.task_seq" in text
+
+    async def _get_task_lock(self, task_id: str) -> asyncio.Lock:
+        async with self._task_locks_guard:
+            lock = self._task_locks.get(task_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._task_locks[task_id] = lock
+            return lock
 
     async def check_idempotency_key(self, key: str) -> str | None:
         """检查幂等键是否已存在

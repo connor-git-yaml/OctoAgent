@@ -10,6 +10,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from octoagent.core.models.enums import (
     ActorType,
@@ -375,3 +376,52 @@ class TestRebuildAll:
         # 验证总任务数
         all_tasks = await ts.list_tasks()
         assert len(all_tasks) == 2
+
+    async def test_rebuild_failure_restores_foreign_keys(self, store_group, monkeypatch):
+        """重建失败时也应恢复 foreign_keys=ON"""
+        conn = store_group.conn
+        es = store_group.event_store
+        ts = store_group.task_store
+
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        task = Task(
+            task_id="TSK_FK_001",
+            created_at=now,
+            updated_at=now,
+            status=TaskStatus.CREATED,
+            title="FK restore",
+            requester=RequesterInfo(channel="web", sender_id="owner"),
+        )
+        await ts.create_task(task)
+        await conn.commit()
+
+        evt = Event(
+            event_id="EVT_FK_001",
+            task_id="TSK_FK_001",
+            task_seq=1,
+            ts=now,
+            type=EventType.TASK_CREATED,
+            actor=ActorType.SYSTEM,
+            payload=TaskCreatedPayload(
+                title="FK restore",
+                thread_id="default",
+                scope_id="",
+                channel="web",
+                sender_id="owner",
+            ).model_dump(),
+            trace_id="trace-TSK_FK_001",
+        )
+        await append_event_only(conn, es, evt)
+
+        async def _boom(_task):
+            raise RuntimeError("inject rebuild failure")
+
+        monkeypatch.setattr(ts, "create_task", _boom)
+
+        with pytest.raises(RuntimeError, match="inject rebuild failure"):
+            await rebuild_all(conn, es, ts)
+
+        cursor = await conn.execute("PRAGMA foreign_keys;")
+        row = await cursor.fetchone()
+        assert row is not None
+        assert int(row[0]) == 1

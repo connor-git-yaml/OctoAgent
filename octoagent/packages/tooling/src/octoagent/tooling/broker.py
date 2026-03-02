@@ -257,7 +257,18 @@ class ToolBroker:
                 )
 
         # 步骤 3: 生成 TOOL_CALL_STARTED 事件
-        await self._emit_started_event(tool_name=tool_name, meta=meta, args=args, context=context)
+        started_ok = await self._emit_started_event(
+            tool_name=tool_name, meta=meta, args=args, context=context
+        )
+        if not started_ok:
+            duration = time.monotonic() - start_time
+            return ToolResult(
+                output="",
+                is_error=True,
+                error="TOOL_CALL_STARTED 事件写入失败，已拒绝执行以避免无审计副作用",
+                duration=duration,
+                tool_name=tool_name,
+            )
 
         # 步骤 4: 执行 before hook 链
         current_args = dict(args)
@@ -442,7 +453,7 @@ class ToolBroker:
         meta: ToolMeta,
         args: dict[str, Any],
         context: ExecutionContext,
-    ) -> None:
+    ) -> bool:
         """生成 TOOL_CALL_STARTED 事件"""
         try:
             # FR-015: 参数摘要经过脱敏处理
@@ -464,9 +475,11 @@ class ToolBroker:
                 payload=sanitized_payload,
                 trace_id=context.trace_id,
             )
-            await self._event_store.append_event(event)
+            await self._persist_event(event)
+            return True
         except Exception as e:
-            logger.warning("failed_to_emit_started_event", error=str(e))
+            logger.error("failed_to_emit_started_event", error=str(e))
+            return False
 
     async def _emit_completed_event(
         self,
@@ -498,9 +511,9 @@ class ToolBroker:
                 payload=sanitized_payload,
                 trace_id=context.trace_id,
             )
-            await self._event_store.append_event(event)
+            await self._persist_event(event)
         except Exception as e:
-            logger.warning("failed_to_emit_completed_event", error=str(e))
+            logger.error("failed_to_emit_completed_event", error=str(e))
 
     async def _emit_failed_event(
         self,
@@ -531,6 +544,14 @@ class ToolBroker:
                 payload=sanitized_payload,
                 trace_id=context.trace_id,
             )
-            await self._event_store.append_event(event)
+            await self._persist_event(event)
         except Exception as e:
-            logger.warning("failed_to_emit_failed_event", error=str(e))
+            logger.error("failed_to_emit_failed_event", error=str(e))
+
+    async def _persist_event(self, event: Event) -> None:
+        """持久化事件：优先使用带提交/重试的实现。"""
+        append_committed = getattr(self._event_store, "append_event_committed", None)
+        if callable(append_committed):
+            await append_committed(event, update_task_pointer=True)
+            return
+        await self._event_store.append_event(event)
