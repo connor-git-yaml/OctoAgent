@@ -6,7 +6,8 @@ POST /api/tasks/{task_id}/cancel: 取消非终态的任务。
 - 409: 任务已在终态
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from octoagent.core.models import TaskStatus
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -26,6 +27,7 @@ class CancelResponse(BaseModel):
 @router.post("/api/tasks/{task_id}/cancel")
 async def cancel_task(
     task_id: str,
+    request: Request,
     store_group=Depends(get_store_group),
     sse_hub=Depends(get_sse_hub),
 ):
@@ -35,11 +37,24 @@ async def cancel_task(
     - 终态任务返回 409 Conflict
     - 不存在的任务返回 404
     """
+    task_runner = getattr(request.app.state, "task_runner", None)
+    if task_runner is not None:
+        await task_runner.cancel_task(task_id)
+
     service = TaskService(store_group, sse_hub)
 
     try:
         task = await service.cancel_task(task_id)
     except ValueError as e:
+        existing = await service.get_task(task_id)
+        if existing is not None and existing.status == TaskStatus.CANCELLED:
+            return JSONResponse(
+                status_code=200,
+                content=CancelResponse(
+                    task_id=existing.task_id,
+                    status=existing.status.value,
+                ).model_dump(),
+            )
         # 任务已在终态
         return JSONResponse(
             status_code=409,

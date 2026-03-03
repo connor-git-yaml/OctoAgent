@@ -16,6 +16,7 @@ class TaskCreatedPayload(BaseModel):
     scope_id: str
     channel: str
     sender_id: str
+    risk_level: str = Field(default="low", description="任务风险等级")
 
 
 class UserMessagePayload(BaseModel):
@@ -100,6 +101,46 @@ class ErrorPayload(BaseModel):
     error_message: str
     recoverable: bool = Field(default=False)
     recovery_hint: str = Field(default="")
+
+
+# Feature 008: Orchestrator 控制平面 Payload 类型
+
+
+class OrchestratorDecisionPayload(BaseModel):
+    """ORCH_DECISION 事件 payload。"""
+
+    contract_version: str = Field(description="派发协议版本")
+    route_reason: str = Field(description="路由理由")
+    worker_capability: str = Field(description="目标 worker 能力")
+    hop_count: int = Field(description="当前跳数")
+    max_hops: int = Field(description="最大跳数")
+    gate_decision: str = Field(description="门禁决策: allow/deny")
+    gate_reason: str = Field(default="", description="门禁决策说明")
+
+
+class WorkerDispatchedPayload(BaseModel):
+    """WORKER_DISPATCHED 事件 payload。"""
+
+    dispatch_id: str = Field(description="派发 ID")
+    worker_id: str = Field(description="worker 标识")
+    worker_capability: str = Field(description="worker 能力")
+    contract_version: str = Field(description="派发协议版本")
+
+
+class WorkerReturnedPayload(BaseModel):
+    """WORKER_RETURNED 事件 payload。"""
+
+    dispatch_id: str = Field(description="派发 ID")
+    worker_id: str = Field(description="worker 标识")
+    status: str = Field(description="worker 返回状态")
+    retryable: bool = Field(description="失败是否可重试")
+    summary: str = Field(description="执行摘要")
+    error_type: str = Field(default="", description="错误类型")
+    error_message: str = Field(default="", description="错误信息")
+    loop_step: int = Field(default=0, description="执行步数")
+    max_steps: int = Field(default=0, description="最大执行步数")
+    backend: str = Field(default="inline", description="执行后端")
+    tool_profile: str = Field(default="standard", description="工具权限级别")
 
 
 # Feature 004: 工具调用 Payload 类型 -- 对齐 FR-014

@@ -114,6 +114,7 @@ class TaskService:
                 scope_id=scope_id,
                 channel=message.channel,
                 sender_id=message.sender_id,
+                risk_level=task.risk_level.value,
             ).model_dump(),
             trace_id=trace_id,
             causality=EventCausality(idempotency_key=message.idempotency_key),
@@ -166,6 +167,43 @@ class TaskService:
 
         return task_id, True
 
+    async def append_user_message(
+        self,
+        task_id: str,
+        text: str,
+        *,
+        sender_id: str = "owner",
+        attachment_count: int = 0,
+    ) -> Event:
+        """向已有任务追加 USER_MESSAGE 事件。"""
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            raise ValueError(f"Task not found: {task_id}")
+
+        trace_id = f"trace-{task_id}"
+        text_preview = text[:MESSAGE_PREVIEW_LENGTH]
+        event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.USER_MESSAGE,
+                actor=ActorType.USER,
+                payload=UserMessagePayload(
+                    text_preview=text_preview,
+                    text_length=len(text),
+                    attachment_count=attachment_count,
+                ).model_dump(),
+                trace_id=trace_id,
+                causality=EventCausality(idempotency_key=f"chat-{task_id}-{ULID()}"),
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+        return event
+
     # 响应摘要截断阈值（对齐 FR-002-CL-4，沿用 M0 8KB 阈值）
     RESPONSE_SUMMARY_MAX_BYTES = 8192
 
@@ -194,10 +232,8 @@ class TaskService:
         trace_id = f"trace-{task_id}"
         effective_alias = model_alias or "main"
         try:
-            # 1. STATE_TRANSITION: CREATED -> RUNNING
-            await self._write_state_transition(
-                task_id, TaskStatus.CREATED, TaskStatus.RUNNING, trace_id
-            )
+            # 1. 进入 RUNNING（支持续对话场景的重复执行）
+            await self._prepare_task_for_processing(task_id, trace_id)
 
             # 2. MODEL_CALL_STARTED 事件
             request_summary = f"User asks: {user_text[:100]}"
@@ -378,6 +414,24 @@ class TaskService:
                 error_type=type(inner_e).__name__,
             )
             await self._force_mark_failed_without_event(task_id)
+
+    async def _prepare_task_for_processing(self, task_id: str, trace_id: str) -> None:
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            raise RuntimeError(f"Task not found: {task_id}")
+        if task.status == TaskStatus.RUNNING:
+            return
+        if task.status in {TaskStatus.CANCELLED, TaskStatus.REJECTED}:
+            raise TaskStatusConflictError(
+                f"Task {task_id} is not runnable from status {task.status}"
+            )
+        await self._write_state_transition(
+            task_id=task_id,
+            from_status=task.status,
+            to_status=TaskStatus.RUNNING,
+            trace_id=trace_id,
+            reason="llm_processing_start",
+        )
 
     async def cancel_task(self, task_id: str) -> Task | None:
         """取消任务
@@ -600,3 +654,37 @@ class TaskService:
             model_alias="main",
             error=RuntimeError(reason),
         )
+
+    async def mark_running_task_cancelled_for_runtime(
+        self,
+        task_id: str,
+        reason: str,
+    ) -> None:
+        """运行时取消流程使用：将任务推进到 CANCELLED。"""
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+
+        try:
+            if task.status == TaskStatus.CREATED:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.CREATED,
+                    to_status=TaskStatus.RUNNING,
+                    trace_id=f"trace-{task_id}",
+                    reason="runtime_cancel_bootstrap",
+                )
+                task = await self._stores.task_store.get_task(task_id)
+                if task is None:
+                    return
+
+            if task.status == TaskStatus.RUNNING:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.RUNNING,
+                    to_status=TaskStatus.CANCELLED,
+                    trace_id=f"trace-{task_id}",
+                    reason=reason,
+                )
+        except TaskStatusConflictError:
+            log.info("task_cancel_conflict_skip", task_id=task_id)

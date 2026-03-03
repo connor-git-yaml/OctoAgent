@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
 
 from ..deps import get_store_group
@@ -22,6 +22,32 @@ router = APIRouter()
 
 # 保存后台任务引用，防止 GC 回收
 _background_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _enqueue_or_run(
+    request: Request,
+    service,
+    task_id: str,
+    message: str,
+) -> None:
+    if not (
+        hasattr(request.app.state, "llm_service")
+        and request.app.state.llm_service
+    ):
+        return
+    task_runner = getattr(request.app.state, "task_runner", None)
+    if task_runner is not None:
+        await task_runner.enqueue(task_id, message)
+        return
+    task = asyncio.create_task(
+        service.process_task_with_llm(
+            task_id,
+            message,
+            request.app.state.llm_service,
+        )
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 @router.post("/api/chat/send", response_model=ChatSendResponse)
@@ -37,6 +63,9 @@ async def send_chat_message(
     """
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
+    from ..services.task_service import TaskService
+
+    service = TaskService(store_group, request.app.state.sse_hub)
 
     # 创建 Task 记录（如果是新对话）
     if not body.task_id:
@@ -52,34 +81,22 @@ async def send_chat_message(
                 idempotency_key=f"chat-{task_id}",
             )
 
-            from ..services.task_service import TaskService
-
-            service = TaskService(store_group, request.app.state.sse_hub)
             created_task_id, created = await service.create_task(msg)
             if created:
                 task_id = created_task_id
-
-                # 异步启动 LLM 处理
-                if (
-                    hasattr(request.app.state, "llm_service")
-                    and request.app.state.llm_service
-                ):
-                    task_runner = getattr(request.app.state, "task_runner", None)
-                    if task_runner is not None:
-                        await task_runner.enqueue(task_id, body.message)
-                    else:
-                        task = asyncio.create_task(
-                            service.process_task_with_llm(
-                                task_id,
-                                body.message,
-                                request.app.state.llm_service,
-                            )
-                        )
-                        _background_tasks.add(task)
-                        task.add_done_callback(_background_tasks.discard)
+                await _enqueue_or_run(request, service, task_id, body.message)
         except Exception:
             # 降级: Task 创建失败时仍返回 task_id，记录日志便于排查
             logger.warning("Task 创建失败，降级返回 task_id", exc_info=True)
+    else:
+        try:
+            await service.append_user_message(task_id=task_id, text=body.message)
+            await _enqueue_or_run(request, service, task_id, body.message)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception:
+            logger.warning("续对话写入失败", exc_info=True)
+            raise
 
     # 构造 stream URL
     stream_url = f"/api/stream/task/{task_id}"

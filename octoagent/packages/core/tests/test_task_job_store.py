@@ -59,3 +59,23 @@ class TestTaskJobStore:
         assert queued[0].task_id == "job-task-002"
         assert len(failed) == 1
         assert failed[0].task_id == "job-task-003"
+
+    async def test_create_job_requeues_terminal_job(self, core_db):
+        await _create_task(core_db, "job-task-004")
+        store = SqliteTaskJobStore(core_db)
+
+        created = await store.create_job("job-task-004", "first")
+        assert created is True
+        await store.mark_running("job-task-004")
+        await store.mark_succeeded("job-task-004")
+
+        requeued = await store.create_job("job-task-004", "second", model_alias="main")
+        assert requeued is True
+
+        job = await store.get_job("job-task-004")
+        assert job is not None
+        assert job.status == "QUEUED"
+        assert job.user_text == "second"
+        assert job.model_alias == "main"
+        assert job.started_at is None
+        assert job.finished_at is None
