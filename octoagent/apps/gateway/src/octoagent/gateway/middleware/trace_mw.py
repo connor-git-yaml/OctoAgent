@@ -32,6 +32,7 @@ class TraceMiddleware(BaseHTTPMiddleware):
                         break
 
         if trace_id:
+            request.state.trace_id = trace_id
             structlog.contextvars.bind_contextvars(trace_id=trace_id)
 
         return await call_next(request)

@@ -11,6 +11,8 @@ from octoagent.tooling.models import (
     ExecutionContext,
     FailMode,
     HookType,
+    RegisterToolResult,
+    RegistryDiagnostic,
     SideEffectLevel,
     ToolCall,
     ToolMeta,
@@ -246,3 +248,43 @@ class TestCheckResult:
         )
         assert result.allowed is False
         assert result.requires_approval is True
+
+
+class TestRegisterToolResult:
+    """RegisterToolResult 数据模型测试"""
+
+    def test_success_result(self) -> None:
+        result = RegisterToolResult(
+            ok=True,
+            tool_name="echo",
+            message="registered",
+        )
+        assert result.ok is True
+        assert result.tool_name == "echo"
+        assert result.error_type is None
+
+    def test_failed_result(self) -> None:
+        result = RegisterToolResult(
+            ok=False,
+            tool_name="echo",
+            message="duplicate",
+            error_type="ToolRegistrationError",
+        )
+        assert result.ok is False
+        assert result.error_type == "ToolRegistrationError"
+
+
+class TestRegistryDiagnostic:
+    """RegistryDiagnostic 数据模型测试"""
+
+    def test_required_fields(self) -> None:
+        from datetime import datetime
+
+        diagnostic = RegistryDiagnostic(
+            tool_name="echo",
+            error_type="ToolRegistrationError",
+            message="duplicate",
+            timestamp=datetime.now(),
+        )
+        assert diagnostic.tool_name == "echo"
+        assert diagnostic.error_type == "ToolRegistrationError"
