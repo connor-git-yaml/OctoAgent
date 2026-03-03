@@ -227,3 +227,104 @@ class ResumeFailedPayload(BaseModel):
     failure_type: str = Field(description="失败类型")
     failure_message: str = Field(description="失败信息")
     recovery_hint: str = Field(default="", description="恢复建议")
+
+
+# Feature 011: Watchdog + Task Journal Payload 类型（FR-002, FR-003）
+
+
+class TaskHeartbeatPayload(BaseModel):
+    """TASK_HEARTBEAT 事件 payload（FR-003）
+
+    Worker 在执行关键节点主动写入，用于 Watchdog 进度感知。
+    写入时间戳由服务端 UTC 时间确定，不依赖客户端时间。
+    """
+
+    task_id: str = Field(description="任务 ID")
+    trace_id: str = Field(description="关联 trace ID")
+    heartbeat_ts: str = Field(description="心跳时间戳（UTC ISO 8601）")
+    loop_step: int | None = Field(
+        default=None,
+        description="当前执行步骤编号（Free Loop 循环计数）",
+    )
+    note: str = Field(default="", description="心跳备注（可选摘要）")
+
+
+class TaskMilestonePayload(BaseModel):
+    """TASK_MILESTONE 事件 payload（FR-001）
+
+    Worker 在完成重要阶段时主动写入，标记可观察的进展节点。
+    """
+
+    task_id: str = Field(description="任务 ID")
+    trace_id: str = Field(description="关联 trace ID")
+    milestone_name: str = Field(description="里程碑名称（如 'data_fetched'）")
+    milestone_ts: str = Field(description="里程碑完成时间戳（UTC ISO 8601）")
+    summary: str = Field(default="", description="里程碑完成摘要")
+    artifact_ref: str | None = Field(
+        default=None,
+        description="关联产物引用（可选）",
+    )
+
+
+from typing import Literal  # noqa: E402
+
+DriftType = Literal["no_progress", "state_machine_stall", "repeated_failure"]
+
+
+class TaskDriftDetectedPayload(BaseModel):
+    """TASK_DRIFT_DETECTED 事件 payload（FR-002, FR-019）
+
+    Watchdog Scanner 检测到漂移时写入，payload 包含诊断摘要。
+    详细诊断信息通过 artifact_ref 引用访问，不直接内联（Constitution 原则 11）。
+    """
+
+    # 必填诊断字段（FR-002）
+    drift_type: DriftType = Field(
+        description="漂移类型: no_progress / state_machine_stall / repeated_failure",
+    )
+    detected_at: str = Field(description="检测触发时间（UTC ISO 8601）")
+    task_id: str = Field(description="被检测任务 ID")
+    trace_id: str = Field(description="继承被检测任务的 trace_id")
+
+    # 诊断时间字段
+    last_progress_ts: str | None = Field(
+        default=None,
+        description="最近进展事件时间戳（UTC ISO 8601），无则为 None",
+    )
+    stall_duration_seconds: float = Field(
+        description="卡死/驻留持续时长（秒）",
+    )
+
+    # 操作建议
+    suggested_actions: list[str] = Field(
+        description="可执行的建议动作列表（如 ['cancel_task', 'check_worker_logs']）",
+    )
+
+    # 详细诊断 artifact 引用（Context Hygiene，Constitution 原则 11）
+    artifact_ref: str | None = Field(
+        default=None,
+        description="详细诊断信息的 Artifact 引用 ID，完整内容不内联于 payload",
+    )
+
+    # Logfire / OTel 预留字段（FR-021）
+    # F012 接入前为空字符串占位，不填入真实 span_id
+    watchdog_span_id: str = Field(
+        default="",
+        description="Watchdog 扫描 span_id（F012 接入前为空字符串占位）",
+    )
+
+    # 重复失败模式专属字段（drift_type == 'repeated_failure' 时有值）
+    failure_count: int | None = Field(
+        default=None,
+        description="时间窗口内失败事件次数（重复失败模式专属）",
+    )
+    failure_event_types: list[str] = Field(
+        default_factory=list,
+        description="失败事件类型统计列表（重复失败模式专属）",
+    )
+
+    # 状态机漂移专属字段（drift_type == 'state_machine_stall' 时有值）
+    current_status: str | None = Field(
+        default=None,
+        description="当前任务状态名称（状态机漂移模式专属，使用内部完整 TaskStatus）",
+    )

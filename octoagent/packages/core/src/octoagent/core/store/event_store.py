@@ -179,6 +179,64 @@ class SqliteEventStore:
         rows = await cursor.fetchall()
         return [self._row_to_event(row) for row in rows]
 
+    async def get_latest_event_ts(self, task_id: str) -> datetime | None:
+        """获取指定任务的最新事件时间戳（Feature 011 FR-009 支撑接口）
+
+        利用 idx_events_type_ts 索引高效查询最大 ts。
+
+        Args:
+            task_id: 任务 ID
+
+        Returns:
+            最新事件时间戳，若无事件则返回 None
+        """
+        cursor = await self._conn.execute(
+            "SELECT MAX(ts) FROM events WHERE task_id = ?",
+            (task_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return datetime.fromisoformat(row[0])
+
+    async def get_events_by_types_since(
+        self,
+        task_id: str,
+        event_types: list[EventType],
+        since_ts: datetime,
+    ) -> list[Event]:
+        """按事件类型 + 时间范围查询事件（Feature 011 FR-009 支撑接口）
+
+        利用 idx_events_type_ts 复合索引高效过滤。
+
+        Args:
+            task_id: 任务 ID
+            event_types: 事件类型列表（空列表返回空结果）
+            since_ts: 时间下界（含），查询 ts >= since_ts 的事件
+
+        Returns:
+            匹配的事件列表，按 task_seq 正序排列
+        """
+        if not event_types:
+            return []
+
+        # 动态构建 IN (?, ?, ...) 参数
+        placeholders = ",".join("?" * len(event_types))
+        type_values = [t.value for t in event_types]
+
+        cursor = await self._conn.execute(
+            f"""
+            SELECT * FROM events
+            WHERE task_id = ?
+              AND type IN ({placeholders})
+              AND ts >= ?
+            ORDER BY task_seq ASC
+            """,
+            (task_id, *type_values, since_ts.isoformat()),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_event(row) for row in rows]
+
     @staticmethod
     def _row_to_event(row: aiosqlite.Row) -> Event:
         """将数据库行转换为 Event 模型"""

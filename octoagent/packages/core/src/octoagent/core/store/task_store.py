@@ -9,6 +9,7 @@ from datetime import datetime
 
 import aiosqlite
 
+from ..models.enums import TaskStatus
 from ..models.task import RequesterInfo, Task, TaskPointers
 
 
@@ -23,8 +24,9 @@ class SqliteTaskStore:
         await self._conn.execute(
             """
             INSERT INTO tasks (task_id, created_at, updated_at, status, title,
-                               thread_id, scope_id, requester, risk_level, pointers)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               thread_id, scope_id, requester, risk_level, pointers,
+                               trace_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task.task_id,
@@ -37,6 +39,7 @@ class SqliteTaskStore:
                 task.requester.model_dump_json(),
                 task.risk_level.value,
                 task.pointers.model_dump_json(),
+                task.trace_id,
             ),
         )
 
@@ -65,6 +68,31 @@ class SqliteTaskStore:
         rows = await cursor.fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    async def list_tasks_by_statuses(self, statuses: list[TaskStatus]) -> list[Task]:
+        """按状态集合批量查询任务（Feature 011 spec WARNING 3）
+
+        单次原子 IN (?) 查询，避免多次串行查询导致的竞态窗口。
+        保持原 list_tasks 接口向下兼容（此方法为新增，不修改已有方法）。
+
+        Args:
+            statuses: 目标状态列表（空列表返回空结果）
+
+        Returns:
+            匹配的任务列表，按 created_at 倒序排列
+        """
+        if not statuses:
+            return []
+
+        placeholders = ",".join("?" * len(statuses))
+        status_values = [s.value for s in statuses]
+
+        cursor = await self._conn.execute(
+            f"SELECT * FROM tasks WHERE status IN ({placeholders}) ORDER BY created_at DESC",
+            tuple(status_values),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_task(row) for row in rows]
+
     async def update_task_status(
         self,
         task_id: str,
@@ -85,9 +113,15 @@ class SqliteTaskStore:
 
     @staticmethod
     def _row_to_task(row: aiosqlite.Row) -> Task:
-        """将数据库行转换为 Task 模型"""
+        """将数据库行转换为 Task 模型
+
+        列顺序（对应 _TASKS_DDL）:
+        0=task_id, 1=created_at, 2=updated_at, 3=status, 4=title,
+        5=thread_id, 6=scope_id, 7=requester, 8=risk_level,
+        9=pointers, 10=trace_id
+        """
         requester_data = json.loads(row[7])  # requester 列
-        pointers_data = json.loads(row[9])  # pointers 列
+        pointers_data = json.loads(row[9])   # pointers 列
         return Task(
             task_id=row[0],
             created_at=datetime.fromisoformat(row[1]),
@@ -99,4 +133,5 @@ class SqliteTaskStore:
             requester=RequesterInfo(**requester_data),
             risk_level=row[8],
             pointers=TaskPointers(**pointers_data),
+            trace_id=row[10] if len(row) > 10 else "",  # Feature 011: 追踪 ID
         )
