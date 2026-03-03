@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     scope_id    TEXT NOT NULL DEFAULT '',
     requester   TEXT NOT NULL DEFAULT '{}',
     risk_level  TEXT NOT NULL DEFAULT 'low',
-    pointers    TEXT NOT NULL DEFAULT '{}'
+    pointers    TEXT NOT NULL DEFAULT '{}',
+    trace_id    TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -58,6 +59,8 @@ _EVENTS_INDEXES = [
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key "
         "ON events(idempotency_key) WHERE idempotency_key IS NOT NULL;"
     ),
+    # Feature 011: Watchdog 查询优化索引（支持 get_latest_event_ts 和 get_events_by_types_since）
+    "CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(task_id, type, ts);",
 ]
 
 # artifacts 表 DDL
