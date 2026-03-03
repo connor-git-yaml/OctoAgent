@@ -15,6 +15,7 @@ import pytest_asyncio
 from octoagent.core.models.enums import (
     ActorType,
     EventType,
+    RiskLevel,
     TaskStatus,
 )
 from octoagent.core.models.event import Event
@@ -108,6 +109,30 @@ class TestApplyEvent:
 
         assert tasks["TSK001"].status == TaskStatus.RUNNING
         assert tasks["TSK001"].pointers.latest_event_id == "EVT002"
+
+    def test_apply_task_created_preserves_risk_level(self):
+        """TASK_CREATED payload 的 risk_level 应被重建"""
+        tasks = {}
+        event = Event(
+            event_id="EVT001",
+            task_id="TSK001",
+            task_seq=1,
+            ts=datetime(2026, 1, 1, tzinfo=UTC),
+            type=EventType.TASK_CREATED,
+            actor=ActorType.SYSTEM,
+            payload=TaskCreatedPayload(
+                title="Risk task",
+                thread_id="default",
+                scope_id="chat:web:default",
+                channel="web",
+                sender_id="owner",
+                risk_level=RiskLevel.HIGH.value,
+            ).model_dump(),
+            trace_id="trace-TSK001",
+        )
+        apply_event(tasks, event)
+
+        assert tasks["TSK001"].risk_level == RiskLevel.HIGH
 
     def test_apply_other_event_updates_pointers(self):
         """非状态变更事件应更新 updated_at 和 pointers"""

@@ -39,7 +39,7 @@ class SqliteTaskJobStore:
         user_text: str,
         model_alias: str | None = None,
     ) -> bool:
-        """创建后台任务（已存在则忽略）"""
+        """创建后台任务（终态任务可重入队）"""
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             """
@@ -54,6 +54,25 @@ class SqliteTaskJobStore:
         cursor = await self._conn.execute("SELECT changes()")
         row = await cursor.fetchone()
         changed = int(row[0]) if row else 0
+        if changed == 0:
+            await self._conn.execute(
+                """
+                UPDATE task_jobs
+                SET user_text = ?,
+                    model_alias = ?,
+                    status = 'QUEUED',
+                    last_error = '',
+                    updated_at = ?,
+                    started_at = NULL,
+                    finished_at = NULL
+                WHERE task_id = ?
+                  AND status IN ('SUCCEEDED', 'FAILED', 'REJECTED', 'CANCELLED')
+                """,
+                (user_text, model_alias, now, task_id),
+            )
+            cursor = await self._conn.execute("SELECT changes()")
+            row = await cursor.fetchone()
+            changed = int(row[0]) if row else 0
         await self._conn.commit()
         return changed > 0
 
@@ -107,6 +126,22 @@ class SqliteTaskJobStore:
             WHERE task_id = ?
             """,
             (error[:1000], now, now, task_id),
+        )
+        await self._conn.commit()
+
+    async def mark_cancelled(self, task_id: str) -> None:
+        """标记任务取消。"""
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE task_jobs
+            SET status = 'CANCELLED',
+                last_error = '',
+                finished_at = ?,
+                updated_at = ?
+            WHERE task_id = ?
+            """,
+            (now, now, task_id),
         )
         await self._conn.commit()
 

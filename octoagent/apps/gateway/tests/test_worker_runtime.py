@@ -1,0 +1,157 @@
+"""Feature 009: Worker Runtime 单元测试。"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from octoagent.core.models import DispatchEnvelope, WorkerExecutionStatus
+from octoagent.core.models.message import NormalizedMessage
+from octoagent.core.store import create_store_group
+from octoagent.gateway.services.sse_hub import SSEHub
+from octoagent.gateway.services.task_service import TaskService
+from octoagent.gateway.services.worker_runtime import (
+    WorkerCancellationRegistry,
+    WorkerRuntime,
+    WorkerRuntimeConfig,
+)
+from octoagent.provider.models import ModelCallResult, TokenUsage
+
+
+class SlowLLMService:
+    """用于 timeout/cancel 测试的慢速 LLM 服务。"""
+
+    def __init__(self, delay_s: float) -> None:
+        self._delay_s = delay_s
+
+    async def call(self, prompt_or_messages, model_alias: str | None = None) -> ModelCallResult:
+        await asyncio.sleep(self._delay_s)
+        return ModelCallResult(
+            content="slow response",
+            model_alias=model_alias or "main",
+            model_name="mock-slow",
+            provider="mock",
+            duration_ms=int(self._delay_s * 1000),
+            token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+
+async def _create_task_with_envelope(tmp_path: Path, key: str) -> tuple:
+    store_group = await create_store_group(
+        str(tmp_path / f"{key}.db"),
+        str(tmp_path / f"{key}-artifacts"),
+    )
+    sse_hub = SSEHub()
+    service = TaskService(store_group, sse_hub)
+    msg = NormalizedMessage(text=f"{key}-task", idempotency_key=key)
+    task_id, created = await service.create_task(msg)
+    assert created is True
+    envelope = DispatchEnvelope(
+        dispatch_id=f"dispatch-{key}",
+        task_id=task_id,
+        trace_id=f"trace-{task_id}",
+        contract_version="1.0",
+        route_reason="test",
+        worker_capability="llm_generation",
+        hop_count=1,
+        max_hops=3,
+        user_text=msg.text,
+        model_alias="main",
+    )
+    return store_group, sse_hub, service, envelope
+
+
+class TestWorkerRuntime:
+    async def test_privileged_profile_requires_explicit_approval(
+        self, tmp_path: Path
+    ) -> None:
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f009-runtime-001"
+        )
+        envelope.tool_profile = "privileged"
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=SlowLLMService(delay_s=0.01),
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.retryable is False
+        assert result.error_type == "WorkerProfileDeniedError"
+
+        await store_group.conn.close()
+
+    async def test_required_docker_backend_fails_when_unavailable(
+        self, tmp_path: Path
+    ) -> None:
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f009-runtime-002"
+        )
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=SlowLLMService(delay_s=0.01),
+            config=WorkerRuntimeConfig(docker_mode="required"),
+            docker_available_checker=lambda: False,
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.retryable is False
+        assert result.error_type == "WorkerBackendUnavailableError"
+
+        await store_group.conn.close()
+
+    async def test_max_exec_timeout_marks_task_failed(self, tmp_path: Path) -> None:
+        store_group, sse_hub, service, envelope = await _create_task_with_envelope(
+            tmp_path, "f009-runtime-003"
+        )
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=SlowLLMService(delay_s=0.3),
+            config=WorkerRuntimeConfig(
+                docker_mode="disabled",
+                max_execution_timeout_seconds=0.05,
+            ),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.error_type == "WorkerRuntimeTimeoutError"
+
+        task = await service.get_task(envelope.task_id)
+        assert task is not None
+        assert task.status == "FAILED"
+
+        await store_group.conn.close()
+
+    async def test_cancel_signal_returns_cancelled_result(self, tmp_path: Path) -> None:
+        store_group, sse_hub, service, envelope = await _create_task_with_envelope(
+            tmp_path, "f009-runtime-004"
+        )
+
+        cancellation_registry = WorkerCancellationRegistry()
+        cancellation_registry.ensure(envelope.task_id).set()
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=SlowLLMService(delay_s=0.2),
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+            cancellation_registry=cancellation_registry,
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+        assert result.status == WorkerExecutionStatus.CANCELLED
+        assert result.retryable is False
+
+        task = await service.get_task(envelope.task_id)
+        assert task is not None
+        assert task.status == "CANCELLED"
+
+        await store_group.conn.close()
