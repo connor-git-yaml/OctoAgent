@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import structlog
 from octoagent.core.models import (
+    PIPELINE_NODES,
     TERMINAL_STATES,
     ActorType,
     Event,
@@ -28,12 +29,7 @@ class ResumeEngine:
 
     _resume_locks: dict[str, asyncio.Lock] = {}
     _locks_guard = asyncio.Lock()
-    _known_nodes = {
-        "state_running",
-        "model_call_started",
-        "response_persisted",
-        "task_succeeded",
-    }
+    _known_nodes = set(PIPELINE_NODES)
 
     def __init__(self, store_group: StoreGroup) -> None:
         self._stores = store_group
@@ -148,6 +144,14 @@ class ResumeEngine:
             )
         finally:
             lock.release()
+            await self._cleanup_resume_lock(task_id)
+
+    async def _cleanup_resume_lock(self, task_id: str) -> None:
+        """恢复完成后清理锁，避免全局字典无限增长。"""
+        async with self._locks_guard:
+            lock = self._resume_locks.get(task_id)
+            if lock is not None and not lock.locked():
+                del self._resume_locks[task_id]
 
     async def _try_acquire_task_lock(self, task_id: str) -> asyncio.Lock | None:
         async with self._locks_guard:
@@ -221,18 +225,16 @@ class ResumeEngine:
             message=message,
         )
 
+    _RECOVERY_HINTS: dict[ResumeFailureType, str] = {
+        ResumeFailureType.SNAPSHOT_CORRUPT: "请回滚到更早 checkpoint 或重跑任务",
+        ResumeFailureType.VERSION_MISMATCH: "请执行 schema 迁移后再恢复，或直接重跑",
+        ResumeFailureType.LEASE_CONFLICT: "等待当前恢复流程结束后重试",
+        ResumeFailureType.TERMINAL_TASK: "任务已结束，无需恢复",
+        ResumeFailureType.DEPENDENCY_MISSING: "请检查 checkpoint 是否存在，必要时重跑任务",
+    }
+
     def _build_recovery_hint(self, failure_type: ResumeFailureType) -> str:
-        if failure_type == ResumeFailureType.SNAPSHOT_CORRUPT:
-            return "请回滚到更早 checkpoint 或重跑任务"
-        if failure_type == ResumeFailureType.VERSION_MISMATCH:
-            return "请执行 schema 迁移后再恢复，或直接重跑"
-        if failure_type == ResumeFailureType.LEASE_CONFLICT:
-            return "等待当前恢复流程结束后重试"
-        if failure_type == ResumeFailureType.TERMINAL_TASK:
-            return "任务已结束，无需恢复"
-        if failure_type == ResumeFailureType.DEPENDENCY_MISSING:
-            return "请检查 checkpoint 是否存在，必要时重跑任务"
-        return "请查看事件流与日志，评估是否重跑任务"
+        return self._RECOVERY_HINTS.get(failure_type, "请查看事件流与日志，评估是否重跑任务")
 
     async def _build_event(
         self,

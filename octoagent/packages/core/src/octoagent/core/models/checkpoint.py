@@ -28,6 +28,15 @@ class ResumeFailureType(StrEnum):
     UNKNOWN = "unknown"
 
 
+# 流水线节点（有序列表，用于恢复起点计算与节点合法性校验）
+PIPELINE_NODES: list[str] = [
+    "state_running",
+    "model_call_started",
+    "response_persisted",
+    "task_succeeded",
+]
+
+
 class CheckpointSnapshot(BaseModel):
     """节点级快照"""
 
