@@ -17,6 +17,7 @@ from octoagent.core.config import (
     MESSAGE_PREVIEW_LENGTH,
 )
 from octoagent.core.models import (
+    PIPELINE_NODES,
     TERMINAL_STATES,
     ActorType,
     Artifact,
@@ -62,12 +63,7 @@ class TaskService:
     _task_locks: dict[str, asyncio.Lock] = {}
     _task_locks_guard = asyncio.Lock()
     _max_task_seq_retries = 3
-    _pipeline_nodes = [
-        "state_running",
-        "model_call_started",
-        "response_persisted",
-        "task_succeeded",
-    ]
+    _pipeline_nodes = PIPELINE_NODES
 
     def __init__(self, store_group: StoreGroup, sse_hub=None) -> None:
         self._stores = store_group
@@ -393,6 +389,15 @@ class TaskService:
         except Exception as e:
             await self._handle_llm_failure(task_id, trace_id, effective_alias, e)
 
+    def _truncate_response_summary(self, text: str, suffix: str = "see artifact") -> str:
+        """截断超出字节限制的响应摘要（UTF-8 字节数）"""
+        if len(text.encode("utf-8")) > self.RESPONSE_SUMMARY_MAX_BYTES:
+            truncated = text.encode("utf-8")[: self.RESPONSE_SUMMARY_MAX_BYTES].decode(
+                "utf-8", errors="ignore"
+            )
+            return truncated + f"... [truncated, {suffix}]"
+        return text
+
     async def _store_llm_artifact(self, task_id: str, llm_result) -> tuple[str, Artifact]:
         """存储 LLM 响应为 Artifact"""
         artifact_id = str(ULID())
@@ -414,12 +419,7 @@ class TaskService:
     ) -> None:
         """写入 MODEL_CALL_COMPLETED 事件（含响应截断逻辑）"""
         # 响应摘要截断（对齐 FR-002-CL-4）
-        response_summary = llm_result.content
-        if len(response_summary.encode("utf-8")) > self.RESPONSE_SUMMARY_MAX_BYTES:
-            truncated = response_summary.encode("utf-8")[
-                : self.RESPONSE_SUMMARY_MAX_BYTES
-            ].decode("utf-8", errors="ignore")
-            response_summary = truncated + "... [truncated, see artifact]"
+        response_summary = self._truncate_response_summary(llm_result.content, "see artifact")
 
         event = await self._append_event_only_with_retry(
             task_id=task_id,
@@ -493,12 +493,7 @@ class TaskService:
             summary = "Reused prior LLM result"
             if content is not None:
                 text = content.decode("utf-8", errors="ignore")
-                summary = text
-                if len(summary.encode("utf-8")) > self.RESPONSE_SUMMARY_MAX_BYTES:
-                    truncated = summary.encode("utf-8")[
-                        : self.RESPONSE_SUMMARY_MAX_BYTES
-                    ].decode("utf-8", errors="ignore")
-                    summary = truncated + "... [truncated, reused artifact]"
+                summary = self._truncate_response_summary(text, "reused artifact")
 
             event = await self._append_event_only_with_retry(
                 task_id=task_id,

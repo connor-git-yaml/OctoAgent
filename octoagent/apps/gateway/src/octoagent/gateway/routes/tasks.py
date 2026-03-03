@@ -83,15 +83,11 @@ async def list_tasks(
                 task_id=t.task_id,
                 created_at=t.created_at.isoformat(),
                 updated_at=t.updated_at.isoformat(),
-                status=t.status.value if hasattr(t.status, "value") else str(t.status),
+                status=t.status.value,
                 title=t.title,
                 thread_id=t.thread_id,
                 scope_id=t.scope_id,
-                risk_level=(
-                    t.risk_level.value
-                    if hasattr(t.risk_level, "value")
-                    else str(t.risk_level)
-                ),
+                risk_level=t.risk_level.value,
             )
             for t in tasks
         ]
@@ -143,7 +139,7 @@ async def get_task_detail(
             "size": a.size,
             "parts": [
                 {
-                    "type": p.type.value if hasattr(p.type, "value") else str(p.type),
+                    "type": p.type.value,
                     "mime": p.mime,
                     "content": p.content,
                 }
@@ -158,7 +154,7 @@ async def get_task_detail(
         "task_id": task.task_id,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
-        "status": task.status.value if hasattr(task.status, "value") else str(task.status),
+        "status": task.status.value,
         "title": task.title,
         "thread_id": task.thread_id,
         "scope_id": task.scope_id,
@@ -166,11 +162,7 @@ async def get_task_detail(
             "channel": task.requester.channel,
             "sender_id": task.requester.sender_id,
         },
-        "risk_level": (
-            task.risk_level.value
-            if hasattr(task.risk_level, "value")
-            else str(task.risk_level)
-        ),
+        "risk_level": task.risk_level.value,
     }
 
     return {

@@ -5,6 +5,7 @@
 
 from .artifact import Artifact, ArtifactPart
 from .checkpoint import (
+    PIPELINE_NODES,
     CheckpointSnapshot,
     CheckpointStatus,
     ResumeAttempt,
@@ -76,6 +77,7 @@ __all__ = [
     "Artifact",
     "ArtifactPart",
     # Checkpoint
+    "PIPELINE_NODES",
     "CheckpointStatus",
     "ResumeFailureType",
     "CheckpointSnapshot",
