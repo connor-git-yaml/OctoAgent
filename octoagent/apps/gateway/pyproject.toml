@@ -12,6 +12,7 @@ dependencies = [
     "octoagent-core",
     "octoagent-provider",
     "octoagent-policy",
+    "apscheduler>=3.10,<4.0",
 ]
 
 [tool.uv.sources]
