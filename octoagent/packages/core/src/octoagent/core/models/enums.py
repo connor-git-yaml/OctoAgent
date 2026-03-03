@@ -102,6 +102,11 @@ class EventType(StrEnum):
     # Feature 006: 策略配置变更事件 -- 对齐 FR-027
     POLICY_CONFIG_CHANGED = "POLICY_CONFIG_CHANGED"
 
+    # Feature 008: Orchestrator 控制平面事件
+    ORCH_DECISION = "ORCH_DECISION"
+    WORKER_DISPATCHED = "WORKER_DISPATCHED"
+    WORKER_RETURNED = "WORKER_RETURNED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

@@ -29,8 +29,8 @@ from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
 from .routes import approvals, cancel, chat, health, message, stream, tasks
 from .services.llm_service import LLMService
-from .services.task_runner import TaskRunner
 from .services.sse_hub import SSEHub
+from .services.task_runner import TaskRunner
 from .sse.approval_events import SSEApprovalBroadcaster
 
 log = structlog.get_logger()
@@ -112,6 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
         sse_hub=app.state.sse_hub,
         llm_service=llm_service,
+        approval_manager=app.state.approval_manager,
     )
     await app.state.task_runner.startup()
 

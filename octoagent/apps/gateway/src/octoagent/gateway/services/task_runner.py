@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from octoagent.core.models import TaskStatus, TERMINAL_STATES
+from octoagent.core.models import TERMINAL_STATES, TaskStatus
 from octoagent.core.store import StoreGroup
 
+from .orchestrator import OrchestratorService
 from .task_service import TaskService
 
 log = structlog.get_logger()
@@ -36,6 +37,7 @@ class TaskRunner:
         store_group: StoreGroup,
         sse_hub,
         llm_service,
+        approval_manager=None,
         timeout_seconds: float = 600.0,
         monitor_interval_seconds: float = 5.0,
     ) -> None:
@@ -47,6 +49,12 @@ class TaskRunner:
         self._running_jobs: dict[str, RunningJob] = {}
         self._monitor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._orchestrator = OrchestratorService(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            approval_manager=approval_manager,
+        )
 
     async def startup(self) -> None:
         """启动恢复：清理 orphan running + 拉起 queued"""
@@ -133,10 +141,9 @@ class TaskRunner:
 
     async def _run_job(self, task_id: str, user_text: str, model_alias: str | None) -> None:
         service = TaskService(self._stores, self._sse_hub)
-        await service.process_task_with_llm(
+        await self._orchestrator.dispatch(
             task_id=task_id,
             user_text=user_text,
-            llm_service=self._llm_service,
             model_alias=model_alias,
         )
         task = await service.get_task(task_id)
