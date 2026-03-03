@@ -10,6 +10,8 @@ import os
 
 import structlog
 
+_LOGFIRE_INITIALIZED = False
+
 
 def setup_logging() -> None:
     """初始化 structlog 配置
@@ -70,16 +72,31 @@ def setup_logfire() -> None:
     - "true": 启用 Logfire APM（需要 LOGFIRE_TOKEN）
     - "false" (默认): 降级为纯本地日志
     """
-    send_to_logfire = os.environ.get("LOGFIRE_SEND_TO_LOGFIRE", "false").lower()
-    if send_to_logfire == "true":
-        try:
-            import logfire
+    global _LOGFIRE_INITIALIZED
 
-            logfire.configure()
-            logfire.instrument_fastapi()
-        except Exception:
-            # Logfire 初始化失败不影响系统运行（C6: Degrade Gracefully）
-            structlog.get_logger().warning(
-                "logfire_init_failed",
-                message="Logfire 初始化失败，降级为纯本地日志",
-            )
+    if _LOGFIRE_INITIALIZED:
+        return
+
+    send_to_logfire = os.environ.get("LOGFIRE_SEND_TO_LOGFIRE", "false").lower()
+    if send_to_logfire != "true":
+        return
+
+    try:
+        import logfire
+
+        logfire.configure()
+        logfire.instrument_fastapi()
+
+        # Feature 012: HTTP 客户端链路也纳入 trace（默认开启，可显式关闭）
+        capture_httpx = os.environ.get("LOGFIRE_CAPTURE_HTTPX", "true").lower() == "true"
+        if capture_httpx:
+            logfire.instrument_httpx(capture_all=False)
+
+        _LOGFIRE_INITIALIZED = True
+    except Exception as exc:
+        # Logfire 初始化失败不影响系统运行（C6: Degrade Gracefully）
+        structlog.get_logger().warning(
+            "logfire_init_failed",
+            error_type=type(exc).__name__,
+            message="Logfire 初始化失败，降级为纯本地日志",
+        )

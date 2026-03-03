@@ -34,6 +34,8 @@ from .models import (
     ExecutionContext,
     FailMode,
     HookType,
+    RegisterToolResult,
+    RegistryDiagnostic,
     SideEffectLevel,
     ToolCall,
     ToolMeta,
@@ -63,6 +65,8 @@ __all__ = [
     # 枚举
     "FailMode",
     "HookType",
+    "RegisterToolResult",
+    "RegistryDiagnostic",
     "SideEffectLevel",
     "ToolProfile",
     # 数据模型

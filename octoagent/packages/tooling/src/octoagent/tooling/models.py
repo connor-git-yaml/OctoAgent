@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -140,6 +141,24 @@ class ToolResult(BaseModel):
     # 扩展字段
     tool_name: str = Field(default="", description="执行的工具名称")
     truncated: bool = Field(default=False, description="输出是否被裁切")
+
+
+class RegisterToolResult(BaseModel):
+    """工具注册结果 -- Feature 012 fail-open 注册返回体"""
+
+    ok: bool = Field(description="是否注册成功")
+    tool_name: str = Field(description="工具名称")
+    message: str = Field(default="", description="结果说明")
+    error_type: str | None = Field(default=None, description="错误类型（失败时）")
+
+
+class RegistryDiagnostic(BaseModel):
+    """注册诊断项 -- 记录一次工具注册失败或告警"""
+
+    tool_name: str = Field(description="工具名称")
+    error_type: str = Field(description="错误类型")
+    message: str = Field(description="错误说明")
+    timestamp: datetime = Field(description="记录时间")
 
 
 class ToolCall(BaseModel):
