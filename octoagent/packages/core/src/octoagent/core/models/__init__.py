@@ -21,6 +21,8 @@ from .orchestrator import (
     OrchestratorRequest,
     WorkerExecutionStatus,
     WorkerResult,
+    WorkerRuntimeState,
+    WorkerSession,
 )
 from .payloads import (
     ArtifactCreatedPayload,
@@ -86,4 +88,6 @@ __all__ = [
     "DispatchEnvelope",
     "WorkerResult",
     "WorkerExecutionStatus",
+    "WorkerRuntimeState",
+    "WorkerSession",
 ]

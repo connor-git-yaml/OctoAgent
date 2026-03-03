@@ -129,6 +129,22 @@ class SqliteTaskJobStore:
         )
         await self._conn.commit()
 
+    async def mark_cancelled(self, task_id: str) -> None:
+        """标记任务取消。"""
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE task_jobs
+            SET status = 'CANCELLED',
+                last_error = '',
+                finished_at = ?,
+                updated_at = ?
+            WHERE task_id = ?
+            """,
+            (now, now, task_id),
+        )
+        await self._conn.commit()
+
     async def list_jobs(self, statuses: list[str]) -> list[TaskJob]:
         """按状态批量查询任务"""
         if not statuses:

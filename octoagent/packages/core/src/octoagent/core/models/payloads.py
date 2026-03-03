@@ -137,6 +137,10 @@ class WorkerReturnedPayload(BaseModel):
     summary: str = Field(description="执行摘要")
     error_type: str = Field(default="", description="错误类型")
     error_message: str = Field(default="", description="错误信息")
+    loop_step: int = Field(default=0, description="执行步数")
+    max_steps: int = Field(default=0, description="最大执行步数")
+    backend: str = Field(default="inline", description="执行后端")
+    tool_profile: str = Field(default="standard", description="工具权限级别")
 
 
 # Feature 004: 工具调用 Payload 类型 -- 对齐 FR-014
