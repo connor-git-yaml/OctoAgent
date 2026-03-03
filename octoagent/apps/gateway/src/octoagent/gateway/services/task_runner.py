@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from octoagent.core.models import TERMINAL_STATES, TaskStatus
+from octoagent.core.models import TERMINAL_STATES, TaskStatus, WorkerExecutionStatus
 from octoagent.core.store import StoreGroup
 
 from .orchestrator import OrchestratorService
 from .task_service import TaskService
+from .worker_runtime import WorkerCancellationRegistry, WorkerRuntimeConfig
 
 log = structlog.get_logger()
 
@@ -40,6 +41,8 @@ class TaskRunner:
         approval_manager=None,
         timeout_seconds: float = 600.0,
         monitor_interval_seconds: float = 5.0,
+        worker_runtime_config: WorkerRuntimeConfig | None = None,
+        docker_available_checker=None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -49,11 +52,15 @@ class TaskRunner:
         self._running_jobs: dict[str, RunningJob] = {}
         self._monitor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._cancellation_registry = WorkerCancellationRegistry()
         self._orchestrator = OrchestratorService(
             store_group=store_group,
             sse_hub=sse_hub,
             llm_service=llm_service,
             approval_manager=approval_manager,
+            worker_runtime_config=worker_runtime_config,
+            docker_available_checker=docker_available_checker,
+            cancellation_registry=self._cancellation_registry,
         )
 
     async def startup(self) -> None:
@@ -76,10 +83,12 @@ class TaskRunner:
             self._running_jobs.clear()
 
         for task_id, running_job in running:
+            self._cancellation_registry.cancel(task_id)
             running_job.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await running_job.task
             await self._stores.task_job_store.mark_failed(task_id, "runner_shutdown_cancelled")
+            self._cancellation_registry.clear(task_id)
 
     async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
         """入队并尝试启动执行"""
@@ -121,6 +130,7 @@ class TaskRunner:
         marked = await self._stores.task_job_store.mark_running(task_id)
         if not marked:
             return
+        self._cancellation_registry.ensure(task_id)
 
         job = await self._stores.task_job_store.get_job(task_id)
         if job is None:
@@ -138,10 +148,31 @@ class TaskRunner:
     async def _on_done(self, task_id: str) -> None:
         async with self._lock:
             self._running_jobs.pop(task_id, None)
+        self._cancellation_registry.clear(task_id)
+
+    async def cancel_task(self, task_id: str) -> bool:
+        """通知运行中任务取消。"""
+        self._cancellation_registry.cancel(task_id)
+
+        async with self._lock:
+            running = self._running_jobs.get(task_id)
+        if running is None:
+            return False
+
+        running.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running.task
+        service = TaskService(self._stores, self._sse_hub)
+        await service.mark_running_task_cancelled_for_runtime(
+            task_id,
+            reason="用户取消",
+        )
+        await self._stores.task_job_store.mark_cancelled(task_id)
+        return True
 
     async def _run_job(self, task_id: str, user_text: str, model_alias: str | None) -> None:
         service = TaskService(self._stores, self._sse_hub)
-        await self._orchestrator.dispatch(
+        result = await self._orchestrator.dispatch(
             task_id=task_id,
             user_text=user_text,
             model_alias=model_alias,
@@ -152,6 +183,9 @@ class TaskRunner:
             return
         if task.status == TaskStatus.SUCCEEDED:
             await self._stores.task_job_store.mark_succeeded(task_id)
+            return
+        if task.status == TaskStatus.CANCELLED or result.status == WorkerExecutionStatus.CANCELLED:
+            await self._stores.task_job_store.mark_cancelled(task_id)
             return
         if task.status in TERMINAL_STATES:
             await self._stores.task_job_store.mark_failed(
@@ -184,6 +218,7 @@ class TaskRunner:
                 if running is None:
                     continue
 
+                self._cancellation_registry.cancel(task_id)
                 running.task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await running.task

@@ -654,3 +654,37 @@ class TaskService:
             model_alias="main",
             error=RuntimeError(reason),
         )
+
+    async def mark_running_task_cancelled_for_runtime(
+        self,
+        task_id: str,
+        reason: str,
+    ) -> None:
+        """运行时取消流程使用：将任务推进到 CANCELLED。"""
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+
+        try:
+            if task.status == TaskStatus.CREATED:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.CREATED,
+                    to_status=TaskStatus.RUNNING,
+                    trace_id=f"trace-{task_id}",
+                    reason="runtime_cancel_bootstrap",
+                )
+                task = await self._stores.task_store.get_task(task_id)
+                if task is None:
+                    return
+
+            if task.status == TaskStatus.RUNNING:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.RUNNING,
+                    to_status=TaskStatus.CANCELLED,
+                    trace_id=f"trace-{task_id}",
+                    reason=reason,
+                )
+        except TaskStatusConflictError:
+            log.info("task_cancel_conflict_skip", task_id=task_id)

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -35,6 +36,11 @@ from octoagent.policy.models import ApprovalDecision, ApprovalStatus
 from ulid import ULID
 
 from .task_service import TaskService
+from .worker_runtime import (
+    WorkerCancellationRegistry,
+    WorkerRuntime,
+    WorkerRuntimeConfig,
+)
 
 log = structlog.get_logger()
 
@@ -188,18 +194,36 @@ class SingleWorkerRouter:
             max_hops=request.max_hops,
             user_text=request.user_text,
             model_alias=request.model_alias,
+            tool_profile=request.tool_profile,
+            metadata=request.metadata,
         )
 
 
 class LLMWorkerAdapter:
     """默认 LLM worker 适配器。"""
 
-    def __init__(self, store_group: StoreGroup, sse_hub, llm_service) -> None:
+    def __init__(
+        self,
+        store_group: StoreGroup,
+        sse_hub,
+        llm_service,
+        *,
+        runtime_config: WorkerRuntimeConfig | None = None,
+        docker_available_checker: Callable[[], bool] | None = None,
+        cancellation_registry: WorkerCancellationRegistry | None = None,
+    ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._llm_service = llm_service
         self._worker_id = "worker.llm.default"
         self._capability = "llm_generation"
+        self._runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            config=runtime_config,
+            docker_available_checker=docker_available_checker,
+            cancellation_registry=cancellation_registry,
+        )
 
     @property
     def worker_id(self) -> str:
@@ -210,59 +234,7 @@ class LLMWorkerAdapter:
         return self._capability
 
     async def handle(self, envelope: DispatchEnvelope) -> WorkerResult:
-        service = TaskService(self._stores, self._sse_hub)
-        try:
-            await service.process_task_with_llm(
-                task_id=envelope.task_id,
-                user_text=envelope.user_text,
-                llm_service=self._llm_service,
-                model_alias=envelope.model_alias,
-            )
-            task = await service.get_task(envelope.task_id)
-            if task is None:
-                return WorkerResult(
-                    dispatch_id=envelope.dispatch_id,
-                    task_id=envelope.task_id,
-                    worker_id=self.worker_id,
-                    status=WorkerExecutionStatus.FAILED,
-                    retryable=False,
-                    summary="task_missing_after_worker_execution",
-                    error_type="TaskNotFound",
-                    error_message="Task projection not found after worker execution",
-                )
-
-            if task.status == TaskStatus.SUCCEEDED:
-                return WorkerResult(
-                    dispatch_id=envelope.dispatch_id,
-                    task_id=envelope.task_id,
-                    worker_id=self.worker_id,
-                    status=WorkerExecutionStatus.SUCCEEDED,
-                    retryable=False,
-                    summary="worker_execution_succeeded",
-                )
-
-            retryable = task.status == TaskStatus.FAILED
-            return WorkerResult(
-                dispatch_id=envelope.dispatch_id,
-                task_id=envelope.task_id,
-                worker_id=self.worker_id,
-                status=WorkerExecutionStatus.FAILED,
-                retryable=retryable,
-                summary=f"worker_execution_terminal:{task.status}",
-                error_type="WorkerExecutionFailed",
-                error_message=f"task status={task.status}",
-            )
-        except Exception as exc:  # pragma: no cover - 防御性兜底
-            return WorkerResult(
-                dispatch_id=envelope.dispatch_id,
-                task_id=envelope.task_id,
-                worker_id=self.worker_id,
-                status=WorkerExecutionStatus.FAILED,
-                retryable=True,
-                summary="worker_adapter_exception",
-                error_type=type(exc).__name__,
-                error_message=str(exc),
-            )
+        return await self._runtime.run(envelope, worker_id=self.worker_id)
 
 
 class OrchestratorService:
@@ -278,6 +250,9 @@ class OrchestratorService:
         policy_gate: OrchestratorPolicyGate | None = None,
         router: SingleWorkerRouter | None = None,
         workers: dict[str, OrchestratorWorker] | None = None,
+        worker_runtime_config: WorkerRuntimeConfig | None = None,
+        docker_available_checker: Callable[[], bool] | None = None,
+        cancellation_registry: WorkerCancellationRegistry | None = None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -286,7 +261,14 @@ class OrchestratorService:
         )
         self._router = router or SingleWorkerRouter()
 
-        default_worker = LLMWorkerAdapter(store_group, sse_hub, llm_service)
+        default_worker = LLMWorkerAdapter(
+            store_group,
+            sse_hub,
+            llm_service,
+            runtime_config=worker_runtime_config,
+            docker_available_checker=docker_available_checker,
+            cancellation_registry=cancellation_registry,
+        )
         self._workers: dict[str, OrchestratorWorker] = {default_worker.capability: default_worker}
         if workers:
             self._workers.update(workers)
@@ -301,6 +283,7 @@ class OrchestratorService:
         contract_version: str = "1.0",
         hop_count: int = 0,
         max_hops: int = 3,
+        tool_profile: str = "standard",
         metadata: dict[str, str] | None = None,
     ) -> WorkerResult:
         trace_id = f"trace-{task_id}"
@@ -316,6 +299,7 @@ class OrchestratorService:
             contract_version=contract_version,
             hop_count=hop_count,
             max_hops=max_hops,
+            tool_profile=tool_profile,
             risk_level=risk_level,
             metadata=metadata or {},
         )
@@ -456,6 +440,10 @@ class OrchestratorService:
             summary=result.summary,
             error_type=result.error_type or "",
             error_message=result.error_message or "",
+            loop_step=result.loop_step,
+            max_steps=result.max_steps,
+            backend=result.backend,
+            tool_profile=result.tool_profile,
         )
         await self._append_control_event(
             task_id=result.task_id,
