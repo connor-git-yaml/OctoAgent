@@ -13,6 +13,8 @@ from .models import (
     CheckResult,
     ExecutionContext,
     FailMode,
+    RegisterToolResult,
+    RegistryDiagnostic,
     ToolMeta,
     ToolProfile,
     ToolResult,
@@ -183,6 +185,14 @@ class ToolBrokerProtocol(Protocol):
         """
         ...
 
+    async def try_register(
+        self,
+        tool_meta: ToolMeta,
+        handler: ToolHandler,
+    ) -> RegisterToolResult:
+        """尝试注册工具（失败不抛异常，返回结构化诊断）"""
+        ...
+
     async def discover(
         self,
         profile: ToolProfile | None = None,
@@ -234,4 +244,9 @@ class ToolBrokerProtocol(Protocol):
         Returns:
             True 如果成功注销，False 如果工具不存在
         """
+        ...
+
+    @property
+    def registry_diagnostics(self) -> list[RegistryDiagnostic]:
+        """获取工具注册诊断列表（只读快照）"""
         ...

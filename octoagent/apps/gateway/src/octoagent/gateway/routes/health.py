@@ -1,8 +1,9 @@
-"""健康检查路由 -- 对齐 contracts/rest-api.md §6, §7 + Feature 002 gateway-changes.md §5
+"""健康检查路由 -- 对齐 contracts/rest-api.md §6, §7 + Feature 002/012
 
 GET /health: Liveness 检查，永远返回 200。
 GET /ready: Readiness 检查，包含 SQLite 连通性、artifacts_dir、磁盘空间。
-         Feature 002: 新增 profile 查询参数，支持 LiteLLM Proxy 健康检查。
+         Feature 002: profile 查询参数，支持 LiteLLM Proxy 健康检查。
+         Feature 012: 增加 subsystems + tool registry diagnostics 摘要。
 """
 
 import shutil
@@ -15,6 +16,47 @@ from starlette.responses import JSONResponse
 log = structlog.get_logger()
 
 router = APIRouter()
+
+
+def _collect_subsystem_health(request: Request) -> tuple[dict[str, str], dict[str, dict[str, int]]]:
+    """收集 M1.5 关键子系统状态（不影响 core readiness 判定）。"""
+    state = request.app.state
+    subsystems: dict[str, str] = {}
+
+    subsystems["orchestrator"] = (
+        "ok" if getattr(state, "orchestrator", None) is not None else "unavailable"
+    )
+
+    task_runner = getattr(state, "task_runner", None)
+    subsystems["worker_runtime"] = "ok" if task_runner is not None else "unavailable"
+
+    store_group = getattr(state, "store_group", None)
+    checkpoint_store = getattr(store_group, "task_job_store", None) if store_group else None
+    subsystems["checkpoint"] = "ok" if checkpoint_store is not None else "unavailable"
+
+    if task_runner is None:
+        subsystems["watchdog"] = "unavailable"
+    else:
+        monitor_task = getattr(task_runner, "_monitor_task", None)
+        if monitor_task is None:
+            subsystems["watchdog"] = "unavailable"
+        elif monitor_task.done():
+            subsystems["watchdog"] = "degraded"
+        else:
+            subsystems["watchdog"] = "ok"
+
+    tool_broker = getattr(state, "tool_broker", None)
+    diagnostics_count = 0
+    if tool_broker is None:
+        subsystems["tool_registry"] = "unavailable"
+    else:
+        diagnostics = getattr(tool_broker, "registry_diagnostics", [])
+        if callable(diagnostics):
+            diagnostics = diagnostics()
+        diagnostics_count = len(diagnostics) if diagnostics is not None else 0
+        subsystems["tool_registry"] = "degraded" if diagnostics_count > 0 else "ok"
+
+    return subsystems, {"tool_registry": {"diagnostics_count": diagnostics_count}}
 
 
 @router.get("/health")
@@ -119,6 +161,8 @@ async def ready(
         # profile=core 或默认：不探测 Proxy
         checks["litellm_proxy"] = "skipped"
 
+    subsystems, diagnostics = _collect_subsystem_health(request)
+
     status_code = 200 if all_ok else 503
     status_text = "ready" if all_ok else "not_ready"
 
@@ -128,5 +172,7 @@ async def ready(
             "status": status_text,
             "profile": effective_profile,
             "checks": checks,
+            "subsystems": subsystems,
+            "diagnostics": diagnostics,
         },
     )

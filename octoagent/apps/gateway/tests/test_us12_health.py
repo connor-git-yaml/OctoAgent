@@ -63,7 +63,7 @@ class TestHealthCheck:
         assert data["status"] == "ok"
 
     async def test_ready_returns_200(self, client: AsyncClient):
-        """GET /ready 正常时返回 200 + checks 结构"""
+        """GET /ready 正常时返回 200 + checks/subsystems 结构"""
         resp = await client.get("/ready")
         assert resp.status_code == 200
         data = resp.json()
@@ -76,6 +76,16 @@ class TestHealthCheck:
         assert isinstance(checks["disk_space_mb"], int)
         assert checks["disk_space_mb"] > 0
         assert checks["litellm_proxy"] == "skipped"
+
+        assert "subsystems" in data
+        subsystems = data["subsystems"]
+        assert subsystems["orchestrator"] == "unavailable"
+        assert subsystems["worker_runtime"] == "unavailable"
+        assert subsystems["checkpoint"] == "ok"
+        assert subsystems["watchdog"] == "unavailable"
+        assert subsystems["tool_registry"] == "unavailable"
+
+        assert data["diagnostics"]["tool_registry"]["diagnostics_count"] == 0
 
     async def test_ready_sqlite_failure(self, test_app):
         """GET /ready SQLite 不可用时返回 503"""
@@ -93,3 +103,23 @@ class TestHealthCheck:
             assert data["status"] == "not_ready"
             assert data["checks"]["sqlite"] == "unavailable"
             assert "closed" not in str(data["checks"]["sqlite"]).lower()
+
+    async def test_ready_tool_registry_degraded(self, test_app):
+        """Feature 012: registry diagnostics > 0 时标记 tool_registry=degraded"""
+
+        class FakeBroker:
+            @property
+            def registry_diagnostics(self):
+                return [{"tool_name": "dup_tool"}]
+
+        test_app.state.tool_broker = FakeBroker()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=test_app),
+            base_url="http://test",
+        ) as ac:
+            resp = await ac.get("/ready")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["subsystems"]["tool_registry"] == "degraded"
+            assert data["diagnostics"]["tool_registry"]["diagnostics_count"] == 1
