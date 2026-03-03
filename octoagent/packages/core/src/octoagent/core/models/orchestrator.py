@@ -4,6 +4,7 @@ Feature 008: 冻结控制平面契约，支持后续多 Worker 扩展。
 """
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -46,6 +47,11 @@ class OrchestratorRequest(BaseModel):
     hop_count: int = Field(default=0, ge=0, description="当前跳数")
     max_hops: int = Field(default=3, ge=1, description="最大跳数")
     model_alias: str | None = Field(default=None, description="模型别名")
+    resume_from_node: str | None = Field(default=None, description="恢复起点节点 ID")
+    resume_state_snapshot: dict[str, Any] | None = Field(
+        default=None,
+        description="恢复时注入的状态快照",
+    )
     tool_profile: str = Field(default="standard", description="工具权限级别")
     metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
 
@@ -73,6 +79,11 @@ class DispatchEnvelope(BaseModel):
 
     user_text: str = Field(description="用户输入文本")
     model_alias: str | None = Field(default=None, description="模型别名")
+    resume_from_node: str | None = Field(default=None, description="恢复起点节点 ID")
+    resume_state_snapshot: dict[str, Any] | None = Field(
+        default=None,
+        description="恢复时注入的状态快照",
+    )
     tool_profile: str = Field(default="standard", description="工具权限级别")
     metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
 

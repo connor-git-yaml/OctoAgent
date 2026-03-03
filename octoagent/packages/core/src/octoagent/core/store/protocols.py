@@ -7,6 +7,7 @@
 from typing import Protocol
 
 from ..models.artifact import Artifact
+from ..models.checkpoint import CheckpointSnapshot, SideEffectLedgerEntry
 from ..models.event import Event
 from ..models.task import Task
 
@@ -93,4 +94,51 @@ class ArtifactStore(Protocol):
 
     async def get_artifact_content(self, artifact_id: str) -> bytes | None:
         """获取 Artifact 内容（inline 直接返回 + 文件路径读取）"""
+        ...
+
+
+class CheckpointStore(Protocol):
+    """Checkpoint 存储接口"""
+
+    async def save_checkpoint(self, snapshot: CheckpointSnapshot) -> None:
+        """保存 checkpoint"""
+        ...
+
+    async def get_latest_success(self, task_id: str) -> CheckpointSnapshot | None:
+        """获取任务最近成功 checkpoint"""
+        ...
+
+    async def mark_status(self, checkpoint_id: str, status: str) -> None:
+        """更新 checkpoint 状态"""
+        ...
+
+    async def list_checkpoints(self, task_id: str) -> list[CheckpointSnapshot]:
+        """列出任务 checkpoint 时间线"""
+        ...
+
+
+class SideEffectLedgerStore(Protocol):
+    """副作用幂等账本接口"""
+
+    async def try_record(
+        self,
+        task_id: str,
+        step_key: str,
+        idempotency_key: str,
+        effect_type: str = "tool_call",
+        result_ref: str | None = None,
+    ) -> bool:
+        """尝试记录副作用，首次写入返回 True"""
+        ...
+
+    async def exists(self, idempotency_key: str) -> bool:
+        """检查幂等键是否存在"""
+        ...
+
+    async def get_entry(self, idempotency_key: str) -> SideEffectLedgerEntry | None:
+        """按幂等键获取账本记录"""
+        ...
+
+    async def set_result_ref(self, idempotency_key: str, result_ref: str) -> None:
+        """回填副作用结果引用"""
         ...

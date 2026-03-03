@@ -107,6 +107,12 @@ class EventType(StrEnum):
     WORKER_DISPATCHED = "WORKER_DISPATCHED"
     WORKER_RETURNED = "WORKER_RETURNED"
 
+    # Feature 010: Checkpoint / Resume 生命周期事件
+    CHECKPOINT_SAVED = "CHECKPOINT_SAVED"
+    RESUME_STARTED = "RESUME_STARTED"
+    RESUME_SUCCEEDED = "RESUME_SUCCEEDED"
+    RESUME_FAILED = "RESUME_FAILED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

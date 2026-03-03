@@ -189,6 +189,8 @@ class InlineRuntimeBackend:
             user_text=envelope.user_text,
             llm_service=llm_service,
             model_alias=envelope.model_alias,
+            resume_from_node=envelope.resume_from_node,
+            resume_state_snapshot=envelope.resume_state_snapshot,
         )
 
 

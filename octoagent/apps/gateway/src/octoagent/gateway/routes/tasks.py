@@ -1,14 +1,18 @@
-"""任务查询路由 -- 对齐 contracts/rest-api.md §2, §3
+"""任务查询与恢复路由 -- 对齐 contracts/rest-api.md §2, §3
 
 GET /api/tasks: 任务列表查询，支持 status 筛选。
 GET /api/tasks/{task_id}: 任务详情查询，含 events + artifacts。
+POST /api/tasks/{task_id}/resume: 手动触发恢复。
+GET /api/tasks/{task_id}/checkpoints: 查询 checkpoint 时间线。
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from octoagent.core.models import ResumeFailureType
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from ..deps import get_store_group
+from ..services.resume_engine import ResumeEngine
 from ..services.task_service import TaskService
 
 router = APIRouter()
@@ -31,6 +35,37 @@ class TaskListResponse(BaseModel):
     """任务列表响应"""
 
     tasks: list[TaskSummary]
+
+
+class ResumeTaskResponse(BaseModel):
+    """手动恢复响应"""
+
+    ok: bool
+    task_id: str
+    checkpoint_id: str | None = None
+    resumed_from_node: str | None = None
+    failure_type: str | None = None
+    message: str
+
+
+class CheckpointItem(BaseModel):
+    """checkpoint 列表项"""
+
+    checkpoint_id: str
+    task_id: str
+    node_id: str
+    status: str
+    schema_version: int
+    state_snapshot: dict
+    side_effect_cursor: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class CheckpointListResponse(BaseModel):
+    """checkpoint 列表响应"""
+
+    checkpoints: list[CheckpointItem]
 
 
 @router.get("/api/tasks", response_model=TaskListResponse)
@@ -143,3 +178,103 @@ async def get_task_detail(
         "events": events_data,
         "artifacts": artifacts_data,
     }
+
+
+@router.post("/api/tasks/{task_id}/resume", response_model=ResumeTaskResponse)
+async def resume_task(
+    task_id: str,
+    request: Request,
+    store_group=Depends(get_store_group),
+):
+    """手动触发恢复。"""
+    task = await store_group.task_store.get_task(task_id)
+    if task is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "TASK_NOT_FOUND",
+                    "message": f"Task with id {task_id} does not exist",
+                }
+            },
+        )
+
+    task_runner = getattr(request.app.state, "task_runner", None)
+    if task_runner is not None:
+        result = await task_runner.resume_task(task_id, trigger="manual")
+    else:
+        engine = ResumeEngine(store_group)
+        result = await engine.try_resume(task_id, trigger="manual")
+
+    if result.ok:
+        return ResumeTaskResponse(
+            ok=True,
+            task_id=result.task_id,
+            checkpoint_id=result.checkpoint_id,
+            resumed_from_node=result.resumed_from_node,
+            failure_type=None,
+            message=result.message,
+        )
+
+    failure_type = result.failure_type.value if result.failure_type else "unknown"
+    if result.failure_type in {
+        ResumeFailureType.TERMINAL_TASK,
+        ResumeFailureType.LEASE_CONFLICT,
+    }:
+        status_code = 409
+    elif result.failure_type in {
+        ResumeFailureType.DEPENDENCY_MISSING,
+        ResumeFailureType.SNAPSHOT_CORRUPT,
+        ResumeFailureType.VERSION_MISMATCH,
+    }:
+        status_code = 422
+    else:
+        status_code = 422
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": "TASK_RESUME_FAILED",
+                "failure_type": failure_type,
+                "message": result.message,
+            }
+        },
+    )
+
+
+@router.get("/api/tasks/{task_id}/checkpoints", response_model=CheckpointListResponse)
+async def list_task_checkpoints(
+    task_id: str,
+    store_group=Depends(get_store_group),
+):
+    """查询任务 checkpoint 时间线（created_at 倒序）。"""
+    task = await store_group.task_store.get_task(task_id)
+    if task is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "TASK_NOT_FOUND",
+                    "message": f"Task with id {task_id} does not exist",
+                }
+            },
+        )
+
+    checkpoints = await store_group.checkpoint_store.list_checkpoints(task_id)
+    return CheckpointListResponse(
+        checkpoints=[
+            CheckpointItem(
+                checkpoint_id=cp.checkpoint_id,
+                task_id=cp.task_id,
+                node_id=cp.node_id,
+                status=cp.status.value,
+                schema_version=cp.schema_version,
+                state_snapshot=cp.state_snapshot,
+                side_effect_cursor=cp.side_effect_cursor,
+                created_at=cp.created_at.isoformat(),
+                updated_at=cp.updated_at.isoformat(),
+            )
+            for cp in checkpoints
+        ]
+    )

@@ -8,11 +8,17 @@ from pathlib import Path
 import aiosqlite
 
 from .artifact_store import SqliteArtifactStore
+from .checkpoint_store import SqliteCheckpointStore
 from .event_store import SqliteEventStore
+from .side_effect_ledger_store import SqliteSideEffectLedgerStore
 from .sqlite_init import init_db
 from .task_job_store import SqliteTaskJobStore
 from .task_store import SqliteTaskStore
-from .transaction import append_event_and_update_task, append_event_only
+from .transaction import (
+    append_event_and_save_checkpoint,
+    append_event_and_update_task,
+    append_event_only,
+)
 
 
 class StoreGroup:
@@ -28,6 +34,8 @@ class StoreGroup:
         self.event_store = SqliteEventStore(conn)
         self.artifact_store = SqliteArtifactStore(conn, artifacts_dir)
         self.task_job_store = SqliteTaskJobStore(conn)
+        self.checkpoint_store = SqliteCheckpointStore(conn)
+        self.side_effect_ledger_store = SqliteSideEffectLedgerStore(conn)
 
 
 async def create_store_group(
@@ -64,7 +72,10 @@ __all__ = [
     "SqliteTaskJobStore",
     "SqliteEventStore",
     "SqliteArtifactStore",
+    "SqliteCheckpointStore",
+    "SqliteSideEffectLedgerStore",
     "init_db",
     "append_event_and_update_task",
     "append_event_only",
+    "append_event_and_save_checkpoint",
 ]

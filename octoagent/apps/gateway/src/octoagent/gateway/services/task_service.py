@@ -9,6 +9,7 @@
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 import aiosqlite
 import structlog
@@ -20,6 +21,8 @@ from octoagent.core.models import (
     ActorType,
     Artifact,
     ArtifactPart,
+    CheckpointSnapshot,
+    CheckpointStatus,
     Event,
     EventCausality,
     EventType,
@@ -32,6 +35,7 @@ from octoagent.core.models import (
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.models.payloads import (
     ArtifactCreatedPayload,
+    CheckpointSavedPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
@@ -42,6 +46,7 @@ from octoagent.core.models.payloads import (
 from octoagent.core.store import StoreGroup
 from octoagent.core.store.transaction import (
     TaskStatusConflictError,
+    append_event_and_save_checkpoint,
     append_event_and_update_task,
     append_event_only,
     create_task_with_initial_events,
@@ -57,6 +62,12 @@ class TaskService:
     _task_locks: dict[str, asyncio.Lock] = {}
     _task_locks_guard = asyncio.Lock()
     _max_task_seq_retries = 3
+    _pipeline_nodes = [
+        "state_running",
+        "model_call_started",
+        "response_persisted",
+        "task_succeeded",
+    ]
 
     def __init__(self, store_group: StoreGroup, sse_hub=None) -> None:
         self._stores = store_group
@@ -213,8 +224,10 @@ class TaskService:
         user_text: str,
         llm_service,
         model_alias: str | None = None,
+        resume_from_node: str | None = None,
+        resume_state_snapshot: dict[str, Any] | None = None,
     ) -> None:
-        """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储
+        """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储 + Checkpoint
 
         流程：
         1. STATE_TRANSITION: CREATED -> RUNNING
@@ -231,45 +244,145 @@ class TaskService:
         """
         trace_id = f"trace-{task_id}"
         effective_alias = model_alias or "main"
+        llm_call_idempotency_key = self._derive_llm_call_idempotency_key(
+            task_id=task_id,
+            model_alias=effective_alias,
+            resume_from_node=resume_from_node,
+            resume_state_snapshot=resume_state_snapshot,
+        )
+        artifact_id = (
+            str(resume_state_snapshot.get("artifact_id"))
+            if resume_state_snapshot and resume_state_snapshot.get("artifact_id")
+            else None
+        )
         try:
-            # 1. 进入 RUNNING（支持续对话场景的重复执行）
-            await self._prepare_task_for_processing(task_id, trace_id)
+            # 1. STATE_TRANSITION: CREATED -> RUNNING（恢复路径按 checkpoint 起点跳过）
+            if self._should_execute_node("state_running", resume_from_node):
+                if resume_from_node is None:
+                    # 常规路径保留“续对话可重复执行”语义
+                    await self._prepare_task_for_processing(task_id, trace_id)
+                else:
+                    try:
+                        await self._write_state_transition(
+                            task_id, TaskStatus.CREATED, TaskStatus.RUNNING, trace_id
+                        )
+                    except TaskStatusConflictError:
+                        # 恢复路径下任务大概率已是 RUNNING，允许跳过冲突
+                        current = await self.get_task(task_id)
+                        if current is None or current.status != TaskStatus.RUNNING:
+                            raise
+
+                await self._write_checkpoint(
+                    task_id=task_id,
+                    node_id="state_running",
+                    trace_id=trace_id,
+                    state_snapshot={
+                        "next_node": "model_call_started",
+                        "model_alias": effective_alias,
+                        "llm_call_idempotency_key": llm_call_idempotency_key,
+                    },
+                )
 
             # 2. MODEL_CALL_STARTED 事件
             request_summary = f"User asks: {user_text[:100]}"
-            started_event = await self._append_event_only_with_retry(
-                task_id=task_id,
-                event_builder=lambda seq: Event(
-                    event_id=str(ULID()),
+            if self._should_execute_node("model_call_started", resume_from_node):
+                started_event = await self._append_event_only_with_retry(
                     task_id=task_id,
-                    task_seq=seq,
-                    ts=datetime.now(UTC),
-                    type=EventType.MODEL_CALL_STARTED,
-                    actor=ActorType.SYSTEM,
-                    payload=ModelCallStartedPayload(
-                        model_alias=effective_alias,
-                        request_summary=request_summary,
-                    ).model_dump(),
+                    event_builder=lambda seq: Event(
+                        event_id=str(ULID()),
+                        task_id=task_id,
+                        task_seq=seq,
+                        ts=datetime.now(UTC),
+                        type=EventType.MODEL_CALL_STARTED,
+                        actor=ActorType.SYSTEM,
+                        payload=ModelCallStartedPayload(
+                            model_alias=effective_alias,
+                            request_summary=request_summary,
+                        ).model_dump(),
+                        trace_id=trace_id,
+                    ),
+                )
+                if self._sse_hub:
+                    await self._sse_hub.broadcast(task_id, started_event)
+
+                await self._write_checkpoint(
+                    task_id=task_id,
+                    node_id="model_call_started",
                     trace_id=trace_id,
-                ),
-            )
-            if self._sse_hub:
-                await self._sse_hub.broadcast(task_id, started_event)
+                    state_snapshot={
+                        "next_node": "response_persisted",
+                        "request_summary": request_summary,
+                        "model_alias": effective_alias,
+                        "llm_call_idempotency_key": llm_call_idempotency_key,
+                    },
+                )
 
             # 3. LLM 调用（返回 ModelCallResult）
-            llm_result = await llm_service.call(user_text, model_alias=model_alias)
+            if self._should_execute_node("response_persisted", resume_from_node):
+                first_record = await self._stores.side_effect_ledger_store.try_record(
+                    task_id=task_id,
+                    step_key=f"llm_call:{llm_call_idempotency_key}",
+                    idempotency_key=llm_call_idempotency_key,
+                    effect_type="tool_call",
+                )
+                if first_record:
+                    llm_result = await llm_service.call(user_text, model_alias=model_alias)
 
-            # 4. 存储 Artifact + 写入完成事件
-            artifact_id, artifact = await self._store_llm_artifact(task_id, llm_result)
-            await self._write_model_call_completed(
-                task_id, trace_id, llm_result, artifact_id
-            )
-            await self._write_artifact_created(task_id, trace_id, artifact_id, artifact)
+                    # 4. 存储 Artifact + 写入完成事件
+                    artifact_id, artifact = await self._store_llm_artifact(task_id, llm_result)
+                    await self._stores.side_effect_ledger_store.set_result_ref(
+                        llm_call_idempotency_key, artifact_id
+                    )
+                    await self._write_model_call_completed(
+                        task_id, trace_id, llm_result, artifact_id
+                    )
+                    await self._write_artifact_created(task_id, trace_id, artifact_id, artifact)
+                else:
+                    reused_artifact_id = await self._resolve_reused_artifact_id(
+                        llm_call_idempotency_key
+                    )
+                    if reused_artifact_id is None:
+                        raise RuntimeError(
+                            "检测到重复副作用幂等键，但缺少可复用结果引用"
+                        )
+                    artifact_id = reused_artifact_id
+                    await self._write_model_call_reused_events(
+                        task_id=task_id,
+                        trace_id=trace_id,
+                        model_alias=effective_alias,
+                        artifact_id=artifact_id,
+                    )
+                    log.info(
+                        "resume_reused_llm_result",
+                        task_id=task_id,
+                        artifact_id=artifact_id,
+                    )
+
+                await self._write_checkpoint(
+                    task_id=task_id,
+                    node_id="response_persisted",
+                    trace_id=trace_id,
+                    state_snapshot={
+                        "next_node": "task_succeeded",
+                        "artifact_id": artifact_id,
+                        "llm_call_idempotency_key": llm_call_idempotency_key,
+                    },
+                )
 
             # 5. STATE_TRANSITION: RUNNING -> SUCCEEDED
-            await self._write_state_transition(
-                task_id, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, trace_id
-            )
+            if self._should_execute_node("task_succeeded", resume_from_node):
+                await self._write_state_transition(
+                    task_id, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, trace_id
+                )
+                await self._write_checkpoint(
+                    task_id=task_id,
+                    node_id="task_succeeded",
+                    trace_id=trace_id,
+                    state_snapshot={
+                        "next_node": None,
+                        "artifact_id": artifact_id,
+                    },
+                )
 
         except TaskStatusConflictError:
             log.info(
@@ -339,6 +452,89 @@ class TaskService:
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
 
+    async def _resolve_reused_artifact_id(self, idempotency_key: str) -> str | None:
+        """根据幂等键查找可复用的 artifact 引用"""
+        entry = await self._stores.side_effect_ledger_store.get_entry(idempotency_key)
+        if entry is None or not entry.result_ref:
+            return None
+        artifact = await self._stores.artifact_store.get_artifact(entry.result_ref)
+        if artifact is None:
+            return None
+        return artifact.artifact_id
+
+    async def _write_model_call_reused_events(
+        self,
+        task_id: str,
+        trace_id: str,
+        model_alias: str,
+        artifact_id: str,
+    ) -> None:
+        """恢复场景复用已存在 artifact，补写必要事件（若缺失）。"""
+        existing_events = await self._stores.event_store.get_events_for_task(task_id)
+        has_model_completed = any(
+            e.type == EventType.MODEL_CALL_COMPLETED
+            and e.payload.get("artifact_ref") == artifact_id
+            for e in existing_events
+        )
+        has_artifact_created = any(
+            e.type == EventType.ARTIFACT_CREATED
+            and e.payload.get("artifact_id") == artifact_id
+            for e in existing_events
+        )
+        if has_model_completed and has_artifact_created:
+            return
+
+        artifact = await self._stores.artifact_store.get_artifact(artifact_id)
+        if artifact is None:
+            raise RuntimeError(f"复用 artifact 不存在: {artifact_id}")
+
+        if not has_model_completed:
+            content = await self._stores.artifact_store.get_artifact_content(artifact_id)
+            summary = "Reused prior LLM result"
+            if content is not None:
+                text = content.decode("utf-8", errors="ignore")
+                summary = text
+                if len(summary.encode("utf-8")) > self.RESPONSE_SUMMARY_MAX_BYTES:
+                    truncated = summary.encode("utf-8")[
+                        : self.RESPONSE_SUMMARY_MAX_BYTES
+                    ].decode("utf-8", errors="ignore")
+                    summary = truncated + "... [truncated, reused artifact]"
+
+            event = await self._append_event_only_with_retry(
+                task_id=task_id,
+                event_builder=lambda seq: Event(
+                    event_id=str(ULID()),
+                    task_id=task_id,
+                    task_seq=seq,
+                    ts=datetime.now(UTC),
+                    type=EventType.MODEL_CALL_COMPLETED,
+                    actor=ActorType.SYSTEM,
+                    payload=ModelCallCompletedPayload(
+                        model_alias=model_alias,
+                        model_name="",
+                        provider="",
+                        response_summary=summary,
+                        duration_ms=0,
+                        token_usage={},
+                        cost_usd=0.0,
+                        cost_unavailable=True,
+                        is_fallback=False,
+                        artifact_ref=artifact_id,
+                    ).model_dump(),
+                    trace_id=trace_id,
+                ),
+            )
+            if self._sse_hub:
+                await self._sse_hub.broadcast(task_id, event)
+
+        if not has_artifact_created:
+            await self._write_artifact_created(
+                task_id=task_id,
+                trace_id=trace_id,
+                artifact_id=artifact_id,
+                artifact=artifact,
+            )
+
     async def _write_artifact_created(
         self, task_id: str, trace_id: str, artifact_id: str, artifact: Artifact
     ) -> None:
@@ -363,6 +559,125 @@ class TaskService:
         )
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
+
+    def _should_execute_node(self, node_id: str, resume_from_node: str | None) -> bool:
+        """根据恢复起点判断当前节点是否需要执行"""
+        if resume_from_node is None:
+            return True
+        if resume_from_node not in self._pipeline_nodes:
+            return True
+        return self._pipeline_nodes.index(node_id) > self._pipeline_nodes.index(
+            resume_from_node
+        )
+
+    def _derive_llm_call_idempotency_key(
+        self,
+        task_id: str,
+        model_alias: str,
+        resume_from_node: str | None,
+        resume_state_snapshot: dict[str, Any] | None,
+    ) -> str:
+        """生成副作用幂等键。
+
+        常规执行为每次处理生成唯一 key，避免续对话场景误复用历史结果；
+        恢复执行优先复用 checkpoint 中落盘 key，兼容旧快照回退到确定性 key。
+        """
+        if resume_from_node is None:
+            return f"{task_id}:llm_call:{model_alias}:{ULID()}"
+
+        if resume_state_snapshot and resume_state_snapshot.get("llm_call_idempotency_key"):
+            return str(resume_state_snapshot["llm_call_idempotency_key"])
+
+        return f"{task_id}:llm_call:{model_alias}"
+
+    async def _write_checkpoint(
+        self,
+        task_id: str,
+        node_id: str,
+        trace_id: str,
+        state_snapshot: dict[str, Any],
+    ) -> str:
+        """写入 CHECKPOINT_SAVED 事件与 checkpoint（同事务）"""
+
+        event, checkpoint = await self._append_event_and_checkpoint_with_retry(
+            task_id=task_id,
+            builder=lambda seq: self._build_checkpoint_pair(
+                task_id=task_id,
+                task_seq=seq,
+                node_id=node_id,
+                trace_id=trace_id,
+                state_snapshot=state_snapshot,
+            ),
+        )
+
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+        return checkpoint.checkpoint_id
+
+    def _build_checkpoint_pair(
+        self,
+        task_id: str,
+        task_seq: int,
+        node_id: str,
+        trace_id: str,
+        state_snapshot: dict[str, Any],
+    ) -> tuple[Event, CheckpointSnapshot]:
+        """构建 checkpoint 事件与 snapshot 配对对象"""
+        now = datetime.now(UTC)
+        checkpoint_id = str(ULID())
+        checkpoint = CheckpointSnapshot(
+            checkpoint_id=checkpoint_id,
+            task_id=task_id,
+            node_id=node_id,
+            status=CheckpointStatus.SUCCESS,
+            schema_version=1,
+            state_snapshot=state_snapshot,
+            created_at=now,
+            updated_at=now,
+        )
+        event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=task_seq,
+            ts=now,
+            type=EventType.CHECKPOINT_SAVED,
+            actor=ActorType.SYSTEM,
+            payload=CheckpointSavedPayload(
+                checkpoint_id=checkpoint_id,
+                node_id=node_id,
+                schema_version=1,
+            ).model_dump(),
+            trace_id=trace_id,
+        )
+        return event, checkpoint
+
+    async def _append_event_and_checkpoint_with_retry(self, task_id: str, builder):
+        """写入 checkpoint 相关事件并在 task_seq 冲突时重试。"""
+        lock = await self._get_task_lock(task_id)
+        async with lock:
+            for attempt in range(1, self._max_task_seq_retries + 1):
+                seq = await self._stores.event_store.get_next_task_seq(task_id)
+                event, checkpoint = builder(seq)
+                try:
+                    await append_event_and_save_checkpoint(
+                        self._stores.conn,
+                        self._stores.event_store,
+                        self._stores.task_store,
+                        self._stores.checkpoint_store,
+                        event,
+                        checkpoint,
+                    )
+                    return event, checkpoint
+                except aiosqlite.IntegrityError as e:
+                    if self._is_task_seq_conflict(e) and attempt < self._max_task_seq_retries:
+                        log.warning(
+                            "task_seq_conflict_retry",
+                            task_id=task_id,
+                            attempt=attempt,
+                        )
+                        continue
+                    raise
+        raise RuntimeError("failed to append checkpoint event after retries")
 
     async def _handle_llm_failure(
         self, task_id: str, trace_id: str, model_alias: str, error: Exception
