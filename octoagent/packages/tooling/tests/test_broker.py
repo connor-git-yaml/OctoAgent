@@ -110,6 +110,40 @@ class TestBrokerRegistration:
         with pytest.raises(ToolRegistrationError, match="already registered"):
             await broker.register(meta, echo_tool)
 
+    async def test_try_register_success(self, mock_event_store) -> None:
+        """Feature 012: try_register 成功返回 ok=True"""
+        from octoagent.tooling.broker import ToolBroker
+
+        broker = ToolBroker(event_store=mock_event_store)
+        meta = reflect_tool_schema(echo_tool)
+
+        result = await broker.try_register(meta, echo_tool)
+
+        assert result.ok is True
+        assert result.tool_name == "echo_tool"
+        assert result.error_type is None
+        assert broker.registry_diagnostics == []
+
+    async def test_try_register_duplicate_records_diagnostic(self, mock_event_store) -> None:
+        """Feature 012: try_register 冲突不抛错，写入 diagnostics"""
+        from octoagent.tooling.broker import ToolBroker
+
+        broker = ToolBroker(event_store=mock_event_store)
+        meta = reflect_tool_schema(echo_tool)
+
+        await broker.register(meta, echo_tool)
+        result = await broker.try_register(meta, echo_tool)
+
+        assert result.ok is False
+        assert result.tool_name == "echo_tool"
+        assert result.error_type == "ToolRegistrationError"
+
+        diagnostics = broker.registry_diagnostics
+        assert len(diagnostics) == 1
+        assert diagnostics[0].tool_name == "echo_tool"
+        assert diagnostics[0].error_type == "ToolRegistrationError"
+        assert "already registered" in diagnostics[0].message
+
     async def test_discover_by_profile_minimal(self, mock_event_store) -> None:
         """profile=minimal 仅返回 minimal 工具"""
         from octoagent.tooling.broker import ToolBroker

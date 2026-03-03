@@ -7,6 +7,7 @@ MockPolicyCheckpoint 满足 PolicyCheckpoint Protocol。
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from octoagent.tooling.models import (
@@ -14,6 +15,8 @@ from octoagent.tooling.models import (
     CheckResult,
     ExecutionContext,
     FailMode,
+    RegisterToolResult,
+    RegistryDiagnostic,
     ToolMeta,
     ToolProfile,
     ToolResult,
@@ -29,6 +32,7 @@ class MockToolBroker:
 
     def __init__(self) -> None:
         self._registry: dict[str, tuple[ToolMeta, Any]] = {}
+        self._diagnostics: list[RegistryDiagnostic] = []
 
     async def register(self, tool_meta: ToolMeta, handler: Any) -> None:
         self._registry[tool_meta.name] = (tool_meta, handler)
@@ -39,6 +43,25 @@ class MockToolBroker:
         group: str | None = None,
     ) -> list[ToolMeta]:
         return [meta for meta, _ in self._registry.values()]
+
+    async def try_register(self, tool_meta: ToolMeta, handler: Any) -> RegisterToolResult:
+        if tool_meta.name in self._registry:
+            self._diagnostics.append(
+                RegistryDiagnostic(
+                    tool_name=tool_meta.name,
+                    error_type="ToolRegistrationError",
+                    message="already registered",
+                    timestamp=datetime.now(),
+                )
+            )
+            return RegisterToolResult(
+                ok=False,
+                tool_name=tool_meta.name,
+                message="already registered",
+                error_type="ToolRegistrationError",
+            )
+        await self.register(tool_meta, handler)
+        return RegisterToolResult(ok=True, tool_name=tool_meta.name, message="registered")
 
     async def execute(
         self,
@@ -56,6 +79,10 @@ class MockToolBroker:
             del self._registry[tool_name]
             return True
         return False
+
+    @property
+    def registry_diagnostics(self) -> list[RegistryDiagnostic]:
+        return list(self._diagnostics)
 
 
 class MockPolicyCheckpoint:
@@ -137,6 +164,11 @@ class TestToolBrokerProtocolCompliance:
         broker = MockToolBroker()
         assert hasattr(broker, "discover")
 
+    def test_mock_broker_has_try_register(self) -> None:
+        """MockToolBroker 有 try_register 方法"""
+        broker = MockToolBroker()
+        assert hasattr(broker, "try_register")
+
     def test_mock_broker_has_execute(self) -> None:
         """MockToolBroker 有 execute 方法"""
         broker = MockToolBroker()
@@ -151,6 +183,11 @@ class TestToolBrokerProtocolCompliance:
         """MockToolBroker 有 unregister 方法"""
         broker = MockToolBroker()
         assert hasattr(broker, "unregister")
+
+    def test_mock_broker_has_registry_diagnostics(self) -> None:
+        """MockToolBroker 有 registry_diagnostics 属性"""
+        broker = MockToolBroker()
+        assert hasattr(broker, "registry_diagnostics")
 
     async def test_mock_broker_register_and_discover(self) -> None:
         """MockToolBroker register + discover 端到端"""

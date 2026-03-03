@@ -25,6 +25,8 @@ from .exceptions import (
 from .models import (
     ExecutionContext,
     FailMode,
+    RegisterToolResult,
+    RegistryDiagnostic,
     SideEffectLevel,
     ToolMeta,
     ToolProfile,
@@ -63,6 +65,7 @@ class ToolBroker:
         # Hook 列表
         self._before_hooks: list[BeforeHook] = []
         self._after_hooks: list[AfterHook] = []
+        self._diagnostics: list[RegistryDiagnostic] = []
         # 外部依赖
         self._event_store = event_store
         self._artifact_store = artifact_store
@@ -97,6 +100,50 @@ class ToolBroker:
             tool_profile=tool_meta.tool_profile,
             tool_group=tool_meta.tool_group,
         )
+
+    async def try_register(
+        self,
+        tool_meta: ToolMeta,
+        handler: Callable[..., Any],
+    ) -> RegisterToolResult:
+        """尝试注册工具（Feature 012 fail-open 语义）
+
+        与 register 的区别：
+        - register: 冲突时抛出 ToolRegistrationError（严格模式）
+        - try_register: 冲突时返回 ok=False，并写入 registry diagnostics
+        """
+        try:
+            await self.register(tool_meta, handler)
+            return RegisterToolResult(
+                ok=True,
+                tool_name=tool_meta.name,
+                message="registered",
+            )
+        except Exception as exc:
+            diagnostic = RegistryDiagnostic(
+                tool_name=tool_meta.name,
+                error_type=type(exc).__name__,
+                message=str(exc),
+                timestamp=datetime.now(),
+            )
+            self._diagnostics.append(diagnostic)
+            logger.warning(
+                "tool_try_register_failed",
+                tool_name=tool_meta.name,
+                error_type=diagnostic.error_type,
+                message=diagnostic.message,
+            )
+            return RegisterToolResult(
+                ok=False,
+                tool_name=tool_meta.name,
+                message=diagnostic.message,
+                error_type=diagnostic.error_type,
+            )
+
+    @property
+    def registry_diagnostics(self) -> list[RegistryDiagnostic]:
+        """返回诊断列表快照，防止调用方修改内部状态。"""
+        return list(self._diagnostics)
 
     async def discover(
         self,
