@@ -6,8 +6,10 @@
 
 import aiosqlite
 
-from ..models.task import Task
+from ..models.checkpoint import CheckpointSnapshot
 from ..models.event import Event
+from ..models.task import Task
+from .checkpoint_store import SqliteCheckpointStore
 from .event_store import SqliteEventStore
 from .task_store import SqliteTaskStore
 
@@ -158,6 +160,42 @@ async def append_event_only(
             (event.ts.isoformat(), event.event_id, event.task_id),
         )
 
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+
+
+async def append_event_and_save_checkpoint(
+    conn: aiosqlite.Connection,
+    event_store: SqliteEventStore,
+    task_store: SqliteTaskStore,
+    checkpoint_store: SqliteCheckpointStore,
+    event: Event,
+    checkpoint: CheckpointSnapshot,
+) -> None:
+    """在同一事务内写入事件 + checkpoint + task pointers"""
+    try:
+        await event_store.append_event(event)
+        await checkpoint_store.save_checkpoint(checkpoint)
+        await conn.execute(
+            """
+            UPDATE tasks
+            SET updated_at = ?,
+                pointers = json_set(
+                    json_set(pointers, '$.latest_event_id', ?),
+                    '$.latest_checkpoint_id',
+                    ?
+                )
+            WHERE task_id = ?
+            """,
+            (
+                event.ts.isoformat(),
+                event.event_id,
+                checkpoint.checkpoint_id,
+                event.task_id,
+            ),
+        )
         await conn.commit()
     except Exception:
         await conn.rollback()

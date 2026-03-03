@@ -105,6 +105,58 @@ _TASK_JOBS_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_task_jobs_updated_at ON task_jobs(updated_at DESC);",
 ]
 
+# checkpoints 表 DDL（Feature 010）
+_CHECKPOINTS_DDL = """
+CREATE TABLE IF NOT EXISTS checkpoints (
+    checkpoint_id      TEXT PRIMARY KEY,
+    task_id            TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    schema_version     INTEGER NOT NULL DEFAULT 1,
+    state_snapshot     TEXT NOT NULL,
+    side_effect_cursor TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
+_CHECKPOINTS_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_checkpoints_task_created "
+        "ON checkpoints(task_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_checkpoints_task_status "
+        "ON checkpoints(task_id, status);"
+    ),
+]
+
+# side_effect_ledger 表 DDL（Feature 010）
+_SIDE_EFFECT_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS side_effect_ledger (
+    ledger_id        TEXT PRIMARY KEY,
+    task_id          TEXT NOT NULL,
+    step_key         TEXT NOT NULL,
+    idempotency_key  TEXT NOT NULL,
+    effect_type      TEXT NOT NULL,
+    result_ref       TEXT,
+    created_at       TEXT NOT NULL,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id),
+    UNIQUE(task_id, step_key),
+    UNIQUE(idempotency_key)
+);
+"""
+
+_SIDE_EFFECT_LEDGER_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_task_id "
+        "ON side_effect_ledger(task_id);"
+    ),
+]
+
 
 async def init_db(conn: aiosqlite.Connection) -> None:
     """初始化数据库：设置 PRAGMA + 创建表 + 创建索引
@@ -122,9 +174,18 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_EVENTS_DDL)
     await conn.execute(_ARTIFACTS_DDL)
     await conn.execute(_TASK_JOBS_DDL)
+    await conn.execute(_CHECKPOINTS_DDL)
+    await conn.execute(_SIDE_EFFECT_LEDGER_DDL)
 
     # 创建索引
-    for idx_sql in _TASKS_INDEXES + _EVENTS_INDEXES + _ARTIFACTS_INDEXES + _TASK_JOBS_INDEXES:
+    for idx_sql in (
+        _TASKS_INDEXES
+        + _EVENTS_INDEXES
+        + _ARTIFACTS_INDEXES
+        + _TASK_JOBS_INDEXES
+        + _CHECKPOINTS_INDEXES
+        + _SIDE_EFFECT_LEDGER_INDEXES
+    ):
         await conn.execute(idx_sql)
 
     await conn.commit()

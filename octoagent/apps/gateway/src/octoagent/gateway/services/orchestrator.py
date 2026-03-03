@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from typing import Protocol
 
 import structlog
@@ -194,6 +195,8 @@ class SingleWorkerRouter:
             max_hops=request.max_hops,
             user_text=request.user_text,
             model_alias=request.model_alias,
+            resume_from_node=request.resume_from_node,
+            resume_state_snapshot=request.resume_state_snapshot,
             tool_profile=request.tool_profile,
             metadata=request.metadata,
         )
@@ -278,6 +281,8 @@ class OrchestratorService:
         task_id: str,
         user_text: str,
         model_alias: str | None = None,
+        resume_from_node: str | None = None,
+        resume_state_snapshot: dict[str, Any] | None = None,
         *,
         worker_capability: str = "llm_generation",
         contract_version: str = "1.0",
@@ -295,6 +300,8 @@ class OrchestratorService:
             trace_id=trace_id,
             user_text=user_text,
             model_alias=model_alias,
+            resume_from_node=resume_from_node,
+            resume_state_snapshot=resume_state_snapshot,
             worker_capability=worker_capability,
             contract_version=contract_version,
             hop_count=hop_count,

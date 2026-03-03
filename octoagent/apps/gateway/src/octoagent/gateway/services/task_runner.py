@@ -12,12 +12,20 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
-from octoagent.core.models import TERMINAL_STATES, TaskStatus, WorkerExecutionStatus
+from octoagent.core.models import (
+    TERMINAL_STATES,
+    ResumeFailureType,
+    ResumeResult,
+    TaskStatus,
+    WorkerExecutionStatus,
+)
 from octoagent.core.store import StoreGroup
 
 from .orchestrator import OrchestratorService
+from .resume_engine import ResumeEngine
 from .task_service import TaskService
 from .worker_runtime import WorkerCancellationRegistry, WorkerRuntimeConfig
 
@@ -62,6 +70,7 @@ class TaskRunner:
             docker_available_checker=docker_available_checker,
             cancellation_registry=self._cancellation_registry,
         )
+        self._resume_engine = ResumeEngine(store_group)
 
     async def startup(self) -> None:
         """启动恢复：清理 orphan running + 拉起 queued"""
@@ -101,6 +110,41 @@ class TaskRunner:
             return
         await self._start_job(task_id)
 
+    async def resume_task(self, task_id: str, trigger: str = "manual") -> ResumeResult:
+        """手动触发恢复并在成功时启动执行。"""
+        job = await self._stores.task_job_store.get_job(task_id)
+        if job is None:
+            return ResumeResult(
+                ok=False,
+                task_id=task_id,
+                failure_type=ResumeFailureType.DEPENDENCY_MISSING,
+                message="task_jobs 中不存在可恢复任务记录",
+            )
+
+        resume_result = await self._resume_engine.try_resume(task_id, trigger=trigger)
+        if not resume_result.ok:
+            return resume_result
+
+        if job.status == "QUEUED":
+            marked = await self._stores.task_job_store.mark_running(task_id)
+            if not marked:
+                return ResumeResult(
+                    ok=False,
+                    task_id=task_id,
+                    failure_type=ResumeFailureType.LEASE_CONFLICT,
+                    message="任务未能切换到 RUNNING，可能被其他执行器接管",
+                )
+
+        self._cancellation_registry.ensure(task_id)
+        await self._spawn_job(
+            task_id=task_id,
+            user_text=job.user_text,
+            model_alias=job.model_alias,
+            resume_from_node=resume_result.resumed_from_node,
+            resume_state_snapshot=resume_result.state_snapshot,
+        )
+        return resume_result
+
     async def _dispatch_queued_jobs(self) -> None:
         jobs = await self._stores.task_job_store.list_jobs(["QUEUED"])
         for job in jobs:
@@ -113,13 +157,42 @@ class TaskRunner:
 
         service = TaskService(self._stores, self._sse_hub)
         for job in jobs:
+            task = await service.get_task(job.task_id)
+            if task is None:
+                await self._stores.task_job_store.mark_failed(
+                    job.task_id,
+                    "task_missing_for_recovery",
+                )
+                continue
+            if task.status == TaskStatus.SUCCEEDED:
+                await self._stores.task_job_store.mark_succeeded(job.task_id)
+                continue
+            if task.status in TERMINAL_STATES:
+                await self._stores.task_job_store.mark_failed(
+                    job.task_id,
+                    f"task_terminal_status_{task.status}",
+                )
+                continue
+
+            resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
+            if resume_result.ok:
+                self._cancellation_registry.ensure(job.task_id)
+                await self._spawn_job(
+                    task_id=job.task_id,
+                    user_text=job.user_text,
+                    model_alias=job.model_alias,
+                    resume_from_node=resume_result.resumed_from_node,
+                    resume_state_snapshot=resume_result.state_snapshot,
+                )
+                continue
+
             await self._stores.task_job_store.mark_failed(
                 job.task_id,
-                "gateway_restarted_before_job_completed",
+                f"gateway_resume_failed:{resume_result.failure_type or 'unknown'}",
             )
             await service.mark_running_task_failed_for_recovery(
                 job.task_id,
-                reason="网关重启，后台任务中断",
+                reason=f"网关恢复失败: {resume_result.message}",
             )
 
     async def _start_job(self, task_id: str) -> None:
@@ -137,13 +210,35 @@ class TaskRunner:
             await self._stores.task_job_store.mark_failed(task_id, "job_missing_after_mark_running")
             return
 
-        task = asyncio.create_task(self._run_job(job.task_id, job.user_text, job.model_alias))
+        await self._spawn_job(
+            task_id=job.task_id,
+            user_text=job.user_text,
+            model_alias=job.model_alias,
+        )
+
+    async def _spawn_job(
+        self,
+        task_id: str,
+        user_text: str,
+        model_alias: str | None,
+        resume_from_node: str | None = None,
+        resume_state_snapshot: dict[str, Any] | None = None,
+    ) -> None:
+        task = asyncio.create_task(
+            self._run_job(
+                task_id=task_id,
+                user_text=user_text,
+                model_alias=model_alias,
+                resume_from_node=resume_from_node,
+                resume_state_snapshot=resume_state_snapshot,
+            )
+        )
         async with self._lock:
-            self._running_jobs[job.task_id] = RunningJob(
+            self._running_jobs[task_id] = RunningJob(
                 task=task,
                 started_at=datetime.now(UTC),
             )
-        task.add_done_callback(lambda t, tid=job.task_id: asyncio.create_task(self._on_done(tid)))
+        task.add_done_callback(lambda t, tid=task_id: asyncio.create_task(self._on_done(tid)))
 
     async def _on_done(self, task_id: str) -> None:
         async with self._lock:
@@ -170,12 +265,21 @@ class TaskRunner:
         await self._stores.task_job_store.mark_cancelled(task_id)
         return True
 
-    async def _run_job(self, task_id: str, user_text: str, model_alias: str | None) -> None:
+    async def _run_job(
+        self,
+        task_id: str,
+        user_text: str,
+        model_alias: str | None,
+        resume_from_node: str | None = None,
+        resume_state_snapshot: dict[str, Any] | None = None,
+    ) -> None:
         service = TaskService(self._stores, self._sse_hub)
         result = await self._orchestrator.dispatch(
             task_id=task_id,
             user_text=user_text,
             model_alias=model_alias,
+            resume_from_node=resume_from_node,
+            resume_state_snapshot=resume_state_snapshot,
         )
         task = await service.get_task(task_id)
         if task is None:

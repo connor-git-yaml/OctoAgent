@@ -192,3 +192,38 @@ class ToolCallFailedPayload(BaseModel):
         default="",
         description="恢复建议",
     )
+
+
+# Feature 010: Checkpoint / Resume Payload 类型
+
+
+class CheckpointSavedPayload(BaseModel):
+    """CHECKPOINT_SAVED 事件 payload"""
+
+    checkpoint_id: str = Field(description="checkpoint ID")
+    node_id: str = Field(description="节点标识")
+    schema_version: int = Field(default=1, description="checkpoint schema 版本")
+
+
+class ResumeStartedPayload(BaseModel):
+    """RESUME_STARTED 事件 payload"""
+
+    attempt_id: str = Field(description="恢复尝试 ID")
+    checkpoint_id: str | None = Field(default=None, description="checkpoint ID")
+    trigger: str = Field(default="startup", description="触发来源")
+
+
+class ResumeSucceededPayload(BaseModel):
+    """RESUME_SUCCEEDED 事件 payload"""
+
+    attempt_id: str = Field(description="恢复尝试 ID")
+    resumed_from_node: str = Field(description="恢复起点节点")
+
+
+class ResumeFailedPayload(BaseModel):
+    """RESUME_FAILED 事件 payload"""
+
+    attempt_id: str = Field(description="恢复尝试 ID")
+    failure_type: str = Field(description="失败类型")
+    failure_message: str = Field(description="失败信息")
+    recovery_hint: str = Field(default="", description="恢复建议")

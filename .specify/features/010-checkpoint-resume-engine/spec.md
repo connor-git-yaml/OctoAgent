@@ -2,11 +2,17 @@
 
 **Feature Branch**: `010-checkpoint-resume-engine`
 **Created**: 2026-03-03
-**Status**: Draft (Design Gate Ready)
+**Status**: Completed（2026-03-03 全量任务已完成）
 **Input**: 基于 M1.5 规划推进 Feature 010（Checkpoint & Resume Engine）
 **Blueprint 对齐**: FR-TASK-4（Checkpoint 恢复）、M1.5 执行约束（恢复幂等 + 事务边界）
 **Constitution 对齐**: C1 Durability, C2 Events, C4 Two-Phase, C6 Degrade Gracefully, C8 Observability
 **前序依赖**: Feature 008（Orchestrator Skeleton）、Feature 009（Worker Runtime）
+
+## 实施进度（2026-03-03）
+
+- ✅ 已完成：Phase 1-8 全部任务（T001-T029）
+- ✅ 已交付：恢复幂等复用、并发恢复冲突治理、手动恢复 API 与 checkpoints 查询 API
+- ✅ 已验证：core + gateway + integration 回归通过
 
 ## User Scenarios & Testing
 

@@ -4,6 +4,14 @@
 """
 
 from .artifact import Artifact, ArtifactPart
+from .checkpoint import (
+    CheckpointSnapshot,
+    CheckpointStatus,
+    ResumeAttempt,
+    ResumeFailureType,
+    ResumeResult,
+    SideEffectLedgerEntry,
+)
 from .enums import (
     TERMINAL_STATES,
     VALID_TRANSITIONS,
@@ -26,11 +34,15 @@ from .orchestrator import (
 )
 from .payloads import (
     ArtifactCreatedPayload,
+    CheckpointSavedPayload,
     ErrorPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
     OrchestratorDecisionPayload,
+    ResumeFailedPayload,
+    ResumeStartedPayload,
+    ResumeSucceededPayload,
     StateTransitionPayload,
     TaskCreatedPayload,
     ToolCallCompletedPayload,
@@ -63,6 +75,13 @@ __all__ = [
     # Artifact
     "Artifact",
     "ArtifactPart",
+    # Checkpoint
+    "CheckpointStatus",
+    "ResumeFailureType",
+    "CheckpointSnapshot",
+    "ResumeAttempt",
+    "ResumeResult",
+    "SideEffectLedgerEntry",
     # Message
     "NormalizedMessage",
     "MessageAttachment",
@@ -83,6 +102,11 @@ __all__ = [
     "ToolCallStartedPayload",
     "ToolCallCompletedPayload",
     "ToolCallFailedPayload",
+    # Feature 010: Checkpoint / Resume Payloads
+    "CheckpointSavedPayload",
+    "ResumeStartedPayload",
+    "ResumeSucceededPayload",
+    "ResumeFailedPayload",
     # Feature 008: Orchestrator Models
     "OrchestratorRequest",
     "DispatchEnvelope",

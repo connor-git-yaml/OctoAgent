@@ -22,6 +22,7 @@ class TaskPointers(BaseModel):
     """Task 指针信息"""
 
     latest_event_id: str | None = Field(default=None, description="最新事件 ID")
+    latest_checkpoint_id: str | None = Field(default=None, description="最新 checkpoint ID")
 
 
 class Task(BaseModel):

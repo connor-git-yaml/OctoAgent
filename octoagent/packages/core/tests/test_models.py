@@ -67,6 +67,10 @@ class TestEnums:
         assert EventType.ORCH_DECISION == "ORCH_DECISION"
         assert EventType.WORKER_DISPATCHED == "WORKER_DISPATCHED"
         assert EventType.WORKER_RETURNED == "WORKER_RETURNED"
+        assert EventType.CHECKPOINT_SAVED == "CHECKPOINT_SAVED"
+        assert EventType.RESUME_STARTED == "RESUME_STARTED"
+        assert EventType.RESUME_SUCCEEDED == "RESUME_SUCCEEDED"
+        assert EventType.RESUME_FAILED == "RESUME_FAILED"
 
     def test_actor_type_values(self):
         """ActorType 枚举值正确"""
@@ -140,6 +144,7 @@ class TestTaskModel:
         assert task.status == TaskStatus.CREATED
         assert task.risk_level == RiskLevel.LOW
         assert task.pointers.latest_event_id is None
+        assert task.pointers.latest_checkpoint_id is None
 
     def test_task_serialization(self):
         """Task 序列化/反序列化"""
