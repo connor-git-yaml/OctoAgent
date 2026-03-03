@@ -113,6 +113,11 @@ class EventType(StrEnum):
     RESUME_SUCCEEDED = "RESUME_SUCCEEDED"
     RESUME_FAILED = "RESUME_FAILED"
 
+    # Feature 011: Watchdog + Task Journal 事件类型（FR-001）
+    TASK_HEARTBEAT = "TASK_HEARTBEAT"            # Worker 心跳确认事件
+    TASK_MILESTONE = "TASK_MILESTONE"            # 任务里程碑完成标记事件
+    TASK_DRIFT_DETECTED = "TASK_DRIFT_DETECTED"  # 漂移检测告警事件
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

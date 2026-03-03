@@ -27,7 +27,7 @@ from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .routes import approvals, cancel, chat, health, message, stream, tasks
+from .routes import approvals, cancel, chat, health, message, stream, tasks, watchdog
 from .services.llm_service import LLMService
 from .services.sse_hub import SSEHub
 from .services.task_runner import TaskRunner
@@ -116,6 +116,54 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     await app.state.task_runner.startup()
 
+    # Feature 011: 注册 WatchdogScanner APScheduler job
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from .services.watchdog.config import WatchdogConfig
+    from .services.watchdog.cooldown import CooldownRegistry
+    from .services.watchdog.detectors import NoProgressDetector
+    from .services.watchdog.scanner import WatchdogScanner
+
+    watchdog_config = WatchdogConfig.from_env()
+    cooldown_registry = CooldownRegistry()
+    from .services.watchdog.detectors import (
+        StateMachineDriftDetector,
+        RepeatedFailureDetector,
+    )
+
+    watchdog_scanner = WatchdogScanner(
+        store_group=store_group,
+        config=watchdog_config,
+        cooldown_registry=cooldown_registry,
+        detectors=[
+            NoProgressDetector(),
+            StateMachineDriftDetector(),   # T035: Phase 4 追加（FR-011 状态机漂移）
+            RepeatedFailureDetector(),     # T039: Phase 5 追加（FR-012 重复失败）
+        ],
+    )
+    await watchdog_scanner.startup()  # 重建 cooldown 注册表（FR-006 跨重启一致性）
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        watchdog_scanner.scan,
+        trigger="interval",
+        seconds=watchdog_config.scan_interval_seconds,
+        id="watchdog_scan",
+        misfire_grace_time=5,  # 允许最多 5 秒的执行延迟
+    )
+    scheduler.start()
+
+    # 保存到 app state 供测试/健康检查访问
+    app.state.watchdog_config = watchdog_config
+    app.state.watchdog_scheduler = scheduler
+    app.state.watchdog_scanner = watchdog_scanner
+
+    log.info(
+        "watchdog_scheduler_started",
+        scan_interval_seconds=watchdog_config.scan_interval_seconds,
+        no_progress_threshold_seconds=watchdog_config.no_progress_threshold_seconds,
+    )
+
     yield
 
     # 关闭：尝试优雅等待后台任务完成，降低中断导致的任务丢失概率
@@ -143,6 +191,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         "background_task_failed_before_shutdown",
                         error_type=type(exc).__name__,
                     )
+
+    # 关闭：停止 Watchdog 调度器
+    if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
+        app.state.watchdog_scheduler.shutdown(wait=False)
+        log.info("watchdog_scheduler_stopped")
 
     # 关闭：清理数据库连接
     if hasattr(app.state, "task_runner") and app.state.task_runner:
@@ -172,6 +225,9 @@ def create_app() -> FastAPI:
     setup_logfire()
 
     # 注册路由
+    # 注意：watchdog.router 必须在 tasks.router 之前注册，
+    # 确保 /api/tasks/journal 优先于 /api/tasks/{task_id} 匹配（contracts/rest-api.md 要求）
+    app.include_router(watchdog.router, tags=["watchdog"])
     app.include_router(message.router, tags=["message"])
     app.include_router(tasks.router, tags=["tasks"])
     app.include_router(cancel.router, tags=["cancel"])

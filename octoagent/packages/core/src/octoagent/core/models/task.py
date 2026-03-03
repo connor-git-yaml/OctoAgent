@@ -42,3 +42,4 @@ class Task(BaseModel):
     requester: RequesterInfo = Field(description="请求者信息")
     risk_level: RiskLevel = Field(default=RiskLevel.LOW, description="风险等级")
     pointers: TaskPointers = Field(default_factory=TaskPointers, description="指针信息")
+    trace_id: str = Field(default="", description="追踪 ID（链路追踪用，F012 前为空字符串）")
