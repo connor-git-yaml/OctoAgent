@@ -16,18 +16,27 @@ from .enums import (
 )
 from .event import Event, EventCausality
 from .message import MessageAttachment, NormalizedMessage
+from .orchestrator import (
+    DispatchEnvelope,
+    OrchestratorRequest,
+    WorkerExecutionStatus,
+    WorkerResult,
+)
 from .payloads import (
     ArtifactCreatedPayload,
     ErrorPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
+    OrchestratorDecisionPayload,
     StateTransitionPayload,
     TaskCreatedPayload,
     ToolCallCompletedPayload,
     ToolCallFailedPayload,
     ToolCallStartedPayload,
     UserMessagePayload,
+    WorkerDispatchedPayload,
+    WorkerReturnedPayload,
 )
 from .task import RequesterInfo, Task, TaskPointers
 
@@ -64,8 +73,17 @@ __all__ = [
     "StateTransitionPayload",
     "ArtifactCreatedPayload",
     "ErrorPayload",
+    # Feature 008: Orchestrator Payloads
+    "OrchestratorDecisionPayload",
+    "WorkerDispatchedPayload",
+    "WorkerReturnedPayload",
     # Feature 004: 工具调用 Payloads
     "ToolCallStartedPayload",
     "ToolCallCompletedPayload",
     "ToolCallFailedPayload",
+    # Feature 008: Orchestrator Models
+    "OrchestratorRequest",
+    "DispatchEnvelope",
+    "WorkerResult",
+    "WorkerExecutionStatus",
 ]

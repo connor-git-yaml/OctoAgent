@@ -30,6 +30,11 @@ def apply_event(tasks: dict[str, Task], event: Event) -> None:
     if event.type == EventType.TASK_CREATED:
         # 从 payload 重建 Task
         payload = event.payload
+        risk_level_raw = payload.get("risk_level", RiskLevel.LOW.value)
+        try:
+            risk_level = RiskLevel(risk_level_raw)
+        except ValueError:
+            risk_level = RiskLevel.LOW
         tasks[task_id] = Task(
             task_id=task_id,
             created_at=event.ts,
@@ -42,7 +47,7 @@ def apply_event(tasks: dict[str, Task], event: Event) -> None:
                 channel=payload.get("channel", "web"),
                 sender_id=payload.get("sender_id", "owner"),
             ),
-            risk_level=RiskLevel.LOW,
+            risk_level=risk_level,
             pointers=TaskPointers(latest_event_id=event.event_id),
         )
     elif event.type == EventType.STATE_TRANSITION:

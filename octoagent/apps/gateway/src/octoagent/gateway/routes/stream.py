@@ -45,6 +45,19 @@ def _is_terminal_event(event: Event) -> bool:
     return False
 
 
+def _is_latest_terminal_event(
+    event: Event,
+    *,
+    latest_event_id: str | None,
+    task_is_terminal: bool,
+) -> bool:
+    if not task_is_terminal:
+        return False
+    if latest_event_id and event.event_id != latest_event_id:
+        return False
+    return _is_terminal_event(event)
+
+
 @router.get("/api/stream/task/{task_id}")
 async def stream_task_events(
     task_id: str,
@@ -89,9 +102,18 @@ async def stream_task_events(
             events = await store_group.event_store.get_events_for_task(task_id)
 
         # 推送历史事件
-        task_is_terminal = task.status in TERMINAL_STATES
+        task_job = await store_group.task_job_store.get_job(task_id)
+        has_pending_execution = (
+            task_job is not None and task_job.status in {"QUEUED", "RUNNING"}
+        )
+        task_is_terminal = task.status in TERMINAL_STATES and not has_pending_execution
+        latest_event_id = task.pointers.latest_event_id
         for event in events:
-            is_final = _is_terminal_event(event)
+            is_final = _is_latest_terminal_event(
+                event,
+                latest_event_id=latest_event_id,
+                task_is_terminal=task_is_terminal,
+            )
             data = _event_to_sse_data(event, is_final=is_final)
             yield {
                 "id": event.event_id,
