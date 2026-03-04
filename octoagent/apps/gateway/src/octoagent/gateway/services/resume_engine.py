@@ -74,7 +74,13 @@ class ResumeEngine:
 
             try:
                 checkpoint = await self._stores.checkpoint_store.get_latest_success(task_id)
-            except Exception:
+            except Exception as exc:
+                log.warning(
+                    "resume_engine_checkpoint_load_failed",
+                    task_id=task_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
                 return await self._emit_failed(
                     task_id=task_id,
                     attempt_id=attempt_id,
@@ -134,6 +140,8 @@ class ResumeEngine:
                 "resume_engine_unexpected_error",
                 task_id=task_id,
                 error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=True,
             )
             return await self._emit_failed(
                 task_id=task_id,

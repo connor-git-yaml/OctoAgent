@@ -378,6 +378,14 @@ class OrchestratorService:
         try:
             result = await worker.handle(envelope)
         except Exception as exc:  # pragma: no cover - 防御性兜底
+            log.error(
+                "orchestrator_worker_handle_exception",
+                task_id=task_id,
+                worker_id=worker.worker_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=True,
+            )
             result = WorkerResult(
                 dispatch_id=envelope.dispatch_id,
                 task_id=envelope.task_id,
