@@ -10,8 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import structlog
-
-from octoagent.core.models.enums import EventType, TaskStatus, TERMINAL_STATES
+from octoagent.core.models.enums import TERMINAL_STATES, EventType, TaskStatus
 from octoagent.core.models.task import Task
 from octoagent.core.store.event_store import SqliteEventStore
 

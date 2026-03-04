@@ -13,8 +13,7 @@ import time
 from datetime import UTC, datetime
 
 import structlog
-
-from octoagent.core.models.enums import ActorType, EventType, TaskStatus, TERMINAL_STATES
+from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event, EventCausality
 from octoagent.core.models.payloads import TaskDriftDetectedPayload
 from octoagent.core.store import StoreGroup
@@ -109,12 +108,9 @@ class WatchdogScanner:
                 NON_TERMINAL_STATUSES
             )
             active_count = len(active_tasks)
+            self._cooldown.cleanup_terminated({t.task_id for t in active_tasks})
 
             for task in active_tasks:
-                # 额外防御：跳过终态任务（理论上 list_tasks_by_statuses 已过滤）
-                if TaskStatus(task.status) in TERMINAL_STATES:
-                    continue
-
                 # FR-008/FR-020: structlog 绑定 task_id 上下文，全链路透传
                 task_log = log.bind(task_id=task.task_id)
 
@@ -149,7 +145,8 @@ class WatchdogScanner:
 
                     # 写入 DRIFT 事件（FR-002, FR-019）
                     try:
-                        # FR-020: 全链路透传 task_id/trace_id（Feature 011 已在 Task 模型中添加 trace_id）
+                        # FR-020: 全链路透传 task_id/trace_id
+                        # （Feature 011 已在 Task 模型中添加 trace_id）
                         task_trace_id = task.trace_id
                         await self._emit_drift_event(
                             task_id=task.task_id,

@@ -147,8 +147,8 @@ class TaskRunner:
 
     async def _dispatch_queued_jobs(self) -> None:
         jobs = await self._stores.task_job_store.list_jobs(["QUEUED"])
-        for job in jobs:
-            await self._start_job(job.task_id)
+        if jobs:
+            await asyncio.gather(*[self._start_job(j.task_id) for j in jobs])
 
     async def _recover_orphan_running_jobs(self) -> None:
         jobs = await self._stores.task_job_store.list_jobs(["RUNNING"])
@@ -156,44 +156,46 @@ class TaskRunner:
             return
 
         service = TaskService(self._stores, self._sse_hub)
-        for job in jobs:
-            task = await service.get_task(job.task_id)
-            if task is None:
-                await self._stores.task_job_store.mark_failed(
-                    job.task_id,
-                    "task_missing_for_recovery",
-                )
-                continue
-            if task.status == TaskStatus.SUCCEEDED:
-                await self._stores.task_job_store.mark_succeeded(job.task_id)
-                continue
-            if task.status in TERMINAL_STATES:
-                await self._stores.task_job_store.mark_failed(
-                    job.task_id,
-                    f"task_terminal_status_{task.status}",
-                )
-                continue
+        await asyncio.gather(*[self._recover_one_orphan_job(j, service) for j in jobs])
 
-            resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
-            if resume_result.ok:
-                self._cancellation_registry.ensure(job.task_id)
-                await self._spawn_job(
-                    task_id=job.task_id,
-                    user_text=job.user_text,
-                    model_alias=job.model_alias,
-                    resume_from_node=resume_result.resumed_from_node,
-                    resume_state_snapshot=resume_result.state_snapshot,
-                )
-                continue
-
+    async def _recover_one_orphan_job(self, job, service: TaskService) -> None:
+        task = await service.get_task(job.task_id)
+        if task is None:
             await self._stores.task_job_store.mark_failed(
                 job.task_id,
-                f"gateway_resume_failed:{resume_result.failure_type or 'unknown'}",
+                "task_missing_for_recovery",
             )
-            await service.mark_running_task_failed_for_recovery(
+            return
+        if task.status == TaskStatus.SUCCEEDED:
+            await self._stores.task_job_store.mark_succeeded(job.task_id)
+            return
+        if task.status in TERMINAL_STATES:
+            await self._stores.task_job_store.mark_failed(
                 job.task_id,
-                reason=f"网关恢复失败: {resume_result.message}",
+                f"task_terminal_status_{task.status}",
             )
+            return
+
+        resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
+        if resume_result.ok:
+            self._cancellation_registry.ensure(job.task_id)
+            await self._spawn_job(
+                task_id=job.task_id,
+                user_text=job.user_text,
+                model_alias=job.model_alias,
+                resume_from_node=resume_result.resumed_from_node,
+                resume_state_snapshot=resume_result.state_snapshot,
+            )
+            return
+
+        await self._stores.task_job_store.mark_failed(
+            job.task_id,
+            f"gateway_resume_failed:{resume_result.failure_type or 'unknown'}",
+        )
+        await service.mark_running_task_failed_for_recovery(
+            job.task_id,
+            reason=f"网关恢复失败: {resume_result.message}",
+        )
 
     async def _start_job(self, task_id: str) -> None:
         async with self._lock:

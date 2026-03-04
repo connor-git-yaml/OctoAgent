@@ -216,7 +216,12 @@ def default_docker_available_checker() -> bool:
             timeout=0.5,
         )
         return True
-    except Exception:
+    except Exception as exc:
+        log.debug(
+            "docker_availability_check_failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         return False
 
 
