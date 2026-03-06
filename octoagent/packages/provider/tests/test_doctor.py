@@ -5,19 +5,17 @@
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
-
 from octoagent.provider.auth.credentials import ApiKeyCredential, TokenCredential
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
+from octoagent.provider.dx.cli import main
 from octoagent.provider.dx.doctor import DoctorRunner, format_report
 from octoagent.provider.dx.models import CheckLevel, CheckStatus
+from pydantic import SecretStr
 
 
 class TestDoctorChecks:
@@ -118,7 +116,7 @@ class TestDoctorChecks:
 
     async def test_credential_valid_has_profile(self, tmp_path: Path) -> None:
         store = CredentialStore(store_path=tmp_path / "auth.json")
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         store.set_profile(
             ProviderProfile(
                 name="test",
@@ -139,7 +137,7 @@ class TestDoctorChecks:
 
     async def test_credential_expiry_expired_token(self, tmp_path: Path) -> None:
         store = CredentialStore(store_path=tmp_path / "auth.json")
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         store.set_profile(
             ProviderProfile(
                 name="expired",
@@ -180,7 +178,7 @@ class TestDoctorOverall:
         runner = DoctorRunner(project_root=tmp_path)
         # 使用有凭证的 store
         store = CredentialStore(store_path=tmp_path / "auth.json")
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         store.set_profile(
             ProviderProfile(
                 name="test",
@@ -216,6 +214,15 @@ class TestFormatReport:
         assert table.title == "OctoAgent 环境诊断"
         assert table.row_count > 0
 
+    async def test_format_guidance_returns_panel_when_findings(self, tmp_path: Path) -> None:
+        from octoagent.provider.dx.doctor import format_guidance
+
+        runner = DoctorRunner(project_root=tmp_path)
+        report = await runner.run_all_checks(live=False)
+        guidance_panel = format_guidance(report)
+        assert guidance_panel is not None
+        assert guidance_panel.title == "Remediation"
+
 
 class TestDoctorCli:
     """CLI doctor 命令测试"""
@@ -223,9 +230,15 @@ class TestDoctorCli:
     def test_doctor_help(self) -> None:
         from click.testing import CliRunner
 
-        from octoagent.provider.dx.cli import main
-
         runner = CliRunner()
         result = runner.invoke(main, ["doctor", "--help"])
         assert result.exit_code == 0
         assert "--live" in result.output
+
+    def test_onboard_help(self) -> None:
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["onboard", "--help"])
+        assert result.exit_code == 0
+        assert "--status-only" in result.output

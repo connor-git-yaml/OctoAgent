@@ -426,7 +426,7 @@ class DoctorRunner:
 
     def _load_config_safe(
         self, check_name: str
-    ) -> "tuple[object | None, CheckResult | None]":
+    ) -> tuple[object | None, CheckResult | None]:
         """加载 octoagent.yaml；不存在或读取为空时返回 (None, skip_result)。
 
         Returns:
@@ -564,3 +564,17 @@ def format_report(report: DoctorReport) -> Table:
     table.caption = f"总体状态: {overall_icon}"
 
     return table
+
+
+def build_guidance(report: DoctorReport):
+    """基于 DoctorReport 生成 remediation guidance。"""
+    from .doctor_remediation import DoctorRemediationPlanner
+
+    return DoctorRemediationPlanner().build(report)
+
+
+def format_guidance(report: DoctorReport):
+    """将 remediation guidance 格式化为 Rich renderable。"""
+    from .doctor_remediation import format_guidance_panel
+
+    return format_guidance_panel(build_guidance(report))

@@ -26,12 +26,13 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from .config_bootstrap import ConfigBootstrapError, bootstrap_config
 from .config_schema import (
     ConfigParseError,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
-    RuntimeConfig,
+    ProviderNotFoundError,
 )
 from .config_wizard import (
     load_config,
@@ -161,7 +162,10 @@ def _show_summary(yaml_path: str | None) -> None:
     console.print(f"[bold]Model Aliases[/bold]（{alias_count} 个）:")
     for alias_key, alias_val in cfg.model_aliases.items():
         thinking_str = f"  thinking={alias_val.thinking_level}" if alias_val.thinking_level else ""
-        console.print(f"  {alias_key:<10} →  {alias_val.provider:<15} {alias_val.model}{thinking_str}")
+        console.print(
+            f"  {alias_key:<10} →  {alias_val.provider:<15} "
+            f"{alias_val.model}{thinking_str}"
+        )
 
     console.print()
 
@@ -218,66 +222,17 @@ def config_init(ctx: click.Context, force: bool, echo: bool) -> None:
             console.print("[dim]已取消。[/dim]")
             return
 
-    # 构建初始配置
-    if echo:
-        # echo 模式：直接创建最小配置（供 CI 使用，不交互）
-        new_config = OctoAgentConfig(
-            updated_at=date.today().isoformat(),
-            runtime=RuntimeConfig(llm_mode="echo"),
-        )
-    else:
-        # 交互式模式
-        console.print()
-        console.print("[bold]初始化 OctoAgent 配置[/bold]")
-        console.print("──────────────────────────────────")
-
-        # 询问 Provider
-        provider_id = click.prompt(
-            "Provider ID（如 openrouter / anthropic / openai）",
-            default="openrouter",
-        )
-        provider_name = click.prompt("Provider 显示名称", default=provider_id.title())
-        api_key_env = click.prompt(
-            "凭证环境变量名（如 OPENROUTER_API_KEY）",
-            default=f"{provider_id.upper()}_API_KEY",
-        )
-
-        try:
-            provider_entry = ProviderEntry(
-                id=provider_id,
-                name=provider_name,
-                auth_type="api_key",
-                api_key_env=api_key_env,
-            )
-        except Exception as exc:
-            err_console.print(f"[red]错误：Provider 配置无效：{exc}[/red]")
-            raise SystemExit(1) from exc
-
-        # 构建默认别名
-        default_aliases = {
-            "main": ModelAlias(
-                provider=provider_id,
-                model=f"{provider_id}/auto",
-                description="主力模型别名",
-            ),
-            "cheap": ModelAlias(
-                provider=provider_id,
-                model=f"{provider_id}/auto",
-                description="低成本模型别名（用于 octo doctor --live ping）",
-            ),
-        }
-
-        new_config = OctoAgentConfig(
-            updated_at=date.today().isoformat(),
-            providers=[provider_entry],
-            model_aliases=default_aliases,
-            runtime=RuntimeConfig(llm_mode="litellm"),
-        )
-
     try:
-        save_config(new_config, project_root)
+        if not echo:
+            console.print()
+            console.print("[bold]初始化 OctoAgent 配置[/bold]")
+            console.print("──────────────────────────────────")
+        result = bootstrap_config(project_root, echo=echo)
         console.print(f"[green]已写入：{project_root / 'octoagent.yaml'}[/green]")
-        _auto_sync(new_config, project_root)
+        _auto_sync(result.config, project_root)
+    except ConfigBootstrapError as exc:
+        err_console.print(f"[red]错误：{exc}[/red]")
+        raise SystemExit(1) from exc
     except Exception as exc:
         err_console.print(f"[red]错误：写入 octoagent.yaml 失败：{exc}[/red]")
         raise SystemExit(1) from exc
@@ -526,7 +481,13 @@ def alias_list(ctx: click.Context) -> None:
 
     for alias_key, alias_val in cfg.model_aliases.items():
         thinking_str = alias_val.thinking_level or "-"
-        table.add_row(alias_key, alias_val.provider, alias_val.model, thinking_str, alias_val.description or "-")
+        table.add_row(
+            alias_key,
+            alias_val.provider,
+            alias_val.model,
+            thinking_str,
+            alias_val.description or "-",
+        )
 
     console.print(table)
 
