@@ -10,12 +10,17 @@ import asyncio
 import click
 from rich.console import Console
 
+from .config_commands import config
+
 console = Console()
 
 
 @click.group()
 def main() -> None:
     """OctoAgent CLI 工具"""
+
+
+main.add_command(config)
 
 
 @main.command()

@@ -1,0 +1,66 @@
+# OctoAgent 统一配置文件（示例）
+# 由 octo config 管理，安全纳入版本管理
+#
+# NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
+# API Key 明文由 .env.litellm 管理（已在 .gitignore）
+#
+# 快速开始：
+#   cp octoagent.yaml.example octoagent.yaml
+#   octo config provider add openrouter   # 添加 Provider 并配置 API Key
+#   octo config sync                       # 生成 litellm-config.yaml
+
+config_version: 1
+updated_at: "2026-03-04"
+
+# Provider 列表 — 每个 Provider 对应一个 LLM 服务商
+# auth_type: api_key（API Key 认证）或 oauth（OAuth 认证）
+# api_key_env: 凭证所在的环境变量名（仅存名称，不存实际值）
+# enabled: false 时不生成对应 litellm-config 条目，但配置保留（可逆）
+providers:
+  - id: openrouter
+    name: "OpenRouter"
+    auth_type: api_key
+    api_key_env: OPENROUTER_API_KEY   # 实际值在 .env.litellm 中
+    enabled: true
+
+  # 多 Provider 示例（按需取消注释）
+  # - id: anthropic
+  #   name: "Anthropic"
+  #   auth_type: api_key
+  #   api_key_env: ANTHROPIC_API_KEY
+  #   enabled: false
+  #
+  # - id: openai
+  #   name: "OpenAI"
+  #   auth_type: api_key
+  #   api_key_env: OPENAI_API_KEY
+  #   enabled: false
+
+# 模型别名映射 — 将用户可见别名绑定到具体 Provider 和模型字符串
+# provider: 对应 providers[].id（引用完整性，octo config 会自动校验）
+# model: 传递给 LiteLLM 的完整模型字符串
+# 内置别名：main（主力模型）和 cheap（低成本模型，用于 octo doctor --live ping）
+model_aliases:
+  main:
+    provider: openrouter
+    model: "openrouter/auto"
+    description: "主力对话模型（高质量请求）"
+  cheap:
+    provider: openrouter
+    model: "openrouter/auto"
+    description: "低成本模型（用于 octo doctor --live ping）"
+
+  # 自定义别名示例（按需取消注释）
+  # fast:
+  #   provider: openrouter
+  #   model: "openrouter/auto"
+  #   description: "快速响应模型（低延迟任务）"
+
+# 运行时配置 — 控制 OctoAgent 运行时行为
+# llm_mode: litellm（真实调用）或 echo（开发测试回显，不发起网络请求）
+# litellm_proxy_url: LiteLLM Proxy 地址
+# master_key_env: LiteLLM Master Key 所在的环境变量名
+runtime:
+  llm_mode: litellm
+  litellm_proxy_url: "http://localhost:4000"
+  master_key_env: LITELLM_MASTER_KEY
