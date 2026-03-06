@@ -63,6 +63,10 @@ class DoctorRunner:
         checks.append(await self.check_credential_valid())
         checks.append(await self.check_credential_expiry())
 
+        # Feature 014 新增检查项（不修改现有签名）
+        checks.append(await self.check_octoagent_yaml_valid())
+        checks.append(await self.check_litellm_sync())
+
         # --live 检查
         if live:
             checks.append(await self.check_live_ping())
@@ -419,6 +423,98 @@ class DoctorRunner:
                 message=f"LLM 调用异常: {exc}",
                 fix_hint="确保 LiteLLM Proxy 已启动",
             )
+
+    def _load_config_safe(
+        self, check_name: str
+    ) -> "tuple[object | None, CheckResult | None]":
+        """加载 octoagent.yaml；不存在或读取为空时返回 (None, skip_result)。
+
+        Returns:
+            (config, None)  — 成功加载
+            (None, CheckResult) — 文件不存在或为空，调用方直接返回该 CheckResult
+        """
+        from .config_wizard import load_config
+
+        if not (self._root / "octoagent.yaml").exists():
+            return None, CheckResult(
+                name=check_name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="octoagent.yaml 不存在，跳过检测",
+                fix_hint="运行 octo config init 初始化配置",
+            )
+        cfg = load_config(self._root)
+        if cfg is None:
+            return None, CheckResult(
+                name=check_name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="octoagent.yaml 读取返回空（跳过）",
+            )
+        return cfg, None
+
+    async def check_octoagent_yaml_valid(self) -> CheckResult:
+        """校验 octoagent.yaml 格式（RECOMMENDED 级别）
+
+        不存在时跳过不报错（Constitution C6 Degrade Gracefully）。
+        """
+        try:
+            cfg, skip = self._load_config_safe("octoagent_yaml_valid")
+        except Exception as exc:
+            return CheckResult(
+                name="octoagent_yaml_valid",
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"octoagent.yaml 格式错误：{exc}",
+                fix_hint="运行 octo config init --force 重新初始化，或手动修复 octoagent.yaml",
+            )
+        if skip is not None:
+            return skip
+        return CheckResult(
+            name="octoagent_yaml_valid",
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=(
+                f"octoagent.yaml 格式正确"
+                f"（{len(cfg.providers)} 个 Provider，{len(cfg.model_aliases)} 个别名）"
+            ),
+        )
+
+    async def check_litellm_sync(self) -> CheckResult:
+        """检测 octoagent.yaml 与 litellm-config.yaml 一致性（WARN 级别）
+
+        不一致时 fix_hint 提示 octo config sync（FR-013/SC-005）。
+        octoagent.yaml 不存在时跳过（Constitution C6）。
+        """
+        try:
+            cfg, skip = self._load_config_safe("litellm_sync")
+            if skip is not None:
+                return skip
+            from .litellm_generator import check_litellm_sync_status
+
+            in_sync, diffs = check_litellm_sync_status(cfg, self._root)
+        except Exception as exc:
+            return CheckResult(
+                name="litellm_sync",
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message=f"同步检测失败：{exc}",
+                fix_hint="运行 octo config sync",
+            )
+        if in_sync:
+            return CheckResult(
+                name="litellm_sync",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message="octoagent.yaml 与 litellm-config.yaml 一致",
+            )
+        return CheckResult(
+            name="litellm_sync",
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message=f"配置不一致：{diffs[0]}" if diffs else "配置不一致",
+            fix_hint="运行 octo config sync 重新生成 litellm-config.yaml",
+        )
 
     @staticmethod
     def _compute_overall(checks: list[CheckResult]) -> CheckStatus:

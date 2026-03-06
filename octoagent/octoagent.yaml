@@ -1,0 +1,28 @@
+# OctoAgent 统一配置文件
+# 此文件安全纳入版本管理（不含凭证）
+# 凭证由 .env.litellm 管理（已在 .gitignore）
+# NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
+#
+config_version: 1
+updated_at: '2026-03-06'
+providers:
+- id: openai-codex
+  name: OpenAI Codex (ChatGPT Pro OAuth)
+  auth_type: oauth
+  api_key_env: OPENAI_API_KEY
+  enabled: true
+model_aliases:
+  main:
+    provider: openai-codex
+    model: gpt-5.4
+    description: 主力模型（GPT-5.4，深度推理）
+    thinking_level: xhigh
+  cheap:
+    provider: openai-codex
+    model: gpt-5.3-codex
+    description: 低成本模型（GPT-5.3 Codex，轻量推理）
+    thinking_level: low
+runtime:
+  llm_mode: litellm
+  litellm_proxy_url: http://localhost:4001
+  master_key_env: LITELLM_MASTER_KEY

@@ -398,7 +398,7 @@ def generate_litellm_config(config: InitConfig, project_root: Path) -> Path:
 
     yaml_content = f"""# LiteLLM Proxy 配置（由 octo init 自动生成）
 model_list:
-  - model_name: "default"
+  - model_name: "main"
     litellm_params:
       model: "{_get_default_model(provider)}"
       api_key: "os.environ/{env_key}"

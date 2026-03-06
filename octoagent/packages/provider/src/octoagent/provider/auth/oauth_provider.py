@@ -161,12 +161,15 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
             "id_token_add_organizations": "true",
             "originator": "codex_cli_rs",
         },
-        # JWT 方案：直连 chatgpt.com/backend-api（对齐 OpenClaw/pi-ai）
-        api_base_url="https://chatgpt.com/backend-api",
+        # JWT 方案：直连 chatgpt.com/backend-api/codex（对齐 OpenClaw/pi-ai）
+        # LiteLLM 会在此 base_url 后追加 /responses，
+        # 实际请求路径为 /codex/responses（与 pi-ai 一致）
+        api_base_url="https://chatgpt.com/backend-api/codex",
         extra_api_headers={
             "chatgpt-account-id": "{account_id}",
             "OpenAI-Beta": "responses=experimental",
-            "originator": "octoagent",
+            "originator": "pi",
+            "User-Agent": "pi (darwin; arm64)",
         },
     ),
     "github-copilot": OAuthProviderConfig(
