@@ -1,9 +1,9 @@
-# M3 Feature 拆分方案（v1）
+# M3 Feature 拆分方案（v1.1）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1 — M3 初版拆分，目标从“增强能力”升级为“普通用户 Ready”  
-> **日期**: 2026-03-07
+> **状态**: v1.1 — 增补并行开发边界、迁移门禁与控制面契约约束  
+> **日期**: 2026-03-08
 
 ---
 
@@ -149,6 +149,33 @@ M2 收口
 3. **Memory 产品化先于 Memory 炫技**：先让用户能看懂、检索、追溯，再上多模态 / ToM / Category。
 4. **高级能力不能破坏治理边界**：MemU、ToolIndex、Skill Pipeline 全部只能建立在现有 Event / SoR / Approval 模型之上。
 
+### 3.3 Design Gates（必须先过 gate，再全面并行）
+
+1. **Project Migration Gate**
+   - M2 既有实例升级到 M3 时，必须自动生成 `default project`，并把既有 channel、task/chat、memory scope、import cursor、backup 元数据回填到 project/workspace 映射中。
+   - 禁止把“新装一遍再手工导数据”当作默认迁移方案。
+2. **Control Plane Contract Gate**
+   - 在 Web 控制台、Telegram 命令面、CLI wizard 并行开发前，必须先冻结一套 versioned control-plane contract，至少覆盖：
+     - `wizard session`
+     - `config schema + uiHints`
+     - `project selector`
+     - `session/chat projection`
+     - `automation job`
+     - `diagnostics summary`
+3. **Session / Automation Recovery Gate**
+   - session reset/new、interrupt/resume、automation replay/run-now、job pause/resume 必须事件化，并通过幂等恢复测试，避免 UI 操作把运行态留在半更新状态。
+4. **Memory Evidence Gate**
+   - Memory Console 默认只暴露经过授权的摘要、证据引用与版本链；Vault 原文、敏感片段与删除/修订能力必须经过显式授权。
+5. **Delegation Ownership Gate**
+   - 每个 `Work` 都必须有 owner、budget、parent/children、checkpoint/artifact 归属；Subagent / ACP-like runtime / Graph Agent 不允许绕过主 Agent 直接提交最终状态。
+
+### 3.4 推荐并行执行编排
+
+- **Wave 1（骨架先行）**：Feature 024 + Feature 025（协议/迁移）+ Feature 026 的 control-plane contract 子线，先把安装、升级、配置、project migration、共享契约定下来。
+- **Wave 2（控制面与记忆面并行）**：Feature 026 的 console/session/scheduler/runtime 子线与 Feature 027 并行；前者消费共享 contract，后者独立交付 Memory Console 与 Vault 授权链。
+- **Wave 3（增强能力并行）**：Feature 028 与 Feature 030 并行；Feature 029 作为 stretch lane，在 user-ready 主闭环稳定后再抢资源，不阻塞 Feature 031。
+- **Wave 4（集成收口）**：Feature 031 只做真实用户路径、恢复与安全验收，不承接新的产品范围。
+
 ---
 
 ## 4. Feature 详细拆解
@@ -207,6 +234,8 @@ M2 收口
 - F025-T06：收敛 Provider Key、OAuth Token、Telegram Bot Token、Gateway Token、Webhook Secret 的默认存储位置
 - F025-T07：在普通用户路径中移除“必须手工 export env 才能跑起来”的依赖
 - F025-T08：支持 SecretRef（env / file / exec / OS keychain fallback）与审计/轮换
+- F025-T09：为既有 M2 安装实例提供 `default project` 回填、旧 `.env` / 全局配置桥接与 scope → project/workspace 迁移
+- F025-T10：定义 project/workspace 与 task/chat、memory、import、backup 元数据之间的映射规则，并提供迁移校验/回滚
 
 **验收标准**：
 
@@ -215,6 +244,7 @@ M2 收口
 - 正常用户路径不再需要手工维护多处 `.env`
 - 所有高价值 secret 都能在同一入口中完成审计、应用、reload 和轮换
 - secret 不进入日志、事件、LLM 上下文，且按 project/scope 隔离
+- 既有 M2 实例升级后会自动获得 `default project`，且原有 task/chat、memory、import、backup 数据仍可通过 project/workspace 映射访问
 
 ---
 
@@ -229,6 +259,7 @@ M2 收口
 
 **任务拆解**：
 
+- F026-T00：先冻结 versioned control-plane contract（`wizard session`、`config schema + uiHints`、`project selector`、`session/chat projection`、`automation job`、`diagnostics summary`），供 CLI / Web / Telegram 共用
 - F026-T01：设计统一 command/action registry，保证 Telegram 与 Web 共享同一动作语义
 - F026-T02：提供最小 Telegram 控制命令：`approve`、model 切换、skill 调用、subagent/work 控制、status 查询
 - F026-T03：设计 session/chat center，覆盖 history、export、queue、focus/unfocus、reset/new、interrupt/resume
@@ -239,7 +270,6 @@ M2 收口
 - F026-T08：补齐 agents / permissions / secrets / runtime status 的管理与查询面
 - F026-T09：实现 automation / scheduler 面板（create / run / pause / resume / run history / project binding）
 - F026-T10：实现 runtime diagnostics console（health、logs、event stream、provider/model 状态、usage/cost、worker/subagent/work graph 状态）
-- F026-T11：接入 Memory 浏览、Vault 授权、证据追溯视图
 
 **UI/UX 技术选型建议**：
 
@@ -257,8 +287,9 @@ M2 收口
 - 用户可以在 session/chat center 中完成 history/export、queue、focus/reset、interrupt/resume 等日常会话操作
 - 配置中心具备 schema 驱动表单与基础校验
 - 用户可以创建 recurring automation 并查看 run history，且 automation 可以显式绑定到 project / channel / target
+- control-plane contract 有版本号与兼容策略，CLI / Web / Telegram 可基于同一 contract 并行开发
 - diagnostics console 可以查看 health、logs、event stream、provider/model、usage/cost 与 worker/subagent/work graph 运行态
-- approval / recovery / channel / agents / permissions / secrets / memory / update 都有明确入口和状态反馈
+- approval / recovery / channel / agents / permissions / secrets / update 都有明确入口和状态反馈
 - 控制台在桌面与移动端都能稳定工作
 
 ---
@@ -274,6 +305,7 @@ M2 收口
 
 **任务拆解**：
 
+- F027-T00：定义 Memory Console query / projection contract，明确 SoR、Fragments、Vault、WriteProposal、evidence view 的只读/授权边界
 - F027-T01：实现 Memory 浏览器，按 partition / scope / layer 浏览 SoR、Fragments、Vault 引用
 - F027-T02：展示 `subject_key` 的 current / superseded 历史与 evidence refs
 - F027-T03：实现 Vault 授权检索面板（授权申请、授权记录、检索结果证据链）
@@ -286,6 +318,7 @@ M2 收口
 - 用户可以在 UI 中看懂某条记忆的来源、当前版本、相关 agent/work 和证据
 - Vault 默认不可检索，授权后才可查阅，并留下审计记录
 - Memory 浏览不暴露敏感原文，除非对应授权已生效
+- Memory Console 与 Runtime Console 的职责边界清晰，前者拥有 Memory/Vault 领域视图，后者只负责入口与运行态总览
 
 ---
 
@@ -375,6 +408,7 @@ M2 收口
 - F030-T06：实现多 Worker 类型（ops/research/dev）的 capability registry 与派发策略
 - F030-T07：在管理台展示 tool hit、pipeline graph、worker routing reason、work ownership、subagent/runtime status
 - F030-T08：保证失败时可回退到单 Worker / 静态工具集路径
+- F030-T09：把 ToolIndex 动态工具注入纳入 ToolBroker / Policy Engine / manifest / audit event 链，保证授权、审计与降级路径不被绕过
 
 **验收标准**：
 
@@ -383,6 +417,7 @@ M2 收口
 - 主 Agent 能创建/管理/合并 Work，并把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent
 - 多 Worker 派发具备可解释的 route reason，失败可降级
 - bundled capability pack 能在新 agent / worker 首次启动时注入必要的基础能力与 bootstrap 上下文
+- ToolIndex 动态注入不会绕过 ToolBroker / Policy Engine / 审计事件链，失败时可回退到固定基础工具集
 
 ---
 
