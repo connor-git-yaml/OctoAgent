@@ -285,6 +285,19 @@ class BackupLifecyclePayload(BaseModel):
     message: str = Field(default="", description="补充说明")
 
 
+class ChatImportLifecyclePayload(BaseModel):
+    """CHAT_IMPORT_* 生命周期事件 payload。"""
+
+    batch_id: str = Field(description="导入批次 ID")
+    source_id: str = Field(description="导入源 ID")
+    scope_id: str = Field(description="目标 chat scope")
+    imported_count: int = Field(default=0, description="本次新增导入消息数")
+    duplicate_count: int = Field(default=0, description="本次命中的重复消息数")
+    window_count: int = Field(default=0, description="生成的窗口数量")
+    report_id: str | None = Field(default=None, description="对应 ImportReport ID")
+    message: str = Field(default="", description="补充说明")
+
+
 from typing import Literal  # noqa: E402
 
 DriftType = Literal["no_progress", "state_machine_stall", "repeated_failure"]
