@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -18,11 +19,12 @@ from octoagent.provider.dx.cli import main
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
+    RuntimeConfig,
     TelegramChannelConfig,
 )
 from octoagent.provider.dx.config_wizard import save_config
-from octoagent.provider.dx.doctor import DoctorRunner, format_report
-from octoagent.provider.dx.models import CheckLevel, CheckStatus
+from octoagent.provider.dx.doctor import DoctorRunner, build_guidance, format_report
+from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from octoagent.provider.dx.onboarding_models import OnboardingStepStatus
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
@@ -67,6 +69,26 @@ def _write_invalid_telegram_config(tmp_path: Path) -> None:
             ]
         ),
         encoding="utf-8",
+    )
+
+
+def _write_runtime_config(
+    tmp_path: Path,
+    *,
+    llm_mode: str = "echo",
+    proxy_url: str = "http://yaml-proxy:4001",
+    master_key_env: str = "YAML_MASTER_KEY",
+) -> None:
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-03-07",
+            runtime=RuntimeConfig(
+                llm_mode=llm_mode,
+                litellm_proxy_url=proxy_url,
+                master_key_env=master_key_env,
+            ),
+        ),
+        tmp_path,
     )
 
 
@@ -163,6 +185,20 @@ class TestDoctorChecks:
         result = await runner.check_llm_mode()
         assert result.status == CheckStatus.FAIL
 
+    async def test_llm_mode_reads_yaml_runtime(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_runtime_config(tmp_path, llm_mode="echo")
+        monkeypatch.delenv("OCTOAGENT_LLM_MODE", raising=False)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_llm_mode()
+
+        assert result.status == CheckStatus.PASS
+        assert result.message == "runtime.llm_mode=echo"
+
     async def test_proxy_key_unset(
         self,
         tmp_path: Path,
@@ -172,6 +208,21 @@ class TestDoctorChecks:
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_proxy_key()
         assert result.status == CheckStatus.WARN
+
+    async def test_proxy_key_reads_custom_yaml_master_key_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_runtime_config(tmp_path, master_key_env="CUSTOM_MASTER_KEY")
+        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
+        monkeypatch.delenv("LITELLM_PROXY_KEY", raising=False)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_proxy_key()
+
+        assert result.status == CheckStatus.PASS
+        assert result.message == "CUSTOM_MASTER_KEY 已设置"
 
     async def test_master_key_match_skip(
         self,
@@ -184,6 +235,22 @@ class TestDoctorChecks:
         result = await runner.check_master_key_match()
         assert result.status == CheckStatus.SKIP
 
+    async def test_master_key_match_skips_legacy_compare_for_yaml_runtime(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_runtime_config(tmp_path, master_key_env="CUSTOM_MASTER_KEY")
+        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
+        monkeypatch.setenv("LITELLM_MASTER_KEY", "legacy-master")
+        monkeypatch.setenv("LITELLM_PROXY_KEY", "legacy-proxy")
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_master_key_match()
+
+        assert result.status == CheckStatus.SKIP
+        assert "CUSTOM_MASTER_KEY" in result.message
+
     async def test_master_key_match_pass(
         self,
         tmp_path: Path,
@@ -194,6 +261,80 @@ class TestDoctorChecks:
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_master_key_match()
         assert result.status == CheckStatus.PASS
+
+    async def test_proxy_reachable_uses_yaml_runtime_proxy_url(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_runtime_config(tmp_path, proxy_url="http://yaml-proxy:4310")
+        calls: list[str] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            async def get(self, url: str):
+                calls.append(url)
+                return SimpleNamespace(status_code=200)
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_proxy_reachable()
+
+        assert result.status == CheckStatus.PASS
+        assert calls == ["http://yaml-proxy:4310/health/liveliness"]
+
+    async def test_live_ping_uses_yaml_runtime_proxy_url_and_key_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_runtime_config(
+            tmp_path,
+            proxy_url="http://yaml-proxy:4320",
+            master_key_env="CUSTOM_MASTER_KEY",
+        )
+        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
+        calls: list[tuple[str, str]] = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            text = ""
+
+            def json(self) -> dict[str, object]:
+                return {"ok": True}
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+                del json
+                calls.append((url, headers["Authorization"]))
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_live_ping()
+
+        assert result.status == CheckStatus.PASS
+        assert calls == [("http://yaml-proxy:4320/v1/chat/completions", "Bearer yaml-key")]
 
     async def test_db_writable(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
@@ -396,6 +537,55 @@ class TestFormatReport:
         assert guidance_panel is not None
         assert guidance_panel.title == "Remediation"
 
+    async def test_build_guidance_uses_config_init_when_telegram_checks_lack_base_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = DoctorRunner(project_root=tmp_path)
+        report = await runner.run_all_checks(live=False)
+
+        guidance = build_guidance(report)
+        telegram_actions = {
+            item.check_name: item.action
+            for group in guidance.groups
+            for item in group.items
+            if item.check_name in {"telegram_config", "telegram_token"}
+        }
+
+        assert telegram_actions["telegram_config"].command == "octo config init"
+        assert telegram_actions["telegram_token"].command == "octo config init"
+
+    async def test_build_guidance_uses_octo_init_for_env_and_credential_gaps(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        del tmp_path
+        report = DoctorReport(
+            checks=[
+                CheckResult(
+                    name="env_file",
+                    status=CheckStatus.FAIL,
+                    level=CheckLevel.REQUIRED,
+                    message=".env 文件不存在",
+                    fix_hint="运行 octo init 生成配置文件",
+                ),
+                CheckResult(
+                    name="credential_valid",
+                    status=CheckStatus.WARN,
+                    level=CheckLevel.RECOMMENDED,
+                    message="credential store 为空",
+                    fix_hint="运行 octo init 配置凭证",
+                ),
+            ],
+            overall_status=CheckStatus.FAIL,
+            timestamp=datetime.now(tz=UTC),
+        )
+
+        guidance = build_guidance(report)
+        actions = [item.action.command for group in guidance.groups for item in group.items]
+
+        assert actions == ["octo init", "octo init"]
+
 
 class TestDoctorCli:
     """CLI doctor 命令测试"""
@@ -419,3 +609,40 @@ class TestDoctorCli:
     def test_doctor_runner_registers_builtin_telegram_verifier(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
         assert isinstance(runner._telegram_verifier, TelegramOnboardingVerifier)
+
+    def test_doctor_exit_code_follows_blocking_guidance(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from click.testing import CliRunner
+        from octoagent.provider.dx import doctor as doctor_module
+
+        report = doctor_module.DoctorReport(
+            checks=[
+                doctor_module.CheckResult(
+                    name="live_ping",
+                    status=CheckStatus.FAIL,
+                    level=CheckLevel.RECOMMENDED,
+                    message="Proxy 认证失败",
+                    fix_hint="检查 CUSTOM_MASTER_KEY 配置",
+                )
+            ],
+            overall_status=CheckStatus.WARN,
+            timestamp=datetime.now(tz=UTC),
+        )
+
+        class FakeDoctorRunner:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            async def run_all_checks(self, live: bool = False):
+                del live
+                return report
+
+        monkeypatch.setattr(doctor_module, "DoctorRunner", FakeDoctorRunner)
+        monkeypatch.setattr("octoagent.provider.dx.cli._resolve_project_root", lambda: Path.cwd())
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["doctor", "--live"])
+
+        assert result.exit_code == 1

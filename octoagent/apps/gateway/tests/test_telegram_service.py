@@ -22,20 +22,27 @@ from octoagent.provider.dx.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.provider.dx.config_wizard import save_config
+from octoagent.provider.dx.telegram_client import (
+    TelegramChat,
+    TelegramMessage,
+    TelegramUpdate,
+    TelegramUser,
+)
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 
 def _write_config(project_root: Path, **telegram_overrides: object) -> None:
+    telegram_config: dict[str, object] = {
+        "enabled": True,
+        "mode": "webhook",
+        "webhook_url": "https://example.com/api/telegram/webhook",
+    }
+    telegram_config.update(telegram_overrides)
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-07",
             channels=ChannelsConfig(
-                telegram=TelegramChannelConfig(
-                    enabled=True,
-                    mode="webhook",
-                    webhook_url="https://example.com/api/telegram/webhook",
-                    **telegram_overrides,
-                )
+                telegram=TelegramChannelConfig(**telegram_config)
             ),
         ),
         project_root,
@@ -269,6 +276,96 @@ async def test_authorized_dm_creates_task_and_dedupes_update(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("telegram_overrides", "update_sender_id", "expected_status"),
+    [
+        ({"dm_policy": "open"}, 501, "accepted"),
+        ({"dm_policy": "allowlist", "allow_users": ["777"]}, 777, "accepted"),
+        ({"dm_policy": "disabled"}, 909, "blocked"),
+    ],
+)
+async def test_non_pairing_dm_policies_do_not_create_pending_pairings(
+    tmp_path: Path,
+    telegram_overrides: dict[str, object],
+    update_sender_id: int,
+    expected_status: str,
+) -> None:
+    _write_config(tmp_path, **telegram_overrides)
+    store_group = await create_store_group(
+        str(tmp_path / "gateway-dm-policy.db"),
+        str(tmp_path / "artifacts"),
+    )
+    state_store = TelegramStateStore(tmp_path)
+    task_runner = FakeTaskRunner()
+    service = TelegramGatewayService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        task_runner=task_runner,
+        state_store=state_store,
+        bot_client=FakeTelegramBotClient(),
+    )
+
+    result = await service.handle_webhook_update(
+        {
+            "update_id": 244,
+            "message": {
+                "message_id": 20,
+                "text": "dm policy check",
+                "chat": {"id": update_sender_id, "type": "private"},
+                "from": {
+                    "id": update_sender_id,
+                    "username": "member",
+                    "first_name": "Member",
+                },
+            },
+        }
+    )
+
+    assert result.status == expected_status
+    assert state_store.get_pending_pairing(str(update_sender_id)) is None
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_group_open_accepts_message_without_allowlist(tmp_path: Path) -> None:
+    _write_config(tmp_path, allowed_groups=[], group_policy="open")
+    store_group = await create_store_group(
+        str(tmp_path / "gateway-group-open.db"),
+        str(tmp_path / "artifacts"),
+    )
+    service = TelegramGatewayService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        task_runner=FakeTaskRunner(),
+        state_store=TelegramStateStore(tmp_path),
+        bot_client=FakeTelegramBotClient(),
+    )
+
+    result = await service.handle_webhook_update(
+        {
+            "update_id": 302,
+            "message": {
+                "message_id": 12,
+                "text": "group hello",
+                "chat": {"id": -10099, "type": "supergroup"},
+                "from": {"id": 7, "username": "member", "first_name": "Member"},
+            },
+        }
+    )
+
+    task = await store_group.task_store.get_task(result.task_id or "")
+    assert result.status == "accepted"
+    assert task is not None
+    assert task.scope_id == "chat:telegram:-10099"
+    assert task.thread_id == "tg_group:-10099"
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("message_patch", "expected_thread"),
     [
         ({"message_thread_id": 77}, "tg_group:-10099:topic:77"),
@@ -310,6 +407,64 @@ async def test_group_updates_preserve_stable_thread_routing(
     assert result.status == "accepted"
     assert task is not None
     assert task.scope_id == "chat:telegram:-10099"
+    assert task.thread_id == expected_thread
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message_kwargs", "expected_thread"),
+    [
+        ({"message_thread_id": 77}, "tg_group:-10099:topic:77"),
+        (
+            {
+                "reply_to_message": TelegramMessage(
+                    message_id=88,
+                    chat=TelegramChat(id=-10099, type="supergroup"),
+                    from_user=TelegramUser(id=7, username="member", first_name="Member"),
+                    text="root",
+                )
+            },
+            "tg_group:-10099:reply:88",
+        ),
+    ],
+)
+async def test_polling_update_models_preserve_thread_routing(
+    tmp_path: Path,
+    message_kwargs: dict[str, object],
+    expected_thread: str,
+) -> None:
+    _write_config(tmp_path, mode="polling", allowed_groups=["-10099"], group_policy="allowlist")
+    store_group = await create_store_group(
+        str(tmp_path / "gateway-polling-thread.db"),
+        str(tmp_path / "artifacts"),
+    )
+    service = TelegramGatewayService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        task_runner=FakeTaskRunner(),
+        state_store=TelegramStateStore(tmp_path),
+        bot_client=FakeTelegramBotClient(),
+    )
+
+    result = await service._ingest_update(
+        TelegramUpdate(
+            update_id=505,
+            message=TelegramMessage(
+                message_id=16,
+                chat=TelegramChat(id=-10099, type="supergroup"),
+                from_user=TelegramUser(id=7, username="member", first_name="Member"),
+                text="polling hello",
+                **message_kwargs,
+            ),
+        )
+    )
+
+    task = await store_group.task_store.get_task(result.task_id or "")
+    assert result.status == "accepted"
+    assert task is not None
     assert task.thread_id == expected_thread
 
     await store_group.conn.close()

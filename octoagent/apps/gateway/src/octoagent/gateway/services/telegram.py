@@ -294,18 +294,10 @@ class TelegramGatewayService:
         if context is None or not context.text.strip():
             return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
 
-        if context.chat_type == "private" and self._state_store is not None:
-            self._state_store.record_dm_message(
-                user_id=context.sender_id,
-                chat_id=context.chat_id,
-                username=context.sender_username,
-                display_name=context.sender_name,
-                message_id=int(context.message_id),
-                text=context.text,
-            )
-
         if not self._is_allowed(context):
             return await self._handle_unauthorized(context)
+
+        self._record_authorized_private_dm(context)
 
         scope_id, thread_id, reply_thread_root_id = self._resolve_scope_thread(context)
         metadata = {
@@ -360,6 +352,8 @@ class TelegramGatewayService:
         policy = self._resolve_group_policy()
         if policy == "disabled":
             return False
+        if policy == "open":
+            return True
 
         static_allowed_groups = self._resolve_static_allowed_groups()
         dynamic_allowed_groups = set(self._state_store.list_allowed_groups())
@@ -370,8 +364,6 @@ class TelegramGatewayService:
         )
         if not chat_allowed:
             return False
-        if policy == "open":
-            return True
 
         allowed_users = self._resolve_group_allow_users() | set(
             self._state_store.list_group_allow_users()
@@ -381,6 +373,20 @@ class TelegramGatewayService:
         if context.sender_id in allowed_users:
             return True
         return self._state_store.is_group_allowed(context.chat_id, context.sender_id)
+
+    def _record_authorized_private_dm(self, context: TelegramInboundContext) -> None:
+        if context.chat_type != "private" or self._state_store is None:
+            return
+        if not self._state_store.is_user_allowed(context.sender_id):
+            return
+        self._state_store.record_dm_message(
+            user_id=context.sender_id,
+            chat_id=context.chat_id,
+            username=context.sender_username,
+            display_name=context.sender_name,
+            message_id=int(context.message_id),
+            text=context.text,
+        )
 
     async def _handle_unauthorized(self, context: TelegramInboundContext) -> TelegramIngestResult:
         if context.chat_type != "private" or self._state_store is None or self._bot_client is None:

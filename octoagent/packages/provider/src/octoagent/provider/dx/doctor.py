@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,6 +22,17 @@ from .onboarding_models import OnboardingStepStatus
 from .telegram_verifier import TelegramOnboardingVerifier
 
 log = structlog.get_logger()
+
+
+@dataclass(slots=True)
+class RuntimeCheckContext:
+    """doctor 运行时检查使用的统一上下文。"""
+
+    source: str
+    llm_mode: str
+    proxy_url: str
+    proxy_key_env: str
+    proxy_key: str
 
 
 class DoctorRunner:
@@ -38,6 +50,33 @@ class DoctorRunner:
             self._root = project_root
         self._store = CredentialStore()
         self._telegram_verifier = telegram_verifier or TelegramOnboardingVerifier()
+
+    def _resolve_runtime_context(self) -> RuntimeCheckContext:
+        """解析 provider/runtime 配置来源，优先使用 octoagent.yaml.runtime。"""
+        from .config_wizard import load_config
+
+        if (self._root / "octoagent.yaml").exists():
+            try:
+                cfg = load_config(self._root)
+            except Exception:
+                cfg = None
+            if cfg is not None:
+                env_name = cfg.runtime.master_key_env
+                return RuntimeCheckContext(
+                    source="octoagent_yaml",
+                    llm_mode=cfg.runtime.llm_mode,
+                    proxy_url=cfg.runtime.litellm_proxy_url,
+                    proxy_key_env=env_name,
+                    proxy_key=os.environ.get(env_name, ""),
+                )
+
+        return RuntimeCheckContext(
+            source="env",
+            llm_mode=os.environ.get("OCTOAGENT_LLM_MODE", ""),
+            proxy_url=os.environ.get("LITELLM_PROXY_URL", "http://localhost:4000"),
+            proxy_key_env="LITELLM_PROXY_KEY",
+            proxy_key=os.environ.get("LITELLM_PROXY_KEY", ""),
+        )
 
     async def run_all_checks(self, live: bool = False) -> DoctorReport:
         """执行所有检查项
@@ -173,43 +212,60 @@ class DoctorRunner:
         )
 
     async def check_llm_mode(self) -> CheckResult:
-        """OCTOAGENT_LLM_MODE 有值"""
-        mode = os.environ.get("OCTOAGENT_LLM_MODE", "")
-        if mode:
+        """检查 llm_mode 配置是否可解析。"""
+        runtime = self._resolve_runtime_context()
+        if runtime.llm_mode:
+            label = (
+                "runtime.llm_mode"
+                if runtime.source == "octoagent_yaml"
+                else "OCTOAGENT_LLM_MODE"
+            )
             return CheckResult(
                 name="llm_mode",
                 status=CheckStatus.PASS,
                 level=CheckLevel.REQUIRED,
-                message=f"OCTOAGENT_LLM_MODE={mode}",
+                message=f"{label}={runtime.llm_mode}",
             )
         return CheckResult(
             name="llm_mode",
             status=CheckStatus.FAIL,
             level=CheckLevel.REQUIRED,
-            message="OCTOAGENT_LLM_MODE 未设置",
-            fix_hint="检查 .env 文件或运行 octo init",
+            message="未检测到 llm_mode 配置",
+            fix_hint="在 octoagent.yaml.runtime.llm_mode 中设置，或导出 OCTOAGENT_LLM_MODE",
         )
 
     async def check_proxy_key(self) -> CheckResult:
-        """LITELLM_PROXY_KEY 非空"""
-        key = os.environ.get("LITELLM_PROXY_KEY", "")
-        if key:
+        """检查当前运行时引用的 Proxy Key 环境变量。"""
+        runtime = self._resolve_runtime_context()
+        if runtime.proxy_key:
             return CheckResult(
                 name="proxy_key",
                 status=CheckStatus.PASS,
                 level=CheckLevel.RECOMMENDED,
-                message="LITELLM_PROXY_KEY 已设置",
+                message=f"{runtime.proxy_key_env} 已设置",
             )
         return CheckResult(
             name="proxy_key",
             status=CheckStatus.WARN,
             level=CheckLevel.RECOMMENDED,
-            message="LITELLM_PROXY_KEY 未设置",
-            fix_hint="检查 .env 文件",
+            message=f"缺少 Proxy Key 环境变量: {runtime.proxy_key_env}",
+            fix_hint=f"在 .env / .env.litellm / shell 中设置 {runtime.proxy_key_env}",
         )
 
     async def check_master_key_match(self) -> CheckResult:
         """LITELLM_MASTER_KEY == LITELLM_PROXY_KEY"""
+        runtime = self._resolve_runtime_context()
+        if runtime.source == "octoagent_yaml":
+            return CheckResult(
+                name="master_key_match",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=(
+                    f"使用 runtime.master_key_env={runtime.proxy_key_env}，"
+                    "跳过 legacy master/proxy key 对比"
+                ),
+            )
+
         master = os.environ.get("LITELLM_MASTER_KEY", "")
         proxy = os.environ.get("LITELLM_PROXY_KEY", "")
 
@@ -232,7 +288,7 @@ class DoctorRunner:
             status=CheckStatus.WARN,
             level=CheckLevel.RECOMMENDED,
             message="LITELLM_MASTER_KEY != LITELLM_PROXY_KEY",
-            fix_hint="重新运行 octo init 同步密钥",
+            fix_hint="将 LITELLM_MASTER_KEY 与 LITELLM_PROXY_KEY 统一为同一值，或运行 octo init",
         )
 
     async def check_docker_running(self) -> CheckResult:
@@ -264,10 +320,8 @@ class DoctorRunner:
         """LiteLLM Proxy /health/liveliness 返回 200"""
         import httpx
 
-        proxy_url = os.environ.get(
-            "LITELLM_PROXY_URL",
-            "http://localhost:4000",
-        )
+        runtime = self._resolve_runtime_context()
+        proxy_url = runtime.proxy_url
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.get(f"{proxy_url}/health/liveliness")
@@ -375,11 +429,9 @@ class DoctorRunner:
         """cheap 模型 ping（仅 --live）"""
         import httpx
 
-        proxy_url = os.environ.get(
-            "LITELLM_PROXY_URL",
-            "http://localhost:4000",
-        )
-        proxy_key = os.environ.get("LITELLM_PROXY_KEY", "")
+        runtime = self._resolve_runtime_context()
+        proxy_url = runtime.proxy_url
+        proxy_key = runtime.proxy_key
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -410,7 +462,7 @@ class DoctorRunner:
                         status=CheckStatus.FAIL,
                         level=CheckLevel.RECOMMENDED,
                         message=f"Proxy 认证失败: {error_msg}",
-                        fix_hint="检查 LITELLM_PROXY_KEY 配置",
+                        fix_hint=f"检查 {runtime.proxy_key_env} 配置",
                     )
                 elif resp.status_code == 502:
                     return CheckResult(

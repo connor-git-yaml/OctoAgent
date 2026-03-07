@@ -292,16 +292,27 @@ class TaskRunner:
 
         async with self._lock:
             running = self._running_jobs.get(task_id)
+        service = TaskService(self._stores, self._sse_hub)
         if running is None:
             job = await self._stores.task_job_store.get_job(task_id)
             if job is not None and job.status == "WAITING_INPUT":
+                await service.mark_running_task_cancelled_for_runtime(
+                    task_id,
+                    reason="用户取消",
+                )
                 await self._stores.task_job_store.mark_cancelled(task_id)
+                await self._mark_execution_terminal(
+                    task_id=task_id,
+                    status=ExecutionSessionState.CANCELLED,
+                    message="用户取消",
+                )
+                await self._notify_completion(task_id)
+                return True
             return False
 
         running.task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await running.task
-        service = TaskService(self._stores, self._sse_hub)
         await service.mark_running_task_cancelled_for_runtime(
             task_id,
             reason="用户取消",
@@ -484,16 +495,17 @@ class TaskRunner:
         session = await self._execution_console.get_session(task_id)
         if session is None:
             return
-        if (
-            session.state
-            in {
-                ExecutionSessionState.SUCCEEDED,
-                ExecutionSessionState.FAILED,
-                ExecutionSessionState.CANCELLED,
-            }
-            and session.live is False
-        ):
-            return
+        if session.live is False:
+            events = await self._execution_console.list_execution_events(
+                task_id,
+                session_id=session.session_id,
+            )
+            latest_status = next(
+                (event for event in reversed(events) if event.kind.value == "status"),
+                None,
+            )
+            if latest_status is not None and latest_status.final:
+                return
         await self._execution_console.mark_status(
             task_id=task_id,
             session_id=session.session_id,

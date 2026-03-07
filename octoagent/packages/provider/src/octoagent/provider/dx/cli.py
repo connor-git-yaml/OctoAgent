@@ -53,25 +53,20 @@ def init(manual_oauth: bool) -> None:
 @click.option("--live", is_flag=True, help="发送真实 LLM 调用验证端到端连通性")
 def doctor(live: bool) -> None:
     """环境诊断 -- FR-008"""
-    from .doctor import DoctorRunner, format_guidance, format_report
+    from .doctor import DoctorRunner, build_guidance, format_report
+    from .doctor_remediation import format_guidance_panel
 
     async def _run() -> None:
         project_root = Path(_resolve_project_root())
         runner = DoctorRunner(project_root=project_root)
         report = await runner.run_all_checks(live=live)
+        guidance = build_guidance(report)
         table = format_report(report)
         console.print(table)
-        guidance_panel = format_guidance(report)
+        guidance_panel = format_guidance_panel(guidance)
         if guidance_panel is not None:
             console.print(guidance_panel)
-        # 如果有 REQUIRED 级别的 FAIL，退出码为 1
-        from .models import CheckLevel, CheckStatus
-
-        has_critical = any(
-            c.status == CheckStatus.FAIL and c.level == CheckLevel.REQUIRED
-            for c in report.checks
-        )
-        if has_critical:
+        if guidance.overall_status == "blocked":
             raise SystemExit(1)
 
     try:
