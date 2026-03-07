@@ -62,6 +62,11 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     from_user: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
+    message_thread_id: int | None = None
+    reply_to_message: TelegramMessage | None = None
+
+
+TelegramMessage.model_rebuild()
 
 
 class TelegramUpdate(BaseModel):

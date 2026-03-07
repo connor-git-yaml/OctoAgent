@@ -58,6 +58,11 @@ log = structlog.get_logger()
 _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S = 10
 
 
+def _resolve_project_root() -> Path:
+    """解析 Gateway 使用的 project root。"""
+    return Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd())))
+
+
 def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> int:
     """解析 Telegram polling timeout，配置不可用时回退默认值。"""
     try:
@@ -77,7 +82,7 @@ def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
-    project_root = Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd())))
+    project_root = _resolve_project_root()
     app.state.project_root = project_root
 
     # 启动：初始化 Store
@@ -267,7 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
     # Feature 003: 自动加载 .env（override=False，不覆盖已有环境变量）
-    load_project_dotenv(override=False)
+    load_project_dotenv(project_root=_resolve_project_root(), override=False)
 
     app = FastAPI(
         title="OctoAgent Gateway",

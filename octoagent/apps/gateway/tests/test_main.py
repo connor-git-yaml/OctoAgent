@@ -57,3 +57,26 @@ def test_resolve_telegram_polling_timeout_falls_back_on_invalid_config(
     gateway_main = importlib.import_module("octoagent.gateway.main")
 
     assert gateway_main._resolve_telegram_polling_timeout(tmp_path) == 15
+
+
+def test_create_app_loads_dotenv_from_resolved_project_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    calls: list[tuple[Path | None, bool]] = []
+
+    def fake_load_project_dotenv(
+        project_root: Path | None = None,
+        override: bool = False,
+    ) -> bool:
+        calls.append((project_root, override))
+        return True
+
+    monkeypatch.setattr(gateway_main, "load_project_dotenv", fake_load_project_dotenv)
+
+    gateway_main.create_app()
+
+    assert calls == [(tmp_path, False)]

@@ -13,7 +13,7 @@ from octoagent.core.models import (
     ExecutionBackend,
     ExecutionSessionState,
 )
-from octoagent.core.models.enums import TaskStatus
+from octoagent.core.models.enums import EventType, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.execution_context import get_current_execution_context
@@ -739,6 +739,88 @@ class TestTaskRunner:
         final_session = await runner_2.get_execution_session(task_id)
         assert final_session is not None
         assert final_session.session_id == original_session_id
+
+        await runner_2.shutdown()
+        await store_group_2.conn.close()
+
+    async def test_cancel_waiting_input_without_live_runner_marks_execution_cancelled(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = str(tmp_path / "runner-interactive-cancel.db")
+        artifacts_dir = str(tmp_path / "artifacts")
+        store_group = await create_store_group(db_path, artifacts_dir)
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=InteractiveLLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="restart cancel waiting input",
+            idempotency_key="runner-019-cancel-waiting",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        for _ in range(20):
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("task did not enter WAITING_INPUT before shutdown")
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+        store_group_2 = await create_store_group(db_path, artifacts_dir)
+        sse_hub_2 = SSEHub()
+        task_service_2 = TaskService(store_group_2, sse_hub_2)
+        runner_2 = TaskRunner(
+            store_group=store_group_2,
+            sse_hub=sse_hub_2,
+            llm_service=InteractiveLLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner_2.startup()
+
+        session = await runner_2.get_execution_session(task_id)
+        assert session is not None
+        assert session.state == ExecutionSessionState.WAITING_INPUT
+        assert session.live is False
+
+        cancelled = await runner_2.cancel_task(task_id)
+        assert cancelled is True
+
+        task = await task_service_2.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.CANCELLED
+
+        job = await store_group_2.task_job_store.get_job(task_id)
+        assert job is not None
+        assert job.status == "CANCELLED"
+
+        final_session = await runner_2.get_execution_session(task_id)
+        assert final_session is not None
+        assert final_session.state == ExecutionSessionState.CANCELLED
+
+        events = await store_group_2.event_store.get_events_for_task(task_id)
+        terminal_events = [
+            event
+            for event in events
+            if event.type == EventType.EXECUTION_STATUS_CHANGED
+        ]
+        assert terminal_events
+        assert terminal_events[-1].payload["status"] == ExecutionSessionState.CANCELLED.value
 
         await runner_2.shutdown()
         await store_group_2.conn.close()

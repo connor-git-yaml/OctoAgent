@@ -83,6 +83,15 @@ def _manual_action(
     )
 
 
+def _doctor_retry_steps(command: str = "octo doctor --live") -> list[str]:
+    return [f"修复后重新运行: {command}"]
+
+
+def _config_missing_for_check(check: CheckResult) -> bool:
+    text = f"{check.message}\n{check.fix_hint}".lower()
+    return "octoagent.yaml" in text and ("不存在" in text or "读取返回空" in text)
+
+
 def _severity(check: CheckResult) -> Literal["blocking", "warning"]:
     if check.status == CheckStatus.FAIL and check.level == CheckLevel.REQUIRED:
         return "blocking"
@@ -113,6 +122,16 @@ def _stage_for(check_name: str) -> DoctorStage:
 
 def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) -> NextAction:
     blocking = severity == "blocking"
+    if _config_missing_for_check(check):
+        return _command_action(
+            "config-init",
+            "初始化统一配置",
+            "先生成 octoagent.yaml，再继续后续 channel/runtime 检查。",
+            "octo config init",
+            blocking=blocking,
+            sort_order=25,
+        )
+
     mapping: dict[str, NextAction] = {
         "python_version": _manual_action(
             "python-version",
@@ -131,44 +150,50 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
             manual_steps=["执行安装脚本: curl -LsSf https://astral.sh/uv/install.sh | sh"],
         ),
         "env_file": _command_action(
-            "config-init",
-            "初始化统一配置",
-            "生成基础 provider/runtime 配置。",
-            "octo config init",
+            "octo-init-env",
+            "运行初始化向导",
+            "生成 .env / .env.litellm 并补齐基础凭证配置。",
+            "octo init",
             blocking=blocking,
             sort_order=30,
         ),
         "env_litellm_file": _command_action(
-            "config-sync",
-            "同步 LiteLLM 配置",
-            "根据 octoagent.yaml 重新生成运行时配置。",
-            "octo config sync",
+            "octo-init-env-litellm",
+            "运行初始化向导",
+            "补齐 .env.litellm 与 LiteLLM 相关环境变量。",
+            "octo init",
             blocking=blocking,
             sort_order=35,
         ),
-        "llm_mode": _command_action(
+        "llm_mode": _manual_action(
             "repair-llm-mode",
             "修复运行模式",
-            "重新初始化 runtime，确保 llm_mode 正确。",
-            "octo config init",
+            check.fix_hint or "修复 llm_mode 配置来源。",
             blocking=blocking,
             sort_order=40,
+            manual_steps=[check.fix_hint or "修复 llm_mode 配置来源。", *_doctor_retry_steps()],
         ),
-        "proxy_key": _command_action(
+        "proxy_key": _manual_action(
             "repair-proxy-key",
-            "重建 Proxy Key",
-            "重新生成并写入 LiteLLM proxy key。",
-            "octo config init --force",
+            "补齐 Proxy Key",
+            check.fix_hint or "确保运行时引用的 Proxy Key 环境变量已设置。",
             blocking=blocking,
             sort_order=45,
+            manual_steps=[
+                check.fix_hint or "确保运行时引用的 Proxy Key 环境变量已设置。",
+                *_doctor_retry_steps(),
+            ],
         ),
-        "master_key_match": _command_action(
+        "master_key_match": _manual_action(
             "sync-master-key",
             "同步 Master Key",
-            "重新生成并同步 master/proxy key。",
-            "octo config init --force",
+            check.fix_hint or "同步 legacy master/proxy key 配置。",
             blocking=blocking,
             sort_order=46,
+            manual_steps=[
+                check.fix_hint or "同步 legacy master/proxy key 配置。",
+                *_doctor_retry_steps(),
+            ],
         ),
         "docker_running": _manual_action(
             "start-docker",
@@ -181,13 +206,16 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
                 "修复后重新运行: octo doctor --live",
             ],
         ),
-        "proxy_reachable": _command_action(
+        "proxy_reachable": _manual_action(
             "start-proxy",
-            "启动 LiteLLM Proxy",
-            "确保本地 LiteLLM Proxy 可达。",
-            "docker compose -f docker-compose.litellm.yml up -d",
+            "修复 LiteLLM Proxy 连通性",
+            check.fix_hint or "确保配置的 LiteLLM Proxy 可达。",
             blocking=blocking,
             sort_order=55,
+            manual_steps=[
+                check.fix_hint or "确保配置的 LiteLLM Proxy 可达。",
+                *_doctor_retry_steps(),
+            ],
         ),
         "db_writable": _manual_action(
             "repair-data-permission",
@@ -198,9 +226,9 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
         ),
         "credential_valid": _command_action(
             "configure-provider",
-            "补齐 Provider 配置",
-            "当前缺少可用凭证，请重新配置 provider。",
-            "octo config init --force",
+            "运行初始化向导",
+            "当前缺少可用凭证，请通过初始化向导补齐 provider/credential。",
+            "octo init",
             blocking=blocking,
             sort_order=65,
         ),
@@ -230,12 +258,12 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
         "live_ping": _manual_action(
             "repair-live-ping",
             "修复端到端连通性",
-            "检查 proxy key、provider key 与网络连通性后重试。",
+            check.fix_hint or "检查 proxy key、provider key 与网络连通性后重试。",
             blocking=blocking,
             sort_order=90,
             manual_steps=[
-                "检查 LITELLM_PROXY_KEY、Provider API Key 与网络连通性",
-                "修复后重新运行: octo doctor --live",
+                check.fix_hint or "检查 proxy key、provider key 与网络连通性",
+                *_doctor_retry_steps(),
             ],
         ),
         "telegram_config": _manual_action(
@@ -253,11 +281,11 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
         "telegram_token": _manual_action(
             "repair-telegram-token",
             "设置 Telegram bot token",
-            "确保 bot token 环境变量已导出并可被 provider/dx 读取。",
+            check.fix_hint or "确保 bot token 环境变量已导出并可被 provider/dx 读取。",
             blocking=blocking,
             sort_order=84,
             manual_steps=[
-                "在 .env 或 shell 中设置 TELEGRAM_BOT_TOKEN（或自定义 bot_token_env）",
+                check.fix_hint or "在 .env 或 shell 中设置 Telegram bot token 环境变量",
                 "修复后重新运行: octo doctor",
             ],
         ),
