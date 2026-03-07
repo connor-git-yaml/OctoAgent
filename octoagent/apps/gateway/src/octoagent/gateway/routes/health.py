@@ -11,6 +11,8 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Query, Request
+from octoagent.provider.dx.backup_service import resolve_data_dir, resolve_project_root
+from octoagent.provider.dx.recovery_status_store import RecoveryStatusStore
 from starlette.responses import JSONResponse
 
 log = structlog.get_logger()
@@ -18,7 +20,9 @@ log = structlog.get_logger()
 router = APIRouter()
 
 
-def _collect_subsystem_health(request: Request) -> tuple[dict[str, str], dict[str, dict[str, int]]]:
+def _collect_subsystem_health(
+    request: Request,
+) -> tuple[dict[str, str], dict[str, dict[str, int | bool]]]:
     """收集 M1.5 关键子系统状态（不影响 core readiness 判定）。"""
     state = request.app.state
     subsystems: dict[str, str] = {}
@@ -56,7 +60,24 @@ def _collect_subsystem_health(request: Request) -> tuple[dict[str, str], dict[st
         diagnostics_count = len(diagnostics) if diagnostics is not None else 0
         subsystems["tool_registry"] = "degraded" if diagnostics_count > 0 else "ok"
 
-    return subsystems, {"tool_registry": {"diagnostics_count": diagnostics_count}}
+    recovery_store = RecoveryStatusStore(
+        resolve_project_root(),
+        data_dir=resolve_data_dir(),
+    )
+    recovery_summary = recovery_store.load_summary()
+    if recovery_summary.ready_for_restore:
+        subsystems["recovery"] = "ok"
+    elif recovery_summary.latest_recovery_drill is None:
+        subsystems["recovery"] = "unavailable"
+    else:
+        subsystems["recovery"] = "degraded"
+
+    return subsystems, {
+        "tool_registry": {"diagnostics_count": diagnostics_count},
+        "recovery": {
+            "ready_for_restore": recovery_summary.ready_for_restore,
+        },
+    }
 
 
 @router.get("/health")

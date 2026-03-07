@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchTasks } from "../api/client";
+import RecoveryPanel from "../components/RecoveryPanel";
 import type { TaskSummary } from "../types";
 
 /** 格式化时间为可读字符串 */
@@ -61,17 +62,30 @@ export default function TaskList() {
   }, []);
 
   if (loading) {
-    return <div className="loading">Loading tasks...</div>;
+    return (
+      <div>
+        <h1>Tasks</h1>
+        <RecoveryPanel />
+        <div className="loading">Loading tasks...</div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="error">Error: {error}</div>;
+    return (
+      <div>
+        <h1>Tasks</h1>
+        <RecoveryPanel />
+        <div className="error">Error: {error}</div>
+      </div>
+    );
   }
 
   if (tasks.length === 0) {
     return (
       <div>
         <h1>Tasks</h1>
+        <RecoveryPanel />
         <div className="card" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
           No tasks yet
         </div>
@@ -82,6 +96,7 @@ export default function TaskList() {
   return (
     <div>
       <h1>Tasks</h1>
+      <RecoveryPanel />
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {tasks.map((task) => (
           <div

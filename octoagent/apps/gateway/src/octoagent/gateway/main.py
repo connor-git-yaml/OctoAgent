@@ -27,7 +27,18 @@ from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .routes import approvals, cancel, chat, execution, health, message, stream, tasks, watchdog
+from .routes import (
+    approvals,
+    cancel,
+    chat,
+    execution,
+    health,
+    message,
+    ops,
+    stream,
+    tasks,
+    watchdog,
+)
 from .services.llm_service import LLMService
 from .services.sse_hub import SSEHub
 from .services.task_runner import TaskRunner
@@ -235,6 +246,7 @@ def create_app() -> FastAPI:
     app.include_router(execution.router, tags=["execution"])
     app.include_router(stream.router, tags=["stream"])
     app.include_router(health.router, tags=["health"])
+    app.include_router(ops.router, tags=["ops"])
     app.include_router(approvals.router, tags=["approvals"])
     app.include_router(chat.router, tags=["chat"])
 

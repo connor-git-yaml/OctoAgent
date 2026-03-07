@@ -232,3 +232,73 @@ h2 {
 .sse-indicator.connected { background-color: var(--color-succeeded); }
 .sse-indicator.disconnected { background-color: var(--color-failed); }
 .sse-indicator.closed { background-color: var(--color-created); }
+
+.muted {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.recovery-panel {
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(14, 165, 233, 0.02)),
+    var(--color-surface);
+}
+
+.recovery-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.recovery-header h2 {
+  margin-bottom: var(--space-xs);
+}
+
+.recovery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.recovery-item {
+  padding: var(--space-sm) 0;
+}
+
+.recovery-actions {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-top: var(--space-md);
+}
+
+.action-button {
+  border: none;
+  background: var(--color-accent);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.action-button.secondary {
+  background: var(--color-text);
+}
+
+.action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.error-inline {
+  margin-bottom: var(--space-sm);
+  color: var(--color-failed);
+}
+
+.notice-inline {
+  margin-bottom: var(--space-sm);
+  color: var(--color-succeeded);
+}

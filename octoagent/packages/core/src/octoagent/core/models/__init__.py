@@ -4,6 +4,23 @@
 """
 
 from .artifact import Artifact, ArtifactPart
+from .backup import (
+    BackupBundle,
+    BackupFileEntry,
+    BackupManifest,
+    BackupScope,
+    ExportFilter,
+    ExportManifest,
+    ExportTaskRef,
+    RecoveryDrillRecord,
+    RecoveryDrillStatus,
+    RecoverySummary,
+    RestoreConflict,
+    RestoreConflictSeverity,
+    RestoreConflictType,
+    RestorePlan,
+    SensitivityLevel,
+)
 from .checkpoint import (
     PIPELINE_NODES,
     CheckpointSnapshot,
@@ -45,6 +62,7 @@ from .orchestrator import (
 )
 from .payloads import (
     ArtifactCreatedPayload,
+    BackupLifecyclePayload,
     CheckpointSavedPayload,
     ErrorPayload,
     ExecutionCancelRequestedPayload,
@@ -96,6 +114,22 @@ __all__ = [
     # Artifact
     "Artifact",
     "ArtifactPart",
+    # Backup / Restore / Export
+    "BackupScope",
+    "SensitivityLevel",
+    "RestoreConflictType",
+    "RestoreConflictSeverity",
+    "RecoveryDrillStatus",
+    "BackupFileEntry",
+    "BackupManifest",
+    "BackupBundle",
+    "RestoreConflict",
+    "RestorePlan",
+    "ExportFilter",
+    "ExportTaskRef",
+    "ExportManifest",
+    "RecoveryDrillRecord",
+    "RecoverySummary",
     # Execution
     "JobSpec",
     "ExecutionRuntimeRecord",
@@ -120,6 +154,7 @@ __all__ = [
     "ModelCallFailedPayload",
     "StateTransitionPayload",
     "ArtifactCreatedPayload",
+    "BackupLifecyclePayload",
     "ErrorPayload",
     "ExecutionStatusChangedPayload",
     "ExecutionLogPayload",

@@ -94,3 +94,80 @@ export interface SSEEventData extends TaskEvent {
   task_id: string;
   final?: boolean;
 }
+
+export type SensitivityLevel =
+  | "none"
+  | "metadata_only"
+  | "operator_sensitive";
+
+export type RecoveryDrillStatus = "NOT_RUN" | "PASSED" | "FAILED";
+
+export interface BackupFileEntry {
+  scope: string;
+  relative_path: string;
+  kind: "file" | "directory";
+  required: boolean;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface BackupManifest {
+  manifest_version: number;
+  bundle_id: string;
+  created_at: string;
+  source_project_root: string;
+  scopes: string[];
+  files: BackupFileEntry[];
+  warnings: string[];
+  excluded_paths: string[];
+  sensitivity_level: SensitivityLevel;
+  notes: string[];
+}
+
+export interface BackupBundle {
+  bundle_id: string;
+  output_path: string;
+  created_at: string;
+  size_bytes: number;
+  manifest: BackupManifest;
+}
+
+export interface RecoveryDrillRecord {
+  status: RecoveryDrillStatus;
+  checked_at: string | null;
+  bundle_path: string;
+  summary: string;
+  failure_reason: string;
+  remediation: string[];
+}
+
+export interface RecoverySummary {
+  latest_backup: BackupBundle | null;
+  latest_recovery_drill: RecoveryDrillRecord | null;
+  ready_for_restore: boolean;
+}
+
+export interface ExportFilter {
+  task_id?: string | null;
+  thread_id?: string | null;
+  since?: string | null;
+  until?: string | null;
+}
+
+export interface ExportTaskRef {
+  task_id: string;
+  thread_id: string;
+  title: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ExportManifest {
+  export_id: string;
+  created_at: string;
+  output_path: string;
+  filters: ExportFilter;
+  tasks: ExportTaskRef[];
+  event_count: number;
+  artifact_refs: string[];
+}
