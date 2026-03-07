@@ -145,6 +145,11 @@ class EventType(StrEnum):
     BACKUP_COMPLETED = "BACKUP_COMPLETED"
     BACKUP_FAILED = "BACKUP_FAILED"
 
+    # Feature 021: Chat Import 生命周期事件
+    CHAT_IMPORT_STARTED = "CHAT_IMPORT_STARTED"
+    CHAT_IMPORT_COMPLETED = "CHAT_IMPORT_COMPLETED"
+    CHAT_IMPORT_FAILED = "CHAT_IMPORT_FAILED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

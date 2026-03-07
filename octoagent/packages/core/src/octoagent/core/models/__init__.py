@@ -78,6 +78,7 @@ from .orchestrator import (
 from .payloads import (
     ArtifactCreatedPayload,
     BackupLifecyclePayload,
+    ChatImportLifecyclePayload,
     CheckpointSavedPayload,
     ErrorPayload,
     ExecutionCancelRequestedPayload,
@@ -188,6 +189,7 @@ __all__ = [
     "StateTransitionPayload",
     "ArtifactCreatedPayload",
     "BackupLifecyclePayload",
+    "ChatImportLifecyclePayload",
     "ErrorPayload",
     "ExecutionStatusChangedPayload",
     "ExecutionLogPayload",

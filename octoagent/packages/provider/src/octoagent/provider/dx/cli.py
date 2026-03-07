@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .backup_commands import backup, export, restore
+from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
 
 console = Console()
@@ -27,6 +28,7 @@ main.add_command(config)
 main.add_command(backup)
 main.add_command(restore)
 main.add_command(export)
+main.add_command(import_cmd)
 
 
 @main.command()

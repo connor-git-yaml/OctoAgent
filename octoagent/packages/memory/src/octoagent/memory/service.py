@@ -62,6 +62,7 @@ class MemoryService:
         expected_version: int | None = None,
         is_sensitive: bool = False,
         metadata: dict[str, str | int | float | bool | None] | None = None,
+        autocommit: bool = True,
     ) -> WriteProposal:
         """创建并落盘 WriteProposal。"""
 
@@ -81,10 +82,16 @@ class MemoryService:
             created_at=datetime.now(UTC),
         )
         await self._store.save_proposal(proposal)
-        await self._conn.commit()
+        if autocommit:
+            await self._conn.commit()
         return proposal
 
-    async def validate_proposal(self, proposal_id: str) -> ProposalValidation:
+    async def validate_proposal(
+        self,
+        proposal_id: str,
+        *,
+        autocommit: bool = True,
+    ) -> ProposalValidation:
         """验证 Proposal，并更新其状态。"""
 
         proposal = await self._require_proposal(proposal_id)
@@ -124,7 +131,8 @@ class MemoryService:
             }
         )
         await self._store.replace_proposal(updated)
-        await self._conn.commit()
+        if autocommit:
+            await self._conn.commit()
         return ProposalValidation(
             proposal_id=updated.proposal_id,
             accepted=accepted,
@@ -133,7 +141,12 @@ class MemoryService:
             current_version=current.version if current is not None else None,
         )
 
-    async def commit_memory(self, proposal_id: str) -> CommitResult:
+    async def commit_memory(
+        self,
+        proposal_id: str,
+        *,
+        autocommit: bool = True,
+    ) -> CommitResult:
         """提交已验证的 WriteProposal。"""
 
         proposal = await self._require_proposal(proposal_id)
@@ -177,24 +190,26 @@ class MemoryService:
                 }
             )
             await self._store.replace_proposal(committed)
-            await self._conn.commit()
+            if autocommit:
+                await self._conn.commit()
         except Exception:
             await self._conn.rollback()
             raise
 
-        log.info(
-            "memory_committed",
-            proposal_id=proposal.proposal_id,
-            action=proposal.action.value,
-            scope_id=proposal.scope_id,
-            partition=proposal.partition.value,
-            backend=self._backend.backend_id,
-        )
-        await self._sync_backend(
-            fragment=fragment,
-            current_sor_id=sor_id,
-            current_vault_id=vault_id,
-        )
+        if autocommit:
+            log.info(
+                "memory_committed",
+                proposal_id=proposal.proposal_id,
+                action=proposal.action.value,
+                scope_id=proposal.scope_id,
+                partition=proposal.partition.value,
+                backend=self._backend.backend_id,
+            )
+            await self._sync_backend(
+                fragment=fragment,
+                current_sor_id=sor_id,
+                current_vault_id=vault_id,
+            )
         return CommitResult(
             proposal_id=proposal.proposal_id,
             fragment_id=fragment.fragment_id,
