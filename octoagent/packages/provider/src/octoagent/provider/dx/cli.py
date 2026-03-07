@@ -12,6 +12,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from .backup_commands import backup, export, restore
 from .config_commands import _resolve_project_root, config
 
 console = Console()
@@ -23,6 +24,9 @@ def main() -> None:
 
 
 main.add_command(config)
+main.add_command(backup)
+main.add_command(restore)
+main.add_command(export)
 
 
 @main.command()

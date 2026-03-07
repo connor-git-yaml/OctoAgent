@@ -271,6 +271,19 @@ class TaskMilestonePayload(BaseModel):
     )
 
 
+# Feature 022: Backup 生命周期 Payload 类型
+
+
+class BackupLifecyclePayload(BaseModel):
+    """BACKUP_* 生命周期事件 payload。"""
+
+    bundle_id: str = Field(description="backup bundle ID")
+    output_path: str = Field(description="bundle 输出路径")
+    scope_summary: list[str] = Field(default_factory=list, description="包含的 scope 摘要")
+    status: str = Field(description="started/completed/failed")
+    message: str = Field(default="", description="补充说明")
+
+
 from typing import Literal  # noqa: E402
 
 DriftType = Literal["no_progress", "state_machine_stall", "repeated_failure"]

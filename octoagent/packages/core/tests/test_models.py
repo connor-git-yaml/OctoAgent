@@ -83,6 +83,9 @@ class TestEnums:
         assert EventType.EXECUTION_INPUT_REQUESTED == "EXECUTION_INPUT_REQUESTED"
         assert EventType.EXECUTION_INPUT_ATTACHED == "EXECUTION_INPUT_ATTACHED"
         assert EventType.EXECUTION_CANCEL_REQUESTED == "EXECUTION_CANCEL_REQUESTED"
+        assert EventType.BACKUP_STARTED == "BACKUP_STARTED"
+        assert EventType.BACKUP_COMPLETED == "BACKUP_COMPLETED"
+        assert EventType.BACKUP_FAILED == "BACKUP_FAILED"
 
     def test_actor_type_values(self):
         """ActorType 枚举值正确"""

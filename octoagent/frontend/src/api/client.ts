@@ -2,14 +2,24 @@
  * API Client -- fetch 封装，对接后端 REST API
  */
 
-import type { TaskListResponse, TaskDetailResponse } from "../types";
+import type {
+  BackupBundle,
+  ExportFilter,
+  ExportManifest,
+  RecoverySummary,
+  TaskDetailResponse,
+  TaskListResponse,
+} from "../types";
 
 const BASE_URL = "";
 
 /** 通用 fetch 封装 */
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
     ...init,
   });
 
@@ -35,4 +45,32 @@ export async function fetchTaskDetail(
   taskId: string
 ): Promise<TaskDetailResponse> {
   return apiFetch<TaskDetailResponse>(`/api/tasks/${taskId}`);
+}
+
+/** GET /api/ops/recovery -- 最近一次恢复准备度摘要 */
+export async function fetchRecoverySummary(): Promise<RecoverySummary> {
+  return apiFetch<RecoverySummary>("/api/ops/recovery");
+}
+
+/** POST /api/ops/backup/create -- 触发 backup create */
+export async function triggerBackupCreate(label?: string): Promise<BackupBundle> {
+  return apiFetch<BackupBundle>("/api/ops/backup/create", {
+    method: "POST",
+    body: JSON.stringify({ label: label ?? null }),
+  });
+}
+
+/** POST /api/ops/export/chats -- 触发 chats export */
+export async function triggerExportChats(
+  filters: ExportFilter = {}
+): Promise<ExportManifest> {
+  return apiFetch<ExportManifest>("/api/ops/export/chats", {
+    method: "POST",
+    body: JSON.stringify({
+      task_id: filters.task_id ?? null,
+      thread_id: filters.thread_id ?? null,
+      since: filters.since ?? null,
+      until: filters.until ?? null,
+    }),
+  });
 }
