@@ -22,8 +22,10 @@ class MessageRequest(BaseModel):
     idempotency_key: str = Field(description="幂等键，用于去重")
     channel: str = Field(default="web", description="渠道标识")
     thread_id: str = Field(default="default", description="线程标识")
+    scope_id: str = Field(default="", description="作用域标识")
     sender_id: str = Field(default="owner", description="发送者 ID")
     sender_name: str = Field(default="Owner", description="发送者名称")
+    metadata: dict[str, str] = Field(default_factory=dict, description="渠道侧扩展元数据")
 
 
 class MessageResponse(BaseModel):
@@ -52,9 +54,11 @@ async def receive_message(
     msg = NormalizedMessage(
         channel=body.channel,
         thread_id=body.thread_id,
+        scope_id=body.scope_id,
         sender_id=body.sender_id,
         sender_name=body.sender_name,
         text=body.text,
+        metadata=body.metadata,
         idempotency_key=body.idempotency_key,
     )
 
