@@ -2,7 +2,7 @@
 feature_id: "016"
 title: "Telegram Channel + Pairing + Session Routing"
 milestone: "M2"
-status: "Draft"
+status: "Implemented"
 created: "2026-03-07"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md §5.1.1 / §13.4 / Appendix B.2"
@@ -14,7 +14,7 @@ parallel_dependency: "Feature 017（统一 operator inbox）仅消费 016 的 Te
 
 **Feature Branch**: `codex/feat-016-telegram-channel`
 **Created**: 2026-03-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: 基于 `docs/m2-feature-split.md` 的 Feature 016，交付 Telegram 作为首个真实外部渠道，并落实 pairing、allowlist、session routing、webhook/polling 与基础回传语义。
 **调研基础**: `research/research-synthesis.md`、`research/product-research.md`、`research/tech-research.md`、`research/online-research.md`
 
@@ -224,4 +224,3 @@ Feature 016 要解决的不是“多一个 webhook 路由”，而是“把 Tele
 - 高级媒体、poll、复杂富交互组件
 - Telegram 之外的其它移动端控制面
 - 备份/恢复产品入口与会话导出
-

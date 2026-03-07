@@ -1,9 +1,10 @@
-# M2 Feature 拆分方案（v1）
+# M2 Feature 拆分方案（v2）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §5.1 + §12.4 + §12.9 + §14（M2 定义）+ `docs/m1.5-feature-split.md` 收口结论  
-> **状态**: v1 — 基于 OpenClaw / Agent Zero 用户可用性复核后的 M2 并行拆分  
-> **日期**: 2026-03-06
+> **状态**: v2 — Feature 015/016/018/019/020/022 已交付，Feature 017/021/023 待启动
+> **日期**: 2026-03-07
+> **变更记录**: v1(2026-03-06，M2 初版拆分) → v2(2026-03-07，按当前 `master` 交付事实回写已完成与待启动状态)
 
 ---
 
@@ -11,11 +12,26 @@
 
 ### 1.1 当前基线
 
-基于当前 `master`（`40aaed3`）：
+基于当前 `master`（2026-03-07）：
 
 - M0 / M1 / M1.5 核心能力已交付，系统已经具备最小 Agent 闭环。
 - M1.5 已解决“能不能稳定跑起来”的问题；M2 要解决“你是否愿意每天真的用它”的问题。
-- 当前 Blueprint 在 Telegram、A2A、JobRunner、Memory 等内核能力上方向正确，但对用户视角的可用性闭环仍不完整。
+- M2 第一波 contract / transport / recovery / DX 能力已完成：015、016、018、019、020、022。
+- 当前剩余待启动 Feature 只剩 017（operator inbox）、021（chat import）、023（M2 集成验收）。
+
+### 1.1.1 M2 实际交付状态
+
+| Feature | 状态 | 日期 | 关键产出 |
+|---|---|---:|---|
+| 015 | 已交付 | 2026-03-07 | `octo onboard` + doctor remediation + channel verifier |
+| 016 | 已交付 | 2026-03-07 | Telegram transport + pairing + session routing |
+| 017 | 待启动 | - | Unified operator inbox + mobile controls |
+| 018 | 已交付 | 2026-03-07 | A2A-Lite envelope + state mapper |
+| 019 | 已交付 | 2026-03-07 | Interactive execution console + durable input resume |
+| 020 | 已交付 | 2026-03-07 | Memory core + proposal/commit contract |
+| 021 | 待启动 | - | Chat import core |
+| 022 | 已交付 | 2026-03-07 | Backup/restore/export + recovery drill |
+| 023 | 待启动 | - | M2 E2E integration acceptance |
 
 ### 1.2 竞品复核后的三类缺口
 
@@ -64,28 +80,28 @@ M2 的目标不只是“把 Telegram/A2A/Memory 实现出来”，而是把 Octo
 M1.5 基线（已完成）
    │
    ├── Track A: 上手体验与渠道
-   │   ├── Feature 015: Octo Onboard + Doctor Guided Remediation
-   │   ├── Feature 016: Telegram Channel + Pairing + Session Routing
-   │   └── Feature 017: Unified Operator Inbox + Mobile Task Controls
+   │   ├── Feature 015 已交付: Octo Onboard + Doctor Guided Remediation
+   │   ├── Feature 016 已交付: Telegram Channel + Pairing + Session Routing
+   │   └── Feature 017 待启动: Unified Operator Inbox + Mobile Task Controls
    │
    ├── Track B: 控制平面与执行面
-   │   ├── Feature 018: A2A-Lite Envelope + StateMapper
-   │   └── Feature 019: JobRunner Docker Backend + Interactive Console
+   │   ├── Feature 018 已交付: A2A-Lite Envelope + StateMapper
+   │   └── Feature 019 已交付: JobRunner Docker Backend + Interactive Console
    │
    ├── Track C: Memory 与导入
-   │   ├── Feature 020: Memory Core + WriteProposal + Vault Skeleton
-   │   └── Feature 021: Chat Import Core
+   │   ├── Feature 020 已交付: Memory Core + WriteProposal + Vault Skeleton
+   │   └── Feature 021 待启动: Chat Import Core
    │
    ├── Track D: 可迁移与恢复
-   │   └── Feature 022: Backup/Restore + Export + Recovery Drill
+   │   └── Feature 022 已交付: Backup/Restore + Export + Recovery Drill
    │
    └── 全部汇合
-       └── Feature 023: M2 E2E 集成验收
+       └── Feature 023 待启动: M2 E2E 集成验收
 ```
 
 ### 3.2 并行化原则
 
-1. **先冻结 contract，再并行编码**：016 冻结 Telegram ingress/egress contract，018 冻结 A2A envelope，020 冻结 Memory 写入 contract。
+1. **先冻结 contract，再并行编码**：016、018、020 的 contract 已冻结并落地；017、021、023 只消费这些 contract，不再重定义 schema。
 2. **体验层只消费 contract，不重定义 schema**：015/017/022 不得单独发明 task / approval / message / backup 的新主数据模型。
 3. **导入与 Memory 解耦**：021 在实现阶段可用 mock `MemoryWriter`，待 020 contract 稳定后接真实仲裁器。
 4. **集成 Feature 不引入新能力**：023 仅联调 015-022 的真实依赖与验收，不接“顺手加一个功能”。

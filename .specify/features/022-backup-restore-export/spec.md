@@ -2,7 +2,7 @@
 feature_id: "022"
 title: "Backup/Restore + Export + Recovery Drill"
 milestone: "M2"
-status: "Draft"
+status: "Implemented"
 created: "2026-03-07"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md §5.1 FR-OPS-4 / §12.4 / §14"
@@ -14,7 +14,7 @@ parallel_dependency: "可与 Feature 016 / 018 / 020 并行；Feature 023 依赖
 
 **Feature Branch**: `codex/feat-022-backup-restore-export`
 **Created**: 2026-03-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: 基于 `docs/m2-feature-split.md` 的 Feature 022，交付用户可触达的 backup / restore dry-run / chats export / recovery drill 状态入口。
 **调研基础**: `research/research-synthesis.md`、`research/product-research.md`、`research/tech-research.md`、`research/online-research.md`
 

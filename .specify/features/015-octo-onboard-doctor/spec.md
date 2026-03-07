@@ -2,7 +2,7 @@
 feature_id: "015"
 title: "Octo Onboard + Doctor Guided Remediation"
 milestone: "M2"
-status: "Draft"
+status: "Implemented"
 created: "2026-03-07"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md §12.9 / §14"
@@ -14,7 +14,7 @@ parallel_dependency: "Feature 016（Telegram Channel + Pairing + Session Routing
 
 **Feature Branch**: `codex/feat-015-octo-onboard-doctor`
 **Created**: 2026-03-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: 基于 `docs/m2-feature-split.md` 的 Feature 015，交付 `octo onboard`、doctor guided remediation 和可恢复的首次使用闭环。
 **调研基础**: `research/research-synthesis.md`、`research/product-research.md`、`research/tech-research.md`、`research/online-research.md`
 
