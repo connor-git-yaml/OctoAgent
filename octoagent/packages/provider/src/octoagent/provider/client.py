@@ -4,8 +4,12 @@
 通过 litellm.acompletion() 调用 Proxy，内部集成 CostTracker。
 """
 
+from __future__ import annotations
+
 import re
 import time
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 import structlog
@@ -18,9 +22,10 @@ log = structlog.get_logger()
 
 # 隔离 litellm 导入，方便测试 Mock
 try:
-    from litellm import acompletion
+    from litellm import acompletion, stream_chunk_builder
 except ImportError:  # pragma: no cover
     acompletion = None  # type: ignore[assignment]
+    stream_chunk_builder = None  # type: ignore[assignment]
 
 # 健康检查超时（硬编码，应快速响应）
 HEALTH_CHECK_TIMEOUT_S = 5
@@ -70,6 +75,8 @@ class LiteLLMClient:
         proxy_base_url: str = "http://localhost:4000",
         proxy_api_key: str = "",
         timeout_s: int = 30,
+        *,
+        stream_model_aliases: set[str] | None = None,
     ) -> None:
         """初始化 LiteLLM Proxy 客户端
 
@@ -84,6 +91,67 @@ class LiteLLMClient:
         self._proxy_base_url = proxy_base_url.rstrip("/")
         self._proxy_api_key = proxy_api_key
         self._timeout_s = timeout_s
+        self._stream_model_aliases = set(stream_model_aliases or ())
+
+    async def _collect_stream_response(
+        self,
+        response: AsyncIterator[Any],
+        *,
+        messages: list[dict[str, str]],
+    ) -> Any:
+        """消费 LiteLLM 流式响应并组装为完整 completion 对象。"""
+        if stream_chunk_builder is None:  # pragma: no cover
+            raise ProviderError(
+                message="LiteLLM 未提供 stream_chunk_builder，无法解析流式响应",
+                recoverable=True,
+            )
+
+        chunks: list[Any] = []
+        async for chunk in response:
+            chunks.append(chunk)
+
+        if not chunks:
+            raise ProviderError(
+                message="LLM 返回了空的流式响应",
+                recoverable=True,
+            )
+
+        complete_response = stream_chunk_builder(
+            chunks=chunks,
+            messages=messages,
+        )
+        if complete_response is None:
+            raise ProviderError(
+                message="LLM 流式响应组装失败",
+                recoverable=True,
+            )
+        return complete_response
+
+    def _build_result(
+        self,
+        *,
+        response: Any,
+        model_alias: str,
+        duration_ms: int,
+    ) -> ModelCallResult:
+        """将 LiteLLM completion 响应转换为统一 ModelCallResult。"""
+        content = response.choices[0].message.content or ""
+        cost_usd, cost_unavailable = CostTracker.calculate_cost(response)
+        token_usage = CostTracker.parse_usage(response)
+        model_name, provider = CostTracker.extract_model_info(response)
+
+        return ModelCallResult(
+            content=content,
+            model_alias=model_alias,
+            model_name=model_name,
+            provider=provider,
+            duration_ms=duration_ms,
+            token_usage=token_usage,
+            cost_usd=cost_usd,
+            cost_unavailable=cost_unavailable,
+            is_fallback=False,
+            fallback_reason="",
+        )
 
     async def complete(
         self,
@@ -129,6 +197,7 @@ class LiteLLMClient:
             # model 加 "openai/" 前缀：告诉本地 LiteLLM SDK 将请求视为
             # OpenAI 兼容端点直接转发到 Proxy，由 Proxy 负责路由到真实模型。
             proxy_model = f"openai/{model_alias}"
+            use_stream = model_alias in self._stream_model_aliases
             call_kwargs = {
                 "model": proxy_model,
                 "messages": messages,
@@ -145,6 +214,11 @@ class LiteLLMClient:
             # Chat Completions API 使用顶层 reasoning_effort 字符串
             if reasoning is not None:
                 call_kwargs["reasoning_effort"] = reasoning.effort
+            if use_stream:
+                # ChatGPT backend / Codex OAuth 路径经 LiteLLM Proxy 会返回 SSE 分片，
+                # 这里显式切到 stream 模式，再在客户端聚合回完整结果。
+                call_kwargs["stream"] = True
+                call_kwargs["stream_options"] = {"include_usage": True}
 
             log.debug(
                 "litellm_call_start",
@@ -155,42 +229,27 @@ class LiteLLMClient:
 
             # 调用 LiteLLM SDK
             response = await acompletion(**call_kwargs)
+            if use_stream:
+                response = await self._collect_stream_response(
+                    response,
+                    messages=messages,
+                )
 
             # 计算耗时
             duration_ms = int((time.monotonic() - start_time) * 1000)
-
-            # 提取响应内容
-            content = response.choices[0].message.content or ""
-
-            # 通过 CostTracker 计算成本
-            cost_usd, cost_unavailable = CostTracker.calculate_cost(response)
-
-            # 通过 CostTracker 解析 token 使用
-            token_usage = CostTracker.parse_usage(response)
-
-            # 提取模型和 provider 信息
-            model_name, provider = CostTracker.extract_model_info(response)
-
-            result = ModelCallResult(
-                content=content,
+            result = self._build_result(
+                response=response,
                 model_alias=model_alias,
-                model_name=model_name,
-                provider=provider,
                 duration_ms=duration_ms,
-                token_usage=token_usage,
-                cost_usd=cost_usd,
-                cost_unavailable=cost_unavailable,
-                is_fallback=False,
-                fallback_reason="",
             )
 
             log.info(
                 "litellm_call_completed",
                 model_alias=model_alias,
-                model_name=model_name,
-                provider=provider,
+                model_name=result.model_name,
+                provider=result.provider,
                 duration_ms=duration_ms,
-                cost_usd=cost_usd,
+                cost_usd=result.cost_usd,
             )
 
             return result

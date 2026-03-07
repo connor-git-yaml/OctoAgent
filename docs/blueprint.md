@@ -1134,6 +1134,12 @@ WriteProposal:
 - MemU 承担检索、索引、增量同步和后续 chat import / knowledge update 的主要执行负载
 - MemU 不可用时自动降级回 SQLite-only search
 
+M3 产品化集成约束（2026-03-07）：
+- `MemUBackend` 不应被视为纯外挂检索器，而应作为 Memory engine 的首选实现之一，与 `search_memory()` / `get_memory()` / `before_compaction_flush()` 共用同一治理边界
+- 多模态记忆、Category、ToM、关系抽取等高级能力只能产出 `Fragments`、派生索引或 `WriteProposal` 草案，不能绕过 SoR / Vault 直接成为权威事实
+- 所有高级记忆结果都必须带 `evidence_refs` / artifact 引用，确保 Memory 浏览与证据追溯可落地
+- MemU 不可用或插件降级时，系统仍需保留 SQLite-only 的最小检索与 SoR 回答路径（对齐 Constitution 6）
+
 #### 8.7.5 Chat Import Core（通用内核）
 
 - 用户入口：`octo import chats [--dry-run] [--resume]`
@@ -1336,6 +1342,12 @@ backend：
 - Auth Adapter 变更的影响范围限定在 `packages/provider/auth/`
 - 新增 Provider 只需实现对应 `AuthAdapter` 子类 + 注册到 Handler Chain
 - JWT 直连路径通过 HandlerChainResult 路由覆盖实现，不影响 API Key 路径的默认行为
+
+M3 用户化约束（2026-03-07）：
+- 环境变量继续作为高级/CI 路径保留，但不应再是普通用户完成 provider/channel/gateway 配置的默认方式
+- 用户视角的主路径应收敛为统一 Secret Store + Wizard：Provider Key、OAuth Token、Telegram Bot Token、Gateway Token 等通过同一配置入口管理、审计、轮换与 reload
+- CLI / Web / 未来桌面端应共用 onboarding + config protocol，避免重复实现两套配置逻辑
+- secret 配置的默认目标应从“让用户记住要 export 哪些 env”转为“告诉用户存到哪个 project/scope，系统负责注入运行时”
 
 ---
 
@@ -2658,23 +2670,71 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Chat Import 增量导入去重 + 窗口化摘要正确，且不污染主聊天 scope
 - 备份包可在 dry-run 中完成校验，并能恢复 tasks / events / chats / config 元数据
 
-### M3（增强）：Vault 授权检索 + ToolIndex + Skill Pipeline（后续）
+### M3（用户 Ready 增强）：统一配置 / 管理台 / 记忆产品化（后续）
 
-- [ ] 微信导入插件
+- 拆解文档：`docs/m3-feature-split.md`（2026-03-07 新增）
+- 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可理解**的状态
+- 参考复核（2026-03-07）：OpenClaw 的 installer / onboarding wizard / SecretRef / Control UI / update flow；Agent Zero 的 settings surface / secrets alias / memory dashboard / backup preview
+- [ ] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
+- [ ] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
+- [ ] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
+- [ ] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
+- [ ] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
+- [ ] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
+- [ ] Automation / Scheduler 产品化（recurring jobs / run history / project-scoped automation）
+- [ ] Runtime Diagnostics Console（logs / event stream / provider/model health / usage&cost / worker&subagent&work status）
 - [ ] Vault 授权检索 + Memory 浏览 / 证据追溯
+- [ ] `MemUBackend` 深度集成（检索 / 索引 / 增量同步 / 多模态 / Category / ToM）
+- [ ] 微信导入插件 + 多源导入工作台
+- [ ] 内置 Skill/Tools 与 Bootstrap Agent Pack（bundled skills / bundled tools / worker bootstrap）
+- [ ] Delegation Plane（A2A / Work graph / subagent / ACP-like runtime / graph agents）
 - [ ] ToolIndex（向量检索）+ 动态工具注入
-- [ ] Skill Pipeline Engine（关键子流程固化、可回放）
-- [ ] 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发
+- [ ] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [ ] 多端远程节点 / companion surfaces（按需引入）
 
-交付：完整的增强能力——多源导入、敏感数据治理、动态工具发现、确定性子流程编排与多 Worker 调度。
+M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
+
+- 安装、配置、首聊、管理台打开必须是一条连续路径；不能要求用户手工拼装多份 `.env`、Docker 命令和 channel token
+- secret 默认应集中收敛到统一 store，并提供 audit / reload / rotate / apply；环境变量只保留给 CI、容器编排和高级用户
+- `project/workspace` 必须成为 M3 的一等公民；instructions、memory、secrets、knowledge、files、A2A target 与 channel bindings 都应优先挂在 project 上，而不是散落为独立配置块
+- CLI / Web 共享同一 wizard session 与 config schema，避免出现“CLI 能做、Web 不能做”或两边语义不一致
+- Telegram / Web 必须共用同一命令/动作语义，不能出现“Web 能 approve，Telegram 只能看不能控”的半控制面
+- 用户与 Agent 的“会话”必须成为可管理对象，而不是仅把一切折叠成 task；history/export/focus/queue/reset/intervene 等生命周期操作要进入正式产品面
+- automation / scheduler 必须是用户可理解、可操作、可回放的产品能力，而不是只在底层放一个 APScheduler job
+- 管理台优先复用成熟开源 UI primitives，而不是手写整套控件体系；配置中心、审批、恢复、Memory 浏览应统一在同一控制台
+- Agent / Worker / Subagent / Graph Agent 的管理与状态查询必须进入统一控制面，而不是散落在日志和底层脚本中；同时应提供 runtime diagnostics console，汇总 health、logs、event stream、usage/cost、provider/model 与 work graph 状态
+- 高级 Memory engine（MemU）必须服从 SoR / Fragments / Vault / WriteProposal 的治理边界，而不是绕过核心设计另起一套记忆模型
+
+交付：从“能力齐全的 Agent 系统”推进到“普通用户 Ready 的 Personal AI OS”——新用户可一键安装并完成统一向导配置，随后在 Web 管理台完成渠道接入、审批、恢复和 Memory 浏览；高级记忆能力通过 MemU 等 backend 深度融入，但不破坏现有治理模型。
 
 验收标准：
 
-- Vault 分区默认不可检索，授权后可查且带证据链
-- ToolIndex 向量检索精度满足 top-5 命中率 > 80%
-- Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL）
-- 多 Worker 派发策略可解释，且失败可降级回单 Worker 路径
+- 新机器从安装脚本或 App 入口开始，在 10 分钟内完成安装、统一向导配置、dashboard 打开和首条消息验证；过程中不要求用户手工维护多处环境变量
+- 升级路径支持 doctor/migrate/preflight，失败时可给出回滚或恢复建议；用户可从 CLI 或 Web 发起一键升级
+- 用户可以创建 / 选择 / 切换 project，并让 project 统一承载 instructions、memory mode、secrets bindings、knowledge/files、channel/A2A routing
+- Telegram 与 Web 都可以完成最基本的控制命令：approve、model 切换、skill 调用、subagent/work 控制、状态查询
+- Web 管理台可以完成 provider/channel 配置、device pairing、agents / memory / permissions / secrets 管理、任务查看、backup/restore dry-run、memory 浏览与证据追溯，不再依赖终端作为唯一操作面
+- 用户可以在正式的 session/chat center 中完成 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
+- 用户可以创建 recurring automation / scheduler job，查看 run history，并把任务明确绑定到某个 project / channel / target
+- runtime diagnostics console 可以查看 health、logs、event stream、provider/model 状态、usage/cost、worker/subagent/work graph 执行态与最近失败原因
+- Vault 分区默认不可检索，授权后可查且带证据链；MemU 不可用时自动降级回核心 Memory 能力
+- 多模态记忆、Category、ToM 等高级能力通过 `MemUBackend` 提供，但其输出必须可追溯、可审核，并通过 SoR/WriteProposal 治理落盘
+- 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
+- ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
+
+### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
+
+- 本阶段聚焦“把已经 user-ready 的 M3 做得更丰富、更顺手、更有陪伴感”，而不是补 M3 主闭环缺口
+- [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
+- [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
+- [ ] Progressive Web App / companion surfaces / remote tunnel polish
+- [ ] 更完整的通知中心与 attention model（提醒、升级提示、后台任务完成通知、多端同步提示）
+
+M4 约束：
+
+- M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
+- 文件工作台优先服务 artifacts / configs / generated files / project workspace，不以“内建 IDE”作为第一目标
+- 语音、PWA、remote access 等增强能力不得破坏现有 secret / approval / audit / device trust 边界
 
 ---
 

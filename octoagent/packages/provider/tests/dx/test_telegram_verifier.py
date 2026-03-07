@@ -119,6 +119,59 @@ async def test_telegram_bot_client_minimal_api(tmp_path: Path) -> None:
     assert updates[0].message.text == "/start"
 
 
+@pytest.mark.asyncio
+async def test_telegram_bot_client_long_poll_uses_extended_read_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_config(
+        tmp_path,
+        telegram=TelegramChannelConfig(
+            enabled=True,
+            mode="polling",
+        ),
+    )
+    captured: list[httpx.Timeout | float] = []
+
+    class FakeAsyncClient:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout: httpx.Timeout | float,
+            transport: httpx.AsyncBaseTransport | None = None,
+        ) -> None:
+            del base_url, transport
+            captured.append(timeout)
+
+        async def __aenter__(self) -> FakeAsyncClient:
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            del exc_type, exc, tb
+
+        async def post(self, url: str, json: dict[str, object]) -> httpx.Response:
+            del url
+            return httpx.Response(200, json={"ok": True, "result": []})
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    client = TelegramBotClient(
+        tmp_path,
+        environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+    )
+
+    updates = await client.get_updates(timeout_s=30)
+
+    assert updates == []
+    assert len(captured) == 1
+    timeout = captured[0]
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.read == 35.0
+    assert timeout.connect == 10.0
+    assert timeout.write == 10.0
+    assert timeout.pool == 10.0
+
+
 def test_verifier_availability_blocks_disabled_channel(tmp_path: Path) -> None:
     _write_config(
         tmp_path,

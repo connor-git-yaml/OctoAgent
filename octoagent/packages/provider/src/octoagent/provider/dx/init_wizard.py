@@ -25,8 +25,6 @@ from typing import Any
 import questionary
 import structlog
 from pydantic import SecretStr
-from rich.console import Console
-from rich.panel import Panel
 
 from ..auth.credentials import (
     ApiKeyCredential,
@@ -44,10 +42,11 @@ from ..auth.oauth_provider import (
 from ..auth.profile import ProviderProfile
 from ..auth.store import CredentialStore
 from ..auth.validators import validate_api_key, validate_setup_token
+from .console_output import create_console, render_panel
 from .models import InitConfig
 
 log = structlog.get_logger()
-console = Console()
+console = create_console()
 
 # Provider 选项配置
 PROVIDERS: dict[str, dict[str, Any]] = {
@@ -459,7 +458,13 @@ def run_init_wizard(
     if store is None:
         store = CredentialStore()
 
-    console.print(Panel("OctoAgent 初始化向导", style="bold blue"))
+    console.print(
+        render_panel(
+            "OctoAgent 初始化向导",
+            ["即将开始交互式初始化。"],
+            border_style="blue",
+        )
+    )
 
     # 检测已有配置
     has_existing = (project_root / ".env").exists()
@@ -555,7 +560,7 @@ def run_init_wizard(
 
     # 步骤 9: 输出摘要
     console.print()
-    console.print(Panel("配置完成", style="bold green"))
+    console.print(render_panel("配置完成", ["初始化流程已完成。"], border_style="green"))
     console.print(f"  运行模式: {llm_mode}")
     if provider:
         console.print(f"  Provider: {provider}")

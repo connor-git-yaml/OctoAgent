@@ -11,12 +11,14 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import structlog
 from rich.table import Table
 
 from ..auth.store import CredentialStore
 from .config_schema import TelegramChannelConfig
+from .litellm_runtime import alias_uses_codex_backend
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
 from .telegram_verifier import TelegramOnboardingVerifier
@@ -80,6 +82,28 @@ class DoctorRunner:
             proxy_key_env="LITELLM_PROXY_KEY",
             proxy_key=os.environ.get("LITELLM_PROXY_KEY", ""),
         )
+
+    def _build_live_ping_payload(self) -> dict[str, Any]:
+        """构建 live ping 请求体。
+
+        OpenAI Codex OAuth 路由通过 ChatGPT backend API 转发时，要求显式
+        提供 instructions，且不接受 doctor 旧探活里使用的 max_tokens。
+        其他 provider 继续沿用原有最小 chat/completions payload。
+        """
+        payload: dict[str, Any] = {
+            "model": "cheap",
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 5,
+        }
+
+        if alias_uses_codex_backend(self._root, "cheap"):
+            return {
+                "model": "cheap",
+                "instructions": "reply briefly",
+                "messages": [{"role": "user", "content": "ping"}],
+            }
+
+        return payload
 
     async def run_all_checks(self, live: bool = False) -> DoctorReport:
         """执行所有检查项
@@ -455,11 +479,7 @@ class DoctorRunner:
                 resp = await client.post(
                     f"{proxy_url}/v1/chat/completions",
                     headers={"Authorization": f"Bearer {proxy_key}"},
-                    json={
-                        "model": "cheap",
-                        "messages": [{"role": "user", "content": "ping"}],
-                        "max_tokens": 5,
-                    },
+                    json=self._build_live_ping_payload(),
                 )
                 if resp.status_code == 200:
                     return CheckResult(

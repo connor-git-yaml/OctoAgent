@@ -23,7 +23,6 @@ from datetime import date
 from pathlib import Path
 
 import click
-from rich.console import Console
 from rich.table import Table
 
 from .config_bootstrap import ConfigBootstrapError, bootstrap_config
@@ -41,10 +40,11 @@ from .config_wizard import (
     wizard_update_model,
     wizard_update_provider,
 )
+from .console_output import create_console
 from .litellm_generator import build_litellm_config_dict, generate_litellm_config
 
-console = Console()
-err_console = Console(stderr=True)
+console = create_console()
+err_console = create_console(stderr=True)
 
 
 # ---------------------------------------------------------------------------

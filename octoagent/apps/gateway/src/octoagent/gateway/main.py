@@ -24,6 +24,7 @@ from octoagent.provider import (
     load_provider_config,
 )
 from octoagent.provider.dx.config_wizard import load_config
+from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
@@ -83,6 +84,11 @@ def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> 
     return int(cfg.channels.telegram.polling_timeout_seconds)
 
 
+def _resolve_stream_model_aliases(project_root: Path) -> set[str]:
+    """解析需要走流式聚合的 model aliases。"""
+    return resolve_codex_backend_aliases(project_root)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
@@ -136,6 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             proxy_base_url=provider_config.proxy_base_url,
             proxy_api_key=provider_config.proxy_api_key.get_secret_value(),
             timeout_s=provider_config.timeout_s,
+            stream_model_aliases=_resolve_stream_model_aliases(project_root),
         )
         echo_adapter = EchoMessageAdapter()
         fallback_manager = FallbackManager(
