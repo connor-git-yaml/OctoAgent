@@ -171,3 +171,36 @@ class TestMessageCreation:
         assert task is not None
         assert task.requester.channel == "telegram"
         assert task.requester.sender_id == "user123"
+
+    async def test_scope_id_and_metadata_are_persisted(self, client: AsyncClient, test_app):
+        """scope_id 与 metadata 会写入 Task / USER_MESSAGE"""
+        resp = await client.post(
+            "/api/message",
+            json={
+                "text": "Telegram metadata",
+                "idempotency_key": "test-msg-meta",
+                "channel": "telegram",
+                "thread_id": "tg:42",
+                "scope_id": "chat:telegram:42",
+                "sender_id": "42",
+                "sender_name": "Owner",
+                "metadata": {
+                    "telegram_chat_id": "42",
+                    "telegram_message_id": "11",
+                },
+            },
+        )
+        assert resp.status_code == 201
+        task_id = resp.json()["task_id"]
+
+        store_group = test_app.state.store_group
+        task = await store_group.task_store.get_task(task_id)
+        events = await store_group.event_store.get_events_for_task(task_id)
+
+        assert task is not None
+        assert task.scope_id == "chat:telegram:42"
+        assert task.thread_id == "tg:42"
+        assert events[1].payload["metadata"] == {
+            "telegram_chat_id": "42",
+            "telegram_message_id": "11",
+        }

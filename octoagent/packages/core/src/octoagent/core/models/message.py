@@ -38,4 +38,8 @@ class NormalizedMessage(BaseModel):
         default_factory=list,
         description="附件列表",
     )
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="渠道侧扩展元数据",
+    )
     idempotency_key: str = Field(description="幂等键，必填")

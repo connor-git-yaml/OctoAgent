@@ -21,6 +21,7 @@ from octoagent.provider.dx.onboarding_models import (
 )
 from octoagent.provider.dx.onboarding_service import OnboardingService
 from octoagent.provider.dx.onboarding_store import OnboardingSessionStore
+from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 
 
 @dataclass
@@ -167,6 +168,7 @@ async def test_onboarding_service_happy_path(tmp_path: Path) -> None:
 async def test_onboarding_service_missing_verifier_blocks(tmp_path: Path) -> None:
     service = OnboardingService(
         tmp_path,
+        registry=ChannelVerifierRegistry(),
         bootstrapper=_bootstrapper,
         doctor_factory=lambda _root: FakeDoctorRunner(_ready_report()),
     )
@@ -232,3 +234,9 @@ def test_onboard_status_only_without_session(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "尚未开始 onboarding" in result.output
+
+
+def test_onboarding_service_registers_builtin_telegram_verifier(tmp_path: Path) -> None:
+    service = OnboardingService(tmp_path)
+    verifier = service.registry.get("telegram")
+    assert isinstance(verifier, TelegramOnboardingVerifier)

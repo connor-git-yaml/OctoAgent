@@ -47,6 +47,15 @@ class TestProviderConfig:
 class TestLoadProviderConfig:
     """load_provider_config() 环境变量映射测试"""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_project_root(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """隔离 cwd 中的仓库级 octoagent.yaml，确保测试只覆盖目标来源。"""
+        monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+
     def test_default_when_no_env(self, monkeypatch):
         """无环境变量时使用默认值"""
         # 清除相关环境变量
@@ -128,3 +137,30 @@ class TestLoadProviderConfig:
         assert config.proxy_api_key.get_secret_value() == "sk-key"
         assert config.llm_mode == "litellm"
         assert config.timeout_s == 45
+
+    def test_yaml_has_priority_over_env(self, monkeypatch, tmp_path):
+        """存在 octoagent.yaml 时，runtime 配置优先于环境变量。"""
+        from octoagent.provider.dx.config_schema import OctoAgentConfig, RuntimeConfig
+        from octoagent.provider.dx.config_wizard import save_config
+
+        save_config(
+            OctoAgentConfig(
+                updated_at="2026-03-07",
+                runtime=RuntimeConfig(
+                    llm_mode="echo",
+                    litellm_proxy_url="http://yaml-proxy:4001",
+                    master_key_env="YAML_MASTER_KEY",
+                ),
+            ),
+            tmp_path,
+        )
+        monkeypatch.setenv("LITELLM_PROXY_URL", "http://env-proxy:4999")
+        monkeypatch.setenv("OCTOAGENT_LLM_MODE", "litellm")
+        monkeypatch.setenv("LITELLM_PROXY_KEY", "env-key")
+        monkeypatch.setenv("YAML_MASTER_KEY", "yaml-key")
+
+        config = load_provider_config()
+        assert config.proxy_base_url == "http://yaml-proxy:4001"
+        assert config.proxy_api_key.get_secret_value() == "yaml-key"
+        assert config.llm_mode == "echo"
+        assert config.config_source == "octoagent_yaml"
