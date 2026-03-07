@@ -52,7 +52,8 @@ def doctor(live: bool) -> None:
     from .doctor import DoctorRunner, format_guidance, format_report
 
     async def _run() -> None:
-        runner = DoctorRunner()
+        project_root = Path(_resolve_project_root())
+        runner = DoctorRunner(project_root=project_root)
         report = await runner.run_all_checks(live=live)
         table = format_report(report)
         console.print(table)
@@ -101,6 +102,7 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
     """首次使用统一入口。"""
     from .doctor_remediation import format_guidance_panel
     from .onboarding_service import OnboardingService
+    from .telegram_verifier import build_builtin_verifier_registry
 
     project_root = _resolve_project_root()
     if restart and not click.confirm("确认重置当前 onboarding session？", default=False):
@@ -135,6 +137,7 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
         service = OnboardingService(
             Path(project_root),
             channel=channel,
+            registry=build_builtin_verifier_registry(),
         )
         result = await service.run(restart=restart, status_only=status_only)
         if result.resumed and not status_only:

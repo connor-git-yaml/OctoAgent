@@ -6,6 +6,7 @@ app 创建 + lifespan 管理：DB 初始化/关闭 + LLM 组件初始化 + 路�
 """
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,24 +23,51 @@ from octoagent.provider import (
     LiteLLMClient,
     load_provider_config,
 )
+from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
+from octoagent.provider.dx.telegram_client import TelegramBotClient
+from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .routes import approvals, cancel, chat, health, message, stream, tasks, watchdog
+from .routes import approvals, cancel, chat, health, message, stream, tasks, telegram, watchdog
 from .services.llm_service import LLMService
 from .services.sse_hub import SSEHub
 from .services.task_runner import TaskRunner
+from .services.telegram import (
+    CompositeApprovalBroadcaster,
+    TelegramApprovalBroadcaster,
+    TelegramGatewayService,
+)
 from .sse.approval_events import SSEApprovalBroadcaster
 
 log = structlog.get_logger()
 _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S = 10
 
 
+def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> int:
+    """解析 Telegram polling timeout，配置不可用时回退默认值。"""
+    try:
+        cfg = load_config(project_root)
+    except Exception as exc:
+        log.warning(
+            "telegram_polling_timeout_config_invalid_fallback",
+            error_type=type(exc).__name__,
+        )
+        return default
+
+    if cfg is None:
+        return default
+    return int(cfg.channels.telegram.polling_timeout_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
+    project_root = Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd())))
+    app.state.project_root = project_root
+
     # 启动：初始化 Store
     db_path = get_db_path()
     artifacts_dir = get_artifacts_dir()
@@ -49,13 +77,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 初始化 SSEHub
     app.state.sse_hub = SSEHub()
 
+    telegram_service = TelegramGatewayService(
+        project_root=project_root,
+        store_group=store_group,
+        sse_hub=app.state.sse_hub,
+        state_store=TelegramStateStore(project_root),
+        bot_client=TelegramBotClient(project_root),
+        polling_timeout_s=_resolve_telegram_polling_timeout(project_root),
+    )
+    app.state.telegram_service = telegram_service
+
     # Feature 006: 初始化 PolicyEngine
     from octoagent.policy.policy_engine import PolicyEngine
 
     sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
+    approval_broadcaster = CompositeApprovalBroadcaster(
+        sse_broadcaster,
+        TelegramApprovalBroadcaster(telegram_service),
+    )
     policy_engine = PolicyEngine(
         event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
-        sse_broadcaster=sse_broadcaster,
+        sse_broadcaster=approval_broadcaster,
     )
     await policy_engine.startup()
     app.state.policy_engine = policy_engine
@@ -113,23 +155,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sse_hub=app.state.sse_hub,
         llm_service=llm_service,
         approval_manager=app.state.approval_manager,
+        completion_notifier=telegram_service.notify_task_result,
     )
+    telegram_service.bind_task_runner(app.state.task_runner)
     await app.state.task_runner.startup()
+    await telegram_service.startup()
 
     # Feature 011: 注册 WatchdogScanner APScheduler job
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
     from .services.watchdog.config import WatchdogConfig
     from .services.watchdog.cooldown import CooldownRegistry
-    from .services.watchdog.detectors import NoProgressDetector
+    from .services.watchdog.detectors import (
+        NoProgressDetector,
+        RepeatedFailureDetector,
+        StateMachineDriftDetector,
+    )
     from .services.watchdog.scanner import WatchdogScanner
 
     watchdog_config = WatchdogConfig.from_env()
     cooldown_registry = CooldownRegistry()
-    from .services.watchdog.detectors import (
-        StateMachineDriftDetector,
-        RepeatedFailureDetector,
-    )
 
     watchdog_scanner = WatchdogScanner(
         store_group=store_group,
@@ -198,6 +243,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("watchdog_scheduler_stopped")
 
     # 关闭：清理数据库连接
+    if hasattr(app.state, "telegram_service") and app.state.telegram_service:
+        await app.state.telegram_service.shutdown()
     if hasattr(app.state, "task_runner") and app.state.task_runner:
         await app.state.task_runner.shutdown()
     if hasattr(app.state, "store_group") and app.state.store_group:
@@ -229,6 +276,7 @@ def create_app() -> FastAPI:
     # 确保 /api/tasks/journal 优先于 /api/tasks/{task_id} 匹配（contracts/rest-api.md 要求）
     app.include_router(watchdog.router, tags=["watchdog"])
     app.include_router(message.router, tags=["message"])
+    app.include_router(telegram.router, tags=["telegram"])
     app.include_router(tasks.router, tags=["tasks"])
     app.include_router(cancel.router, tags=["cancel"])
     app.include_router(stream.router, tags=["stream"])

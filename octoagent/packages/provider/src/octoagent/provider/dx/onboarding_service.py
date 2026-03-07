@@ -29,6 +29,7 @@ from .onboarding_models import (
     OnboardingStepStatus,
 )
 from .onboarding_store import OnboardingSessionStore
+from .telegram_verifier import build_builtin_verifier_registry
 
 BootstrapFunc = Callable[..., ConfigBootstrapResult]
 DoctorFactory = Callable[[Path], DoctorRunner]
@@ -61,7 +62,7 @@ class OnboardingService:
         self.store = store or OnboardingSessionStore(project_root)
         self.doctor_factory = doctor_factory or (lambda root: DoctorRunner(project_root=root))
         self.planner = planner or DoctorRemediationPlanner()
-        self.registry = registry or ChannelVerifierRegistry()
+        self.registry = registry or build_builtin_verifier_registry()
         self.bootstrapper = bootstrapper or bootstrap_config
 
     def load_or_create_session(self) -> tuple[OnboardingSession, bool, list[str]]:

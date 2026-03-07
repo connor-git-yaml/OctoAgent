@@ -25,6 +25,7 @@ class UserMessagePayload(BaseModel):
     text_preview: str = Field(description="消息预览（截断到 200 字符）")
     text_length: int = Field(description="原始文本长度")
     attachment_count: int = Field(default=0)
+    metadata: dict[str, str] = Field(default_factory=dict, description="渠道侧扩展元数据")
 
 
 class ModelCallStartedPayload(BaseModel):

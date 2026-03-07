@@ -8,14 +8,107 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 from octoagent.provider.auth.credentials import ApiKeyCredential, TokenCredential
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
+from octoagent.provider.dx.channel_verifier import VerifierAvailability
 from octoagent.provider.dx.cli import main
+from octoagent.provider.dx.config_schema import (
+    ChannelsConfig,
+    OctoAgentConfig,
+    TelegramChannelConfig,
+)
+from octoagent.provider.dx.config_wizard import save_config
 from octoagent.provider.dx.doctor import DoctorRunner, format_report
 from octoagent.provider.dx.models import CheckLevel, CheckStatus
+from octoagent.provider.dx.onboarding_models import OnboardingStepStatus
+from octoagent.provider.dx.telegram_client import TelegramBotClient
+from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 from pydantic import SecretStr
+
+
+def _write_telegram_config(
+    tmp_path: Path,
+    *,
+    enabled: bool = True,
+    mode: str = "polling",
+    polling_timeout_seconds: int = 30,
+) -> None:
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-03-07",
+            channels=ChannelsConfig(
+                telegram=TelegramChannelConfig(
+                    enabled=enabled,
+                    mode=mode,
+                    webhook_url="https://example.com/api/telegram/webhook"
+                    if enabled and mode == "webhook"
+                    else "",
+                    polling_timeout_seconds=polling_timeout_seconds,
+                )
+            ),
+        ),
+        tmp_path,
+    )
+
+
+def _write_invalid_telegram_config(tmp_path: Path) -> None:
+    (tmp_path / "octoagent.yaml").write_text(
+        "\n".join(
+            [
+                "config_version: 1",
+                "updated_at: '2026-03-07'",
+                "channels:",
+                "  telegram:",
+                "    enabled: true",
+                "    mode: webhook",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _telegram_transport() -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/getMe"):
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "result": {
+                        "id": 1,
+                        "is_bot": True,
+                        "username": "octobot",
+                        "first_name": "Octo",
+                    },
+                },
+            )
+        return httpx.Response(404, json={"ok": False, "description": "not found"})
+
+    return httpx.MockTransport(handler)
+
+
+class TrackingTelegramVerifier:
+    def __init__(self) -> None:
+        self.readiness_calls = 0
+
+    def availability(self, _project_root: Path) -> VerifierAvailability:
+        return VerifierAvailability(available=True)
+
+    async def run_readiness(self, _project_root: Path, session: object):
+        del session
+        self.readiness_calls += 1
+        return type(
+            "ReadinessResult",
+            (),
+            {
+                "status": OnboardingStepStatus.COMPLETED,
+                "summary": "telegram ready",
+                "actions": [],
+            },
+        )()
 
 
 class TestDoctorChecks:
@@ -158,6 +251,47 @@ class TestDoctorChecks:
         result = await runner.check_credential_expiry()
         assert result.status == CheckStatus.WARN
 
+    async def test_telegram_config_skip_when_disabled(self, tmp_path: Path) -> None:
+        _write_telegram_config(tmp_path, enabled=False)
+        runner = DoctorRunner(project_root=tmp_path)
+        result = await runner.check_telegram_config()
+        assert result.status == CheckStatus.SKIP
+        assert "未启用" in result.message
+
+    async def test_telegram_token_warn_when_missing(self, tmp_path: Path) -> None:
+        _write_telegram_config(tmp_path, enabled=True)
+        runner = DoctorRunner(project_root=tmp_path)
+        result = await runner.check_telegram_token()
+        assert result.status == CheckStatus.WARN
+        assert "TELEGRAM_BOT_TOKEN" in result.message
+
+    async def test_telegram_readiness_pass_with_verifier(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_telegram_config(tmp_path, enabled=True)
+        runner = DoctorRunner(
+            project_root=tmp_path,
+            telegram_verifier=TelegramOnboardingVerifier(
+                environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+                client_factory=lambda root: TelegramBotClient(
+                    root,
+                    environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+                    transport=_telegram_transport(),
+                ),
+            ),
+        )
+        result = await runner.check_telegram_readiness()
+        assert result.status == CheckStatus.PASS
+        assert "octobot" in result.message
+
+    async def test_telegram_config_fail_when_config_invalid(self, tmp_path: Path) -> None:
+        _write_invalid_telegram_config(tmp_path)
+        runner = DoctorRunner(project_root=tmp_path)
+        result = await runner.check_telegram_config()
+        assert result.status == CheckStatus.FAIL
+        assert "配置无效" in result.message
+
 
 class TestDoctorOverall:
     """run_all_checks 汇总逻辑"""
@@ -203,6 +337,45 @@ class TestDoctorOverall:
         ]
         assert len(required_fails) == 0
 
+    async def test_run_all_checks_skips_telegram_readiness_without_live(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_telegram_config(tmp_path, enabled=True)
+        verifier = TrackingTelegramVerifier()
+        runner = DoctorRunner(project_root=tmp_path, telegram_verifier=verifier)
+
+        report = await runner.run_all_checks(live=False)
+
+        assert verifier.readiness_calls == 0
+        assert all(check.name != "telegram_readiness" for check in report.checks)
+
+    async def test_run_all_checks_runs_telegram_readiness_with_live(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_telegram_config(tmp_path, enabled=True)
+        verifier = TrackingTelegramVerifier()
+        runner = DoctorRunner(project_root=tmp_path, telegram_verifier=verifier)
+
+        report = await runner.run_all_checks(live=True)
+
+        assert verifier.readiness_calls == 1
+        readiness = next(check for check in report.checks if check.name == "telegram_readiness")
+        assert readiness.status == CheckStatus.PASS
+
+    async def test_run_all_checks_does_not_crash_on_invalid_telegram_config(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_invalid_telegram_config(tmp_path)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        report = await runner.run_all_checks(live=False)
+
+        telegram_config = next(check for check in report.checks if check.name == "telegram_config")
+        assert telegram_config.status == CheckStatus.FAIL
+
 
 class TestFormatReport:
     """format_report 行为"""
@@ -242,3 +415,7 @@ class TestDoctorCli:
         result = runner.invoke(main, ["onboard", "--help"])
         assert result.exit_code == 0
         assert "--status-only" in result.output
+
+    def test_doctor_runner_registers_builtin_telegram_verifier(self, tmp_path: Path) -> None:
+        runner = DoctorRunner(project_root=tmp_path)
+        assert isinstance(runner._telegram_verifier, TelegramOnboardingVerifier)

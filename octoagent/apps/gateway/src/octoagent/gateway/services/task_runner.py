@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -49,6 +50,7 @@ class TaskRunner:
         approval_manager=None,
         timeout_seconds: float = 600.0,
         monitor_interval_seconds: float = 5.0,
+        completion_notifier: Callable[[str], Awaitable[None]] | None = None,
         worker_runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker=None,
     ) -> None:
@@ -57,6 +59,7 @@ class TaskRunner:
         self._llm_service = llm_service
         self._timeout_seconds = timeout_seconds
         self._monitor_interval_seconds = monitor_interval_seconds
+        self._completion_notifier = completion_notifier
         self._running_jobs: dict[str, RunningJob] = {}
         self._monitor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -168,12 +171,14 @@ class TaskRunner:
             return
         if task.status == TaskStatus.SUCCEEDED:
             await self._stores.task_job_store.mark_succeeded(job.task_id)
+            await self._notify_completion(job.task_id)
             return
         if task.status in TERMINAL_STATES:
             await self._stores.task_job_store.mark_failed(
                 job.task_id,
                 f"task_terminal_status_{task.status}",
             )
+            await self._notify_completion(job.task_id)
             return
 
         resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
@@ -196,6 +201,7 @@ class TaskRunner:
             job.task_id,
             reason=f"网关恢复失败: {resume_result.message}",
         )
+        await self._notify_completion(job.task_id)
 
     async def _start_job(self, task_id: str) -> None:
         async with self._lock:
@@ -265,6 +271,7 @@ class TaskRunner:
             reason="用户取消",
         )
         await self._stores.task_job_store.mark_cancelled(task_id)
+        await self._notify_completion(task_id)
         return True
 
     async def _run_job(
@@ -289,15 +296,18 @@ class TaskRunner:
             return
         if task.status == TaskStatus.SUCCEEDED:
             await self._stores.task_job_store.mark_succeeded(task_id)
+            await self._notify_completion(task_id)
             return
         if task.status == TaskStatus.CANCELLED or result.status == WorkerExecutionStatus.CANCELLED:
             await self._stores.task_job_store.mark_cancelled(task_id)
+            await self._notify_completion(task_id)
             return
         if task.status in TERMINAL_STATES:
             await self._stores.task_job_store.mark_failed(
                 task_id,
                 f"task_terminal_status_{task.status}",
             )
+            await self._notify_completion(task_id)
             return
         await self._stores.task_job_store.mark_failed(
             task_id,
@@ -337,4 +347,17 @@ class TaskRunner:
                     task_id,
                     reason=f"后台任务超时（>{int(self._timeout_seconds)}s）",
                 )
+                await self._notify_completion(task_id)
                 log.warning("task_runner_job_timeout", task_id=task_id)
+
+    async def _notify_completion(self, task_id: str) -> None:
+        if self._completion_notifier is None:
+            return
+        try:
+            await self._completion_notifier(task_id)
+        except Exception as exc:  # pragma: no cover - 通知链路异常不能影响主流程
+            log.warning(
+                "task_runner_completion_notifier_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+            )

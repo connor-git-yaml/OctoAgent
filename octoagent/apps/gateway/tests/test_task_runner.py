@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from octoagent.core.models import CheckpointSnapshot, CheckpointStatus
 from octoagent.core.models.enums import TaskStatus
 from octoagent.core.models.message import NormalizedMessage
@@ -121,6 +122,45 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.conn.close()
 
+    async def test_enqueue_notifies_completion(self, tmp_path: Path) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-notify.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        notified: list[str] = []
+        completed = asyncio.Event()
+
+        async def notifier(task_id: str) -> None:
+            notified.append(task_id)
+            completed.set()
+
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            completion_notifier=notifier,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="runner notify",
+            idempotency_key="runner-notify-001",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+
+        await runner.enqueue(task_id, msg.text)
+        await asyncio.wait_for(completed.wait(), timeout=2.0)
+
+        assert notified == [task_id]
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
     async def test_cancel_running_job_marks_task_and_job_cancelled(
         self, tmp_path: Path
     ) -> None:
@@ -215,6 +255,69 @@ class TestTaskRunner:
         assert task.status == "SUCCEEDED"
         assert job is not None
         assert job.status == "SUCCEEDED"
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+    @pytest.mark.parametrize(
+        ("terminal_status", "expected_job_status"),
+        [
+            (TaskStatus.SUCCEEDED, "SUCCEEDED"),
+            (TaskStatus.FAILED, "FAILED"),
+        ],
+    )
+    async def test_startup_recovery_terminal_job_notifies_completion(
+        self,
+        tmp_path: Path,
+        terminal_status: TaskStatus,
+        expected_job_status: str,
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / f"runner-recover-{terminal_status.value}.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        notified: list[str] = []
+
+        async def notifier(task_id: str) -> None:
+            notified.append(task_id)
+
+        msg = NormalizedMessage(
+            text=f"recover notify {terminal_status.value}",
+            idempotency_key=f"runner-recover-notify-{terminal_status.value}",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await task_service._write_state_transition(
+            task_id=task_id,
+            from_status=TaskStatus.CREATED,
+            to_status=TaskStatus.RUNNING,
+            trace_id=f"trace-{task_id}",
+        )
+        await task_service._write_state_transition(
+            task_id=task_id,
+            from_status=TaskStatus.RUNNING,
+            to_status=terminal_status,
+            trace_id=f"trace-{task_id}",
+        )
+        await store_group.task_job_store.create_job(task_id, msg.text, "main")
+        await store_group.task_job_store.mark_running(task_id)
+
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            completion_notifier=notifier,
+        )
+        await runner.startup()
+
+        job = await store_group.task_job_store.get_job(task_id)
+        assert job is not None
+        assert job.status == expected_job_status
+        assert notified == [task_id]
 
         await runner.shutdown()
         await store_group.conn.close()
