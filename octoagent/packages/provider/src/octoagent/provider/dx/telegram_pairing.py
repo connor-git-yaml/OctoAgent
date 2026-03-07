@@ -135,6 +135,9 @@ class TelegramStateStore:
     def get_approved_user(self, user_id: str) -> TelegramApprovedUser | None:
         return self.load().approved_users.get(str(user_id))
 
+    def first_approved_user(self) -> TelegramApprovedUser | None:
+        return self.load().first_approved_user()
+
     def is_user_allowed(self, user_id: str | int) -> bool:
         return str(user_id) in self.load().approved_users
 

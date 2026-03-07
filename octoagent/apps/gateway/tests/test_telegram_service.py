@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,12 +11,16 @@ import pytest
 from octoagent.core.models import TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.operator_actions import OperatorActionService
+from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.telegram import (
     TelegramApprovalBroadcaster,
     TelegramGatewayService,
 )
+from octoagent.policy.approval_manager import ApprovalManager
+from octoagent.policy.models import ApprovalRequest
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
@@ -23,12 +28,14 @@ from octoagent.provider.dx.config_schema import (
 )
 from octoagent.provider.dx.config_wizard import save_config
 from octoagent.provider.dx.telegram_client import (
+    InlineKeyboardMarkup,
     TelegramChat,
     TelegramMessage,
     TelegramUpdate,
     TelegramUser,
 )
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+from octoagent.tooling.models import SideEffectLevel
 
 
 def _write_config(project_root: Path, **telegram_overrides: object) -> None:
@@ -56,6 +63,7 @@ class SentMessage:
     reply_to_message_id: str | int | None
     message_thread_id: str | int | None
     disable_notification: bool
+    reply_markup: InlineKeyboardMarkup | dict[str, object] | None = None
 
 
 class FakeTaskRunner:
@@ -70,6 +78,8 @@ class FakeTaskRunner:
 class FakeTelegramBotClient:
     def __init__(self) -> None:
         self.sent_messages: list[SentMessage] = []
+        self.answered_callbacks: list[tuple[str, str, bool]] = []
+        self.edited_messages: list[tuple[str, str | int, str]] = []
 
     async def send_message(
         self,
@@ -79,6 +89,7 @@ class FakeTelegramBotClient:
         reply_to_message_id: str | int | None = None,
         message_thread_id: str | int | None = None,
         disable_notification: bool = False,
+        reply_markup: InlineKeyboardMarkup | dict[str, object] | None = None,
     ) -> SimpleNamespace:
         self.sent_messages.append(
             SentMessage(
@@ -87,6 +98,7 @@ class FakeTelegramBotClient:
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=message_thread_id,
                 disable_notification=disable_notification,
+                reply_markup=reply_markup,
             )
         )
         return SimpleNamespace(message_id=9001)
@@ -100,6 +112,28 @@ class FakeTelegramBotClient:
         del offset, timeout_s
         return []
 
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str = "",
+        show_alert: bool = False,
+    ) -> bool:
+        self.answered_callbacks.append((callback_query_id, text, show_alert))
+        return True
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: str,
+        message_id: str | int,
+        text: str,
+        reply_markup: InlineKeyboardMarkup | dict[str, object] | None = None,
+    ) -> SimpleNamespace:
+        del reply_markup
+        self.edited_messages.append((str(chat_id), message_id, text))
+        return SimpleNamespace(message_id=message_id)
+
 
 class FailingTelegramBotClient(FakeTelegramBotClient):
     async def send_message(
@@ -110,8 +144,16 @@ class FailingTelegramBotClient(FakeTelegramBotClient):
         reply_to_message_id: str | int | None = None,
         message_thread_id: str | int | None = None,
         disable_notification: bool = False,
+        reply_markup: InlineKeyboardMarkup | dict[str, object] | None = None,
     ) -> SimpleNamespace:
-        del chat_id, text, reply_to_message_id, message_thread_id, disable_notification
+        del (
+            chat_id,
+            text,
+            reply_to_message_id,
+            message_thread_id,
+            disable_notification,
+            reply_markup,
+        )
         raise RuntimeError("telegram transport broken")
 
 
@@ -549,12 +591,28 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
         str(tmp_path / "artifacts"),
     )
     bot_client = FakeTelegramBotClient()
+    state_store = TelegramStateStore(tmp_path)
+    state_store.upsert_approved_user(user_id="42", chat_id="4242", username="owner")
     service = TelegramGatewayService(
         project_root=tmp_path,
         store_group=store_group,
         sse_hub=SSEHub(),
-        state_store=TelegramStateStore(tmp_path),
+        state_store=state_store,
         bot_client=bot_client,
+    )
+    approval_manager = ApprovalManager(event_store=store_group.event_store)
+    service.bind_operator_services(
+        OperatorInboxService(
+            store_group=store_group,
+            approval_manager=approval_manager,
+            telegram_state_store=state_store,
+        ),
+        OperatorActionService(
+            store_group=store_group,
+            sse_hub=SSEHub(),
+            approval_manager=approval_manager,
+            telegram_state_store=state_store,
+        ),
     )
     task_service = TaskService(store_group, SSEHub())
     task_id, created = await task_service.create_task(
@@ -586,6 +644,18 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
         to_status=TaskStatus.SUCCEEDED,
         trace_id=f"trace-{task_id}",
     )
+    await approval_manager.register(
+        ApprovalRequest(
+            approval_id="ap-001",
+            task_id=task_id,
+            tool_name="filesystem.write",
+            tool_args_summary="echo hello",
+            risk_explanation="需要审批",
+            policy_label="global.irreversible",
+            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+    )
 
     await service.notify_task_result(task_id)
     await TelegramApprovalBroadcaster(service).broadcast(
@@ -598,7 +668,9 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
     assert bot_client.sent_messages[0].reply_to_message_id == "11"
     assert bot_client.sent_messages[0].message_thread_id == "77"
     assert bot_client.sent_messages[0].text == "任务已成功完成。"
-    assert "Approval ID: ap-001" in bot_client.sent_messages[1].text
+    assert bot_client.sent_messages[1].chat_id == "4242"
+    assert "filesystem.write 需要审批" in bot_client.sent_messages[1].text
     assert bot_client.sent_messages[1].disable_notification is True
+    assert bot_client.sent_messages[1].reply_markup is not None
 
     await store_group.conn.close()

@@ -93,3 +93,28 @@ async def test_webhook_maps_pairing_required_to_202(
         "detail": "ABC123",
         "created": False,
     }
+
+
+async def test_webhook_maps_operator_action_to_200(
+    app: FastAPI,
+    client: AsyncClient,
+) -> None:
+    app.state.telegram_service = FakeTelegramService(
+        FakeResult(
+            status="operator_action",
+            detail="succeeded",
+            task_id="01TESTTASK0000000000000000",
+            created=True,
+        )
+    )
+
+    response = await client.post("/api/telegram/webhook", json={"update_id": 3})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "status": "operator_action",
+        "detail": "succeeded",
+        "task_id": "01TESTTASK0000000000000000",
+        "created": True,
+    }
