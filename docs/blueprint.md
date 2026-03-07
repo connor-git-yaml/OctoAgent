@@ -2637,10 +2637,10 @@ M1.5 交付约束（已验证）：
 - [x] Logfire 面板可查看 trace 链路（Gateway → Kernel → Worker → LLM）
 - [x] `task_id/trace_id/span_id` 在关键链路透传一致并可校验
 
-### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周，已完成）
+### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周，进行中）
 
 - 拆解文档：`docs/m2-feature-split.md`（2026-03-06 新增）
-- 当前基线（2026-03-08）：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022 / 023 已交付
+- 当前基线（2026-03-07）：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022 已交付；023 待启动
 - [x] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
 - [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
 - [x] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
@@ -2649,7 +2649,7 @@ M1.5 交付约束（已验证）：
 - [x] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
 - [x] Feature 021：Chat Import Core（`octo import chats` / dry-run / report）
 - [x] Feature 022：Backup/Restore + 会话导出 + 恢复演练记录
-- [x] Feature 023：M2 集成验收（不引入新能力）
+- [ ] Feature 023：M2 集成验收（不引入新能力）
 
 M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 
@@ -2678,9 +2678,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [ ] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
 - [ ] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
 - [ ] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
-- [ ] 既有实例自动迁移到 `default project`（scope / channel / memory / import / backup 元数据回填，保留兼容桥）
 - [ ] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
-- [ ] Control Plane Contract（CLI / Web / Telegram 共用 `wizard session` / `config schema` / `project selector` / `session` / `automation` / `diagnostics` 契约）
 - [ ] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
 - [ ] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
 - [ ] Automation / Scheduler 产品化（recurring jobs / run history / project-scoped automation）
@@ -2699,16 +2697,13 @@ M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 - 安装、配置、首聊、管理台打开必须是一条连续路径；不能要求用户手工拼装多份 `.env`、Docker 命令和 channel token
 - secret 默认应集中收敛到统一 store，并提供 audit / reload / rotate / apply；环境变量只保留给 CI、容器编排和高级用户
 - `project/workspace` 必须成为 M3 的一等公民；instructions、memory、secrets、knowledge、files、A2A target 与 channel bindings 都应优先挂在 project 上，而不是散落为独立配置块
-- 既有实例升级到 M3 时必须自动回填 `default project` 与 project/workspace 映射，不能把“重新初始化再手工迁移数据”当作默认路径
 - CLI / Web 共享同一 wizard session 与 config schema，避免出现“CLI 能做、Web 不能做”或两边语义不一致
-- CLI / Web / Telegram 在并行开发前必须先冻结 versioned control-plane contract，至少覆盖 `wizard session`、`config schema + uiHints`、`project selector`、`session/chat projection`、`automation job`、`diagnostics summary`
 - Telegram / Web 必须共用同一命令/动作语义，不能出现“Web 能 approve，Telegram 只能看不能控”的半控制面
 - 用户与 Agent 的“会话”必须成为可管理对象，而不是仅把一切折叠成 task；history/export/focus/queue/reset/intervene 等生命周期操作要进入正式产品面
 - automation / scheduler 必须是用户可理解、可操作、可回放的产品能力，而不是只在底层放一个 APScheduler job
 - 管理台优先复用成熟开源 UI primitives，而不是手写整套控件体系；配置中心、审批、恢复、Memory 浏览应统一在同一控制台
 - Agent / Worker / Subagent / Graph Agent 的管理与状态查询必须进入统一控制面，而不是散落在日志和底层脚本中；同时应提供 runtime diagnostics console，汇总 health、logs、event stream、usage/cost、provider/model 与 work graph 状态
 - 高级 Memory engine（MemU）必须服从 SoR / Fragments / Vault / WriteProposal 的治理边界，而不是绕过核心设计另起一套记忆模型
-- ToolIndex、动态工具注入、Skill Pipeline 与 Delegation Plane 必须继续走 ToolBroker / Policy Engine / manifest / audit event 链，不能绕过治理面
 
 交付：从“能力齐全的 Agent 系统”推进到“普通用户 Ready 的 Personal AI OS”——新用户可一键安装并完成统一向导配置，随后在 Web 管理台完成渠道接入、审批、恢复和 Memory 浏览；高级记忆能力通过 MemU 等 backend 深度融入，但不破坏现有治理模型。
 

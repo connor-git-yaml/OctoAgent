@@ -1,10 +1,10 @@
-# M2 Feature 拆分方案（v5）
+# M2 Feature 拆分方案（v4）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §5.1 + §12.4 + §12.9 + §14（M2 定义）+ `docs/m1.5-feature-split.md` 收口结论  
-> **状态**: v5 — Feature 015/016/017/018/019/020/021/022/023 已交付
-> **日期**: 2026-03-08
-> **变更记录**: v1(2026-03-06，M2 初版拆分) → v2(2026-03-07，按当前 `master` 交付事实回写已完成与待启动状态) → v3(2026-03-07，补回写 Feature 017 已交付，收敛剩余项为 021/023) → v4(2026-03-07，回写 Feature 021 已交付，补齐 CLI / dry-run / ImportReport) → v5(2026-03-08，回写 Feature 023 已交付，清理残留“待启动”状态)
+> **状态**: v4 — Feature 015/016/017/018/019/020/021/022 已交付，Feature 023 待启动
+> **日期**: 2026-03-07
+> **变更记录**: v1(2026-03-06，M2 初版拆分) → v2(2026-03-07，按当前 `master` 交付事实回写已完成与待启动状态) → v3(2026-03-07，补回写 Feature 017 已交付，收敛剩余项为 021/023) → v4(2026-03-07，回写 Feature 021 已交付，补齐 CLI / dry-run / ImportReport)
 
 ---
 
@@ -12,12 +12,12 @@
 
 ### 1.1 当前基线
 
-基于当前 `master`（2026-03-08）：
+基于当前 `master`（2026-03-07）：
 
 - M0 / M1 / M1.5 核心能力已交付，系统已经具备最小 Agent 闭环。
 - M1.5 已解决“能不能稳定跑起来”的问题；M2 要解决“你是否愿意每天真的用它”的问题。
 - M2 第一波 contract / transport / recovery / DX / operator control 能力已完成：015、016、017、018、019、020、022。
-- M2 现已完成 Feature 023 集成验收，进入 M3 规划阶段。
+- 当前剩余待启动 Feature 只剩 023（M2 集成验收）。
 
 ### 1.1.1 M2 实际交付状态
 
@@ -31,7 +31,7 @@
 | 020 | 已交付 | 2026-03-07 | Memory core + proposal/commit contract |
 | 021 | 已交付 | 2026-03-07 | `octo import chats` + dry-run + ImportReport + governed chat import |
 | 022 | 已交付 | 2026-03-07 | Backup/restore/export + recovery drill |
-| 023 | 已交付 | 2026-03-08 | M2 E2E integration acceptance + verification report |
+| 023 | 待启动 | - | M2 E2E integration acceptance |
 
 ### 1.2 竞品复核后的三类缺口
 
@@ -96,7 +96,7 @@ M1.5 基线（已完成）
    │   └── Feature 022 已交付: Backup/Restore + Export + Recovery Drill
    │
    └── 全部汇合
-       └── Feature 023 已交付: M2 E2E 集成验收
+       └── Feature 023 待启动: M2 E2E 集成验收
 ```
 
 ### 3.2 并行化原则
@@ -403,10 +403,10 @@ M1.5 基线（已完成）
 最大化并发的启动建议：
 
 1. **已完成批次**：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022
-2. **当前主线**：无，M2 已收口完成
-3. **最后串行**：无，等待进入 M3
+2. **当前主线**：023（M2 集成验收）
+3. **最后串行**：023 集成验收
 
-收口完成后的历史并行轨如下：
+当前建议至少分成 2 条收口轨：
 
 - A 轨：023（M2 E2E Integration Acceptance）
 - B 轨：023 前置验收脚本 / fixture / gate 清单准备
