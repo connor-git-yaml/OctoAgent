@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-heartbeat",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://worker.ops",
+  "to": "agent://kernel",
+  "type": "HEARTBEAT",
+  "idempotency_key": "task-018:session-018:heartbeat:2",
+  "timestamp_ms": 1741305600500,
+  "payload": {
+    "state": "working",
+    "worker_id": "worker.ops",
+    "loop_step": 2,
+    "max_steps": 5,
+    "summary": "running tool call",
+    "backend": "docker"
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "backend": "docker",
+    "loop_step": 2,
+    "max_steps": 5,
+    "final": false
+  }
+}

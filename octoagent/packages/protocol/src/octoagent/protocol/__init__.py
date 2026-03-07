@@ -1,0 +1,60 @@
+"""OctoAgent Protocol -- A2A-Lite envelope + mapping helpers."""
+
+from .adapters import (
+    build_cancel_message,
+    build_error_message,
+    build_heartbeat_message,
+    build_result_message,
+    build_task_message,
+    dispatch_envelope_from_task_message,
+)
+from .mappers import A2AArtifactMapper, A2AStateMapper
+from .models import (
+    SUPPORTED_SCHEMA_VERSIONS,
+    A2AArtifact,
+    A2ACancelPayload,
+    A2ADataPart,
+    A2AErrorPayload,
+    A2AFilePart,
+    A2AHeartbeatPayload,
+    A2AMessage,
+    A2AMessageMetadata,
+    A2AMessageType,
+    A2AResultPayload,
+    A2ATaskPayload,
+    A2ATaskState,
+    A2ATextPart,
+    A2ATraceContext,
+    A2AUpdatePayload,
+)
+from .replay import A2AReplayDecision, A2AReplayProtector, A2AReplayVerdict
+
+__all__ = [
+    "SUPPORTED_SCHEMA_VERSIONS",
+    "A2AArtifact",
+    "A2AArtifactMapper",
+    "A2ACancelPayload",
+    "A2ADataPart",
+    "A2AErrorPayload",
+    "A2AFilePart",
+    "A2AHeartbeatPayload",
+    "A2AMessage",
+    "A2AMessageMetadata",
+    "A2AMessageType",
+    "A2AReplayDecision",
+    "A2AReplayProtector",
+    "A2AReplayVerdict",
+    "A2AResultPayload",
+    "A2AStateMapper",
+    "A2ATaskPayload",
+    "A2ATaskState",
+    "A2ATextPart",
+    "A2ATraceContext",
+    "A2AUpdatePayload",
+    "build_cancel_message",
+    "build_error_message",
+    "build_heartbeat_message",
+    "build_result_message",
+    "build_task_message",
+    "dispatch_envelope_from_task_message",
+]
