@@ -1,10 +1,10 @@
-# M2 Feature 拆分方案（v2）
+# M2 Feature 拆分方案（v3）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §5.1 + §12.4 + §12.9 + §14（M2 定义）+ `docs/m1.5-feature-split.md` 收口结论  
-> **状态**: v2 — Feature 015/016/018/019/020/022 已交付，Feature 017/021/023 待启动
+> **状态**: v3 — Feature 015/016/017/018/019/020/022 已交付，Feature 021/023 待启动
 > **日期**: 2026-03-07
-> **变更记录**: v1(2026-03-06，M2 初版拆分) → v2(2026-03-07，按当前 `master` 交付事实回写已完成与待启动状态)
+> **变更记录**: v1(2026-03-06，M2 初版拆分) → v2(2026-03-07，按当前 `master` 交付事实回写已完成与待启动状态) → v3(2026-03-07，补回写 Feature 017 已交付，收敛剩余项为 021/023)
 
 ---
 
@@ -16,8 +16,8 @@
 
 - M0 / M1 / M1.5 核心能力已交付，系统已经具备最小 Agent 闭环。
 - M1.5 已解决“能不能稳定跑起来”的问题；M2 要解决“你是否愿意每天真的用它”的问题。
-- M2 第一波 contract / transport / recovery / DX 能力已完成：015、016、018、019、020、022。
-- 当前剩余待启动 Feature 只剩 017（operator inbox）、021（chat import）、023（M2 集成验收）。
+- M2 第一波 contract / transport / recovery / DX / operator control 能力已完成：015、016、017、018、019、020、022。
+- 当前剩余待启动 Feature 只剩 021（chat import）、023（M2 集成验收）。
 
 ### 1.1.1 M2 实际交付状态
 
@@ -25,7 +25,7 @@
 |---|---|---:|---|
 | 015 | 已交付 | 2026-03-07 | `octo onboard` + doctor remediation + channel verifier |
 | 016 | 已交付 | 2026-03-07 | Telegram transport + pairing + session routing |
-| 017 | 待启动 | - | Unified operator inbox + mobile controls |
+| 017 | 已交付 | 2026-03-07 | Unified operator inbox + mobile controls |
 | 018 | 已交付 | 2026-03-07 | A2A-Lite envelope + state mapper |
 | 019 | 已交付 | 2026-03-07 | Interactive execution console + durable input resume |
 | 020 | 已交付 | 2026-03-07 | Memory core + proposal/commit contract |
@@ -82,7 +82,7 @@ M1.5 基线（已完成）
    ├── Track A: 上手体验与渠道
    │   ├── Feature 015 已交付: Octo Onboard + Doctor Guided Remediation
    │   ├── Feature 016 已交付: Telegram Channel + Pairing + Session Routing
-   │   └── Feature 017 待启动: Unified Operator Inbox + Mobile Task Controls
+   │   └── Feature 017 已交付: Unified Operator Inbox + Mobile Task Controls
    │
    ├── Track B: 控制平面与执行面
    │   ├── Feature 018 已交付: A2A-Lite Envelope + StateMapper
@@ -101,7 +101,7 @@ M1.5 基线（已完成）
 
 ### 3.2 并行化原则
 
-1. **先冻结 contract，再并行编码**：016、018、020 的 contract 已冻结并落地；017、021、023 只消费这些 contract，不再重定义 schema。
+1. **先冻结 contract，再并行编码**：016、017、018、020 的 contract 已冻结并落地；021、023 只消费这些 contract，不再重定义 schema。
 2. **体验层只消费 contract，不重定义 schema**：015/017/022 不得单独发明 task / approval / message / backup 的新主数据模型。
 3. **导入与 Memory 解耦**：021 在实现阶段可用 mock `MemoryWriter`，待 020 contract 稳定后接真实仲裁器。
 4. **集成 Feature 不引入新能力**：023 仅联调 015-022 的真实依赖与验收，不接“顺手加一个功能”。
@@ -398,14 +398,11 @@ M1.5 基线（已完成）
 
 最大化并发的启动建议：
 
-1. **第一批并行**：015 / 016 / 018 / 020 / 022
-2. **第二批并行**：019（接 018） + 017（先冻 operator inbox contract）
-3. **第三批**：021（在 020 contract 稳定后接入）
-4. **最后串行**：023 集成验收
+1. **已完成批次**：015 / 016 / 017 / 018 / 019 / 020 / 022
+2. **当前主线**：021（在 020 contract 稳定后接入真实记忆写入）
+3. **最后串行**：023 集成验收
 
-如果资源允许，建议至少分成 4 条开发轨：
+当前建议至少分成 2 条收口轨：
 
-- A 轨：015 + 017（上手体验与 operator UX）
-- B 轨：016（Telegram 渠道）
-- C 轨：018 + 019（协议与执行面）
-- D 轨：020 + 021 + 022（Memory / Import / Recovery）
+- A 轨：021（Chat Import Core）
+- B 轨：023 前置验收脚本 / fixture / gate 清单准备

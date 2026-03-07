@@ -2624,10 +2624,10 @@ M1.5 交付约束（已验证）：
 ### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周，进行中）
 
 - 拆解文档：`docs/m2-feature-split.md`（2026-03-06 新增）
-- 当前基线（2026-03-07）：015 / 016 / 018 / 019 / 020 / 022 已交付；017 / 021 / 023 待启动
+- 当前基线（2026-03-07）：015 / 016 / 017 / 018 / 019 / 020 / 022 已交付；021 / 023 待启动
 - [x] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
 - [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
-- [ ] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
+- [x] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
 - [x] Feature 018：A2A-Lite 消息投递 + A2AStateMapper
 - [x] Feature 019：JobRunner docker backend + 交互式执行控制台
 - [x] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
