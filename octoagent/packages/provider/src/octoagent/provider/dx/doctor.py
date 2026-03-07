@@ -51,6 +51,9 @@ class DoctorRunner:
         self._store = CredentialStore()
         self._telegram_verifier = telegram_verifier or TelegramOnboardingVerifier()
 
+    def _has_yaml_runtime_config(self) -> bool:
+        return (self._root / "octoagent.yaml").exists()
+
     def _resolve_runtime_context(self) -> RuntimeCheckContext:
         """解析 provider/runtime 配置来源，优先使用 octoagent.yaml.runtime。"""
         from .config_wizard import load_config
@@ -185,12 +188,19 @@ class DoctorRunner:
                 level=CheckLevel.REQUIRED,
                 message=f".env 存在 ({env_path})",
             )
+        if self._has_yaml_runtime_config():
+            return CheckResult(
+                name="env_file",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="检测到 octoagent.yaml，.env 改为可选",
+            )
         return CheckResult(
             name="env_file",
             status=CheckStatus.FAIL,
             level=CheckLevel.REQUIRED,
             message=".env 文件不存在",
-            fix_hint="运行 octo init 生成配置文件",
+            fix_hint="运行 octo config init 或 octo init 生成配置文件",
         )
 
     async def check_env_litellm_file(self) -> CheckResult:
@@ -202,6 +212,13 @@ class DoctorRunner:
                 status=CheckStatus.PASS,
                 level=CheckLevel.RECOMMENDED,
                 message=".env.litellm 存在",
+            )
+        if self._has_yaml_runtime_config():
+            return CheckResult(
+                name="env_litellm_file",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="检测到 octoagent.yaml，.env.litellm 改为可选",
             )
         return CheckResult(
             name="env_litellm_file",

@@ -187,6 +187,10 @@ def _print_not_configured_hint() -> None:
     console.print()
     console.print("快速开始：")
     console.print(
+        "  [cyan]octo config init --enable-telegram --telegram-mode polling[/cyan]"
+        "  # 一次写入 Provider + Telegram 最小配置"
+    )
+    console.print(
         "  [cyan]octo config provider add openrouter[/cyan]"
         "   # 添加 Provider 并自动初始化配置"
     )
@@ -204,8 +208,46 @@ def _print_not_configured_hint() -> None:
 @config.command("init")
 @click.option("--force", is_flag=True, default=False, help="跳过已有配置文件的确认提示")
 @click.option("--echo", is_flag=True, default=False, help="初始化为 echo 模式（供 CI 使用）")
+@click.option(
+    "--enable-telegram",
+    is_flag=True,
+    default=False,
+    help="同时写入 Telegram channel 最小配置",
+)
+@click.option(
+    "--telegram-mode",
+    type=click.Choice(["webhook", "polling"]),
+    default="polling",
+    show_default=True,
+    help="Telegram 接入模式",
+)
+@click.option(
+    "--telegram-webhook-url",
+    default=None,
+    help="Telegram webhook 模式的外部 URL",
+)
+@click.option(
+    "--telegram-bot-token-env",
+    default="TELEGRAM_BOT_TOKEN",
+    show_default=True,
+    help="Telegram bot token 环境变量名",
+)
+@click.option(
+    "--telegram-webhook-secret-env",
+    default="",
+    help="Telegram webhook secret 环境变量名（可选）",
+)
 @click.pass_context
-def config_init(ctx: click.Context, force: bool, echo: bool) -> None:
+def config_init(
+    ctx: click.Context,
+    force: bool,
+    echo: bool,
+    enable_telegram: bool,
+    telegram_mode: str,
+    telegram_webhook_url: str | None,
+    telegram_bot_token_env: str,
+    telegram_webhook_secret_env: str,
+) -> None:
     """全量初始化 octoagent.yaml（FR-011）"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
@@ -227,8 +269,40 @@ def config_init(ctx: click.Context, force: bool, echo: bool) -> None:
             console.print()
             console.print("[bold]初始化 OctoAgent 配置[/bold]")
             console.print("──────────────────────────────────")
-        result = bootstrap_config(project_root, echo=echo)
+        resolved_webhook_url = telegram_webhook_url
+        if enable_telegram and telegram_mode == "webhook" and not resolved_webhook_url:
+            if sys.stdin.isatty():
+                resolved_webhook_url = click.prompt(
+                    "Telegram webhook URL",
+                    type=str,
+                )
+            else:
+                err_console.print(
+                    "[red]错误：启用 Telegram webhook 模式时必须提供 --telegram-webhook-url。[/red]"
+                )
+                raise SystemExit(1)
+
+        result = bootstrap_config(
+            project_root,
+            echo=echo,
+            enable_telegram=enable_telegram,
+            telegram_mode=telegram_mode,  # type: ignore[arg-type]
+            telegram_webhook_url=resolved_webhook_url or "",
+            telegram_bot_token_env=telegram_bot_token_env,
+            telegram_webhook_secret_env=telegram_webhook_secret_env,
+        )
         console.print(f"[green]已写入：{project_root / 'octoagent.yaml'}[/green]")
+        if enable_telegram:
+            console.print(
+                "[green]已启用 Telegram channel[/green]"
+                f"（mode={telegram_mode}"
+                + (
+                    f", webhook_url={resolved_webhook_url}"
+                    if telegram_mode == "webhook" and resolved_webhook_url
+                    else ""
+                )
+                + ")"
+            )
         _auto_sync(result.config, project_root)
     except ConfigBootstrapError as exc:
         err_console.print(f"[red]错误：{exc}[/red]")

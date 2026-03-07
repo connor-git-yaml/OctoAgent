@@ -6,6 +6,9 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+import aiosqlite
+from octoagent.core.config import get_db_path
+
 from .channel_verifier import (
     ChannelStepResult,
     ChannelVerifierRegistry,
@@ -259,6 +262,7 @@ class TelegramOnboardingVerifier:
 
         approved_user = state.first_approved_user()
         if approved_user is None:
+            pending_count = len(state.pending_pairings)
             return ChannelStepResult(
                 channel_id=self.channel_id,
                 step="first_message",
@@ -272,10 +276,18 @@ class TelegramOnboardingVerifier:
                         blocking=True,
                         sort_order=20,
                         manual_steps=[
-                            "让目标用户先向 Bot 发送 /start 或任意消息",
+                            "启动 gateway，让目标用户先向 Bot 发送 /start 或任意消息",
                             (
-                                f"在 {store.path.name} 中批准该用户，"
-                                "或由 gateway pairing 流程写入 approved_users"
+                                "通过 Web operator inbox / Telegram callback 批准 pairing"
+                                if pending_count
+                                else (
+                                    "通过 Web operator inbox 批准 pairing，"
+                                    "或由 gateway pairing 流程写入 approved_users"
+                                )
+                            ),
+                            (
+                                "如需手工修复，可检查 "
+                                f"{store.path.name} 中的 pending_pairings / approved_users"
                             ),
                             "重新运行: octo onboard --channel telegram",
                         ],
@@ -283,10 +295,26 @@ class TelegramOnboardingVerifier:
                 ],
             )
 
+        latest_task_id = await self._find_latest_inbound_task_id(
+            project_root,
+            approved_user.user_id,
+            approved_user.chat_id,
+        )
+        if latest_task_id is not None:
+            return ChannelStepResult(
+                channel_id=self.channel_id,
+                step="first_message",
+                status=OnboardingStepStatus.COMPLETED,
+                summary=(
+                    f"已检测到 Telegram 入站任务 {latest_task_id}，"
+                    f"用户 {approved_user.user_id} 的首条消息链路已闭环。"
+                ),
+            )
+
         try:
             sent = await self._client_factory(project_root).send_message(
                 approved_user.chat_id,
-                "OctoAgent onboarding 验证消息已送达。",
+                "OctoAgent onboarding 还差最后一步：请继续向 Bot 发送任意消息，验证入站链路。",
             )
         except TelegramBotClientConfigError as exc:
             return ChannelStepResult(
@@ -345,12 +373,69 @@ class TelegramOnboardingVerifier:
         return ChannelStepResult(
             channel_id=self.channel_id,
             step="first_message",
-            status=OnboardingStepStatus.COMPLETED,
+            status=OnboardingStepStatus.ACTION_REQUIRED,
             summary=(
-                f"已向 Telegram 用户 {approved_user.user_id} 发送验证消息"
-                f"（message_id={sent.message_id}）。"
+                f"已向 Telegram 用户 {approved_user.user_id} 发送验证提示"
+                f"（message_id={sent.message_id}），但尚未检测到入站任务。"
             ),
+            actions=[
+                _manual_action(
+                    "verify-telegram-ingress",
+                    "完成 Telegram 首条入站验证",
+                    "需要真实用户消息进入 gateway 并创建 task，onboarding 才算完成。",
+                    blocking=True,
+                    sort_order=50,
+                    manual_steps=[
+                        "启动 gateway，确保 Telegram webhook / polling 正在运行",
+                        "让已批准用户向 Bot 再发送一条消息",
+                        "重新运行: octo onboard --channel telegram",
+                    ],
+                )
+            ],
         )
+
+    @staticmethod
+    def _resolve_db_path(project_root: Path) -> Path:
+        db_path = Path(get_db_path()).expanduser()
+        if db_path.is_absolute():
+            return db_path
+        return (project_root / db_path).resolve()
+
+    async def _find_latest_inbound_task_id(
+        self,
+        project_root: Path,
+        user_id: str | int,
+        chat_id: str | int,
+    ) -> str | None:
+        db_path = self._resolve_db_path(project_root)
+        if not db_path.exists():
+            return None
+
+        private_thread_id = f"tg:{user_id}"
+        private_scope_id = f"chat:telegram:{chat_id}"
+
+        try:
+            async with aiosqlite.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+                cursor = await conn.execute(
+                    """
+                    SELECT task_id
+                    FROM tasks
+                    WHERE json_extract(requester, '$.channel') = 'telegram'
+                      AND json_extract(requester, '$.sender_id') = ?
+                      AND scope_id = ?
+                      AND thread_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (str(user_id), private_scope_id, private_thread_id),
+                )
+                row = await cursor.fetchone()
+        except aiosqlite.Error:
+            return None
+
+        if row is None:
+            return None
+        return str(row[0])
 
     def _load_telegram_config(
         self,
