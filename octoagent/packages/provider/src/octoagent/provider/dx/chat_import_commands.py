@@ -6,13 +6,12 @@ import asyncio
 from pathlib import Path
 
 import click
-from rich.console import Console
-from rich.panel import Panel
 
 from .chat_import_service import ChatImportService
 from .config_commands import _resolve_project_root
+from .console_output import create_console, render_panel
 
-console = Console()
+console = create_console()
 
 
 @click.group("import")
@@ -76,9 +75,9 @@ def import_chats(
                 f"  {idx}. {item}" for idx, item in enumerate(report.next_actions, start=1)
             )
         console.print(
-            Panel(
-                "\n".join(lines),
-                title=title,
+            render_panel(
+                title,
+                lines,
                 border_style="cyan" if dry_run else "green",
             )
         )

@@ -134,12 +134,13 @@ class TelegramBotClient:
         method: str,
         *,
         payload: dict[str, Any] | None = None,
+        timeout: httpx.Timeout | float | None = None,
     ) -> Any:
         bot_token = self._load_bot_token()
         base_url = f"{self._base_url}/bot{bot_token}"
         async with httpx.AsyncClient(
             base_url=base_url,
-            timeout=self._timeout,
+            timeout=timeout if timeout is not None else self._timeout,
             transport=self._transport,
         ) as client:
             response = await client.post(f"/{method}", json=payload or {})
@@ -249,12 +250,21 @@ class TelegramBotClient:
         timeout_s: int | None = None,
         limit: int | None = None,
     ) -> list[TelegramUpdate]:
-        payload: dict[str, Any] = {"timeout": timeout_s if timeout_s is not None else timeout}
+        poll_timeout = timeout_s if timeout_s is not None else timeout
+        payload: dict[str, Any] = {"timeout": poll_timeout}
         if offset is not None:
             payload["offset"] = offset
         if limit is not None:
             payload["limit"] = limit
-        result = await self._request("getUpdates", payload=payload)
+        # long polling 的 Telegram timeout 由服务端持有，客户端 read timeout
+        # 需要留出额外缓冲，否则本地会早于 Telegram 返回而先超时。
+        request_timeout = httpx.Timeout(
+            connect=self._timeout,
+            read=max(self._timeout, float(poll_timeout) + 5.0),
+            write=self._timeout,
+            pool=self._timeout,
+        )
+        result = await self._request("getUpdates", payload=payload, timeout=request_timeout)
         if not isinstance(result, list):
             raise TelegramBotApiError("getUpdates 返回结构非法")
         return [TelegramUpdate.model_validate(item) for item in result]

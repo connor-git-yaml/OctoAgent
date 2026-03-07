@@ -7,13 +7,12 @@ from pathlib import Path
 
 import click
 from octoagent.core.models import RestoreConflictSeverity
-from rich.console import Console
-from rich.panel import Panel
 
 from .backup_service import BackupService
 from .config_commands import _resolve_project_root
+from .console_output import create_console, render_panel
 
-console = Console()
+console = create_console()
 
 
 @click.group("backup")
@@ -37,7 +36,7 @@ def backup_create(output: str | None, label: str | None) -> None:
             f"默认排除: {', '.join(bundle.manifest.excluded_paths)}",
             f"敏感性: {bundle.manifest.sensitivity_level.value}",
         ]
-        console.print(Panel("\n".join(lines), title="Backup Created", border_style="green"))
+        console.print(render_panel("Backup Created", lines, border_style="green"))
 
     try:
         asyncio.run(_run())
@@ -80,7 +79,7 @@ def restore_dry_run(bundle: str, target_root: str | None) -> None:
                 f"  {idx}. {action}"
                 for idx, action in enumerate(plan.next_actions, start=1)
             )
-        console.print(Panel("\n".join(lines), title="Restore Dry Run", border_style="cyan"))
+        console.print(render_panel("Restore Dry Run", lines, border_style="cyan"))
         return 0 if plan.compatible else 1
 
     bundle_path = Path(bundle).expanduser()
@@ -140,7 +139,7 @@ def export_chats(
             f"事件数: {manifest.event_count}",
             f"Artifact Refs: {len(manifest.artifact_refs)}",
         ]
-        console.print(Panel("\n".join(lines), title="Chats Export", border_style="green"))
+        console.print(render_panel("Chats Export", lines, border_style="green"))
 
     try:
         asyncio.run(_run())

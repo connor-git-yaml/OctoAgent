@@ -160,6 +160,51 @@ class TestLiteLLMClientComplete:
         assert "tok-abc" not in kwargs["error"]
         assert "[REDACTED]" in kwargs["error"]
 
+    @patch("octoagent.provider.client.stream_chunk_builder")
+    @patch("octoagent.provider.client.acompletion")
+    async def test_stream_alias_collects_chunks_into_completion(
+        self,
+        mock_acompletion,
+        mock_stream_chunk_builder,
+    ):
+        """被标记为流式 alias 时，应消费 SSE 并组装回完整响应。"""
+
+        class FakeStream:
+            def __init__(self, chunks):
+                self._chunks = chunks
+
+            def __aiter__(self):
+                async def _gen():
+                    for chunk in self._chunks:
+                        yield chunk
+
+                return _gen()
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4000",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            stream_model_aliases={"main"},
+        )
+        chunks = [MagicMock(), MagicMock()]
+        mock_acompletion.return_value = FakeStream(chunks)
+        mock_stream_chunk_builder.return_value = _make_mock_litellm_response(
+            content="streamed hello",
+            model="gpt-5.3-codex",
+        )
+
+        result = await client.complete(
+            messages=[{"role": "user", "content": "Hello"}],
+            model_alias="main",
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert call_kwargs["stream"] is True
+        assert call_kwargs["stream_options"] == {"include_usage": True}
+        assert mock_stream_chunk_builder.call_args.kwargs["chunks"] == chunks
+        assert result.content == "streamed hello"
+        assert result.model_name == "gpt-5.3-codex"
+
 
 class TestLiteLLMClientRoutingOverrides:
     """路由覆盖测试（003-b JWT 方案多认证隔离）"""
@@ -171,11 +216,11 @@ class TestLiteLLMClientRoutingOverrides:
 
         await client.complete(
             messages=[{"role": "user", "content": "test"}],
-            api_base="https://chatgpt.com/backend-api",
+            api_base="https://chatgpt.com/backend-api/codex",
         )
 
         call_kwargs = mock_acompletion.call_args.kwargs
-        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api"
+        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api/codex"
 
     @patch("octoagent.provider.client.acompletion")
     async def test_api_key_override(self, mock_acompletion, client):
@@ -228,17 +273,17 @@ class TestLiteLLMClientRoutingOverrides:
 
         await client.complete(
             messages=[{"role": "user", "content": "test"}],
-            api_base="https://chatgpt.com/backend-api",
+            api_base="https://chatgpt.com/backend-api/codex",
             api_key="jwt-token-value",
             extra_headers={
                 "chatgpt-account-id": "acct-e2e",
                 "OpenAI-Beta": "responses=experimental",
-                "originator": "octoagent",
+                "originator": "pi",
             },
         )
 
         call_kwargs = mock_acompletion.call_args.kwargs
-        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api"
+        assert call_kwargs["api_base"] == "https://chatgpt.com/backend-api/codex"
         assert call_kwargs["api_key"] == "jwt-token-value"
         assert call_kwargs["extra_headers"]["chatgpt-account-id"] == "acct-e2e"
 

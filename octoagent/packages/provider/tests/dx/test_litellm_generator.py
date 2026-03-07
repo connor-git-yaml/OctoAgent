@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from octoagent.provider.dx.config_schema import (
     ModelAlias,
     OctoAgentConfig,
@@ -31,7 +30,6 @@ from octoagent.provider.dx.litellm_generator import (
     generate_env_litellm,
     generate_litellm_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # 测试夹具
@@ -140,6 +138,46 @@ def test_generate_litellm_config_master_key(tmp_path: Path) -> None:
     data = _parse_litellm(tmp_path / "litellm-config.yaml")
     master_key = data["general_settings"]["master_key"]
     assert master_key == f"os.environ/{config.runtime.master_key_env}"
+
+
+def test_generate_litellm_config_openai_codex_uses_codex_backend_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """openai-codex OAuth 生成 Codex backend 路由与兼容 headers。"""
+    monkeypatch.setenv(
+        "OPENAI_API_KEY",
+        (
+            "eyJhbGciOiJIUzI1NiJ9."
+            "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC10ZXN0In19."
+            "signature"
+        ),
+    )
+    config = _make_config(
+        providers=[
+            ProviderEntry(
+                id="openai-codex",
+                name="OpenAI Codex",
+                auth_type="oauth",
+                api_key_env="OPENAI_API_KEY",
+            )
+        ],
+        aliases={
+            "main": ModelAlias(
+                provider="openai-codex",
+                model="gpt-5.3-codex",
+                thinking_level="xhigh",
+            )
+        },
+    )
+
+    generate_litellm_config(config, tmp_path)
+    data = _parse_litellm(tmp_path / "litellm-config.yaml")
+    params = data["model_list"][0]["litellm_params"]
+
+    assert params["api_base"] == "https://chatgpt.com/backend-api/codex"
+    assert params["headers"]["chatgpt-account-id"] == "acct-test"
+    assert params["headers"]["originator"] == "pi"
 
 
 # ---------------------------------------------------------------------------

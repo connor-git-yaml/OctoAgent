@@ -92,4 +92,8 @@ async def test_init_db_is_backward_compatible_for_existing_schema(tmp_path: Path
     assert "artifacts" in tables
     assert "task_jobs" in tables
 
+    task_columns_cursor = await conn.execute("PRAGMA table_info(tasks)")
+    task_columns = {row[1] for row in await task_columns_cursor.fetchall()}
+    assert "trace_id" in task_columns
+
     await conn.close()

@@ -11,14 +11,11 @@
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import SecretStr
-
 from octoagent.provider.auth.adapter import AuthAdapter
 from octoagent.provider.auth.api_key_adapter import ApiKeyAuthAdapter
 from octoagent.provider.auth.chain import HandlerChain, HandlerChainResult
@@ -32,10 +29,11 @@ from octoagent.provider.auth.credentials import (
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.setup_token_adapter import SetupTokenAuthAdapter
 from octoagent.provider.auth.store import CredentialStore
+from pydantic import SecretStr
 
 
 def _now() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _make_api_key_profile(
@@ -617,13 +615,13 @@ class TestHandlerChainResult:
             credential_value="jwt-token",
             source="profile",
             adapter="PkceOAuthAdapter",
-            api_base_url="https://chatgpt.com/backend-api",
+            api_base_url="https://chatgpt.com/backend-api/codex",
             extra_headers={
                 "chatgpt-account-id": "acct-123",
                 "OpenAI-Beta": "responses=experimental",
             },
         )
-        assert result.api_base_url == "https://chatgpt.com/backend-api"
+        assert result.api_base_url == "https://chatgpt.com/backend-api/codex"
         assert result.extra_headers["chatgpt-account-id"] == "acct-123"
 
 
@@ -649,10 +647,7 @@ class TestRoutingExtraction:
 
     async def test_pkce_oauth_populates_routing(self, tmp_path: Path) -> None:
         """PkceOAuthAdapter 产生路由覆盖（api_base_url + extra_headers）"""
-        from octoagent.provider.auth.oauth_provider import (
-            BUILTIN_PROVIDERS,
-            OAuthProviderConfig,
-        )
+        from octoagent.provider.auth.oauth_provider import BUILTIN_PROVIDERS
 
         store = CredentialStore(store_path=tmp_path / "auth.json")
         now = _now()
@@ -686,10 +681,10 @@ class TestRoutingExtraction:
         assert result.adapter == "PkceOAuthAdapter"
         assert result.credential_value == "jwt-access-token"
         # 路由覆盖
-        assert result.api_base_url == "https://chatgpt.com/backend-api"
+        assert result.api_base_url == "https://chatgpt.com/backend-api/codex"
         assert result.extra_headers["chatgpt-account-id"] == "acct-test-123"
         assert result.extra_headers["OpenAI-Beta"] == "responses=experimental"
-        assert result.extra_headers["originator"] == "octoagent"
+        assert result.extra_headers["originator"] == "pi"
 
     async def test_pkce_oauth_no_routing_when_no_api_base(
         self, tmp_path: Path

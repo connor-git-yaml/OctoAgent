@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import pytest
-
 from octoagent.provider.auth.oauth_provider import (
     BUILTIN_PROVIDERS,
     DISPLAY_TO_CANONICAL,
@@ -61,9 +60,10 @@ class TestBuiltinProviders:
     def test_openai_codex_has_jwt_api_config(self) -> None:
         """openai-codex 配置了 JWT 方案的 api_base_url 和 extra_api_headers"""
         config = BUILTIN_PROVIDERS["openai-codex"]
-        assert config.api_base_url == "https://chatgpt.com/backend-api"
+        assert config.api_base_url == "https://chatgpt.com/backend-api/codex"
         assert "chatgpt-account-id" in config.extra_api_headers
         assert "OpenAI-Beta" in config.extra_api_headers
+        assert config.extra_api_headers["originator"] == "pi"
 
     def test_openai_codex_extra_params(self) -> None:
         """openai-codex 包含 codex_cli_simplified_flow 参数"""

@@ -161,12 +161,13 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
             "id_token_add_organizations": "true",
             "originator": "codex_cli_rs",
         },
-        # JWT 方案：直连 chatgpt.com/backend-api，由调用链决定具体 API 路径。
-        api_base_url="https://chatgpt.com/backend-api",
+        # JWT 方案：Codex OAuth 目前需要命中 backend-api/codex 路由，
+        # 且请求头需保持与官方 Codex CLI 一致。
+        api_base_url="https://chatgpt.com/backend-api/codex",
         extra_api_headers={
             "chatgpt-account-id": "{account_id}",
             "OpenAI-Beta": "responses=experimental",
-            "originator": "octoagent",
+            "originator": "pi",
             "User-Agent": "pi (darwin; arm64)",
         },
     ),

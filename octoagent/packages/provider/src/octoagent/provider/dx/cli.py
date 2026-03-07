@@ -9,14 +9,14 @@ import asyncio
 from pathlib import Path
 
 import click
-from rich.console import Console
-from rich.panel import Panel
+from rich.console import RenderableType
 
 from .backup_commands import backup, export, restore
 from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
+from .console_output import create_console, render_panel
 
-console = Console()
+console = create_console()
 
 
 @click.group()
@@ -109,11 +109,15 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
     if restart and not click.confirm("确认重置当前 onboarding session？", default=False):
         raise SystemExit(2)
 
-    def _render_summary(result) -> Panel:
+    def _render_summary(result) -> RenderableType:
         session = result.session
         if session is None:
             body = "\n".join(result.notes or ["尚未开始 onboarding。"])
-            return Panel(body, title="Onboarding Summary", border_style="yellow")
+            return render_panel(
+                "Onboarding Summary",
+                [body],
+                border_style="yellow",
+            )
 
         summary = session.summary
         lines = [summary.headline, "", f"状态: {summary.overall_status.value}"]
@@ -132,7 +136,7 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
                     lines.append(f"  {idx}. {action.title}: {action.command}")
                 else:
                     lines.append(f"  {idx}. {action.title}: {action.description}")
-        return Panel("\n".join(lines), title="Onboarding Summary", border_style="cyan")
+        return render_panel("Onboarding Summary", lines, border_style="cyan")
 
     async def _run() -> None:
         service = OnboardingService(

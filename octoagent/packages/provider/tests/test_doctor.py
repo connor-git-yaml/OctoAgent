@@ -18,7 +18,9 @@ from octoagent.provider.dx.channel_verifier import VerifierAvailability
 from octoagent.provider.dx.cli import main
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
+    ModelAlias,
     OctoAgentConfig,
+    ProviderEntry,
     RuntimeConfig,
     TelegramChannelConfig,
 )
@@ -29,6 +31,10 @@ from octoagent.provider.dx.onboarding_models import OnboardingStepStatus
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 from pydantic import SecretStr
+
+
+def _write_litellm_config(tmp_path: Path, content: str) -> None:
+    (tmp_path / "litellm-config.yaml").write_text(content, encoding="utf-8")
 
 
 def _write_telegram_config(
@@ -84,6 +90,41 @@ def _write_runtime_config(
             updated_at="2026-03-07",
             runtime=RuntimeConfig(
                 llm_mode=llm_mode,
+                litellm_proxy_url=proxy_url,
+                master_key_env=master_key_env,
+            ),
+        ),
+        tmp_path,
+    )
+
+
+def _write_codex_runtime_config(
+    tmp_path: Path,
+    *,
+    proxy_url: str = "http://yaml-proxy:4001",
+    master_key_env: str = "YAML_MASTER_KEY",
+) -> None:
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-03-07",
+            providers=[
+                ProviderEntry(
+                    id="openai-codex",
+                    name="OpenAI Codex",
+                    auth_type="oauth",
+                    api_key_env="OPENAI_API_KEY",
+                )
+            ],
+            model_aliases={
+                "cheap": ModelAlias(
+                    provider="openai-codex",
+                    model="gpt-5.3-codex",
+                    description="doctor live ping",
+                    thinking_level="low",
+                )
+            },
+            runtime=RuntimeConfig(
+                llm_mode="litellm",
                 litellm_proxy_url=proxy_url,
                 master_key_env=master_key_env,
             ),
@@ -357,6 +398,115 @@ class TestDoctorChecks:
         result = await runner.check_db_writable()
         assert result.status == CheckStatus.PASS
 
+    async def test_live_ping_uses_codex_compatible_payload_for_oauth_alias(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_codex_runtime_config(
+            tmp_path,
+            proxy_url="http://yaml-proxy:4320",
+            master_key_env="CUSTOM_MASTER_KEY",
+        )
+        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
+        calls: list[dict[str, object]] = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            text = ""
+
+            def json(self) -> dict[str, object]:
+                return {"ok": True}
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+                del url, headers
+                calls.append(json)
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_live_ping()
+
+        assert result.status == CheckStatus.PASS
+        assert calls == [
+            {
+                "model": "cheap",
+                "instructions": "reply briefly",
+                "messages": [{"role": "user", "content": "ping"}],
+            }
+        ]
+
+    async def test_live_ping_uses_litellm_config_fallback_for_env_only_codex_alias(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _write_litellm_config(
+            tmp_path,
+            "\n".join(
+                [
+                    "model_list:",
+                    "  - model_name: cheap",
+                    "    litellm_params:",
+                    "      model: gpt-5.3-codex",
+                    "      api_base: https://chatgpt.com/backend-api/codex",
+                ]
+            )
+            + "\n",
+        )
+        monkeypatch.setenv("LITELLM_PROXY_URL", "http://env-proxy:4010")
+        monkeypatch.setenv("LITELLM_PROXY_KEY", "env-key")
+        calls: list[dict[str, object]] = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            text = ""
+
+            def json(self) -> dict[str, object]:
+                return {"ok": True}
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self) -> FakeAsyncClient:
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+                del url, headers
+                calls.append(json)
+                return FakeResponse()
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_live_ping()
+
+        assert result.status == CheckStatus.PASS
+        assert calls == [
+            {
+                "model": "cheap",
+                "instructions": "reply briefly",
+                "messages": [{"role": "user", "content": "ping"}],
+            }
+        ]
+
     async def test_credential_valid_empty(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
         # 使用临时 store
@@ -551,7 +701,10 @@ class TestFormatReport:
         report = await runner.run_all_checks(live=False)
         guidance_panel = format_guidance(report)
         assert guidance_panel is not None
-        assert guidance_panel.title == "Remediation"
+        if isinstance(guidance_panel, str):
+            assert guidance_panel.startswith("[Remediation]")
+        else:
+            assert guidance_panel.title == "Remediation"
 
     async def test_build_guidance_uses_config_init_when_telegram_checks_lack_base_config(
         self,

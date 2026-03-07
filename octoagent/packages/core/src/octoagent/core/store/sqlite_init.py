@@ -161,6 +161,22 @@ _SIDE_EFFECT_LEDGER_INDEXES = [
 ]
 
 
+async def _table_columns(conn: aiosqlite.Connection, table_name: str) -> set[str]:
+    """读取表列名集合。"""
+    cursor = await conn.execute(f"PRAGMA table_info({table_name})")
+    rows = await cursor.fetchall()
+    return {str(row[1]) for row in rows}
+
+
+async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
+    """对已有旧表执行最小 schema 迁移。"""
+    task_columns = await _table_columns(conn, "tasks")
+    if task_columns and "trace_id" not in task_columns:
+        await conn.execute(
+            "ALTER TABLE tasks ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''"
+        )
+
+
 async def init_db(conn: aiosqlite.Connection) -> None:
     """初始化数据库：设置 PRAGMA + 创建表 + 创建索引
 
@@ -179,6 +195,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_TASK_JOBS_DDL)
     await conn.execute(_CHECKPOINTS_DDL)
     await conn.execute(_SIDE_EFFECT_LEDGER_DDL)
+    await _migrate_legacy_tables(conn)
 
     # 创建索引
     for idx_sql in (

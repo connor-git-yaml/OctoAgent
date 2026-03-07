@@ -4,7 +4,7 @@
 # NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
 #
 config_version: 1
-updated_at: '2026-03-06'
+updated_at: '2026-03-07'
 providers:
 - id: openai-codex
   name: OpenAI Codex (ChatGPT Pro OAuth)
@@ -14,8 +14,8 @@ providers:
 model_aliases:
   main:
     provider: openai-codex
-    model: gpt-5.4
-    description: 主力模型（GPT-5.4，深度推理）
+    model: gpt-5.3-codex
+    description: 主力模型（GPT-5.3 Codex，深度推理）
     thinking_level: xhigh
   cheap:
     provider: openai-codex
@@ -26,3 +26,16 @@ runtime:
   llm_mode: litellm
   litellm_proxy_url: http://localhost:4001
   master_key_env: LITELLM_MASTER_KEY
+channels:
+  telegram:
+    enabled: true
+    mode: polling
+    bot_token_env: TELEGRAM_BOT_TOKEN
+    webhook_url: ''
+    webhook_secret_env: ''
+    dm_policy: pairing
+    allow_users: []
+    allowed_groups: []
+    group_policy: allowlist
+    group_allow_users: []
+    polling_timeout_seconds: 30

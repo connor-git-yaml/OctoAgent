@@ -6,8 +6,9 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from rich.panel import Panel
+from rich.console import RenderableType
 
+from .console_output import render_panel
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import NextAction
 
@@ -365,7 +366,7 @@ class DoctorRemediationPlanner:
         )
 
 
-def format_guidance_panel(guidance: DoctorGuidance) -> Panel | None:
+def format_guidance_panel(guidance: DoctorGuidance) -> RenderableType | None:
     if not guidance.groups:
         return None
 
@@ -382,8 +383,8 @@ def format_guidance_panel(guidance: DoctorGuidance) -> Panel | None:
                     lines.append(f"  - {step}")
         lines.append("")
 
-    return Panel(
-        "\n".join(lines).rstrip(),
-        title="Remediation",
+    return render_panel(
+        "Remediation",
+        "\n".join(lines).rstrip().splitlines(),
         border_style="yellow",
     )
