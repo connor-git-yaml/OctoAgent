@@ -6,17 +6,19 @@
 - T005: TaskStatus 状态转换测试（3 条新规则）
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from octoagent.core.models.enums import (
     EventType,
     TaskStatus,
     validate_transition,
 )
 from octoagent.policy.models import (
+    DEFAULT_PROFILE,
+    PERMISSIVE_PROFILE,
     POLICY_ACTION_SEVERITY,
+    STRICT_PROFILE,
     ApprovalDecision,
     ApprovalExpiredEventPayload,
     ApprovalListItem,
@@ -24,14 +26,10 @@ from octoagent.policy.models import (
     ApprovalRequest,
     ApprovalRequestedEventPayload,
     ApprovalResolvedEventPayload,
-    ApprovalResolveRequest,
-    ApprovalStatus,
     ApprovalsListResponse,
+    ApprovalStatus,
     ChatSendRequest,
     ChatSendResponse,
-    DEFAULT_PROFILE,
-    PERMISSIVE_PROFILE,
-    STRICT_PROFILE,
     PolicyAction,
     PolicyDecision,
     PolicyDecisionEventPayload,
@@ -40,7 +38,6 @@ from octoagent.policy.models import (
     SSEApprovalEvent,
 )
 from octoagent.tooling.models import SideEffectLevel, ToolProfile
-
 
 # ============================================================
 # T004: PolicyAction 严格度排序
@@ -95,7 +92,7 @@ class TestPolicyDecision:
 
     def test_full_fields(self) -> None:
         """所有字段可正确赋值"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         decision = PolicyDecision(
             action=PolicyAction.DENY,
             label="global.irreversible",
@@ -140,7 +137,7 @@ class TestApprovalRecord:
             risk_explanation="不可逆 shell 命令",
             policy_label="global.irreversible",
             side_effect_level=SideEffectLevel.IRREVERSIBLE,
-            expires_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(UTC),
         )
 
     def test_pending_state(self) -> None:
@@ -157,7 +154,7 @@ class TestApprovalRecord:
             request=self._make_request(),
             status=ApprovalStatus.APPROVED,
             decision=ApprovalDecision.ALLOW_ONCE,
-            resolved_at=datetime.now(timezone.utc),
+            resolved_at=datetime.now(UTC),
             resolved_by="user:web",
         )
         assert record.status == ApprovalStatus.APPROVED
@@ -169,7 +166,7 @@ class TestApprovalRecord:
             request=self._make_request(),
             status=ApprovalStatus.REJECTED,
             decision=ApprovalDecision.DENY,
-            resolved_at=datetime.now(timezone.utc),
+            resolved_at=datetime.now(UTC),
             resolved_by="user:web",
         )
         assert record.status == ApprovalStatus.REJECTED
@@ -340,7 +337,7 @@ class TestRESTModels:
                     policy_label="global.irreversible",
                     side_effect_level="irreversible",
                     remaining_seconds=95.3,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             ],
             total=1,
@@ -396,9 +393,9 @@ class TestTaskStatusTransitions:
         """WAITING_APPROVAL -> FAILED 非法"""
         assert validate_transition(TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED) is False
 
-    def test_waiting_approval_to_cancelled_illegal(self) -> None:
-        """WAITING_APPROVAL -> CANCELLED 非法"""
-        assert validate_transition(TaskStatus.WAITING_APPROVAL, TaskStatus.CANCELLED) is False
+    def test_waiting_approval_to_cancelled(self) -> None:
+        """WAITING_APPROVAL -> CANCELLED 合法（用户主动取消）"""
+        assert validate_transition(TaskStatus.WAITING_APPROVAL, TaskStatus.CANCELLED) is True
 
     def test_created_to_waiting_approval_illegal(self) -> None:
         """CREATED -> WAITING_APPROVAL 非法（必须先 RUNNING）"""
