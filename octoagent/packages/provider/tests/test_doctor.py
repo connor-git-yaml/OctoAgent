@@ -160,10 +160,26 @@ class TestDoctorChecks:
         result = await runner.check_env_file()
         assert result.status == CheckStatus.PASS
 
+    async def test_env_file_skips_when_yaml_runtime_exists(self, tmp_path: Path) -> None:
+        _write_runtime_config(tmp_path, llm_mode="echo")
+        runner = DoctorRunner(project_root=tmp_path)
+        result = await runner.check_env_file()
+        assert result.status == CheckStatus.SKIP
+        assert "octoagent.yaml" in result.message
+        assert result.fix_hint == ""
+
     async def test_env_litellm_missing(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_env_litellm_file()
         assert result.status == CheckStatus.WARN
+
+    async def test_env_litellm_skips_when_yaml_runtime_exists(self, tmp_path: Path) -> None:
+        _write_runtime_config(tmp_path, llm_mode="echo")
+        runner = DoctorRunner(project_root=tmp_path)
+        result = await runner.check_env_litellm_file()
+        assert result.status == CheckStatus.SKIP
+        assert "octoagent.yaml" in result.message
+        assert result.fix_hint == ""
 
     async def test_llm_mode_set(
         self,
@@ -585,6 +601,24 @@ class TestFormatReport:
         actions = [item.action.command for group in guidance.groups for item in group.items]
 
         assert actions == ["octo init", "octo init"]
+
+    async def test_build_guidance_ignores_optional_dotenv_checks_when_yaml_exists(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_runtime_config(tmp_path, llm_mode="echo")
+        runner = DoctorRunner(project_root=tmp_path)
+
+        report = await runner.run_all_checks(live=False)
+        guidance = build_guidance(report)
+        check_names = {
+            item.check_name
+            for group in guidance.groups
+            for item in group.items
+        }
+
+        assert "env_file" not in check_names
+        assert "env_litellm_file" not in check_names
 
 
 class TestDoctorCli:

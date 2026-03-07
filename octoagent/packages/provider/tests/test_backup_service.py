@@ -157,6 +157,77 @@ async def _append_follow_up(
     await store_group.conn.close()
 
 
+async def _seed_ops_chat_import_task(project_root: Path) -> str:
+    resolved_db_path = project_root / "data" / "sqlite" / "octoagent.db"
+    resolved_artifacts_dir = project_root / "data" / "artifacts"
+    store_group = await create_store_group(str(resolved_db_path), resolved_artifacts_dir)
+
+    now = datetime.now(tz=UTC)
+    task_id = "ops-chat-import"
+    task = Task(
+        task_id=task_id,
+        created_at=now,
+        updated_at=now,
+        title="系统运维审计（聊天导入）",
+        thread_id="ops-chat-import",
+        scope_id="ops/chat-import",
+        requester=RequesterInfo(channel="system", sender_id="system"),
+        trace_id="trace-ops-chat-import",
+    )
+    events = [
+        Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=1,
+            ts=now,
+            type=EventType.TASK_CREATED,
+            actor=ActorType.SYSTEM,
+            payload=TaskCreatedPayload(
+                title=task.title,
+                thread_id=task.thread_id,
+                scope_id=task.scope_id,
+                channel=task.requester.channel,
+                sender_id=task.requester.sender_id,
+                risk_level=task.risk_level.value,
+            ).model_dump(mode="json"),
+            trace_id=task.trace_id,
+            causality=EventCausality(idempotency_key="seed-ops-chat-import-created"),
+        ),
+        Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=2,
+            ts=now,
+            type=EventType.CHAT_IMPORT_COMPLETED,
+            actor=ActorType.SYSTEM,
+            payload={"batch_id": "batch-001", "message": "聊天导入完成。"},
+            trace_id=task.trace_id,
+            causality=EventCausality(idempotency_key="seed-ops-chat-import-completed"),
+        ),
+    ]
+    await create_task_with_initial_events(
+        store_group.conn,
+        store_group.task_store,
+        store_group.event_store,
+        task,
+        events,
+    )
+
+    artifact = Artifact(
+        artifact_id="artifact-ops-import-001",
+        task_id=task_id,
+        ts=now,
+        name="chat-import-window-001.json",
+        parts=[ArtifactPart(type=PartType.JSON, mime="application/json", content="{}")],
+        size=0,
+        hash="",
+    )
+    await store_group.artifact_store.put_artifact(artifact, content=b"{}")
+    await store_group.conn.commit()
+    await store_group.conn.close()
+    return task_id
+
+
 @pytest.mark.asyncio
 async def test_create_bundle_excludes_plaintext_secrets_and_updates_state(tmp_path: Path) -> None:
     await _seed_project(tmp_path)
@@ -293,6 +364,24 @@ async def test_export_chats_outputs_manifest_and_payload_file(tmp_path: Path) ->
     payload = json.loads(Path(manifest.output_path).read_text(encoding="utf-8"))
     assert payload["manifest"]["export_id"] == manifest.export_id
     assert task_id in payload["events_by_task"]
+
+
+@pytest.mark.asyncio
+async def test_export_chats_includes_explicit_ops_task_filter(tmp_path: Path) -> None:
+    await _seed_project(tmp_path)
+    task_id = await _seed_ops_chat_import_task(tmp_path)
+    service = BackupService(tmp_path)
+
+    manifest = await service.export_chats(task_id=task_id)
+
+    assert len(manifest.tasks) == 1
+    assert manifest.tasks[0].task_id == task_id
+    assert manifest.event_count == 2
+    assert manifest.artifact_refs == ["artifact-ops-import-001"]
+
+    payload = json.loads(Path(manifest.output_path).read_text(encoding="utf-8"))
+    assert task_id in payload["events_by_task"]
+    assert task_id in payload["artifacts_by_task"]
 
 
 @pytest.mark.asyncio

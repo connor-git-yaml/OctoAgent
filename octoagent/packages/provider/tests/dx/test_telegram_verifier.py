@@ -4,6 +4,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from octoagent.core.models.message import NormalizedMessage
+from octoagent.core.store import create_store_group
+from octoagent.gateway.services.sse_hub import SSEHub
+from octoagent.gateway.services.task_service import TaskService
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
@@ -200,7 +204,111 @@ async def test_verifier_first_message_sends_to_first_approved_user(tmp_path: Pat
 
     result = await verifier.verify_first_message(tmp_path, session=None)
     approved = store.get_approved_user("456")
+    assert result.status == OnboardingStepStatus.ACTION_REQUIRED
+    assert "尚未检测到入站任务" in result.summary
+    assert approved is not None
+    assert approved.last_message_id == 11
+
+
+@pytest.mark.asyncio
+async def test_verifier_first_message_completes_after_detecting_inbound_task(
+    tmp_path: Path,
+) -> None:
+    _write_config(
+        tmp_path,
+        telegram=TelegramChannelConfig(
+            enabled=True,
+            mode="polling",
+        ),
+    )
+    store = TelegramStateStore(tmp_path)
+    store.upsert_approved_user(user_id=456, chat_id=456, username="alice")
+
+    store_group = await create_store_group(
+        str(tmp_path / "data" / "sqlite" / "octoagent.db"),
+        tmp_path / "data" / "artifacts",
+    )
+    try:
+        task_service = TaskService(store_group, SSEHub())
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                channel="telegram",
+                thread_id="tg:456",
+                scope_id="chat:telegram:456",
+                sender_id="456",
+                sender_name="Alice",
+                text="hello inbound",
+                idempotency_key="tg-verifier-inbound-001",
+            )
+        )
+        assert created is True
+    finally:
+        await store_group.conn.close()
+
+    verifier = TelegramOnboardingVerifier(
+        environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+        client_factory=lambda root: TelegramBotClient(
+            root,
+            environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+            transport=_transport(),
+        ),
+    )
+
+    result = await verifier.verify_first_message(tmp_path, session=None)
+
     assert result.status == OnboardingStepStatus.COMPLETED
-    assert "message_id=11" in result.summary
+    assert task_id in result.summary
+
+
+@pytest.mark.asyncio
+async def test_verifier_first_message_ignores_group_task_from_same_user(
+    tmp_path: Path,
+) -> None:
+    _write_config(
+        tmp_path,
+        telegram=TelegramChannelConfig(
+            enabled=True,
+            mode="polling",
+        ),
+    )
+    store = TelegramStateStore(tmp_path)
+    store.upsert_approved_user(user_id=456, chat_id=456, username="alice")
+
+    store_group = await create_store_group(
+        str(tmp_path / "data" / "sqlite" / "octoagent.db"),
+        tmp_path / "data" / "artifacts",
+    )
+    try:
+        task_service = TaskService(store_group, SSEHub())
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                channel="telegram",
+                thread_id="tg_group:999",
+                scope_id="chat:telegram:999",
+                sender_id="456",
+                sender_name="Alice",
+                text="hello group",
+                idempotency_key="tg-verifier-group-001",
+            )
+        )
+        assert created is True
+    finally:
+        await store_group.conn.close()
+
+    verifier = TelegramOnboardingVerifier(
+        environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+        client_factory=lambda root: TelegramBotClient(
+            root,
+            environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+            transport=_transport(),
+        ),
+    )
+
+    result = await verifier.verify_first_message(tmp_path, session=None)
+    approved = store.get_approved_user("456")
+
+    assert result.status == OnboardingStepStatus.ACTION_REQUIRED
+    assert "尚未检测到入站任务" in result.summary
+    assert task_id not in result.summary
     assert approved is not None
     assert approved.last_message_id == 11

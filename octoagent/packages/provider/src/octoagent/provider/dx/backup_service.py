@@ -647,7 +647,15 @@ class BackupService:
         return current
 
     def _match_export_task(self, task: Task, filters: ExportFilter) -> bool:
-        if task.requester.channel == "system" and task.scope_id.startswith("ops/"):
+        explicitly_selected = (
+            (filters.task_id is not None and task.task_id == filters.task_id)
+            or (filters.thread_id is not None and task.thread_id == filters.thread_id)
+        )
+        if (
+            task.requester.channel == "system"
+            and task.scope_id.startswith("ops/")
+            and not explicitly_selected
+        ):
             return False
         if filters.task_id and task.task_id != filters.task_id:
             return False
