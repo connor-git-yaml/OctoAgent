@@ -17,6 +17,7 @@ from typing import Any
 import structlog
 from octoagent.core.models import (
     TERMINAL_STATES,
+    ExecutionConsoleSession,
     ResumeFailureType,
     ResumeResult,
     TaskStatus,
@@ -24,6 +25,7 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import StoreGroup
 
+from .execution_console import AttachInputResult, ExecutionConsoleService, ExecutionInputError
 from .orchestrator import OrchestratorService
 from .resume_engine import ResumeEngine
 from .task_service import TaskService
@@ -61,6 +63,11 @@ class TaskRunner:
         self._monitor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._cancellation_registry = WorkerCancellationRegistry()
+        self._execution_console = ExecutionConsoleService(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            approval_manager=approval_manager,
+        )
         self._orchestrator = OrchestratorService(
             store_group=store_group,
             sse_hub=sse_hub,
@@ -69,8 +76,13 @@ class TaskRunner:
             worker_runtime_config=worker_runtime_config,
             docker_available_checker=docker_available_checker,
             cancellation_registry=self._cancellation_registry,
+            execution_console=self._execution_console,
         )
         self._resume_engine = ResumeEngine(store_group)
+
+    @property
+    def execution_console(self) -> ExecutionConsoleService:
+        return self._execution_console
 
     async def startup(self) -> None:
         """启动恢复：清理 orphan running + 拉起 queued"""
@@ -96,7 +108,14 @@ class TaskRunner:
             running_job.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await running_job.task
-            await self._stores.task_job_store.mark_failed(task_id, "runner_shutdown_cancelled")
+            task = await self._stores.task_store.get_task(task_id)
+            if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                await self._stores.task_job_store.mark_waiting_input(task_id)
+            else:
+                await self._stores.task_job_store.mark_failed(
+                    task_id,
+                    "runner_shutdown_cancelled",
+                )
             self._cancellation_registry.clear(task_id)
 
     async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
@@ -168,6 +187,9 @@ class TaskRunner:
             return
         if task.status == TaskStatus.SUCCEEDED:
             await self._stores.task_job_store.mark_succeeded(job.task_id)
+            return
+        if task.status == TaskStatus.WAITING_INPUT:
+            await self._stores.task_job_store.mark_waiting_input(job.task_id)
             return
         if task.status in TERMINAL_STATES:
             await self._stores.task_job_store.mark_failed(
@@ -249,11 +271,19 @@ class TaskRunner:
 
     async def cancel_task(self, task_id: str) -> bool:
         """通知运行中任务取消。"""
+        await self._execution_console.record_cancel_request(
+            task_id=task_id,
+            actor="user:web",
+            reason="用户取消",
+        )
         self._cancellation_registry.cancel(task_id)
 
         async with self._lock:
             running = self._running_jobs.get(task_id)
         if running is None:
+            job = await self._stores.task_job_store.get_job(task_id)
+            if job is not None and job.status == "WAITING_INPUT":
+                await self._stores.task_job_store.mark_cancelled(task_id)
             return False
 
         running.task.cancel()
@@ -266,6 +296,61 @@ class TaskRunner:
         )
         await self._stores.task_job_store.mark_cancelled(task_id)
         return True
+
+    async def get_execution_session(self, task_id: str) -> ExecutionConsoleSession | None:
+        """查询 execution session。"""
+        return await self._execution_console.get_session(task_id)
+
+    async def collect_artifacts(self, task_id: str):
+        """查询 execution artifacts。"""
+        return await self._execution_console.collect_artifacts(task_id)
+
+    async def attach_input(
+        self,
+        task_id: str,
+        text: str,
+        *,
+        actor: str = "user:web",
+        approval_id: str | None = None,
+    ) -> AttachInputResult:
+        """提交人工输入；若 live waiter 不存在则自动恢复执行。"""
+        result = await self._execution_console.attach_input(
+            task_id=task_id,
+            text=text,
+            actor=actor,
+            approval_id=approval_id,
+        )
+        if result.delivered_live:
+            async with self._lock:
+                running = self._running_jobs.get(task_id)
+                if running is not None:
+                    running.started_at = datetime.now(UTC)
+            return result
+
+        job = await self._stores.task_job_store.get_job(task_id)
+        if job is None:
+            raise ExecutionInputError(
+                "task job missing for input resume",
+                code="TASK_JOB_MISSING",
+            )
+
+        async with self._lock:
+            if task_id in self._running_jobs:
+                return result
+
+        await self._stores.task_job_store.mark_running_from_waiting_input(task_id)
+        self._cancellation_registry.ensure(task_id)
+        await self._spawn_job(
+            task_id=task_id,
+            user_text=job.user_text,
+            model_alias=job.model_alias,
+            resume_from_node="state_running",
+            resume_state_snapshot={
+                "human_input_artifact_id": result.artifact_id,
+                "input_request_id": result.request_id,
+            },
+        )
+        return result
 
     async def _run_job(
         self,
@@ -289,6 +374,9 @@ class TaskRunner:
             return
         if task.status == TaskStatus.SUCCEEDED:
             await self._stores.task_job_store.mark_succeeded(task_id)
+            return
+        if task.status == TaskStatus.WAITING_INPUT:
+            await self._stores.task_job_store.mark_waiting_input(task_id)
             return
         if task.status == TaskStatus.CANCELLED or result.status == WorkerExecutionStatus.CANCELLED:
             await self._stores.task_job_store.mark_cancelled(task_id)
@@ -319,6 +407,13 @@ class TaskRunner:
 
             service = TaskService(self._stores, self._sse_hub)
             for task_id in timed_out_ids:
+                task = await service.get_task(task_id)
+                if task is not None and task.status in {
+                    TaskStatus.WAITING_INPUT,
+                    TaskStatus.WAITING_APPROVAL,
+                    TaskStatus.PAUSED,
+                }:
+                    continue
                 async with self._lock:
                     running = self._running_jobs.get(task_id)
                 if running is None:

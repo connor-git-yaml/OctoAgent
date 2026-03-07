@@ -24,6 +24,16 @@ from .enums import (
     validate_transition,
 )
 from .event import Event, EventCausality
+from .execution import (
+    ExecutionBackend,
+    ExecutionConsoleSession,
+    ExecutionEventKind,
+    ExecutionRuntimeRecord,
+    ExecutionSessionState,
+    ExecutionStreamEvent,
+    HumanInputPolicy,
+    JobSpec,
+)
 from .message import MessageAttachment, NormalizedMessage
 from .orchestrator import (
     DispatchEnvelope,
@@ -37,6 +47,12 @@ from .payloads import (
     ArtifactCreatedPayload,
     CheckpointSavedPayload,
     ErrorPayload,
+    ExecutionCancelRequestedPayload,
+    ExecutionInputAttachedPayload,
+    ExecutionInputRequestedPayload,
+    ExecutionLogPayload,
+    ExecutionStatusChangedPayload,
+    ExecutionStepPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
@@ -62,6 +78,10 @@ __all__ = [
     "ActorType",
     "RiskLevel",
     "PartType",
+    "ExecutionBackend",
+    "ExecutionSessionState",
+    "ExecutionEventKind",
+    "HumanInputPolicy",
     # 状态机
     "VALID_TRANSITIONS",
     "TERMINAL_STATES",
@@ -76,6 +96,11 @@ __all__ = [
     # Artifact
     "Artifact",
     "ArtifactPart",
+    # Execution
+    "JobSpec",
+    "ExecutionRuntimeRecord",
+    "ExecutionConsoleSession",
+    "ExecutionStreamEvent",
     # Checkpoint
     "PIPELINE_NODES",
     "CheckpointStatus",
@@ -96,6 +121,12 @@ __all__ = [
     "StateTransitionPayload",
     "ArtifactCreatedPayload",
     "ErrorPayload",
+    "ExecutionStatusChangedPayload",
+    "ExecutionLogPayload",
+    "ExecutionStepPayload",
+    "ExecutionInputRequestedPayload",
+    "ExecutionInputAttachedPayload",
+    "ExecutionCancelRequestedPayload",
     # Feature 008: Orchestrator Payloads
     "OrchestratorDecisionPayload",
     "WorkerDispatchedPayload",

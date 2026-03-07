@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import subprocess
@@ -22,6 +23,9 @@ from typing import Protocol
 import structlog
 from octoagent.core.models import (
     DispatchEnvelope,
+    ExecutionBackend,
+    ExecutionSessionState,
+    HumanInputPolicy,
     TaskStatus,
     WorkerExecutionStatus,
     WorkerResult,
@@ -31,6 +35,7 @@ from octoagent.core.models import (
 from octoagent.core.store import StoreGroup
 from ulid import ULID
 
+from .execution_context import ExecutionRuntimeContext
 from .task_service import TaskService
 
 log = structlog.get_logger()
@@ -167,6 +172,7 @@ class RuntimeBackend(Protocol):
         task_service: TaskService,
         envelope: DispatchEnvelope,
         llm_service,
+        execution_context: ExecutionRuntimeContext | None = None,
     ) -> None:
         """执行一次 worker 步骤。"""
 
@@ -183,6 +189,7 @@ class InlineRuntimeBackend:
         task_service: TaskService,
         envelope: DispatchEnvelope,
         llm_service,
+        execution_context: ExecutionRuntimeContext | None = None,
     ) -> None:
         await task_service.process_task_with_llm(
             task_id=envelope.task_id,
@@ -191,6 +198,7 @@ class InlineRuntimeBackend:
             model_alias=envelope.model_alias,
             resume_from_node=envelope.resume_from_node,
             resume_state_snapshot=envelope.resume_state_snapshot,
+            execution_context=execution_context,
         )
 
 
@@ -237,6 +245,7 @@ class WorkerRuntime:
         config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
+        execution_console=None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -246,6 +255,7 @@ class WorkerRuntime:
             docker_available_checker or default_docker_available_checker
         )
         self._cancellation_registry = cancellation_registry
+        self._execution_console = execution_console
         self._inline_backend = InlineRuntimeBackend()
         self._docker_backend = DockerRuntimeBackend()
 
@@ -274,22 +284,57 @@ class WorkerRuntime:
             backend = self._select_backend()
             session.backend = backend.name
             session.state = WorkerRuntimeState.RUNNING
+            if self._execution_console is not None:
+                await self._execution_console.register_session(
+                    task_id=envelope.task_id,
+                    session_id=session.session_id,
+                    backend_job_id=session.dispatch_id,
+                    backend=(
+                        ExecutionBackend.DOCKER
+                        if backend.name == "docker"
+                        else ExecutionBackend.INLINE
+                    ),
+                    interactive=True,
+                    input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
+                    worker_id=worker_id,
+                    message="worker runtime selected backend",
+                )
+
+            execution_context = (
+                ExecutionRuntimeContext(
+                    task_id=envelope.task_id,
+                    trace_id=envelope.trace_id,
+                    session_id=session.session_id,
+                    worker_id=worker_id,
+                    backend=backend.name,
+                    console=self._execution_console,
+                    resume_state_snapshot=envelope.resume_state_snapshot,
+                )
+                if self._execution_console is not None
+                else None
+            )
 
             for step in range(1, self._config.max_steps + 1):
                 session.loop_step = step
+                if self._execution_console is not None:
+                    await self._execution_console.emit_step(
+                        task_id=envelope.task_id,
+                        session_id=session.session_id,
+                        step_name=f"loop_step_{step}",
+                        summary="worker runtime iteration",
+                    )
 
                 if cancel_signal is not None and cancel_signal.is_set():
                     raise WorkerRuntimeCancelled("cancel_signal_received")
 
                 start = time.monotonic()
                 try:
-                    await asyncio.wait_for(
-                        backend.execute(
-                            task_service=task_service,
-                            envelope=envelope,
-                            llm_service=self._llm_service,
-                        ),
-                        timeout=self._config.max_execution_timeout_seconds,
+                    await self._await_backend_execute(
+                        backend=backend,
+                        task_service=task_service,
+                        envelope=envelope,
+                        cancel_signal=cancel_signal,
+                        execution_context=execution_context,
                     )
                 except TimeoutError as exc:
                     raise WorkerRuntimeTimeoutError("max_exec_timeout") from exc
@@ -320,6 +365,13 @@ class WorkerRuntime:
 
                 if task.status == TaskStatus.SUCCEEDED:
                     session.state = WorkerRuntimeState.SUCCEEDED
+                    if self._execution_console is not None:
+                        await self._execution_console.mark_status(
+                            task_id=envelope.task_id,
+                            session_id=session.session_id,
+                            status=ExecutionSessionState.SUCCEEDED,
+                            message="worker execution succeeded",
+                        )
                     return WorkerResult(
                         dispatch_id=envelope.dispatch_id,
                         task_id=envelope.task_id,
@@ -335,6 +387,13 @@ class WorkerRuntime:
 
                 if task.status == TaskStatus.CANCELLED:
                     session.state = WorkerRuntimeState.CANCELLED
+                    if self._execution_console is not None:
+                        await self._execution_console.mark_status(
+                            task_id=envelope.task_id,
+                            session_id=session.session_id,
+                            status=ExecutionSessionState.CANCELLED,
+                            message="worker runtime cancelled",
+                        )
                     return WorkerResult(
                         dispatch_id=envelope.dispatch_id,
                         task_id=envelope.task_id,
@@ -350,6 +409,13 @@ class WorkerRuntime:
 
                 if task.status == TaskStatus.FAILED:
                     session.state = WorkerRuntimeState.FAILED
+                    if self._execution_console is not None:
+                        await self._execution_console.mark_status(
+                            task_id=envelope.task_id,
+                            session_id=session.session_id,
+                            status=ExecutionSessionState.FAILED,
+                            message="worker execution failed",
+                        )
                     return self._failure_result(
                         envelope=envelope,
                         worker_id=worker_id,
@@ -370,6 +436,13 @@ class WorkerRuntime:
                 envelope.task_id,
                 reason="worker runtime收到取消信号",
             )
+            if self._execution_console is not None:
+                await self._execution_console.mark_status(
+                    task_id=envelope.task_id,
+                    session_id=session.session_id,
+                    status=ExecutionSessionState.CANCELLED,
+                    message="worker runtime收到取消信号",
+                )
             return WorkerResult(
                 dispatch_id=envelope.dispatch_id,
                 task_id=envelope.task_id,
@@ -390,6 +463,13 @@ class WorkerRuntime:
                 envelope.task_id,
                 reason=f"worker runtime超时: {exc}",
             )
+            if self._execution_console is not None:
+                await self._execution_console.mark_status(
+                    task_id=envelope.task_id,
+                    session_id=session.session_id,
+                    status=ExecutionSessionState.FAILED,
+                    message="worker runtime timeout",
+                )
             return self._failure_result(
                 envelope=envelope,
                 worker_id=worker_id,
@@ -401,6 +481,13 @@ class WorkerRuntime:
             )
         except WorkerRuntimeError as exc:
             session.state = WorkerRuntimeState.FAILED
+            if self._execution_console is not None:
+                await self._execution_console.mark_status(
+                    task_id=envelope.task_id,
+                    session_id=session.session_id,
+                    status=ExecutionSessionState.FAILED,
+                    message=str(exc),
+                )
             return self._failure_result(
                 envelope=envelope,
                 worker_id=worker_id,
@@ -412,6 +499,13 @@ class WorkerRuntime:
             )
         except Exception as exc:  # pragma: no cover - 防御性兜底
             session.state = WorkerRuntimeState.FAILED
+            if self._execution_console is not None:
+                await self._execution_console.mark_status(
+                    task_id=envelope.task_id,
+                    session_id=session.session_id,
+                    status=ExecutionSessionState.FAILED,
+                    message=str(exc),
+                )
             return self._failure_result(
                 envelope=envelope,
                 worker_id=worker_id,
@@ -453,6 +547,44 @@ class WorkerRuntime:
         if docker_mode == "required":
             raise WorkerBackendUnavailableError("docker backend is required but unavailable")
         return self._inline_backend
+
+    async def _await_backend_execute(
+        self,
+        *,
+        backend: RuntimeBackend,
+        task_service: TaskService,
+        envelope: DispatchEnvelope,
+        cancel_signal: asyncio.Event | None,
+        execution_context: ExecutionRuntimeContext | None,
+    ) -> None:
+        backend_task = asyncio.create_task(
+            backend.execute(
+                task_service=task_service,
+                envelope=envelope,
+                llm_service=self._llm_service,
+                execution_context=execution_context,
+            )
+        )
+        deadline = time.monotonic() + self._config.max_execution_timeout_seconds
+        while True:
+            if cancel_signal is not None and cancel_signal.is_set():
+                backend_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await backend_task
+                raise WorkerRuntimeCancelled("cancel_signal_received")
+            try:
+                await asyncio.wait_for(asyncio.shield(backend_task), timeout=0.1)
+                return
+            except TimeoutError:
+                task = await task_service.get_task(envelope.task_id)
+                if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                    deadline = time.monotonic() + self._config.max_execution_timeout_seconds
+                    continue
+                if time.monotonic() > deadline:
+                    backend_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await backend_task
+                    raise
 
     @staticmethod
     def _failure_result(

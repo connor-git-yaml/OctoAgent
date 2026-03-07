@@ -97,6 +97,42 @@ class SqliteTaskJobStore:
         await self._conn.commit()
         return changed > 0
 
+    async def mark_waiting_input(self, task_id: str) -> bool:
+        """将任务标记为 WAITING_INPUT（仅 RUNNING -> WAITING_INPUT）。"""
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE task_jobs
+            SET status = 'WAITING_INPUT',
+                updated_at = ?
+            WHERE task_id = ? AND status = 'RUNNING'
+            """,
+            (now, task_id),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        changed = int(row[0]) if row else 0
+        await self._conn.commit()
+        return changed > 0
+
+    async def mark_running_from_waiting_input(self, task_id: str) -> bool:
+        """将等待输入的任务恢复为 RUNNING。"""
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE task_jobs
+            SET status = 'RUNNING',
+                updated_at = ?
+            WHERE task_id = ? AND status = 'WAITING_INPUT'
+            """,
+            (now, task_id),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        changed = int(row[0]) if row else 0
+        await self._conn.commit()
+        return changed > 0
+
     async def mark_succeeded(self, task_id: str) -> None:
         """标记任务成功"""
         now = datetime.now(UTC).isoformat()

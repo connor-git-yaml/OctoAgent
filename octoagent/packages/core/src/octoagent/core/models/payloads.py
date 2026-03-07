@@ -3,9 +3,12 @@
 所有事件的结构化 payload 定义。
 """
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from .enums import TaskStatus
+from .execution import ExecutionSessionState
 
 
 class TaskCreatedPayload(BaseModel):
@@ -92,6 +95,8 @@ class ArtifactCreatedPayload(BaseModel):
     name: str
     size: int
     part_count: int
+    session_id: str | None = Field(default=None, description="来源 execution session")
+    source: str = Field(default="", description="artifact 来源分类")
 
 
 class ErrorPayload(BaseModel):
@@ -328,3 +333,68 @@ class TaskDriftDetectedPayload(BaseModel):
         default=None,
         description="当前任务状态名称（状态机漂移模式专属，使用内部完整 TaskStatus）",
     )
+
+
+# Feature 019: Execution Console / JobRunner Payload 类型
+
+
+class ExecutionStatusChangedPayload(BaseModel):
+    """EXECUTION_STATUS_CHANGED 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    backend: str = Field(description="execution backend")
+    backend_job_id: str = Field(description="backend job ID")
+    status: ExecutionSessionState = Field(description="new execution status")
+    interactive: bool = Field(default=False)
+    input_policy: str = Field(default="explicit-request-only")
+    runtime_dir: str = Field(default="", description="host runtime dir for recovery")
+    container_name: str = Field(default="", description="docker container name")
+    message: str = Field(default="", description="status summary")
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class ExecutionLogPayload(BaseModel):
+    """EXECUTION_LOG 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    stream: str = Field(description="stdout/stderr")
+    chunk: str = Field(description="log chunk")
+    chunk_index: int = Field(default=0, ge=0)
+
+
+class ExecutionStepPayload(BaseModel):
+    """EXECUTION_STEP 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    step_name: str = Field(description="current step name")
+    summary: str = Field(default="", description="step summary")
+
+
+class ExecutionInputRequestedPayload(BaseModel):
+    """EXECUTION_INPUT_REQUESTED 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    prompt: str = Field(description="human input prompt")
+    request_id: str = Field(description="input request ID")
+    approval_id: str | None = Field(default=None, description="optional approval ID")
+
+
+class ExecutionInputAttachedPayload(BaseModel):
+    """EXECUTION_INPUT_ATTACHED 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    request_id: str = Field(description="input request ID")
+    actor: str = Field(description="input actor")
+    preview: str = Field(description="sanitized input preview")
+    text_length: int = Field(description="full input length")
+    approval_id: str | None = Field(default=None)
+    artifact_id: str | None = Field(default=None)
+    attached_at: datetime = Field(description="attached timestamp")
+
+
+class ExecutionCancelRequestedPayload(BaseModel):
+    """EXECUTION_CANCEL_REQUESTED 事件 payload。"""
+
+    session_id: str = Field(description="execution session ID")
+    actor: str = Field(description="cancel actor")
+    reason: str = Field(default="", description="cancel reason")
