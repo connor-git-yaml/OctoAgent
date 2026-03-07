@@ -522,7 +522,8 @@ class ExecutionConsoleService:
 
         started_at = latest_status_event.ts
         step_payload = None
-        pending_request = None
+        latest_requested = None
+        latest_attached_request_id = None
         for event in events:
             stream_event = self._to_stream_event(event)
             if stream_event is None or stream_event.session_id != latest_session_id:
@@ -539,10 +540,28 @@ class ExecutionConsoleService:
                 continue
             if step_payload is None and event.type == EventType.EXECUTION_STEP:
                 step_payload = ExecutionStepPayload.model_validate(event.payload)
-            if pending_request is None and event.type == EventType.EXECUTION_INPUT_REQUESTED:
-                pending_request = ExecutionInputRequestedPayload.model_validate(event.payload)
-            if step_payload is not None and pending_request is not None:
+            if (
+                latest_attached_request_id is None
+                and event.type == EventType.EXECUTION_INPUT_ATTACHED
+            ):
+                latest_attached_request_id = ExecutionInputAttachedPayload.model_validate(
+                    event.payload
+                ).request_id
+            if latest_requested is None and event.type == EventType.EXECUTION_INPUT_REQUESTED:
+                latest_requested = ExecutionInputRequestedPayload.model_validate(event.payload)
+            if (
+                step_payload is not None
+                and latest_requested is not None
+                and latest_attached_request_id is not None
+            ):
                 break
+        pending_request = None
+        if (
+            latest_requested is not None
+            and latest_requested.request_id != latest_attached_request_id
+            and task.status == TaskStatus.WAITING_INPUT
+        ):
+            pending_request = latest_requested
 
         updated_at = task.updated_at
         metadata = dict(latest_status_payload.metadata)
@@ -561,7 +580,7 @@ class ExecutionConsoleService:
             current_step=step_payload.step_name if step_payload else "",
             requested_input=(
                 pending_request.prompt
-                if pending_request is not None and task.status == TaskStatus.WAITING_INPUT
+                if pending_request is not None
                 else None
             ),
             pending_approval_id=(

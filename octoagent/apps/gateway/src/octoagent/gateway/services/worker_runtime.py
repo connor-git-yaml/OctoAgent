@@ -261,8 +261,13 @@ class WorkerRuntime:
 
     async def run(self, envelope: DispatchEnvelope, *, worker_id: str) -> WorkerResult:
         profile = self._resolve_tool_profile(envelope)
+        resumed_session_id = ""
+        if envelope.resume_state_snapshot is not None:
+            raw_session_id = envelope.resume_state_snapshot.get("execution_session_id")
+            if isinstance(raw_session_id, str) and raw_session_id.strip():
+                resumed_session_id = raw_session_id.strip()
         session = WorkerSession(
-            session_id=str(ULID()),
+            session_id=resumed_session_id or str(ULID()),
             dispatch_id=envelope.dispatch_id,
             task_id=envelope.task_id,
             worker_id=worker_id,
@@ -566,25 +571,31 @@ class WorkerRuntime:
             )
         )
         deadline = time.monotonic() + self._config.max_execution_timeout_seconds
-        while True:
-            if cancel_signal is not None and cancel_signal.is_set():
-                backend_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await backend_task
-                raise WorkerRuntimeCancelled("cancel_signal_received")
-            try:
-                await asyncio.wait_for(asyncio.shield(backend_task), timeout=0.1)
-                return
-            except TimeoutError:
-                task = await task_service.get_task(envelope.task_id)
-                if task is not None and task.status == TaskStatus.WAITING_INPUT:
-                    deadline = time.monotonic() + self._config.max_execution_timeout_seconds
-                    continue
-                if time.monotonic() > deadline:
+        try:
+            while True:
+                if cancel_signal is not None and cancel_signal.is_set():
                     backend_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await backend_task
-                    raise
+                    raise WorkerRuntimeCancelled("cancel_signal_received")
+                try:
+                    await asyncio.wait_for(asyncio.shield(backend_task), timeout=0.1)
+                    return
+                except TimeoutError:
+                    task = await task_service.get_task(envelope.task_id)
+                    if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                        deadline = time.monotonic() + self._config.max_execution_timeout_seconds
+                        continue
+                    if time.monotonic() > deadline:
+                        backend_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await backend_task
+                        raise
+        except asyncio.CancelledError:
+            backend_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await backend_task
+            raise
 
     @staticmethod
     def _failure_result(
