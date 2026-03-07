@@ -27,7 +27,7 @@ from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .routes import approvals, cancel, chat, health, message, stream, tasks, watchdog
+from .routes import approvals, cancel, chat, execution, health, message, stream, tasks, watchdog
 from .services.llm_service import LLMService
 from .services.sse_hub import SSEHub
 from .services.task_runner import TaskRunner
@@ -114,6 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         llm_service=llm_service,
         approval_manager=app.state.approval_manager,
     )
+    app.state.execution_console = app.state.task_runner.execution_console
     await app.state.task_runner.startup()
 
     # Feature 011: 注册 WatchdogScanner APScheduler job
@@ -127,8 +128,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     watchdog_config = WatchdogConfig.from_env()
     cooldown_registry = CooldownRegistry()
     from .services.watchdog.detectors import (
-        StateMachineDriftDetector,
         RepeatedFailureDetector,
+        StateMachineDriftDetector,
     )
 
     watchdog_scanner = WatchdogScanner(
@@ -231,6 +232,7 @@ def create_app() -> FastAPI:
     app.include_router(message.router, tags=["message"])
     app.include_router(tasks.router, tags=["tasks"])
     app.include_router(cancel.router, tags=["cancel"])
+    app.include_router(execution.router, tags=["execution"])
     app.include_router(stream.router, tags=["stream"])
     app.include_router(health.router, tags=["health"])
     app.include_router(approvals.router, tags=["approvals"])

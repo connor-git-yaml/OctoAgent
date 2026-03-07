@@ -34,13 +34,24 @@ VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.SUCCEEDED,
         TaskStatus.FAILED,
         TaskStatus.CANCELLED,
+        TaskStatus.WAITING_INPUT,
         # Feature 006: 策略决策为 ask 时进入审批等待
         TaskStatus.WAITING_APPROVAL,
+    },
+    # Feature 019: WAITING_INPUT 状态转换
+    TaskStatus.WAITING_INPUT: {
+        TaskStatus.RUNNING,
+        TaskStatus.CANCELLED,
     },
     # Feature 006: WAITING_APPROVAL 状态转换 -- 对齐 FR-013
     TaskStatus.WAITING_APPROVAL: {
         TaskStatus.RUNNING,   # 用户批准后恢复执行
         TaskStatus.REJECTED,  # 用户拒绝或超时
+        TaskStatus.CANCELLED,
+    },
+    TaskStatus.PAUSED: {
+        TaskStatus.RUNNING,
+        TaskStatus.CANCELLED,
     },
     # 终态不可再流转
     TaskStatus.SUCCEEDED: set(),
@@ -117,6 +128,14 @@ class EventType(StrEnum):
     TASK_HEARTBEAT = "TASK_HEARTBEAT"            # Worker 心跳确认事件
     TASK_MILESTONE = "TASK_MILESTONE"            # 任务里程碑完成标记事件
     TASK_DRIFT_DETECTED = "TASK_DRIFT_DETECTED"  # 漂移检测告警事件
+
+    # Feature 019: Execution Console / JobRunner 事件
+    EXECUTION_STATUS_CHANGED = "EXECUTION_STATUS_CHANGED"
+    EXECUTION_LOG = "EXECUTION_LOG"
+    EXECUTION_STEP = "EXECUTION_STEP"
+    EXECUTION_INPUT_REQUESTED = "EXECUTION_INPUT_REQUESTED"
+    EXECUTION_INPUT_ATTACHED = "EXECUTION_INPUT_ATTACHED"
+    EXECUTION_CANCEL_REQUESTED = "EXECUTION_CANCEL_REQUESTED"
 
 
 class ActorType(StrEnum):

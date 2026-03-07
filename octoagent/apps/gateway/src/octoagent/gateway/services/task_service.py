@@ -54,6 +54,8 @@ from octoagent.core.store.transaction import (
 )
 from ulid import ULID
 
+from .execution_context import bind_execution_context
+
 log = structlog.get_logger()
 
 
@@ -211,6 +213,69 @@ class TaskService:
             await self._sse_hub.broadcast(task_id, event)
         return event
 
+    async def append_structured_event(
+        self,
+        *,
+        task_id: str,
+        event_type: EventType,
+        actor: ActorType,
+        payload: dict[str, Any],
+        trace_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Event:
+        """追加任意结构化事件并广播。"""
+        event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=event_type,
+                actor=actor,
+                payload=payload,
+                trace_id=trace_id or f"trace-{task_id}",
+                causality=EventCausality(idempotency_key=idempotency_key),
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+        return event
+
+    async def create_text_artifact(
+        self,
+        *,
+        task_id: str,
+        name: str,
+        description: str,
+        content: str,
+        trace_id: str | None = None,
+        emit_event: bool = True,
+        session_id: str | None = None,
+        source: str = "",
+    ) -> Artifact:
+        """创建文本 Artifact 并写入 ARTIFACT_CREATED 事件。"""
+        artifact = Artifact(
+            artifact_id=str(ULID()),
+            task_id=task_id,
+            ts=datetime.now(UTC),
+            name=name,
+            description=description,
+            parts=[ArtifactPart(type=PartType.TEXT, content=content)],
+        )
+        await self._stores.artifact_store.put_artifact(artifact, content.encode("utf-8"))
+        await self._stores.conn.commit()
+        if emit_event:
+            await self._write_artifact_created(
+                task_id=task_id,
+                trace_id=trace_id or f"trace-{task_id}",
+                artifact_id=artifact.artifact_id,
+                artifact=artifact,
+                session_id=session_id,
+                source=source,
+            )
+        return artifact
+
     # 响应摘要截断阈值（对齐 FR-002-CL-4，沿用 M0 8KB 阈值）
     RESPONSE_SUMMARY_MAX_BYTES = 8192
 
@@ -222,6 +287,7 @@ class TaskService:
         model_alias: str | None = None,
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
+        execution_context=None,
     ) -> None:
         """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储 + Checkpoint
 
@@ -322,17 +388,37 @@ class TaskService:
                     effect_type="tool_call",
                 )
                 if first_record:
-                    llm_result = await llm_service.call(user_text, model_alias=model_alias)
+                    with bind_execution_context(execution_context):
+                        llm_result = await llm_service.call(user_text, model_alias=model_alias)
 
                     # 4. 存储 Artifact + 写入完成事件
-                    artifact_id, artifact = await self._store_llm_artifact(task_id, llm_result)
+                    artifact_id, artifact = await self._store_llm_artifact(
+                        task_id,
+                        llm_result,
+                        session_id=(
+                            execution_context.session_id
+                            if execution_context is not None
+                            else None
+                        ),
+                    )
                     await self._stores.side_effect_ledger_store.set_result_ref(
                         llm_call_idempotency_key, artifact_id
                     )
                     await self._write_model_call_completed(
                         task_id, trace_id, llm_result, artifact_id
                     )
-                    await self._write_artifact_created(task_id, trace_id, artifact_id, artifact)
+                    await self._write_artifact_created(
+                        task_id,
+                        trace_id,
+                        artifact_id,
+                        artifact,
+                        session_id=(
+                            execution_context.session_id
+                            if execution_context is not None
+                            else None
+                        ),
+                        source="llm-response",
+                    )
                 else:
                     reused_artifact_id = await self._resolve_reused_artifact_id(
                         llm_call_idempotency_key
@@ -398,21 +484,25 @@ class TaskService:
             return truncated + f"... [truncated, {suffix}]"
         return text
 
-    async def _store_llm_artifact(self, task_id: str, llm_result) -> tuple[str, Artifact]:
+    async def _store_llm_artifact(
+        self,
+        task_id: str,
+        llm_result,
+        *,
+        session_id: str | None = None,
+    ) -> tuple[str, Artifact]:
         """存储 LLM 响应为 Artifact"""
-        artifact_id = str(ULID())
-        content_bytes = llm_result.content.encode("utf-8")
-        artifact = Artifact(
-            artifact_id=artifact_id,
+        artifact = await self.create_text_artifact(
             task_id=task_id,
-            ts=datetime.now(UTC),
             name="llm-response",
             description="LLM 响应内容",
-            parts=[ArtifactPart(type=PartType.TEXT, content=llm_result.content)],
+            content=llm_result.content,
+            trace_id=f"trace-{task_id}",
+            emit_event=False,
+            session_id=session_id,
+            source="llm-response",
         )
-        await self._stores.artifact_store.put_artifact(artifact, content_bytes)
-        await self._stores.conn.commit()
-        return artifact_id, artifact
+        return artifact.artifact_id, artifact
 
     async def _write_model_call_completed(
         self, task_id: str, trace_id: str, llm_result, artifact_id: str
@@ -531,7 +621,14 @@ class TaskService:
             )
 
     async def _write_artifact_created(
-        self, task_id: str, trace_id: str, artifact_id: str, artifact: Artifact
+        self,
+        task_id: str,
+        trace_id: str,
+        artifact_id: str,
+        artifact: Artifact,
+        *,
+        session_id: str | None = None,
+        source: str = "",
     ) -> None:
         """写入 ARTIFACT_CREATED 事件"""
         event = await self._append_event_only_with_retry(
@@ -545,9 +642,11 @@ class TaskService:
                 actor=ActorType.SYSTEM,
                 payload=ArtifactCreatedPayload(
                     artifact_id=artifact_id,
-                    name="llm-response",
+                    name=artifact.name,
                     size=artifact.size,
                     part_count=len(artifact.parts),
+                    session_id=session_id,
+                    source=source,
                 ).model_dump(),
                 trace_id=trace_id,
             ),
@@ -992,6 +1091,36 @@ class TaskService:
                 await self._write_state_transition(
                     task_id=task_id,
                     from_status=TaskStatus.RUNNING,
+                    to_status=TaskStatus.CANCELLED,
+                    trace_id=f"trace-{task_id}",
+                    reason=reason,
+                )
+                return
+
+            if task.status == TaskStatus.WAITING_INPUT:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.WAITING_INPUT,
+                    to_status=TaskStatus.CANCELLED,
+                    trace_id=f"trace-{task_id}",
+                    reason=reason,
+                )
+                return
+
+            if task.status == TaskStatus.WAITING_APPROVAL:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.WAITING_APPROVAL,
+                    to_status=TaskStatus.CANCELLED,
+                    trace_id=f"trace-{task_id}",
+                    reason=reason,
+                )
+                return
+
+            if task.status == TaskStatus.PAUSED:
+                await self._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.PAUSED,
                     to_status=TaskStatus.CANCELLED,
                     trace_id=f"trace-{task_id}",
                     reason=reason,

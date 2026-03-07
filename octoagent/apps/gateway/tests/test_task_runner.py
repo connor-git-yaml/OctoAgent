@@ -6,14 +6,22 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from octoagent.core.models import CheckpointSnapshot, CheckpointStatus
+from octoagent.core.models import (
+    CheckpointSnapshot,
+    CheckpointStatus,
+    ExecutionBackend,
+    ExecutionSessionState,
+)
 from octoagent.core.models.enums import TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.execution_context import get_current_execution_context
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
+from octoagent.policy.approval_manager import ApprovalManager
+from octoagent.policy.models import ApprovalDecision
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
 
@@ -29,6 +37,34 @@ class SlowLLMService:
             model_name="mock",
             provider="mock",
             duration_ms=int(self._delay_s * 1000),
+            token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+
+class InteractiveLLMService:
+    def __init__(self, *, approval_required: bool = False) -> None:
+        self._approval_required = approval_required
+
+    async def call(self, prompt_or_messages, model_alias: str | None = None) -> ModelCallResult:
+        ctx = get_current_execution_context()
+        await ctx.emit_log("stdout", "interactive-start")
+        human_input = await ctx.consume_resume_input()
+        if human_input is None:
+            human_input = await ctx.request_input(
+                "请输入执行确认信息",
+                approval_required=self._approval_required,
+            )
+        await ctx.emit_log("stdout", f"interactive-input:{human_input}")
+        return ModelCallResult(
+            content=f"interactive:{human_input}",
+            model_alias=model_alias or "main",
+            model_name="mock-interactive",
+            provider="mock",
+            duration_ms=5,
             token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             cost_usd=0.0,
             cost_unavailable=False,
@@ -388,6 +424,221 @@ class TestTaskRunner:
             assert started_idx < chain.index("RESUME_SUCCEEDED")
         if "RESUME_FAILED" in chain:
             assert started_idx < chain.index("RESUME_FAILED")
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+    async def test_attach_input_live_path_updates_session_and_job(
+        self, tmp_path: Path
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-interactive.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=InteractiveLLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="need operator input",
+            idempotency_key="runner-019-live",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        for _ in range(20):
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("task did not enter WAITING_INPUT")
+
+        session = await runner.get_execution_session(task_id)
+        assert session is not None
+        assert session.state == ExecutionSessionState.WAITING_INPUT
+        assert session.backend == ExecutionBackend.DOCKER
+        assert session.can_attach_input is True
+
+        job = await store_group.task_job_store.get_job(task_id)
+        assert job is not None
+        assert job.status == "WAITING_INPUT"
+
+        result = await runner.attach_input(task_id, "live-confirmed")
+        assert result.delivered_live is True
+
+        for _ in range(20):
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.SUCCEEDED:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("task did not reach SUCCEEDED")
+
+        job = await store_group.task_job_store.get_job(task_id)
+        assert job is not None
+        assert job.status == "SUCCEEDED"
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        event_types = [event.type.value for event in events]
+        assert "EXECUTION_INPUT_REQUESTED" in event_types
+        assert "EXECUTION_INPUT_ATTACHED" in event_types
+        assert "EXECUTION_STATUS_CHANGED" in event_types
+
+        artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+        artifact_names = [artifact.name for artifact in artifacts]
+        assert "human-input" in artifact_names
+        assert "llm-response" in artifact_names
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+    async def test_attach_input_after_restart_resumes_waiting_task(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = str(tmp_path / "runner-interactive-restart.db")
+        artifacts_dir = str(tmp_path / "artifacts")
+        store_group = await create_store_group(db_path, artifacts_dir)
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=InteractiveLLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="restart for input",
+            idempotency_key="runner-019-restart",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        for _ in range(20):
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("task did not enter WAITING_INPUT before restart")
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+        store_group_2 = await create_store_group(db_path, artifacts_dir)
+        sse_hub_2 = SSEHub()
+        task_service_2 = TaskService(store_group_2, sse_hub_2)
+        runner_2 = TaskRunner(
+            store_group=store_group_2,
+            sse_hub=sse_hub_2,
+            llm_service=InteractiveLLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner_2.startup()
+
+        session = await runner_2.get_execution_session(task_id)
+        assert session is not None
+        assert session.state == ExecutionSessionState.WAITING_INPUT
+        assert session.live is False
+
+        result = await runner_2.attach_input(task_id, "restart-confirmed")
+        assert result.delivered_live is False
+
+        for _ in range(20):
+            task = await task_service_2.get_task(task_id)
+            if task is not None and task.status == TaskStatus.SUCCEEDED:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("task did not resume to SUCCEEDED after restart")
+
+        job = await store_group_2.task_job_store.get_job(task_id)
+        assert job is not None
+        assert job.status == "SUCCEEDED"
+
+        await runner_2.shutdown()
+        await store_group_2.conn.close()
+
+    async def test_attach_input_requires_approval_when_requested(
+        self, tmp_path: Path
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-approval.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        approval_manager = ApprovalManager(event_store=store_group.event_store)
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=InteractiveLLMService(approval_required=True),
+            approval_manager=approval_manager,
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="approved input only",
+            idempotency_key="runner-019-approval",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        for _ in range(20):
+            session = await runner.get_execution_session(task_id)
+            if session is not None and session.pending_approval_id:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("approval_id was not exposed for interactive input")
+
+        approval_id = session.pending_approval_id
+        assert approval_id is not None
+
+        try:
+            await runner.attach_input(task_id, "should-fail")
+        except Exception as exc:
+            assert "approval" in str(exc).lower()
+        else:
+            raise AssertionError("attach_input should require approval")
+
+        resolved = await approval_manager.resolve(approval_id, ApprovalDecision.ALLOW_ONCE)
+        assert resolved is True
+
+        result = await runner.attach_input(
+            task_id,
+            "approved-live",
+            approval_id=approval_id,
+        )
+        assert result.approval_id == approval_id
+
+        for _ in range(20):
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.SUCCEEDED:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("approved input did not resume task")
 
         await runner.shutdown()
         await store_group.conn.close()

@@ -25,3 +25,8 @@ def get_approval_manager(request: Request) -> ApprovalManager:
     ApprovalManager 通过 PolicyEngine 获取。
     """
     return request.app.state.approval_manager
+
+
+def get_execution_console_service(request: Request):
+    """从 app.state 获取 ExecutionConsoleService。"""
+    return request.app.state.execution_console

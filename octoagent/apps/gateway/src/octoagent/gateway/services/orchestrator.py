@@ -12,8 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
-from typing import Protocol
+from typing import Any, Protocol
 
 import structlog
 from octoagent.core.models import (
@@ -214,6 +213,7 @@ class LLMWorkerAdapter:
         runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
+        execution_console=None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -226,6 +226,7 @@ class LLMWorkerAdapter:
             config=runtime_config,
             docker_available_checker=docker_available_checker,
             cancellation_registry=cancellation_registry,
+            execution_console=execution_console,
         )
 
     @property
@@ -256,6 +257,7 @@ class OrchestratorService:
         worker_runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
+        execution_console=None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -271,6 +273,7 @@ class OrchestratorService:
             runtime_config=worker_runtime_config,
             docker_available_checker=docker_available_checker,
             cancellation_registry=cancellation_registry,
+            execution_console=execution_console,
         )
         self._workers: dict[str, OrchestratorWorker] = {default_worker.capability: default_worker}
         if workers:

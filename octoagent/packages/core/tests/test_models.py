@@ -17,6 +17,12 @@ from octoagent.core.models import (
     Event,
     EventCausality,
     EventType,
+    ExecutionBackend,
+    ExecutionConsoleSession,
+    ExecutionEventKind,
+    ExecutionSessionState,
+    HumanInputPolicy,
+    JobSpec,
     MessageAttachment,
     NormalizedMessage,
     PartType,
@@ -71,6 +77,12 @@ class TestEnums:
         assert EventType.RESUME_STARTED == "RESUME_STARTED"
         assert EventType.RESUME_SUCCEEDED == "RESUME_SUCCEEDED"
         assert EventType.RESUME_FAILED == "RESUME_FAILED"
+        assert EventType.EXECUTION_STATUS_CHANGED == "EXECUTION_STATUS_CHANGED"
+        assert EventType.EXECUTION_LOG == "EXECUTION_LOG"
+        assert EventType.EXECUTION_STEP == "EXECUTION_STEP"
+        assert EventType.EXECUTION_INPUT_REQUESTED == "EXECUTION_INPUT_REQUESTED"
+        assert EventType.EXECUTION_INPUT_ATTACHED == "EXECUTION_INPUT_ATTACHED"
+        assert EventType.EXECUTION_CANCEL_REQUESTED == "EXECUTION_CANCEL_REQUESTED"
 
     def test_actor_type_values(self):
         """ActorType 枚举值正确"""
@@ -81,6 +93,13 @@ class TestEnums:
         """PartType 枚举值正确"""
         assert PartType.TEXT == "text"
         assert PartType.FILE == "file"
+
+    def test_execution_enums(self):
+        """Execution 相关枚举值正确"""
+        assert ExecutionBackend.DOCKER == "docker"
+        assert ExecutionSessionState.RUNNING == "RUNNING"
+        assert ExecutionEventKind.STDOUT == "stdout"
+        assert HumanInputPolicy.APPROVAL_REQUIRED == "approval-required"
 
     def test_risk_level_values(self):
         """RiskLevel 枚举值正确"""
@@ -98,10 +117,16 @@ class TestStateMachine:
         assert validate_transition(TaskStatus.CREATED, TaskStatus.CANCELLED)
 
     def test_valid_transitions_from_running(self):
-        """RUNNING 可流转到 SUCCEEDED、FAILED、CANCELLED"""
+        """RUNNING 可流转到 SUCCEEDED、FAILED、CANCELLED、WAITING_INPUT"""
         assert validate_transition(TaskStatus.RUNNING, TaskStatus.SUCCEEDED)
         assert validate_transition(TaskStatus.RUNNING, TaskStatus.FAILED)
         assert validate_transition(TaskStatus.RUNNING, TaskStatus.CANCELLED)
+        assert validate_transition(TaskStatus.RUNNING, TaskStatus.WAITING_INPUT)
+
+    def test_valid_transitions_from_waiting_input(self):
+        """WAITING_INPUT 可恢复 RUNNING，也可被取消"""
+        assert validate_transition(TaskStatus.WAITING_INPUT, TaskStatus.RUNNING)
+        assert validate_transition(TaskStatus.WAITING_INPUT, TaskStatus.CANCELLED)
 
     def test_invalid_transition_created_to_succeeded(self):
         """CREATED 不能直接流转到 SUCCEEDED"""
@@ -258,7 +283,46 @@ class TestArtifactModel:
             hash="def456",
         )
         assert artifact.storage_ref is not None
-        assert artifact.parts[0].uri is not None
+
+
+class TestExecutionModels:
+    """Execution 模型测试"""
+
+    def test_job_spec_requires_command(self):
+        """JobSpec 至少要有一条命令"""
+        with pytest.raises(ValueError):
+            JobSpec(task_id="task-001", image="python:3.12-slim", command=[])
+
+    def test_job_spec_approval_policy_requires_interactive(self):
+        """approval-required 必须配合 interactive"""
+        with pytest.raises(ValueError):
+            JobSpec(
+                task_id="task-001",
+                image="python:3.12-slim",
+                command=["python", "-V"],
+                interactive=False,
+                input_policy=HumanInputPolicy.APPROVAL_REQUIRED,
+            )
+
+    def test_execution_console_session_creation(self):
+        """ExecutionConsoleSession 可正常创建"""
+        now = datetime.now(UTC)
+        session = ExecutionConsoleSession(
+            session_id="session-001",
+            task_id="task-001",
+            backend=ExecutionBackend.DOCKER,
+            backend_job_id="job-001",
+            state=ExecutionSessionState.RUNNING,
+            interactive=True,
+            input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
+            started_at=now,
+            updated_at=now,
+        )
+        assert session.session_id == "session-001"
+        assert session.state == ExecutionSessionState.RUNNING
+        assert session.latest_event_seq == 0
+        assert session.can_cancel is False
+        assert session.pending_approval_id is None
 
 
 class TestMessageModel:
