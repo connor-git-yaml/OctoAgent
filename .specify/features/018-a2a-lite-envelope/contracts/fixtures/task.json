@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-task",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://kernel",
+  "to": "agent://worker.ops",
+  "type": "TASK",
+  "idempotency_key": "task-018:dispatch-018-task:task",
+  "timestamp_ms": 1741305600000,
+  "payload": {
+    "user_text": "Summarize recent shell output",
+    "metadata": {
+      "channel": "telegram",
+      "sender_id": "owner"
+    },
+    "resume_from_node": null,
+    "resume_state_snapshot": null
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "hop_count": 1,
+    "max_hops": 3,
+    "route_reason": "single_worker_default",
+    "worker_capability": "worker.ops",
+    "tool_profile": "standard",
+    "model_alias": "main"
+  }
+}
