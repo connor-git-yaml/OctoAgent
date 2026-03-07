@@ -12,7 +12,7 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Planned（2026-03-06 同步）
+- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-In-Progress（2026-03-07 同步）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
@@ -2621,17 +2621,18 @@ M1.5 交付约束（已验证）：
 - [x] Logfire 面板可查看 trace 链路（Gateway → Kernel → Worker → LLM）
 - [x] `task_id/trace_id/span_id` 在关键链路透传一致并可校验
 
-### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周）
+### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周，进行中）
 
 - 拆解文档：`docs/m2-feature-split.md`（2026-03-06 新增）
-- [ ] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
-- [ ] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
+- 当前基线（2026-03-07）：015 / 016 / 018 / 019 / 020 / 022 已交付；017 / 021 / 023 待启动
+- [x] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
+- [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
 - [ ] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
-- [ ] Feature 018：A2A-Lite 消息投递 + A2AStateMapper
-- [ ] Feature 019：JobRunner docker backend + 交互式执行控制台
-- [ ] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
+- [x] Feature 018：A2A-Lite 消息投递 + A2AStateMapper
+- [x] Feature 019：JobRunner docker backend + 交互式执行控制台
+- [x] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
 - [ ] Feature 021：Chat Import Core（dedupe / window / summarize）
-- [ ] Feature 022：Backup/Restore + 会话导出 + 恢复演练记录
+- [x] Feature 022：Backup/Restore + 会话导出 + 恢复演练记录
 - [ ] Feature 023：M2 集成验收（不引入新能力）
 
 M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：

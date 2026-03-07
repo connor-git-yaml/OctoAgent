@@ -2,7 +2,7 @@
 feature_id: "018"
 title: "A2A-Lite Envelope + A2AStateMapper"
 milestone: "M2"
-status: "Draft"
+status: "Implemented"
 created: "2026-03-07"
 research_mode: "tech-only"
 blueprint_ref: "docs/blueprint.md §10.2 / §10.2.1 / §10.2.2 / §11.9 / §14"
@@ -14,7 +14,7 @@ parallel_dependency: "Feature 019（JobRunner）与 Feature 023（Worker ↔ Sub
 
 **Feature Branch**: `codex/feat-018-a2a-lite-envelope`
 **Created**: 2026-03-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: 基于 `docs/m2-feature-split.md` 的 Feature 018，冻结 OctoAgent 内部 Agent 通信协议，为后续多 Worker / SubAgent / JobRunner 对接提供稳定 contract。
 **调研基础**: `research/tech-research.md`
 
