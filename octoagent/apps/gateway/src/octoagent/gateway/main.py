@@ -38,6 +38,7 @@ from .routes import (
     execution,
     health,
     message,
+    operator_inbox,
     ops,
     stream,
     tasks,
@@ -45,7 +46,10 @@ from .routes import (
     watchdog,
 )
 from .services.llm_service import LLMService
+from .services.operator_actions import OperatorActionService
+from .services.operator_inbox import OperatorInboxService
 from .services.sse_hub import SSEHub
+from .services.task_journal import TaskJournalService
 from .services.task_runner import TaskRunner
 from .services.telegram import (
     CompositeApprovalBroadcaster,
@@ -94,15 +98,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 初始化 SSEHub
     app.state.sse_hub = SSEHub()
 
+    telegram_state_store = TelegramStateStore(project_root)
     telegram_service = TelegramGatewayService(
         project_root=project_root,
         store_group=store_group,
         sse_hub=app.state.sse_hub,
-        state_store=TelegramStateStore(project_root),
+        state_store=telegram_state_store,
         bot_client=TelegramBotClient(project_root),
         polling_timeout_s=_resolve_telegram_polling_timeout(project_root),
     )
     app.state.telegram_service = telegram_service
+    app.state.telegram_state_store = telegram_state_store
 
     # Feature 006: 初始化 PolicyEngine
     from octoagent.policy.policy_engine import PolicyEngine
@@ -220,6 +226,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.watchdog_config = watchdog_config
     app.state.watchdog_scheduler = scheduler
     app.state.watchdog_scanner = watchdog_scanner
+    app.state.task_journal_service = TaskJournalService(store_group=store_group)
+    app.state.operator_inbox_service = OperatorInboxService(
+        store_group=store_group,
+        approval_manager=app.state.approval_manager,
+        telegram_state_store=telegram_state_store,
+        watchdog_config=watchdog_config,
+        task_journal_service=app.state.task_journal_service,
+    )
+    app.state.operator_action_service = OperatorActionService(
+        store_group=store_group,
+        sse_hub=app.state.sse_hub,
+        approval_manager=app.state.approval_manager,
+        task_runner=app.state.task_runner,
+        telegram_state_store=telegram_state_store,
+        watchdog_config=watchdog_config,
+        task_journal_service=app.state.task_journal_service,
+    )
+    telegram_service.bind_operator_services(
+        app.state.operator_inbox_service,
+        app.state.operator_action_service,
+    )
 
     log.info(
         "watchdog_scheduler_started",
@@ -302,6 +329,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, tags=["health"])
     app.include_router(ops.router, tags=["ops"])
     app.include_router(approvals.router, tags=["approvals"])
+    app.include_router(operator_inbox.router, tags=["operator"])
     app.include_router(chat.router, tags=["chat"])
 
     # 挂载前端静态文件（frontend/dist/ -> /）

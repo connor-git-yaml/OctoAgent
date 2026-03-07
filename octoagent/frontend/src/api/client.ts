@@ -6,6 +6,9 @@ import type {
   BackupBundle,
   ExportFilter,
   ExportManifest,
+  OperatorActionRequest,
+  OperatorActionResult,
+  OperatorInboxResponse,
   RecoverySummary,
   TaskDetailResponse,
   TaskListResponse,
@@ -72,5 +75,20 @@ export async function triggerExportChats(
       since: filters.since ?? null,
       until: filters.until ?? null,
     }),
+  });
+}
+
+/** GET /api/operator/inbox -- 统一 operator inbox */
+export async function fetchOperatorInbox(): Promise<OperatorInboxResponse> {
+  return apiFetch<OperatorInboxResponse>("/api/operator/inbox");
+}
+
+/** POST /api/operator/actions -- 提交统一 operator 动作 */
+export async function submitOperatorAction(
+  body: OperatorActionRequest
+): Promise<OperatorActionResult> {
+  return apiFetch<OperatorActionResult>("/api/operator/actions", {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }

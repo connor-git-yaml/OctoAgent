@@ -349,6 +349,26 @@ class TaskDriftDetectedPayload(BaseModel):
     )
 
 
+# Feature 017: Operator Inbox / Mobile Controls Payload 类型
+
+
+class OperatorActionAuditPayload(BaseModel):
+    """OPERATOR_ACTION_RECORDED 事件 payload。"""
+
+    item_id: str = Field(description="被操作的 inbox item 标识")
+    item_kind: str = Field(description="item 类型")
+    action_kind: str = Field(description="动作类型")
+    source: str = Field(description="动作来源渠道")
+    actor_id: str = Field(description="操作者标识")
+    actor_label: str = Field(default="", description="操作者展示名称")
+    target_ref: str = Field(default="", description="目标对象引用")
+    outcome: str = Field(description="动作结果")
+    message: str = Field(default="", description="结果描述")
+    note: str = Field(default="", description="用户备注")
+    result_task_id: str | None = Field(default=None, description="retry 生成的新任务 ID")
+    handled_at: datetime = Field(description="动作处理时间")
+
+
 # Feature 019: Execution Console / JobRunner Payload 类型
 
 

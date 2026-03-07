@@ -171,3 +171,98 @@ export interface ExportManifest {
   event_count: number;
   artifact_refs: string[];
 }
+
+export type OperatorItemKind =
+  | "approval"
+  | "alert"
+  | "retryable_failure"
+  | "pairing_request";
+
+export type OperatorItemState = "pending" | "handled" | "degraded";
+
+export type OperatorActionKind =
+  | "approve_once"
+  | "approve_always"
+  | "deny"
+  | "cancel_task"
+  | "retry_task"
+  | "ack_alert"
+  | "approve_pairing"
+  | "reject_pairing";
+
+export type OperatorActionSource = "web" | "telegram" | "system";
+
+export type OperatorActionOutcome =
+  | "succeeded"
+  | "already_handled"
+  | "expired"
+  | "stale_state"
+  | "not_allowed"
+  | "not_found"
+  | "failed";
+
+export interface OperatorQuickAction {
+  kind: OperatorActionKind;
+  label: string;
+  style: string;
+  enabled: boolean;
+}
+
+export interface RetryLaunchRef {
+  source_task_id: string;
+  result_task_id: string;
+}
+
+export interface OperatorActionResult {
+  item_id: string;
+  kind: OperatorActionKind;
+  source: OperatorActionSource;
+  outcome: OperatorActionOutcome;
+  message: string;
+  task_id?: string | null;
+  audit_event_id?: string | null;
+  retry_launch?: RetryLaunchRef | null;
+  handled_at: string;
+}
+
+export interface OperatorInboxItem {
+  item_id: string;
+  kind: OperatorItemKind;
+  state: OperatorItemState;
+  title: string;
+  summary: string;
+  task_id?: string | null;
+  thread_id?: string | null;
+  source_ref: string;
+  created_at: string;
+  expires_at?: string | null;
+  pending_age_seconds?: number | null;
+  suggested_actions: string[];
+  quick_actions: OperatorQuickAction[];
+  recent_action_result?: OperatorActionResult | null;
+  metadata: Record<string, string>;
+}
+
+export interface OperatorInboxSummary {
+  total_pending: number;
+  approvals: number;
+  alerts: number;
+  retryable_failures: number;
+  pairing_requests: number;
+  degraded_sources: string[];
+  generated_at: string;
+}
+
+export interface OperatorInboxResponse {
+  summary: OperatorInboxSummary;
+  items: OperatorInboxItem[];
+}
+
+export interface OperatorActionRequest {
+  item_id: string;
+  kind: OperatorActionKind;
+  source: OperatorActionSource;
+  actor_id?: string;
+  actor_label?: string;
+  note?: string;
+}

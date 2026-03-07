@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from octoagent.core.models import TaskStatus
+from octoagent.core.models import OperatorActionOutcome, OperatorInboxItem, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.provider.dx.config_wizard import load_config
+from octoagent.provider.dx.telegram_client import InlineKeyboardButton, InlineKeyboardMarkup
 
+from .operator_actions import decode_telegram_operator_action, encode_telegram_operator_action
 from .task_service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 class TelegramPairingRequestLike(Protocol):
     code: str
+
+
+class TelegramApprovedUserLike(Protocol):
+    user_id: str
+    chat_id: str
 
 
 class TelegramStateStoreProtocol(Protocol):
@@ -60,6 +67,21 @@ class TelegramStateStoreProtocol(Protocol):
     def list_group_allow_users(self) -> list[str]:
         ...
 
+    def get_pending_pairing(self, user_id: str) -> TelegramPairingRequestLike | None:
+        ...
+
+    def list_pending_pairings(self) -> list[TelegramPairingRequestLike]:
+        ...
+
+    def upsert_approved_user(self, **kwargs: Any) -> TelegramApprovedUserLike:
+        ...
+
+    def delete_pending_pairing(self, user_id: str) -> None:
+        ...
+
+    def first_approved_user(self) -> TelegramApprovedUserLike | None:
+        ...
+
     def resolve_reply_thread_root(
         self,
         *,
@@ -93,6 +115,7 @@ class TelegramBotClientProtocol(Protocol):
         reply_to_message_id: str | int | None = None,
         message_thread_id: str | int | None = None,
         disable_notification: bool = False,
+        reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
     ) -> Any:
         ...
 
@@ -102,6 +125,25 @@ class TelegramBotClientProtocol(Protocol):
         offset: int | None = None,
         timeout_s: int,
     ) -> list[Any]:
+        ...
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str = "",
+        show_alert: bool = False,
+    ) -> Any:
+        ...
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: str,
+        message_id: str | int,
+        text: str,
+        reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
+    ) -> Any:
         ...
 
 
@@ -117,6 +159,9 @@ class TelegramInboundContext:
     sender_username: str = ""
     reply_to_message_id: str = ""
     message_thread_id: str = ""
+    callback_query_id: str = ""
+    callback_data: str = ""
+    is_callback: bool = False
 
 
 @dataclass(slots=True)
@@ -159,6 +204,8 @@ class TelegramGatewayService:
         self._polling_timeout_s = polling_timeout_s
         self._polling_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
+        self._operator_inbox_service = None
+        self._operator_action_service = None
 
     @property
     def enabled(self) -> bool:
@@ -167,6 +214,14 @@ class TelegramGatewayService:
 
     def bind_task_runner(self, task_runner: Any) -> None:
         self._task_runner = task_runner
+
+    def bind_operator_services(
+        self,
+        operator_inbox_service: Any,
+        operator_action_service: Any,
+    ) -> None:
+        self._operator_inbox_service = operator_inbox_service
+        self._operator_action_service = operator_action_service
 
     def _get_telegram_config(self):
         try:
@@ -291,11 +346,16 @@ class TelegramGatewayService:
             return TelegramIngestResult(status="ignored", detail="unsupported_update_payload")
 
         context = self._extract_context(payload)
-        if context is None or not context.text.strip():
+        if context is None:
             return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
 
         if not self._is_allowed(context):
             return await self._handle_unauthorized(context)
+
+        if context.is_callback:
+            return await self._handle_callback_query(context)
+        if not context.text.strip():
+            return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
 
         self._record_authorized_private_dm(context)
 
@@ -391,6 +451,14 @@ class TelegramGatewayService:
     async def _handle_unauthorized(self, context: TelegramInboundContext) -> TelegramIngestResult:
         if context.chat_type != "private" or self._state_store is None or self._bot_client is None:
             return TelegramIngestResult(status="blocked", detail="telegram_sender_not_authorized")
+        if context.is_callback:
+            with contextlib.suppress(Exception):
+                await self._bot_client.answer_callback_query(
+                    context.callback_query_id,
+                    text="当前账号没有 operator 权限",
+                    show_alert=False,
+                )
+            return TelegramIngestResult(status="blocked", detail="telegram_sender_not_authorized")
 
         policy = self._resolve_dm_policy()
         if policy != "pairing":
@@ -417,6 +485,7 @@ class TelegramGatewayService:
                 context.sender_id,
                 exc_info=True,
             )
+        await self._notify_pairing_request(context.sender_id)
         return TelegramIngestResult(status="pairing_required", detail=request.code)
 
     @staticmethod
@@ -452,15 +521,25 @@ class TelegramGatewayService:
     @staticmethod
     def _extract_context(update: Mapping[str, Any]) -> TelegramInboundContext | None:
         message = update.get("message")
+        callback_query_id = ""
+        callback_data = ""
+        is_callback = False
         if not isinstance(message, Mapping):
             callback = update.get("callback_query")
             if isinstance(callback, Mapping):
+                callback_query_id = str(callback.get("id") or "").strip()
+                callback_data = str(callback.get("data") or "").strip()
+                is_callback = True
                 message = callback.get("message")
+                sender = callback.get("from")
+            else:
+                sender = None
+        else:
+            sender = message.get("from")
         if not isinstance(message, Mapping):
             return None
 
         chat = message.get("chat")
-        sender = message.get("from")
         if not isinstance(chat, Mapping) or not isinstance(sender, Mapping):
             return None
 
@@ -500,6 +579,9 @@ class TelegramGatewayService:
             sender_username=username,
             reply_to_message_id=reply_to_message_id,
             message_thread_id=message_thread_id,
+            callback_query_id=callback_query_id,
+            callback_data=callback_data,
+            is_callback=is_callback,
         )
 
     async def notify_task_result(self, task_id: str) -> None:
@@ -533,34 +615,179 @@ class TelegramGatewayService:
         if self._bot_client is None or task_id is None:
             return
         task = await self._stores.task_store.get_task(task_id)
-        if task is None or task.requester.channel != "telegram":
+        if task is None:
             return
 
-        target = await self._resolve_reply_target(task_id)
+        target = await self._resolve_operator_target()
         if target is None:
             return
 
         if event_type == "approval:requested":
+            approval_id = str(data.get("approval_id", "")).strip()
+            item = None
+            if approval_id and self._operator_inbox_service is not None:
+                with contextlib.suppress(Exception):
+                    item = await self._operator_inbox_service.get_item(f"approval:{approval_id}")
             text = (
-                "任务需要审批。\n"
-                f"Approval ID: {data.get('approval_id', '-')}\n"
-                f"Tool: {data.get('tool_name', '-')}\n"
-                "请在 Web 端 approvals 面板完成处理。"
+                self._build_operator_item_text(item)
+                if item is not None
+                else (
+                    "任务需要审批。\n"
+                    f"Approval ID: {data.get('approval_id', '-')}\n"
+                    f"Tool: {data.get('tool_name', '-')}"
+                )
             )
+            reply_markup = self._build_operator_item_markup(item)
         elif event_type == "approval:resolved":
             decision = str(data.get("decision", "unknown"))
             text = f"审批结果已更新：{decision}"
+            reply_markup = None
         else:
             return
 
         sent_message = await self._bot_client.send_message(
             target["chat_id"],
             text,
-            reply_to_message_id=target.get("reply_to_message_id") or None,
-            message_thread_id=target.get("message_thread_id") or None,
             disable_notification=True,
+            reply_markup=reply_markup,
         )
         self._remember_outbound_reply_thread(target, sent_message)
+
+    async def _handle_callback_query(self, context: TelegramInboundContext) -> TelegramIngestResult:
+        if (
+            self._operator_action_service is None
+            or self._bot_client is None
+            or not context.callback_query_id
+            or not context.callback_data
+        ):
+            return TelegramIngestResult(status="ignored", detail="operator_action_unavailable")
+
+        try:
+            request = decode_telegram_operator_action(context.callback_data).model_copy(
+                update={
+                    "actor_id": f"user:telegram:{context.sender_id}",
+                    "actor_label": context.sender_name,
+                }
+            )
+        except ValueError as exc:
+            await self._bot_client.answer_callback_query(
+                context.callback_query_id,
+                text=str(exc),
+                show_alert=False,
+            )
+            return TelegramIngestResult(status="blocked", detail="invalid_operator_callback")
+
+        result = await self._operator_action_service.execute(request)
+        await self._bot_client.answer_callback_query(
+            context.callback_query_id,
+            text=self._callback_notice(result),
+            show_alert=False,
+        )
+        with contextlib.suppress(Exception):
+            await self._bot_client.edit_message_text(
+                chat_id=context.chat_id,
+                message_id=context.message_id,
+                text=self._render_operator_result_text(result),
+                reply_markup=None,
+            )
+        return TelegramIngestResult(
+            status="operator_action",
+            detail=result.outcome.value,
+            task_id=result.task_id,
+            created=result.outcome == OperatorActionOutcome.SUCCEEDED,
+        )
+
+    async def _notify_pairing_request(self, user_id: str) -> None:
+        if self._operator_inbox_service is None or self._bot_client is None:
+            return
+        item = None
+        with contextlib.suppress(Exception):
+            item = await self._operator_inbox_service.get_item(f"pairing:{user_id}")
+        if item is None:
+            return
+        target = await self._resolve_operator_target()
+        if target is None:
+            return
+        await self._bot_client.send_message(
+            target["chat_id"],
+            self._build_operator_item_text(item),
+            disable_notification=True,
+            reply_markup=self._build_operator_item_markup(item),
+        )
+
+    async def _resolve_operator_target(self) -> dict[str, str] | None:
+        if self._state_store is None:
+            return None
+        approved = self._state_store.first_approved_user()
+        if approved is None:
+            return None
+        return {"chat_id": str(approved.chat_id)}
+
+    def _build_operator_item_text(self, item: OperatorInboxItem | None) -> str:
+        if item is None:
+            return "存在待处理 operator 工作项。"
+        lines = [item.title]
+        if item.summary:
+            lines.append(item.summary)
+        if item.expires_at is not None:
+            lines.append(f"过期时间: {item.expires_at.isoformat()}")
+        if item.task_id:
+            lines.append(f"Task: {item.task_id}")
+        code = item.metadata.get("code", "")
+        if code:
+            lines.append(f"Pairing Code: {code}")
+        return "\n".join(lines)
+
+    def _build_operator_item_markup(
+        self,
+        item: OperatorInboxItem | None,
+    ) -> InlineKeyboardMarkup | None:
+        if item is None:
+            return None
+        rows: list[list[InlineKeyboardButton]] = []
+        current: list[InlineKeyboardButton] = []
+        for action in item.quick_actions:
+            if not action.enabled:
+                continue
+            try:
+                callback_data = encode_telegram_operator_action(item.item_id, action.kind)
+            except ValueError:
+                continue
+            current.append(
+                InlineKeyboardButton(text=action.label, callback_data=callback_data)
+            )
+            if len(current) == 2:
+                rows.append(current)
+                current = []
+        if current:
+            rows.append(current)
+        if not rows:
+            return None
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @staticmethod
+    def _callback_notice(result) -> str:
+        if result.outcome == OperatorActionOutcome.SUCCEEDED:
+            return "已处理"
+        if result.outcome == OperatorActionOutcome.ALREADY_HANDLED:
+            return "已被处理"
+        if result.outcome == OperatorActionOutcome.EXPIRED:
+            return "已过期"
+        if result.outcome == OperatorActionOutcome.STALE_STATE:
+            return "状态已变化"
+        if result.outcome == OperatorActionOutcome.NOT_ALLOWED:
+            return "当前不可操作"
+        if result.outcome == OperatorActionOutcome.NOT_FOUND:
+            return "目标不存在"
+        return "处理失败"
+
+    @staticmethod
+    def _render_operator_result_text(result) -> str:
+        return (
+            "Operator Action\n"
+            f"结果: {result.outcome.value}\n"
+            f"说明: {result.message}"
+        )
 
     async def _resolve_reply_target(self, task_id: str) -> dict[str, str] | None:
         events = await self._stores.event_store.get_events_for_task(task_id)

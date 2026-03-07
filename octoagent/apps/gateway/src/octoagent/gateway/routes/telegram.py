@@ -31,12 +31,15 @@ async def telegram_webhook(
         "accepted": 200,
         "duplicate": 200,
         "ignored": 200,
+        "operator_action": 200,
         "pairing_required": 202,
         "blocked": 403,
         "unauthorized": 401,
         "disabled": 503,
     }
-    payload: dict[str, Any] = {"ok": result.status in {"accepted", "duplicate", "ignored"}}
+    payload: dict[str, Any] = {
+        "ok": result.status in {"accepted", "duplicate", "ignored", "operator_action"}
+    }
     payload["status"] = result.status
     if result.detail:
         payload["detail"] = result.detail

@@ -51,6 +51,15 @@ class TelegramChat(BaseModel):
     username: str | None = None
 
 
+class InlineKeyboardButton(BaseModel):
+    text: str
+    callback_data: str | None = None
+
+
+class InlineKeyboardMarkup(BaseModel):
+    inline_keyboard: list[list[InlineKeyboardButton]]
+
+
 class TelegramBotIdentity(TelegramUser):
     """`getMe()` 结果。"""
 
@@ -69,9 +78,19 @@ class TelegramMessage(BaseModel):
 TelegramMessage.model_rebuild()
 
 
+class TelegramCallbackQuery(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    from_user: TelegramUser = Field(alias="from")
+    message: TelegramMessage | None = None
+    data: str | None = None
+
+
 class TelegramUpdate(BaseModel):
     update_id: int
     message: TelegramMessage | None = None
+    callback_query: TelegramCallbackQuery | None = None
 
 
 class TelegramBotClient:
@@ -161,6 +180,7 @@ class TelegramBotClient:
         reply_to_message_id: str | int | None = None,
         message_thread_id: str | int | None = None,
         disable_notification: bool = True,
+        reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
     ) -> TelegramMessage:
         payload: dict[str, Any] = {
             "chat_id": str(chat_id),
@@ -171,10 +191,54 @@ class TelegramBotClient:
             payload["reply_to_message_id"] = int(reply_to_message_id)
         if message_thread_id is not None:
             payload["message_thread_id"] = int(message_thread_id)
+        if reply_markup is not None:
+            payload["reply_markup"] = (
+                reply_markup.model_dump(exclude_none=True)
+                if isinstance(reply_markup, BaseModel)
+                else reply_markup
+            )
         result = await self._request(
             "sendMessage",
             payload=payload,
         )
+        return TelegramMessage.model_validate(result)
+
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        *,
+        text: str = "",
+        show_alert: bool = False,
+    ) -> bool:
+        payload: dict[str, Any] = {
+            "callback_query_id": callback_query_id,
+            "show_alert": show_alert,
+        }
+        if text:
+            payload["text"] = text
+        result = await self._request("answerCallbackQuery", payload=payload)
+        return bool(result)
+
+    async def edit_message_text(
+        self,
+        *,
+        chat_id: str | int,
+        message_id: str | int,
+        text: str,
+        reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
+    ) -> TelegramMessage:
+        payload: dict[str, Any] = {
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "text": text,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = (
+                reply_markup.model_dump(exclude_none=True)
+                if isinstance(reply_markup, BaseModel)
+                else reply_markup
+            )
+        result = await self._request("editMessageText", payload=payload)
         return TelegramMessage.model_validate(result)
 
     async def get_updates(
