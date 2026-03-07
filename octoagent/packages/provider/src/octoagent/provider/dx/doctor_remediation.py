@@ -104,6 +104,8 @@ def _stage_for(check_name: str) -> DoctorStage:
         "master_key_match",
         "octoagent_yaml_valid",
         "litellm_sync",
+        "telegram_config",
+        "telegram_token",
     }:
         return "config"
     return "connectivity"
@@ -234,6 +236,41 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
             manual_steps=[
                 "检查 LITELLM_PROXY_KEY、Provider API Key 与网络连通性",
                 "修复后重新运行: octo doctor --live",
+            ],
+        ),
+        "telegram_config": _manual_action(
+            "repair-telegram-config",
+            "补齐 Telegram 配置",
+            "在 octoagent.yaml 中启用并补齐 channels.telegram。",
+            blocking=blocking,
+            sort_order=82,
+            manual_steps=[
+                "设置 channels.telegram.enabled=true",
+                "根据 mode 补齐 bot_token_env 与 webhook_url/polling 配置",
+                "修复后重新运行: octo doctor",
+            ],
+        ),
+        "telegram_token": _manual_action(
+            "repair-telegram-token",
+            "设置 Telegram bot token",
+            "确保 bot token 环境变量已导出并可被 provider/dx 读取。",
+            blocking=blocking,
+            sort_order=84,
+            manual_steps=[
+                "在 .env 或 shell 中设置 TELEGRAM_BOT_TOKEN（或自定义 bot_token_env）",
+                "修复后重新运行: octo doctor",
+            ],
+        ),
+        "telegram_readiness": _manual_action(
+            "repair-telegram-readiness",
+            "修复 Telegram readiness",
+            "检查 bot token、网络连通性与 telegram-state.json。",
+            blocking=blocking,
+            sort_order=86,
+            manual_steps=[
+                "确认 api.telegram.org 可达且 token 有效",
+                "确认 telegram-state.json 可解析且 pairing 状态正常",
+                "修复后重新运行: octo doctor",
             ],
         ),
     }

@@ -11,7 +11,7 @@ import warnings
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # octoagent.yaml 文件头注释（不含凭证提示）
 _YAML_HEADER = (
@@ -21,6 +21,9 @@ _YAML_HEADER = (
     "# NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名\n"
     "#\n"
 )
+
+_ENV_NAME_PATTERN = r"^[A-Z][A-Z0-9_]*$"
+_OPTIONAL_ENV_NAME_PATTERN = r"^$|^[A-Z][A-Z0-9_]*$"
 
 # ---------------------------------------------------------------------------
 # 辅助错误类型
@@ -77,7 +80,7 @@ class ProviderEntry(BaseModel):
     )
     api_key_env: str = Field(
         description="凭证所在环境变量名（如 'OPENROUTER_API_KEY'）。仅存变量名称，不存实际值。",
-        pattern=r"^[A-Z][A-Z0-9_]*$",
+        pattern=_ENV_NAME_PATTERN,
     )
     enabled: bool = Field(
         default=True,
@@ -151,7 +154,104 @@ class RuntimeConfig(BaseModel):
     master_key_env: str = Field(
         default="LITELLM_MASTER_KEY",
         description="Master Key 所在的环境变量名",
-        pattern=r"^[A-Z][A-Z0-9_]*$",
+        pattern=_ENV_NAME_PATTERN,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TelegramChannelConfig / ChannelsConfig — 渠道配置
+# ---------------------------------------------------------------------------
+
+
+class TelegramChannelConfig(BaseModel):
+    """Telegram 渠道最小配置。
+
+    provider/dx、doctor 与 gateway 共享此结构，作为 Feature 016 的最小单一事实源。
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="是否启用 Telegram channel",
+    )
+    mode: Literal["webhook", "polling"] = Field(
+        default="webhook",
+        description="Telegram 接入模式",
+    )
+    bot_token_env: str = Field(
+        default="TELEGRAM_BOT_TOKEN",
+        description="Bot token 所在环境变量名",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    webhook_url: str = Field(
+        default="",
+        description="webhook 模式下的外部 URL",
+    )
+    webhook_secret_env: str = Field(
+        default="",
+        description="webhook secret 所在环境变量名（可选）",
+        pattern=_OPTIONAL_ENV_NAME_PATTERN,
+    )
+    dm_policy: Literal["pairing", "allowlist", "open", "disabled"] = Field(
+        default="pairing",
+        description="DM 默认访问策略",
+    )
+    allow_users: list[str] = Field(
+        default_factory=list,
+        description="显式允许的 Telegram user id 列表",
+    )
+    allowed_groups: list[str] = Field(
+        default_factory=list,
+        description="显式允许的 Telegram group/chat id 列表",
+    )
+    group_policy: Literal["allowlist", "open", "disabled"] = Field(
+        default="allowlist",
+        description="群聊默认访问策略",
+    )
+    group_allow_users: list[str] = Field(
+        default_factory=list,
+        description="群聊内额外允许发言的 user id 列表",
+    )
+    polling_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=600,
+        description="polling 模式单次 long polling 超时时间（秒）",
+    )
+
+    @field_validator(
+        "allow_users",
+        "allowed_groups",
+        "group_allow_users",
+        mode="before",
+    )
+    @classmethod
+    def normalize_id_list(cls, value: object) -> list[str]:
+        """允许 YAML 中使用数字 chat_id，但内部统一存字符串。"""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise TypeError("Telegram ID 列表必须是 list")
+        normalized: list[str] = []
+        for item in value:
+            if isinstance(item, str | int):
+                normalized.append(str(item))
+                continue
+            raise TypeError("Telegram ID 仅支持 str/int")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_webhook_requirements(self) -> TelegramChannelConfig:
+        if self.enabled and self.mode == "webhook" and not self.webhook_url:
+            raise ValueError("channels.telegram.mode=webhook 时必须提供 webhook_url")
+        return self
+
+
+class ChannelsConfig(BaseModel):
+    """统一渠道配置块。"""
+
+    telegram: TelegramChannelConfig = Field(
+        default_factory=TelegramChannelConfig,
+        description="Telegram 渠道配置",
     )
 
 
@@ -186,9 +286,13 @@ class OctoAgentConfig(BaseModel):
         default_factory=RuntimeConfig,
         description="运行时配置块",
     )
+    channels: ChannelsConfig = Field(
+        default_factory=ChannelsConfig,
+        description="多渠道配置块",
+    )
 
     @model_validator(mode="after")
-    def validate_provider_ids_unique(self) -> "OctoAgentConfig":
+    def validate_provider_ids_unique(self) -> OctoAgentConfig:
         """校验 providers 列表中 id 唯一"""
         seen: set[str] = set()
         for p in self.providers:
@@ -198,7 +302,7 @@ class OctoAgentConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_alias_provider_refs(self) -> "OctoAgentConfig":
+    def validate_alias_provider_refs(self) -> OctoAgentConfig:
         """校验 model_aliases 中所有 provider 引用必须存在于 providers 列表"""
         provider_ids = {p.id for p in self.providers}
         for alias_key, alias_val in self.model_aliases.items():
@@ -210,7 +314,7 @@ class OctoAgentConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def warn_alias_disabled_provider(self) -> "OctoAgentConfig":
+    def warn_alias_disabled_provider(self) -> OctoAgentConfig:
         """alias 指向已禁用 Provider 时发出 UserWarning（EC-5）"""
         disabled_ids = {p.id for p in self.providers if not p.enabled}
         for alias_key, alias_val in self.model_aliases.items():
@@ -254,7 +358,7 @@ class OctoAgentConfig(BaseModel):
         return _YAML_HEADER + body
 
     @classmethod
-    def from_yaml(cls, text: str) -> "OctoAgentConfig":
+    def from_yaml(cls, text: str) -> OctoAgentConfig:
         """解析并校验 YAML 文本
 
         抛出 ConfigParseError（含字段路径）：

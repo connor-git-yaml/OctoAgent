@@ -15,7 +15,10 @@ import structlog
 from rich.table import Table
 
 from ..auth.store import CredentialStore
+from .config_schema import TelegramChannelConfig
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
+from .onboarding_models import OnboardingStepStatus
+from .telegram_verifier import TelegramOnboardingVerifier
 
 log = structlog.get_logger()
 
@@ -23,12 +26,18 @@ log = structlog.get_logger()
 class DoctorRunner:
     """诊断运行器"""
 
-    def __init__(self, project_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path | None = None,
+        *,
+        telegram_verifier: TelegramOnboardingVerifier | None = None,
+    ) -> None:
         if project_root is None:
             self._root = Path.cwd()
         else:
             self._root = project_root
         self._store = CredentialStore()
+        self._telegram_verifier = telegram_verifier or TelegramOnboardingVerifier()
 
     async def run_all_checks(self, live: bool = False) -> DoctorReport:
         """执行所有检查项
@@ -66,9 +75,12 @@ class DoctorRunner:
         # Feature 014 新增检查项（不修改现有签名）
         checks.append(await self.check_octoagent_yaml_valid())
         checks.append(await self.check_litellm_sync())
+        checks.append(await self.check_telegram_config())
+        checks.append(await self.check_telegram_token())
 
         # --live 检查
         if live:
+            checks.append(await self.check_telegram_readiness())
             checks.append(await self.check_live_ping())
 
         # 计算整体状态
@@ -453,6 +465,24 @@ class DoctorRunner:
             )
         return cfg, None
 
+    def _load_telegram_config_safe(
+        self,
+        check_name: str,
+    ) -> tuple[TelegramChannelConfig | None, CheckResult | None]:
+        try:
+            cfg, skip = self._load_config_safe(check_name)
+        except Exception as exc:
+            return None, CheckResult(
+                name=check_name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"Telegram channel 配置无效：{exc}",
+                fix_hint="修复 octoagent.yaml 中 channels.telegram 配置后重试",
+            )
+        if skip is not None:
+            return None, skip
+        return cfg.channels.telegram, None
+
     async def check_octoagent_yaml_valid(self) -> CheckResult:
         """校验 octoagent.yaml 格式（RECOMMENDED 级别）
 
@@ -515,6 +545,115 @@ class DoctorRunner:
             message=f"配置不一致：{diffs[0]}" if diffs else "配置不一致",
             fix_hint="运行 octo config sync 重新生成 litellm-config.yaml",
         )
+
+    async def check_telegram_config(self) -> CheckResult:
+        """检查 Telegram channel 最小配置是否可用。"""
+        cfg, skip = self._load_telegram_config_safe("telegram_config")
+        if skip is not None:
+            return skip
+        if not cfg.enabled:
+            return CheckResult(
+                name="telegram_config",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="channels.telegram 未启用",
+            )
+
+        availability = self._telegram_verifier.availability(self._root)
+        if availability.available:
+            return CheckResult(
+                name="telegram_config",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message=f"Telegram channel 已启用（mode={cfg.mode}）",
+            )
+        return CheckResult(
+            name="telegram_config",
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message=availability.reason or "Telegram channel 配置不完整",
+            fix_hint=self._fix_hint_from_actions(availability.actions),
+        )
+
+    async def check_telegram_token(self) -> CheckResult:
+        """检查 Telegram bot token 环境变量是否可读取。"""
+        cfg, skip = self._load_telegram_config_safe("telegram_token")
+        if skip is not None:
+            return skip
+        if not cfg.enabled:
+            return CheckResult(
+                name="telegram_token",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="Telegram channel 未启用，跳过 bot token 检查",
+            )
+
+        environ = getattr(self._telegram_verifier, "_environ", os.environ)
+        token = environ.get(cfg.bot_token_env, "")
+        if token:
+            return CheckResult(
+                name="telegram_token",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message=f"{cfg.bot_token_env} 已设置",
+            )
+        return CheckResult(
+            name="telegram_token",
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message=f"缺少 Telegram bot token 环境变量: {cfg.bot_token_env}",
+            fix_hint=f"在 .env 或 shell 中设置 {cfg.bot_token_env}",
+        )
+
+    async def check_telegram_readiness(self) -> CheckResult:
+        """复用真实 verifier 做 Telegram readiness 探测（仅 --live 调用）。"""
+        cfg, skip = self._load_telegram_config_safe("telegram_readiness")
+        if skip is not None:
+            return skip
+        if not cfg.enabled:
+            return CheckResult(
+                name="telegram_readiness",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="Telegram channel 未启用，跳过 readiness 检查",
+            )
+
+        result = await self._telegram_verifier.run_readiness(self._root, session=None)
+        if result.status == OnboardingStepStatus.COMPLETED:
+            return CheckResult(
+                name="telegram_readiness",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message=result.summary,
+            )
+        if result.status == OnboardingStepStatus.SKIPPED:
+            return CheckResult(
+                name="telegram_readiness",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=result.summary,
+                fix_hint=self._fix_hint_from_actions(result.actions),
+            )
+        return CheckResult(
+            name="telegram_readiness",
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message=result.summary,
+            fix_hint=self._fix_hint_from_actions(result.actions),
+        )
+
+    @staticmethod
+    def _fix_hint_from_actions(actions: list[object]) -> str:
+        if not actions:
+            return ""
+        action = actions[0]
+        command = getattr(action, "command", "")
+        if command:
+            return str(command)
+        manual_steps = getattr(action, "manual_steps", [])
+        if manual_steps:
+            return str(manual_steps[0])
+        return str(getattr(action, "description", ""))
 
     @staticmethod
     def _compute_overall(checks: list[CheckResult]) -> CheckStatus:

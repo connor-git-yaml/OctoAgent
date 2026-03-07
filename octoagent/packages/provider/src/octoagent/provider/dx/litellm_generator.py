@@ -73,7 +73,7 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
             if oauth_cfg:
                 if oauth_cfg.api_base_url:
                     litellm_params["api_base"] = oauth_cfg.api_base_url
-                # chatgpt.com/backend-api/codex/responses 要求 store=false 且 stream=true
+                # ChatGPT Backend API 的 Responses 路径要求 store=false 且 stream=true
                 # 使用 extra_body 确保字段写入请求体（而非被 LiteLLM 拦截为自有参数）
                 litellm_params["extra_body"] = {"store": False, "stream": True}
                 if oauth_cfg.extra_api_headers:

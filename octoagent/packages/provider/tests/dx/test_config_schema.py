@@ -10,16 +10,15 @@ from __future__ import annotations
 import warnings
 
 import pytest
-
 from octoagent.provider.dx.config_schema import (
+    ChannelsConfig,
     ConfigParseError,
-    CredentialLeakError,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     RuntimeConfig,
+    TelegramChannelConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # 测试夹具
@@ -48,6 +47,7 @@ def _make_config(**kwargs: object) -> OctoAgentConfig:
             )
         },
         "runtime": RuntimeConfig(),
+        "channels": ChannelsConfig(),
     }
     defaults.update(kwargs)
     return OctoAgentConfig(**defaults)  # type: ignore[arg-type]
@@ -77,6 +77,9 @@ def test_default_values() -> None:
     assert config.runtime.llm_mode == "litellm"
     assert config.runtime.litellm_proxy_url == "http://localhost:4000"
     assert config.runtime.master_key_env == "LITELLM_MASTER_KEY"
+    assert config.channels.telegram.enabled is False
+    assert config.channels.telegram.mode == "webhook"
+    assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +195,18 @@ def test_unknown_config_version_warns() -> None:
 
 def test_to_yaml_roundtrip() -> None:
     """to_yaml() / from_yaml() 往返序列化"""
-    original = _make_config()
+    original = _make_config(
+        channels=ChannelsConfig(
+            telegram=TelegramChannelConfig(
+                enabled=True,
+                mode="polling",
+                allow_users=["123"],
+                allowed_groups=["-1001"],
+                group_allow_users=["456"],
+                polling_timeout_seconds=10,
+            )
+        )
+    )
     yaml_str = original.to_yaml()
     # 验证包含注释头
     assert "NEVER" in yaml_str
@@ -201,6 +215,9 @@ def test_to_yaml_roundtrip() -> None:
     assert restored.config_version == original.config_version
     assert restored.providers[0].id == original.providers[0].id
     assert restored.model_aliases["main"].model == original.model_aliases["main"].model
+    assert restored.channels.telegram.enabled is True
+    assert restored.channels.telegram.mode == "polling"
+    assert restored.channels.telegram.allowed_groups == ["-1001"]
 
 
 def test_from_yaml_invalid_syntax() -> None:
@@ -264,6 +281,32 @@ def test_validate_alias_disabled_provider() -> None:
             },
         )
     assert any("已禁用" in str(warning.message) for warning in w)
+
+
+def test_telegram_webhook_requires_url_when_enabled() -> None:
+    """enabled=true 且 mode=webhook 时必须提供 webhook_url。"""
+    with pytest.raises(Exception) as exc_info:
+        TelegramChannelConfig(enabled=True, mode="webhook")
+    assert "webhook_url" in str(exc_info.value)
+
+
+def test_telegram_numeric_ids_are_normalized_to_strings() -> None:
+    """Telegram ID 列表允许 YAML 数字，内部统一转成字符串。"""
+    config = OctoAgentConfig(
+        updated_at="2026-03-04",
+        channels=ChannelsConfig(
+            telegram=TelegramChannelConfig(
+                enabled=True,
+                mode="polling",
+                allow_users=[123456],
+                allowed_groups=[-1009988],
+                group_allow_users=[789],
+            )
+        ),
+    )
+    assert config.channels.telegram.allow_users == ["123456"]
+    assert config.channels.telegram.allowed_groups == ["-1009988"]
+    assert config.channels.telegram.group_allow_users == ["789"]
 
 
 # ---------------------------------------------------------------------------

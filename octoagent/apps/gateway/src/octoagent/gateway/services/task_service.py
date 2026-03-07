@@ -143,6 +143,7 @@ class TaskService:
                 text_preview=text_preview,
                 text_length=len(message.text),
                 attachment_count=len(message.attachments),
+                metadata=message.metadata,
             ).model_dump(),
             trace_id=trace_id,
         )
@@ -183,6 +184,7 @@ class TaskService:
         *,
         sender_id: str = "owner",
         attachment_count: int = 0,
+        metadata: dict[str, str] | None = None,
     ) -> Event:
         """向已有任务追加 USER_MESSAGE 事件。"""
         task = await self._stores.task_store.get_task(task_id)
@@ -204,6 +206,7 @@ class TaskService:
                     text_preview=text_preview,
                     text_length=len(text),
                     attachment_count=attachment_count,
+                    metadata=metadata or {},
                 ).model_dump(),
                 trace_id=trace_id,
                 causality=EventCausality(idempotency_key=f"chat-{task_id}-{ULID()}"),
