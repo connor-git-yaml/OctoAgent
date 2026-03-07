@@ -254,6 +254,26 @@ M1.5 基线（已完成）
 - F020-T04：实现基础检索接口与敏感分区默认拒绝策略。
 - F020-T05：增加 unit/integration tests（同一 `subject_key` 唯一 current、冲突写入、Vault 默认拒绝）。
 
+**冻结接口（2026-03-07）**：
+- `propose_write()`
+- `validate_proposal()`
+- `commit_memory()`
+- `search_memory()`
+- `get_memory()`
+- `before_compaction_flush()`
+- `MemoryBackend`
+- `MemUBackend`（adapter 位）
+
+**M2 插件化落点（2026-03-07）**：
+- `packages/memory` 负责 governance plane：proposal / arbitration / SoR current / Vault policy
+- `MemUBackend` 负责 memory engine plane：检索、索引、增量同步、后续 chat import / knowledge update 扩展
+- backend 失效时自动降级回本地 SQLite metadata search，不阻塞任务系统
+
+**明确非目标（避免与 021 / Context Manager / M3 混淆）**：
+- 不实现 Chat Import Core
+- 不实现工作上下文 GC / auto-compaction 引擎
+- 不实现 Vault 授权检索与浏览 UI
+
 **验收标准**：
 - 写入必须经 `WriteProposal -> validate -> commit`；
 - SoR 同 `subject_key` 永远只有一条 `current`；
