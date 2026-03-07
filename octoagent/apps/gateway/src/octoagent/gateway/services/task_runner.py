@@ -18,6 +18,7 @@ import structlog
 from octoagent.core.models import (
     TERMINAL_STATES,
     ExecutionConsoleSession,
+    ExecutionSessionState,
     ResumeFailureType,
     ResumeResult,
     TaskStatus,
@@ -115,6 +116,11 @@ class TaskRunner:
                 await self._stores.task_job_store.mark_failed(
                     task_id,
                     "runner_shutdown_cancelled",
+                )
+                await self._mark_execution_terminal(
+                    task_id=task_id,
+                    status=ExecutionSessionState.FAILED,
+                    message="runner shutdown cancelled execution",
                 )
             self._cancellation_registry.clear(task_id)
 
@@ -295,6 +301,11 @@ class TaskRunner:
             reason="用户取消",
         )
         await self._stores.task_job_store.mark_cancelled(task_id)
+        await self._mark_execution_terminal(
+            task_id=task_id,
+            status=ExecutionSessionState.CANCELLED,
+            message="用户取消",
+        )
         return True
 
     async def get_execution_session(self, task_id: str) -> ExecutionConsoleSession | None:
@@ -346,6 +357,7 @@ class TaskRunner:
             model_alias=job.model_alias,
             resume_from_node="state_running",
             resume_state_snapshot={
+                "execution_session_id": result.session_id,
                 "human_input_artifact_id": result.artifact_id,
                 "input_request_id": result.request_id,
             },
@@ -432,4 +444,36 @@ class TaskRunner:
                     task_id,
                     reason=f"后台任务超时（>{int(self._timeout_seconds)}s）",
                 )
+                await self._mark_execution_terminal(
+                    task_id=task_id,
+                    status=ExecutionSessionState.FAILED,
+                    message="worker runtime timeout",
+                )
                 log.warning("task_runner_job_timeout", task_id=task_id)
+
+    async def _mark_execution_terminal(
+        self,
+        *,
+        task_id: str,
+        status: ExecutionSessionState,
+        message: str,
+    ) -> None:
+        session = await self._execution_console.get_session(task_id)
+        if session is None:
+            return
+        if (
+            session.state
+            in {
+                ExecutionSessionState.SUCCEEDED,
+                ExecutionSessionState.FAILED,
+                ExecutionSessionState.CANCELLED,
+            }
+            and session.live is False
+        ):
+            return
+        await self._execution_console.mark_status(
+            task_id=task_id,
+            session_id=session.session_id,
+            status=status,
+            message=message,
+        )

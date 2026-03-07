@@ -231,6 +231,9 @@ class TestExecutionApi:
                 assert attach_resp.status_code == 200
 
                 await _wait_for_task_status(task_service, task_id, TaskStatus.SUCCEEDED)
+                session_resp = await client.get(f"/api/tasks/{task_id}/execution")
+                assert session_resp.status_code == 200
+                assert session_resp.json()["session"]["pending_approval_id"] is None
 
     async def test_attach_input_route_returns_conflict_when_not_waiting(
         self,

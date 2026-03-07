@@ -40,7 +40,7 @@ uv run --project octoagent python -m pytest \
 ```
 
 - 结果：PASS
-- 汇总：`51 passed`
+- 汇总：`52 passed`
 
 ## 验证覆盖
 
@@ -48,8 +48,11 @@ uv run --project octoagent python -m pytest \
 - `RUNNING -> WAITING_INPUT -> RUNNING/SUCCEEDED` 状态链
 - task_jobs `WAITING_INPUT` 持久化与 restart-after-input 恢复
 - execution session 投影与 `session_id` 过滤
+- cancel / timeout / shutdown 时 backend task 真正中断，不再残留后台执行
 - execution log / step / input_requested / input_attached / artifact stream 回放
+- restart-after-input 继续沿用原 execution `session_id`
 - approval-required 输入 gate 与 `approval_id` 透传
+- approval 消费后，投影 session 不再暴露过期 `pending_approval_id`
 - execution API 的 `200 / 403 / 409 / 404` 返回语义
 - worker runtime 的 backend 选择、timeout、cancel 回归
 

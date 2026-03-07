@@ -20,6 +20,7 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
+from octoagent.gateway.services.worker_runtime import WorkerRuntimeConfig
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalDecision
 from octoagent.provider.models import ModelCallResult, TokenUsage
@@ -43,6 +44,20 @@ class SlowLLMService:
             is_fallback=False,
             fallback_reason="",
         )
+
+
+class CancellableLLMService:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def call(self, prompt_or_messages, model_alias: str | None = None) -> ModelCallResult:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 class InteractiveLLMService:
@@ -193,6 +208,51 @@ class TestTaskRunner:
         assert task.status == "CANCELLED"
         assert job is not None
         assert job.status == "CANCELLED"
+
+        await runner.shutdown()
+        await store_group.conn.close()
+
+    async def test_cancel_running_job_cancels_underlying_llm_call(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-cancel-live.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        llm_service = CancellableLLMService()
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            worker_runtime_config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="runner cancel backend",
+            idempotency_key="runner-cancel-live-001",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        await asyncio.wait_for(llm_service.started.wait(), timeout=0.5)
+        cancelled = await runner.cancel_task(task_id)
+        assert cancelled is True
+        await asyncio.wait_for(llm_service.cancelled.wait(), timeout=0.5)
+
+        session = await runner.get_execution_session(task_id)
+        assert session is not None
+        assert session.state == ExecutionSessionState.CANCELLED
+
+        task = await task_service.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.CANCELLED
 
         await runner.shutdown()
         await store_group.conn.close()
@@ -556,9 +616,11 @@ class TestTaskRunner:
         assert session is not None
         assert session.state == ExecutionSessionState.WAITING_INPUT
         assert session.live is False
+        original_session_id = session.session_id
 
         result = await runner_2.attach_input(task_id, "restart-confirmed")
         assert result.delivered_live is False
+        assert result.session_id == original_session_id
 
         for _ in range(20):
             task = await task_service_2.get_task(task_id)
@@ -571,6 +633,9 @@ class TestTaskRunner:
         job = await store_group_2.task_job_store.get_job(task_id)
         assert job is not None
         assert job.status == "SUCCEEDED"
+        final_session = await runner_2.get_execution_session(task_id)
+        assert final_session is not None
+        assert final_session.session_id == original_session_id
 
         await runner_2.shutdown()
         await store_group_2.conn.close()
@@ -639,6 +704,10 @@ class TestTaskRunner:
             await asyncio.sleep(0.05)
         else:
             raise AssertionError("approved input did not resume task")
+
+        final_session = await runner.get_execution_session(task_id)
+        assert final_session is not None
+        assert final_session.pending_approval_id is None
 
         await runner.shutdown()
         await store_group.conn.close()
