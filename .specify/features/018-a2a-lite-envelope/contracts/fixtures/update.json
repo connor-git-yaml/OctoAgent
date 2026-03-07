@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-update",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://worker.ops",
+  "to": "agent://kernel",
+  "type": "UPDATE",
+  "idempotency_key": "task-018:update:0001",
+  "timestamp_ms": 1741305600100,
+  "payload": {
+    "state": "working",
+    "summary": "worker is collecting artifacts",
+    "requested_input": null
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "hop_count": 1,
+    "max_hops": 3,
+    "backend": "docker",
+    "loop_step": 1,
+    "max_steps": 5,
+    "final": false
+  }
+}

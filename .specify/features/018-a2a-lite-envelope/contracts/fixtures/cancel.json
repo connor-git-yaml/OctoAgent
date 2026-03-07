@@ -1,0 +1,22 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-cancel",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://kernel",
+  "to": "agent://worker.ops",
+  "type": "CANCEL",
+  "idempotency_key": "task-018:cancel:0001",
+  "timestamp_ms": 1741305600200,
+  "payload": {
+    "reason": "user_cancelled"
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "hop_count": 1,
+    "max_hops": 3,
+    "final": false
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-error",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://worker.ops",
+  "to": "agent://kernel",
+  "type": "ERROR",
+  "idempotency_key": "task-018:dispatch-018-error:error",
+  "timestamp_ms": 1741305600400,
+  "payload": {
+    "state": "failed",
+    "error_type": "WorkerRuntimeTimeoutError",
+    "error_message": "worker timed out",
+    "retryable": true
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "backend": "docker",
+    "retryable": true,
+    "final": true
+  }
+}

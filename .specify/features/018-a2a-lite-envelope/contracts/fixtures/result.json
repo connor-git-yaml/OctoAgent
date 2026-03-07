@@ -1,0 +1,51 @@
+{
+  "schema_version": "0.1",
+  "message_id": "dispatch-018-result",
+  "task_id": "task-018",
+  "context_id": "thread-018",
+  "from": "agent://worker.ops",
+  "to": "agent://kernel",
+  "type": "RESULT",
+  "idempotency_key": "task-018:dispatch-018-result:result",
+  "timestamp_ms": 1741305600300,
+  "payload": {
+    "state": "completed",
+    "worker_id": "worker.ops",
+    "summary": "command output stored as artifact",
+    "artifacts": [
+      {
+        "artifactId": "artifact-018",
+        "name": "command-output",
+        "description": "final command output",
+        "parts": [
+          {
+            "kind": "text",
+            "text": "ok",
+            "uri": null,
+            "mime": "text/plain",
+            "metadata": {}
+          }
+        ],
+        "append": false,
+        "lastChunk": false,
+        "metadata": {
+          "version": 1,
+          "hash": "abc123",
+          "size": 2
+        }
+      }
+    ],
+    "retryable": false,
+    "backend": "docker",
+    "tool_profile": "standard"
+  },
+  "trace": {
+    "trace_id": "trace-018"
+  },
+  "metadata": {
+    "backend": "docker",
+    "loop_step": 3,
+    "max_steps": 5,
+    "final": true
+  }
+}
