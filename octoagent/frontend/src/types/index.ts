@@ -1,16 +1,18 @@
 /**
- * TypeScript 类型定义 -- 与后端 Pydantic 模型对齐
+ * TypeScript 类型定义 -- 对齐后端 Pydantic 模型
  */
 
-/** 任务状态枚举 */
 export type TaskStatus =
   | "CREATED"
   | "RUNNING"
+  | "WAITING_INPUT"
+  | "WAITING_APPROVAL"
+  | "PAUSED"
   | "SUCCEEDED"
   | "FAILED"
-  | "CANCELLED";
+  | "CANCELLED"
+  | "REJECTED";
 
-/** 事件类型枚举 */
 export type EventType =
   | "TASK_CREATED"
   | "USER_MESSAGE"
@@ -21,13 +23,11 @@ export type EventType =
   | "ARTIFACT_CREATED"
   | "ERROR";
 
-/** 请求者信息 */
 export interface RequesterInfo {
   channel: string;
   sender_id: string;
 }
 
-/** 任务摘要（列表项） */
 export interface TaskSummary {
   task_id: string;
   created_at: string;
@@ -39,7 +39,6 @@ export interface TaskSummary {
   risk_level: string;
 }
 
-/** 任务详情 */
 export interface TaskDetail {
   task_id: string;
   created_at: string;
@@ -52,7 +51,6 @@ export interface TaskDetail {
   risk_level: string;
 }
 
-/** 事件 */
 export interface TaskEvent {
   event_id: string;
   task_seq: number;
@@ -62,14 +60,12 @@ export interface TaskEvent {
   payload: Record<string, unknown>;
 }
 
-/** Artifact Part */
 export interface ArtifactPart {
   type: string;
   mime: string;
   content: string | null;
 }
 
-/** Artifact */
 export interface Artifact {
   artifact_id: string;
   name: string;
@@ -77,19 +73,16 @@ export interface Artifact {
   parts: ArtifactPart[];
 }
 
-/** GET /api/tasks 响应 */
 export interface TaskListResponse {
   tasks: TaskSummary[];
 }
 
-/** GET /api/tasks/{id} 响应 */
 export interface TaskDetailResponse {
   task: TaskDetail;
   events: TaskEvent[];
   artifacts: Artifact[];
 }
 
-/** SSE 事件数据（从 data 字段解析） */
 export interface SSEEventData extends TaskEvent {
   task_id: string;
   final?: boolean;
@@ -154,11 +147,7 @@ export type UpdateOverallStatus =
   | "FAILED"
   | "ACTION_REQUIRED";
 
-export type UpdatePhaseName =
-  | "preflight"
-  | "migrate"
-  | "restart"
-  | "verify";
+export type UpdatePhaseName = "preflight" | "migrate" | "restart" | "verify";
 
 export type UpdatePhaseStatus =
   | "NOT_STARTED"
@@ -322,4 +311,344 @@ export interface OperatorActionRequest {
   actor_id?: string;
   actor_label?: string;
   note?: string;
+}
+
+export type ControlPlaneSurface = "web" | "telegram" | "cli" | "system";
+
+export type ControlPlaneSupportStatus =
+  | "supported"
+  | "unsupported"
+  | "hidden"
+  | "degraded";
+
+export type ControlPlaneActionStatus =
+  | "completed"
+  | "rejected"
+  | "deferred";
+
+export type ControlPlaneEventType =
+  | "control.resource.projected"
+  | "control.resource.removed"
+  | "control.action.requested"
+  | "control.action.completed"
+  | "control.action.rejected"
+  | "control.action.deferred";
+
+export interface ControlPlaneActor {
+  actor_id: string;
+  actor_label: string;
+}
+
+export interface ControlPlaneResourceRef {
+  resource_type: string;
+  resource_id: string;
+  schema_version: number;
+}
+
+export interface ControlPlaneTargetRef {
+  target_type: string;
+  target_id: string;
+  label: string;
+}
+
+export interface ControlPlaneDegradedState {
+  is_degraded: boolean;
+  reasons: string[];
+  unavailable_sections: string[];
+}
+
+export interface ControlPlaneCapability {
+  capability_id: string;
+  label: string;
+  action_id: string;
+  enabled: boolean;
+  support_status: ControlPlaneSupportStatus;
+  reason: string;
+}
+
+export interface ControlPlaneDocumentBase {
+  contract_version: string;
+  resource_type: string;
+  resource_id: string;
+  schema_version: number;
+  generated_at: string;
+  updated_at: string;
+  status: string;
+  degraded: ControlPlaneDegradedState;
+  warnings: string[];
+  capabilities: ControlPlaneCapability[];
+  refs: Record<string, string>;
+}
+
+export interface WizardStepDocument {
+  step_id: string;
+  label: string;
+  status: string;
+  summary: string;
+  actions: Array<Record<string, unknown>>;
+  detail_ref: string | null;
+}
+
+export interface WizardSessionDocument extends ControlPlaneDocumentBase {
+  resource_type: "wizard_session";
+  resource_id: "wizard:default";
+  session_version: number;
+  current_step: string;
+  resumable: boolean;
+  blocking_reason: string;
+  steps: WizardStepDocument[];
+  summary: Record<string, unknown>;
+  next_actions: Array<Record<string, unknown>>;
+}
+
+export interface ConfigFieldHint {
+  field_path: string;
+  section: string;
+  label: string;
+  description: string;
+  widget: string;
+  placeholder: string;
+  help_text: string;
+  sensitive: boolean;
+  multiline: boolean;
+  order: number;
+}
+
+export interface ConfigSchemaDocument extends ControlPlaneDocumentBase {
+  resource_type: "config_schema";
+  resource_id: "config:octoagent";
+  schema: Record<string, unknown>;
+  ui_hints: Record<string, ConfigFieldHint>;
+  current_value: Record<string, unknown>;
+  validation_rules: string[];
+  bridge_refs: Array<Record<string, unknown>>;
+  secret_refs_only: boolean;
+}
+
+export interface ProjectOption {
+  project_id: string;
+  slug: string;
+  name: string;
+  is_default: boolean;
+  status: string;
+  workspace_ids: string[];
+  warnings: string[];
+}
+
+export interface WorkspaceOption {
+  workspace_id: string;
+  project_id: string;
+  slug: string;
+  name: string;
+  kind: string;
+  root_path: string;
+}
+
+export interface ProjectSelectorDocument extends ControlPlaneDocumentBase {
+  resource_type: "project_selector";
+  resource_id: "project:selector";
+  current_project_id: string;
+  current_workspace_id: string;
+  default_project_id: string;
+  fallback_reason: string;
+  switch_allowed: boolean;
+  available_projects: ProjectOption[];
+  available_workspaces: WorkspaceOption[];
+}
+
+export interface SessionProjectionItem {
+  session_id: string;
+  thread_id: string;
+  task_id: string;
+  title: string;
+  status: string;
+  channel: string;
+  requester_id: string;
+  project_id: string;
+  workspace_id: string;
+  latest_message_summary: string;
+  latest_event_at: string | null;
+  execution_summary: Record<string, unknown>;
+  capabilities: ControlPlaneCapability[];
+  detail_refs: Record<string, string>;
+}
+
+export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
+  resource_type: "session_projection";
+  resource_id: "sessions:overview";
+  focused_thread_id: string;
+  sessions: SessionProjectionItem[];
+  operator_summary: OperatorInboxSummary | null;
+  operator_items: OperatorInboxItem[];
+}
+
+export type AutomationScheduleKind = "interval" | "cron" | "once";
+
+export type AutomationJobStatus =
+  | "active"
+  | "paused"
+  | "running"
+  | "failed"
+  | "degraded";
+
+export interface AutomationJob {
+  job_id: string;
+  name: string;
+  action_id: string;
+  params: Record<string, unknown>;
+  project_id: string;
+  workspace_id: string;
+  schedule_kind: AutomationScheduleKind;
+  schedule_expr: string;
+  timezone: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationJobRun {
+  run_id: string;
+  job_id: string;
+  request_id: string;
+  correlation_id: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+  result_code: string;
+  resource_refs: ControlPlaneResourceRef[];
+}
+
+export interface AutomationJobItem {
+  job: AutomationJob;
+  status: AutomationJobStatus;
+  next_run_at: string | null;
+  last_run: AutomationJobRun | null;
+  supported_actions: string[];
+  degraded_reason: string;
+}
+
+export interface AutomationJobDocument extends ControlPlaneDocumentBase {
+  resource_type: "automation_job";
+  resource_id: "automation:jobs";
+  jobs: AutomationJobItem[];
+  run_history_cursor: string;
+}
+
+export interface DiagnosticsSubsystemStatus {
+  subsystem_id: string;
+  label: string;
+  status: string;
+  summary: string;
+  detail_ref: string;
+  warnings: string[];
+}
+
+export interface DiagnosticsFailureSummary {
+  source: string;
+  message: string;
+  occurred_at: string | null;
+}
+
+export interface DiagnosticsSummaryDocument extends ControlPlaneDocumentBase {
+  resource_type: "diagnostics_summary";
+  resource_id: "diagnostics:runtime";
+  overall_status: string;
+  subsystems: DiagnosticsSubsystemStatus[];
+  recent_failures: DiagnosticsFailureSummary[];
+  runtime_snapshot: Record<string, unknown>;
+  recovery_summary: Record<string, unknown>;
+  update_summary: Record<string, unknown>;
+  channel_summary: Record<string, unknown>;
+  deep_refs: Record<string, string>;
+}
+
+export interface ActionDefinition {
+  action_id: string;
+  label: string;
+  description: string;
+  category: string;
+  supported_surfaces: ControlPlaneSurface[];
+  surface_aliases: Record<string, string[]>;
+  support_status_by_surface: Record<string, ControlPlaneSupportStatus>;
+  params_schema: Record<string, unknown>;
+  result_schema: Record<string, unknown>;
+  risk_hint: string;
+  approval_hint: string;
+  idempotency_hint: string;
+  resource_targets: string[];
+}
+
+export interface ActionRegistryDocument extends ControlPlaneDocumentBase {
+  resource_type: "action_registry";
+  resource_id: "actions:registry";
+  actions: ActionDefinition[];
+}
+
+export interface ActionRequestEnvelope {
+  contract_version?: string;
+  request_id: string;
+  action_id: string;
+  params: Record<string, unknown>;
+  surface: ControlPlaneSurface;
+  actor: ControlPlaneActor;
+  requested_at?: string;
+  idempotency_key?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface ActionResultEnvelope {
+  contract_version: string;
+  request_id: string;
+  correlation_id: string;
+  action_id: string;
+  status: ControlPlaneActionStatus;
+  code: string;
+  message: string;
+  data: Record<string, unknown>;
+  resource_refs: ControlPlaneResourceRef[];
+  target_refs: ControlPlaneTargetRef[];
+  handled_at: string;
+  audit_event_id?: string | null;
+}
+
+export interface ControlPlaneEvent {
+  event_id: string;
+  contract_version: string;
+  event_type: ControlPlaneEventType;
+  request_id: string;
+  correlation_id: string;
+  causation_id: string;
+  actor: ControlPlaneActor;
+  surface: ControlPlaneSurface;
+  occurred_at: string;
+  payload_summary: string;
+  resource_ref: ControlPlaneResourceRef | null;
+  resource_refs: ControlPlaneResourceRef[];
+  target_refs: ControlPlaneTargetRef[];
+  metadata: Record<string, unknown>;
+}
+
+export interface ControlPlaneSnapshot {
+  contract_version: string;
+  resources: {
+    wizard: WizardSessionDocument;
+    config: ConfigSchemaDocument;
+    project_selector: ProjectSelectorDocument;
+    sessions: SessionProjectionDocument;
+    automation: AutomationJobDocument;
+    diagnostics: DiagnosticsSummaryDocument;
+  };
+  registry: ActionRegistryDocument;
+  generated_at: string;
+}
+
+export interface ControlPlaneActionResponse {
+  contract_version: string;
+  result: ActionResultEnvelope;
+}
+
+export interface ControlPlaneEventsResponse {
+  contract_version: string;
+  events: ControlPlaneEvent[];
 }

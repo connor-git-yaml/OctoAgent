@@ -1,6 +1,6 @@
 ---
 required: true
-mode: tech-only
+mode: full
 points_count: 3
 tools:
   - openrouter-perplexity-web-search

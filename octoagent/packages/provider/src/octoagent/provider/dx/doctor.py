@@ -143,6 +143,7 @@ class DoctorRunner:
         checks.append(await self.check_litellm_sync())
         checks.append(await self.check_telegram_config())
         checks.append(await self.check_telegram_token())
+        checks.append(await self.check_secret_bindings())
 
         # --live 检查
         if live:
@@ -729,6 +730,53 @@ class DoctorRunner:
             level=CheckLevel.RECOMMENDED,
             message=result.summary,
             fix_hint=self._fix_hint_from_actions(result.actions),
+        )
+
+    async def check_secret_bindings(self) -> CheckResult:
+        """检查当前 project 的 secret bindings / runtime sync 摘要。"""
+        if not (self._root / "octoagent.yaml").exists():
+            return CheckResult(
+                name="secret_bindings",
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="octoagent.yaml 不存在，跳过 secret binding 检查",
+            )
+        try:
+            from .secret_service import SecretService
+
+            report = await SecretService(self._root).audit()
+        except Exception as exc:
+            return CheckResult(
+                name="secret_bindings",
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message=f"secret binding 检查失败：{exc}",
+                fix_hint="运行 octo secrets audit 查看详细问题",
+            )
+
+        if report.overall_status == "ready":
+            return CheckResult(
+                name="secret_bindings",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message="当前 project secret bindings 已就绪",
+            )
+        if report.overall_status == "blocked":
+            detail = report.unresolved_refs[:1] or report.plaintext_risks[:1] or ["存在阻塞问题"]
+            return CheckResult(
+                name="secret_bindings",
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"secret bindings 被阻塞：{detail[0]}",
+                fix_hint="运行 octo secrets audit && octo secrets configure 修复后重试",
+            )
+        detail = report.missing_targets[:1] or report.warnings[:1] or ["需要同步 bindings/reload"]
+        return CheckResult(
+            name="secret_bindings",
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message=f"secret bindings 尚未完成：{detail[0]}",
+            fix_hint="运行 octo secrets audit / configure / apply / reload 收口",
         )
 
     @staticmethod

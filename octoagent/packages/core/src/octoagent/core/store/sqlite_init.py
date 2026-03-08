@@ -210,6 +210,46 @@ CREATE TABLE IF NOT EXISTS project_bindings (
 );
 """
 
+_PROJECT_SECRET_BINDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS project_secret_bindings (
+    binding_id         TEXT PRIMARY KEY,
+    project_id         TEXT NOT NULL,
+    workspace_id       TEXT,
+    target_kind        TEXT NOT NULL,
+    target_key         TEXT NOT NULL,
+    env_name           TEXT NOT NULL,
+    ref_source_type    TEXT NOT NULL,
+    ref_locator        TEXT NOT NULL DEFAULT '{}',
+    display_name       TEXT NOT NULL DEFAULT '',
+    redaction_label    TEXT NOT NULL DEFAULT '***',
+    status             TEXT NOT NULL DEFAULT 'draft',
+    last_audited_at    TEXT,
+    last_applied_at    TEXT,
+    last_reloaded_at   TEXT,
+    metadata           TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+);
+"""
+
+_PROJECT_SELECTOR_STATE_DDL = """
+CREATE TABLE IF NOT EXISTS project_selector_state (
+    selector_id         TEXT PRIMARY KEY,
+    surface             TEXT NOT NULL UNIQUE,
+    active_project_id   TEXT NOT NULL,
+    active_workspace_id TEXT,
+    source              TEXT NOT NULL DEFAULT '',
+    warnings            TEXT NOT NULL DEFAULT '[]',
+    updated_at          TEXT NOT NULL,
+
+    FOREIGN KEY (active_project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (active_workspace_id) REFERENCES workspaces(workspace_id)
+);
+"""
+
 _PROJECT_MIGRATION_RUNS_DDL = """
 CREATE TABLE IF NOT EXISTS project_migration_runs (
     run_id          TEXT PRIMARY KEY,
@@ -248,6 +288,14 @@ _PROJECT_INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_project_bindings_run_id "
         "ON project_bindings(migration_run_id, created_at DESC);"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_secret_bindings_target "
+        "ON project_secret_bindings(project_id, target_kind, target_key);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_project_secret_bindings_env_name "
+        "ON project_secret_bindings(project_id, env_name);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_project_migration_runs_root_started "
@@ -293,6 +341,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_PROJECTS_DDL)
     await conn.execute(_WORKSPACES_DDL)
     await conn.execute(_PROJECT_BINDINGS_DDL)
+    await conn.execute(_PROJECT_SECRET_BINDINGS_DDL)
+    await conn.execute(_PROJECT_SELECTOR_STATE_DDL)
     await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
     await _migrate_legacy_tables(conn)
 

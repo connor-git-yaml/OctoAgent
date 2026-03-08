@@ -17,6 +17,8 @@ async def test_init_db_creates_project_tables(tmp_path: Path) -> None:
         assert "projects" in tables
         assert "workspaces" in tables
         assert "project_bindings" in tables
+        assert "project_secret_bindings" in tables
+        assert "project_selector_state" in tables
         assert "project_migration_runs" in tables
     finally:
         await conn.close()

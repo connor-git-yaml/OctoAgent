@@ -18,6 +18,7 @@ from octoagent.provider.dx.config_schema import (
     ProviderEntry,
     RuntimeConfig,
     TelegramChannelConfig,
+    build_config_schema_document,
 )
 
 # ---------------------------------------------------------------------------
@@ -218,6 +219,28 @@ def test_to_yaml_roundtrip() -> None:
     assert restored.channels.telegram.enabled is True
     assert restored.channels.telegram.mode == "polling"
     assert restored.channels.telegram.allowed_groups == ["-1001"]
+
+
+def test_build_config_schema_document_uses_canonical_provider_target_key() -> None:
+    config = _make_config(
+        providers=[
+            ProviderEntry(
+                id="anthropic",
+                name="Anthropic",
+                auth_type="api_key",
+                api_key_env="ANTHROPIC_API_KEY",
+            )
+        ],
+        model_aliases={
+            "main": ModelAlias(provider="anthropic", model="claude-3-7-sonnet"),
+        },
+    )
+
+    document = build_config_schema_document(config)
+    secret_target = document.ui_hints["fields"]["providers.0.api_key_env"]["secret_target"]
+
+    assert secret_target["target_key"] == "providers.anthropic.api_key_env"
+    assert secret_target["target_key_template"] == "providers.{provider_id}.api_key_env"
 
 
 def test_from_yaml_invalid_syntax() -> None:

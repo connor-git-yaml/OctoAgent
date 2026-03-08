@@ -1,32 +1,45 @@
-# Requirements Checklist: Feature 025 第一阶段
+# Requirements Checklist: Feature 025 第二阶段
 
 ## Scope Lock
 
-- [x] 只包含 `Project` 正式模型、workspace 持久化、default project migration、legacy metadata backfill、env bridge、validation/rollback
-- [x] 明确排除 Secret Store 实值存储
-- [x] 明确排除 Wizard UI / Config Center 页面
-- [x] 明确排除 project selector UI/CLI 契约
+- [x] 只包含 Secret Store 分层、CLI wizard session、`octo secrets *`、`octo project create/select/edit/inspect`
+- [x] 明确复用 025-A 已交付的 Project / Workspace / migration 基线
+- [x] 明确消费 026-A 已冻结的 wizard / config schema / project selector 语义
+- [x] 明确排除完整 Web Config Center、Session Center、Scheduler、Runtime Console
 
-## Migration Gate
+## Secret Safety
 
-- [x] 已覆盖 `Project Migration Gate`
-- [x] 要求自动生成 `default project`
-- [x] 要求旧 `scope/channel/memory/import/backup` 元数据回填到 project/workspace 映射
-- [x] 禁止“新装一遍再手工迁移”作为默认升级路径
+- [x] 已定义 `SecretRef(env/file/exec/keychain)`
+- [x] 已明确 project-scoped secret bindings 与 runtime short-lived injection
+- [x] 已明确 secret 明文不得进入 YAML、日志、事件、artifact 或 LLM 上下文
+- [x] 已明确 `audit -> configure -> apply -> reload -> rotate` 生命周期
 
-## Safety
+## Project Main Path
 
-- [x] 明确禁止 destructive rewrite legacy `scope_id`
-- [x] 明确要求 migration dry-run
-- [x] 明确要求 validation report
-- [x] 明确要求 rollback strategy
-- [x] 明确要求 secret bridge 只记录引用，不存 secret 实值
+- [x] 已要求 `octo project create`
+- [x] 已要求 `octo project select`
+- [x] 已要求 `octo project edit`
+- [x] 已要求 `octo project inspect`
+- [x] 已要求 active project 语义与 readiness/warnings 摘要
+
+## Wizard / Contract Reuse
+
+- [x] 已要求 CLI wizard 可 start/resume/status/cancel
+- [x] 已要求 CLI 消费 `ConfigSchemaDocument + uiHints`
+- [x] 已要求普通用户路径与高级路径共用同一 contract，不得分裂为两套系统
+
+## Runtime / Binding Integration
+
+- [x] 已覆盖 provider / channel / gateway secret bindings
+- [x] 已覆盖 `*_env` 兼容语义与 project materialization
+- [x] 已要求复用 024 managed runtime / ops / recovery 基线完成 reload
+- [x] 已要求 unmanaged runtime 明确降级，不得伪装成功
 
 ## Test Matrix
 
-- [x] 覆盖 domain model + store schema
-- [x] 覆盖 default project migration apply / idempotency
-- [x] 覆盖 memory/import/backup/env/channel backfill
-- [x] 覆盖 validation failure -> rollback
-- [x] 覆盖 CLI dry-run / rollback
-- [x] 覆盖 Gateway startup auto-bootstrap
+- [x] 覆盖 `SecretRef` 解析、遮罩、故障路径与审计
+- [x] 覆盖 project create/select/edit/inspect CLI 主路径
+- [x] 覆盖 wizard session 恢复与 `config schema + uiHints` CLI 消费
+- [x] 覆盖 `audit/configure/apply --dry-run/apply/reload/rotate`
+- [x] 覆盖“不泄露 secret 明文”的单元测试与关键集成测试
+- [x] 明确与 026-B 的消费边界，不在本阶段承诺厚 Web 页面

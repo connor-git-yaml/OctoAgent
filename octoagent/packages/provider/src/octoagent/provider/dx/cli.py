@@ -15,6 +15,8 @@ from .backup_commands import backup, export, restore
 from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
 from .console_output import create_console, render_panel
+from .project_commands import project_group
+from .secret_commands import secrets_group
 from .update_commands import restart, update, verify
 
 console = create_console()
@@ -33,6 +35,8 @@ main.add_command(import_cmd)
 main.add_command(update)
 main.add_command(restart)
 main.add_command(verify)
+main.add_command(project_group)
+main.add_command(secrets_group)
 
 
 @main.command()
@@ -44,10 +48,31 @@ main.add_command(verify)
 )
 def init(manual_oauth: bool) -> None:
     """交互式引导配置 -- FR-007"""
-    from .init_wizard import run_init_wizard
+    from .project_selector import ProjectSelectorService
+    from .wizard_session import WizardSessionService
 
     try:
-        run_init_wizard(manual_oauth=manual_oauth)
+        if manual_oauth:
+            console.print(
+                "[yellow]提示：统一 wizard 已接管 init，"
+                "manual_oauth 标志仅保留兼容性。[/yellow]"
+            )
+
+        async def _run() -> None:
+            root = Path(_resolve_project_root())
+            project_service = ProjectSelectorService(root)
+            project, _ = await project_service.get_active_project()
+            wizard = WizardSessionService(root)
+            result = wizard.start_or_resume(project, interactive=True, advanced=manual_oauth)
+            lines = [
+                f"project_id={project.project_id}",
+                f"status={result.record.status}",
+                f"current_step={result.record.current_step_id}",
+                f"draft_secret_targets={len(result.record.draft_secret_bindings)}",
+            ]
+            console.print(render_panel("Init Wizard", lines, border_style="cyan"))
+
+        asyncio.run(_run())
     except KeyboardInterrupt:
         console.print("\n[yellow]初始化已取消。[/yellow]")
     except Exception as exc:
