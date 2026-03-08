@@ -7,14 +7,14 @@
  */
 
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import TaskList from "./pages/TaskList";
+import ControlPlane from "./pages/ControlPlane";
 import TaskDetail from "./pages/TaskDetail";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<TaskList />} />
+        <Route path="/" element={<ControlPlane />} />
         <Route path="/tasks/:taskId" element={<TaskDetail />} />
       </Routes>
     </BrowserRouter>

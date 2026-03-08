@@ -1,45 +1,139 @@
 /**
- * API Client -- fetch 封装，对接后端 REST API
+ * API Client -- REST 封装，优先消费 Feature 026 control-plane canonical routes
  */
 
 import type {
+  ActionRequestEnvelope,
+  ActionResultEnvelope,
   BackupBundle,
+  ControlPlaneActionResponse,
+  ControlPlaneEventsResponse,
+  ControlPlaneSnapshot,
+  DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
-  UpdateAttemptSummary,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
+  ProjectSelectorDocument,
   RecoverySummary,
+  SessionProjectionDocument,
   TaskDetailResponse,
   TaskListResponse,
+  UpdateAttemptSummary,
+  WizardSessionDocument,
+  ConfigSchemaDocument,
+  AutomationJobDocument,
 } from "../types";
 
 const BASE_URL = "";
 
-/** 通用 fetch 封装 */
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${BASE_URL}${path}`, {
+type ControlResourceName =
+  | "wizard"
+  | "config"
+  | "project-selector"
+  | "sessions"
+  | "automation"
+  | "diagnostics";
+
+async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
     ...init,
   });
+}
 
+/** 通用 JSON fetch，非 2xx 直接抛错 */
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await apiRequest(path, init);
   if (!resp.ok) {
     const body = await resp.json().catch(() => null);
-    const message = body?.error?.message || `HTTP ${resp.status}`;
+    const message =
+      body?.error?.message ??
+      body?.result?.message ??
+      `HTTP ${resp.status}`;
     throw new Error(message);
   }
-
   return resp.json() as Promise<T>;
 }
 
+/** GET /api/control/snapshot -- control plane 首屏快照 */
+export async function fetchControlSnapshot(): Promise<ControlPlaneSnapshot> {
+  return apiFetch<ControlPlaneSnapshot>("/api/control/snapshot");
+}
+
+/** GET /api/control/resources/* -- 单资源刷新 */
+export async function fetchControlResource(
+  resource: "wizard"
+): Promise<WizardSessionDocument>;
+export async function fetchControlResource(
+  resource: "config"
+): Promise<ConfigSchemaDocument>;
+export async function fetchControlResource(
+  resource: "project-selector"
+): Promise<ProjectSelectorDocument>;
+export async function fetchControlResource(
+  resource: "sessions"
+): Promise<SessionProjectionDocument>;
+export async function fetchControlResource(
+  resource: "automation"
+): Promise<AutomationJobDocument>;
+export async function fetchControlResource(
+  resource: "diagnostics"
+): Promise<DiagnosticsSummaryDocument>;
+export async function fetchControlResource(
+  resource: ControlResourceName
+): Promise<
+  | WizardSessionDocument
+  | ConfigSchemaDocument
+  | ProjectSelectorDocument
+  | SessionProjectionDocument
+  | AutomationJobDocument
+  | DiagnosticsSummaryDocument
+> {
+  return apiFetch(`/api/control/resources/${resource}`);
+}
+
+/** GET /api/control/events -- 读取 control-plane event stream */
+export async function fetchControlEvents(
+  after?: string,
+  limit = 100
+): Promise<ControlPlaneEventsResponse> {
+  const params = new URLSearchParams();
+  if (after) {
+    params.set("after", after);
+  }
+  params.set("limit", String(limit));
+  return apiFetch<ControlPlaneEventsResponse>(
+    `/api/control/events?${params.toString()}`
+  );
+}
+
+/** POST /api/control/actions -- 执行统一 control-plane action */
+export async function executeControlAction(
+  body: ActionRequestEnvelope
+): Promise<ActionResultEnvelope> {
+  const resp = await apiRequest("/api/control/actions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const payload =
+    ((await resp.json().catch(() => null)) as ControlPlaneActionResponse | null) ??
+    null;
+  if (payload?.result) {
+    return payload.result;
+  }
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  throw new Error("control action 返回体缺少 result");
+}
+
 /** GET /api/tasks -- 任务列表查询 */
-export async function fetchTasks(
-  status?: string
-): Promise<TaskListResponse> {
+export async function fetchTasks(status?: string): Promise<TaskListResponse> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : "";
   return apiFetch<TaskListResponse>(`/api/tasks${qs}`);
 }
@@ -118,12 +212,12 @@ export async function triggerExportChats(
   });
 }
 
-/** GET /api/operator/inbox -- 统一 operator inbox */
+/** GET /api/operator/inbox -- 旧 operator inbox，保留兼容 */
 export async function fetchOperatorInbox(): Promise<OperatorInboxResponse> {
   return apiFetch<OperatorInboxResponse>("/api/operator/inbox");
 }
 
-/** POST /api/operator/actions -- 提交统一 operator 动作 */
+/** POST /api/operator/actions -- 旧 operator 动作，保留兼容 */
 export async function submitOperatorAction(
   body: OperatorActionRequest
 ): Promise<OperatorActionResult> {

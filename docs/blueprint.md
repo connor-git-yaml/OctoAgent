@@ -2692,6 +2692,11 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [ ] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [ ] 多端远程节点 / companion surfaces（按需引入）
 
+2026-03-08 进展：
+
+- Feature 026 已交付统一 control plane backend 与正式 Web 控制台：六类 canonical resources、snapshot/per-resource/actions/events routes、Telegram/Web 共用 action semantics、Session Center、Automation/Scheduler、Runtime Diagnostics Console、配置中心、channel/device 管理入口与统一 operator/ops 控制入口均已落地。
+- Memory Console / Vault 详细领域视图仍留给 Feature 027；Secret Store 实值管理与 Wizard 深度交互仍留给 025-B / 后续能力。
+
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 
 - 安装、配置、首聊、管理台打开必须是一条连续路径；不能要求用户手工拼装多份 `.env`、Docker 命令和 channel token

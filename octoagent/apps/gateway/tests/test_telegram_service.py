@@ -8,9 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from octoagent.core.models import TaskStatus
+from octoagent.core.models import (
+    ActionRequestEnvelope,
+    ControlPlaneActor,
+    ControlPlaneSurface,
+    TaskStatus,
+)
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.control_plane import ControlPlaneService
 from octoagent.gateway.services.operator_actions import OperatorActionService
 from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -27,6 +33,7 @@ from octoagent.provider.dx.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.provider.dx.config_wizard import save_config
+from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.provider.dx.telegram_client import (
     InlineKeyboardMarkup,
     TelegramChat,
@@ -36,6 +43,7 @@ from octoagent.provider.dx.telegram_client import (
 )
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
+from ulid import ULID
 
 
 def _write_config(project_root: Path, **telegram_overrides: object) -> None:
@@ -312,6 +320,111 @@ async def test_authorized_dm_creates_task_and_dedupes_update(tmp_path: Path) -> 
     assert approved is not None
     assert approved.last_message_id == 11
     assert len(await store_group.task_store.list_tasks()) == 1
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_control_plane_command_executes_registry_action_without_creating_task(
+    tmp_path: Path,
+) -> None:
+    _write_config(tmp_path, dm_policy="open")
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await ProjectWorkspaceMigrationService(
+        project_root=tmp_path,
+        store_group=store_group,
+    ).ensure_default_project()
+    state_store = TelegramStateStore(tmp_path)
+    state_store.upsert_approved_user(user_id="42", chat_id="42", username="owner")
+    bot_client = FakeTelegramBotClient()
+    sse_hub = SSEHub()
+    service = TelegramGatewayService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=sse_hub,
+        task_runner=FakeTaskRunner(),
+        state_store=state_store,
+        bot_client=bot_client,
+    )
+    service.bind_control_plane_service(
+        ControlPlaneService(
+            project_root=tmp_path,
+            store_group=store_group,
+            sse_hub=sse_hub,
+            telegram_state_store=state_store,
+        )
+    )
+
+    result = await service.handle_webhook_update(
+        {
+            "update_id": 303,
+            "message": {
+                "message_id": 19,
+                "text": "/status",
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "username": "owner", "first_name": "Connor"},
+            },
+        }
+    )
+
+    assert result.status == "control_action"
+    assert bot_client.sent_messages
+    assert "Action: diagnostics.refresh" in bot_client.sent_messages[0].text
+    tasks = await store_group.task_store.list_tasks()
+    assert [task.task_id for task in tasks] == ["ops-control-plane"]
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_web_and_telegram_project_select_share_action_semantics(
+    tmp_path: Path,
+) -> None:
+    _write_config(tmp_path, dm_policy="open")
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await ProjectWorkspaceMigrationService(
+        project_root=tmp_path,
+        store_group=store_group,
+    ).ensure_default_project()
+    control_plane = ControlPlaneService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        telegram_state_store=TelegramStateStore(tmp_path),
+    )
+    default_project = await store_group.project_store.get_default_project()
+    assert default_project is not None
+
+    web_result = await control_plane.execute_action(
+        ActionRequestEnvelope(
+            request_id=str(ULID()),
+            action_id="project.select",
+            surface=ControlPlaneSurface.WEB,
+            actor=ControlPlaneActor(
+                actor_id="user:web",
+                actor_label="Owner",
+            ),
+            params={"project_id": default_project.project_id},
+        )
+    )
+    telegram_request = control_plane.build_telegram_action_request(
+        f"/project select {default_project.project_id}",
+        actor_id="user:telegram:42",
+        actor_label="Owner",
+    )
+    assert telegram_request is not None
+
+    telegram_result = await control_plane.execute_action(telegram_request)
+
+    assert telegram_request.action_id == "project.select"
+    assert web_result.code == telegram_result.code == "PROJECT_SELECTED"
+    assert web_result.data["project_id"] == telegram_result.data["project_id"]
 
     await store_group.conn.close()
 

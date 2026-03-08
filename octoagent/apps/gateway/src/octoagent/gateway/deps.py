@@ -30,3 +30,8 @@ def get_approval_manager(request: Request) -> ApprovalManager:
 def get_execution_console_service(request: Request):
     """从 app.state 获取 ExecutionConsoleService。"""
     return request.app.state.execution_console
+
+
+def get_control_plane_service(request: Request):
+    """从 app.state 获取 ControlPlaneService。"""
+    return request.app.state.control_plane_service

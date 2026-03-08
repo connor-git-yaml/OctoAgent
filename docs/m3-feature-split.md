@@ -261,6 +261,14 @@ M2 收口
 - approval / recovery / channel / agents / permissions / secrets / memory / update 都有明确入口和状态反馈
 - 控制台在桌面与移动端都能稳定工作
 
+**交付状态（2026-03-08）**：
+
+- 已交付统一 control-plane backend：六类 canonical resources、`ActionRegistryDocument`、`ActionRequest/ActionResultEnvelope`、`ControlPlaneEvent`、snapshot/per-resource/actions/events routes。
+- 已打通 Telegram / Web 共用 action semantics，现有控制命令与 Web 操作统一落到同一 action registry。
+- 已交付正式 Web Control Plane：首页切换为 `Dashboard / Projects / Sessions / Operator / Automation / Diagnostics / Config / Channels`。
+- 已交付 Session Center、Automation/Scheduler 面板、Runtime Diagnostics Console、配置中心、channel/device 管理入口，以及 approvals/retry/cancel/backup/restore/import/update 的统一控制台入口。
+- Memory/Vault detailed view 仍明确留给 Feature 027；Secret Store 实值管理仍留给 025-B / 后续 Feature。
+
 ---
 
 ### Feature 027：Memory Console + Vault Authorized Retrieval

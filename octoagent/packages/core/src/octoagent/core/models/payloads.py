@@ -298,6 +298,24 @@ class ChatImportLifecyclePayload(BaseModel):
     message: str = Field(default="", description="补充说明")
 
 
+class ControlPlaneAuditPayload(BaseModel):
+    """CONTROL_PLANE_* 事件 payload。"""
+
+    event_type: str = Field(description="control-plane 事件类型")
+    contract_version: str = Field(default="1.0.0", description="contract 版本")
+    request_id: str = Field(default="", description="动作请求 ID")
+    correlation_id: str = Field(default="", description="异步关联 ID")
+    causation_id: str = Field(default="", description="因果链 ID")
+    actor_id: str = Field(default="", description="操作者 ID")
+    actor_label: str = Field(default="", description="操作者标签")
+    surface: str = Field(default="system", description="触发表面")
+    payload_summary: str = Field(default="", description="摘要")
+    resource_ref: dict[str, object] | None = Field(default=None)
+    resource_refs: list[dict[str, object]] = Field(default_factory=list)
+    target_refs: list[dict[str, object]] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 from typing import Literal  # noqa: E402
 
 DriftType = Literal["no_progress", "state_machine_stall", "repeated_failure"]

@@ -39,6 +39,7 @@ from .routes import (
     approvals,
     cancel,
     chat,
+    control_plane,
     execution,
     health,
     message,
@@ -49,6 +50,8 @@ from .routes import (
     telegram,
     watchdog,
 )
+from .services.automation_scheduler import AutomationSchedulerService
+from .services.control_plane import ControlPlaneService
 from .services.llm_service import LLMService
 from .services.operator_actions import OperatorActionService
 from .services.operator_inbox import OperatorInboxService
@@ -388,6 +391,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.operator_inbox_service,
         app.state.operator_action_service,
     )
+    app.state.control_plane_service = ControlPlaneService(
+        project_root=project_root,
+        store_group=store_group,
+        sse_hub=app.state.sse_hub,
+        task_runner=app.state.task_runner,
+        operator_action_service=app.state.operator_action_service,
+        operator_inbox_service=app.state.operator_inbox_service,
+        telegram_state_store=telegram_state_store,
+        update_status_store=app.state.update_status_store,
+        update_service=app.state.update_service,
+    )
+    app.state.automation_scheduler = AutomationSchedulerService(
+        control_plane_service=app.state.control_plane_service,
+        automation_store=app.state.control_plane_service.automation_store,
+    )
+    app.state.control_plane_service.bind_automation_scheduler(
+        app.state.automation_scheduler
+    )
+    telegram_service.bind_control_plane_service(app.state.control_plane_service)
+    await app.state.automation_scheduler.startup()
 
     log.info(
         "watchdog_scheduler_started",
@@ -427,6 +450,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
         app.state.watchdog_scheduler.shutdown(wait=False)
         log.info("watchdog_scheduler_stopped")
+    if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
+        await app.state.automation_scheduler.shutdown()
 
     # 关闭：清理数据库连接
     update_status_store = getattr(app.state, "update_status_store", None)
@@ -480,6 +505,7 @@ def create_app() -> FastAPI:
     app.include_router(approvals.router, tags=["approvals"])
     app.include_router(operator_inbox.router, tags=["operator"])
     app.include_router(chat.router, tags=["chat"])
+    app.include_router(control_plane.router, tags=["control-plane"])
 
     # 挂载前端静态文件（frontend/dist/ -> /）
     # 在所有 API 路由之后挂载，确保 API 优先匹配

@@ -206,6 +206,7 @@ class TelegramGatewayService:
         self._stop_event = asyncio.Event()
         self._operator_inbox_service = None
         self._operator_action_service = None
+        self._control_plane_service = None
 
     @property
     def enabled(self) -> bool:
@@ -222,6 +223,9 @@ class TelegramGatewayService:
     ) -> None:
         self._operator_inbox_service = operator_inbox_service
         self._operator_action_service = operator_action_service
+
+    def bind_control_plane_service(self, control_plane_service: Any) -> None:
+        self._control_plane_service = control_plane_service
 
     def _get_telegram_config(self):
         try:
@@ -356,6 +360,8 @@ class TelegramGatewayService:
             return await self._handle_callback_query(context)
         if not context.text.strip():
             return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
+        if control_result := await self._handle_control_command(context):
+            return control_result
 
         self._record_authorized_private_dm(context)
 
@@ -392,6 +398,42 @@ class TelegramGatewayService:
             status="accepted" if created else "duplicate",
             task_id=task_id,
             created=created,
+        )
+
+    async def _handle_control_command(
+        self,
+        context: TelegramInboundContext,
+    ) -> TelegramIngestResult | None:
+        if self._control_plane_service is None:
+            return None
+        request = self._control_plane_service.build_telegram_action_request(
+            context.text,
+            actor_id=f"user:telegram:{context.sender_id}",
+            actor_label=context.sender_name,
+        )
+        if request is None:
+            return None
+
+        result = await self._control_plane_service.execute_action(request)
+        if self._bot_client is not None:
+            with contextlib.suppress(Exception):
+                sent_message = await self._bot_client.send_message(
+                    context.chat_id,
+                    self._render_control_plane_result(result),
+                    reply_to_message_id=context.message_id,
+                    message_thread_id=context.message_thread_id or None,
+                )
+                self._remember_outbound_reply_thread(
+                    {
+                        "chat_id": context.chat_id,
+                        "reply_thread_root_id": context.reply_to_message_id,
+                    },
+                    sent_message,
+                )
+        return TelegramIngestResult(
+            status="control_action",
+            detail=result.status.value,
+            created=result.status.value == "completed",
         )
 
     def _is_allowed(self, context: TelegramInboundContext) -> bool:
@@ -788,6 +830,20 @@ class TelegramGatewayService:
             f"结果: {result.outcome.value}\n"
             f"说明: {result.message}"
         )
+
+    @staticmethod
+    def _render_control_plane_result(result) -> str:
+        lines = [
+            f"Action: {result.action_id}",
+            f"状态: {result.status.value}",
+            f"代码: {result.code}",
+            f"说明: {result.message}",
+        ]
+        if isinstance(result.data, Mapping):
+            summary = result.data.get("overall_status") or result.data.get("project_id")
+            if summary:
+                lines.append(f"摘要: {summary}")
+        return "\n".join(lines)
 
     async def _resolve_reply_target(self, task_id: str) -> dict[str, str] | None:
         events = await self._stores.event_store.get_events_for_task(task_id)
