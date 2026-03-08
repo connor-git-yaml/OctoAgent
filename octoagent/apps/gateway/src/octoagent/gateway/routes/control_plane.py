@@ -28,30 +28,41 @@ async def get_control_config(control_plane=Depends(get_control_plane_service)):
 
 @router.get("/api/control/resources/project-selector")
 async def get_control_project_selector(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_project_selector()).model_dump(
-        mode="json", by_alias=True
-    )
+    return (await control_plane.get_project_selector()).model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/sessions")
 async def get_control_sessions(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_session_projection()).model_dump(
+    return (await control_plane.get_session_projection()).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/capability-pack")
+async def get_control_capability_pack(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_capability_pack_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/delegation")
+async def get_control_delegation(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_delegation_document()).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/pipelines")
+async def get_control_pipelines(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_skill_pipeline_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
 @router.get("/api/control/resources/automation")
 async def get_control_automation(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_automation_document()).model_dump(
-        mode="json", by_alias=True
-    )
+    return (await control_plane.get_automation_document()).model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/diagnostics")
 async def get_control_diagnostics(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_diagnostics_summary()).model_dump(
-        mode="json", by_alias=True
-    )
+    return (await control_plane.get_diagnostics_summary()).model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/memory")

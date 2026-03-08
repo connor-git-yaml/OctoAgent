@@ -75,6 +75,10 @@ def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
         timeout_seconds=tool_meta_dict["timeout_seconds"],
         is_async=is_async,
         output_truncate_threshold=tool_meta_dict["output_truncate_threshold"],
+        tags=tool_meta_dict.get("tags", []),
+        worker_types=tool_meta_dict.get("worker_types", []),
+        manifest_ref=tool_meta_dict.get("manifest_ref", ""),
+        metadata=tool_meta_dict.get("metadata", {}),
     )
 
 

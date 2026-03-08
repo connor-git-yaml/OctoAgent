@@ -30,6 +30,7 @@ class MemoryStore(Protocol):
         *,
         scope_ids: list[str] | None = None,
         statuses: list[str] | None = None,
+        source: str | None = None,
         limit: int = 50,
     ) -> list[WriteProposal]: ...
 

@@ -30,6 +30,8 @@ class TaskJob:
 class SqliteTaskJobStore:
     """task_jobs 表访问层"""
 
+    _DEFERRED_STATUSES = ("WAITING_INPUT", "WAITING_APPROVAL", "PAUSED")
+
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
 
@@ -99,15 +101,29 @@ class SqliteTaskJobStore:
 
     async def mark_waiting_input(self, task_id: str) -> bool:
         """将任务标记为 WAITING_INPUT（仅 RUNNING -> WAITING_INPUT）。"""
+        return await self.mark_deferred(task_id, "WAITING_INPUT")
+
+    async def mark_waiting_approval(self, task_id: str) -> bool:
+        """将任务标记为 WAITING_APPROVAL（仅 RUNNING -> WAITING_APPROVAL）。"""
+        return await self.mark_deferred(task_id, "WAITING_APPROVAL")
+
+    async def mark_paused(self, task_id: str) -> bool:
+        """将任务标记为 PAUSED（仅 RUNNING -> PAUSED）。"""
+        return await self.mark_deferred(task_id, "PAUSED")
+
+    async def mark_deferred(self, task_id: str, status: str) -> bool:
+        """将任务标记为 deferred 状态（仅 RUNNING -> deferred）。"""
+        if status not in self._DEFERRED_STATUSES:
+            raise ValueError(f"unsupported deferred task job status: {status}")
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             """
             UPDATE task_jobs
-            SET status = 'WAITING_INPUT',
+            SET status = ?,
                 updated_at = ?
             WHERE task_id = ? AND status = 'RUNNING'
             """,
-            (now, task_id),
+            (status, now, task_id),
         )
         cursor = await self._conn.execute("SELECT changes()")
         row = await cursor.fetchone()
@@ -117,15 +133,20 @@ class SqliteTaskJobStore:
 
     async def mark_running_from_waiting_input(self, task_id: str) -> bool:
         """将等待输入的任务恢复为 RUNNING。"""
+        return await self.mark_running_from_deferred(task_id)
+
+    async def mark_running_from_deferred(self, task_id: str) -> bool:
+        """将 deferred 任务恢复为 RUNNING。"""
         now = datetime.now(UTC).isoformat()
+        placeholders = ",".join("?" for _ in self._DEFERRED_STATUSES)
         await self._conn.execute(
-            """
+            f"""
             UPDATE task_jobs
             SET status = 'RUNNING',
                 updated_at = ?
-            WHERE task_id = ? AND status = 'WAITING_INPUT'
+            WHERE task_id = ? AND status IN ({placeholders})
             """,
-            (now, task_id),
+            (now, task_id, *self._DEFERRED_STATUSES),
         )
         cursor = await self._conn.execute("SELECT changes()")
         row = await cursor.fetchone()

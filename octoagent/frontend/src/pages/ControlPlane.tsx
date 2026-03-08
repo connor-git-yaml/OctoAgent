@@ -10,6 +10,7 @@ import {
   executeControlAction,
   fetchControlEvents,
   fetchControlResource,
+  fetchMemoryConsole,
   fetchControlSnapshot,
   fetchMemoryProposals,
   fetchMemorySubjectHistory,
@@ -19,21 +20,98 @@ import type {
   ActionResultEnvelope,
   ActionRequestEnvelope,
   AutomationJobItem,
+  CapabilityPackDocument,
   ControlPlaneEvent,
   ControlPlaneResourceRef,
   ControlPlaneSnapshot,
+  DelegationPlaneDocument,
   MemoryProposalAuditDocument,
   MemoryRecordProjection,
   MemorySubjectHistoryDocument,
   OperatorActionKind,
   OperatorInboxItem,
   SessionProjectionItem,
+  SkillPipelineDocument,
   VaultAuthorizationDocument,
 } from "../types";
+
+const EMPTY_CAPABILITY_PACK: CapabilityPackDocument = {
+  contract_version: "1.0.0",
+  resource_type: "capability_pack",
+  resource_id: "capability:bundled",
+  schema_version: 1,
+  generated_at: "",
+  updated_at: "",
+  status: "degraded",
+  degraded: {
+    is_degraded: true,
+    reasons: ["capability_pack_missing"],
+    unavailable_sections: ["capability_pack"],
+  },
+  warnings: ["capability pack resource missing from snapshot"],
+  capabilities: [],
+  refs: {},
+  pack: {
+    pack_id: "bundled:missing",
+    version: "0.0.0",
+    skills: [],
+    tools: [],
+    worker_profiles: [],
+    bootstrap_files: [],
+    fallback_toolset: [],
+    degraded_reason: "resource_missing",
+    generated_at: "",
+  },
+  selected_project_id: "",
+  selected_workspace_id: "",
+};
+
+const EMPTY_DELEGATION: DelegationPlaneDocument = {
+  contract_version: "1.0.0",
+  resource_type: "delegation_plane",
+  resource_id: "delegation:overview",
+  schema_version: 1,
+  generated_at: "",
+  updated_at: "",
+  status: "degraded",
+  degraded: {
+    is_degraded: true,
+    reasons: ["delegation_plane_missing"],
+    unavailable_sections: ["delegation"],
+  },
+  warnings: ["delegation resource missing from snapshot"],
+  capabilities: [],
+  refs: {},
+  works: [],
+  summary: {},
+};
+
+const EMPTY_PIPELINES: SkillPipelineDocument = {
+  contract_version: "1.0.0",
+  resource_type: "skill_pipeline",
+  resource_id: "pipeline:overview",
+  schema_version: 1,
+  generated_at: "",
+  updated_at: "",
+  status: "degraded",
+  degraded: {
+    is_degraded: true,
+    reasons: ["skill_pipeline_missing"],
+    unavailable_sections: ["pipelines"],
+  },
+  warnings: ["pipeline resource missing from snapshot"],
+  capabilities: [],
+  refs: {},
+  runs: [],
+  summary: {},
+};
 
 type SectionId =
   | "dashboard"
   | "projects"
+  | "capability"
+  | "delegation"
+  | "pipelines"
   | "sessions"
   | "operator"
   | "automation"
@@ -45,6 +123,9 @@ type SectionId =
 const SECTION_LABELS: Array<{ id: SectionId; label: string; accent: string }> = [
   { id: "dashboard", label: "Dashboard", accent: "总览" },
   { id: "projects", label: "Projects", accent: "Project / Workspace" },
+  { id: "capability", label: "Capability", accent: "Pack / ToolIndex" },
+  { id: "delegation", label: "Delegation", accent: "Work / Routing" },
+  { id: "pipelines", label: "Pipelines", accent: "Checkpoint / Replay" },
   { id: "sessions", label: "Sessions", accent: "Session Center" },
   { id: "operator", label: "Operator", accent: "Approvals / Retry / Cancel" },
   { id: "automation", label: "Automation", accent: "Scheduler" },
@@ -59,6 +140,9 @@ type ControlResourceRoute =
   | "config"
   | "project-selector"
   | "sessions"
+  | "capability-pack"
+  | "delegation"
+  | "pipelines"
   | "automation"
   | "diagnostics"
   | "memory";
@@ -70,6 +154,9 @@ const RESOURCE_ROUTE_BY_TYPE: Record<string, ControlResourceRoute> = {
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
+  capability_pack: "capability-pack",
+  delegation_plane: "delegation",
+  skill_pipeline: "pipelines",
   automation_job: "automation",
   diagnostics_summary: "diagnostics",
   memory_console: "memory",
@@ -83,6 +170,9 @@ const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   config: "config",
   "project-selector": "project_selector",
   sessions: "sessions",
+  "capability-pack": "capability_pack",
+  delegation: "delegation",
+  pipelines: "pipelines",
   automation: "automation",
   diagnostics: "diagnostics",
   memory: "memory",
@@ -161,7 +251,20 @@ function isControlResourceDocument(
 }
 
 async function loadControlResource(
-  route: ControlResourceRoute
+  route: ControlResourceRoute,
+  options?: {
+    memoryQuery?: {
+      projectId?: string;
+      workspaceId?: string;
+      scopeId?: string;
+      partition?: string;
+      layer?: string;
+      query?: string;
+      includeHistory?: boolean;
+      includeVaultRefs?: boolean;
+      limit?: number;
+    };
+  }
 ): Promise<ControlPlaneSnapshot["resources"][SnapshotResourceKey]> {
   switch (route) {
     case "wizard":
@@ -172,12 +275,18 @@ async function loadControlResource(
       return fetchControlResource("project-selector");
     case "sessions":
       return fetchControlResource("sessions");
+    case "capability-pack":
+      return fetchControlResource("capability-pack");
+    case "delegation":
+      return fetchControlResource("delegation");
+    case "pipelines":
+      return fetchControlResource("pipelines");
     case "automation":
       return fetchControlResource("automation");
     case "diagnostics":
       return fetchControlResource("diagnostics");
     case "memory":
-      return fetchControlResource("memory");
+      return fetchMemoryConsole(options?.memoryQuery ?? {});
   }
 }
 
@@ -201,6 +310,32 @@ function memoryActionResult(
   return result.action_id.startsWith("memory.") || result.action_id.startsWith("vault.")
     ? result
     : null;
+}
+
+function buildMemoryQueryFromSnapshot(
+  projectId: string,
+  workspaceId: string,
+  draft: {
+    scopeId: string;
+    partition: string;
+    layer: string;
+    query: string;
+    includeHistory: boolean;
+    includeVaultRefs: boolean;
+    limit: number;
+  }
+) {
+  return {
+    projectId,
+    workspaceId,
+    scopeId: draft.scopeId || undefined,
+    partition: draft.partition || undefined,
+    layer: draft.layer || undefined,
+    query: draft.query || undefined,
+    includeHistory: draft.includeHistory,
+    includeVaultRefs: draft.includeVaultRefs,
+    limit: draft.limit,
+  };
 }
 
 function mapQuickAction(
@@ -430,6 +565,14 @@ export default function ControlPlane() {
   ) {
     const preserveConfigDraft = options?.preserveConfigDraft ?? true;
     const routes = resolveResourceRoutes(refs);
+    const memoryQuery =
+      snapshot?.resources.memory != null
+        ? buildMemoryQueryFromSnapshot(
+            snapshot.resources.memory.active_project_id,
+            snapshot.resources.memory.active_workspace_id,
+            memoryQueryDraft
+          )
+        : undefined;
 
     if (routes.length === 0) {
       await reloadData({ preserveConfigDraft });
@@ -437,7 +580,13 @@ export default function ControlPlane() {
     }
 
     try {
-      const updates = await Promise.all(routes.map((route) => loadControlResource(route)));
+      const updates = await Promise.all(
+        routes.map((route) =>
+          loadControlResource(route, {
+            memoryQuery: route === "memory" ? memoryQuery : undefined,
+          })
+        )
+      );
       if (!updates.every((item) => isControlResourceDocument(item))) {
         throw new Error("control resource refresh returned malformed payload");
       }
@@ -638,10 +787,18 @@ export default function ControlPlane() {
     config,
     project_selector,
     sessions,
+    memory,
+    capability_pack,
+    delegation,
+    pipelines,
     automation,
     diagnostics,
-    memory,
   } = snapshot.resources;
+  const capabilityPack: CapabilityPackDocument =
+    capability_pack ?? EMPTY_CAPABILITY_PACK;
+  const delegationPlane: DelegationPlaneDocument =
+    delegation ?? EMPTY_DELEGATION;
+  const skillPipelines: SkillPipelineDocument = pipelines ?? EMPTY_PIPELINES;
   const availableProjects = project_selector.available_projects ?? [];
   const availableWorkspaces = project_selector.available_workspaces ?? [];
   const currentProject =
@@ -663,11 +820,11 @@ export default function ControlPlane() {
     <div className="control-shell">
       <aside className="control-sidebar">
         <div className="control-brand">
-          <p className="eyebrow">Feature 026 / 027</p>
+          <p className="eyebrow">Feature 026 / 027 / 030</p>
           <h1>OctoAgent Control Plane</h1>
           <p>
-            统一消费 wizard / project / session / automation / diagnostics /
-            memory / config contract。
+            统一消费 wizard / project / capability / delegation / pipeline /
+            session / automation / diagnostics / memory / config contract。
           </p>
         </div>
         <nav className="control-nav" aria-label="Control sections">
@@ -822,6 +979,48 @@ export default function ControlPlane() {
             <article className="panel">
               <div className="panel-head">
                 <div>
+                  <p className="eyebrow">Capability Pack</p>
+                  <h3>{capabilityPack.pack.tools.length}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  Skills {capabilityPack.pack.skills.length}
+                </span>
+              </div>
+              <p>
+                Worker Profiles {capabilityPack.pack.worker_profiles.length} / Bootstrap{" "}
+                {capabilityPack.pack.bootstrap_files.length}
+              </p>
+              <p className="muted">
+                ToolIndex {capabilityPack.pack.degraded_reason || "active"}
+              </p>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Delegation</p>
+                  <h3>{delegationPlane.works.length}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  Pipelines {skillPipelines.runs.length}
+                </span>
+              </div>
+              <div className="event-list">
+                {delegationPlane.works.slice(0, 2).map((item) => (
+                  <div key={item.work_id} className="event-item">
+                    <div>
+                      <strong>{item.title || item.work_id}</strong>
+                      <p>{item.route_reason || item.selected_worker_type}</p>
+                    </div>
+                    <small>{item.status}</small>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
                   <p className="eyebrow">Diagnostics</p>
                   <h3>{diagnostics.subsystems.length}</h3>
                 </div>
@@ -943,6 +1142,212 @@ export default function ControlPlane() {
                         </button>
                       </div>
                     ))}
+                </div>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
+        {activeSection === "capability" ? (
+          <section className="stack-section">
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Bundled Capability Pack</p>
+                  <h3>{capabilityPack.pack.pack_id}</h3>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void submitAction("capability.refresh", {})}
+                  disabled={busyActionId === "capability.refresh"}
+                >
+                  刷新能力包
+                </button>
+              </div>
+              <div className="meta-grid">
+                <span>Version {capabilityPack.pack.version}</span>
+                <span>Tools {capabilityPack.pack.tools.length}</span>
+                <span>Skills {capabilityPack.pack.skills.length}</span>
+                <span>
+                  Fallback {capabilityPack.pack.fallback_toolset.join(", ") || "-"}
+                </span>
+              </div>
+            </article>
+            {capabilityPack.pack.worker_profiles.map((profile) => (
+              <article key={profile.worker_type} className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Worker Profile</p>
+                    <h3>{profile.worker_type}</h3>
+                  </div>
+                  <span className="tone-chip neutral">
+                    Runtime {profile.runtime_kinds.join(", ")}
+                  </span>
+                </div>
+                <div className="meta-grid">
+                  <span>Capabilities {profile.capabilities.join(", ")}</span>
+                  <span>Model {profile.default_model_alias}</span>
+                  <span>Profile {profile.default_tool_profile}</span>
+                  <span>Groups {profile.default_tool_groups.join(", ")}</span>
+                </div>
+              </article>
+            ))}
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Bundled Tools</p>
+                  <h3>{capabilityPack.pack.tools.length}</h3>
+                </div>
+              </div>
+              <div className="event-list">
+                {capabilityPack.pack.tools.map((tool) => (
+                  <div key={tool.tool_name} className="event-item">
+                    <div>
+                      <strong>{tool.tool_name}</strong>
+                      <p>{tool.description || tool.tool_group}</p>
+                    </div>
+                    <small>{tool.tags.join(", ") || tool.tool_profile}</small>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+        ) : null}
+
+        {activeSection === "delegation" ? (
+          <section className="stack-section">
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Delegation Overview</p>
+                  <h3>{delegationPlane.works.length}</h3>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void submitAction("work.refresh", {})}
+                  disabled={busyActionId === "work.refresh"}
+                >
+                  刷新委派面板
+                </button>
+              </div>
+              <pre className="json-preview">{formatJson(delegationPlane.summary)}</pre>
+            </article>
+            {delegationPlane.works.map((work) => (
+              <article key={work.work_id} className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">{work.work_id}</p>
+                    <h3>{work.title || work.task_id}</h3>
+                  </div>
+                  <span className={`tone-chip ${statusTone(work.status)}`}>
+                    {work.status}
+                  </span>
+                </div>
+                <div className="meta-grid">
+                  <span>Worker {work.selected_worker_type || "-"}</span>
+                  <span>Target {work.target_kind || "-"}</span>
+                  <span>Runtime {work.runtime_id || "-"}</span>
+                  <span>Pipeline {work.pipeline_run_id || "-"}</span>
+                </div>
+                <p>{work.route_reason || "无 route reason"}</p>
+                <p className="muted">
+                  Selected Tools: {work.selected_tools.join(", ") || "none"}
+                </p>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void submitAction("work.cancel", { work_id: work.work_id })}
+                    disabled={busyActionId === "work.cancel"}
+                  >
+                    取消 Work
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => void submitAction("work.retry", { work_id: work.work_id })}
+                    disabled={busyActionId === "work.retry"}
+                  >
+                    重试
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void submitAction("work.escalate", { work_id: work.work_id })
+                    }
+                    disabled={busyActionId === "work.escalate"}
+                  >
+                    升级
+                  </button>
+                </div>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
+        {activeSection === "pipelines" ? (
+          <section className="stack-section">
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Skill Pipeline</p>
+                  <h3>{skillPipelines.runs.length}</h3>
+                </div>
+              </div>
+              <pre className="json-preview">{formatJson(skillPipelines.summary)}</pre>
+            </article>
+            {skillPipelines.runs.map((run) => (
+              <article key={run.run_id} className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">{run.pipeline_id}</p>
+                    <h3>{run.run_id}</h3>
+                  </div>
+                  <span className={`tone-chip ${statusTone(run.status)}`}>
+                    {run.status}
+                  </span>
+                </div>
+                <div className="meta-grid">
+                  <span>Work {run.work_id}</span>
+                  <span>Task {run.task_id}</span>
+                  <span>Node {run.current_node_id || "-"}</span>
+                  <span>Pause {run.pause_reason || "-"}</span>
+                </div>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      void submitAction("pipeline.resume", { work_id: run.work_id })
+                    }
+                    disabled={busyActionId === "pipeline.resume"}
+                  >
+                    恢复
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void submitAction("pipeline.retry_node", { work_id: run.work_id })
+                    }
+                    disabled={busyActionId === "pipeline.retry_node"}
+                  >
+                    重试节点
+                  </button>
+                </div>
+                <div className="event-list">
+                  {run.replay_frames.map((frame) => (
+                    <div key={frame.frame_id} className="event-item">
+                      <div>
+                        <strong>{frame.node_id}</strong>
+                        <p>{frame.summary || frame.status}</p>
+                      </div>
+                      <small>{formatDateTime(frame.ts)}</small>
+                    </div>
+                  ))}
                 </div>
               </article>
             ))}

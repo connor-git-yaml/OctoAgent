@@ -130,10 +130,7 @@ _CHECKPOINTS_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_checkpoints_task_created "
         "ON checkpoints(task_id, created_at DESC);"
     ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_checkpoints_task_status "
-        "ON checkpoints(task_id, status);"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_checkpoints_task_status ON checkpoints(task_id, status);"),
 ]
 
 # side_effect_ledger 表 DDL（Feature 010）
@@ -154,10 +151,7 @@ CREATE TABLE IF NOT EXISTS side_effect_ledger (
 """
 
 _SIDE_EFFECT_LEDGER_INDEXES = [
-    (
-        "CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_task_id "
-        "ON side_effect_ledger(task_id);"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_task_id ON side_effect_ledger(task_id);"),
 ]
 
 # Feature 025: projects/workspaces/bindings/migration_runs
@@ -264,6 +258,80 @@ CREATE TABLE IF NOT EXISTS project_migration_runs (
 );
 """
 
+# Feature 030: work / pipeline
+_WORKS_DDL = """
+CREATE TABLE IF NOT EXISTS works (
+    work_id                 TEXT PRIMARY KEY,
+    task_id                 TEXT NOT NULL,
+    parent_work_id          TEXT,
+    title                   TEXT NOT NULL DEFAULT '',
+    kind                    TEXT NOT NULL DEFAULT 'delegation',
+    status                  TEXT NOT NULL DEFAULT 'created',
+    target_kind             TEXT NOT NULL DEFAULT 'worker',
+    owner_id                TEXT NOT NULL DEFAULT '',
+    requested_capability    TEXT NOT NULL DEFAULT '',
+    selected_worker_type    TEXT NOT NULL DEFAULT 'general',
+    route_reason            TEXT NOT NULL DEFAULT '',
+    project_id              TEXT NOT NULL DEFAULT '',
+    workspace_id            TEXT NOT NULL DEFAULT '',
+    tool_selection_id       TEXT NOT NULL DEFAULT '',
+    selected_tools          TEXT NOT NULL DEFAULT '[]',
+    pipeline_run_id         TEXT NOT NULL DEFAULT '',
+    delegation_id           TEXT NOT NULL DEFAULT '',
+    runtime_id              TEXT NOT NULL DEFAULT '',
+    retry_count             INTEGER NOT NULL DEFAULT 0,
+    escalation_count        INTEGER NOT NULL DEFAULT 0,
+    metadata                TEXT NOT NULL DEFAULT '{}',
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    completed_at            TEXT,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
+_SKILL_PIPELINE_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS skill_pipeline_runs (
+    run_id               TEXT PRIMARY KEY,
+    pipeline_id          TEXT NOT NULL,
+    task_id              TEXT NOT NULL,
+    work_id              TEXT NOT NULL,
+    status               TEXT NOT NULL DEFAULT 'created',
+    current_node_id      TEXT NOT NULL DEFAULT '',
+    pause_reason         TEXT NOT NULL DEFAULT '',
+    retry_cursor         TEXT NOT NULL DEFAULT '{}',
+    state_snapshot       TEXT NOT NULL DEFAULT '{}',
+    input_request        TEXT NOT NULL DEFAULT '{}',
+    approval_request     TEXT NOT NULL DEFAULT '{}',
+    metadata             TEXT NOT NULL DEFAULT '{}',
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    completed_at         TEXT,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id),
+    FOREIGN KEY (work_id) REFERENCES works(work_id)
+);
+"""
+
+_SKILL_PIPELINE_CHECKPOINTS_DDL = """
+CREATE TABLE IF NOT EXISTS skill_pipeline_checkpoints (
+    checkpoint_id       TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL,
+    task_id             TEXT NOT NULL,
+    node_id             TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    state_snapshot      TEXT NOT NULL DEFAULT '{}',
+    side_effect_cursor  TEXT,
+    replay_summary      TEXT NOT NULL DEFAULT '',
+    retry_count         INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+
+    FOREIGN KEY (run_id) REFERENCES skill_pipeline_runs(run_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
 _PROJECT_INDEXES = [
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_single_default "
@@ -303,6 +371,24 @@ _PROJECT_INDEXES = [
     ),
 ]
 
+_WORK_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_works_task_created ON works(task_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_works_status_updated ON works(status, updated_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_works_parent_work ON works(parent_work_id, created_at DESC);",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_runs_work_updated "
+        "ON skill_pipeline_runs(work_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_runs_task_updated "
+        "ON skill_pipeline_runs(task_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_checkpoints_run_created "
+        "ON skill_pipeline_checkpoints(run_id, created_at ASC);"
+    ),
+]
+
 
 async def _table_columns(conn: aiosqlite.Connection, table_name: str) -> set[str]:
     """读取表列名集合。"""
@@ -315,9 +401,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     """对已有旧表执行最小 schema 迁移。"""
     task_columns = await _table_columns(conn, "tasks")
     if task_columns and "trace_id" not in task_columns:
-        await conn.execute(
-            "ALTER TABLE tasks ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''"
-        )
+        await conn.execute("ALTER TABLE tasks ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
 
 
 async def init_db(conn: aiosqlite.Connection) -> None:
@@ -344,6 +428,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_PROJECT_SECRET_BINDINGS_DDL)
     await conn.execute(_PROJECT_SELECTOR_STATE_DDL)
     await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
+    await conn.execute(_WORKS_DDL)
+    await conn.execute(_SKILL_PIPELINE_RUNS_DDL)
+    await conn.execute(_SKILL_PIPELINE_CHECKPOINTS_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -355,6 +442,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _CHECKPOINTS_INDEXES
         + _SIDE_EFFECT_LEDGER_INDEXES
         + _PROJECT_INDEXES
+        + _WORK_INDEXES
     ):
         await conn.execute(idx_sql)
 

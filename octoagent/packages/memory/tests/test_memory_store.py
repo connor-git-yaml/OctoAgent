@@ -85,6 +85,28 @@ class TestSqliteMemoryStore:
         assert loaded is not None
         assert loaded.subject_key == proposal.subject_key
 
+    async def test_list_proposals_with_empty_scope_ids_returns_empty(self, memory_store):
+        now = datetime.now(UTC)
+        await memory_store.save_proposal(
+            WriteProposal(
+                proposal_id="01JPROP_10000000000000003",
+                scope_id="work/project-x",
+                partition=MemoryPartition.WORK,
+                action=WriteAction.ADD,
+                subject_key="work.project-x.status",
+                content="running",
+                rationale="sync current state",
+                confidence=0.9,
+                evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
+                metadata={"source": "worker"},
+                created_at=now,
+            )
+        )
+
+        proposals = await memory_store.list_proposals(scope_ids=[])
+
+        assert proposals == []
+
     async def test_store_sets_row_factory_for_named_column_access(self, tmp_path):
         db_path = tmp_path / "memory-store-row-factory.db"
         conn = await aiosqlite.connect(str(db_path))

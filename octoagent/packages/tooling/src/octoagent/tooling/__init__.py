@@ -60,6 +60,7 @@ from .sanitizer import sanitize_for_event
 
 # Schema Reflection
 from .schema import reflect_tool_schema
+from .tool_index import InMemoryToolIndexBackend, LanceDBToolIndexBackend, ToolIndex
 
 __all__ = [
     # 枚举
@@ -97,6 +98,9 @@ __all__ = [
     "LargeOutputHandler",
     # 脱敏
     "sanitize_for_event",
+    "ToolIndex",
+    "InMemoryToolIndexBackend",
+    "LanceDBToolIndexBackend",
     # 异常
     "PolicyCheckpointMissingError",
     "SchemaReflectionError",

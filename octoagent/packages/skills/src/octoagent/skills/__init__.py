@@ -25,6 +25,11 @@ from .models import (
     ToolCallSpec,
     ToolFeedbackMessage,
 )
+from .pipeline import (
+    PipelineExecutionError,
+    PipelineNodeOutcome,
+    SkillPipelineEngine,
+)
 from .protocols import (
     SkillRegistryProtocol,
     SkillRunnerProtocol,
@@ -62,4 +67,7 @@ __all__ = [
     "RegisteredSkill",
     "SkillRegistry",
     "SkillRunner",
+    "PipelineExecutionError",
+    "PipelineNodeOutcome",
+    "SkillPipelineEngine",
 ]

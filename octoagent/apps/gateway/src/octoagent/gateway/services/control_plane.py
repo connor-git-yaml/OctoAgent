@@ -20,6 +20,7 @@ from octoagent.core.models import (
     AutomationJobRun,
     AutomationJobStatus,
     AutomationScheduleKind,
+    CapabilityPackDocument,
     ConfigFieldHint,
     ConfigSchemaDocument,
     ControlPlaneActionStatus,
@@ -33,6 +34,7 @@ from octoagent.core.models import (
     ControlPlaneSupportStatus,
     ControlPlaneSurface,
     ControlPlaneTargetRef,
+    DelegationPlaneDocument,
     DiagnosticsFailureSummary,
     DiagnosticsSubsystemStatus,
     DiagnosticsSummaryDocument,
@@ -45,11 +47,13 @@ from octoagent.core.models import (
     OperatorActionKind,
     OperatorActionRequest,
     OperatorActionSource,
+    PipelineRunItem,
     ProjectBindingType,
     ProjectOption,
     ProjectSelectorDocument,
     SessionProjectionDocument,
     SessionProjectionItem,
+    SkillPipelineDocument,
     Task,
     TaskPointers,
     TaskStatus,
@@ -57,6 +61,7 @@ from octoagent.core.models import (
     VaultAuthorizationDocument,
     WizardSessionDocument,
     WizardStepDocument,
+    WorkProjectionItem,
     WorkspaceOption,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
@@ -116,6 +121,8 @@ class ControlPlaneService:
         update_status_store=None,
         update_service=None,
         memory_console_service: MemoryConsoleService | None = None,
+        capability_pack_service=None,
+        delegation_plane_service=None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -130,6 +137,8 @@ class ControlPlaneService:
             project_root,
             store_group=store_group,
         )
+        self._capability_pack_service = capability_pack_service
+        self._delegation_plane_service = delegation_plane_service
         self._state_store = ControlPlaneStateStore(project_root)
         self._automation_store = AutomationStore(project_root)
         self._automation_scheduler = None
@@ -148,6 +157,9 @@ class ControlPlaneService:
         config = await self.get_config_schema()
         project_selector = await self.get_project_selector()
         sessions = await self.get_session_projection()
+        capability_pack = await self.get_capability_pack_document()
+        delegation = await self.get_delegation_document()
+        pipelines = await self.get_skill_pipeline_document()
         automation = await self.get_automation_document()
         diagnostics = await self.get_diagnostics_summary()
         memory = await self.get_memory_console()
@@ -157,10 +169,11 @@ class ControlPlaneService:
             "resources": {
                 "wizard": wizard.model_dump(mode="json", by_alias=True),
                 "config": config.model_dump(mode="json", by_alias=True),
-                "project_selector": project_selector.model_dump(
-                    mode="json", by_alias=True
-                ),
+                "project_selector": project_selector.model_dump(mode="json", by_alias=True),
                 "sessions": sessions.model_dump(mode="json", by_alias=True),
+                "capability_pack": capability_pack.model_dump(mode="json", by_alias=True),
+                "delegation": delegation.model_dump(mode="json", by_alias=True),
+                "pipelines": pipelines.model_dump(mode="json", by_alias=True),
                 "automation": automation.model_dump(mode="json", by_alias=True),
                 "diagnostics": diagnostics.model_dump(mode="json", by_alias=True),
                 "memory": memory.model_dump(mode="json", by_alias=True),
@@ -254,6 +267,46 @@ class ControlPlaneService:
         ):
             action_id = "automation.run"
             params["job_id"] = parts[2]
+        elif (
+            command == "/work"
+            and len(parts) >= 3
+            and parts[1].lower() == "cancel"
+            and self._has_telegram_alias("work.cancel", "/work cancel")
+        ):
+            action_id = "work.cancel"
+            params["work_id"] = parts[2]
+        elif (
+            command == "/work"
+            and len(parts) >= 3
+            and parts[1].lower() == "retry"
+            and self._has_telegram_alias("work.retry", "/work retry")
+        ):
+            action_id = "work.retry"
+            params["work_id"] = parts[2]
+        elif (
+            command == "/work"
+            and len(parts) >= 3
+            and parts[1].lower() == "escalate"
+            and self._has_telegram_alias("work.escalate", "/work escalate")
+        ):
+            action_id = "work.escalate"
+            params["work_id"] = parts[2]
+        elif (
+            command == "/pipeline"
+            and len(parts) >= 3
+            and parts[1].lower() == "resume"
+            and self._has_telegram_alias("pipeline.resume", "/pipeline resume")
+        ):
+            action_id = "pipeline.resume"
+            params["work_id"] = parts[2]
+        elif (
+            command == "/pipeline"
+            and len(parts) >= 3
+            and parts[1].lower() == "retry"
+            and self._has_telegram_alias("pipeline.retry_node", "/pipeline retry")
+        ):
+            action_id = "pipeline.retry_node"
+            params["work_id"] = parts[2]
 
         if not action_id:
             return None
@@ -551,6 +604,162 @@ class ControlPlaneService:
                     label="创建自动化任务",
                     action_id="automation.create",
                 )
+            ],
+        )
+
+    async def get_capability_pack_document(self) -> CapabilityPackDocument:
+        state = self._state_store.load()
+        if self._capability_pack_service is None:
+            return CapabilityPackDocument(
+                selected_project_id=state.selected_project_id,
+                selected_workspace_id=state.selected_workspace_id,
+                degraded=ControlPlaneDegradedState(
+                    is_degraded=True,
+                    reasons=["capability_pack_unavailable"],
+                ),
+                warnings=["capability pack service unavailable"],
+            )
+        pack = await self._capability_pack_service.get_pack()
+        return CapabilityPackDocument(
+            pack=pack,
+            selected_project_id=state.selected_project_id,
+            selected_workspace_id=state.selected_workspace_id,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="capability.refresh",
+                    label="刷新能力包",
+                    action_id="capability.refresh",
+                )
+            ],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=bool(pack.degraded_reason),
+                reasons=[pack.degraded_reason] if pack.degraded_reason else [],
+            ),
+        )
+
+    async def get_delegation_document(self) -> DelegationPlaneDocument:
+        if self._delegation_plane_service is None:
+            return DelegationPlaneDocument(
+                degraded=ControlPlaneDegradedState(
+                    is_degraded=True,
+                    reasons=["delegation_plane_unavailable"],
+                ),
+                warnings=["delegation plane unavailable"],
+            )
+        works = await self._delegation_plane_service.list_works()
+        items = [
+            WorkProjectionItem(
+                work_id=work.work_id,
+                task_id=work.task_id,
+                parent_work_id=work.parent_work_id or "",
+                title=work.title,
+                status=work.status.value,
+                target_kind=work.target_kind.value,
+                selected_worker_type=work.selected_worker_type.value,
+                route_reason=work.route_reason,
+                owner_id=work.owner_id,
+                selected_tools=work.selected_tools,
+                pipeline_run_id=work.pipeline_run_id,
+                runtime_id=work.runtime_id,
+                project_id=work.project_id,
+                workspace_id=work.workspace_id,
+                updated_at=work.updated_at,
+                capabilities=[
+                    ControlPlaneCapability(
+                        capability_id="work.cancel",
+                        label="取消 Work",
+                        action_id="work.cancel",
+                        enabled=work.status.value
+                        not in {"succeeded", "failed", "cancelled", "merged"},
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="work.retry",
+                        label="重试 Work",
+                        action_id="work.retry",
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="work.escalate",
+                        label="升级 Work",
+                        action_id="work.escalate",
+                    ),
+                ],
+            )
+            for work in works
+        ]
+        summary: dict[str, Any] = {
+            "total": len(items),
+            "by_status": {},
+            "by_worker_type": {},
+        }
+        for item in items:
+            summary["by_status"][item.status] = summary["by_status"].get(item.status, 0) + 1
+            summary["by_worker_type"][item.selected_worker_type] = (
+                summary["by_worker_type"].get(item.selected_worker_type, 0) + 1
+            )
+        return DelegationPlaneDocument(
+            works=items,
+            summary=summary,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="work.refresh",
+                    label="刷新委派视图",
+                    action_id="work.refresh",
+                )
+            ],
+        )
+
+    async def get_skill_pipeline_document(self) -> SkillPipelineDocument:
+        if self._delegation_plane_service is None:
+            return SkillPipelineDocument(
+                degraded=ControlPlaneDegradedState(
+                    is_degraded=True,
+                    reasons=["delegation_plane_unavailable"],
+                ),
+                warnings=["skill pipeline unavailable"],
+            )
+        runs = await self._delegation_plane_service.list_pipeline_runs()
+        items: list[PipelineRunItem] = []
+        for run in runs:
+            frames = await self._delegation_plane_service.list_pipeline_replay(run.run_id)
+            items.append(
+                PipelineRunItem(
+                    run_id=run.run_id,
+                    pipeline_id=run.pipeline_id,
+                    task_id=run.task_id,
+                    work_id=run.work_id,
+                    status=run.status.value,
+                    current_node_id=run.current_node_id,
+                    pause_reason=run.pause_reason,
+                    retry_cursor=run.retry_cursor,
+                    updated_at=run.updated_at,
+                    replay_frames=frames,
+                )
+            )
+        summary = {
+            "total": len(items),
+            "paused": len(
+                [
+                    item
+                    for item in items
+                    if item.status in {"waiting_input", "waiting_approval", "paused"}
+                ]
+            ),
+            "running": len([item for item in items if item.status == "running"]),
+        }
+        return SkillPipelineDocument(
+            runs=items,
+            summary=summary,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="pipeline.resume",
+                    label="恢复 Pipeline",
+                    action_id="pipeline.resume",
+                ),
+                ControlPlaneCapability(
+                    capability_id="pipeline.retry_node",
+                    label="重试节点",
+                    action_id="pipeline.retry_node",
+                ),
             ],
         )
 
@@ -986,6 +1195,24 @@ class ControlPlaneService:
             return await self._handle_memory_export_inspect(request)
         if action_id == "memory.restore.verify":
             return await self._handle_memory_restore_verify(request)
+        if action_id == "capability.refresh":
+            if self._capability_pack_service is not None:
+                await self._capability_pack_service.refresh()
+            await self.get_capability_pack_document()
+            return self._completed_result(
+                request=request,
+                code="CAPABILITY_REFRESHED",
+                message="已刷新 capability pack",
+                resource_refs=[self._resource_ref("capability_pack", "capability:bundled")],
+            )
+        if action_id == "work.refresh":
+            await self.get_delegation_document()
+            return self._completed_result(
+                request=request,
+                code="WORK_REFRESHED",
+                message="已刷新 delegation overview",
+                resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            )
         if action_id == "session.focus":
             return await self._handle_session_focus(request)
         if action_id == "session.export":
@@ -1047,6 +1274,16 @@ class ControlPlaneService:
             return await self._handle_automation_pause_resume(request, enable=True)
         if action_id == "automation.delete":
             return await self._handle_automation_delete(request)
+        if action_id == "work.cancel":
+            return await self._handle_work_cancel(request)
+        if action_id == "work.retry":
+            return await self._handle_work_retry(request)
+        if action_id == "work.escalate":
+            return await self._handle_work_escalate(request)
+        if action_id == "pipeline.resume":
+            return await self._handle_pipeline_resume(request)
+        if action_id == "pipeline.retry_node":
+            return await self._handle_pipeline_retry_node(request)
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {action_id}")
 
     async def _handle_project_select(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -1547,6 +1784,123 @@ class ControlPlaneService:
             data=result.model_dump(mode="json"),
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[ControlPlaneTargetRef(target_type="task", target_id=task_id)],
+        )
+
+    async def _handle_work_cancel(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        if self._task_runner is not None:
+            await self._task_runner.cancel_task(work.task_id)
+        updated = await self._delegation_plane_service.cancel_work(
+            work_id, reason="control_plane_cancel"
+        )
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="WORK_CANCELLED",
+            message="已取消 work",
+            data=updated.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("delegation_plane", "delegation:overview"),
+                self._resource_ref("skill_pipeline", "pipeline:overview"),
+            ],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_work_retry(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        updated = await self._delegation_plane_service.retry_work(work_id)
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="WORK_RETRIED",
+            message="已重置 work 为待重试状态",
+            data=updated.model_dump(mode="json"),
+            resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_work_escalate(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        updated = await self._delegation_plane_service.escalate_work(
+            work_id,
+            reason="control_plane_escalate",
+        )
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="WORK_ESCALATED",
+            message="已升级 work",
+            data=updated.model_dump(mode="json"),
+            resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_pipeline_resume(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        state_patch = request.params.get("state_patch")
+        if state_patch is not None and not isinstance(state_patch, dict):
+            raise ControlPlaneActionError("STATE_PATCH_INVALID", "state_patch 必须是 object")
+        updated = await self._delegation_plane_service.resume_pipeline(
+            work_id,
+            state_patch=state_patch if isinstance(state_patch, dict) else None,
+        )
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="PIPELINE_RESUMED",
+            message="已恢复 pipeline",
+            data=updated.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("delegation_plane", "delegation:overview"),
+                self._resource_ref("skill_pipeline", "pipeline:overview"),
+            ],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_pipeline_retry_node(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        updated = await self._delegation_plane_service.retry_pipeline_node(work_id)
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="PIPELINE_NODE_RETRIED",
+            message="已重试当前 pipeline 节点",
+            data=updated.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("delegation_plane", "delegation:overview"),
+                self._resource_ref("skill_pipeline", "pipeline:overview"),
+            ],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
         )
 
     async def _handle_operator_approval(
@@ -2748,6 +3102,8 @@ class ControlPlaneService:
                     approval_hint="operator",
                     params_schema={"type": "object", "required": ["snapshot_ref"]},
                 ),
+                definition("capability.refresh", "刷新能力包", category="capability"),
+                definition("work.refresh", "刷新委派视图", category="delegation"),
                 definition("session.focus", "聚焦会话", category="sessions"),
                 definition("session.export", "导出会话", category="sessions"),
                 definition(
@@ -2827,53 +3183,48 @@ class ControlPlaneService:
                     "automation.delete", "删除自动化任务", category="automation", risk_hint="medium"
                 ),
                 definition(
+                    "work.cancel",
+                    "取消 Work",
+                    category="delegation",
+                    telegram_aliases=["/work cancel"],
+                    risk_hint="medium",
+                    telegram_supported=True,
+                ),
+                definition(
+                    "work.retry",
+                    "重试 Work",
+                    category="delegation",
+                    telegram_aliases=["/work retry"],
+                    telegram_supported=True,
+                ),
+                definition(
+                    "work.escalate",
+                    "升级 Work",
+                    category="delegation",
+                    telegram_aliases=["/work escalate"],
+                    risk_hint="medium",
+                    telegram_supported=True,
+                ),
+                definition(
+                    "pipeline.resume",
+                    "恢复 Pipeline",
+                    category="pipeline",
+                    telegram_aliases=["/pipeline resume"],
+                    telegram_supported=True,
+                ),
+                definition(
+                    "pipeline.retry_node",
+                    "重试节点",
+                    category="pipeline",
+                    telegram_aliases=["/pipeline retry"],
+                    telegram_supported=True,
+                ),
+                definition(
                     "diagnostics.refresh",
                     "刷新诊断",
                     category="diagnostics",
                     telegram_aliases=["/status"],
                     telegram_supported=True,
-                ),
-                definition("memory.query", "查询 Memory", category="memory"),
-                definition(
-                    "memory.subject.inspect",
-                    "查看 Subject 历史",
-                    category="memory",
-                ),
-                definition(
-                    "memory.proposal.inspect",
-                    "查看 Proposal 审计",
-                    category="memory",
-                ),
-                definition(
-                    "vault.access.request",
-                    "申请 Vault 授权",
-                    category="memory",
-                ),
-                definition(
-                    "vault.access.resolve",
-                    "审批 Vault 授权",
-                    category="memory",
-                    risk_hint="high",
-                    approval_hint="operator",
-                ),
-                definition(
-                    "vault.retrieve",
-                    "检索 Vault",
-                    category="memory",
-                    risk_hint="high",
-                    approval_hint="grant",
-                ),
-                definition(
-                    "memory.export.inspect",
-                    "检查 Memory 导出范围",
-                    category="memory",
-                ),
-                definition(
-                    "memory.restore.verify",
-                    "校验 Memory 恢复",
-                    category="memory",
-                    risk_hint="high",
-                    approval_hint="operator",
                 ),
             ],
             capabilities=[

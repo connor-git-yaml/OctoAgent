@@ -202,7 +202,7 @@ async def seeded_memory_control_plane(control_plane_app):
 
 
 class TestControlPlaneApi:
-    async def test_snapshot_returns_six_resources_and_registry(
+    async def test_snapshot_returns_feature_030_resources_and_registry(
         self,
         control_plane_client: AsyncClient,
         seeded_memory_control_plane,
@@ -217,6 +217,9 @@ class TestControlPlaneApi:
             "config",
             "project_selector",
             "sessions",
+            "capability_pack",
+            "delegation",
+            "pipelines",
             "automation",
             "diagnostics",
             "memory",
@@ -224,6 +227,10 @@ class TestControlPlaneApi:
         assert payload["registry"]["resource_type"] == "action_registry"
         assert any(item["action_id"] == "project.select" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "memory.query" for item in payload["registry"]["actions"])
+        assert any(item["action_id"] == "work.cancel" for item in payload["registry"]["actions"])
+        assert any(
+            item["action_id"] == "pipeline.resume" for item in payload["registry"]["actions"]
+        )
         assert "schema" in payload["resources"]["config"]
         assert "schema_payload" not in payload["resources"]["config"]
         assert payload["resources"]["memory"]["resource_type"] == "memory_console"
@@ -233,11 +240,60 @@ class TestControlPlaneApi:
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
+        capability_pack = payload["resources"]["capability_pack"]
+        assert capability_pack["resource_type"] == "capability_pack"
+        assert capability_pack["pack"]["tools"]
+        assert payload["resources"]["delegation"]["works"] == []
+        assert payload["resources"]["pipelines"]["runs"] == []
 
         config_resp = await control_plane_client.get("/api/control/resources/config")
         config_payload = config_resp.json()
         assert "schema" in config_payload
         assert "schema_payload" not in config_payload
+
+    async def test_capability_refresh_action_invokes_refresh(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        monkeypatch,
+    ) -> None:
+        calls: list[str] = []
+
+        async def fake_refresh():
+            calls.append("refresh")
+            return await control_plane_app.state.capability_pack_service.get_pack()
+
+        monkeypatch.setattr(
+            control_plane_app.state.capability_pack_service,
+            "refresh",
+            fake_refresh,
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "capability.refresh",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {},
+            },
+        )
+
+        assert resp.status_code == 200
+        payload = resp.json()["result"]
+        assert payload["code"] == "CAPABILITY_REFRESHED"
+        assert calls == ["refresh"]
+        assert payload["resource_refs"] == [
+            {
+                "resource_type": "capability_pack",
+                "resource_id": "capability:bundled",
+                "schema_version": 1,
+            }
+        ]
 
     async def test_memory_resources_and_vault_authorization_flow(
         self,

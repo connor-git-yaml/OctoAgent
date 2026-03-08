@@ -485,7 +485,6 @@ class MemoryConsoleService:
         source: str | None = None,
         limit: int = 50,
     ) -> MemoryProposalAuditDocument:
-        _ = source
         context = await self._resolve_context(
             active_project_id=active_project_id,
             active_workspace_id=active_workspace_id,
@@ -499,6 +498,7 @@ class MemoryConsoleService:
         proposals = await memory.list_proposals(
             scope_ids=context.selected_scope_ids,
             statuses=statuses,
+            source=source or None,
             limit=limit,
         )
         summary = MemoryProposalSummary()
@@ -882,6 +882,13 @@ class MemoryConsoleService:
         if not decision.allowed:
             return "MEMORY_EXPORT_INSPECTION_NOT_ALLOWED", {}, decision
         selected_scope_ids = scope_ids or context.selected_scope_ids
+        scope_decision = self._decide_scope_list_bound(
+            action_id="memory.export.inspect",
+            context=context,
+            scope_ids=selected_scope_ids,
+        )
+        if scope_decision is not None:
+            return "MEMORY_EXPORT_INSPECTION_NOT_ALLOWED", {}, scope_decision
         counts = {
             "fragments": 0,
             "sor_current": 0,
@@ -990,7 +997,8 @@ class MemoryConsoleService:
         else:
             blocking_issues.append("仅支持 .json 或 .zip 的 memory snapshot/bundle 校验。")
 
-        target_scopes = scope_ids or context.selected_scope_ids
+        snapshot_scope_ids = self._snapshot_scope_ids(snapshot_payload)
+        target_scopes = scope_ids or snapshot_scope_ids or context.selected_scope_ids
         scope_conflicts: list[str] = []
         if target_scope_mode == "current_project":
             bound_scope_ids = set(context.scope_bindings.keys())
@@ -1243,6 +1251,12 @@ class MemoryConsoleService:
             normalized = await self._normalize_grant(grant)
             if normalized.status is VaultAccessGrantStatus.EXPIRED:
                 return None, "VAULT_AUTHORIZATION_EXPIRED", "Vault grant 已过期。"
+            if normalized.granted_to_actor_id != actor_id:
+                return (
+                    None,
+                    "VAULT_AUTHORIZATION_NOT_ALLOWED",
+                    "指定的 Vault grant 不属于当前 actor。",
+                )
             if normalized.project_id != project_id or normalized.scope_id != scope_id:
                 return (
                     None,
@@ -1286,6 +1300,30 @@ class MemoryConsoleService:
                 return None, "VAULT_AUTHORIZATION_EXPIRED", "Vault grant 已过期。"
             return None, "VAULT_AUTHORIZATION_REQUIRED", "当前 actor 缺少有效 Vault grant。"
         return grant, "VAULT_RETRIEVE_AUTHORIZED", ""
+
+    def _decide_scope_list_bound(
+        self,
+        *,
+        action_id: str,
+        context: _MemoryContext,
+        scope_ids: list[str],
+    ) -> MemoryPermissionDecision | None:
+        invalid_scope_ids = [
+            scope_id for scope_id in scope_ids if scope_id not in context.scope_bindings
+        ]
+        if not invalid_scope_ids:
+            return None
+        return MemoryPermissionDecision(
+            allowed=False,
+            reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
+            message=(
+                f"{action_id} 包含未绑定到当前 project 的 scope: "
+                f"{', '.join(invalid_scope_ids)}"
+            ),
+            project_id=context.project.project_id,
+            workspace_id=context.workspace.workspace_id if context.workspace else "",
+            scope_id=invalid_scope_ids[0],
+        )
 
     async def _normalize_grant(self, grant):
         if (
@@ -1498,6 +1536,30 @@ class MemoryConsoleService:
         if "grants" not in payload:
             payload["grants"] = []
         return payload, schema_ok, ""
+
+    def _snapshot_scope_ids(self, snapshot_payload: dict[str, Any]) -> list[str]:
+        scope_ids: set[str] = set()
+        raw_scope_ids = snapshot_payload.get("scope_ids")
+        if isinstance(raw_scope_ids, list):
+            scope_ids.update(str(item).strip() for item in raw_scope_ids if str(item).strip())
+        manifest = snapshot_payload.get("manifest")
+        if isinstance(manifest, dict):
+            manifest_scopes = manifest.get("scopes")
+            if isinstance(manifest_scopes, list):
+                scope_ids.update(
+                    str(item).strip() for item in manifest_scopes if str(item).strip()
+                )
+        for collection_key in ("records", "grants"):
+            collection = snapshot_payload.get(collection_key)
+            if not isinstance(collection, list):
+                continue
+            for item in collection:
+                if not isinstance(item, dict):
+                    continue
+                scope_id = str(item.get("scope_id", "")).strip()
+                if scope_id:
+                    scope_ids.add(scope_id)
+        return sorted(scope_ids)
 
     def _bundle_contains_memory_refs(self, bundle_path: Path) -> bool:
         try:

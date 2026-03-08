@@ -10,8 +10,11 @@ import pytest
 from octoagent.core.models import (
     CheckpointSnapshot,
     CheckpointStatus,
+    DispatchEnvelope,
     ExecutionBackend,
     ExecutionSessionState,
+    WorkerExecutionStatus,
+    WorkerResult,
 )
 from octoagent.core.models.enums import EventType, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
@@ -295,6 +298,221 @@ class TestTaskRunner:
         assert task.status == TaskStatus.CANCELLED
 
         await runner.shutdown()
+        await store_group.conn.close()
+
+    @pytest.mark.parametrize(
+        ("deferred_status", "job_status"),
+        [
+            (TaskStatus.WAITING_APPROVAL, "WAITING_APPROVAL"),
+            (TaskStatus.PAUSED, "PAUSED"),
+        ],
+    )
+    async def test_run_job_preserves_deferred_job_status(
+        self,
+        tmp_path: Path,
+        deferred_status: TaskStatus,
+        job_status: str,
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / f"runner-deferred-{deferred_status.value}.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+        )
+
+        msg = NormalizedMessage(
+            text=f"runner deferred {deferred_status.value}",
+            idempotency_key=f"runner-deferred-{deferred_status.value}",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await store_group.task_job_store.create_job(task_id, msg.text, "main")
+        await store_group.task_job_store.mark_running(task_id)
+
+        async def fake_dispatch(**kwargs) -> WorkerResult:
+            await task_service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.CREATED,
+                to_status=TaskStatus.RUNNING,
+                trace_id=f"trace-{task_id}",
+            )
+            await task_service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.RUNNING,
+                to_status=deferred_status,
+                trace_id=f"trace-{task_id}",
+                reason="delegation preflight deferred",
+            )
+            return WorkerResult(
+                dispatch_id="dispatch-deferred",
+                task_id=task_id,
+                worker_id="worker.llm.default",
+                status=WorkerExecutionStatus.FAILED,
+                retryable=True,
+                summary="delegation_deferred",
+            )
+
+        runner._orchestrator.dispatch = fake_dispatch  # type: ignore[method-assign]
+        await runner._run_job(task_id=task_id, user_text=msg.text, model_alias="main")
+
+        task = await task_service.get_task(task_id)
+        job = await store_group.task_job_store.get_job(task_id)
+        assert task is not None
+        assert task.status == deferred_status
+        assert job is not None
+        assert job.status == job_status
+
+        await store_group.conn.close()
+
+    @pytest.mark.parametrize(
+        ("deferred_status", "mark_job"),
+        [
+            (TaskStatus.WAITING_APPROVAL, "WAITING_APPROVAL"),
+            (TaskStatus.PAUSED, "PAUSED"),
+        ],
+    )
+    async def test_cancel_deferred_job_without_live_runner_marks_cancelled(
+        self,
+        tmp_path: Path,
+        deferred_status: TaskStatus,
+        mark_job: str,
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / f"runner-cancel-{deferred_status.value}.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+        )
+
+        msg = NormalizedMessage(
+            text=f"cancel deferred {deferred_status.value}",
+            idempotency_key=f"runner-cancel-deferred-{deferred_status.value}",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await task_service._write_state_transition(
+            task_id=task_id,
+            from_status=TaskStatus.CREATED,
+            to_status=TaskStatus.RUNNING,
+            trace_id=f"trace-{task_id}",
+        )
+        await task_service._write_state_transition(
+            task_id=task_id,
+            from_status=TaskStatus.RUNNING,
+            to_status=deferred_status,
+            trace_id=f"trace-{task_id}",
+            reason="delegation deferred",
+        )
+        await store_group.task_job_store.create_job(task_id, msg.text, "main")
+        await store_group.task_job_store.mark_running(task_id)
+        await store_group.task_job_store.mark_deferred(task_id, mark_job)
+
+        cancelled = await runner.cancel_task(task_id)
+        assert cancelled is True
+
+        task = await task_service.get_task(task_id)
+        job = await store_group.task_job_store.get_job(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.CANCELLED
+        assert job is not None
+        assert job.status == "CANCELLED"
+
+        await store_group.conn.close()
+
+    async def test_schedule_dispatch_envelope_requeues_terminal_job_and_executes(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-prepared-dispatch.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+        )
+
+        msg = NormalizedMessage(
+            text="prepared dispatch retry",
+            idempotency_key="runner-prepared-dispatch",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await store_group.task_job_store.create_job(task_id, msg.text, "main")
+        await store_group.task_job_store.mark_failed(task_id, "previous_failed")
+
+        dispatched = asyncio.Event()
+
+        async def fake_dispatch_prepared(envelope: DispatchEnvelope) -> WorkerResult:
+            await task_service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.CREATED,
+                to_status=TaskStatus.RUNNING,
+                trace_id=envelope.trace_id,
+            )
+            await task_service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.RUNNING,
+                to_status=TaskStatus.SUCCEEDED,
+                trace_id=envelope.trace_id,
+                reason="prepared dispatch succeeded",
+            )
+            dispatched.set()
+            return WorkerResult(
+                dispatch_id=envelope.dispatch_id,
+                task_id=task_id,
+                worker_id="worker.llm.dev",
+                status=WorkerExecutionStatus.SUCCEEDED,
+                retryable=False,
+                summary="prepared_dispatch_succeeded",
+            )
+
+        runner._orchestrator.dispatch_prepared = fake_dispatch_prepared  # type: ignore[method-assign]
+        scheduled = await runner.schedule_dispatch_envelope(
+            DispatchEnvelope(
+                dispatch_id="dispatch-retry",
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                contract_version="1.0",
+                route_reason="retry",
+                worker_capability="dev",
+                hop_count=1,
+                max_hops=3,
+                user_text=msg.text,
+                model_alias="main",
+                tool_profile="standard",
+                metadata={"work_id": "work-001"},
+            )
+        )
+        assert scheduled is True
+        await asyncio.wait_for(dispatched.wait(), timeout=1.0)
+
+        task = await task_service.get_task(task_id)
+        job = await store_group.task_job_store.get_job(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.SUCCEEDED
+        assert job is not None
+        assert job.status == "SUCCEEDED"
+
         await store_group.conn.close()
 
     async def test_startup_recovery_resumes_from_checkpoint(self, tmp_path: Path) -> None:

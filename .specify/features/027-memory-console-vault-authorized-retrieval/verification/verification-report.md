@@ -20,11 +20,12 @@
 uv run pytest \
   packages/memory/tests/test_memory_store.py \
   packages/memory/tests/test_memory_service.py \
+  packages/provider/tests/dx/test_memory_console_service.py \
   apps/gateway/tests/test_control_plane_api.py \
   -q
 ```
 
-结果：`22 passed`
+结果：`28 passed`
 
 ```bash
 uv run --with ruff ruff check \
@@ -45,7 +46,7 @@ uv run --with ruff ruff check \
 npm test -- src/pages/ControlPlane.test.tsx
 ```
 
-结果：`4 passed`
+结果：`5 passed`
 
 ```bash
 npm run build
@@ -64,6 +65,7 @@ npm run build
 - `vault.access.request / vault.access.resolve / vault.retrieve`
 - `memory.export.inspect / memory.restore.verify`
 - Web Control Plane Memory section 的 overview / subject history / proposal audit / vault authorization 读取与动作提交
+- review 回归点：显式 `grant_id` actor 校验、空 scope 过滤、proposal `source` 过滤、export/restore scope 边界、Memory 刷新保留查询参数
 
 ## Residual Notes
 

@@ -53,7 +53,9 @@ from .routes import (
     watchdog,
 )
 from .services.automation_scheduler import AutomationSchedulerService
+from .services.capability_pack import CapabilityPackService
 from .services.control_plane import ControlPlaneService
+from .services.delegation_plane import DelegationPlaneService
 from .services.llm_service import LLMService
 from .services.operator_actions import OperatorActionService
 from .services.operator_inbox import OperatorInboxService
@@ -271,6 +273,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await policy_engine.startup()
     app.state.policy_engine = policy_engine
     app.state.approval_manager = policy_engine.approval_manager
+    from octoagent.tooling import ToolBroker
+
+    tool_broker = ToolBroker(
+        event_store=store_group.event_store,
+        artifact_store=store_group.artifact_store,
+    )
+    tool_broker.add_hook(policy_engine.hook)
+    app.state.tool_broker = tool_broker
 
     # LLM 服务初始化（根据配置选择模式）
     provider_config = load_provider_config()
@@ -320,12 +330,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.llm_service = llm_service
     app.state.alias_registry = alias_registry
     app.state.background_tasks: set[asyncio.Task] = set()
+    app.state.capability_pack_service = CapabilityPackService(
+        project_root=project_root,
+        store_group=store_group,
+        tool_broker=tool_broker,
+    )
+    await app.state.capability_pack_service.startup()
+    app.state.delegation_plane_service = DelegationPlaneService(
+        project_root=project_root,
+        store_group=store_group,
+        sse_hub=app.state.sse_hub,
+        capability_pack=app.state.capability_pack_service,
+    )
     app.state.task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=app.state.sse_hub,
         llm_service=llm_service,
         approval_manager=app.state.approval_manager,
         completion_notifier=telegram_service.notify_task_result,
+        delegation_plane=app.state.delegation_plane_service,
     )
     app.state.execution_console = app.state.task_runner.execution_console
     telegram_service.bind_task_runner(app.state.task_runner)
@@ -353,8 +376,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         cooldown_registry=cooldown_registry,
         detectors=[
             NoProgressDetector(),
-            StateMachineDriftDetector(),   # T035: Phase 4 追加（FR-011 状态机漂移）
-            RepeatedFailureDetector(),     # T039: Phase 5 追加（FR-012 重复失败）
+            StateMachineDriftDetector(),  # T035: Phase 4 追加（FR-011 状态机漂移）
+            RepeatedFailureDetector(),  # T039: Phase 5 追加（FR-012 重复失败）
         ],
     )
     await watchdog_scanner.startup()  # 重建 cooldown 注册表（FR-006 跨重启一致性）
@@ -408,14 +431,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             project_root,
             store_group=store_group,
         ),
+        capability_pack_service=app.state.capability_pack_service,
+        delegation_plane_service=app.state.delegation_plane_service,
     )
     app.state.automation_scheduler = AutomationSchedulerService(
         control_plane_service=app.state.control_plane_service,
         automation_store=app.state.control_plane_service.automation_store,
     )
-    app.state.control_plane_service.bind_automation_scheduler(
-        app.state.automation_scheduler
-    )
+    app.state.control_plane_service.bind_automation_scheduler(app.state.automation_scheduler)
     telegram_service.bind_control_plane_service(app.state.control_plane_service)
     await app.state.automation_scheduler.startup()
 

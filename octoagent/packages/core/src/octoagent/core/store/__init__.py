@@ -20,6 +20,7 @@ from .transaction import (
     append_event_and_update_task,
     append_event_only,
 )
+from .work_store import SqliteWorkStore
 
 
 class StoreGroup:
@@ -38,6 +39,7 @@ class StoreGroup:
         self.checkpoint_store = SqliteCheckpointStore(conn)
         self.side_effect_ledger_store = SqliteSideEffectLedgerStore(conn)
         self.project_store = SqliteProjectStore(conn)
+        self.work_store = SqliteWorkStore(conn)
 
 
 async def create_store_group(
@@ -77,6 +79,7 @@ __all__ = [
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",
     "SqliteProjectStore",
+    "SqliteWorkStore",
     "init_db",
     "append_event_and_update_task",
     "append_event_only",

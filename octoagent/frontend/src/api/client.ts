@@ -6,9 +6,11 @@ import type {
   ActionRequestEnvelope,
   ActionResultEnvelope,
   BackupBundle,
+  CapabilityPackDocument,
   ControlPlaneActionResponse,
   ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
+  DelegationPlaneDocument,
   DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
@@ -18,6 +20,7 @@ import type {
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
+  SkillPipelineDocument,
   ProjectSelectorDocument,
   RecoverySummary,
   SessionProjectionDocument,
@@ -37,6 +40,9 @@ type ControlResourceName =
   | "config"
   | "project-selector"
   | "sessions"
+  | "capability-pack"
+  | "delegation"
+  | "pipelines"
   | "automation"
   | "diagnostics"
   | "memory";
@@ -116,6 +122,15 @@ export async function fetchControlResource(
   resource: "sessions"
 ): Promise<SessionProjectionDocument>;
 export async function fetchControlResource(
+  resource: "capability-pack"
+): Promise<CapabilityPackDocument>;
+export async function fetchControlResource(
+  resource: "delegation"
+): Promise<DelegationPlaneDocument>;
+export async function fetchControlResource(
+  resource: "pipelines"
+): Promise<SkillPipelineDocument>;
+export async function fetchControlResource(
   resource: "automation"
 ): Promise<AutomationJobDocument>;
 export async function fetchControlResource(
@@ -131,11 +146,32 @@ export async function fetchControlResource(
   | ConfigSchemaDocument
   | ProjectSelectorDocument
   | SessionProjectionDocument
+  | CapabilityPackDocument
+  | DelegationPlaneDocument
+  | SkillPipelineDocument
   | AutomationJobDocument
   | DiagnosticsSummaryDocument
   | MemoryConsoleDocument
 > {
   return apiFetch(`/api/control/resources/${resource}`);
+}
+
+export async function fetchMemoryConsole(
+  params: MemoryResourceQuery = {}
+): Promise<MemoryConsoleDocument> {
+  return apiFetch<MemoryConsoleDocument>(
+    `/api/control/resources/memory${buildQueryString({
+      project_id: params.projectId,
+      workspace_id: params.workspaceId,
+      scope_id: params.scopeId,
+      partition: params.partition,
+      layer: params.layer,
+      query: params.query,
+      include_history: params.includeHistory,
+      include_vault_refs: params.includeVaultRefs,
+      limit: params.limit,
+    })}`
+  );
 }
 
 export async function fetchMemorySubjectHistory(

@@ -607,6 +607,7 @@ class MemoryService:
         *,
         scope_ids: list[str] | None = None,
         statuses: list[ProposalStatus] | None = None,
+        source: str | None = None,
         limit: int = 50,
     ) -> list[WriteProposal]:
         """按 scope/status 列出提案。"""
@@ -614,6 +615,7 @@ class MemoryService:
         return await self._store.list_proposals(
             scope_ids=scope_ids,
             statuses=[item.value for item in statuses] if statuses else None,
+            source=source,
             limit=limit,
         )
 

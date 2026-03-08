@@ -482,6 +482,132 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   operator_items: OperatorInboxItem[];
 }
 
+export type WorkerType = "general" | "ops" | "research" | "dev";
+
+export type RuntimeKind =
+  | "worker"
+  | "subagent"
+  | "acp_runtime"
+  | "graph_agent";
+
+export interface BundledToolDefinition {
+  tool_name: string;
+  label: string;
+  description: string;
+  tool_group: string;
+  tool_profile: string;
+  tags: string[];
+  worker_types: WorkerType[];
+  manifest_ref: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface BundledSkillDefinition {
+  skill_id: string;
+  label: string;
+  description: string;
+  model_alias: string;
+  worker_types: WorkerType[];
+  tools_allowed: string[];
+  pipeline_templates: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkerBootstrapFile {
+  file_id: string;
+  path_hint: string;
+  content: string;
+  applies_to_worker_types: WorkerType[];
+  metadata: Record<string, unknown>;
+}
+
+export interface WorkerCapabilityProfile {
+  worker_type: WorkerType;
+  capabilities: string[];
+  default_model_alias: string;
+  default_tool_profile: string;
+  default_tool_groups: string[];
+  bootstrap_file_ids: string[];
+  runtime_kinds: RuntimeKind[];
+  metadata: Record<string, unknown>;
+}
+
+export interface BundledCapabilityPack {
+  pack_id: string;
+  version: string;
+  skills: BundledSkillDefinition[];
+  tools: BundledToolDefinition[];
+  worker_profiles: WorkerCapabilityProfile[];
+  bootstrap_files: WorkerBootstrapFile[];
+  fallback_toolset: string[];
+  degraded_reason: string;
+  generated_at: string;
+}
+
+export interface CapabilityPackDocument extends ControlPlaneDocumentBase {
+  resource_type: "capability_pack";
+  resource_id: "capability:bundled";
+  pack: BundledCapabilityPack;
+  selected_project_id: string;
+  selected_workspace_id: string;
+}
+
+export interface WorkProjectionItem {
+  work_id: string;
+  task_id: string;
+  parent_work_id: string;
+  title: string;
+  status: string;
+  target_kind: string;
+  selected_worker_type: string;
+  route_reason: string;
+  owner_id: string;
+  selected_tools: string[];
+  pipeline_run_id: string;
+  runtime_id: string;
+  project_id: string;
+  workspace_id: string;
+  updated_at: string | null;
+  capabilities: ControlPlaneCapability[];
+}
+
+export interface DelegationPlaneDocument extends ControlPlaneDocumentBase {
+  resource_type: "delegation_plane";
+  resource_id: "delegation:overview";
+  works: WorkProjectionItem[];
+  summary: Record<string, unknown>;
+}
+
+export interface PipelineReplayFrame {
+  frame_id: string;
+  run_id: string;
+  node_id: string;
+  status: string;
+  summary: string;
+  checkpoint_id: string;
+  ts: string;
+}
+
+export interface PipelineRunItem {
+  run_id: string;
+  pipeline_id: string;
+  task_id: string;
+  work_id: string;
+  status: string;
+  current_node_id: string;
+  pause_reason: string;
+  retry_cursor: Record<string, number>;
+  updated_at: string | null;
+  replay_frames: PipelineReplayFrame[];
+}
+
+export interface SkillPipelineDocument extends ControlPlaneDocumentBase {
+  resource_type: "skill_pipeline";
+  resource_id: "pipeline:overview";
+  runs: PipelineRunItem[];
+  summary: Record<string, unknown>;
+}
+
 export type AutomationScheduleKind = "interval" | "cron" | "once";
 
 export type AutomationJobStatus =
@@ -797,6 +923,9 @@ export interface ControlPlaneSnapshot {
     config: ConfigSchemaDocument;
     project_selector: ProjectSelectorDocument;
     sessions: SessionProjectionDocument;
+    capability_pack: CapabilityPackDocument;
+    delegation: DelegationPlaneDocument;
+    pipelines: SkillPipelineDocument;
     automation: AutomationJobDocument;
     diagnostics: DiagnosticsSummaryDocument;
     memory: MemoryConsoleDocument;

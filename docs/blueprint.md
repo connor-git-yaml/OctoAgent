@@ -2692,15 +2692,16 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [ ] Project Asset Manifest（knowledge / files / artifacts 的 upload / list / inspect / bind 最小产品面）
 - [ ] `MemUBackend` 深度集成（检索 / 索引 / 增量同步 / 多模态 / Category / ToM）
 - [ ] 微信导入插件 + 多源导入工作台
-- [ ] 内置 Skill/Tools 与 Bootstrap Agent Pack（bundled skills / bundled tools / worker bootstrap）
-- [ ] Delegation Plane（A2A / Work graph / subagent / ACP-like runtime / graph agents）
-- [ ] ToolIndex（向量检索）+ 动态工具注入
-- [ ] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
+- [x] 内置 Skill/Tools 与 Bootstrap Agent Pack（bundled skills / bundled tools / worker bootstrap）
+- [x] Delegation Plane（A2A / Work graph / subagent / ACP-like runtime / graph agents）
+- [x] ToolIndex（向量检索）+ 动态工具注入
+- [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [ ] 多端远程节点 / companion surfaces（按需引入）
 
 2026-03-08 进展：
 
 - Feature 026 已交付统一 control plane backend 与正式 Web 控制台：六类 canonical resources、snapshot/per-resource/actions/events routes、Telegram/Web 共用 action semantics、Session Center、Automation/Scheduler、Runtime Diagnostics Console、配置中心、channel/device 管理入口与统一 operator/ops 控制入口均已落地。
+- Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
 - Memory Console / Vault 详细领域视图仍留给 Feature 027；Secret Store 实值管理与 Wizard 深度交互仍留给 025-B / 后续能力。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
