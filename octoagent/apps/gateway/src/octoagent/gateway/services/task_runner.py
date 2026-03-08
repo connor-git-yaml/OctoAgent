@@ -18,6 +18,7 @@ from typing import Any
 import structlog
 from octoagent.core.models import (
     TERMINAL_STATES,
+    DispatchEnvelope,
     ExecutionConsoleSession,
     ExecutionSessionState,
     ResumeFailureType,
@@ -27,13 +28,25 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import StoreGroup
 
-from .execution_console import AttachInputResult, ExecutionConsoleService, ExecutionInputError
+from .execution_console import (
+    AttachInputResult,
+    ExecutionConsoleService,
+    ExecutionInputError,
+)
 from .orchestrator import OrchestratorService
 from .resume_engine import ResumeEngine
 from .task_service import TaskService
 from .worker_runtime import WorkerCancellationRegistry, WorkerRuntimeConfig
 
 log = structlog.get_logger()
+
+_DEFERRED_TASK_STATUSES: dict[TaskStatus, str] = {
+    TaskStatus.WAITING_INPUT: "WAITING_INPUT",
+    TaskStatus.WAITING_APPROVAL: "WAITING_APPROVAL",
+    TaskStatus.PAUSED: "PAUSED",
+}
+_DEFERRED_JOB_STATUSES = set(_DEFERRED_TASK_STATUSES.values())
+_TERMINAL_JOB_STATUSES = {"SUCCEEDED", "FAILED", "REJECTED", "CANCELLED"}
 
 
 @dataclass
@@ -56,6 +69,7 @@ class TaskRunner:
         completion_notifier: Callable[[str], Awaitable[None]] | None = None,
         worker_runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker=None,
+        delegation_plane=None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -77,11 +91,14 @@ class TaskRunner:
             sse_hub=sse_hub,
             llm_service=llm_service,
             approval_manager=approval_manager,
+            delegation_plane=delegation_plane,
             worker_runtime_config=worker_runtime_config,
             docker_available_checker=docker_available_checker,
             cancellation_registry=self._cancellation_registry,
             execution_console=self._execution_console,
         )
+        if delegation_plane is not None:
+            delegation_plane.bind_dispatch_scheduler(self.schedule_dispatch_envelope)
         self._resume_engine = ResumeEngine(store_group)
 
     @property
@@ -113,8 +130,11 @@ class TaskRunner:
             with contextlib.suppress(asyncio.CancelledError):
                 await running_job.task
             task = await self._stores.task_store.get_task(task_id)
-            if task is not None and task.status == TaskStatus.WAITING_INPUT:
-                await self._stores.task_job_store.mark_waiting_input(task_id)
+            deferred_job_status = (
+                _DEFERRED_TASK_STATUSES.get(task.status) if task is not None else None
+            )
+            if deferred_job_status is not None:
+                await self._stores.task_job_store.mark_deferred(task_id, deferred_job_status)
             else:
                 await self._stores.task_job_store.mark_failed(
                     task_id,
@@ -201,6 +221,12 @@ class TaskRunner:
         if task.status == TaskStatus.WAITING_INPUT:
             await self._stores.task_job_store.mark_waiting_input(job.task_id)
             return
+        if task.status == TaskStatus.WAITING_APPROVAL:
+            await self._stores.task_job_store.mark_waiting_approval(job.task_id)
+            return
+        if task.status == TaskStatus.PAUSED:
+            await self._stores.task_job_store.mark_paused(job.task_id)
+            return
         if task.status in TERMINAL_STATES:
             await self._stores.task_job_store.mark_failed(
                 job.task_id,
@@ -259,6 +285,7 @@ class TaskRunner:
         model_alias: str | None,
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
+        dispatch_envelope: DispatchEnvelope | None = None,
     ) -> None:
         task = asyncio.create_task(
             self._run_job(
@@ -267,6 +294,7 @@ class TaskRunner:
                 model_alias=model_alias,
                 resume_from_node=resume_from_node,
                 resume_state_snapshot=resume_state_snapshot,
+                dispatch_envelope=dispatch_envelope,
             )
         )
         async with self._lock:
@@ -295,7 +323,7 @@ class TaskRunner:
         service = TaskService(self._stores, self._sse_hub)
         if running is None:
             job = await self._stores.task_job_store.get_job(task_id)
-            if job is not None and job.status == "WAITING_INPUT":
+            if job is not None and job.status in _DEFERRED_JOB_STATUSES:
                 await service.mark_running_task_cancelled_for_runtime(
                     task_id,
                     reason="用户取消",
@@ -382,6 +410,44 @@ class TaskRunner:
         )
         return result
 
+    async def schedule_dispatch_envelope(self, envelope: DispatchEnvelope) -> bool:
+        """为预构建 dispatch envelope 重新排队并异步执行。"""
+        task_id = envelope.task_id
+        async with self._lock:
+            if task_id in self._running_jobs:
+                return False
+
+        job = await self._stores.task_job_store.get_job(task_id)
+        if job is None or job.status in _TERMINAL_JOB_STATUSES:
+            created = await self._stores.task_job_store.create_job(
+                task_id,
+                envelope.user_text,
+                envelope.model_alias,
+            )
+            if not created:
+                return False
+            marked = await self._stores.task_job_store.mark_running(task_id)
+        elif job.status in _DEFERRED_JOB_STATUSES:
+            marked = await self._stores.task_job_store.mark_running_from_deferred(task_id)
+        elif job.status == "QUEUED":
+            marked = await self._stores.task_job_store.mark_running(task_id)
+        elif job.status == "RUNNING":
+            return False
+        else:
+            return False
+
+        if not marked:
+            return False
+
+        self._cancellation_registry.ensure(task_id)
+        await self._spawn_job(
+            task_id=task_id,
+            user_text=envelope.user_text,
+            model_alias=envelope.model_alias,
+            dispatch_envelope=envelope,
+        )
+        return True
+
     async def _run_job(
         self,
         task_id: str,
@@ -389,15 +455,19 @@ class TaskRunner:
         model_alias: str | None,
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
+        dispatch_envelope: DispatchEnvelope | None = None,
     ) -> None:
         service = TaskService(self._stores, self._sse_hub)
-        result = await self._orchestrator.dispatch(
-            task_id=task_id,
-            user_text=user_text,
-            model_alias=model_alias,
-            resume_from_node=resume_from_node,
-            resume_state_snapshot=resume_state_snapshot,
-        )
+        if dispatch_envelope is None:
+            result = await self._orchestrator.dispatch(
+                task_id=task_id,
+                user_text=user_text,
+                model_alias=model_alias,
+                resume_from_node=resume_from_node,
+                resume_state_snapshot=resume_state_snapshot,
+            )
+        else:
+            result = await self._orchestrator.dispatch_prepared(dispatch_envelope)
         task = await service.get_task(task_id)
         if task is None:
             await self._stores.task_job_store.mark_failed(task_id, "task_missing_after_processing")
@@ -406,8 +476,9 @@ class TaskRunner:
             await self._stores.task_job_store.mark_succeeded(task_id)
             await self._notify_completion(task_id)
             return
-        if task.status == TaskStatus.WAITING_INPUT:
-            await self._stores.task_job_store.mark_waiting_input(task_id)
+        deferred_job_status = _DEFERRED_TASK_STATUSES.get(task.status)
+        if deferred_job_status is not None:
+            await self._stores.task_job_store.mark_deferred(task_id, deferred_job_status)
             return
         if task.status == TaskStatus.CANCELLED or result.status == WorkerExecutionStatus.CANCELLED:
             await self._stores.task_job_store.mark_cancelled(task_id)

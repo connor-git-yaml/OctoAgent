@@ -269,6 +269,186 @@ function buildSnapshot(currentProjectId = "project-default") {
           },
         ],
       },
+      capability_pack: {
+        contract_version: "1.0.0",
+        resource_type: "capability_pack",
+        resource_id: "capability:bundled",
+        schema_version: 1,
+        generated_at: "2026-03-08T09:00:00Z",
+        updated_at: "2026-03-08T09:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        pack: {
+          pack_id: "bundled:default",
+          version: "1.0.0",
+          degraded_reason: "",
+          generated_at: "2026-03-08T09:00:00Z",
+          fallback_toolset: ["project.inspect", "task.inspect"],
+          worker_profiles: [
+            {
+              worker_type: "general",
+              capabilities: ["llm_generation", "general"],
+              default_model_alias: "main",
+              default_tool_profile: "minimal",
+              default_tool_groups: ["project", "session"],
+              bootstrap_file_ids: ["bootstrap:shared", "bootstrap:general"],
+              runtime_kinds: ["worker", "subagent"],
+              metadata: {},
+            },
+            {
+              worker_type: "ops",
+              capabilities: ["ops", "runtime"],
+              default_model_alias: "main",
+              default_tool_profile: "minimal",
+              default_tool_groups: ["runtime", "session", "project"],
+              bootstrap_file_ids: ["bootstrap:shared", "bootstrap:ops"],
+              runtime_kinds: ["worker", "acp_runtime"],
+              metadata: {},
+            },
+          ],
+          bootstrap_files: [
+            {
+              file_id: "bootstrap:shared",
+              path_hint: "bootstrap/shared.md",
+              content: "shared bootstrap",
+              applies_to_worker_types: ["general"],
+              metadata: {},
+            },
+            {
+              file_id: "bootstrap:ops",
+              path_hint: "bootstrap/ops.md",
+              content: "ops bootstrap",
+              applies_to_worker_types: ["ops"],
+              metadata: {},
+            },
+          ],
+          skills: [
+            {
+              skill_id: "ops_triage",
+              label: "Ops Triage",
+              description: "bundled ops skill",
+              model_alias: "main",
+              worker_types: ["ops"],
+              tools_allowed: ["runtime.inspect", "task.inspect"],
+              pipeline_templates: ["delegation:preflight"],
+              metadata: { tool_profile: "minimal" },
+            },
+          ],
+          tools: [
+            {
+              tool_name: "project.inspect",
+              label: "Project Inspect",
+              description: "inspect project context",
+              tool_group: "project",
+              tool_profile: "minimal",
+              tags: ["project", "workspace"],
+              worker_types: ["general", "ops"],
+              manifest_ref: "builtin://project.inspect",
+              metadata: {},
+            },
+            {
+              tool_name: "runtime.inspect",
+              label: "Runtime Inspect",
+              description: "inspect runtime summary",
+              tool_group: "runtime",
+              tool_profile: "minimal",
+              tags: ["runtime", "diagnostics"],
+              worker_types: ["ops"],
+              manifest_ref: "builtin://runtime.inspect",
+              metadata: {},
+            },
+          ],
+        },
+        selected_project_id: currentProjectId,
+        selected_workspace_id:
+          currentProjectId === "project-ops" ? "workspace-ops" : "workspace-default",
+      },
+      delegation: {
+        contract_version: "1.0.0",
+        resource_type: "delegation_plane",
+        resource_id: "delegation:overview",
+        schema_version: 1,
+        generated_at: "2026-03-08T09:00:00Z",
+        updated_at: "2026-03-08T09:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        summary: {
+          total: 1,
+          by_status: { assigned: 1 },
+          by_worker_type: { ops: 1 },
+        },
+        works: [
+          {
+            work_id: "work-1",
+            task_id: "task-1",
+            parent_work_id: "",
+            title: "诊断运行态",
+            status: "assigned",
+            target_kind: "acp_runtime",
+            selected_worker_type: "ops",
+            route_reason: "worker_type=ops | fallback=single_worker",
+            owner_id: "orchestrator",
+            selected_tools: ["runtime.inspect", "task.inspect"],
+            pipeline_run_id: "run-1",
+            runtime_id: "worker.llm.ops",
+            project_id: currentProjectId,
+            workspace_id:
+              currentProjectId === "project-ops"
+                ? "workspace-ops"
+                : "workspace-default",
+            updated_at: "2026-03-08T09:12:00Z",
+            capabilities: [],
+          },
+        ],
+      },
+      pipelines: {
+        contract_version: "1.0.0",
+        resource_type: "skill_pipeline",
+        resource_id: "pipeline:overview",
+        schema_version: 1,
+        generated_at: "2026-03-08T09:00:00Z",
+        updated_at: "2026-03-08T09:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        summary: {
+          total: 1,
+          paused: 0,
+          running: 0,
+        },
+        runs: [
+          {
+            run_id: "run-1",
+            pipeline_id: "delegation:preflight",
+            task_id: "task-1",
+            work_id: "work-1",
+            status: "succeeded",
+            current_node_id: "",
+            pause_reason: "",
+            retry_cursor: {},
+            updated_at: "2026-03-08T09:12:00Z",
+            replay_frames: [
+              {
+                frame_id: "frame-1",
+                run_id: "run-1",
+                node_id: "tool_index.select",
+                status: "succeeded",
+                summary: "tool index selected tools",
+                checkpoint_id: "checkpoint-1",
+                ts: "2026-03-08T09:11:30Z",
+              },
+            ],
+          },
+        ],
+      },
       automation: {
         contract_version: "1.0.0",
         resource_type: "automation_job",
@@ -1014,5 +1194,39 @@ describe("ControlPlane", () => {
     expect(refreshUrl).toContain("partition=credential");
     expect(refreshUrl).toContain("query=Database");
     expect(refreshUrl).toContain("scope_id=scope-prod");
+  });
+
+  it("030 新增面板会展示 capability pack / delegation / pipeline 数据", async () => {
+    const snapshot = buildSnapshot();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("project-default");
+
+    await userEvent.click(screen.getByRole("button", { name: /Capability/i }));
+    expect(await screen.findByText("bundled:default")).toBeInTheDocument();
+    expect(screen.getByText("runtime.inspect")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
+    expect(await screen.findByText("诊断运行态")).toBeInTheDocument();
+    expect(screen.getByText(/worker_type=ops/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Pipelines/i }));
+    expect(await screen.findByText("delegation:preflight")).toBeInTheDocument();
+    expect(screen.getByText("tool index selected tools")).toBeInTheDocument();
   });
 });

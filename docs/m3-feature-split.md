@@ -383,6 +383,14 @@ M2 收口
 
 **一句话目标**：把内置 skill/tool/bootstrap、A2A/work/subagent/graph-agent 委派链，以及 Skill Pipeline 做成可解释、可回放、可降级的增强层。
 
+**实现状态**：已交付（2026-03-08）
+
+- 已落地 bundled capability pack：bundled skills、bundled tools、worker bootstrap files、capability registry
+- 已落地 ToolIndex：metadata filter、query top-N、fallback toolset、control-plane 可见 hit/selection
+- 已落地 Skill Pipeline Engine：checkpoint、replay、pause/resume、node retry、HITL gate
+- 已落地 Delegation Plane：Work create/assign/cancel/escalate、route reason、多 Worker 类型派发、单 Worker 降级
+- 已落地 control-plane backend/frontend 增量资源：capability pack、delegation、pipelines
+
 **借鉴来源**：
 
 - OpenClaw skills / bootstrapping / subagents / ACP agents / `sessions_spawn`

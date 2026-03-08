@@ -6,9 +6,11 @@ import type {
   ActionRequestEnvelope,
   ActionResultEnvelope,
   BackupBundle,
+  CapabilityPackDocument,
   ControlPlaneActionResponse,
   ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
+  DelegationPlaneDocument,
   DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
@@ -18,6 +20,7 @@ import type {
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
+  SkillPipelineDocument,
   ProjectSelectorDocument,
   RecoverySummary,
   SessionProjectionDocument,
@@ -37,6 +40,9 @@ type ControlResourceName =
   | "config"
   | "project-selector"
   | "sessions"
+  | "capability-pack"
+  | "delegation"
+  | "pipelines"
   | "automation"
   | "diagnostics"
   | "memory";
@@ -116,6 +122,15 @@ export async function fetchControlResource(
   resource: "sessions"
 ): Promise<SessionProjectionDocument>;
 export async function fetchControlResource(
+  resource: "capability-pack"
+): Promise<CapabilityPackDocument>;
+export async function fetchControlResource(
+  resource: "delegation"
+): Promise<DelegationPlaneDocument>;
+export async function fetchControlResource(
+  resource: "pipelines"
+): Promise<SkillPipelineDocument>;
+export async function fetchControlResource(
   resource: "automation"
 ): Promise<AutomationJobDocument>;
 export async function fetchControlResource(
@@ -131,6 +146,9 @@ export async function fetchControlResource(
   | ConfigSchemaDocument
   | ProjectSelectorDocument
   | SessionProjectionDocument
+  | CapabilityPackDocument
+  | DelegationPlaneDocument
+  | SkillPipelineDocument
   | AutomationJobDocument
   | DiagnosticsSummaryDocument
   | MemoryConsoleDocument

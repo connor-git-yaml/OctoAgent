@@ -8,7 +8,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .capability import BundledCapabilityPack
 from .operator_inbox import OperatorInboxItem, OperatorInboxSummary
+from .pipeline import PipelineReplayFrame
 
 
 def _utc_now() -> datetime:
@@ -196,6 +198,60 @@ class SessionProjectionDocument(ControlPlaneDocument):
     sessions: list[SessionProjectionItem] = Field(default_factory=list)
     operator_summary: OperatorInboxSummary | None = None
     operator_items: list[OperatorInboxItem] = Field(default_factory=list)
+
+
+class CapabilityPackDocument(ControlPlaneDocument):
+    resource_type: str = "capability_pack"
+    resource_id: str = "capability:bundled"
+    pack: BundledCapabilityPack = Field(default_factory=BundledCapabilityPack)
+    selected_project_id: str = Field(default="")
+    selected_workspace_id: str = Field(default="")
+
+
+class WorkProjectionItem(BaseModel):
+    work_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    parent_work_id: str = Field(default="")
+    title: str = Field(default="")
+    status: str = Field(default="")
+    target_kind: str = Field(default="")
+    selected_worker_type: str = Field(default="")
+    route_reason: str = Field(default="")
+    owner_id: str = Field(default="")
+    selected_tools: list[str] = Field(default_factory=list)
+    pipeline_run_id: str = Field(default="")
+    runtime_id: str = Field(default="")
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    updated_at: datetime | None = None
+    capabilities: list[ControlPlaneCapability] = Field(default_factory=list)
+
+
+class DelegationPlaneDocument(ControlPlaneDocument):
+    resource_type: str = "delegation_plane"
+    resource_id: str = "delegation:overview"
+    works: list[WorkProjectionItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineRunItem(BaseModel):
+    run_id: str = Field(min_length=1)
+    pipeline_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    status: str = Field(default="")
+    current_node_id: str = Field(default="")
+    pause_reason: str = Field(default="")
+    retry_cursor: dict[str, int] = Field(default_factory=dict)
+    updated_at: datetime | None = None
+    replay_frames: list[PipelineReplayFrame] = Field(default_factory=list)
+
+
+class SkillPipelineDocument(ControlPlaneDocument):
+    resource_type: str = "skill_pipeline"
+    resource_id: str = "pipeline:overview"
+    runs: list[PipelineRunItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class AutomationScheduleKind(StrEnum):
@@ -452,9 +508,7 @@ class ActionDefinition(BaseModel):
     category: str = Field(default="general")
     supported_surfaces: list[ControlPlaneSurface] = Field(default_factory=list)
     surface_aliases: dict[str, list[str]] = Field(default_factory=dict)
-    support_status_by_surface: dict[str, ControlPlaneSupportStatus] = Field(
-        default_factory=dict
-    )
+    support_status_by_surface: dict[str, ControlPlaneSupportStatus] = Field(default_factory=dict)
     params_schema: dict[str, Any] = Field(default_factory=dict)
     result_schema: dict[str, Any] = Field(default_factory=dict)
     risk_hint: str = Field(default="low")

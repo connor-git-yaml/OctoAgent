@@ -18,6 +18,8 @@ import structlog
 from octoagent.core.models import (
     TERMINAL_STATES,
     ActorType,
+    DelegationResult,
+    DelegationTargetKind,
     DispatchEnvelope,
     Event,
     EventCausality,
@@ -30,6 +32,7 @@ from octoagent.core.models import (
     WorkerExecutionStatus,
     WorkerResult,
     WorkerReturnedPayload,
+    WorkStatus,
 )
 from octoagent.core.store import StoreGroup
 from octoagent.policy.models import ApprovalDecision, ApprovalStatus
@@ -210,6 +213,8 @@ class LLMWorkerAdapter:
         sse_hub,
         llm_service,
         *,
+        worker_id: str = "worker.llm.default",
+        capability: str = "llm_generation",
         runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
@@ -217,8 +222,8 @@ class LLMWorkerAdapter:
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._worker_id = "worker.llm.default"
-        self._capability = "llm_generation"
+        self._worker_id = worker_id
+        self._capability = capability
         self._runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
@@ -254,6 +259,7 @@ class OrchestratorService:
         policy_gate: OrchestratorPolicyGate | None = None,
         router: SingleWorkerRouter | None = None,
         workers: dict[str, OrchestratorWorker] | None = None,
+        delegation_plane=None,
         worker_runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
@@ -261,23 +267,91 @@ class OrchestratorService:
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._policy_gate = policy_gate or OrchestratorPolicyGate(
-            approval_manager=approval_manager
-        )
+        self._policy_gate = policy_gate or OrchestratorPolicyGate(approval_manager=approval_manager)
         self._router = router or SingleWorkerRouter()
+        self._delegation_plane = delegation_plane
 
-        default_worker = LLMWorkerAdapter(
-            store_group,
-            sse_hub,
-            llm_service,
-            runtime_config=worker_runtime_config,
-            docker_available_checker=docker_available_checker,
-            cancellation_registry=cancellation_registry,
-            execution_console=execution_console,
-        )
-        self._workers: dict[str, OrchestratorWorker] = {default_worker.capability: default_worker}
+        default_workers = [
+            LLMWorkerAdapter(
+                store_group,
+                sse_hub,
+                llm_service,
+                worker_id="worker.llm.default",
+                capability="llm_generation",
+                runtime_config=worker_runtime_config,
+                docker_available_checker=docker_available_checker,
+                cancellation_registry=cancellation_registry,
+                execution_console=execution_console,
+            ),
+            LLMWorkerAdapter(
+                store_group,
+                sse_hub,
+                llm_service,
+                worker_id="worker.llm.ops",
+                capability="ops",
+                runtime_config=worker_runtime_config,
+                docker_available_checker=docker_available_checker,
+                cancellation_registry=cancellation_registry,
+                execution_console=execution_console,
+            ),
+            LLMWorkerAdapter(
+                store_group,
+                sse_hub,
+                llm_service,
+                worker_id="worker.llm.research",
+                capability="research",
+                runtime_config=worker_runtime_config,
+                docker_available_checker=docker_available_checker,
+                cancellation_registry=cancellation_registry,
+                execution_console=execution_console,
+            ),
+            LLMWorkerAdapter(
+                store_group,
+                sse_hub,
+                llm_service,
+                worker_id="worker.llm.dev",
+                capability="dev",
+                runtime_config=worker_runtime_config,
+                docker_available_checker=docker_available_checker,
+                cancellation_registry=cancellation_registry,
+                execution_console=execution_console,
+            ),
+        ]
+        self._workers: dict[str, OrchestratorWorker] = {
+            worker.capability: worker for worker in default_workers
+        }
         if workers:
             self._workers.update(workers)
+
+    async def dispatch_prepared(self, envelope: DispatchEnvelope) -> WorkerResult:
+        """执行已完成 preflight 的 dispatch envelope。"""
+        task = await self._stores.task_store.get_task(envelope.task_id)
+        risk_level = task.risk_level if task is not None else RiskLevel.LOW
+        request = OrchestratorRequest(
+            task_id=envelope.task_id,
+            trace_id=envelope.trace_id,
+            user_text=envelope.user_text,
+            model_alias=envelope.model_alias,
+            resume_from_node=envelope.resume_from_node,
+            resume_state_snapshot=envelope.resume_state_snapshot,
+            worker_capability=envelope.worker_capability,
+            contract_version=envelope.contract_version,
+            route_reason=envelope.route_reason,
+            hop_count=envelope.hop_count,
+            max_hops=envelope.max_hops,
+            tool_profile=envelope.tool_profile,
+            risk_level=risk_level,
+            metadata=dict(envelope.metadata),
+        )
+        return await self._dispatch_envelope(
+            request=request,
+            envelope=envelope,
+            gate_decision=OrchestratorPolicyDecision(
+                allow=True,
+                reason="delegation_pipeline_ready",
+            ),
+            work_id=envelope.metadata.get("work_id", ""),
+        )
 
     async def dispatch(
         self,
@@ -334,7 +408,35 @@ class OrchestratorService:
             )
 
         try:
-            envelope = self._router.route(request)
+            if self._delegation_plane is not None:
+                plan = await self._delegation_plane.prepare_dispatch(request)
+                if plan.dispatch_envelope is None:
+                    await self._write_orch_decision_event(
+                        request=request,
+                        route_reason=plan.work.route_reason or "delegation_pipeline_deferred",
+                        gate_decision=gate_decision,
+                    )
+                    await self._ensure_task_waiting(
+                        task_id=task_id,
+                        trace_id=trace_id,
+                        status=plan.pipeline_status.value,
+                        reason=plan.deferred_reason or plan.pipeline_status.value,
+                    )
+                    return WorkerResult(
+                        dispatch_id=f"delegation-{plan.work.work_id}",
+                        task_id=task_id,
+                        worker_id="orchestrator.delegation",
+                        status=WorkerExecutionStatus.FAILED,
+                        retryable=True,
+                        summary=f"delegation_deferred:{plan.pipeline_status.value}",
+                        error_type="DelegationDeferred",
+                        error_message=plan.deferred_reason or plan.pipeline_status.value,
+                    )
+                envelope = plan.dispatch_envelope
+                work_id = plan.work.work_id
+            else:
+                envelope = self._router.route(request)
+                work_id = ""
         except OrchestratorRoutingError as exc:
             await self._write_orch_decision_event(
                 request=request,
@@ -353,6 +455,23 @@ class OrchestratorService:
                 error_message=str(exc),
             )
 
+        return await self._dispatch_envelope(
+            request=request,
+            envelope=envelope,
+            gate_decision=gate_decision,
+            work_id=work_id,
+        )
+
+    async def _dispatch_envelope(
+        self,
+        *,
+        request: OrchestratorRequest,
+        envelope: DispatchEnvelope,
+        gate_decision: OrchestratorPolicyDecision,
+        work_id: str,
+    ) -> WorkerResult:
+        task_id = envelope.task_id
+        trace_id = request.trace_id
         await self._write_orch_decision_event(
             request=request,
             route_reason=envelope.route_reason,
@@ -374,8 +493,28 @@ class OrchestratorService:
             )
             await self._write_worker_returned_event(result)
             await self._ensure_task_failed(task_id, trace_id, summary)
+            if self._delegation_plane is not None and work_id:
+                await self._delegation_plane.complete_work(
+                    work_id=work_id,
+                    result=DelegationResult(
+                        delegation_id=envelope.dispatch_id,
+                        work_id=work_id,
+                        status=WorkStatus.FAILED,
+                        summary=summary,
+                        retryable=False,
+                        runtime_id="orchestrator.registry",
+                        target_kind=DelegationTargetKind.FALLBACK,
+                        route_reason=envelope.route_reason,
+                    ),
+                )
             return result
 
+        if self._delegation_plane is not None and work_id:
+            await self._delegation_plane.mark_dispatched(
+                work_id=work_id,
+                worker_id=worker.worker_id,
+                dispatch_id=envelope.dispatch_id,
+            )
         await self._write_worker_dispatched_event(envelope, worker.worker_id)
 
         try:
@@ -402,6 +541,30 @@ class OrchestratorService:
             await self._ensure_task_failed(task_id, trace_id, result.summary)
 
         await self._write_worker_returned_event(result)
+        if self._delegation_plane is not None and work_id:
+            await self._delegation_plane.complete_work(
+                work_id=work_id,
+                result=DelegationResult(
+                    delegation_id=envelope.dispatch_id,
+                    work_id=work_id,
+                    status={
+                        WorkerExecutionStatus.SUCCEEDED: WorkStatus.SUCCEEDED,
+                        WorkerExecutionStatus.FAILED: WorkStatus.FAILED,
+                        WorkerExecutionStatus.CANCELLED: WorkStatus.CANCELLED,
+                    }[result.status],
+                    summary=result.summary,
+                    retryable=result.retryable,
+                    runtime_id=result.worker_id,
+                    target_kind=DelegationTargetKind(
+                        envelope.metadata.get("target_kind", DelegationTargetKind.FALLBACK.value)
+                    ),
+                    route_reason=envelope.route_reason,
+                    metadata={
+                        "backend": result.backend,
+                        "tool_profile": result.tool_profile,
+                    },
+                ),
+            )
 
         if result.status == WorkerExecutionStatus.FAILED:
             await self._ensure_task_failed(task_id, trace_id, result.summary)
@@ -580,6 +743,54 @@ class OrchestratorService:
         except Exception as exc:  # pragma: no cover - 防御性兜底
             log.warning(
                 "orchestrator_force_reject_error",
+                task_id=task_id,
+                reason=reason,
+                error_type=type(exc).__name__,
+            )
+
+    async def _ensure_task_waiting(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        status: str,
+        reason: str,
+    ) -> None:
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+        target = {
+            "waiting_input": TaskStatus.WAITING_INPUT,
+            "waiting_approval": TaskStatus.WAITING_APPROVAL,
+            "paused": TaskStatus.PAUSED,
+        }.get(status)
+        if target is None:
+            return
+
+        service = TaskService(self._stores, self._sse_hub)
+        try:
+            if task.status == TaskStatus.CREATED:
+                await service._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.CREATED,
+                    to_status=TaskStatus.RUNNING,
+                    trace_id=trace_id,
+                    reason="orchestrator_bootstrap",
+                )
+                task = await self._stores.task_store.get_task(task_id)
+                if task is None:
+                    return
+            if task.status == TaskStatus.RUNNING:
+                await service._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.RUNNING,
+                    to_status=target,
+                    trace_id=trace_id,
+                    reason=reason,
+                )
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            log.warning(
+                "orchestrator_force_waiting_error",
                 task_id=task_id,
                 reason=reason,
                 error_type=type(exc).__name__,

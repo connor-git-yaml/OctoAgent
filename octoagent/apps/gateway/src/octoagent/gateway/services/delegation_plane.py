@@ -1,0 +1,834 @@
+"""Feature 030: Delegation Plane / Work / routing。"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from octoagent.core.models import (
+    ActorType,
+    DelegationResult,
+    DelegationTargetKind,
+    DispatchEnvelope,
+    DynamicToolSelection,
+    EventType,
+    OrchestratorRequest,
+    PipelineRunStatus,
+    ToolIndexQuery,
+    Work,
+    WorkerType,
+    WorkKind,
+    WorkLifecyclePayload,
+    WorkStatus,
+)
+from octoagent.core.models.payloads import ToolIndexSelectedPayload
+from octoagent.skills import PipelineNodeOutcome, SkillPipelineEngine
+from ulid import ULID
+
+from .capability_pack import CapabilityPackService
+from .task_service import TaskService
+
+
+@dataclass(slots=True)
+class DelegationPlan:
+    """Delegation 预处理结果。"""
+
+    work: Work
+    pipeline_status: PipelineRunStatus
+    tool_selection: DynamicToolSelection
+    dispatch_envelope: DispatchEnvelope | None
+    deferred_reason: str = ""
+
+
+class DelegationPlaneService:
+    """统一 Work / delegation / multi-worker 路由平面。"""
+
+    def __init__(
+        self,
+        *,
+        project_root,
+        store_group,
+        sse_hub,
+        capability_pack: CapabilityPackService,
+    ) -> None:
+        self._project_root = project_root
+        self._stores = store_group
+        self._sse_hub = sse_hub
+        self._capability_pack = capability_pack
+        self._task_service = TaskService(store_group, sse_hub)
+        self._pipeline_engine = SkillPipelineEngine(
+            store_group=store_group,
+            event_recorder=self._record_event,
+        )
+        self._register_pipeline_handlers()
+        self._dispatch_scheduler: Callable[[DispatchEnvelope], Awaitable[bool]] | None = None
+
+    @property
+    def pipeline_engine(self) -> SkillPipelineEngine:
+        return self._pipeline_engine
+
+    def bind_dispatch_scheduler(
+        self,
+        scheduler: Callable[[DispatchEnvelope], Awaitable[bool]],
+    ) -> None:
+        """绑定后台 dispatch 调度器。"""
+        self._dispatch_scheduler = scheduler
+
+    async def prepare_dispatch(self, request: OrchestratorRequest) -> DelegationPlan:
+        project, workspace = await self._resolve_project_context(request)
+        work = Work(
+            work_id=str(ULID()),
+            task_id=request.task_id,
+            title=request.user_text[:120],
+            kind=WorkKind.DELEGATION,
+            owner_id="orchestrator",
+            requested_capability=request.worker_capability,
+            project_id=project.project_id if project is not None else "",
+            workspace_id=workspace.workspace_id if workspace is not None else "",
+            metadata={
+                "requested_target_kind": str(request.metadata.get("target_kind", "")),
+                "resume_from_node": request.resume_from_node or "",
+                "request_context": {
+                    "trace_id": request.trace_id,
+                    "contract_version": request.contract_version,
+                    "hop_count": request.hop_count,
+                    "max_hops": request.max_hops,
+                    "model_alias": request.model_alias or "",
+                    "resume_from_node": request.resume_from_node or "",
+                    "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
+                    "tool_profile": request.tool_profile,
+                    "metadata": dict(request.metadata),
+                },
+            },
+        )
+        await self._stores.work_store.save_work(work)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_CREATED, work)
+
+        pipeline_run = await self._pipeline_engine.start_run(
+            definition=self._build_definition(),
+            task_id=request.task_id,
+            work_id=work.work_id,
+            initial_state={
+                "user_text": request.user_text,
+                "requested_capability": request.worker_capability,
+                "project_id": work.project_id,
+                "workspace_id": work.workspace_id,
+                "trace_id": request.trace_id,
+                "contract_version": request.contract_version,
+                "hop_count": request.hop_count,
+                "max_hops": request.max_hops,
+                "model_alias": request.model_alias or "",
+                "resume_from_node": request.resume_from_node or "",
+                "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
+                "tool_profile": request.tool_profile,
+                "metadata": dict(request.metadata),
+            },
+        )
+        selection = self._selection_from_run(pipeline_run)
+        work_status = self._work_status_from_pipeline(pipeline_run.status)
+        updated_work = work.model_copy(
+            update={
+                "status": work_status,
+                "target_kind": DelegationTargetKind(
+                    str(
+                        pipeline_run.state_snapshot.get(
+                            "target_kind",
+                            DelegationTargetKind.WORKER.value,
+                        )
+                    )
+                ),
+                "selected_worker_type": WorkerType(
+                    str(
+                        pipeline_run.state_snapshot.get(
+                            "selected_worker_type",
+                            WorkerType.GENERAL.value,
+                        )
+                    )
+                ),
+                "route_reason": str(pipeline_run.state_snapshot.get("route_reason", "")),
+                "tool_selection_id": selection.selection_id,
+                "selected_tools": selection.selected_tools,
+                "pipeline_run_id": pipeline_run.run_id,
+                "metadata": {
+                    **work.metadata,
+                    "bootstrap_context": pipeline_run.state_snapshot.get(
+                        "bootstrap_context",
+                        [],
+                    ),
+                    "tool_selection": selection.model_dump(mode="json"),
+                    "pipeline_status": pipeline_run.status.value,
+                    "pipeline_pause_reason": pipeline_run.pause_reason,
+                },
+                "updated_at": datetime.now(tz=UTC),
+                "completed_at": (
+                    datetime.now(tz=UTC)
+                    if pipeline_run.status == PipelineRunStatus.SUCCEEDED
+                    else None
+                ),
+            }
+        )
+        await self._stores.work_store.save_work(updated_work)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated_work)
+        await self._emit_tool_index_event(request.task_id, selection)
+
+        if pipeline_run.status != PipelineRunStatus.SUCCEEDED:
+            return DelegationPlan(
+                work=updated_work,
+                pipeline_status=pipeline_run.status,
+                tool_selection=selection,
+                dispatch_envelope=None,
+                deferred_reason=pipeline_run.pause_reason or pipeline_run.status.value,
+            )
+
+        dispatch = DispatchEnvelope(
+            dispatch_id=str(ULID()),
+            task_id=request.task_id,
+            trace_id=request.trace_id,
+            contract_version=request.contract_version,
+            route_reason=str(pipeline_run.state_snapshot.get("route_reason", "")),
+            worker_capability=str(
+                pipeline_run.state_snapshot.get(
+                    "worker_capability",
+                    request.worker_capability,
+                )
+            ),
+            hop_count=request.hop_count + 1,
+            max_hops=request.max_hops,
+            user_text=request.user_text,
+            model_alias=request.model_alias,
+            resume_from_node=request.resume_from_node,
+            resume_state_snapshot=request.resume_state_snapshot,
+            tool_profile=request.tool_profile,
+            metadata={
+                **{key: str(value) for key, value in request.metadata.items()},
+                "work_id": updated_work.work_id,
+                "pipeline_run_id": pipeline_run.run_id,
+                "selected_worker_type": updated_work.selected_worker_type.value,
+                "selected_tools_json": json.dumps(selection.selected_tools, ensure_ascii=False),
+                "target_kind": updated_work.target_kind.value,
+                "tool_selection_id": selection.selection_id,
+            },
+        )
+        return DelegationPlan(
+            work=updated_work,
+            pipeline_status=pipeline_run.status,
+            tool_selection=selection,
+            dispatch_envelope=dispatch,
+        )
+
+    async def mark_dispatched(
+        self,
+        *,
+        work_id: str,
+        worker_id: str,
+        dispatch_id: str,
+    ) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        updated = work.model_copy(
+            update={
+                "status": WorkStatus.ASSIGNED,
+                "delegation_id": dispatch_id,
+                "runtime_id": worker_id,
+                "updated_at": datetime.now(tz=UTC),
+            }
+        )
+        await self._stores.work_store.save_work(updated)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+        return updated
+
+    async def complete_work(
+        self,
+        *,
+        work_id: str,
+        result: DelegationResult,
+    ) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        updated = work.model_copy(
+            update={
+                "status": result.status,
+                "runtime_id": result.runtime_id or work.runtime_id,
+                "route_reason": result.route_reason or work.route_reason,
+                "metadata": {
+                    **work.metadata,
+                    "runtime_status": result.status.value,
+                    "result_summary": result.summary,
+                    **result.metadata,
+                },
+                "updated_at": datetime.now(tz=UTC),
+                "completed_at": datetime.now(tz=UTC),
+            }
+        )
+        await self._stores.work_store.save_work(updated)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+        return updated
+
+    async def cancel_work(self, work_id: str, *, reason: str = "cancelled") -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        if work.pipeline_run_id:
+            run = await self._stores.work_store.get_pipeline_run(work.pipeline_run_id)
+            if run is not None and run.status not in {
+                PipelineRunStatus.SUCCEEDED,
+                PipelineRunStatus.FAILED,
+                PipelineRunStatus.CANCELLED,
+            }:
+                await self._pipeline_engine.cancel_run(
+                    work.pipeline_run_id,
+                    reason=f"work_cancelled:{reason}",
+                )
+        return await self._transition_work(work_id, status=WorkStatus.CANCELLED, reason=reason)
+
+    async def escalate_work(
+        self, work_id: str, *, reason: str = "manual_escalation"
+    ) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        updated = work.model_copy(
+            update={
+                "status": WorkStatus.ESCALATED,
+                "escalation_count": work.escalation_count + 1,
+                "metadata": {**work.metadata, "escalation_reason": reason},
+                "updated_at": datetime.now(tz=UTC),
+            }
+        )
+        await self._stores.work_store.save_work(updated)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+        return updated
+
+    async def retry_work(self, work_id: str) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        run = (
+            await self._stores.work_store.get_pipeline_run(work.pipeline_run_id)
+            if work.pipeline_run_id
+            else None
+        )
+        base_update = {
+            "retry_count": work.retry_count + 1,
+            "updated_at": datetime.now(tz=UTC),
+            "completed_at": None,
+        }
+        if run is not None and run.status == PipelineRunStatus.SUCCEEDED:
+            updated = work.model_copy(
+                update={
+                    **base_update,
+                    "status": WorkStatus.CREATED,
+                    "metadata": {
+                        **work.metadata,
+                        "pipeline_status": run.status.value,
+                        "pipeline_pause_reason": run.pause_reason,
+                    },
+                }
+            )
+            await self._stores.work_store.save_work(updated)
+            await self._stores.conn.commit()
+            await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+            await self._schedule_dispatch(updated, run)
+            return await self._stores.work_store.get_work(work_id)
+
+        request_state = self._request_state(work, run)
+        rerun = await self._pipeline_engine.start_run(
+            definition=self._build_definition(),
+            task_id=work.task_id,
+            work_id=work.work_id,
+            initial_state=request_state,
+        )
+        rerun_work = work.model_copy(
+            update={
+                **base_update,
+                "pipeline_run_id": rerun.run_id,
+            }
+        )
+        updated = await self._sync_work_from_pipeline(rerun_work, rerun)
+        if rerun.status == PipelineRunStatus.SUCCEEDED:
+            await self._schedule_dispatch(updated, rerun)
+        return await self._stores.work_store.get_work(work_id)
+
+    async def merge_work(self, work_id: str, *, summary: str = "merged") -> Work | None:
+        return await self._transition_work(work_id, status=WorkStatus.MERGED, reason=summary)
+
+    async def resume_pipeline(
+        self,
+        work_id: str,
+        *,
+        state_patch: dict[str, Any] | None = None,
+    ) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None or not work.pipeline_run_id:
+            return None
+        run = await self._pipeline_engine.resume_run(
+            definition=self._build_definition(),
+            run_id=work.pipeline_run_id,
+            state_patch=state_patch,
+        )
+        updated = await self._sync_work_from_pipeline(work, run)
+        if run.status == PipelineRunStatus.SUCCEEDED:
+            await self._schedule_dispatch(updated, run)
+        return await self._stores.work_store.get_work(work_id)
+
+    async def retry_pipeline_node(self, work_id: str) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None or not work.pipeline_run_id:
+            return None
+        run = await self._pipeline_engine.retry_current_node(
+            definition=self._build_definition(),
+            run_id=work.pipeline_run_id,
+        )
+        updated = await self._sync_work_from_pipeline(work, run)
+        if run.status == PipelineRunStatus.SUCCEEDED:
+            await self._schedule_dispatch(updated, run)
+        return await self._stores.work_store.get_work(work_id)
+
+    async def list_works(self, *, task_id: str | None = None) -> list[Work]:
+        return await self._stores.work_store.list_works(task_id=task_id)
+
+    async def list_pipeline_runs(self, *, task_id: str | None = None):
+        return await self._stores.work_store.list_pipeline_runs(task_id=task_id)
+
+    async def list_pipeline_replay(self, run_id: str):
+        return await self._pipeline_engine.list_replay_frames(run_id)
+
+    async def _sync_work_from_pipeline(self, work: Work, run) -> Work:
+        selection = self._selection_from_run(run)
+        updated = work.model_copy(
+            update={
+                "status": self._work_status_from_pipeline(run.status),
+                "route_reason": str(run.state_snapshot.get("route_reason", work.route_reason)),
+                "selected_worker_type": WorkerType(
+                    str(
+                        run.state_snapshot.get(
+                            "selected_worker_type",
+                            work.selected_worker_type.value,
+                        )
+                    )
+                ),
+                "target_kind": DelegationTargetKind(
+                    str(
+                        run.state_snapshot.get(
+                            "target_kind",
+                            work.target_kind.value,
+                        )
+                    )
+                ),
+                "tool_selection_id": selection.selection_id,
+                "selected_tools": selection.selected_tools,
+                "metadata": {
+                    **work.metadata,
+                    "tool_selection": selection.model_dump(mode="json"),
+                    "pipeline_status": run.status.value,
+                    "pipeline_pause_reason": run.pause_reason,
+                },
+                "updated_at": datetime.now(tz=UTC),
+                "completed_at": (
+                    datetime.now(tz=UTC) if run.status == PipelineRunStatus.SUCCEEDED else None
+                ),
+            }
+        )
+        await self._stores.work_store.save_work(updated)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+        return updated
+
+    async def _schedule_dispatch(self, work: Work, run) -> None:
+        if run.status != PipelineRunStatus.SUCCEEDED or self._dispatch_scheduler is None:
+            return
+        envelope = self._dispatch_from_run(work, run)
+        await self._dispatch_scheduler(envelope)
+
+    def _dispatch_from_run(self, work: Work, run) -> DispatchEnvelope:
+        state = self._request_state(work, run)
+        metadata = {
+            **{key: str(value) for key, value in state.get("metadata", {}).items()},
+            "work_id": work.work_id,
+            "pipeline_run_id": run.run_id,
+            "selected_worker_type": work.selected_worker_type.value,
+            "selected_tools_json": json.dumps(work.selected_tools, ensure_ascii=False),
+            "target_kind": work.target_kind.value,
+            "tool_selection_id": work.tool_selection_id,
+        }
+        return DispatchEnvelope(
+            dispatch_id=str(ULID()),
+            task_id=work.task_id,
+            trace_id=str(state.get("trace_id", f"trace-{work.task_id}")),
+            contract_version=str(state.get("contract_version", "1.0")),
+            route_reason=str(run.state_snapshot.get("route_reason", work.route_reason)),
+            worker_capability=str(
+                run.state_snapshot.get("worker_capability", work.requested_capability)
+            ),
+            hop_count=int(state.get("hop_count", 0)) + 1,
+            max_hops=max(int(state.get("max_hops", 3)), 1),
+            user_text=str(state.get("user_text", "")),
+            model_alias=str(state.get("model_alias", "")) or None,
+            resume_from_node=str(state.get("resume_from_node", "")).strip() or None,
+            resume_state_snapshot=self._resume_state_snapshot(state),
+            tool_profile=str(state.get("tool_profile", "standard")),
+            metadata=metadata,
+        )
+
+    def _request_state(self, work: Work, run) -> dict[str, Any]:
+        state = dict(run.state_snapshot) if run is not None else {}
+        request_context = work.metadata.get("request_context", {})
+        if isinstance(request_context, dict):
+            if "trace_id" not in state:
+                state["trace_id"] = request_context.get("trace_id", "")
+            if "contract_version" not in state:
+                state["contract_version"] = request_context.get("contract_version", "1.0")
+            if "hop_count" not in state:
+                state["hop_count"] = request_context.get("hop_count", 0)
+            if "max_hops" not in state:
+                state["max_hops"] = request_context.get("max_hops", 3)
+            if "model_alias" not in state:
+                state["model_alias"] = request_context.get("model_alias", "")
+            if "resume_from_node" not in state:
+                state["resume_from_node"] = request_context.get("resume_from_node", "")
+            if "resume_state_snapshot" not in state:
+                raw_resume_state = request_context.get("resume_state_snapshot", {})
+                state["resume_state_snapshot"] = (
+                    raw_resume_state if isinstance(raw_resume_state, dict) else {}
+                )
+            if "tool_profile" not in state:
+                state["tool_profile"] = request_context.get("tool_profile", "standard")
+            if "metadata" not in state:
+                raw_metadata = request_context.get("metadata", {})
+                state["metadata"] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        state.setdefault("user_text", work.title)
+        state.setdefault("requested_capability", work.requested_capability)
+        state.setdefault("project_id", work.project_id)
+        state.setdefault("workspace_id", work.workspace_id)
+        state.setdefault("trace_id", f"trace-{work.task_id}")
+        state.setdefault("contract_version", "1.0")
+        state.setdefault("hop_count", 0)
+        state.setdefault("max_hops", 3)
+        state.setdefault("model_alias", "")
+        state.setdefault("resume_from_node", "")
+        state.setdefault("resume_state_snapshot", {})
+        state.setdefault("tool_profile", "standard")
+        state.setdefault("metadata", {})
+        return state
+
+    @staticmethod
+    def _resume_state_snapshot(state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("resume_state_snapshot")
+        return value if isinstance(value, dict) else None
+
+    def _build_definition(self):
+        from octoagent.core.models import (
+            PipelineNodeType,
+            SkillPipelineDefinition,
+            SkillPipelineNode,
+        )
+
+        return SkillPipelineDefinition(
+            pipeline_id="delegation:preflight",
+            label="Delegation Preflight",
+            version="1.0.0",
+            entry_node_id="route.resolve",
+            nodes=[
+                SkillPipelineNode(
+                    node_id="route.resolve",
+                    label="Resolve Route",
+                    node_type=PipelineNodeType.TRANSFORM,
+                    handler_id="route.resolve",
+                    next_node_id="bootstrap.prepare",
+                ),
+                SkillPipelineNode(
+                    node_id="bootstrap.prepare",
+                    label="Prepare Bootstrap",
+                    node_type=PipelineNodeType.TRANSFORM,
+                    handler_id="bootstrap.prepare",
+                    next_node_id="tool_index.select",
+                ),
+                SkillPipelineNode(
+                    node_id="tool_index.select",
+                    label="Select Tools",
+                    node_type=PipelineNodeType.TRANSFORM,
+                    handler_id="tool_index.select",
+                    next_node_id="gate.review",
+                ),
+                SkillPipelineNode(
+                    node_id="gate.review",
+                    label="Delegation Gate",
+                    node_type=PipelineNodeType.GATE,
+                    handler_id="gate.review",
+                    next_node_id="finalize",
+                ),
+                SkillPipelineNode(
+                    node_id="finalize",
+                    label="Finalize",
+                    node_type=PipelineNodeType.TRANSFORM,
+                    handler_id="finalize",
+                ),
+            ],
+        )
+
+    def _register_pipeline_handlers(self) -> None:
+        self._pipeline_engine.register_handler("route.resolve", self._handle_route_resolve)
+        self._pipeline_engine.register_handler(
+            "bootstrap.prepare",
+            self._handle_bootstrap_prepare,
+        )
+        self._pipeline_engine.register_handler("tool_index.select", self._handle_tool_index_select)
+        self._pipeline_engine.register_handler("gate.review", self._handle_gate_review)
+        self._pipeline_engine.register_handler("finalize", self._handle_finalize)
+
+    async def _handle_route_resolve(self, *, run, node, state):
+        requested = str(state.get("requested_capability", "")).strip()
+        metadata = state.get("metadata", {})
+        requested_target = str(metadata.get("target_kind", "")).strip()
+        worker_type = self._select_worker_type(requested, str(state.get("user_text", "")))
+        target_kind = self._select_target_kind(requested_target, worker_type)
+        route_reason = self._build_route_reason(worker_type, requested, requested_target)
+        return PipelineNodeOutcome(
+            summary=route_reason,
+            state_patch={
+                "selected_worker_type": worker_type.value,
+                "worker_capability": worker_type.value
+                if worker_type != WorkerType.GENERAL
+                else "llm_generation",
+                "target_kind": target_kind.value,
+                "route_reason": route_reason,
+            },
+        )
+
+    async def _handle_bootstrap_prepare(self, *, run, node, state):
+        worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
+        bootstrap = await self._capability_pack.render_bootstrap_context(
+            worker_type=worker_type,
+            project_id=str(state.get("project_id", "")),
+            workspace_id=str(state.get("workspace_id", "")),
+        )
+        return PipelineNodeOutcome(
+            summary=f"bootstrap prepared for {worker_type.value}",
+            state_patch={"bootstrap_context": bootstrap},
+        )
+
+    async def _handle_tool_index_select(self, *, run, node, state):
+        worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
+        selection = await self._capability_pack.select_tools(
+            ToolIndexQuery(
+                query=str(state.get("user_text", "")).strip() or "general task",
+                limit=5,
+                tool_groups=[],
+                worker_type=worker_type,
+                tool_profile=str(state.get("tool_profile", "")),
+                project_id=str(state.get("project_id", "")),
+                workspace_id=str(state.get("workspace_id", "")),
+            ),
+            worker_type=worker_type,
+        )
+        return PipelineNodeOutcome(
+            summary="tool index selected tools",
+            state_patch={"tool_selection": selection.model_dump(mode="json")},
+        )
+
+    async def _handle_gate_review(self, *, run, node, state):
+        metadata = state.get("metadata", {})
+        pause_mode = str(metadata.get("delegation_pause", "")).strip().lower()
+        if pause_mode == "input":
+            return PipelineNodeOutcome(
+                status=PipelineRunStatus.WAITING_INPUT,
+                summary="delegation pipeline waiting input",
+                next_node_id="finalize",
+                input_request={"kind": "delegation_input", "run_id": run.run_id},
+            )
+        if pause_mode == "approval":
+            return PipelineNodeOutcome(
+                status=PipelineRunStatus.WAITING_APPROVAL,
+                summary="delegation pipeline waiting approval",
+                next_node_id="finalize",
+                approval_request={"kind": "delegation_approval", "run_id": run.run_id},
+            )
+        if pause_mode == "pause":
+            return PipelineNodeOutcome(
+                status=PipelineRunStatus.PAUSED,
+                summary="delegation pipeline paused",
+                next_node_id="finalize",
+            )
+        return PipelineNodeOutcome(summary="delegation gate passed")
+
+    async def _handle_finalize(self, *, run, node, state):
+        return PipelineNodeOutcome(
+            status=PipelineRunStatus.SUCCEEDED,
+            summary="delegation preflight completed",
+        )
+
+    def _select_worker_type(self, requested_capability: str, user_text: str) -> WorkerType:
+        text = f"{requested_capability} {user_text}".lower()
+        if any(token in text for token in ("ops", "runtime", "恢复", "诊断", "部署", "备份")):
+            return WorkerType.OPS
+        if any(token in text for token in ("research", "调研", "分析", "总结", "资料")):
+            return WorkerType.RESEARCH
+        if any(token in text for token in ("dev", "代码", "修复", "实现", "测试", "patch")):
+            return WorkerType.DEV
+        return WorkerType.GENERAL
+
+    def _select_target_kind(
+        self,
+        requested_target: str,
+        worker_type: WorkerType,
+    ) -> DelegationTargetKind:
+        if requested_target in {item.value for item in DelegationTargetKind}:
+            return DelegationTargetKind(requested_target)
+        if worker_type == WorkerType.DEV:
+            return DelegationTargetKind.GRAPH_AGENT
+        if worker_type == WorkerType.OPS:
+            return DelegationTargetKind.ACP_RUNTIME
+        if worker_type == WorkerType.RESEARCH:
+            return DelegationTargetKind.SUBAGENT
+        return DelegationTargetKind.FALLBACK
+
+    def _build_route_reason(
+        self,
+        worker_type: WorkerType,
+        requested_capability: str,
+        requested_target: str,
+    ) -> str:
+        parts = [f"worker_type={worker_type.value}"]
+        if requested_capability:
+            parts.append(f"requested_capability={requested_capability}")
+        if requested_target:
+            parts.append(f"target={requested_target}")
+        if worker_type == WorkerType.GENERAL:
+            parts.append("fallback=single_worker")
+        return " | ".join(parts)
+
+    def _selection_from_run(self, run) -> DynamicToolSelection:
+        raw = run.state_snapshot.get("tool_selection")
+        if raw:
+            return DynamicToolSelection.model_validate(raw)
+        return DynamicToolSelection(
+            selection_id=f"selection:{run.run_id}",
+            query=ToolIndexQuery(query="general task"),
+            selected_tools=[],
+        )
+
+    def _work_status_from_pipeline(self, status: PipelineRunStatus) -> WorkStatus:
+        mapping = {
+            PipelineRunStatus.CREATED: WorkStatus.CREATED,
+            PipelineRunStatus.RUNNING: WorkStatus.RUNNING,
+            PipelineRunStatus.WAITING_INPUT: WorkStatus.WAITING_INPUT,
+            PipelineRunStatus.WAITING_APPROVAL: WorkStatus.WAITING_APPROVAL,
+            PipelineRunStatus.PAUSED: WorkStatus.PAUSED,
+            PipelineRunStatus.SUCCEEDED: WorkStatus.CREATED,
+            PipelineRunStatus.FAILED: WorkStatus.FAILED,
+            PipelineRunStatus.CANCELLED: WorkStatus.CANCELLED,
+        }
+        return mapping[status]
+
+    async def _transition_work(
+        self,
+        work_id: str,
+        *,
+        status: WorkStatus,
+        reason: str,
+    ) -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        updated = work.model_copy(
+            update={
+                "status": status,
+                "metadata": {**work.metadata, "transition_reason": reason},
+                "updated_at": datetime.now(tz=UTC),
+                "completed_at": (
+                    datetime.now(tz=UTC)
+                    if status in {WorkStatus.CANCELLED, WorkStatus.MERGED}
+                    else work.completed_at
+                ),
+            }
+        )
+        await self._stores.work_store.save_work(updated)
+        await self._stores.conn.commit()
+        await self._emit_work_event(EventType.WORK_STATUS_CHANGED, updated)
+        return updated
+
+    async def _resolve_project_context(self, request: OrchestratorRequest):
+        project = None
+        workspace = None
+        project_id = str(request.metadata.get("project_id", "")).strip()
+        workspace_id = str(request.metadata.get("workspace_id", "")).strip()
+        if project_id:
+            project = await self._stores.project_store.get_project(project_id)
+        if workspace_id:
+            workspace = await self._stores.project_store.get_workspace(workspace_id)
+        if project is None:
+            selector = await self._stores.project_store.get_selector_state("web")
+            if selector is not None:
+                project = await self._stores.project_store.get_project(selector.active_project_id)
+                if selector.active_workspace_id:
+                    workspace = await self._stores.project_store.get_workspace(
+                        selector.active_workspace_id
+                    )
+        if project is None:
+            project = await self._stores.project_store.get_default_project()
+        if project is not None and workspace is None:
+            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
+        return project, workspace
+
+    async def _record_event(
+        self,
+        task_id: str,
+        event_type: EventType,
+        payload: dict[str, Any],
+    ) -> None:
+        await self._task_service.append_structured_event(
+            task_id=task_id,
+            event_type=event_type,
+            actor=ActorType.KERNEL,
+            payload=payload,
+            trace_id=f"trace-{task_id}",
+        )
+
+    async def _emit_tool_index_event(
+        self,
+        task_id: str,
+        selection: DynamicToolSelection,
+    ) -> None:
+        await self._record_event(
+            task_id,
+            EventType.TOOL_INDEX_SELECTED,
+            ToolIndexSelectedPayload(
+                selection_id=selection.selection_id,
+                backend=selection.backend,
+                is_fallback=selection.is_fallback,
+                query=selection.query.query,
+                selected_tools=selection.selected_tools,
+                hit_count=len(selection.hits),
+                warnings=selection.warnings,
+            ).model_dump(mode="json"),
+        )
+
+    async def _emit_work_event(self, event_type: EventType, work: Work) -> None:
+        await self._record_event(
+            work.task_id,
+            event_type,
+            WorkLifecyclePayload(
+                work_id=work.work_id,
+                task_id=work.task_id,
+                parent_work_id=work.parent_work_id,
+                status=work.status.value,
+                target_kind=work.target_kind.value,
+                requested_capability=work.requested_capability,
+                selected_worker_type=work.selected_worker_type.value,
+                route_reason=work.route_reason,
+                selected_tools=work.selected_tools,
+                pipeline_run_id=work.pipeline_run_id,
+                owner_id=work.owner_id,
+                metadata=work.metadata,
+            ).model_dump(mode="json"),
+        )

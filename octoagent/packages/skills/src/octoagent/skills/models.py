@@ -112,3 +112,4 @@ class SkillManifestModel(BaseModel):
     context_budget: ContextBudgetPolicy = Field(default_factory=ContextBudgetPolicy)
     description: str | None = Field(default=None)
     description_md: str | None = Field(default=None)
+    metadata: dict[str, Any] = Field(default_factory=dict)

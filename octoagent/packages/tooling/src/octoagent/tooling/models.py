@@ -115,6 +115,22 @@ class ToolMeta(BaseModel):
         default=None,
         description="工具级输出裁切阈值（字符数），None 表示使用全局默认值",
     )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Feature 030: ToolIndex 检索标签",
+    )
+    worker_types: list[str] = Field(
+        default_factory=list,
+        description="Feature 030: 推荐 worker type",
+    )
+    manifest_ref: str = Field(
+        default="",
+        description="Feature 030: 工具声明来源引用",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Feature 030: 可检索扩展元数据",
+    )
 
 
 class ToolResult(BaseModel):

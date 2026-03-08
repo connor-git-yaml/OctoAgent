@@ -316,6 +316,62 @@ class ControlPlaneAuditPayload(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class ToolIndexSelectedPayload(BaseModel):
+    """Feature 030: ToolIndex 命中事件 payload。"""
+
+    selection_id: str = Field(min_length=1)
+    backend: str = Field(default="in_memory")
+    is_fallback: bool = False
+    query: str = Field(default="")
+    selected_tools: list[str] = Field(default_factory=list)
+    hit_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class WorkLifecyclePayload(BaseModel):
+    """Feature 030: Work 生命周期 payload。"""
+
+    work_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    parent_work_id: str | None = None
+    status: str = Field(min_length=1)
+    target_kind: str = Field(default="")
+    requested_capability: str = Field(default="")
+    selected_worker_type: str = Field(default="")
+    route_reason: str = Field(default="")
+    selected_tools: list[str] = Field(default_factory=list)
+    pipeline_run_id: str = Field(default="")
+    owner_id: str = Field(default="")
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class PipelineRunUpdatedPayload(BaseModel):
+    """Feature 030: Pipeline run 状态变更 payload。"""
+
+    run_id: str = Field(min_length=1)
+    pipeline_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    work_id: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    current_node_id: str = Field(default="")
+    pause_reason: str = Field(default="")
+    retry_count: int = Field(default=0, ge=0)
+    summary: str = Field(default="")
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class PipelineCheckpointSavedPayload(BaseModel):
+    """Feature 030: Pipeline checkpoint 持久化 payload。"""
+
+    checkpoint_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    node_id: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    retry_count: int = Field(default=0, ge=0)
+    replay_summary: str = Field(default="")
+
+
 from typing import Literal  # noqa: E402
 
 DriftType = Literal["no_progress", "state_machine_stall", "repeated_failure"]
