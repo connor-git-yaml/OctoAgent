@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   fetchRecoverySummary,
+  fetchUpdateStatus,
   triggerBackupCreate,
   triggerExportChats,
+  triggerRestart,
+  triggerUpdateApply,
+  triggerUpdateDryRun,
+  triggerVerify,
 } from "../api/client";
-import type { RecoverySummary } from "../types";
+import type { RecoverySummary, UpdateAttemptSummary } from "../types";
 
 function formatTime(value: string | null | undefined): string {
   if (!value) {
@@ -33,17 +38,46 @@ function drillLabel(summary: RecoverySummary | null): string {
   return "尚未验证";
 }
 
+function updateLabel(summary: UpdateAttemptSummary | null): string {
+  const status = summary?.overall_status;
+  if (!status) {
+    return "尚未执行";
+  }
+  if (status === "RUNNING") {
+    return "进行中";
+  }
+  if (status === "SUCCEEDED") {
+    return "已完成";
+  }
+  if (status === "FAILED") {
+    return "失败";
+  }
+  if (status === "ACTION_REQUIRED") {
+    return "待处理";
+  }
+  return "待执行";
+}
+
 export default function RecoveryPanel() {
   const [summary, setSummary] = useState<RecoverySummary | null>(null);
+  const [updateSummary, setUpdateSummary] = useState<UpdateAttemptSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"backup" | "export" | null>(null);
+  const [busy, setBusy] = useState<
+    "backup" | "export" | "update-preview" | "update-apply" | "restart" | "verify" | null
+  >(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function load() {
     try {
-      const data = await fetchRecoverySummary();
-      setSummary(data);
+      const [recovery, update] = await Promise.all([
+        fetchRecoverySummary(),
+        fetchUpdateStatus().catch(() => ({
+          phases: [],
+        }) as UpdateAttemptSummary),
+      ]);
+      setSummary(recovery);
+      setUpdateSummary(update);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load recovery summary");
@@ -55,6 +89,20 @@ export default function RecoveryPanel() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (updateSummary?.overall_status !== "RUNNING") {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      void load();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [updateSummary?.overall_status]);
 
   async function handleBackup() {
     try {
@@ -76,6 +124,62 @@ export default function RecoveryPanel() {
       setNotice(`已导出 chats: ${manifest.output_path}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUpdatePreview() {
+    try {
+      setBusy("update-preview");
+      const latest = await triggerUpdateDryRun();
+      setUpdateSummary(latest);
+      setNotice("已完成 update dry-run。");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update dry-run failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUpdateApply() {
+    try {
+      setBusy("update-apply");
+      const latest = await triggerUpdateApply(false);
+      setUpdateSummary(latest);
+      setNotice("已接受 update 请求，正在后台执行。");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update apply failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRestart() {
+    try {
+      setBusy("restart");
+      const latest = await triggerRestart();
+      setUpdateSummary(latest);
+      setNotice("已触发 restart。");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Restart failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleVerify() {
+    try {
+      setBusy("verify");
+      const latest = await triggerVerify();
+      setUpdateSummary(latest);
+      setNotice("已完成 verify。");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verify failed");
     } finally {
       setBusy(null);
     }
@@ -125,6 +229,36 @@ export default function RecoveryPanel() {
         ) : null}
       </div>
 
+      <div className="recovery-grid">
+        <div className="recovery-item">
+          <div className="muted">最近升级</div>
+          <strong>{updateLabel(updateSummary)}</strong>
+          <div className="muted">{formatTime(updateSummary?.started_at)}</div>
+        </div>
+        <div className="recovery-item">
+          <div className="muted">当前阶段</div>
+          <strong>{updateSummary?.current_phase || "未执行"}</strong>
+          <div className="muted">
+            管理模式: {updateSummary?.management_mode || "unmanaged"}
+          </div>
+        </div>
+      </div>
+
+      <div className="recovery-item">
+        <div className="muted">升级摘要</div>
+        <div>
+          {updateSummary?.failure_report?.message ||
+            (updateSummary?.overall_status
+              ? `状态: ${updateSummary.overall_status}`
+              : "尚未执行 update / restart / verify。")}
+        </div>
+        {updateSummary?.failure_report?.suggested_actions?.length ? (
+          <div className="muted" style={{ marginTop: "var(--space-xs)" }}>
+            下一步: {updateSummary.failure_report.suggested_actions.join("；")}
+          </div>
+        ) : null}
+      </div>
+
       <div className="recovery-actions">
         <button
           type="button"
@@ -141,6 +275,38 @@ export default function RecoveryPanel() {
           disabled={busy !== null}
         >
           {busy === "export" ? "导出中..." : "导出 Chats"}
+        </button>
+        <button
+          type="button"
+          className="action-button secondary"
+          onClick={() => void handleUpdatePreview()}
+          disabled={busy !== null}
+        >
+          {busy === "update-preview" ? "预检中..." : "Update Dry Run"}
+        </button>
+        <button
+          type="button"
+          className="action-button"
+          onClick={() => void handleUpdateApply()}
+          disabled={busy !== null}
+        >
+          {busy === "update-apply" ? "升级中..." : "执行 Update"}
+        </button>
+        <button
+          type="button"
+          className="action-button secondary"
+          onClick={() => void handleRestart()}
+          disabled={busy !== null}
+        >
+          {busy === "restart" ? "重启中..." : "Restart"}
+        </button>
+        <button
+          type="button"
+          className="action-button secondary"
+          onClick={() => void handleVerify()}
+          disabled={busy !== null}
+        >
+          {busy === "verify" ? "验证中..." : "Verify"}
         </button>
       </div>
     </section>

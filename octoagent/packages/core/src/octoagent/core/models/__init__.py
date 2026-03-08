@@ -107,7 +107,40 @@ from .payloads import (
     WorkerDispatchedPayload,
     WorkerReturnedPayload,
 )
+from .project import (
+    Project,
+    ProjectBinding,
+    ProjectBindingType,
+    ProjectMigrationRollbackPlan,
+    ProjectMigrationRun,
+    ProjectMigrationStatus,
+    ProjectMigrationSummary,
+    ProjectMigrationValidation,
+    ProjectStatus,
+    Workspace,
+    WorkspaceKind,
+)
 from .task import RequesterInfo, Task, TaskPointers
+from .update import (
+    InstallAttempt,
+    InstallStatus,
+    ManagedRuntimeDescriptor,
+    MigrationStepKind,
+    MigrationStepResult,
+    RestartStrategy,
+    RuntimeManagementMode,
+    RuntimeStateSnapshot,
+    UpdateAttempt,
+    UpdateAttemptSummary,
+    UpdateOverallStatus,
+    UpdatePhaseName,
+    UpdatePhaseResult,
+    UpdatePhaseStatus,
+    UpdateTriggerSource,
+    UpgradeFailureReport,
+    VerifyStatus,
+    utc_now,
+)
 
 __all__ = [
     # 枚举
@@ -150,6 +183,25 @@ __all__ = [
     "ExportManifest",
     "RecoveryDrillRecord",
     "RecoverySummary",
+    # Update / Runtime
+    "InstallStatus",
+    "UpdateTriggerSource",
+    "UpdateOverallStatus",
+    "UpdatePhaseName",
+    "UpdatePhaseStatus",
+    "RuntimeManagementMode",
+    "RestartStrategy",
+    "MigrationStepKind",
+    "VerifyStatus",
+    "InstallAttempt",
+    "ManagedRuntimeDescriptor",
+    "RuntimeStateSnapshot",
+    "MigrationStepResult",
+    "UpdatePhaseResult",
+    "UpgradeFailureReport",
+    "UpdateAttempt",
+    "UpdateAttemptSummary",
+    "utc_now",
     # Execution
     "JobSpec",
     "ExecutionRuntimeRecord",
@@ -221,4 +273,16 @@ __all__ = [
     "WorkerExecutionStatus",
     "WorkerRuntimeState",
     "WorkerSession",
+    # Project / Workspace
+    "ProjectStatus",
+    "WorkspaceKind",
+    "ProjectBindingType",
+    "ProjectMigrationStatus",
+    "Project",
+    "Workspace",
+    "ProjectBinding",
+    "ProjectMigrationSummary",
+    "ProjectMigrationValidation",
+    "ProjectMigrationRollbackPlan",
+    "ProjectMigrationRun",
 ]

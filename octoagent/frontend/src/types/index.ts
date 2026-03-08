@@ -147,6 +147,63 @@ export interface RecoverySummary {
   ready_for_restore: boolean;
 }
 
+export type UpdateOverallStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "ACTION_REQUIRED";
+
+export type UpdatePhaseName =
+  | "preflight"
+  | "migrate"
+  | "restart"
+  | "verify";
+
+export type UpdatePhaseStatus =
+  | "NOT_STARTED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "BLOCKED"
+  | "SKIPPED";
+
+export type RuntimeManagementMode = "managed" | "unmanaged";
+
+export interface UpgradeFailureReport {
+  attempt_id: string;
+  failed_phase: UpdatePhaseName;
+  last_successful_phase?: UpdatePhaseName | null;
+  message: string;
+  instance_state?: string;
+  suggested_actions?: string[];
+  latest_backup_path?: string;
+  latest_recovery_status?: string;
+}
+
+export interface UpdatePhaseResult {
+  phase: UpdatePhaseName;
+  status: UpdatePhaseStatus;
+  started_at?: string | null;
+  completed_at?: string | null;
+  summary: string;
+  warnings?: string[];
+  errors?: string[];
+  suggested_actions?: string[];
+}
+
+export interface UpdateAttemptSummary {
+  attempt_id?: string;
+  dry_run?: boolean;
+  overall_status?: UpdateOverallStatus | null;
+  current_phase?: UpdatePhaseName | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  management_mode?: RuntimeManagementMode;
+  phases: UpdatePhaseResult[];
+  failure_report?: UpgradeFailureReport | null;
+}
+
 export interface ExportFilter {
   task_id?: string | null;
   thread_id?: string | null;

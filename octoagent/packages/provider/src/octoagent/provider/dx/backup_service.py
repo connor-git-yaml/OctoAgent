@@ -40,6 +40,7 @@ from octoagent.core.store import StoreGroup, create_store_group
 from ulid import ULID
 
 from .backup_audit import BackupAuditRecorder
+from .project_migration import ProjectWorkspaceMigrationService
 from .recovery_status_store import RecoveryStatusStore
 
 DEFAULT_EXCLUDED_PATHS = [
@@ -113,6 +114,7 @@ class BackupService:
         self._backups_dir = self._data_dir / "backups"
         self._exports_dir = self._data_dir / "exports"
         self._store_group = store_group
+        self._project_migration_ensured = False
         self._status_store = status_store or RecoveryStatusStore(
             self._root,
             data_dir=self._data_dir,
@@ -276,14 +278,26 @@ class BackupService:
     @asynccontextmanager
     async def _store_group_scope(self) -> AsyncIterator[StoreGroup]:
         if self._store_group is not None:
+            await self._ensure_project_migration(self._store_group)
             yield self._store_group
             return
 
         store_group = await create_store_group(str(self._db_path), self._artifacts_dir)
         try:
+            await self._ensure_project_migration(store_group)
             yield store_group
         finally:
             await store_group.conn.close()
+
+    async def _ensure_project_migration(self, store_group: StoreGroup) -> None:
+        if self._project_migration_ensured:
+            return
+        service = ProjectWorkspaceMigrationService(
+            project_root=self._root,
+            store_group=store_group,
+        )
+        await service.ensure_default_project()
+        self._project_migration_ensured = True
 
     def _create_bundle_sync(
         self,

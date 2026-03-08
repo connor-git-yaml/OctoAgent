@@ -6,6 +6,7 @@ import type {
   BackupBundle,
   ExportFilter,
   ExportManifest,
+  UpdateAttemptSummary,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
@@ -55,11 +56,50 @@ export async function fetchRecoverySummary(): Promise<RecoverySummary> {
   return apiFetch<RecoverySummary>("/api/ops/recovery");
 }
 
+/** GET /api/ops/update/status -- 最近一次升级摘要 */
+export async function fetchUpdateStatus(): Promise<UpdateAttemptSummary> {
+  return apiFetch<UpdateAttemptSummary>("/api/ops/update/status");
+}
+
 /** POST /api/ops/backup/create -- 触发 backup create */
 export async function triggerBackupCreate(label?: string): Promise<BackupBundle> {
   return apiFetch<BackupBundle>("/api/ops/backup/create", {
     method: "POST",
     body: JSON.stringify({ label: label ?? null }),
+  });
+}
+
+/** POST /api/ops/update/dry-run -- 触发 update dry-run */
+export async function triggerUpdateDryRun(): Promise<UpdateAttemptSummary> {
+  return apiFetch<UpdateAttemptSummary>("/api/ops/update/dry-run", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+/** POST /api/ops/update/apply -- 触发真实 update */
+export async function triggerUpdateApply(
+  wait = false
+): Promise<UpdateAttemptSummary> {
+  return apiFetch<UpdateAttemptSummary>("/api/ops/update/apply", {
+    method: "POST",
+    body: JSON.stringify({ wait }),
+  });
+}
+
+/** POST /api/ops/restart -- 触发 runtime restart */
+export async function triggerRestart(): Promise<UpdateAttemptSummary> {
+  return apiFetch<UpdateAttemptSummary>("/api/ops/restart", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+/** POST /api/ops/verify -- 触发 runtime verify */
+export async function triggerVerify(): Promise<UpdateAttemptSummary> {
+  return apiFetch<UpdateAttemptSummary>("/api/ops/verify", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 
