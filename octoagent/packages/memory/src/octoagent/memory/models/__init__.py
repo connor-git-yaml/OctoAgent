@@ -11,6 +11,25 @@ from .common import (
     ProposalValidation,
 )
 from .fragment import FragmentRecord
+from .integration import (
+    DerivedMemoryQuery,
+    DerivedMemoryRecord,
+    MemoryBackendState,
+    MemoryBackendStatus,
+    MemoryDerivedProjection,
+    MemoryEvidenceProjection,
+    MemoryEvidenceQuery,
+    MemoryIngestBatch,
+    MemoryIngestItem,
+    MemoryIngestResult,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceCommandKind,
+    MemoryMaintenanceRun,
+    MemoryMaintenanceRunStatus,
+    MemorySyncBatch,
+    MemorySyncResult,
+    WriteProposalDraft,
+)
 from .proposal import WriteProposal
 from .sor import SorRecord
 from .vault import VaultRecord
@@ -23,11 +42,27 @@ from .vault_access import (
 __all__ = [
     "CommitResult",
     "CompactionFlushResult",
+    "DerivedMemoryQuery",
+    "DerivedMemoryRecord",
     "EvidenceRef",
     "FragmentRecord",
     "MemoryAccessDeniedError",
     "MemoryAccessPolicy",
+    "MemoryBackendState",
+    "MemoryBackendStatus",
+    "MemoryDerivedProjection",
+    "MemoryEvidenceProjection",
+    "MemoryEvidenceQuery",
+    "MemoryIngestBatch",
+    "MemoryIngestItem",
+    "MemoryIngestResult",
+    "MemoryMaintenanceCommand",
+    "MemoryMaintenanceCommandKind",
+    "MemoryMaintenanceRun",
+    "MemoryMaintenanceRunStatus",
     "MemorySearchHit",
+    "MemorySyncBatch",
+    "MemorySyncResult",
     "ProposalNotValidatedError",
     "ProposalValidation",
     "SorRecord",
@@ -35,5 +70,6 @@ __all__ = [
     "VaultAccessRequestRecord",
     "VaultRetrievalAuditRecord",
     "VaultRecord",
+    "WriteProposalDraft",
     "WriteProposal",
 ]

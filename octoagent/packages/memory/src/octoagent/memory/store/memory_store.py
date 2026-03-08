@@ -1,7 +1,7 @@
 """SQLite MemoryStore 实现。"""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -12,7 +12,12 @@ from ..enums import (
     VaultAccessRequestStatus,
 )
 from ..models import (
+    DerivedMemoryQuery,
+    DerivedMemoryRecord,
     FragmentRecord,
+    MemoryIngestResult,
+    MemoryMaintenanceRun,
+    MemorySyncBatch,
     SorRecord,
     VaultAccessGrantRecord,
     VaultAccessRequestRecord,
@@ -366,6 +371,276 @@ class SqliteMemoryStore:
         cursor = await self._conn.execute(sql, tuple(params))
         rows = await cursor.fetchall()
         return [self._row_to_vault(row) for row in rows]
+
+    async def enqueue_sync_backlog(
+        self,
+        batch: MemorySyncBatch,
+        *,
+        failure_code: str,
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_sync_backlog (
+                batch_id, schema_version, scope_id, payload, status, failure_code,
+                created_at, last_attempt_at, replayed_at
+            )
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, NULL)
+            """,
+            (
+                batch.batch_id,
+                1,
+                batch.scope_id,
+                json.dumps(batch.model_dump(mode="json"), ensure_ascii=False),
+                failure_code,
+                batch.created_at.isoformat(),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+
+    async def list_pending_sync_backlog(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[MemorySyncBatch]:
+        cursor = await self._conn.execute(
+            """
+            SELECT payload FROM memory_sync_backlog
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            MemorySyncBatch.model_validate(json.loads(row["payload"]))
+            for row in rows
+        ]
+
+    async def count_pending_sync_backlog(self) -> int:
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM memory_sync_backlog WHERE status = 'pending'"
+        )
+        row = await cursor.fetchone()
+        return int(row[0] if row else 0)
+
+    async def mark_sync_backlog_replayed(self, batch_id: str) -> None:
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE memory_sync_backlog
+            SET status = 'replayed', last_attempt_at = ?, replayed_at = ?
+            WHERE batch_id = ?
+            """,
+            (now, now, batch_id),
+        )
+
+    async def save_ingest_result(
+        self,
+        *,
+        batch_id: str,
+        scope_id: str,
+        partition: str,
+        idempotency_key: str,
+        result: MemoryIngestResult,
+        created_at: str,
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_ingest_runs (
+                ingest_id, schema_version, scope_id, partition, idempotency_key,
+                artifact_refs, fragment_refs, derived_refs, proposal_drafts,
+                warnings, errors, backend_state, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                1,
+                scope_id,
+                partition,
+                idempotency_key,
+                json.dumps(result.artifact_refs, ensure_ascii=False),
+                json.dumps(result.fragment_refs, ensure_ascii=False),
+                json.dumps(result.derived_refs, ensure_ascii=False),
+                json.dumps(
+                    [item.model_dump(mode="json") for item in result.proposal_drafts],
+                    ensure_ascii=False,
+                ),
+                json.dumps(result.warnings, ensure_ascii=False),
+                json.dumps(result.errors, ensure_ascii=False),
+                result.backend_state.value,
+                created_at,
+            ),
+        )
+
+    async def get_ingest_result(
+        self,
+        *,
+        ingest_id: str,
+        scope_id: str,
+        partition: str,
+        idempotency_key: str = "",
+    ) -> tuple[MemoryIngestResult, str] | None:
+        if idempotency_key:
+            cursor = await self._conn.execute(
+                """
+                SELECT * FROM memory_ingest_runs
+                WHERE (
+                    ingest_id = ?
+                    AND scope_id = ?
+                    AND partition = ?
+                ) OR (
+                    idempotency_key != ''
+                    AND idempotency_key = ?
+                    AND scope_id = ?
+                    AND partition = ?
+                )
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (
+                    ingest_id,
+                    scope_id,
+                    partition,
+                    idempotency_key,
+                    scope_id,
+                    partition,
+                ),
+            )
+        else:
+            cursor = await self._conn.execute(
+                """
+                SELECT * FROM memory_ingest_runs
+                WHERE ingest_id = ? AND scope_id = ? AND partition = ?
+                LIMIT 1
+                """,
+                (ingest_id, scope_id, partition),
+            )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_ingest_result(row), row["created_at"]
+
+    async def get_latest_ingest_at(self) -> str | None:
+        cursor = await self._conn.execute(
+            "SELECT created_at FROM memory_ingest_runs ORDER BY created_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return row["created_at"] if row else None
+
+    async def insert_derived_record(self, record: DerivedMemoryRecord) -> None:
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_derived_records (
+                derived_id, schema_version, scope_id, partition, derived_type,
+                subject_key, summary, payload, confidence, source_fragment_refs,
+                source_artifact_refs, proposal_ref, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.derived_id,
+                1,
+                record.scope_id,
+                record.partition.value,
+                record.derived_type,
+                record.subject_key,
+                record.summary,
+                json.dumps(record.payload, ensure_ascii=False),
+                record.confidence,
+                json.dumps(record.source_fragment_refs, ensure_ascii=False),
+                json.dumps(record.source_artifact_refs, ensure_ascii=False),
+                record.proposal_ref,
+                record.created_at.isoformat(),
+            ),
+        )
+
+    async def get_derived_record(self, derived_id: str) -> DerivedMemoryRecord | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM memory_derived_records WHERE derived_id = ?",
+            (derived_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_derived(row)
+
+    async def list_derived_records(
+        self,
+        query: DerivedMemoryQuery,
+    ) -> list[DerivedMemoryRecord]:
+        sql = "SELECT * FROM memory_derived_records WHERE 1 = 1"
+        params: list[object] = []
+        if query.scope_id:
+            sql += " AND scope_id = ?"
+            params.append(query.scope_id)
+        if query.partition is not None:
+            sql += " AND partition = ?"
+            params.append(query.partition.value)
+        if query.derived_types:
+            placeholders = ",".join("?" for _ in query.derived_types)
+            sql += f" AND derived_type IN ({placeholders})"
+            params.extend(query.derived_types)
+        if query.subject_key:
+            sql += " AND subject_key = ?"
+            params.append(query.subject_key)
+        if query.cursor:
+            sql += " AND created_at < ?"
+            params.append(query.cursor)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(query.limit)
+        cursor = await self._conn.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [self._row_to_derived(row) for row in rows]
+
+    async def insert_maintenance_run(self, run: MemoryMaintenanceRun) -> None:
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_maintenance_runs (
+                run_id, schema_version, command_id, kind, scope_id, partition, status,
+                backend_used, fragment_refs, proposal_refs, derived_refs, diagnostic_refs,
+                error_summary, metadata, started_at, finished_at, backend_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run.run_id,
+                1,
+                run.command_id,
+                run.kind.value,
+                run.scope_id,
+                run.partition.value if run.partition else None,
+                run.status.value,
+                run.backend_used,
+                json.dumps(run.fragment_refs, ensure_ascii=False),
+                json.dumps(run.proposal_refs, ensure_ascii=False),
+                json.dumps(run.derived_refs, ensure_ascii=False),
+                json.dumps(run.diagnostic_refs, ensure_ascii=False),
+                run.error_summary,
+                json.dumps(run.metadata, ensure_ascii=False),
+                run.started_at.isoformat(),
+                run.finished_at.isoformat() if run.finished_at else None,
+                run.backend_state.value,
+            ),
+        )
+
+    async def get_maintenance_run(self, run_id: str) -> MemoryMaintenanceRun | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM memory_maintenance_runs WHERE run_id = ?",
+            (run_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_maintenance_run(row)
+
+    async def get_latest_maintenance_at(self) -> str | None:
+        cursor = await self._conn.execute(
+            "SELECT started_at FROM memory_maintenance_runs ORDER BY started_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return row["started_at"] if row else None
 
     async def create_vault_access_request(self, record: VaultAccessRequestRecord) -> None:
         await self._conn.execute(
@@ -788,4 +1063,59 @@ class SqliteMemoryStore:
             evidence_refs=json.loads(row["evidence_refs"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             metadata=json.loads(row["metadata"]),
+        )
+
+    @staticmethod
+    def _row_to_ingest_result(row: aiosqlite.Row) -> MemoryIngestResult:
+        return MemoryIngestResult(
+            ingest_id=row["ingest_id"],
+            artifact_refs=json.loads(row["artifact_refs"]),
+            fragment_refs=json.loads(row["fragment_refs"]),
+            derived_refs=json.loads(row["derived_refs"]),
+            proposal_drafts=json.loads(row["proposal_drafts"]),
+            warnings=json.loads(row["warnings"]),
+            errors=json.loads(row["errors"]),
+            backend_state=row["backend_state"],
+        )
+
+    @staticmethod
+    def _row_to_derived(row: aiosqlite.Row) -> DerivedMemoryRecord:
+        return DerivedMemoryRecord(
+            derived_id=row["derived_id"],
+            scope_id=row["scope_id"],
+            partition=MemoryPartition(row["partition"]),
+            derived_type=row["derived_type"],
+            subject_key=row["subject_key"],
+            summary=row["summary"],
+            payload=json.loads(row["payload"]),
+            confidence=row["confidence"],
+            source_fragment_refs=json.loads(row["source_fragment_refs"]),
+            source_artifact_refs=json.loads(row["source_artifact_refs"]),
+            proposal_ref=row["proposal_ref"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    @staticmethod
+    def _row_to_maintenance_run(row: aiosqlite.Row) -> MemoryMaintenanceRun:
+        return MemoryMaintenanceRun(
+            run_id=row["run_id"],
+            command_id=row["command_id"],
+            kind=row["kind"],
+            scope_id=row["scope_id"],
+            partition=MemoryPartition(row["partition"]) if row["partition"] else None,
+            status=row["status"],
+            backend_used=row["backend_used"],
+            fragment_refs=json.loads(row["fragment_refs"]),
+            proposal_refs=json.loads(row["proposal_refs"]),
+            derived_refs=json.loads(row["derived_refs"]),
+            diagnostic_refs=json.loads(row["diagnostic_refs"]),
+            error_summary=row["error_summary"],
+            metadata=json.loads(row["metadata"]),
+            started_at=datetime.fromisoformat(row["started_at"]),
+            finished_at=(
+                datetime.fromisoformat(row["finished_at"])
+                if row["finished_at"]
+                else None
+            ),
+            backend_state=row["backend_state"],
         )

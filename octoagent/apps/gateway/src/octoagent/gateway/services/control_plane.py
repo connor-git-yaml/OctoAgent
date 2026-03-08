@@ -61,7 +61,14 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
 from octoagent.core.models.task import RequesterInfo
-from octoagent.memory import MemoryLayer, MemoryPartition, ProposalStatus, VaultAccessDecision
+from octoagent.memory import (
+    EvidenceRef,
+    MemoryLayer,
+    MemoryMaintenanceCommandKind,
+    MemoryPartition,
+    ProposalStatus,
+    VaultAccessDecision,
+)
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.provider.dx.chat_import_service import ChatImportService
@@ -562,7 +569,14 @@ class ControlPlaneService:
         )
         channel_summary = self._build_channel_summary()
         wizard = await self.get_wizard_session()
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
         project_selector = await self.get_project_selector()
+        memory_backend = await self._memory_console_service.get_backend_status(
+            project_id=selected_project.project_id if selected_project is not None else "",
+            workspace_id=selected_workspace.workspace_id
+            if selected_workspace is not None
+            else None,
+        )
 
         subsystems.append(
             DiagnosticsSubsystemStatus(
@@ -593,6 +607,50 @@ class ControlPlaneService:
                 warnings=project_selector.warnings,
             )
         )
+        subsystems.append(
+            DiagnosticsSubsystemStatus(
+                subsystem_id="memory",
+                label="Memory",
+                status=memory_backend.state.value,
+                summary=memory_backend.message
+                or (
+                    "active backend: "
+                    f"{memory_backend.active_backend or memory_backend.backend_id}"
+                    + (
+                        f" ({memory_backend.project_binding})"
+                        if memory_backend.project_binding
+                        else ""
+                    )
+                ),
+                detail_ref="/api/control/resources/memory",
+                warnings=(
+                    ([memory_backend.failure_code] if memory_backend.failure_code else [])
+                    + (
+                        [f"project_binding={memory_backend.project_binding}"]
+                        if memory_backend.project_binding
+                        else []
+                    )
+                    + (
+                        [f"last_ingest_at={memory_backend.last_ingest_at.isoformat()}"]
+                        if memory_backend.last_ingest_at is not None
+                        else []
+                    )
+                    + (
+                        [
+                            "last_maintenance_at="
+                            f"{memory_backend.last_maintenance_at.isoformat()}"
+                        ]
+                        if memory_backend.last_maintenance_at is not None
+                        else []
+                    )
+                    + (
+                        [f"retry_after={memory_backend.retry_after.isoformat()}"]
+                        if memory_backend.retry_after is not None
+                        else []
+                    )
+                ),
+            )
+        )
         update_status = str(update_summary.get("overall_status", "") or "")
         if update_status:
             subsystems.append(
@@ -619,6 +677,14 @@ class ControlPlaneService:
                     message=str(failure_report.get("message", "update failed")),
                 )
             )
+        if memory_backend.state.value in {"degraded", "unavailable", "recovering"}:
+            failures.append(
+                DiagnosticsFailureSummary(
+                    source="memory",
+                    message=memory_backend.message
+                    or f"memory backend 状态为 {memory_backend.state.value}",
+                )
+            )
         overall_status = "ready" if not failures else "degraded"
         return DiagnosticsSummaryDocument(
             overall_status=overall_status,
@@ -637,6 +703,7 @@ class ControlPlaneService:
                 "health": "/ready?profile=full",
                 "events": "/api/control/events",
                 "operator": "/api/operator/inbox",
+                "memory": "/api/control/resources/memory",
             },
             capabilities=[
                 ControlPlaneCapability(
@@ -881,6 +948,34 @@ class ControlPlaneService:
             return await self._handle_memory_subject_inspect(request)
         if action_id == "memory.proposal.inspect":
             return await self._handle_memory_proposal_inspect(request)
+        if action_id == "memory.flush":
+            return await self._handle_memory_maintenance(
+                request,
+                kind=MemoryMaintenanceCommandKind.FLUSH,
+                success_code="MEMORY_FLUSH_COMPLETED",
+                success_message="已执行 Memory flush。",
+            )
+        if action_id == "memory.reindex":
+            return await self._handle_memory_maintenance(
+                request,
+                kind=MemoryMaintenanceCommandKind.REINDEX,
+                success_code="MEMORY_REINDEX_COMPLETED",
+                success_message="已执行 Memory reindex。",
+            )
+        if action_id == "memory.bridge.reconnect":
+            return await self._handle_memory_maintenance(
+                request,
+                kind=MemoryMaintenanceCommandKind.BRIDGE_RECONNECT,
+                success_code="MEMORY_BRIDGE_RECONNECT_COMPLETED",
+                success_message="已执行 Memory bridge reconnect。",
+            )
+        if action_id == "memory.sync.resume":
+            return await self._handle_memory_maintenance(
+                request,
+                kind=MemoryMaintenanceCommandKind.SYNC_RESUME,
+                success_code="MEMORY_SYNC_RESUME_COMPLETED",
+                success_message="已执行 Memory sync.resume。",
+            )
         if action_id == "vault.access.request":
             return await self._handle_vault_access_request(request)
         if action_id == "vault.access.resolve":
@@ -1094,6 +1189,56 @@ class ControlPlaneService:
                     "memory-proposals:overview",
                 )
             ],
+        )
+
+    async def _handle_memory_maintenance(
+        self,
+        request: ActionRequestEnvelope,
+        *,
+        kind: MemoryMaintenanceCommandKind,
+        success_code: str,
+        success_message: str,
+    ) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        partition_value = self._param_str(request.params, "partition")
+        partition = self._parse_memory_partition(partition_value) if partition_value else None
+        raw_evidence_refs = request.params.get("evidence_refs", [])
+        evidence_refs = (
+            [EvidenceRef.model_validate(item) for item in raw_evidence_refs]
+            if isinstance(raw_evidence_refs, list)
+            else []
+        )
+        run = await self._memory_console_service.run_maintenance(
+            kind=kind,
+            project_id=project_id or "",
+            workspace_id=workspace_id,
+            scope_id=self._param_str(request.params, "scope_id"),
+            partition=partition,
+            reason=self._param_str(request.params, "reason"),
+            summary=self._param_str(request.params, "summary"),
+            requested_by=request.actor.actor_id,
+            evidence_refs=evidence_refs,
+            metadata={
+                "actor_id": request.actor.actor_id,
+                "actor_label": request.actor.actor_label,
+            },
+        )
+        return self._completed_result(
+            request=request,
+            code=success_code,
+            message=success_message,
+            data={
+                "run_id": run.run_id,
+                "status": run.status.value,
+                "backend_used": run.backend_used,
+                "error_summary": run.error_summary,
+                "metadata": run.metadata,
+            },
+            resource_refs=[
+                self._resource_ref("memory_console", "memory:overview"),
+                self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            ],
+            target_refs=self._memory_target_refs(request),
         )
 
     async def _handle_vault_access_request(
@@ -2543,6 +2688,30 @@ class ControlPlaneService:
                     "memory.proposal.inspect",
                     "查看 Proposal 审计",
                     category="memory",
+                ),
+                definition(
+                    "memory.flush",
+                    "执行 Memory Flush",
+                    category="memory",
+                    risk_hint="medium",
+                ),
+                definition(
+                    "memory.reindex",
+                    "执行 Memory Reindex",
+                    category="memory",
+                    risk_hint="medium",
+                ),
+                definition(
+                    "memory.bridge.reconnect",
+                    "重连 Memory Bridge",
+                    category="memory",
+                    risk_hint="medium",
+                ),
+                definition(
+                    "memory.sync.resume",
+                    "恢复 Memory Sync",
+                    category="memory",
+                    risk_hint="medium",
                 ),
                 definition(
                     "vault.access.request",

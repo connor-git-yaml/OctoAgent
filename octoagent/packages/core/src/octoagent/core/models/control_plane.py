@@ -311,8 +311,11 @@ class MemoryRecordProjection(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime | None = None
     evidence_refs: list[dict[str, Any]] = Field(default_factory=list)
+    derived_refs: list[str] = Field(default_factory=list)
+    proposal_refs: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     requires_vault_authorization: bool = False
+    retrieval_backend: str = Field(default="")
 
 
 class MemoryConsoleSummary(BaseModel):
@@ -322,6 +325,7 @@ class MemoryConsoleSummary(BaseModel):
     sor_history_count: int = 0
     vault_ref_count: int = 0
     proposal_count: int = 0
+    pending_replay_count: int = 0
 
 
 class MemoryConsoleDocument(ControlPlaneDocument):
@@ -329,12 +333,17 @@ class MemoryConsoleDocument(ControlPlaneDocument):
     resource_id: str = "memory:overview"
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
+    backend_id: str = Field(default="")
+    retrieval_backend: str = Field(default="")
+    backend_state: str = Field(default="")
+    index_health: dict[str, Any] = Field(default_factory=dict)
     filters: MemoryConsoleFilter = Field(default_factory=MemoryConsoleFilter)
     summary: MemoryConsoleSummary = Field(default_factory=MemoryConsoleSummary)
     records: list[MemoryRecordProjection] = Field(default_factory=list)
     available_scopes: list[str] = Field(default_factory=list)
     available_partitions: list[str] = Field(default_factory=list)
     available_layers: list[str] = Field(default_factory=list)
+    advanced_refs: dict[str, str] = Field(default_factory=dict)
 
 
 class MemorySubjectHistoryDocument(ControlPlaneDocument):
@@ -342,10 +351,14 @@ class MemorySubjectHistoryDocument(ControlPlaneDocument):
     resource_id: str = "memory-subject:overview"
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
+    retrieval_backend: str = Field(default="")
+    backend_state: str = Field(default="")
+    index_health: dict[str, Any] = Field(default_factory=dict)
     scope_id: str = Field(default="")
     subject_key: str = Field(default="")
     current_record: MemoryRecordProjection | None = None
     history: list[MemoryRecordProjection] = Field(default_factory=list)
+    latest_proposal_refs: list[str] = Field(default_factory=list)
 
 
 class MemoryProposalSummary(BaseModel):
@@ -377,6 +390,8 @@ class MemoryProposalAuditDocument(ControlPlaneDocument):
     resource_id: str = "memory-proposals:overview"
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
+    retrieval_backend: str = Field(default="")
+    backend_state: str = Field(default="")
     summary: MemoryProposalSummary = Field(default_factory=MemoryProposalSummary)
     items: list[MemoryProposalAuditItem] = Field(default_factory=list)
 
@@ -440,6 +455,8 @@ class VaultAuthorizationDocument(ControlPlaneDocument):
     resource_id: str = "vault:authorization"
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
+    retrieval_backend: str = Field(default="")
+    backend_state: str = Field(default="")
     active_requests: list[VaultAccessRequestItem] = Field(default_factory=list)
     active_grants: list[VaultAccessGrantItem] = Field(default_factory=list)
     recent_retrievals: list[VaultRetrievalAuditItem] = Field(default_factory=list)

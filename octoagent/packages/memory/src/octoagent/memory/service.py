@@ -21,11 +21,24 @@ from .enums import (
 from .models import (
     CommitResult,
     CompactionFlushResult,
+    DerivedMemoryQuery,
     EvidenceRef,
     FragmentRecord,
     MemoryAccessDeniedError,
     MemoryAccessPolicy,
+    MemoryBackendState,
+    MemoryBackendStatus,
+    MemoryDerivedProjection,
+    MemoryEvidenceProjection,
+    MemoryEvidenceQuery,
+    MemoryIngestBatch,
+    MemoryIngestResult,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceCommandKind,
+    MemoryMaintenanceRun,
+    MemoryMaintenanceRunStatus,
     MemorySearchHit,
+    MemorySyncBatch,
     ProposalNotValidatedError,
     ProposalValidation,
     SorRecord,
@@ -34,6 +47,7 @@ from .models import (
     VaultRecord,
     VaultRetrievalAuditRecord,
     WriteProposal,
+    WriteProposalDraft,
 )
 from .store.memory_store import SqliteMemoryStore
 
@@ -51,8 +65,14 @@ class MemoryService:
     ) -> None:
         self._conn = conn
         self._store = store or SqliteMemoryStore(conn)
-        self._backend = backend or SqliteMemoryBackend(self._store)
+        self._fallback_backend = SqliteMemoryBackend(self._store)
+        self._backend = backend or self._fallback_backend
         self._backend_degraded = False
+        self._backend_last_success_at: datetime | None = None
+        self._backend_last_failure_at: datetime | None = None
+        self._backend_failure_code = ""
+        self._backend_failure_message = ""
+        self._pending_replay_count = 0
 
     async def propose_write(
         self,
@@ -145,6 +165,29 @@ class MemoryService:
             errors=errors,
             persist_vault=persist_vault,
             current_version=current.version if current is not None else None,
+        )
+
+    async def create_proposal_from_draft(
+        self,
+        *,
+        scope_id: str,
+        draft: WriteProposalDraft,
+        autocommit: bool = True,
+    ) -> WriteProposal:
+        """将 derived / ingest 产出的草案接入治理层。"""
+
+        return await self.propose_write(
+            scope_id=scope_id,
+            partition=draft.partition,
+            action=WriteAction.ADD,
+            subject_key=draft.subject_key,
+            content=draft.content,
+            rationale=draft.rationale,
+            confidence=draft.confidence,
+            evidence_refs=draft.evidence_refs,
+            is_sensitive=draft.partition in SENSITIVE_PARTITIONS,
+            metadata=draft.metadata,
+            autocommit=autocommit,
         )
 
     async def commit_memory(
@@ -240,7 +283,17 @@ class MemoryService:
         """基础检索接口。"""
 
         policy = policy or MemoryAccessPolicy()
-        if self._backend_degraded:
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            hits = await self._fallback_backend.search(
+                scope_id,
+                query=query,
+                policy=policy,
+                limit=limit,
+            )
+            self._mark_backend_healthy()
+            return hits
+
+        if await self._should_force_fallback():
             return await self._search_via_store(
                 scope_id,
                 query=query,
@@ -250,25 +303,34 @@ class MemoryService:
 
         try:
             if not await self._backend.is_available():
-                self._backend_degraded = True
+                self._mark_backend_degraded(
+                    "BACKEND_UNAVAILABLE",
+                    "高级 memory backend 当前不可用，已切换到 SQLite fallback。",
+                )
                 return await self._search_via_store(
                     scope_id,
                     query=query,
                     policy=policy,
                     limit=limit,
                 )
-            return await self._backend.search(
+            hits = await self._backend.search(
                 scope_id,
                 query=query,
                 policy=policy,
                 limit=limit,
             )
-        except Exception:
-            self._backend_degraded = True
+            self._mark_backend_healthy()
+            return hits
+        except Exception as exc:
+            self._mark_backend_degraded(
+                "BACKEND_SEARCH_FAILED",
+                str(exc) or "高级 memory backend search 失败，已切换到 SQLite fallback。",
+            )
             log.warning(
                 "memory_backend_search_degraded",
                 backend=self._backend.backend_id,
                 scope_id=scope_id,
+                error=str(exc),
             )
             return await self._search_via_store(
                 scope_id,
@@ -276,6 +338,213 @@ class MemoryService:
                 policy=policy,
                 limit=limit,
             )
+
+    async def get_backend_status(self) -> MemoryBackendStatus:
+        """返回 Memory backend 当前状态。"""
+
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            status = await self._fallback_backend.get_status()
+        else:
+            try:
+                status = await self._backend.get_status()
+            except Exception as exc:
+                status = MemoryBackendStatus(
+                    backend_id=self._backend.backend_id,
+                    memory_engine_contract_version=getattr(
+                        self._backend,
+                        "memory_engine_contract_version",
+                        "1.0.0",
+                    ),
+                    state=MemoryBackendState.UNAVAILABLE,
+                    active_backend=self._fallback_backend.backend_id,
+                    failure_code="STATUS_FETCH_FAILED",
+                    message=str(exc),
+                )
+
+        persisted_pending = await self._store.count_pending_sync_backlog()
+        updates: dict[str, object] = {}
+        if status.last_success_at is None and self._backend_last_success_at is not None:
+            updates["last_success_at"] = self._backend_last_success_at
+        if status.last_failure_at is None and self._backend_last_failure_at is not None:
+            updates["last_failure_at"] = self._backend_last_failure_at
+        updates["pending_replay_count"] = max(
+            status.pending_replay_count,
+            self._pending_replay_count,
+            persisted_pending,
+        )
+        updates["sync_backlog"] = max(
+            status.sync_backlog,
+            self._pending_replay_count,
+            persisted_pending,
+        )
+        if (
+            persisted_pending > 0
+            and self._backend.backend_id != self._fallback_backend.backend_id
+        ):
+            updates["active_backend"] = self._fallback_backend.backend_id
+            if status.state is MemoryBackendState.HEALTHY:
+                updates["state"] = MemoryBackendState.RECOVERING
+            elif status.state is not MemoryBackendState.UNAVAILABLE:
+                updates["state"] = MemoryBackendState.DEGRADED
+            if not status.failure_code:
+                updates["failure_code"] = "BACKEND_REPLAY_PENDING"
+            if not status.message:
+                updates["message"] = (
+                    "高级 memory backend 已恢复可连通，但仍存在待 replay backlog，"
+                    "继续使用 SQLite fallback。"
+                )
+            index_health = dict(status.index_health)
+            index_health["fallback_backend"] = self._fallback_backend.backend_id
+            updates["index_health"] = index_health
+
+        if self._backend_degraded and self._backend.backend_id != self._fallback_backend.backend_id:
+            updates["active_backend"] = self._fallback_backend.backend_id
+            updates["failure_code"] = self._backend_failure_code or status.failure_code
+            updates["message"] = self._backend_failure_message or status.message
+            if status.state is MemoryBackendState.HEALTHY:
+                updates["state"] = MemoryBackendState.RECOVERING
+            elif status.state is not MemoryBackendState.UNAVAILABLE:
+                updates["state"] = MemoryBackendState.DEGRADED
+            index_health = dict(status.index_health)
+            index_health["fallback_backend"] = self._fallback_backend.backend_id
+            updates["index_health"] = index_health
+        elif not status.active_backend:
+            updates["active_backend"] = status.backend_id
+
+        return status.model_copy(update=updates) if updates else status
+
+    async def list_derived_memory(
+        self,
+        query: DerivedMemoryQuery,
+    ) -> MemoryDerivedProjection:
+        """查询 derived memory layer。"""
+
+        backend = await self._select_backend_for_advanced_calls()
+        try:
+            projection = await backend.list_derivations(query)
+            if backend is not self._fallback_backend:
+                self._mark_backend_healthy()
+            return projection
+        except Exception as exc:
+            if backend is self._fallback_backend:
+                raise
+            self._mark_backend_degraded(
+                "BACKEND_DERIVED_FAILED",
+                str(exc) or "高级 memory backend derived 查询失败。",
+            )
+            log.warning(
+                "memory_backend_derived_degraded",
+                backend=self._backend.backend_id,
+                scope_id=query.scope_id,
+                error=str(exc),
+            )
+            return await self._fallback_backend.list_derivations(query)
+
+    async def resolve_memory_evidence(
+        self,
+        query: MemoryEvidenceQuery,
+    ) -> MemoryEvidenceProjection:
+        """解析证据链。"""
+
+        backend = await self._select_backend_for_advanced_calls()
+        try:
+            projection = await backend.resolve_evidence(query)
+            if backend is not self._fallback_backend:
+                self._mark_backend_healthy()
+            return projection
+        except Exception as exc:
+            if backend is self._fallback_backend:
+                raise
+            self._mark_backend_degraded(
+                "BACKEND_EVIDENCE_FAILED",
+                str(exc) or "高级 memory backend evidence 解析失败。",
+            )
+            log.warning(
+                "memory_backend_evidence_degraded",
+                backend=self._backend.backend_id,
+                record_id=query.record_id,
+                error=str(exc),
+            )
+            return await self._fallback_backend.resolve_evidence(query)
+
+    async def ingest_memory_batch(
+        self,
+        batch: MemoryIngestBatch,
+    ) -> MemoryIngestResult:
+        """执行多模态 ingest。"""
+
+        backend = await self._select_backend_for_advanced_calls()
+        try:
+            result = await backend.ingest_batch(batch)
+            if backend is self._fallback_backend:
+                await self._conn.commit()
+            else:
+                self._mark_backend_healthy()
+            return result
+        except Exception as exc:
+            if backend is self._fallback_backend:
+                raise
+            self._mark_backend_degraded(
+                "BACKEND_INGEST_FAILED",
+                str(exc) or "高级 memory backend ingest 失败，已切换到 fallback。",
+            )
+            log.warning(
+                "memory_backend_ingest_degraded",
+                backend=self._backend.backend_id,
+                scope_id=batch.scope_id,
+                ingest_id=batch.ingest_id,
+                error=str(exc),
+            )
+            result = await self._fallback_backend.ingest_batch(batch)
+            await self._conn.commit()
+            return result
+
+    async def run_memory_maintenance(
+        self,
+        command: MemoryMaintenanceCommand,
+    ) -> MemoryMaintenanceRun:
+        """执行 memory maintenance。"""
+
+        if command.kind is MemoryMaintenanceCommandKind.FLUSH:
+            return await self._run_flush_maintenance(command)
+        if command.kind in {
+            MemoryMaintenanceCommandKind.REPLAY,
+            MemoryMaintenanceCommandKind.SYNC_RESUME,
+        }:
+            return await self._run_replay_maintenance(command)
+        if command.kind is MemoryMaintenanceCommandKind.BRIDGE_RECONNECT:
+            return await self._run_bridge_reconnect(command)
+
+        backend = await self._select_backend_for_advanced_calls()
+        try:
+            run = await backend.run_maintenance(command)
+            if backend is not self._fallback_backend:
+                self._mark_backend_healthy()
+        except Exception as exc:
+            if backend is self._fallback_backend:
+                raise
+            self._mark_backend_degraded(
+                "BACKEND_MAINTENANCE_FAILED",
+                str(exc) or "高级 memory backend maintenance 执行失败。",
+            )
+            log.warning(
+                "memory_backend_maintenance_degraded",
+                backend=self._backend.backend_id,
+                command_id=command.command_id,
+                kind=command.kind.value,
+                error=str(exc),
+            )
+            run = await self._fallback_backend.run_maintenance(command)
+
+        normalized = run.model_copy(
+            update={
+                "scope_id": run.scope_id or command.scope_id,
+                "partition": run.partition or command.partition,
+            }
+        )
+        await self._store.insert_maintenance_run(normalized)
+        await self._conn.commit()
+        return normalized
 
     async def get_memory(
         self,
@@ -704,6 +973,302 @@ class MemoryService:
             created_at=now,
         )
 
+    async def _run_flush_maintenance(
+        self,
+        command: MemoryMaintenanceCommand,
+    ) -> MemoryMaintenanceRun:
+        started_at = datetime.now(UTC)
+        partition = command.partition or MemoryPartition.WORK
+        summary = command.summary or command.reason or "memory flush draft"
+        subject_key = str(command.metadata.get("subject_key", "") or "").strip()
+        backlog_before = await self._store.count_pending_sync_backlog()
+        flush = await self.before_compaction_flush(
+            scope_id=command.scope_id,
+            summary=summary,
+            evidence_refs=command.evidence_refs,
+            partition=partition,
+            subject_key=subject_key or None,
+        )
+        await self._store.append_fragment(flush.fragment)
+        proposal_id = ""
+        if flush.proposal is not None:
+            proposal_id = flush.proposal.proposal_id
+            await self._store.save_proposal(flush.proposal)
+        await self._conn.commit()
+
+        await self._sync_backend(
+            fragment=flush.fragment,
+            current_sor_id=None,
+            current_vault_id=None,
+        )
+        backlog_after = await self._store.count_pending_sync_backlog()
+        status = (
+            MemoryMaintenanceRunStatus.DEGRADED
+            if backlog_after > backlog_before
+            else MemoryMaintenanceRunStatus.COMPLETED
+        )
+        run = MemoryMaintenanceRun(
+            run_id=str(ULID()),
+            command_id=command.command_id,
+            kind=command.kind,
+            scope_id=command.scope_id,
+            partition=partition,
+            status=status,
+            backend_used=self._backend.backend_id,
+            fragment_refs=[flush.fragment.fragment_id],
+            proposal_refs=[proposal_id] if proposal_id else [],
+            diagnostic_refs=["memory:sync-backlog", "memory:maintenance"],
+            error_summary=(
+                "flush draft 已生成，但高级 backend sync 已进入 backlog。"
+                if status is MemoryMaintenanceRunStatus.DEGRADED
+                else ""
+            ),
+            metadata={
+                **command.metadata,
+                "summary": summary,
+                "backlog_before": backlog_before,
+                "backlog_after": backlog_after,
+            },
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            backend_state=(
+                MemoryBackendState.DEGRADED
+                if status is MemoryMaintenanceRunStatus.DEGRADED
+                else MemoryBackendState.HEALTHY
+            ),
+        )
+        await self._store.insert_maintenance_run(run)
+        await self._conn.commit()
+        return run
+
+    async def _run_replay_maintenance(
+        self,
+        command: MemoryMaintenanceCommand,
+    ) -> MemoryMaintenanceRun:
+        started_at = datetime.now(UTC)
+        batches = await self._store.list_pending_sync_backlog(limit=500)
+        if command.scope_id:
+            batches = [batch for batch in batches if batch.scope_id == command.scope_id]
+        backlog_before = len(batches)
+        if backlog_before == 0:
+            run = MemoryMaintenanceRun(
+                run_id=str(ULID()),
+                command_id=command.command_id,
+                kind=command.kind,
+                scope_id=command.scope_id,
+                partition=command.partition,
+                status=MemoryMaintenanceRunStatus.COMPLETED,
+                backend_used=self._backend.backend_id,
+                diagnostic_refs=["memory:sync-backlog"],
+                metadata={
+                    **command.metadata,
+                    "replayed_batches": 0,
+                    "remaining_backlog": 0,
+                },
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                backend_state=MemoryBackendState.HEALTHY,
+            )
+            await self._store.insert_maintenance_run(run)
+            await self._conn.commit()
+            return run
+
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            run = MemoryMaintenanceRun(
+                run_id=str(ULID()),
+                command_id=command.command_id,
+                kind=command.kind,
+                scope_id=command.scope_id,
+                partition=command.partition,
+                status=MemoryMaintenanceRunStatus.DEGRADED,
+                backend_used=self._fallback_backend.backend_id,
+                diagnostic_refs=["memory:sync-backlog"],
+                error_summary="当前未配置高级 memory backend，无法执行 replay/sync.resume。",
+                metadata={
+                    **command.metadata,
+                    "replayed_batches": 0,
+                    "remaining_backlog": backlog_before,
+                },
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                backend_state=MemoryBackendState.DEGRADED,
+            )
+            await self._store.insert_maintenance_run(run)
+            await self._conn.commit()
+            return run
+
+        replayed_batches = 0
+        errors: list[str] = []
+        for batch in batches:
+            try:
+                result = await self._backend.sync_batch(batch)
+                if result.backend_state in {
+                    MemoryBackendState.DEGRADED,
+                    MemoryBackendState.UNAVAILABLE,
+                }:
+                    errors.append(f"{batch.batch_id}: {result.backend_state.value}")
+                    self._mark_backend_degraded(
+                        "BACKEND_SYNC_REPLAY_DEGRADED",
+                        f"replay batch {batch.batch_id} 返回 {result.backend_state.value}",
+                    )
+                    continue
+                await self._store.mark_sync_backlog_replayed(batch.batch_id)
+                replayed_batches += 1
+            except Exception as exc:
+                errors.append(f"{batch.batch_id}: {exc}")
+                self._mark_backend_degraded(
+                    "BACKEND_SYNC_REPLAY_FAILED",
+                    str(exc) or "高级 memory backend replay 失败。",
+                )
+
+        backlog_after = await self._store.count_pending_sync_backlog()
+        status = (
+            MemoryMaintenanceRunStatus.COMPLETED
+            if not errors and backlog_after == 0
+            else MemoryMaintenanceRunStatus.DEGRADED
+        )
+        if status is MemoryMaintenanceRunStatus.COMPLETED:
+            self._mark_backend_healthy()
+        run = MemoryMaintenanceRun(
+            run_id=str(ULID()),
+            command_id=command.command_id,
+            kind=command.kind,
+            scope_id=command.scope_id,
+            partition=command.partition,
+            status=status,
+            backend_used=self._backend.backend_id,
+            diagnostic_refs=["memory:sync-backlog", "memory:maintenance"],
+            error_summary="; ".join(errors),
+            metadata={
+                **command.metadata,
+                "replayed_batches": replayed_batches,
+                "remaining_backlog": backlog_after,
+                "initial_backlog": backlog_before,
+            },
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            backend_state=(
+                MemoryBackendState.HEALTHY
+                if status is MemoryMaintenanceRunStatus.COMPLETED
+                else MemoryBackendState.DEGRADED
+            ),
+        )
+        await self._store.insert_maintenance_run(run)
+        await self._conn.commit()
+        return run
+
+    async def _run_bridge_reconnect(
+        self,
+        command: MemoryMaintenanceCommand,
+    ) -> MemoryMaintenanceRun:
+        started_at = datetime.now(UTC)
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            run = MemoryMaintenanceRun(
+                run_id=str(ULID()),
+                command_id=command.command_id,
+                kind=command.kind,
+                scope_id=command.scope_id,
+                partition=command.partition,
+                status=MemoryMaintenanceRunStatus.DEGRADED,
+                backend_used=self._fallback_backend.backend_id,
+                diagnostic_refs=["memory:backend-status"],
+                error_summary="当前没有可重连的高级 memory backend。",
+                metadata=dict(command.metadata),
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                backend_state=MemoryBackendState.DEGRADED,
+            )
+            await self._store.insert_maintenance_run(run)
+            await self._conn.commit()
+            return run
+
+        try:
+            reconnect_run = await self._backend.run_maintenance(command)
+            status = await self._backend.get_status()
+        except Exception as exc:
+            self._mark_backend_degraded(
+                "BACKEND_RECONNECT_FAILED",
+                str(exc) or "高级 memory backend reconnect 失败。",
+            )
+            status = MemoryBackendStatus(
+                backend_id=self._backend.backend_id,
+                state=MemoryBackendState.UNAVAILABLE,
+                active_backend=self._fallback_backend.backend_id,
+                failure_code="BACKEND_RECONNECT_FAILED",
+                message=str(exc),
+            )
+            reconnect_run = None
+
+        pending_backlog = await self._store.count_pending_sync_backlog()
+        run_status = (
+            MemoryMaintenanceRunStatus.COMPLETED
+            if (
+                reconnect_run is not None
+                and reconnect_run.status is MemoryMaintenanceRunStatus.COMPLETED
+                and
+                status.state is MemoryBackendState.HEALTHY
+                and pending_backlog == 0
+            )
+            else MemoryMaintenanceRunStatus.DEGRADED
+        )
+        if run_status is MemoryMaintenanceRunStatus.COMPLETED:
+            self._mark_backend_healthy()
+        run = MemoryMaintenanceRun(
+            run_id=(
+                reconnect_run.run_id
+                if reconnect_run is not None
+                else str(ULID())
+            ),
+            command_id=command.command_id,
+            kind=command.kind,
+            scope_id=command.scope_id,
+            partition=command.partition,
+            status=run_status,
+            backend_used=self._backend.backend_id,
+            fragment_refs=(
+                reconnect_run.fragment_refs if reconnect_run is not None else []
+            ),
+            proposal_refs=(
+                reconnect_run.proposal_refs if reconnect_run is not None else []
+            ),
+            derived_refs=(
+                reconnect_run.derived_refs if reconnect_run is not None else []
+            ),
+            diagnostic_refs=[
+                *(reconnect_run.diagnostic_refs if reconnect_run is not None else []),
+                "memory:backend-status",
+            ],
+            error_summary=(
+                ""
+                if run_status is MemoryMaintenanceRunStatus.COMPLETED
+                else (
+                    status.message
+                    or (
+                        "bridge reconnect 已执行，但仍存在待 replay backlog。"
+                        if pending_backlog > 0
+                        else ""
+                    )
+                )
+            ),
+            metadata={
+                **(reconnect_run.metadata if reconnect_run is not None else {}),
+                **command.metadata,
+                "backend_state": status.state.value,
+                "active_backend": status.active_backend,
+                "pending_backlog": pending_backlog,
+            },
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            backend_state=(
+                MemoryBackendState.RECOVERING
+                if status.state is MemoryBackendState.HEALTHY and pending_backlog > 0
+                else status.state
+            ),
+        )
+        await self._store.insert_maintenance_run(run)
+        await self._conn.commit()
+        return run
+
     async def _require_proposal(self, proposal_id: str) -> WriteProposal:
         proposal = await self._store.get_proposal(proposal_id)
         if proposal is None:
@@ -744,27 +1309,73 @@ class MemoryService:
         current_sor_id: str | None,
         current_vault_id: str | None,
     ) -> None:
-        if self._backend_degraded:
+        if self._backend.backend_id == self._fallback_backend.backend_id:
             return
+
+        sor_records: list[SorRecord] = []
+        if current_sor_id is not None:
+            sor = await self._store.get_sor(current_sor_id)
+            if sor is not None:
+                sor_records.append(sor)
+        vault_records: list[VaultRecord] = []
+        if current_vault_id is not None:
+            vault = await self._store.get_vault(current_vault_id)
+            if vault is not None:
+                vault_records.append(vault)
+        batch = MemorySyncBatch(
+            batch_id=str(ULID()),
+            scope_id=fragment.scope_id,
+            fragments=[fragment],
+            sor_records=sor_records,
+            vault_records=vault_records,
+            created_at=datetime.now(UTC),
+        )
 
         try:
             if not await self._backend.is_available():
-                self._backend_degraded = True
+                self._mark_backend_degraded(
+                    "BACKEND_UNAVAILABLE",
+                    "高级 memory backend 当前不可用，已暂停同步。",
+                )
+                await self._store.enqueue_sync_backlog(
+                    batch,
+                    failure_code="BACKEND_UNAVAILABLE",
+                )
+                await self._conn.commit()
+                self._pending_replay_count += 1
                 return
-            await self._backend.sync_fragment(fragment)
-            if current_sor_id is not None:
-                sor = await self._store.get_sor(current_sor_id)
-                if sor is not None:
-                    await self._backend.sync_sor(sor)
-            if current_vault_id is not None:
-                vault = await self._store.get_vault(current_vault_id)
-                if vault is not None:
-                    await self._backend.sync_vault(vault)
-        except Exception:
-            self._backend_degraded = True
+            result = await self._backend.sync_batch(batch)
+            if result.backend_state in {
+                MemoryBackendState.DEGRADED,
+                MemoryBackendState.UNAVAILABLE,
+            }:
+                self._mark_backend_degraded(
+                    "BACKEND_SYNC_DEGRADED",
+                    "高级 memory backend sync 返回降级状态。",
+                )
+                await self._store.enqueue_sync_backlog(
+                    batch,
+                    failure_code="BACKEND_SYNC_DEGRADED",
+                )
+                await self._conn.commit()
+                self._pending_replay_count += 1
+                return
+            self._mark_backend_healthy()
+        except Exception as exc:
+            self._mark_backend_degraded(
+                "BACKEND_SYNC_FAILED",
+                str(exc) or "高级 memory backend sync 失败。",
+            )
+            await self._store.enqueue_sync_backlog(
+                batch,
+                failure_code="BACKEND_SYNC_FAILED",
+            )
+            await self._conn.commit()
+            self._pending_replay_count += 1
             log.warning(
                 "memory_backend_sync_degraded",
                 backend=self._backend.backend_id,
+                error=str(exc),
             )
 
     async def _search_via_store(
@@ -775,31 +1386,68 @@ class MemoryService:
         policy: MemoryAccessPolicy,
         limit: int,
     ) -> list[MemorySearchHit]:
-        sor_records = await self._store.search_sor(
+        return await self._fallback_backend.search(
             scope_id,
             query=query,
-            include_history=policy.include_history,
+            policy=policy,
             limit=limit,
         )
-        fragment_records = await self._store.list_fragments(scope_id, query=query, limit=limit)
-        if not policy.allow_vault:
-            sor_records = [
-                item for item in sor_records if item.partition not in SENSITIVE_PARTITIONS
-            ]
-            fragment_records = [
-                item
-                for item in fragment_records
-                if item.partition not in SENSITIVE_PARTITIONS
-            ]
-        vault_records = []
-        if policy.allow_vault:
-            vault_records = await self._store.search_vault(scope_id, query=query, limit=limit)
 
-        hits = [self._to_sor_hit(item) for item in sor_records]
-        hits.extend(self._to_fragment_hit(item) for item in fragment_records)
-        hits.extend(self._to_vault_hit(item) for item in vault_records)
-        hits.sort(key=lambda item: item.created_at, reverse=True)
-        return hits[:limit]
+    async def _probe_backend_recovery(self) -> bool:
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            self._mark_backend_healthy()
+            return True
+        if await self._has_pending_sync_backlog():
+            return False
+        try:
+            return await self._backend.is_available()
+        except Exception:
+            return False
+
+    async def _select_backend_for_advanced_calls(self) -> MemoryBackend:
+        if self._backend.backend_id == self._fallback_backend.backend_id:
+            return self._fallback_backend
+        if await self._should_force_fallback():
+            return self._fallback_backend
+        try:
+            if not await self._backend.is_available():
+                self._mark_backend_degraded(
+                    "BACKEND_UNAVAILABLE",
+                    "高级 memory backend 当前不可用，已切换到 SQLite fallback。",
+                )
+                return self._fallback_backend
+        except Exception as exc:
+            self._mark_backend_degraded(
+                "BACKEND_STATUS_FAILED",
+                str(exc) or "高级 memory backend 健康探测失败。",
+            )
+            return self._fallback_backend
+        return self._backend
+
+    async def _has_pending_sync_backlog(self) -> bool:
+        return await self._store.count_pending_sync_backlog() > 0
+
+    async def _should_force_fallback(self) -> bool:
+        return (
+            await self._has_pending_sync_backlog()
+            or (
+                self._backend_degraded
+                and not await self._probe_backend_recovery()
+            )
+        )
+
+    def _mark_backend_healthy(self) -> None:
+        self._backend_degraded = False
+        self._backend_last_success_at = datetime.now(UTC)
+        self._backend_failure_code = ""
+        self._backend_failure_message = ""
+        self._pending_replay_count = 0
+
+    def _mark_backend_degraded(self, code: str, message: str) -> None:
+        self._backend_degraded = True
+        self._backend_last_failure_at = datetime.now(UTC)
+        self._backend_failure_code = code
+        self._backend_failure_message = message
 
     @staticmethod
     def _safe_sor_content(proposal: WriteProposal) -> str:

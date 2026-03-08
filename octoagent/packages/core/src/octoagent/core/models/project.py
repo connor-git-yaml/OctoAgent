@@ -28,6 +28,7 @@ class WorkspaceKind(StrEnum):
 class ProjectBindingType(StrEnum):
     SCOPE = "scope"
     MEMORY_SCOPE = "memory_scope"
+    MEMORY_BRIDGE = "memory_bridge"
     IMPORT_SCOPE = "import_scope"
     CHANNEL = "channel"
     BACKUP_ROOT = "backup_root"
@@ -45,6 +46,7 @@ class SecretRefSourceType(StrEnum):
 class SecretTargetKind(StrEnum):
     RUNTIME = "runtime"
     PROVIDER = "provider"
+    MEMORY = "memory"
     CHANNEL = "channel"
     GATEWAY = "gateway"
 

@@ -5,11 +5,21 @@ import json
 from pathlib import Path
 
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import NormalizedMessage, ProjectBinding, ProjectBindingType
+from httpx import ASGITransport, AsyncClient, MockTransport, Response
+from octoagent.core.models import (
+    NormalizedMessage,
+    ProjectBinding,
+    ProjectBindingType,
+    ProjectSecretBinding,
+    SecretBindingStatus,
+    SecretRefSourceType,
+    SecretTargetKind,
+)
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
+    MemoryIngestBatch,
+    MemoryIngestItem,
     MemoryPartition,
     MemoryService,
     SqliteMemoryStore,
@@ -110,6 +120,29 @@ async def _seed_memory(app) -> dict[str, str]:
     await memory_service.validate_proposal(vault_proposal.proposal_id)
     vault_commit = await memory_service.commit_memory(vault_proposal.proposal_id)
     assert vault_commit.vault_id is not None
+    await memory_service.ingest_memory_batch(
+        MemoryIngestBatch(
+            ingest_id="seeded-memory-ingest",
+            scope_id=scope_id,
+            partition=MemoryPartition.WORK,
+            idempotency_key="seeded-memory-ingest",
+            items=[
+                MemoryIngestItem(
+                    item_id="seeded-derived",
+                    modality="text",
+                    artifact_ref="artifact-derived-1",
+                    metadata={
+                        "text": "Connor owns project alpha and plans more tests.",
+                        "subject_key": "work.project-alpha.status",
+                        "entity": "Connor",
+                        "relation": "owns",
+                        "relation_target": "project-alpha",
+                        "tom_summary": "Owner 认为项目还需要补测试。",
+                    },
+                )
+            ],
+        )
+    )
     return {
         "project_id": project.project_id,
         "workspace_id": workspace.workspace_id,
@@ -117,6 +150,42 @@ async def _seed_memory(app) -> dict[str, str]:
         "subject_key": "profile.user.health.note",
         "vault_id": vault_commit.vault_id,
     }
+
+
+async def _seed_memu_bridge(app, *, base_url: str = "https://workspace.memu.test") -> None:
+    store_group = app.state.store_group
+    project = await store_group.project_store.get_default_project()
+    assert project is not None
+    workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+    assert workspace is not None
+    await store_group.project_store.create_binding(
+        ProjectBinding(
+            binding_id=str(ULID()),
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            binding_type=ProjectBindingType.MEMORY_BRIDGE,
+            binding_key="memu.primary",
+            binding_value=base_url,
+            source="tests",
+            migration_run_id="memory-bridge-test",
+            metadata={"api_key_target_key": "memory.memu.api_key"},
+        )
+    )
+    await store_group.project_store.save_secret_binding(
+        ProjectSecretBinding(
+            binding_id=str(ULID()),
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            target_kind=SecretTargetKind.MEMORY,
+            target_key="memory.memu.api_key",
+            env_name="MEMU_API_KEY",
+            ref_source_type=SecretRefSourceType.ENV,
+            ref_locator={"env_name": "MEMU_API_KEY"},
+            display_name="MemU API Key",
+            status=SecretBindingStatus.APPLIED,
+        )
+    )
+    await store_group.conn.commit()
 
 
 @pytest_asyncio.fixture
@@ -158,6 +227,9 @@ class TestControlPlaneApi:
         assert "schema" in payload["resources"]["config"]
         assert "schema_payload" not in payload["resources"]["config"]
         assert payload["resources"]["memory"]["resource_type"] == "memory_console"
+        assert payload["resources"]["memory"]["backend_id"]
+        assert payload["resources"]["memory"]["retrieval_backend"]
+        assert "index_health" in payload["resources"]["memory"]
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
@@ -178,10 +250,14 @@ class TestControlPlaneApi:
         assert memory_resp.status_code == 200
         memory_payload = memory_resp.json()
         assert memory_payload["resource_type"] == "memory_console"
+        assert memory_payload["backend_id"]
+        assert memory_payload["retrieval_backend"]
+        assert "backend_diagnostics" in memory_payload["advanced_refs"]
         assert any(
             item["subject_key"] == "work.project-alpha.status"
             for item in memory_payload["records"]
         )
+        assert any(item["layer"] == "derived" for item in memory_payload["records"])
 
         history_resp = await control_plane_client.get(
             "/api/control/resources/memory-subjects/work.project-alpha.status",
@@ -190,10 +266,18 @@ class TestControlPlaneApi:
         assert history_resp.status_code == 200
         history_payload = history_resp.json()
         assert history_payload["current_record"]["subject_key"] == "work.project-alpha.status"
+        assert "retrieval_backend" in history_payload
 
         proposal_resp = await control_plane_client.get("/api/control/resources/memory-proposals")
         assert proposal_resp.status_code == 200
         assert proposal_resp.json()["items"]
+
+        diagnostics_resp = await control_plane_client.get("/api/control/resources/diagnostics")
+        diagnostics_payload = diagnostics_resp.json()
+        assert any(
+            item["subsystem_id"] == "memory" for item in diagnostics_payload["subsystems"]
+        )
+        assert "memory" in diagnostics_payload["deep_refs"]
 
         request_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -271,6 +355,50 @@ class TestControlPlaneApi:
         assert authorization_payload["active_grants"]
         assert authorization_payload["recent_retrievals"]
 
+    async def test_memory_maintenance_actions_are_registered_and_runnable(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        seeded = seeded_memory_control_plane.state.seeded_memory
+
+        snapshot_resp = await control_plane_client.get("/api/control/snapshot")
+        actions = snapshot_resp.json()["registry"]["actions"]
+        assert any(item["action_id"] == "memory.flush" for item in actions)
+        assert any(item["action_id"] == "memory.reindex" for item in actions)
+        assert any(item["action_id"] == "memory.bridge.reconnect" for item in actions)
+        assert any(item["action_id"] == "memory.sync.resume" for item in actions)
+
+        flush_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "memory.flush",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": seeded["project_id"],
+                    "workspace_id": seeded["workspace_id"],
+                    "scope_id": seeded["scope_id"],
+                    "partition": "work",
+                    "summary": "最近对话主要集中在 project alpha 测试与交付。",
+                    "evidence_refs": [
+                        {"ref_id": "artifact-flush-1", "ref_type": "artifact"}
+                    ],
+                },
+            },
+        )
+        assert flush_resp.status_code == 200
+        flush_result = flush_resp.json()["result"]
+        assert flush_result["code"] == "MEMORY_FLUSH_COMPLETED"
+        assert flush_result["data"]["run_id"]
+        assert flush_result["data"]["status"] in {"completed", "degraded"}
+        resource_types = {item["resource_type"] for item in flush_result["resource_refs"]}
+        assert {"memory_console", "diagnostics_summary"} <= resource_types
+
     async def test_memory_export_inspect_and_restore_verify(
         self,
         control_plane_client: AsyncClient,
@@ -337,6 +465,68 @@ class TestControlPlaneApi:
         verify_payload = verify_resp.json()["result"]
         assert verify_payload["code"] == "MEMORY_RESTORE_VERIFICATION_BLOCKED"
         assert verify_payload["data"] == {}
+
+    async def test_memory_resources_use_project_scoped_memu_bridge_status(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+        monkeypatch,
+    ) -> None:
+        seen_hosts: list[str] = []
+
+        def handler(request):
+            seen_hosts.append(request.url.host or "")
+            assert request.headers["Authorization"] == "Bearer memu-secret"
+            return Response(
+                200,
+                json={
+                    "status": {
+                        "backend_id": "memu",
+                        "state": "healthy",
+                        "active_backend": "memu",
+                        "index_health": {"documents": 24},
+                        "last_ingest_at": "2026-03-08T05:00:00+00:00",
+                        "last_maintenance_at": "2026-03-08T05:10:00+00:00",
+                    }
+                },
+            )
+
+        monkeypatch.setenv("MEMU_API_KEY", "memu-secret")
+        monkeypatch.setattr(
+            "octoagent.memory.backends.http_bridge.httpx.AsyncClient",
+            lambda *args, **kwargs: AsyncClient(transport=MockTransport(handler)),
+        )
+        await _seed_memu_bridge(seeded_memory_control_plane)
+
+        memory_resp = await control_plane_client.get("/api/control/resources/memory")
+        diagnostics_resp = await control_plane_client.get("/api/control/resources/diagnostics")
+
+        assert memory_resp.status_code == 200
+        memory_payload = memory_resp.json()
+        assert memory_payload["backend_id"] == "memu"
+        assert memory_payload["retrieval_backend"] == "memu"
+        assert memory_payload["index_health"]["documents"] == 24
+        assert memory_payload["index_health"]["project_binding"].endswith("/memu.primary")
+        assert memory_payload["index_health"]["last_ingest_at"] == "2026-03-08T05:00:00+00:00"
+        assert (
+            memory_payload["index_health"]["last_maintenance_at"]
+            == "2026-03-08T05:10:00+00:00"
+        )
+
+        assert diagnostics_resp.status_code == 200
+        diagnostics_payload = diagnostics_resp.json()
+        memory_subsystem = next(
+            item for item in diagnostics_payload["subsystems"] if item["subsystem_id"] == "memory"
+        )
+        assert memory_subsystem["status"] == "healthy"
+        assert any(
+            item.startswith("project_binding=") and item.endswith("/memu.primary")
+            for item in memory_subsystem["warnings"]
+        )
+        assert "last_ingest_at=2026-03-08T05:00:00+00:00" in memory_subsystem["warnings"]
+        assert "last_maintenance_at=2026-03-08T05:10:00+00:00" in memory_subsystem["warnings"]
+        assert len(seen_hosts) >= 2
+        assert set(seen_hosts) == {"workspace.memu.test"}
 
     async def test_session_projection_excludes_control_plane_audit_task(
         self,

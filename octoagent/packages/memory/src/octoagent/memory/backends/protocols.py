@@ -6,16 +6,38 @@ backend 负责检索、索引、外部 memory engine 同步等可替换能力。
 
 from typing import Protocol
 
-from ..models import FragmentRecord, MemoryAccessPolicy, MemorySearchHit, SorRecord, VaultRecord
+from ..models import (
+    DerivedMemoryQuery,
+    FragmentRecord,
+    MemoryAccessPolicy,
+    MemoryBackendStatus,
+    MemoryDerivedProjection,
+    MemoryEvidenceProjection,
+    MemoryEvidenceQuery,
+    MemoryIngestBatch,
+    MemoryIngestResult,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceRun,
+    MemorySearchHit,
+    MemorySyncBatch,
+    MemorySyncResult,
+    SorRecord,
+    VaultRecord,
+)
 
 
 class MemoryBackend(Protocol):
     """可插拔 Memory backend 协议。"""
 
     backend_id: str
+    memory_engine_contract_version: str
 
     async def is_available(self) -> bool:
         """backend 是否可用。"""
+        ...
+
+    async def get_status(self) -> MemoryBackendStatus:
+        """返回结构化 backend 状态。"""
         ...
 
     async def search(
@@ -27,6 +49,35 @@ class MemoryBackend(Protocol):
         limit: int = 10,
     ) -> list[MemorySearchHit]:
         """执行 memory search。"""
+        ...
+
+    async def sync_batch(self, batch: MemorySyncBatch) -> MemorySyncResult:
+        """同步一批 fragments / sor summaries / vault summaries。"""
+        ...
+
+    async def ingest_batch(self, batch: MemoryIngestBatch) -> MemoryIngestResult:
+        """执行多模态 ingest。"""
+        ...
+
+    async def list_derivations(
+        self,
+        query: DerivedMemoryQuery,
+    ) -> MemoryDerivedProjection:
+        """查询派生层。"""
+        ...
+
+    async def resolve_evidence(
+        self,
+        query: MemoryEvidenceQuery,
+    ) -> MemoryEvidenceProjection:
+        """解析证据链。"""
+        ...
+
+    async def run_maintenance(
+        self,
+        command: MemoryMaintenanceCommand,
+    ) -> MemoryMaintenanceRun:
+        """执行 maintenance / compaction / replay / reindex。"""
         ...
 
     async def sync_fragment(self, fragment: FragmentRecord) -> None:

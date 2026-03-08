@@ -136,6 +136,78 @@ CREATE TABLE IF NOT EXISTS memory_vault_retrieval_audits (
 );
 """
 
+_SYNC_BACKLOG_DDL = """
+CREATE TABLE IF NOT EXISTS memory_sync_backlog (
+    batch_id         TEXT PRIMARY KEY,
+    schema_version   INTEGER NOT NULL DEFAULT 1,
+    scope_id         TEXT NOT NULL,
+    payload          TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    failure_code     TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL,
+    last_attempt_at  TEXT,
+    replayed_at      TEXT
+);
+"""
+
+_INGEST_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_ingest_runs (
+    ingest_id         TEXT PRIMARY KEY,
+    schema_version    INTEGER NOT NULL DEFAULT 1,
+    scope_id          TEXT NOT NULL,
+    partition         TEXT NOT NULL,
+    idempotency_key   TEXT NOT NULL DEFAULT '',
+    artifact_refs     TEXT NOT NULL DEFAULT '[]',
+    fragment_refs     TEXT NOT NULL DEFAULT '[]',
+    derived_refs      TEXT NOT NULL DEFAULT '[]',
+    proposal_drafts   TEXT NOT NULL DEFAULT '[]',
+    warnings          TEXT NOT NULL DEFAULT '[]',
+    errors            TEXT NOT NULL DEFAULT '[]',
+    backend_state     TEXT NOT NULL DEFAULT 'healthy',
+    created_at        TEXT NOT NULL
+);
+"""
+
+_DERIVED_RECORDS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_derived_records (
+    derived_id             TEXT PRIMARY KEY,
+    schema_version         INTEGER NOT NULL DEFAULT 1,
+    scope_id               TEXT NOT NULL,
+    partition              TEXT NOT NULL,
+    derived_type           TEXT NOT NULL,
+    subject_key            TEXT NOT NULL DEFAULT '',
+    summary                TEXT NOT NULL DEFAULT '',
+    payload                TEXT NOT NULL DEFAULT '{}',
+    confidence             REAL NOT NULL DEFAULT 0.0,
+    source_fragment_refs   TEXT NOT NULL DEFAULT '[]',
+    source_artifact_refs   TEXT NOT NULL DEFAULT '[]',
+    proposal_ref           TEXT NOT NULL DEFAULT '',
+    created_at             TEXT NOT NULL
+);
+"""
+
+_MAINTENANCE_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_maintenance_runs (
+    run_id            TEXT PRIMARY KEY,
+    schema_version    INTEGER NOT NULL DEFAULT 1,
+    command_id        TEXT NOT NULL,
+    kind              TEXT NOT NULL,
+    scope_id          TEXT NOT NULL DEFAULT '',
+    partition         TEXT,
+    status            TEXT NOT NULL,
+    backend_used      TEXT NOT NULL DEFAULT '',
+    fragment_refs     TEXT NOT NULL DEFAULT '[]',
+    proposal_refs     TEXT NOT NULL DEFAULT '[]',
+    derived_refs      TEXT NOT NULL DEFAULT '[]',
+    diagnostic_refs   TEXT NOT NULL DEFAULT '[]',
+    error_summary     TEXT NOT NULL DEFAULT '',
+    metadata          TEXT NOT NULL DEFAULT '{}',
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    backend_state     TEXT NOT NULL DEFAULT 'healthy'
+);
+"""
+
 _INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_memory_fragments_scope_created "
@@ -191,6 +263,38 @@ _INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_memory_vault_retrieval_actor "
         "ON memory_vault_retrieval_audits(actor_id, created_at DESC);"
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_sync_backlog_status_created "
+        "ON memory_sync_backlog(status, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_sync_backlog_scope_status "
+        "ON memory_sync_backlog(scope_id, status, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_ingest_scope_created "
+        "ON memory_ingest_runs(scope_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_ingest_idempotency "
+        "ON memory_ingest_runs(idempotency_key);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_derived_scope_type_created "
+        "ON memory_derived_records(scope_id, derived_type, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_derived_subject "
+        "ON memory_derived_records(scope_id, subject_key, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_maintenance_scope_started "
+        "ON memory_maintenance_runs(scope_id, started_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_maintenance_kind_status "
+        "ON memory_maintenance_runs(kind, status, started_at DESC);"
+    ),
 ]
 
 
@@ -208,6 +312,10 @@ async def init_memory_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_VAULT_ACCESS_REQUESTS_DDL)
     await conn.execute(_VAULT_ACCESS_GRANTS_DDL)
     await conn.execute(_VAULT_RETRIEVAL_AUDITS_DDL)
+    await conn.execute(_SYNC_BACKLOG_DDL)
+    await conn.execute(_INGEST_RUNS_DDL)
+    await conn.execute(_DERIVED_RECORDS_DDL)
+    await conn.execute(_MAINTENANCE_RUNS_DDL)
 
     for sql in _INDEXES:
         await conn.execute(sql)
@@ -226,6 +334,10 @@ async def verify_memory_tables(conn: aiosqlite.Connection) -> bool:
         "memory_vault_access_requests",
         "memory_vault_access_grants",
         "memory_vault_retrieval_audits",
+        "memory_sync_backlog",
+        "memory_ingest_runs",
+        "memory_derived_records",
+        "memory_maintenance_runs",
     }
     cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memory_%'"

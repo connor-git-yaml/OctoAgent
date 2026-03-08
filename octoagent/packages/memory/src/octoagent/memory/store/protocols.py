@@ -3,7 +3,12 @@
 from typing import Protocol
 
 from ..models import (
+    DerivedMemoryQuery,
+    DerivedMemoryRecord,
     FragmentRecord,
+    MemoryIngestResult,
+    MemoryMaintenanceRun,
+    MemorySyncBatch,
     SorRecord,
     VaultAccessGrantRecord,
     VaultAccessRequestRecord,
@@ -80,6 +85,60 @@ class MemoryStore(Protocol):
         query: str | None = None,
         limit: int = 10,
     ) -> list[VaultRecord]: ...
+
+    async def enqueue_sync_backlog(
+        self,
+        batch: MemorySyncBatch,
+        *,
+        failure_code: str,
+    ) -> None: ...
+
+    async def list_pending_sync_backlog(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[MemorySyncBatch]: ...
+
+    async def count_pending_sync_backlog(self) -> int: ...
+
+    async def mark_sync_backlog_replayed(self, batch_id: str) -> None: ...
+
+    async def save_ingest_result(
+        self,
+        *,
+        batch_id: str,
+        scope_id: str,
+        partition: str,
+        idempotency_key: str,
+        result: MemoryIngestResult,
+        created_at: str,
+    ) -> None: ...
+
+    async def get_ingest_result(
+        self,
+        *,
+        ingest_id: str,
+        scope_id: str,
+        partition: str,
+        idempotency_key: str = "",
+    ) -> tuple[MemoryIngestResult, str] | None: ...
+
+    async def get_latest_ingest_at(self) -> str | None: ...
+
+    async def insert_derived_record(self, record: DerivedMemoryRecord) -> None: ...
+
+    async def get_derived_record(self, derived_id: str) -> DerivedMemoryRecord | None: ...
+
+    async def list_derived_records(
+        self,
+        query: DerivedMemoryQuery,
+    ) -> list[DerivedMemoryRecord]: ...
+
+    async def insert_maintenance_run(self, run: MemoryMaintenanceRun) -> None: ...
+
+    async def get_maintenance_run(self, run_id: str) -> MemoryMaintenanceRun | None: ...
+
+    async def get_latest_maintenance_at(self) -> str | None: ...
 
     async def create_vault_access_request(
         self,

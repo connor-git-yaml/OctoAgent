@@ -30,7 +30,12 @@ from octoagent.core.models import (
 )
 from octoagent.memory import (
     SENSITIVE_PARTITIONS,
+    DerivedMemoryQuery,
+    MemoryBackendStatus,
     MemoryLayer,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceCommandKind,
+    MemoryMaintenanceRun,
     MemoryPartition,
     MemoryService,
     ProposalStatus,
@@ -43,6 +48,7 @@ from octoagent.memory import (
 from ulid import ULID
 
 from .backup_service import resolve_project_root
+from .memory_backend_resolver import MemoryBackendResolver
 
 _MEMORY_BINDING_TYPES = {
     ProjectBindingType.SCOPE,
@@ -95,9 +101,29 @@ class MemoryConsoleService:
         self._stores = store_group
         self._memory_store = SqliteMemoryStore(store_group.conn)
         self._memory = MemoryService(store_group.conn, store=self._memory_store)
+        self._backend_resolver = MemoryBackendResolver(
+            self._project_root,
+            store_group=store_group,
+        )
 
     async def ensure_ready(self) -> None:
         await init_memory_db(self._stores.conn)
+
+    async def get_backend_status(
+        self,
+        *,
+        project_id: str = "",
+        workspace_id: str | None = None,
+    ) -> MemoryBackendStatus:
+        """返回底层 memory backend 状态。"""
+        context = await self._resolve_context(
+            active_project_id=project_id or "",
+            active_workspace_id=workspace_id or "",
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+        )
+        memory = await self._memory_service_for_context(context)
+        return await memory.get_backend_status()
 
     async def get_memory_console(
         self,
@@ -143,6 +169,47 @@ class MemoryConsoleService:
             scope_id=scope_id or "",
         )
 
+    async def run_maintenance(
+        self,
+        *,
+        kind: MemoryMaintenanceCommandKind,
+        project_id: str = "",
+        workspace_id: str | None = None,
+        scope_id: str = "",
+        partition: MemoryPartition | None = None,
+        reason: str = "",
+        summary: str = "",
+        requested_by: str = "",
+        evidence_refs=None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryMaintenanceRun:
+        """执行 project/workspace 绑定后的 memory maintenance。"""
+
+        context = await self._resolve_context(
+            active_project_id=project_id or "",
+            active_workspace_id=workspace_id or "",
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+            scope_id=scope_id,
+        )
+        memory = await self._memory_service_for_context(context)
+        resolved_scope_id = scope_id or (
+            context.selected_scope_ids[0] if context.selected_scope_ids else ""
+        )
+        return await memory.run_memory_maintenance(
+            MemoryMaintenanceCommand(
+                command_id=str(ULID()),
+                kind=kind,
+                scope_id=resolved_scope_id,
+                partition=partition,
+                reason=reason,
+                requested_by=requested_by,
+                summary=summary,
+                evidence_refs=list(evidence_refs or []),
+                metadata=metadata or {},
+            )
+        )
+
     async def get_overview(
         self,
         *,
@@ -165,6 +232,8 @@ class MemoryConsoleService:
             workspace_id=workspace_id,
             scope_id=scope_id,
         )
+        memory = await self._memory_service_for_context(context)
+        backend_status = await memory.get_backend_status()
         records: list[MemoryRecordProjection] = []
         summary = MemoryConsoleSummary(scope_count=len(context.selected_scope_ids))
         for scope in context.selected_scope_ids:
@@ -186,6 +255,7 @@ class MemoryConsoleService:
                             fragment=fragment,
                             project_id=context.project.project_id,
                             workspace_id=record_workspace_id,
+                            retrieval_backend=backend_status.active_backend,
                         )
                     )
                     summary.fragment_count += 1
@@ -208,6 +278,7 @@ class MemoryConsoleService:
                             sor=sor,
                             project_id=context.project.project_id,
                             workspace_id=record_workspace_id,
+                            retrieval_backend=backend_status.active_backend,
                         )
                     )
             if include_vault_refs and layer in {"", "vault"}:
@@ -225,31 +296,74 @@ class MemoryConsoleService:
                             vault=vault,
                             project_id=context.project.project_id,
                             workspace_id=record_workspace_id,
+                            retrieval_backend=backend_status.active_backend,
+                        )
+                    )
+            if layer in {"", "derived"}:
+                derived_projection = await memory.list_derived_memory(
+                    DerivedMemoryQuery(
+                        scope_id=scope,
+                        partition=MemoryPartition(partition) if partition else None,
+                        limit=limit,
+                    )
+                )
+                for derived in derived_projection.items:
+                    if query and not self._derived_matches_query(derived, query):
+                        continue
+                    records.append(
+                        self._derived_projection(
+                            derived=derived,
+                            project_id=context.project.project_id,
+                            workspace_id=record_workspace_id,
+                            retrieval_backend=backend_status.active_backend,
                         )
                     )
 
-        proposals = await self._memory.list_proposals(
+        proposals = await memory.list_proposals(
             scope_ids=context.selected_scope_ids,
             limit=limit,
         )
         summary.proposal_count = len(proposals)
+        summary.pending_replay_count = backend_status.pending_replay_count
         records.sort(key=self._projection_sort_key, reverse=True)
         records = records[:limit]
         available_partitions = sorted({item.partition for item in records})
         available_layers = sorted({item.layer for item in records})
         warnings = list(context.warnings)
         status = "ready" if not context.blocking_issues else "degraded"
+        if backend_status.state.value != "healthy":
+            warnings.append(
+                backend_status.message
+                or f"memory backend 当前状态为 {backend_status.state.value}"
+            )
+            status = "degraded"
         warnings.extend(context.blocking_issues)
         return MemoryConsoleDocument(
             status=status,
             degraded=ControlPlaneDegradedState(
-                is_degraded=bool(context.warnings or context.blocking_issues),
-                reasons=context.blocking_issues or context.warnings,
+                is_degraded=bool(
+                    context.warnings
+                    or context.blocking_issues
+                    or backend_status.state.value != "healthy"
+                ),
+                reasons=(
+                    context.blocking_issues
+                    or context.warnings
+                    or (
+                        [backend_status.state.value]
+                        if backend_status.state.value != "healthy"
+                        else []
+                    )
+                ),
                 unavailable_sections=[],
             ),
             warnings=warnings,
             active_project_id=context.project.project_id,
             active_workspace_id=context.workspace.workspace_id if context.workspace else "",
+            backend_id=backend_status.backend_id,
+            retrieval_backend=backend_status.active_backend,
+            backend_state=backend_status.state.value,
+            index_health=self._backend_index_health(backend_status),
             filters=MemoryConsoleFilter(
                 project_id=context.project.project_id,
                 workspace_id=context.workspace.workspace_id if context.workspace else "",
@@ -265,7 +379,12 @@ class MemoryConsoleService:
             records=records,
             available_scopes=context.selected_scope_ids,
             available_partitions=available_partitions,
-            available_layers=available_layers or ["fragment", "sor", "vault"],
+            available_layers=available_layers or ["fragment", "sor", "vault", "derived"],
+            advanced_refs={
+                "backend_diagnostics": "/api/control/resources/diagnostics",
+                "memory_console": "/api/control/resources/memory",
+                "maintenance_actions": "/api/control/actions",
+            },
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="memory.query",
@@ -302,9 +421,12 @@ class MemoryConsoleService:
             workspace_id=workspace_id,
             scope_id=scope_id,
         )
+        memory = await self._memory_service_for_context(context)
+        backend_status = await memory.get_backend_status()
         history: list[MemoryRecordProjection] = []
         current_record: MemoryRecordProjection | None = None
         warnings = list(context.warnings)
+        latest_proposal_refs: list[str] = []
         for scope in context.selected_scope_ids:
             bound = context.scope_bindings.get(scope)
             record_workspace_id = (
@@ -316,10 +438,12 @@ class MemoryConsoleService:
                     sor=sor,
                     project_id=context.project.project_id,
                     workspace_id=record_workspace_id,
+                    retrieval_backend=backend_status.active_backend,
                 )
                 history.append(projection)
                 if sor.status == "current" and current_record is None:
                     current_record = projection
+                latest_proposal_refs.extend(projection.proposal_refs)
         history.sort(key=self._projection_sort_key, reverse=True)
         if len({item.scope_id for item in history}) > 1:
             warnings.append("subject_key 命中了多个 scope，已合并显示历史。")
@@ -327,10 +451,14 @@ class MemoryConsoleService:
             resource_id=f"memory-subject:{subject_key}",
             active_project_id=context.project.project_id,
             active_workspace_id=context.workspace.workspace_id if context.workspace else "",
+            retrieval_backend=backend_status.active_backend,
+            backend_state=backend_status.state.value,
+            index_health=self._backend_index_health(backend_status),
             scope_id=scope_id,
             subject_key=subject_key,
             current_record=current_record,
             history=history,
+            latest_proposal_refs=sorted(set(latest_proposal_refs)),
             warnings=warnings + context.blocking_issues,
             degraded=ControlPlaneDegradedState(
                 is_degraded=bool(warnings or context.blocking_issues),
@@ -365,8 +493,10 @@ class MemoryConsoleService:
             workspace_id=workspace_id,
             scope_id=scope_id,
         )
+        memory = await self._memory_service_for_context(context)
+        backend_status = await memory.get_backend_status()
         statuses = [status] if status else None
-        proposals = await self._memory.list_proposals(
+        proposals = await memory.list_proposals(
             scope_ids=context.selected_scope_ids,
             statuses=statuses,
             limit=limit,
@@ -398,6 +528,8 @@ class MemoryConsoleService:
         return MemoryProposalAuditDocument(
             active_project_id=context.project.project_id,
             active_workspace_id=context.workspace.workspace_id if context.workspace else "",
+            retrieval_backend=backend_status.active_backend,
+            backend_state=backend_status.state.value,
             summary=summary,
             items=items,
             warnings=context.warnings + context.blocking_issues,
@@ -431,14 +563,16 @@ class MemoryConsoleService:
             workspace_id=workspace_id,
             scope_id=scope_id,
         )
-        requests = await self._memory.list_vault_access_requests(
+        memory = await self._memory_service_for_context(context)
+        backend_status = await memory.get_backend_status()
+        requests = await memory.list_vault_access_requests(
             project_id=context.project.project_id,
             workspace_id=context.workspace.workspace_id if context.workspace else None,
             scope_ids=context.selected_scope_ids,
             subject_key=subject_key or None,
             limit=50,
         )
-        grants = await self._memory.list_vault_access_grants(
+        grants = await memory.list_vault_access_grants(
             project_id=context.project.project_id,
             workspace_id=context.workspace.workspace_id if context.workspace else None,
             scope_ids=context.selected_scope_ids,
@@ -446,7 +580,7 @@ class MemoryConsoleService:
             limit=50,
         )
         active_grants = [await self._normalize_grant(item) for item in grants]
-        retrievals = await self._memory.list_vault_retrieval_audits(
+        retrievals = await memory.list_vault_retrieval_audits(
             project_id=context.project.project_id,
             workspace_id=context.workspace.workspace_id if context.workspace else None,
             scope_ids=context.selected_scope_ids,
@@ -456,6 +590,8 @@ class MemoryConsoleService:
         return VaultAuthorizationDocument(
             active_project_id=context.project.project_id,
             active_workspace_id=context.workspace.workspace_id if context.workspace else "",
+            retrieval_backend=backend_status.active_backend,
+            backend_state=backend_status.state.value,
             active_requests=[self._request_item(item) for item in requests],
             active_grants=[
                 self._grant_item(item)
@@ -979,6 +1115,36 @@ class MemoryConsoleService:
             blocking_issues=blocking_issues,
         )
 
+    async def _memory_service_for_context(self, context: _MemoryContext) -> MemoryService:
+        backend = await self._backend_resolver.resolve_backend(
+            project=context.project,
+            workspace=context.workspace,
+        )
+        return MemoryService(
+            self._stores.conn,
+            store=self._memory_store,
+            backend=backend,
+        )
+
+    @staticmethod
+    def _backend_index_health(backend_status: MemoryBackendStatus) -> dict[str, Any]:
+        index_health = dict(backend_status.index_health)
+        if backend_status.project_binding:
+            index_health.setdefault("project_binding", backend_status.project_binding)
+        if backend_status.last_ingest_at is not None:
+            index_health.setdefault(
+                "last_ingest_at",
+                backend_status.last_ingest_at.isoformat(),
+            )
+        if backend_status.last_maintenance_at is not None:
+            index_health.setdefault(
+                "last_maintenance_at",
+                backend_status.last_maintenance_at.isoformat(),
+            )
+        if backend_status.retry_after is not None:
+            index_health.setdefault("retry_after", backend_status.retry_after.isoformat())
+        return index_health
+
     def _decide_project_scope_action(
         self,
         *,
@@ -1139,6 +1305,7 @@ class MemoryConsoleService:
         fragment,
         project_id: str,
         workspace_id: str,
+        retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=fragment.fragment_id,
@@ -1151,7 +1318,57 @@ class MemoryConsoleService:
             created_at=fragment.created_at,
             evidence_refs=[item.model_dump(mode="json") for item in fragment.evidence_refs],
             metadata=fragment.metadata,
+            retrieval_backend=retrieval_backend,
         )
+
+    def _derived_projection(
+        self,
+        *,
+        derived,
+        project_id: str,
+        workspace_id: str,
+        retrieval_backend: str = "",
+    ) -> MemoryRecordProjection:
+        return MemoryRecordProjection(
+            record_id=derived.derived_id,
+            layer="derived",
+            project_id=project_id,
+            workspace_id=workspace_id,
+            scope_id=derived.scope_id,
+            partition=derived.partition.value,
+            subject_key=derived.subject_key,
+            summary=derived.summary,
+            status="derived",
+            created_at=derived.created_at,
+            evidence_refs=[
+                {"ref_id": ref_id, "ref_type": "fragment"}
+                for ref_id in derived.source_fragment_refs
+            ]
+            + [
+                {"ref_id": ref_id, "ref_type": "artifact"}
+                for ref_id in derived.source_artifact_refs
+            ],
+            derived_refs=[derived.derived_id],
+            proposal_refs=[derived.proposal_ref] if derived.proposal_ref else [],
+            metadata={
+                "derived_type": derived.derived_type,
+                "confidence": derived.confidence,
+                **derived.payload,
+            },
+            retrieval_backend=retrieval_backend,
+        )
+
+    def _derived_matches_query(self, derived, query: str) -> bool:
+        normalized = query.strip().lower()
+        if not normalized:
+            return True
+        haystacks = [
+            derived.derived_type,
+            derived.subject_key,
+            derived.summary,
+            json.dumps(derived.payload, ensure_ascii=False),
+        ]
+        return any(normalized in str(item).lower() for item in haystacks if item)
 
     def _sor_projection(
         self,
@@ -1159,6 +1376,7 @@ class MemoryConsoleService:
         sor,
         project_id: str,
         workspace_id: str,
+        retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=sor.memory_id,
@@ -1175,6 +1393,12 @@ class MemoryConsoleService:
             updated_at=sor.updated_at,
             evidence_refs=[item.model_dump(mode="json") for item in sor.evidence_refs],
             metadata=sor.metadata,
+            proposal_refs=(
+                [str(sor.metadata.get("proposal_id"))]
+                if sor.metadata.get("proposal_id")
+                else []
+            ),
+            retrieval_backend=retrieval_backend,
         )
 
     def _vault_projection(
@@ -1183,6 +1407,7 @@ class MemoryConsoleService:
         vault,
         project_id: str,
         workspace_id: str,
+        retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=vault.vault_id,
@@ -1197,6 +1422,7 @@ class MemoryConsoleService:
             evidence_refs=[item.model_dump(mode="json") for item in vault.evidence_refs],
             metadata=vault.metadata,
             requires_vault_authorization=True,
+            retrieval_backend=retrieval_backend,
         )
 
     def _request_item(self, item) -> VaultAccessRequestItem:
