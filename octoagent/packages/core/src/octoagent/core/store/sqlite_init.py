@@ -160,6 +160,101 @@ _SIDE_EFFECT_LEDGER_INDEXES = [
     ),
 ]
 
+# Feature 025: projects/workspaces/bindings/migration_runs
+_PROJECTS_DDL = """
+CREATE TABLE IF NOT EXISTS projects (
+    project_id   TEXT PRIMARY KEY,
+    slug         TEXT NOT NULL UNIQUE,
+    name         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'active',
+    is_default   INTEGER NOT NULL DEFAULT 0,
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+"""
+
+_WORKSPACES_DDL = """
+CREATE TABLE IF NOT EXISTS workspaces (
+    workspace_id TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'primary',
+    root_path    TEXT NOT NULL DEFAULT '',
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
+);
+"""
+
+_PROJECT_BINDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS project_bindings (
+    binding_id        TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL,
+    workspace_id      TEXT,
+    binding_type      TEXT NOT NULL,
+    binding_key       TEXT NOT NULL,
+    binding_value     TEXT NOT NULL DEFAULT '',
+    source            TEXT NOT NULL DEFAULT '',
+    metadata          TEXT NOT NULL DEFAULT '{}',
+    migration_run_id  TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+
+    FOREIGN KEY (project_id) REFERENCES projects(project_id),
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+);
+"""
+
+_PROJECT_MIGRATION_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS project_migration_runs (
+    run_id          TEXT PRIMARY KEY,
+    project_root    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    completed_at    TEXT,
+    summary         TEXT NOT NULL DEFAULT '{}',
+    validation      TEXT NOT NULL DEFAULT '{}',
+    rollback_plan   TEXT NOT NULL DEFAULT '{}',
+    error_message   TEXT NOT NULL DEFAULT ''
+);
+"""
+
+_PROJECT_INDEXES = [
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_single_default "
+        "ON projects(is_default) WHERE is_default = 1;"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_project_slug "
+        "ON workspaces(project_id, slug);"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_primary_per_project "
+        "ON workspaces(project_id) WHERE kind = 'primary';"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_bindings_project_type_key "
+        "ON project_bindings(project_id, binding_type, binding_key);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_project_bindings_workspace "
+        "ON project_bindings(workspace_id);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_project_bindings_run_id "
+        "ON project_bindings(migration_run_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_project_migration_runs_root_started "
+        "ON project_migration_runs(project_root, started_at DESC);"
+    ),
+]
+
 
 async def _table_columns(conn: aiosqlite.Connection, table_name: str) -> set[str]:
     """读取表列名集合。"""
@@ -195,6 +290,10 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_TASK_JOBS_DDL)
     await conn.execute(_CHECKPOINTS_DDL)
     await conn.execute(_SIDE_EFFECT_LEDGER_DDL)
+    await conn.execute(_PROJECTS_DDL)
+    await conn.execute(_WORKSPACES_DDL)
+    await conn.execute(_PROJECT_BINDINGS_DDL)
+    await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -205,6 +304,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _TASK_JOBS_INDEXES
         + _CHECKPOINTS_INDEXES
         + _SIDE_EFFECT_LEDGER_INDEXES
+        + _PROJECT_INDEXES
     ):
         await conn.execute(idx_sql)
 

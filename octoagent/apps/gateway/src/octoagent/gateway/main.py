@@ -24,8 +24,9 @@ from octoagent.provider import (
     load_provider_config,
 )
 from octoagent.provider.dx.config_wizard import load_config
-from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
+from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
+from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
@@ -99,6 +100,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_path = get_db_path()
     artifacts_dir = get_artifacts_dir()
     store_group = await create_store_group(db_path, artifacts_dir)
+    migration_service = ProjectWorkspaceMigrationService(
+        project_root=project_root,
+        store_group=store_group,
+    )
+    app.state.project_migration_run = await migration_service.ensure_default_project()
     app.state.store_group = store_group
 
     # 初始化 SSEHub

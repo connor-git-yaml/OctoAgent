@@ -107,6 +107,19 @@ from .payloads import (
     WorkerDispatchedPayload,
     WorkerReturnedPayload,
 )
+from .project import (
+    Project,
+    ProjectBinding,
+    ProjectBindingType,
+    ProjectMigrationRollbackPlan,
+    ProjectMigrationRun,
+    ProjectMigrationStatus,
+    ProjectMigrationSummary,
+    ProjectMigrationValidation,
+    ProjectStatus,
+    Workspace,
+    WorkspaceKind,
+)
 from .task import RequesterInfo, Task, TaskPointers
 
 __all__ = [
@@ -221,4 +234,16 @@ __all__ = [
     "WorkerExecutionStatus",
     "WorkerRuntimeState",
     "WorkerSession",
+    # Project / Workspace
+    "ProjectStatus",
+    "WorkspaceKind",
+    "ProjectBindingType",
+    "ProjectMigrationStatus",
+    "Project",
+    "Workspace",
+    "ProjectBinding",
+    "ProjectMigrationSummary",
+    "ProjectMigrationValidation",
+    "ProjectMigrationRollbackPlan",
+    "ProjectMigrationRun",
 ]

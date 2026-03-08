@@ -50,6 +50,7 @@ from octoagent.memory import (
 from ulid import ULID
 
 from .backup_service import resolve_artifacts_dir, resolve_db_path, resolve_project_root
+from .project_migration import ProjectWorkspaceMigrationService
 
 _AUDIT_TASK_ID = "ops-chat-import"
 _AUDIT_TRACE_ID = "trace-ops-chat-import"
@@ -82,6 +83,7 @@ class ChatImportService:
         self._artifacts_dir = resolve_artifacts_dir(self._root)
         self._store_group = store_group
         self._processor = processor or ChatImportProcessor()
+        self._project_migration_ensured = False
 
     async def import_chats(
         self,
@@ -593,14 +595,26 @@ class ChatImportService:
     @asynccontextmanager
     async def _store_group_scope(self) -> AsyncIterator[StoreGroup]:
         if self._store_group is not None:
+            await self._ensure_project_migration(self._store_group)
             yield self._store_group
             return
 
         store_group = await create_store_group(str(self._db_path), self._artifacts_dir)
         try:
+            await self._ensure_project_migration(store_group)
             yield store_group
         finally:
             await store_group.conn.close()
+
+    async def _ensure_project_migration(self, store_group: StoreGroup) -> None:
+        if self._project_migration_ensured:
+            return
+        service = ProjectWorkspaceMigrationService(
+            project_root=self._root,
+            store_group=store_group,
+        )
+        await service.ensure_default_project()
+        self._project_migration_ensured = True
 
     async def _prepare_dry_run_import(
         self,
