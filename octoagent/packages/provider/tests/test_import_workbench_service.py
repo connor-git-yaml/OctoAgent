@@ -84,6 +84,50 @@ def _write_wechat_payload(path: Path, media_root: Path, conversations: list[dict
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _write_weflow_jsonl_export(path: Path) -> None:
+    rows = [
+        {
+            "_type": "header",
+            "chatlab": {"version": "0.0.2", "generator": "WeFlow"},
+            "meta": {
+                "name": "发布群",
+                "platform": "wechat",
+                "type": "private",
+            },
+        },
+        {
+            "_type": "member",
+            "platformId": "alice",
+            "accountName": "Alice",
+        },
+        {
+            "_type": "member",
+            "platformId": "connor",
+            "accountName": "Connor",
+        },
+        {
+            "_type": "message",
+            "sender": "alice",
+            "accountName": "Alice",
+            "timestamp": 1700000000,
+            "type": 0,
+            "content": "发布前先检查迁移 smoke。",
+        },
+        {
+            "_type": "message",
+            "sender": "connor",
+            "accountName": "Connor",
+            "timestamp": 1700000060,
+            "type": 1,
+            "content": "[图片]",
+        },
+    ]
+    path.write_text(
+        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.asyncio
 async def test_import_workbench_detect_preview_run_and_resume(tmp_path: Path) -> None:
     export_path = tmp_path / "wechat-export.json"
@@ -300,3 +344,28 @@ async def test_import_workbench_rejects_mapping_from_other_source(tmp_path: Path
 
     with pytest.raises(ImportWorkbenchError, match="IMPORT_MAPPING_MISMATCH|mapping 不属于当前"):
         await service.preview(source_id=source_b.source_id, mapping_id=mapping_a.mapping_id)
+
+
+@pytest.mark.asyncio
+async def test_import_workbench_detects_weflow_jsonl_export(tmp_path: Path) -> None:
+    export_path = tmp_path / "wechat-export.jsonl"
+    _write_weflow_jsonl_export(export_path)
+
+    service = ImportWorkbenchService(tmp_path, surface="cli")
+
+    source = await service.detect_source(
+        source_type="wechat",
+        input_path=str(export_path),
+        format_hint="jsonl",
+    )
+
+    assert source.source_type == "wechat"
+    assert source.metadata["format"] == "jsonl"
+    assert source.detected_conversations[0].label == "发布群"
+    assert source.detected_conversations[0].message_count == 2
+
+    mapping = await service.save_mapping(source_id=source.source_id)
+    preview = await service.preview(source_id=source.source_id, mapping_id=mapping.mapping_id)
+
+    assert preview.status == ImportRunStatus.READY_TO_RUN
+    assert preview.summary["imported_count"] == 2

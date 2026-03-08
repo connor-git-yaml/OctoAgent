@@ -39,6 +39,9 @@ _HTML_ATTACHMENT_PATTERN = re.compile(
     r"[^>]*data-filename=\"(?P<filename>[^\"]*)\"[^>]*>",
     re.DOTALL,
 )
+_JSONL_TYPE_HEADER = "header"
+_JSONL_TYPE_MEMBER = "member"
+_JSONL_TYPE_MESSAGE = "message"
 
 
 class WeChatImportAdapter(ImportSourceAdapter):
@@ -161,6 +164,9 @@ class WeChatImportAdapter(ImportSourceAdapter):
         if resolved_source.suffix.lower() in {".json"}:
             conversations, account_label = self._load_from_json(resolved_source)
             metadata["format"] = "json"
+        elif resolved_source.suffix.lower() in {".jsonl"}:
+            conversations, account_label = self._load_from_jsonl(resolved_source)
+            metadata["format"] = "jsonl"
         elif resolved_source.suffix.lower() in {".html", ".htm"}:
             conversations, account_label = self._load_from_html(resolved_source)
             metadata["format"] = "html"
@@ -191,7 +197,7 @@ class WeChatImportAdapter(ImportSourceAdapter):
         if format_hint:
             hint = format_hint.lower().strip().lstrip(".")
             preferred_suffixes.append(f".{hint}")
-        preferred_suffixes.extend([".json", ".html", ".htm", ".sqlite", ".db"])
+        preferred_suffixes.extend([".json", ".jsonl", ".html", ".htm", ".sqlite", ".db"])
 
         candidates = sorted(path for path in input_path.rglob("*") if path.is_file())
         for suffix in preferred_suffixes:
@@ -266,6 +272,88 @@ class WeChatImportAdapter(ImportSourceAdapter):
         if not grouped:
             raise ValueError(f"WeChat HTML 导出中未解析到消息: {path}")
         return list(grouped.values()), ""
+
+    def _load_from_jsonl(self, path: Path) -> tuple[list[dict[str, Any]], str]:
+        members: dict[str, str] = {}
+        messages: list[dict[str, Any]] = []
+        conversation_key = self._clean_text(path.stem) or "wechat:conversation"
+        conversation_label = conversation_key
+        account_label = ""
+
+        for line_number, raw_line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            row = json.loads(stripped)
+            if not isinstance(row, dict):
+                continue
+            row_type = self._clean_text(row.get("_type"))
+            if row_type == _JSONL_TYPE_HEADER:
+                meta = row.get("meta")
+                if isinstance(meta, dict):
+                    conversation_label = (
+                        self._clean_text(meta.get("name")) or conversation_label
+                    )
+                    account_label = (
+                        self._clean_text(meta.get("ownerName"))
+                        or self._clean_text(meta.get("owner"))
+                        or account_label
+                    )
+                continue
+            if row_type == _JSONL_TYPE_MEMBER:
+                member_id = self._clean_text(row.get("platformId"))
+                if member_id:
+                    members[member_id] = self._clean_text(row.get("accountName")) or member_id
+                continue
+            if row_type != _JSONL_TYPE_MESSAGE:
+                continue
+
+            sender_id = self._clean_text(row.get("sender")) or "wechat:unknown"
+            sender_name = (
+                self._clean_text(row.get("accountName"))
+                or members.get(sender_id, "")
+            )
+            timestamp = self._normalize_jsonl_timestamp(
+                row.get("timestamp"),
+                line_number=line_number,
+            )
+            messages.append(
+                {
+                    "source_message_id": (
+                        self._clean_text(row.get("id"))
+                        or f"jsonl:{path.stem}:{line_number}"
+                    ),
+                    "source_cursor": (
+                        self._clean_text(row.get("cursor"))
+                        or f"{timestamp}:{line_number}"
+                    ),
+                    "sender_id": sender_id,
+                    "sender_name": sender_name,
+                    "timestamp": timestamp,
+                    "text": self._clean_text(row.get("content")),
+                    "attachments": [],
+                    "metadata": {
+                        "jsonl_message_type": row.get("type"),
+                    },
+                }
+            )
+
+        if not messages:
+            raise ValueError(f"WeChat JSONL 导出中未解析到消息: {path}")
+
+        return (
+            [
+                {
+                    "conversation_key": conversation_key,
+                    "label": conversation_label,
+                    "messages": messages,
+                }
+            ],
+            account_label,
+        )
 
     def _load_from_sqlite(self, path: Path) -> tuple[list[dict[str, Any]], str]:
         conn = sqlite3.connect(path)
@@ -412,6 +500,27 @@ class WeChatImportAdapter(ImportSourceAdapter):
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=UTC)
         return parsed.astimezone(UTC)
+
+    @staticmethod
+    def _normalize_jsonl_timestamp(
+        value: object,
+        *,
+        line_number: int,
+    ) -> str:
+        rendered = str(value or "").strip()
+        if not rendered:
+            fallback = datetime(1970, 1, 1, tzinfo=UTC)
+            return fallback.isoformat()
+        try:
+            seconds = int(rendered)
+        except ValueError:
+            try:
+                return WeChatImportAdapter._parse_timestamp(rendered).isoformat()
+            except ValueError as exc:
+                raise ValueError(
+                    f"WeChat JSONL 时间戳无法解析（line {line_number}）: {rendered}"
+                ) from exc
+        return datetime.fromtimestamp(seconds, tz=UTC).isoformat()
 
     @staticmethod
     def _last_message_at(messages: list[dict[str, Any]]) -> datetime | None:

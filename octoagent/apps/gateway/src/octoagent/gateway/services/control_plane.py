@@ -51,6 +51,7 @@ from octoagent.core.models import (
     ProjectBindingType,
     ProjectOption,
     ProjectSelectorDocument,
+    ProjectSelectorState,
     SessionProjectionDocument,
     SessionProjectionItem,
     SkillPipelineDocument,
@@ -166,6 +167,26 @@ class ControlPlaneService:
 
     def bind_automation_scheduler(self, scheduler: Any) -> None:
         self._automation_scheduler = scheduler
+
+    async def _sync_web_project_selector_state(
+        self,
+        *,
+        project,
+        workspace,
+        source: str,
+        warnings: list[str] | None = None,
+    ) -> None:
+        await self._stores.project_store.save_selector_state(
+            ProjectSelectorState(
+                selector_id="selector-web",
+                surface="web",
+                active_project_id=project.project_id,
+                active_workspace_id=workspace.workspace_id if workspace else None,
+                source=source,
+                warnings=list(warnings or []),
+                updated_at=datetime.now(tz=UTC),
+            )
+        )
 
     async def get_snapshot(self) -> dict[str, Any]:
         wizard = await self.get_wizard_session()
@@ -1361,6 +1382,12 @@ class ControlPlaneService:
             }
         )
         self._state_store.save(state)
+        await self._sync_web_project_selector_state(
+            project=project,
+            workspace=workspace,
+            source="control_plane_action",
+        )
+        await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="PROJECT_SELECTED",
@@ -2667,11 +2694,14 @@ class ControlPlaneService:
     async def _resolve_selection(self) -> tuple[ControlPlaneState, Any | None, Any | None, str]:
         state = self._state_store.load()
         fallback_reason = ""
+        selector = await self._stores.project_store.get_selector_state("web")
         project = (
             await self._stores.project_store.get_project(state.selected_project_id)
             if state.selected_project_id
             else None
         )
+        if project is None and selector is not None:
+            project = await self._stores.project_store.get_project(selector.active_project_id)
         if project is None:
             project = await self._stores.project_store.get_default_project()
             if project is not None and state.selected_project_id:
@@ -2682,6 +2712,14 @@ class ControlPlaneService:
             if state.selected_workspace_id
             else None
         )
+        if workspace is None and selector is not None and selector.active_workspace_id:
+            candidate_workspace = await self._stores.project_store.get_workspace(
+                selector.active_workspace_id
+            )
+            if candidate_workspace is not None and (
+                project is None or candidate_workspace.project_id == project.project_id
+            ):
+                workspace = candidate_workspace
         if project is not None and (
             workspace is None or workspace.project_id != project.project_id
         ):
@@ -2704,6 +2742,18 @@ class ControlPlaneService:
                     }
                 )
             )
+        if project is not None and (
+            selector is None
+            or selector.active_project_id != project.project_id
+            or selector.active_workspace_id != (workspace.workspace_id if workspace else None)
+        ):
+            await self._sync_web_project_selector_state(
+                project=project,
+                workspace=workspace,
+                source="control_plane_sync",
+                warnings=[fallback_reason] if fallback_reason else [],
+            )
+            await self._stores.conn.commit()
         return state, project, workspace, fallback_reason
 
     async def _collect_bridge_refs(self) -> list[dict[str, Any]]:

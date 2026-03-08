@@ -2,8 +2,9 @@
 feature_id: "031"
 title: "M3 User-Ready E2E Acceptance"
 milestone: "M3"
-status: "Draft"
+status: "Implemented"
 created: "2026-03-08"
+updated: "2026-03-08"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md M3；docs/m3-feature-split.md Feature 031；Feature 024-030 已交付基线"
 predecessor: "Feature 024-030（M3 主能力，已交付）"
@@ -14,7 +15,8 @@ parallel_dependency: "031 为 M3 汇合验收 Feature，不与新增业务能力
 
 **Feature Branch**: `codex/feat-031-m3-user-ready-acceptance`  
 **Created**: 2026-03-08  
-**Status**: Draft  
+**Updated**: 2026-03-08
+**Status**: Implemented
 **Input**: 在 024-030 已交付的前提下，对 M3 做发布前的真实用户路径、稳定性、迁移与运维验收收口。  
 **调研基础**: OpenClaw 官方文档（wizard / onboarding protocol / control UI / updating / export session / subagents）、Agent Zero 官方文档（projects / backup / memory / settings / tunnel），以及当前 master 代码与测试基线。
 

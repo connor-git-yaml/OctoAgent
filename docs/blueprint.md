@@ -2679,7 +2679,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 拆解文档：`docs/m3-feature-split.md`（2026-03-08 已同步到“031 最终收口”版本）
 - 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可迁移**的状态
 - 参考复核（2026-03-08）：OpenClaw 的 wizard / onboarding protocol / Control UI / updating / export session / subagents；Agent Zero 的 projects / backup / memory / settings / tunnel
-- 当前里程碑判断：Feature 024-030 已交付并合入 `master`；Feature 031 为唯一剩余收口 Feature
+- 当前里程碑判断：Feature 024-031 已交付并合入 `master`；M3 已完成正式收口，可进入用户开放与迁移准备阶段
 - [x] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
 - [x] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
 - [x] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
@@ -2697,7 +2697,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] Delegation Plane（A2A / Work graph / subagent / ACP-like runtime / graph agents）
 - [x] ToolIndex（向量检索）+ 动态工具注入
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
-- [ ] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
+- [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
 2026-03-08 进展：
@@ -2709,7 +2709,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 028 已交付 MemU integration point、检索/索引/降级路径与 evidence-aligned ingest。
 - Feature 029 已交付 WeChat adapter、Import Workbench、mapping/dry-run/dedupe/resume 与 memory effect 链路。
 - Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
-- 剩余唯一主线为 Feature 031：把上述能力收束成正式的 user-ready release 证明。
+- Feature 031 已完成：M3 现已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 
@@ -2760,7 +2760,7 @@ M3 核心对象关系（2026-03-08 补充）：
 - 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
 - automation 触发的 work 必须保留其继承来源（project / agent profile / budget / target），并能在控制台与事件链中解释“为什么使用这套配置”
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
-- Feature 031 必须补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report，M3 才能正式签收
+- Feature 031 已补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report，M3 已正式签收
 
 ### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
 

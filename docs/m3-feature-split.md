@@ -2,7 +2,7 @@
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1.1 — 024-030 已交付，当前进入 Feature 031 最终收口
+> **状态**: v1.2 — 024-031 已交付，M3 已完成正式收口
 > **日期**: 2026-03-08
 
 ---
@@ -23,7 +23,7 @@
 
 当前真正剩下的不是新的 M3 功能 Feature，而是发布前的收口缺口：
 
-- 缺少正式的 Feature 031 acceptance 制品、release report 和 remaining risks 清单
+- Feature 031 已补齐 acceptance 制品、release report 和 remaining risks 清单
 - 当前控制面的 trusted-network / 部署边界没有被写进正式验收门禁
 - 缺少一次面向真实 owner 的 OpenClaw -> OctoAgent 迁移演练
 
@@ -31,9 +31,9 @@
 
 M3 的功能建设已经足够完整，当前复核结论转为：
 
-1. **不再新增 M3 功能 Feature**：024-030 已经覆盖 M3 的主能力闭环，后续工作应集中在 031。
-2. **把 031 升级为正式 release feature**：它必须拥有独立 spec、release gates、验收矩阵、迁移演练和最终报告。
-3. **把“可自用”与“可公开暴露”边界写清楚**：当前产品更接近单 owner / localhost 或 trusted-network 部署，Feature 031 必须把这一边界写入验收。
+1. **M3 主功能线已经完成**：024-031 已覆盖 M3 的主能力闭环。
+2. **031 已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告。
+3. **公网边界仍需按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
 4. **把 OpenClaw 迁移演练纳入 M3 签收**：否则无法证明 OctoAgent 已具备替换现有日常系统的条件。
 
 ### 1.3 调研证据（不仅 README）
@@ -448,7 +448,7 @@ M2 收口
 
 **一句话目标**：用真实用户路径证明 M3 不是“功能上线”，而是“产品可用”。
 
-**实现状态**：待启动（M3 唯一剩余 Feature）
+**实现状态**：已完成
 
 **任务拆解**：
 
@@ -474,6 +474,13 @@ M2 收口
   - dashboard / automation / control plane 验证
   - rollback 与 deferred items 记录
 - F031-T10：产出 M3 release report，明确 pass / blocked / deferred / remaining risks
+
+**收口结果**：
+
+- acceptance matrix：已落地到 `.specify/features/031-m3-user-ready-acceptance/contracts/m3-acceptance-matrix.md`
+- migration rehearsal：已落地到 `.specify/features/031-m3-user-ready-acceptance/verification/openclaw-migration-rehearsal.md`
+- release report：已落地到 `.specify/features/031-m3-user-ready-acceptance/verification/verification-report.md`
+- 关键接缝修补：control plane `project.select` 与 delegation selector 对齐；WeFlow `.jsonl` 导入已纳入 OpenClaw rehearsal 主路径
 
 **验收标准**：
 
