@@ -35,6 +35,28 @@ class ProjectBindingType(StrEnum):
     ENV_FILE = "env_file"
 
 
+class SecretRefSourceType(StrEnum):
+    ENV = "env"
+    FILE = "file"
+    EXEC = "exec"
+    KEYCHAIN = "keychain"
+
+
+class SecretTargetKind(StrEnum):
+    RUNTIME = "runtime"
+    PROVIDER = "provider"
+    CHANNEL = "channel"
+    GATEWAY = "gateway"
+
+
+class SecretBindingStatus(StrEnum):
+    DRAFT = "draft"
+    APPLIED = "applied"
+    INVALID = "invalid"
+    NEEDS_RELOAD = "needs_reload"
+    ROTATION_PENDING = "rotation_pending"
+
+
 class ProjectMigrationStatus(StrEnum):
     PENDING = "pending"
     DRY_RUN = "dry_run"
@@ -95,6 +117,40 @@ class ProjectBinding(BaseModel):
         } and not self.workspace_id:
             raise ValueError("scope/memory_scope/import_scope binding 必须关联 workspace_id")
         return self
+
+
+class ProjectSecretBinding(BaseModel):
+    """project-scoped secret target binding。"""
+
+    binding_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    workspace_id: str | None = None
+    target_kind: SecretTargetKind
+    target_key: str = Field(min_length=1)
+    env_name: str = Field(min_length=1)
+    ref_source_type: SecretRefSourceType
+    ref_locator: dict[str, Any] = Field(default_factory=dict)
+    display_name: str = ""
+    redaction_label: str = "***"
+    status: SecretBindingStatus = SecretBindingStatus.DRAFT
+    last_audited_at: datetime | None = None
+    last_applied_at: datetime | None = None
+    last_reloaded_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+
+
+class ProjectSelectorState(BaseModel):
+    """当前 active project / workspace 选择态。"""
+
+    selector_id: str = Field(min_length=1)
+    surface: str = Field(min_length=1)
+    active_project_id: str = Field(min_length=1)
+    active_workspace_id: str | None = None
+    source: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=_utc_now)
 
 
 class ProjectMigrationSummary(BaseModel):

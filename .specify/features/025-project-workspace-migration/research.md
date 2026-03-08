@@ -1,13 +1,19 @@
-# Research Summary: Feature 025 — Project / Workspace Domain Model + Default Project Migration
+# Research Summary: Feature 025 第二阶段 — Secret Store + Unified Config Wizard
 
-本特性采用 `tech-only` 调研模式。
+本特性采用 `full` 调研模式。
 
 核心结论：
 
-1. **`Project/Workspace` 必须先成为正式 domain model，再谈 UI/selector**。现有代码只有 `project_root`、`scope_id` 和若干 `data/*.json` 状态文件，没有可持久化的 project 主键或 workspace 归属。
-2. **M2 -> M3 升级不能先重写 legacy `scope_id`**。`memory_sor` current 唯一约束、`chat_import_cursors` 主键、`chat_import_dedupe` 唯一键都依赖旧 `scope_id`，第一阶段应采用“新增映射层 + dual-read”而不是 destructive rename。
-3. **正式模型放在 `packages/core`，迁移和兼容桥放在 `packages/provider/dx` 最合理**。`core` 负责跨系统实体和 SQLite store，`provider.dx` 已经持有 `project_root`、config/env、backup/recovery/import 等旧世界入口，适合承担自动迁移与 rollback orchestration。
-4. **default project migration 应该是 additive、幂等、可回滚**。迁移只新增 `projects/workspaces/bindings/migration_runs` 及其记录，不修改历史 task/memory/import/backup snapshot；失败时按 `migration_run_id` 清理新增记录即可回滚。
-5. **env 兼容桥在第一阶段只持久化“引用关系”，不迁移 secret 实值**。旧 `.env` / `.env.litellm`、`api_key_env`、`master_key_env`、Telegram token env 名仍是 runtime 真正事实源，但要被 project-scoped bridge 显式登记，供后续 Secret Store 接管。
+1. **025-B 必须建立在 025-A 已交付的 `Project / Workspace / ProjectBinding` 基线之上**。本阶段不再重做 migration，而是把 secret、wizard、project CLI 主路径挂到既有 canonical model 上。
+2. **026-A 已冻结的 `WizardSessionDocument`、`ConfigSchemaDocument`、`ProjectSelectorDocument` 是上游真相源**。025-B 只能消费和落地这些 contract，不能另起一套语义。
+3. **Secret Store 的 canonical 层应是 `SecretRef + project-scoped binding + runtime short-lived injection summary`**，而不是新的明文本地配置文件。
+4. **普通用户路径必须从 env-first 切到 `project + wizard + secret lifecycle`**；`env/file/exec` 保留为高级路径，但不能再是默认路径。
+5. **025-B 应直接复用 024 的 managed runtime / ops / recovery 基线完成 `reload`**；对 unmanaged runtime 则显式降级，而不是伪装成功。
+6. **025-B 与 026-B 的边界要先切清**：本阶段交付 CLI 主路径和状态面，完整 Web 配置中心、Session Center、Scheduler、Runtime Console 留到 026-B。
 
-详细依据见 `research/tech-research.md` 与 `research/online-research.md`。
+详细依据见：
+
+- `research/tech-research.md`
+- `research/product-research.md`
+- `research/online-research.md`
+- `research/research-synthesis.md`

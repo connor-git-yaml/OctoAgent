@@ -8,6 +8,10 @@ from octoagent.core.models import (
     ProjectBinding,
     ProjectBindingType,
     ProjectMigrationValidation,
+    ProjectSecretBinding,
+    ProjectSelectorState,
+    SecretRefSourceType,
+    SecretTargetKind,
     Workspace,
 )
 
@@ -57,3 +61,34 @@ def test_workspace_model_defaults() -> None:
         root_path="/tmp/octo",
     )
     assert workspace.kind == "primary"
+
+
+def test_project_secret_binding_roundtrip() -> None:
+    binding = ProjectSecretBinding(
+        binding_id="secret-binding-1",
+        project_id="project-default",
+        target_kind=SecretTargetKind.PROVIDER,
+        target_key="provider:openrouter",
+        env_name="OPENROUTER_API_KEY",
+        ref_source_type=SecretRefSourceType.ENV,
+        ref_locator={"env_name": "OPENROUTER_API_KEY"},
+        display_name="OpenRouter API Key",
+        redaction_label="OPENROUTER_API_KEY=***",
+    )
+
+    restored = ProjectSecretBinding.model_validate(binding.model_dump(mode="python"))
+    assert restored == binding
+
+
+def test_project_selector_state_roundtrip() -> None:
+    state = ProjectSelectorState(
+        selector_id="selector-cli",
+        surface="cli",
+        active_project_id="project-default",
+        active_workspace_id="workspace-default-primary",
+        source="test",
+        warnings=["needs reload"],
+    )
+
+    restored = ProjectSelectorState.model_validate(state.model_dump(mode="python"))
+    assert restored == state

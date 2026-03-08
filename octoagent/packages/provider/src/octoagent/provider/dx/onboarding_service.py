@@ -29,6 +29,7 @@ from .onboarding_models import (
     OnboardingStepStatus,
 )
 from .onboarding_store import OnboardingSessionStore
+from .secret_service import SecretService
 from .telegram_verifier import build_builtin_verifier_registry
 
 BootstrapFunc = Callable[..., ConfigBootstrapResult]
@@ -234,6 +235,23 @@ class OnboardingService:
                     command="octo config sync",
                     blocking=True,
                     sort_order=30,
+                )
+            )
+
+        try:
+            audit = await SecretService(self.project_root).audit()
+        except Exception:
+            audit = None
+        if audit is not None and audit.overall_status != "ready":
+            actions.append(
+                NextAction(
+                    action_id="sync-project-secrets",
+                    action_type="command",
+                    title="收口当前 project secrets",
+                    description="当前 project 的 secret bindings 或 runtime sync 尚未完成。",
+                    command="octo secrets audit",
+                    blocking=True,
+                    sort_order=40,
                 )
             )
 

@@ -13,6 +13,9 @@ from ..models.project import (
     ProjectBindingType,
     ProjectMigrationRun,
     ProjectMigrationStatus,
+    ProjectSecretBinding,
+    ProjectSelectorState,
+    SecretTargetKind,
     Workspace,
     WorkspaceKind,
 )
@@ -23,6 +26,37 @@ class SqliteProjectStore:
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
+
+    async def save_project(self, project: Project) -> Project:
+        await self._conn.execute(
+            """
+            INSERT INTO projects (
+                project_id, slug, name, description, status, is_default,
+                metadata, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                slug = excluded.slug,
+                name = excluded.name,
+                description = excluded.description,
+                status = excluded.status,
+                is_default = excluded.is_default,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at
+            """,
+            (
+                project.project_id,
+                project.slug,
+                project.name,
+                project.description,
+                project.status.value,
+                1 if project.is_default else 0,
+                json.dumps(project.metadata, ensure_ascii=False),
+                project.created_at.isoformat(),
+                project.updated_at.isoformat(),
+            ),
+        )
+        return project
 
     async def create_project(self, project: Project) -> tuple[Project, bool]:
         await self._conn.execute(
@@ -159,6 +193,12 @@ class SqliteProjectStore:
         rows = await cursor.fetchall()
         return [self._row_to_workspace(row) for row in rows]
 
+    async def resolve_project(self, ref: str) -> Project | None:
+        project = await self.get_project(ref)
+        if project is not None:
+            return project
+        return await self.get_project_by_slug(ref)
+
     async def get_binding(
         self,
         project_id: str,
@@ -250,6 +290,152 @@ class SqliteProjectStore:
         )
         rows = await cursor.fetchall()
         return [self._row_to_binding(row) for row in rows]
+
+    async def get_secret_binding(
+        self,
+        project_id: str,
+        target_kind: SecretTargetKind,
+        target_key: str,
+    ) -> ProjectSecretBinding | None:
+        cursor = await self._conn.execute(
+            """
+            SELECT * FROM project_secret_bindings
+            WHERE project_id = ? AND target_kind = ? AND target_key = ?
+            """,
+            (project_id, target_kind.value, target_key),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_secret_binding(row) if row is not None else None
+
+    async def save_secret_binding(
+        self,
+        binding: ProjectSecretBinding,
+    ) -> ProjectSecretBinding:
+        await self._conn.execute(
+            """
+            INSERT INTO project_secret_bindings (
+                binding_id, project_id, workspace_id, target_kind, target_key,
+                env_name, ref_source_type, ref_locator, display_name, redaction_label,
+                status, last_audited_at, last_applied_at, last_reloaded_at,
+                metadata, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, target_kind, target_key) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
+                env_name = excluded.env_name,
+                ref_source_type = excluded.ref_source_type,
+                ref_locator = excluded.ref_locator,
+                display_name = excluded.display_name,
+                redaction_label = excluded.redaction_label,
+                status = excluded.status,
+                last_audited_at = excluded.last_audited_at,
+                last_applied_at = excluded.last_applied_at,
+                last_reloaded_at = excluded.last_reloaded_at,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at
+            """,
+            (
+                binding.binding_id,
+                binding.project_id,
+                binding.workspace_id,
+                binding.target_kind.value,
+                binding.target_key,
+                binding.env_name,
+                binding.ref_source_type.value,
+                json.dumps(binding.ref_locator, ensure_ascii=False),
+                binding.display_name,
+                binding.redaction_label,
+                binding.status.value,
+                binding.last_audited_at.isoformat() if binding.last_audited_at else None,
+                binding.last_applied_at.isoformat() if binding.last_applied_at else None,
+                binding.last_reloaded_at.isoformat() if binding.last_reloaded_at else None,
+                json.dumps(binding.metadata, ensure_ascii=False),
+                binding.created_at.isoformat(),
+                binding.updated_at.isoformat(),
+            ),
+        )
+        stored = await self.get_secret_binding(
+            binding.project_id,
+            binding.target_kind,
+            binding.target_key,
+        )
+        if stored is None:
+            raise RuntimeError(
+                "secret binding 保存失败且无法回读: "
+                f"{binding.target_kind}:{binding.target_key}"
+            )
+        return stored
+
+    async def list_secret_bindings(
+        self,
+        project_id: str,
+        target_kind: SecretTargetKind | None = None,
+    ) -> list[ProjectSecretBinding]:
+        if target_kind is None:
+            cursor = await self._conn.execute(
+                """
+                SELECT * FROM project_secret_bindings
+                WHERE project_id = ?
+                ORDER BY target_kind ASC, target_key ASC
+                """,
+                (project_id,),
+            )
+        else:
+            cursor = await self._conn.execute(
+                """
+                SELECT * FROM project_secret_bindings
+                WHERE project_id = ? AND target_kind = ?
+                ORDER BY target_key ASC
+                """,
+                (project_id, target_kind.value),
+            )
+        rows = await cursor.fetchall()
+        return [self._row_to_secret_binding(row) for row in rows]
+
+    async def save_selector_state(
+        self,
+        state: ProjectSelectorState,
+    ) -> ProjectSelectorState:
+        await self._conn.execute(
+            """
+            INSERT INTO project_selector_state (
+                selector_id, surface, active_project_id, active_workspace_id,
+                source, warnings, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(surface) DO UPDATE SET
+                active_project_id = excluded.active_project_id,
+                active_workspace_id = excluded.active_workspace_id,
+                source = excluded.source,
+                warnings = excluded.warnings,
+                updated_at = excluded.updated_at
+            """,
+            (
+                state.selector_id,
+                state.surface,
+                state.active_project_id,
+                state.active_workspace_id,
+                state.source,
+                json.dumps(state.warnings, ensure_ascii=False),
+                state.updated_at.isoformat(),
+            ),
+        )
+        stored = await self.get_selector_state(state.surface)
+        if stored is None:
+            raise RuntimeError(f"selector state 保存失败且无法回读: {state.surface}")
+        return stored
+
+    async def get_selector_state(self, surface: str) -> ProjectSelectorState | None:
+        cursor = await self._conn.execute(
+            """
+            SELECT * FROM project_selector_state
+            WHERE surface = ?
+            LIMIT 1
+            """,
+            (surface,),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_selector_state(row) if row is not None else None
 
     async def save_migration_run(self, run: ProjectMigrationRun) -> None:
         await self._conn.execute(
@@ -458,4 +644,38 @@ class SqliteProjectStore:
             validation=json.loads(row[6]),
             rollback_plan=json.loads(row[7]),
             error_message=row[8],
+        )
+
+    @staticmethod
+    def _row_to_secret_binding(row: aiosqlite.Row) -> ProjectSecretBinding:
+        return ProjectSecretBinding(
+            binding_id=row[0],
+            project_id=row[1],
+            workspace_id=row[2],
+            target_kind=row[3],
+            target_key=row[4],
+            env_name=row[5],
+            ref_source_type=row[6],
+            ref_locator=json.loads(row[7]),
+            display_name=row[8],
+            redaction_label=row[9],
+            status=row[10],
+            last_audited_at=datetime.fromisoformat(row[11]) if row[11] else None,
+            last_applied_at=datetime.fromisoformat(row[12]) if row[12] else None,
+            last_reloaded_at=datetime.fromisoformat(row[13]) if row[13] else None,
+            metadata=json.loads(row[14]),
+            created_at=datetime.fromisoformat(row[15]),
+            updated_at=datetime.fromisoformat(row[16]),
+        )
+
+    @staticmethod
+    def _row_to_selector_state(row: aiosqlite.Row) -> ProjectSelectorState:
+        return ProjectSelectorState(
+            selector_id=row[0],
+            surface=row[1],
+            active_project_id=row[2],
+            active_workspace_id=row[3],
+            source=row[4],
+            warnings=json.loads(row[5]),
+            updated_at=datetime.fromisoformat(row[6]),
         )

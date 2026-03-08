@@ -9,6 +9,10 @@ from octoagent.core.models import (
     ProjectMigrationStatus,
     ProjectMigrationSummary,
     ProjectMigrationValidation,
+    ProjectSecretBinding,
+    ProjectSelectorState,
+    SecretRefSourceType,
+    SecretTargetKind,
     Workspace,
 )
 from octoagent.core.store.project_store import SqliteProjectStore
@@ -82,3 +86,53 @@ class TestProjectStore:
         assert latest is not None
         assert latest.run_id == "run-1"
         assert latest.rollback_plan.delete_binding_ids == ["binding-1"]
+
+    async def test_save_secret_binding_and_selector_state(self, core_db):
+        store = SqliteProjectStore(core_db)
+        project = Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+        workspace = Workspace(
+            workspace_id="workspace-default-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Primary Workspace",
+            root_path="/tmp/octo",
+        )
+        await store.create_project(project)
+        await store.create_workspace(workspace)
+        binding = ProjectSecretBinding(
+            binding_id="secret-binding-1",
+            project_id=project.project_id,
+            target_kind=SecretTargetKind.RUNTIME,
+            target_key="runtime.master_key_env",
+            env_name="LITELLM_MASTER_KEY",
+            ref_source_type=SecretRefSourceType.ENV,
+            ref_locator={"env_name": "LITELLM_MASTER_KEY"},
+            display_name="LiteLLM Master Key",
+            redaction_label="LITELLM_MASTER_KEY=***",
+        )
+        selector = ProjectSelectorState(
+            selector_id="selector-cli",
+            surface="cli",
+            active_project_id=project.project_id,
+            active_workspace_id=workspace.workspace_id,
+            source="test",
+        )
+
+        stored_binding = await store.save_secret_binding(binding)
+        stored_selector = await store.save_selector_state(selector)
+        await core_db.commit()
+
+        bindings = await store.list_secret_bindings(project.project_id)
+        resolved_selector = await store.get_selector_state("cli")
+
+        assert stored_binding.target_key == "runtime.master_key_env"
+        assert stored_selector.active_project_id == project.project_id
+        assert len(bindings) == 1
+        assert bindings[0].redaction_label == "LITELLM_MASTER_KEY=***"
+        assert resolved_selector is not None
+        assert resolved_selector.active_workspace_id == workspace.workspace_id

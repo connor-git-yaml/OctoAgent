@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import warnings
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .control_plane_models import ConfigSchemaDocument
 
 # octoagent.yaml 文件头注释（不含凭证提示）
 _YAML_HEADER = (
@@ -399,3 +401,208 @@ class OctoAgentConfig(BaseModel):
                 message=str(exc),
                 field_path="(root)",
             ) from exc
+
+
+def build_config_schema_document(
+    config: OctoAgentConfig | None = None,
+) -> ConfigSchemaDocument:
+    """产出 026-A 兼容的 schema + uiHints 文档。"""
+
+    active_provider = config.providers[0] if config and config.providers else None
+    active_telegram = config.channels.telegram if config else TelegramChannelConfig()
+    provider_target_key = (
+        f"providers.{active_provider.id}.api_key_env"
+        if active_provider is not None
+        else "providers.openrouter.api_key_env"
+    )
+    schema = OctoAgentConfig.model_json_schema()
+    ui_hints: dict[str, Any] = {
+        "wizard_order": [
+            "project",
+            "provider",
+            "models",
+            "runtime",
+            "telegram",
+            "review",
+        ],
+        "sections": {
+            "provider": {
+                "title": "Provider",
+                "description": "配置默认 provider 与凭证引用名。",
+                "fields": [
+                    "providers.0.id",
+                    "providers.0.name",
+                    "providers.0.auth_type",
+                    "providers.0.api_key_env",
+                ],
+            },
+            "models": {
+                "title": "Model Aliases",
+                "description": "配置 main / cheap alias。",
+                "fields": [
+                    "model_aliases.main.model",
+                    "model_aliases.cheap.model",
+                ],
+            },
+            "runtime": {
+                "title": "Runtime",
+                "description": "配置 runtime 与 proxy 入口。",
+                "fields": [
+                    "runtime.llm_mode",
+                    "runtime.litellm_proxy_url",
+                    "runtime.master_key_env",
+                ],
+            },
+            "telegram": {
+                "title": "Telegram",
+                "description": "可选启用 Telegram channel。",
+                "fields": [
+                    "channels.telegram.enabled",
+                    "channels.telegram.mode",
+                    "channels.telegram.bot_token_env",
+                    "channels.telegram.webhook_url",
+                    "channels.telegram.webhook_secret_env",
+                ],
+            },
+        },
+        "fields": {
+            "providers.0.id": {
+                "label": "Provider ID",
+                "input": "text",
+                "required": True,
+                "recommended": True,
+                "default": active_provider.id if active_provider else "openrouter",
+            },
+            "providers.0.name": {
+                "label": "Provider 显示名",
+                "input": "text",
+                "required": True,
+                "recommended": True,
+                "default": active_provider.name if active_provider else "OpenRouter",
+            },
+            "providers.0.auth_type": {
+                "label": "认证方式",
+                "input": "choice",
+                "required": True,
+                "choices": ["api_key", "oauth"],
+                "default": active_provider.auth_type if active_provider else "api_key",
+            },
+            "providers.0.api_key_env": {
+                "label": "Provider 凭证环境变量名",
+                "input": "env_name",
+                "required": True,
+                "recommended": True,
+                "secret_target": {
+                    "target_kind": "provider",
+                    "target_key": provider_target_key,
+                    "target_key_template": "providers.{provider_id}.api_key_env",
+                    "provider_id_field": "providers.0.id",
+                },
+                "default": (
+                    active_provider.api_key_env if active_provider else "OPENROUTER_API_KEY"
+                ),
+            },
+            "model_aliases.main.model": {
+                "label": "main 模型",
+                "input": "text",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    config.model_aliases.get("main").model
+                    if config and "main" in config.model_aliases
+                    else "openrouter/auto"
+                ),
+            },
+            "model_aliases.cheap.model": {
+                "label": "cheap 模型",
+                "input": "text",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    config.model_aliases.get("cheap").model
+                    if config and "cheap" in config.model_aliases
+                    else "openrouter/auto"
+                ),
+            },
+            "runtime.llm_mode": {
+                "label": "LLM 模式",
+                "input": "choice",
+                "required": True,
+                "choices": ["litellm", "echo"],
+                "default": config.runtime.llm_mode if config else "litellm",
+            },
+            "runtime.litellm_proxy_url": {
+                "label": "LiteLLM Proxy URL",
+                "input": "text",
+                "required": False,
+                "recommended": True,
+                "default": (
+                    config.runtime.litellm_proxy_url if config else "http://localhost:4000"
+                ),
+            },
+            "runtime.master_key_env": {
+                "label": "Master Key 环境变量名",
+                "input": "env_name",
+                "required": False,
+                "recommended": True,
+                "secret_target": {
+                    "target_kind": "runtime",
+                    "target_key": "runtime.master_key_env",
+                },
+                "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
+            },
+            "channels.telegram.enabled": {
+                "label": "启用 Telegram",
+                "input": "confirm",
+                "required": False,
+                "recommended": False,
+                "default": active_telegram.enabled,
+            },
+            "channels.telegram.mode": {
+                "label": "Telegram 模式",
+                "input": "choice",
+                "required": False,
+                "recommended": True,
+                "choices": ["polling", "webhook"],
+                "default": active_telegram.mode,
+            },
+            "channels.telegram.bot_token_env": {
+                "label": "Telegram Bot Token 环境变量名",
+                "input": "env_name",
+                "required": False,
+                "recommended": True,
+                "secret_target": {
+                    "target_kind": "channel",
+                    "target_key": "channels.telegram.bot_token_env",
+                },
+                "default": active_telegram.bot_token_env,
+            },
+            "channels.telegram.webhook_url": {
+                "label": "Telegram Webhook URL",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_telegram.webhook_url,
+                "visible_when": {
+                    "field": "channels.telegram.mode",
+                    "equals": "webhook",
+                },
+            },
+            "channels.telegram.webhook_secret_env": {
+                "label": "Telegram Webhook Secret 环境变量名",
+                "input": "env_name",
+                "required": False,
+                "recommended": False,
+                "secret_target": {
+                    "target_kind": "channel",
+                    "target_key": "channels.telegram.webhook_secret_env",
+                },
+                "default": active_telegram.webhook_secret_env,
+                "visible_when": {
+                    "field": "channels.telegram.mode",
+                    "equals": "webhook",
+                },
+            },
+        },
+    }
+    return ConfigSchemaDocument(schema_payload=schema, ui_hints=ui_hints)
