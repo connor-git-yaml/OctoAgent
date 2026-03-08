@@ -30,7 +30,6 @@ import type {
   DelegationPlaneDocument,
   ImportRunDocument,
   ImportSourceDocument,
-  DelegationPlaneDocument,
   MemoryProposalAuditDocument,
   MemoryRecordProjection,
   MemorySubjectHistoryDocument,
