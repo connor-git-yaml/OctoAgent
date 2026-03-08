@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -24,6 +25,7 @@ from octoagent.core.store.transaction import create_task_with_initial_events
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.provider.dx.backup_service import BackupService
+from octoagent.provider.dx.update_service import UpdateActionError
 from ulid import ULID
 
 
@@ -134,6 +136,30 @@ async def client(test_app) -> AsyncClient:
 
 
 class TestOpsApi:
+    @staticmethod
+    def _summary(
+        *,
+        overall_status: str = "SUCCEEDED",
+        current_phase: str = "verify",
+        management_mode: str = "managed",
+        failure_report: dict[str, Any] | None = None,
+    ):
+        class _Dumpable:
+            def model_dump(self, mode: str = "json") -> dict[str, Any]:
+                return {
+                    "attempt_id": "attempt-001",
+                    "dry_run": False,
+                    "overall_status": overall_status,
+                    "current_phase": current_phase,
+                    "started_at": "2026-03-08T12:00:00Z",
+                    "completed_at": None if overall_status == "RUNNING" else "2026-03-08T12:01:00Z",
+                    "management_mode": management_mode,
+                    "phases": [],
+                    "failure_report": failure_report,
+                }
+
+        return _Dumpable()
+
     async def test_recovery_summary_initially_not_ready(self, client: AsyncClient):
         resp = await client.get("/api/ops/recovery")
         assert resp.status_code == 200
@@ -186,3 +212,145 @@ class TestOpsApi:
         payload = resp.json()
         assert payload["error"]["code"] == "RECOVERY_EXPORT_FAILED"
         assert "时间必须包含时区" in payload["error"]["message"]
+
+    async def test_update_status_reads_from_app_state_store(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+
+        class FakeUpdateStatusStore:
+            def load_summary(self):
+                return TestOpsApi._summary(overall_status="RUNNING", current_phase="migrate")
+
+        app.state.update_status_store = FakeUpdateStatusStore()
+
+        resp = await client.get("/api/ops/update/status")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["overall_status"] == "RUNNING"
+        assert payload["current_phase"] == "migrate"
+
+    async def test_update_dry_run_uses_update_service(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+
+        class FakeUpdateService:
+            async def preview(self, *, trigger_source):
+                assert trigger_source == "web"
+                return TestOpsApi._summary(overall_status="SUCCEEDED", current_phase="preflight")
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/update/dry-run")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["overall_status"] == "SUCCEEDED"
+        assert payload["current_phase"] == "preflight"
+
+    async def test_update_apply_returns_202_and_summary(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+        captured_wait: list[bool] = []
+
+        class FakeUpdateService:
+            async def apply(self, *, trigger_source, wait: bool = False):
+                assert trigger_source == "web"
+                captured_wait.append(wait)
+                return TestOpsApi._summary(overall_status="RUNNING", current_phase="preflight")
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/update/apply", json={"wait": True})
+
+        assert resp.status_code == 202
+        assert captured_wait == [True]
+        assert resp.json()["overall_status"] == "RUNNING"
+
+    async def test_update_apply_maps_active_attempt_to_409(
+        self,
+        client: AsyncClient,
+        test_app,
+    ):
+        app, _, _ = test_app
+
+        class FakeUpdateService:
+            async def apply(self, *, trigger_source, wait: bool = False):
+                raise UpdateActionError(
+                    "UPDATE_ACTIVE_ATTEMPT",
+                    "existing active attempt",
+                    status_code=409,
+                )
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/update/apply", json={"wait": False})
+
+        assert resp.status_code == 409
+        payload = resp.json()
+        assert payload["error"]["code"] == "UPDATE_ACTIVE_ATTEMPT"
+
+    async def test_restart_unmanaged_maps_to_400(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+
+        class FakeUpdateService:
+            async def restart(self, *, trigger_source):
+                raise UpdateActionError(
+                    "RESTART_UNAVAILABLE",
+                    "runtime is not managed",
+                    status_code=400,
+                )
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/restart")
+
+        assert resp.status_code == 400
+        payload = resp.json()
+        assert payload["error"]["code"] == "RESTART_UNAVAILABLE"
+
+    async def test_restart_failed_summary_returns_500(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+
+        class FakeUpdateService:
+            async def restart(self, *, trigger_source):
+                return TestOpsApi._summary(
+                    overall_status="FAILED",
+                    current_phase="restart",
+                    failure_report={
+                        "attempt_id": "attempt-001",
+                        "failed_phase": "restart",
+                        "message": "restart failed",
+                    },
+                )
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/restart")
+
+        assert resp.status_code == 500
+        payload = resp.json()
+        assert payload["error"]["code"] == "RESTART_FAILED"
+        assert payload["summary"]["failure_report"]["message"] == "restart failed"
+
+    async def test_verify_failed_summary_returns_500(self, client: AsyncClient, test_app):
+        app, _, _ = test_app
+
+        class FakeUpdateService:
+            async def verify(self, *, trigger_source):
+                assert trigger_source == "web"
+                return TestOpsApi._summary(
+                    overall_status="FAILED",
+                    current_phase="verify",
+                    failure_report={
+                        "attempt_id": "attempt-001",
+                        "failed_phase": "verify",
+                        "message": "ready timeout",
+                    },
+                )
+
+        app.state.update_service = FakeUpdateService()
+
+        resp = await client.post("/api/ops/verify")
+
+        assert resp.status_code == 500
+        payload = resp.json()
+        assert payload["error"]["code"] == "VERIFY_FAILED"
+        assert payload["summary"]["failure_report"]["message"] == "ready timeout"

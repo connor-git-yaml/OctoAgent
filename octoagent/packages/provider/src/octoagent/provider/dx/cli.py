@@ -15,6 +15,7 @@ from .backup_commands import backup, export, restore
 from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
 from .console_output import create_console, render_panel
+from .update_commands import restart, update, verify
 
 console = create_console()
 
@@ -29,6 +30,9 @@ main.add_command(backup)
 main.add_command(restore)
 main.add_command(export)
 main.add_command(import_cmd)
+main.add_command(update)
+main.add_command(restart)
+main.add_command(verify)
 
 
 @main.command()

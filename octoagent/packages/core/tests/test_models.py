@@ -28,8 +28,16 @@ from octoagent.core.models import (
     PartType,
     RequesterInfo,
     RiskLevel,
+    RuntimeManagementMode,
     Task,
     TaskStatus,
+    UpdateAttempt,
+    UpdateAttemptSummary,
+    UpdateOverallStatus,
+    UpdatePhaseName,
+    UpdatePhaseResult,
+    UpdatePhaseStatus,
+    UpdateTriggerSource,
     validate_transition,
 )
 from octoagent.core.models.payloads import (
@@ -109,6 +117,13 @@ class TestEnums:
         assert RiskLevel.LOW == "low"
         assert RiskLevel.MEDIUM == "medium"
         assert RiskLevel.HIGH == "high"
+
+    def test_update_enums(self):
+        """Feature 024 update 枚举值正确"""
+        assert UpdateOverallStatus.RUNNING == "RUNNING"
+        assert UpdatePhaseName.VERIFY == "verify"
+        assert UpdatePhaseStatus.BLOCKED == "BLOCKED"
+        assert RuntimeManagementMode.MANAGED == "managed"
 
 
 class TestStateMachine:
@@ -246,6 +261,33 @@ class TestEventModel:
         )
         assert causality.parent_event_id == "01JEVT000000000000000000"
         assert causality.idempotency_key == "msg-001"
+
+
+class TestUpdateModels:
+    def test_update_attempt_summary_from_attempt(self):
+        attempt = UpdateAttempt(
+            attempt_id="attempt-001",
+            trigger_source=UpdateTriggerSource.CLI,
+            project_root="/tmp/project",
+            started_at=datetime.now(UTC),
+            overall_status=UpdateOverallStatus.RUNNING,
+            current_phase=UpdatePhaseName.PREFLIGHT,
+            phases=[
+                UpdatePhaseResult(
+                    phase=UpdatePhaseName.PREFLIGHT,
+                    status=UpdatePhaseStatus.RUNNING,
+                ),
+                UpdatePhaseResult(phase=UpdatePhaseName.MIGRATE),
+                UpdatePhaseResult(phase=UpdatePhaseName.RESTART),
+                UpdatePhaseResult(phase=UpdatePhaseName.VERIFY),
+            ],
+        )
+
+        summary = UpdateAttemptSummary.from_attempt(attempt)
+
+        assert summary.attempt_id == "attempt-001"
+        assert summary.current_phase == UpdatePhaseName.PREFLIGHT
+        assert len(summary.phases) == 4
 
 
 class TestArtifactModel:

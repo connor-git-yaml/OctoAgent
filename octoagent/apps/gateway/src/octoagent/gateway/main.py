@@ -9,7 +9,9 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
@@ -24,8 +26,8 @@ from octoagent.provider import (
     load_provider_config,
 )
 from octoagent.provider.dx.config_wizard import load_config
-from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
+from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
@@ -89,11 +91,137 @@ def _resolve_stream_model_aliases(project_root: Path) -> set[str]:
     return resolve_codex_backend_aliases(project_root)
 
 
+def _resolve_verify_url(default_port: int = 8000, profile: str = "core") -> str:
+    """解析 runtime verify URL。"""
+    if explicit := os.environ.get("OCTOAGENT_VERIFY_URL"):
+        return explicit
+
+    host = os.environ.get("OCTOAGENT_VERIFY_HOST", "127.0.0.1")
+    port = os.environ.get("OCTOAGENT_GATEWAY_PORT", str(default_port))
+    return f"http://{host}:{port}/ready?profile={profile}"
+
+
+def _build_update_status_store(project_root: Path) -> Any | None:
+    """构建 024 UpdateStatusStore，缺失时安全降级。"""
+    try:
+        from octoagent.provider.dx.update_status_store import UpdateStatusStore
+    except Exception as exc:
+        log.debug(
+            "update_status_store_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    try:
+        return UpdateStatusStore(project_root)
+    except TypeError:
+        return UpdateStatusStore(project_root, data_dir=None)
+
+
+def _build_update_service(project_root: Path, *, status_store: Any | None = None) -> Any | None:
+    """构建 024 UpdateService，缺失时安全降级。"""
+    try:
+        from octoagent.provider.dx.update_service import UpdateService
+    except Exception as exc:
+        log.debug(
+            "update_service_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    kwargs: dict[str, Any] = {}
+    if status_store is not None:
+        kwargs["status_store"] = status_store
+
+    try:
+        return UpdateService(project_root, **kwargs)
+    except TypeError:
+        return UpdateService(project_root)
+
+
+def _create_runtime_state_snapshot(
+    project_root: Path,
+    *,
+    active_attempt_id: str | None = None,
+    management_mode: Any | None = None,
+) -> Any | None:
+    """创建 RuntimeStateSnapshot，缺失共享模型时安全降级。"""
+    try:
+        from octoagent.core.models import RuntimeManagementMode, RuntimeStateSnapshot
+    except Exception as exc:
+        log.debug(
+            "runtime_state_snapshot_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    now = datetime.now(tz=UTC)
+    return RuntimeStateSnapshot(
+        pid=os.getpid(),
+        project_root=str(project_root),
+        started_at=now,
+        heartbeat_at=now,
+        verify_url=_resolve_verify_url(),
+        management_mode=management_mode or RuntimeManagementMode.UNMANAGED,
+        active_attempt_id=active_attempt_id,
+    )
+
+
+def _persist_runtime_state(
+    project_root: Path,
+    *,
+    store: Any | None = None,
+    active_attempt_id: str | None = None,
+) -> bool:
+    """持久化 runtime state，接口不存在时静默降级。"""
+    status_store = store or _build_update_status_store(project_root)
+    if status_store is None:
+        return False
+
+    save_fn = getattr(status_store, "save_runtime_state", None)
+    if not callable(save_fn):
+        return False
+
+    descriptor = None
+    load_descriptor = getattr(status_store, "load_runtime_descriptor", None)
+    if callable(load_descriptor):
+        descriptor = load_descriptor()
+
+    management_mode = None
+    if descriptor is not None:
+        try:
+            from octoagent.core.models import RuntimeManagementMode
+        except Exception:
+            management_mode = None
+        else:
+            management_mode = RuntimeManagementMode.MANAGED
+
+    runtime_state = _create_runtime_state_snapshot(
+        project_root,
+        active_attempt_id=active_attempt_id,
+        management_mode=management_mode,
+    )
+    if runtime_state is None:
+        return False
+
+    save_fn(runtime_state)
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
     project_root = _resolve_project_root()
     app.state.project_root = project_root
+    app.state.update_status_store = _build_update_status_store(project_root)
+    app.state.update_service = _build_update_service(
+        project_root,
+        status_store=app.state.update_status_store,
+    )
+    _persist_runtime_state(
+        project_root,
+        store=app.state.update_status_store,
+    )
 
     # 启动：初始化 Store
     db_path = get_db_path()
@@ -295,6 +423,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("watchdog_scheduler_stopped")
 
     # 关闭：清理数据库连接
+    update_status_store = getattr(app.state, "update_status_store", None)
+    clear_runtime_state = (
+        getattr(update_status_store, "clear_runtime_state", None)
+        if update_status_store is not None
+        else None
+    )
+    if callable(clear_runtime_state):
+        clear_runtime_state()
     if hasattr(app.state, "telegram_service") and app.state.telegram_service:
         await app.state.telegram_service.shutdown()
     if hasattr(app.state, "task_runner") and app.state.task_runner:
