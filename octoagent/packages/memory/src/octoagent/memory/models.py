@@ -11,7 +11,10 @@ from .models import (
     ProposalNotValidatedError,
     ProposalValidation,
     SorRecord,
+    VaultAccessGrantRecord,
+    VaultAccessRequestRecord,
     VaultRecord,
+    VaultRetrievalAuditRecord,
     WriteProposal,
 )
 
@@ -26,6 +29,9 @@ __all__ = [
     "ProposalNotValidatedError",
     "ProposalValidation",
     "SorRecord",
+    "VaultAccessGrantRecord",
+    "VaultAccessRequestRecord",
+    "VaultRetrievalAuditRecord",
     "VaultRecord",
     "WriteProposal",
 ]

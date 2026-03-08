@@ -5,8 +5,21 @@ from datetime import datetime
 
 import aiosqlite
 
-from ..enums import MemoryPartition
-from ..models import FragmentRecord, SorRecord, VaultRecord, WriteProposal
+from ..enums import (
+    MemoryPartition,
+    VaultAccessDecision,
+    VaultAccessGrantStatus,
+    VaultAccessRequestStatus,
+)
+from ..models import (
+    FragmentRecord,
+    SorRecord,
+    VaultAccessGrantRecord,
+    VaultAccessRequestRecord,
+    VaultRecord,
+    VaultRetrievalAuditRecord,
+    WriteProposal,
+)
 
 
 class MemoryStoreConflictError(RuntimeError):
@@ -62,6 +75,29 @@ class SqliteMemoryStore:
         if row is None:
             return None
         return self._row_to_proposal(row)
+
+    async def list_proposals(
+        self,
+        *,
+        scope_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[WriteProposal]:
+        sql = "SELECT * FROM memory_write_proposals WHERE 1 = 1"
+        params: list[object] = []
+        if scope_ids:
+            placeholders = ",".join("?" for _ in scope_ids)
+            sql += f" AND scope_id IN ({placeholders})"
+            params.extend(scope_ids)
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            sql += f" AND status IN ({placeholders})"
+            params.extend(statuses)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._conn.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [self._row_to_proposal(row) for row in rows]
 
     async def replace_proposal(self, proposal: WriteProposal) -> None:
         await self._conn.execute(
@@ -331,6 +367,283 @@ class SqliteMemoryStore:
         rows = await cursor.fetchall()
         return [self._row_to_vault(row) for row in rows]
 
+    async def create_vault_access_request(self, record: VaultAccessRequestRecord) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO memory_vault_access_requests (
+                request_id, schema_version, project_id, workspace_id, scope_id,
+                partition, subject_key, reason, requester_actor_id, requester_actor_label,
+                status, decision, requested_at, resolved_at,
+                resolver_actor_id, resolver_actor_label, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.request_id,
+                record.schema_version,
+                record.project_id,
+                record.workspace_id,
+                record.scope_id,
+                record.partition.value if record.partition else None,
+                record.subject_key,
+                record.reason,
+                record.requester_actor_id,
+                record.requester_actor_label,
+                record.status.value,
+                record.decision.value if record.decision else None,
+                record.requested_at.isoformat(),
+                record.resolved_at.isoformat() if record.resolved_at else None,
+                record.resolver_actor_id,
+                record.resolver_actor_label,
+                json.dumps(record.metadata, ensure_ascii=False),
+            ),
+        )
+
+    async def get_vault_access_request(self, request_id: str) -> VaultAccessRequestRecord | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM memory_vault_access_requests WHERE request_id = ?",
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_vault_access_request(row)
+
+    async def replace_vault_access_request(self, record: VaultAccessRequestRecord) -> None:
+        await self._conn.execute(
+            """
+            UPDATE memory_vault_access_requests
+            SET schema_version = ?, project_id = ?, workspace_id = ?, scope_id = ?,
+                partition = ?, subject_key = ?, reason = ?, requester_actor_id = ?,
+                requester_actor_label = ?, status = ?, decision = ?, requested_at = ?,
+                resolved_at = ?, resolver_actor_id = ?, resolver_actor_label = ?,
+                metadata = ?
+            WHERE request_id = ?
+            """,
+            (
+                record.schema_version,
+                record.project_id,
+                record.workspace_id,
+                record.scope_id,
+                record.partition.value if record.partition else None,
+                record.subject_key,
+                record.reason,
+                record.requester_actor_id,
+                record.requester_actor_label,
+                record.status.value,
+                record.decision.value if record.decision else None,
+                record.requested_at.isoformat(),
+                record.resolved_at.isoformat() if record.resolved_at else None,
+                record.resolver_actor_id,
+                record.resolver_actor_label,
+                json.dumps(record.metadata, ensure_ascii=False),
+                record.request_id,
+            ),
+        )
+
+    async def list_vault_access_requests(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[VaultAccessRequestRecord]:
+        sql = "SELECT * FROM memory_vault_access_requests WHERE project_id = ?"
+        params: list[object] = [project_id]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        if scope_ids:
+            placeholders = ",".join("?" for _ in scope_ids)
+            sql += f" AND scope_id IN ({placeholders})"
+            params.extend(scope_ids)
+        if subject_key:
+            sql += " AND subject_key = ?"
+            params.append(subject_key)
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            sql += f" AND status IN ({placeholders})"
+            params.extend(statuses)
+        sql += " ORDER BY requested_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._conn.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [self._row_to_vault_access_request(row) for row in rows]
+
+    async def insert_vault_access_grant(self, record: VaultAccessGrantRecord) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO memory_vault_access_grants (
+                grant_id, schema_version, request_id, project_id, workspace_id,
+                scope_id, partition, subject_key, granted_to_actor_id,
+                granted_to_actor_label, granted_by_actor_id, granted_by_actor_label,
+                granted_at, expires_at, status, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.grant_id,
+                record.schema_version,
+                record.request_id,
+                record.project_id,
+                record.workspace_id,
+                record.scope_id,
+                record.partition.value if record.partition else None,
+                record.subject_key,
+                record.granted_to_actor_id,
+                record.granted_to_actor_label,
+                record.granted_by_actor_id,
+                record.granted_by_actor_label,
+                record.granted_at.isoformat(),
+                record.expires_at.isoformat() if record.expires_at else None,
+                record.status.value,
+                json.dumps(record.metadata, ensure_ascii=False),
+            ),
+        )
+
+    async def get_vault_access_grant(self, grant_id: str) -> VaultAccessGrantRecord | None:
+        cursor = await self._conn.execute(
+            "SELECT * FROM memory_vault_access_grants WHERE grant_id = ?",
+            (grant_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_vault_access_grant(row)
+
+    async def replace_vault_access_grant(self, record: VaultAccessGrantRecord) -> None:
+        await self._conn.execute(
+            """
+            UPDATE memory_vault_access_grants
+            SET schema_version = ?, request_id = ?, project_id = ?, workspace_id = ?,
+                scope_id = ?, partition = ?, subject_key = ?, granted_to_actor_id = ?,
+                granted_to_actor_label = ?, granted_by_actor_id = ?, granted_by_actor_label = ?,
+                granted_at = ?, expires_at = ?, status = ?, metadata = ?
+            WHERE grant_id = ?
+            """,
+            (
+                record.schema_version,
+                record.request_id,
+                record.project_id,
+                record.workspace_id,
+                record.scope_id,
+                record.partition.value if record.partition else None,
+                record.subject_key,
+                record.granted_to_actor_id,
+                record.granted_to_actor_label,
+                record.granted_by_actor_id,
+                record.granted_by_actor_label,
+                record.granted_at.isoformat(),
+                record.expires_at.isoformat() if record.expires_at else None,
+                record.status.value,
+                json.dumps(record.metadata, ensure_ascii=False),
+                record.grant_id,
+            ),
+        )
+
+    async def list_vault_access_grants(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        actor_id: str | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[VaultAccessGrantRecord]:
+        sql = "SELECT * FROM memory_vault_access_grants WHERE project_id = ?"
+        params: list[object] = [project_id]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        if scope_ids:
+            placeholders = ",".join("?" for _ in scope_ids)
+            sql += f" AND scope_id IN ({placeholders})"
+            params.extend(scope_ids)
+        if subject_key:
+            sql += " AND subject_key = ?"
+            params.append(subject_key)
+        if actor_id:
+            sql += " AND granted_to_actor_id = ?"
+            params.append(actor_id)
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            sql += f" AND status IN ({placeholders})"
+            params.extend(statuses)
+        sql += " ORDER BY granted_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._conn.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [self._row_to_vault_access_grant(row) for row in rows]
+
+    async def append_vault_retrieval_audit(self, record: VaultRetrievalAuditRecord) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO memory_vault_retrieval_audits (
+                retrieval_id, schema_version, project_id, workspace_id, scope_id, partition,
+                subject_key, query, grant_id, actor_id, actor_label, authorized,
+                reason_code, result_count, retrieved_vault_ids, evidence_refs, created_at,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.retrieval_id,
+                record.schema_version,
+                record.project_id,
+                record.workspace_id,
+                record.scope_id,
+                record.partition.value if record.partition else None,
+                record.subject_key,
+                record.query,
+                record.grant_id,
+                record.actor_id,
+                record.actor_label,
+                int(record.authorized),
+                record.reason_code,
+                record.result_count,
+                json.dumps(record.retrieved_vault_ids, ensure_ascii=False),
+                json.dumps([item.model_dump(mode="json") for item in record.evidence_refs]),
+                record.created_at.isoformat(),
+                json.dumps(record.metadata, ensure_ascii=False),
+            ),
+        )
+
+    async def list_vault_retrieval_audits(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        actor_id: str | None = None,
+        limit: int = 50,
+    ) -> list[VaultRetrievalAuditRecord]:
+        sql = "SELECT * FROM memory_vault_retrieval_audits WHERE project_id = ?"
+        params: list[object] = [project_id]
+        if workspace_id:
+            sql += " AND workspace_id = ?"
+            params.append(workspace_id)
+        if scope_ids:
+            placeholders = ",".join("?" for _ in scope_ids)
+            sql += f" AND scope_id IN ({placeholders})"
+            params.extend(scope_ids)
+        if subject_key:
+            sql += " AND subject_key = ?"
+            params.append(subject_key)
+        if actor_id:
+            sql += " AND actor_id = ?"
+            params.append(actor_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._conn.execute(sql, tuple(params))
+        rows = await cursor.fetchall()
+        return [self._row_to_vault_retrieval_audit(row) for row in rows]
+
     @staticmethod
     def _row_to_proposal(row: aiosqlite.Row) -> WriteProposal:
         return WriteProposal(
@@ -405,4 +718,74 @@ class SqliteMemoryStore:
             metadata=json.loads(row["metadata"]),
             evidence_refs=json.loads(row["evidence_refs"]),
             created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    @staticmethod
+    def _row_to_vault_access_request(row: aiosqlite.Row) -> VaultAccessRequestRecord:
+        return VaultAccessRequestRecord(
+            request_id=row["request_id"],
+            schema_version=row["schema_version"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            scope_id=row["scope_id"],
+            partition=MemoryPartition(row["partition"]) if row["partition"] else None,
+            subject_key=row["subject_key"],
+            reason=row["reason"],
+            requester_actor_id=row["requester_actor_id"],
+            requester_actor_label=row["requester_actor_label"],
+            status=VaultAccessRequestStatus(row["status"]),
+            decision=VaultAccessDecision(row["decision"]) if row["decision"] else None,
+            requested_at=datetime.fromisoformat(row["requested_at"]),
+            resolved_at=(
+                datetime.fromisoformat(row["resolved_at"]) if row["resolved_at"] else None
+            ),
+            resolver_actor_id=row["resolver_actor_id"],
+            resolver_actor_label=row["resolver_actor_label"],
+            metadata=json.loads(row["metadata"]),
+        )
+
+    @staticmethod
+    def _row_to_vault_access_grant(row: aiosqlite.Row) -> VaultAccessGrantRecord:
+        return VaultAccessGrantRecord(
+            grant_id=row["grant_id"],
+            schema_version=row["schema_version"],
+            request_id=row["request_id"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            scope_id=row["scope_id"],
+            partition=MemoryPartition(row["partition"]) if row["partition"] else None,
+            subject_key=row["subject_key"],
+            granted_to_actor_id=row["granted_to_actor_id"],
+            granted_to_actor_label=row["granted_to_actor_label"],
+            granted_by_actor_id=row["granted_by_actor_id"],
+            granted_by_actor_label=row["granted_by_actor_label"],
+            granted_at=datetime.fromisoformat(row["granted_at"]),
+            expires_at=(
+                datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
+            ),
+            status=VaultAccessGrantStatus(row["status"]),
+            metadata=json.loads(row["metadata"]),
+        )
+
+    @staticmethod
+    def _row_to_vault_retrieval_audit(row: aiosqlite.Row) -> VaultRetrievalAuditRecord:
+        return VaultRetrievalAuditRecord(
+            retrieval_id=row["retrieval_id"],
+            schema_version=row["schema_version"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            scope_id=row["scope_id"],
+            partition=MemoryPartition(row["partition"]) if row["partition"] else None,
+            subject_key=row["subject_key"],
+            query=row["query"],
+            grant_id=row["grant_id"],
+            actor_id=row["actor_id"],
+            actor_label=row["actor_label"],
+            authorized=bool(row["authorized"]),
+            reason_code=row["reason_code"],
+            result_count=row["result_count"],
+            retrieved_vault_ids=json.loads(row["retrieved_vault_ids"]),
+            evidence_refs=json.loads(row["evidence_refs"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            metadata=json.loads(row["metadata"]),
         )

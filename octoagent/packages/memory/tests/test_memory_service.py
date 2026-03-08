@@ -7,6 +7,9 @@ from octoagent.memory import (
     MemoryLayer,
     MemoryPartition,
     ProposalNotValidatedError,
+    VaultAccessDecision,
+    VaultAccessGrantStatus,
+    VaultAccessRequestStatus,
     WriteAction,
 )
 
@@ -244,3 +247,59 @@ class TestMemoryService:
         assert flush.proposal is not None
         current = await memory_store.get_current_sor("work/project-x", "work.project-x.summary")
         assert current is None
+
+    async def test_vault_access_request_resolve_and_retrieval_audit(self, memory_service):
+        request = await memory_service.create_vault_access_request(
+            project_id="project-default",
+            workspace_id="workspace-primary",
+            scope_id="memory/project-x",
+            partition=MemoryPartition.HEALTH,
+            subject_key="profile.user.health.note",
+            requester_actor_id="user:web",
+            requester_actor_label="Owner",
+            reason="排障需要查看敏感引用",
+        )
+        assert request.status is VaultAccessRequestStatus.PENDING
+
+        resolved, grant = await memory_service.resolve_vault_access_request(
+            request.request_id,
+            decision=VaultAccessDecision.APPROVE,
+            granted_by_actor_id="user:web",
+            granted_by_actor_label="Owner",
+        )
+        assert resolved.status is VaultAccessRequestStatus.APPROVED
+        assert grant is not None
+        assert grant.status is VaultAccessGrantStatus.ACTIVE
+
+        latest_grant = await memory_service.get_latest_valid_vault_grant(
+            actor_id="user:web",
+            project_id="project-default",
+            workspace_id="workspace-primary",
+            scope_id="memory/project-x",
+            partition=MemoryPartition.HEALTH,
+            subject_key="profile.user.health.note",
+        )
+        assert latest_grant is not None
+        assert latest_grant.grant_id == grant.grant_id
+
+        audit = await memory_service.record_vault_retrieval_audit(
+            actor_id="user:web",
+            actor_label="Owner",
+            project_id="project-default",
+            workspace_id="workspace-primary",
+            scope_id="memory/project-x",
+            partition=MemoryPartition.HEALTH,
+            subject_key="profile.user.health.note",
+            reason_code="VAULT_RETRIEVE_AUTHORIZED",
+            authorized=True,
+            grant_id=grant.grant_id,
+            retrieved_vault_ids=["vault-1"],
+        )
+        assert audit.authorized is True
+        audits = await memory_service.list_vault_retrieval_audits(
+            project_id="project-default",
+            workspace_id="workspace-primary",
+            scope_ids=["memory/project-x"],
+        )
+        assert audits
+        assert audits[0].retrieval_id == audit.retrieval_id

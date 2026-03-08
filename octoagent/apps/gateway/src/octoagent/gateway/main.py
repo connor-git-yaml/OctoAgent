@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from octoagent.core.config import get_artifacts_dir, get_db_path
 from octoagent.core.store import create_store_group
+from octoagent.memory import init_memory_db
 from octoagent.provider import (
     AliasRegistry,
     EchoMessageAdapter,
@@ -28,6 +29,7 @@ from octoagent.provider import (
 from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
+from octoagent.provider.dx.memory_console_service import MemoryConsoleService
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
@@ -231,6 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     db_path = get_db_path()
     artifacts_dir = get_artifacts_dir()
     store_group = await create_store_group(db_path, artifacts_dir)
+    await init_memory_db(store_group.conn)
     migration_service = ProjectWorkspaceMigrationService(
         project_root=project_root,
         store_group=store_group,
@@ -401,6 +404,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         telegram_state_store=telegram_state_store,
         update_status_store=app.state.update_status_store,
         update_service=app.state.update_service,
+        memory_console_service=MemoryConsoleService(
+            project_root,
+            store_group=store_group,
+        ),
     )
     app.state.automation_scheduler = AutomationSchedulerService(
         control_plane_service=app.state.control_plane_service,

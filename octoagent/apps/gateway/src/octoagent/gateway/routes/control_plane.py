@@ -54,6 +54,92 @@ async def get_control_diagnostics(control_plane=Depends(get_control_plane_servic
     )
 
 
+@router.get("/api/control/resources/memory")
+async def get_control_memory(
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    partition: str | None = Query(default=None),
+    layer: str | None = Query(default=None),
+    query: str | None = Query(default=None),
+    include_history: bool = Query(default=False),
+    include_vault_refs: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=200),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_memory_console(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            scope_id=scope_id,
+            partition=partition,
+            layer=layer,
+            query=query,
+            include_history=include_history,
+            include_vault_refs=include_vault_refs,
+            limit=limit,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/memory-subjects/{subject_key}")
+async def get_control_memory_subject_history(
+    subject_key: str,
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_memory_subject_history(
+            subject_key,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            scope_id=scope_id,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/memory-proposals")
+async def get_control_memory_proposals(
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_memory_proposal_audit(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            scope_id=scope_id,
+            status=status,
+            source=source,
+            limit=limit,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/vault-authorization")
+async def get_control_vault_authorization(
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    scope_id: str | None = Query(default=None),
+    subject_key: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_vault_authorization(
+            project_id=project_id,
+            workspace_id=workspace_id,
+            scope_id=scope_id,
+            subject_key=subject_key,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
 @router.get("/api/control/actions")
 async def get_control_actions(control_plane=Depends(get_control_plane_service)):
     return control_plane.get_action_registry().model_dump(mode="json", by_alias=True)

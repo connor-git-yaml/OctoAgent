@@ -14,6 +14,11 @@ from .fragment import FragmentRecord
 from .proposal import WriteProposal
 from .sor import SorRecord
 from .vault import VaultRecord
+from .vault_access import (
+    VaultAccessGrantRecord,
+    VaultAccessRequestRecord,
+    VaultRetrievalAuditRecord,
+)
 
 __all__ = [
     "CommitResult",
@@ -26,6 +31,9 @@ __all__ = [
     "ProposalNotValidatedError",
     "ProposalValidation",
     "SorRecord",
+    "VaultAccessGrantRecord",
+    "VaultAccessRequestRecord",
+    "VaultRetrievalAuditRecord",
     "VaultRecord",
     "WriteProposal",
 ]

@@ -11,6 +11,9 @@ import {
   fetchControlEvents,
   fetchControlResource,
   fetchControlSnapshot,
+  fetchMemoryProposals,
+  fetchMemorySubjectHistory,
+  fetchVaultAuthorization,
 } from "../api/client";
 import type {
   ActionResultEnvelope,
@@ -19,9 +22,13 @@ import type {
   ControlPlaneEvent,
   ControlPlaneResourceRef,
   ControlPlaneSnapshot,
+  MemoryProposalAuditDocument,
+  MemoryRecordProjection,
+  MemorySubjectHistoryDocument,
   OperatorActionKind,
   OperatorInboxItem,
   SessionProjectionItem,
+  VaultAuthorizationDocument,
 } from "../types";
 
 type SectionId =
@@ -31,6 +38,7 @@ type SectionId =
   | "operator"
   | "automation"
   | "diagnostics"
+  | "memory"
   | "config"
   | "channels";
 
@@ -41,6 +49,7 @@ const SECTION_LABELS: Array<{ id: SectionId; label: string; accent: string }> = 
   { id: "operator", label: "Operator", accent: "Approvals / Retry / Cancel" },
   { id: "automation", label: "Automation", accent: "Scheduler" },
   { id: "diagnostics", label: "Diagnostics", accent: "Runtime Console" },
+  { id: "memory", label: "Memory", accent: "SoR / Vault / Proposal" },
   { id: "config", label: "Config", accent: "Schema + uiHints" },
   { id: "channels", label: "Channels", accent: "Telegram / Devices" },
 ];
@@ -51,7 +60,8 @@ type ControlResourceRoute =
   | "project-selector"
   | "sessions"
   | "automation"
-  | "diagnostics";
+  | "diagnostics"
+  | "memory";
 
 type SnapshotResourceKey = keyof ControlPlaneSnapshot["resources"];
 
@@ -62,6 +72,7 @@ const RESOURCE_ROUTE_BY_TYPE: Record<string, ControlResourceRoute> = {
   session_projection: "sessions",
   automation_job: "automation",
   diagnostics_summary: "diagnostics",
+  memory_console: "memory",
 };
 
 const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
@@ -74,6 +85,7 @@ const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   sessions: "sessions",
   automation: "automation",
   diagnostics: "diagnostics",
+  memory: "memory",
 };
 
 function makeRequestId(): string {
@@ -164,7 +176,31 @@ async function loadControlResource(
       return fetchControlResource("automation");
     case "diagnostics":
       return fetchControlResource("diagnostics");
+    case "memory":
+      return fetchControlResource("memory");
   }
+}
+
+function parseCsvList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function firstMemorySubject(records: MemoryRecordProjection[]): string {
+  return records.find((record) => Boolean(record.subject_key))?.subject_key ?? "";
+}
+
+function memoryActionResult(
+  result: ActionResultEnvelope | null
+): ActionResultEnvelope | null {
+  if (!result) {
+    return null;
+  }
+  return result.action_id.startsWith("memory.") || result.action_id.startsWith("vault.")
+    ? result
+    : null;
 }
 
 function mapQuickAction(
@@ -274,12 +310,101 @@ export default function ControlPlane() {
     scheduleExpr: "3600",
     enabled: true,
   });
+  const [memoryQueryDraft, setMemoryQueryDraft] = useState({
+    scopeId: "",
+    partition: "",
+    layer: "",
+    query: "",
+    includeHistory: false,
+    includeVaultRefs: true,
+    limit: 50,
+  });
+  const [memoryAccessDraft, setMemoryAccessDraft] = useState({
+    scopeId: "",
+    partition: "",
+    subjectKey: "",
+    reason: "",
+  });
+  const [memoryRetrieveDraft, setMemoryRetrieveDraft] = useState({
+    scopeId: "",
+    partition: "",
+    subjectKey: "",
+    query: "",
+    grantId: "",
+  });
+  const [memoryExportDraft, setMemoryExportDraft] = useState({
+    scopeIds: "",
+    includeHistory: false,
+    includeVaultRefs: true,
+  });
+  const [memoryRestoreDraft, setMemoryRestoreDraft] = useState({
+    snapshotRef: "",
+    targetScopeMode: "current_project",
+    scopeIds: "",
+  });
+  const [selectedMemorySubjectKey, setSelectedMemorySubjectKey] = useState("");
+  const [memorySubject, setMemorySubject] = useState<MemorySubjectHistoryDocument | null>(
+    null
+  );
+  const [memoryProposals, setMemoryProposals] =
+    useState<MemoryProposalAuditDocument | null>(null);
+  const [vaultAuthorization, setVaultAuthorization] =
+    useState<VaultAuthorizationDocument | null>(null);
+  const [memoryBusy, setMemoryBusy] = useState(false);
 
   async function refreshEvents() {
     const eventPayload = await fetchControlEvents(undefined, 50);
     startTransition(() => {
       setEvents(dedupeEvents(eventPayload.events));
     });
+  }
+
+  async function refreshMemoryDetails(subjectKey?: string) {
+    const memory = snapshot?.resources.memory;
+    if (!memory) {
+      return;
+    }
+    const resolvedSubjectKey =
+      subjectKey || selectedMemorySubjectKey || firstMemorySubject(memory.records);
+    setMemoryBusy(true);
+    try {
+      const [nextProposals, nextVaultAuthorization, nextSubjectHistory] =
+        await Promise.all([
+          fetchMemoryProposals({
+            projectId: memory.active_project_id,
+            workspaceId: memory.active_workspace_id,
+            scopeId: memory.filters.scope_id || undefined,
+            limit: memoryQueryDraft.limit,
+          }),
+          fetchVaultAuthorization({
+            projectId: memory.active_project_id,
+            workspaceId: memory.active_workspace_id,
+            scopeId: memory.filters.scope_id || undefined,
+            subjectKey: resolvedSubjectKey || undefined,
+          }),
+          resolvedSubjectKey
+            ? fetchMemorySubjectHistory(resolvedSubjectKey, {
+                projectId: memory.active_project_id,
+                workspaceId: memory.active_workspace_id,
+                scopeId: memory.filters.scope_id || undefined,
+              })
+            : Promise.resolve(null),
+        ]);
+      startTransition(() => {
+        setMemoryProposals(nextProposals);
+        setVaultAuthorization(nextVaultAuthorization);
+        setMemorySubject(nextSubjectHistory);
+        if (resolvedSubjectKey) {
+          setSelectedMemorySubjectKey(resolvedSubjectKey);
+        }
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Memory 细节资源加载失败";
+      setError(message);
+    } finally {
+      setMemoryBusy(false);
+    }
   }
 
   async function reloadData(options?: { preserveConfigDraft?: boolean }) {
@@ -398,6 +523,49 @@ export default function ControlPlane() {
     configDirtyRef.current = configDirty;
   }, [configDirty]);
 
+  useEffect(() => {
+    const memory = snapshot?.resources.memory;
+    if (!memory) {
+      return;
+    }
+    setMemoryQueryDraft({
+      scopeId: memory.filters.scope_id,
+      partition: memory.filters.partition,
+      layer: memory.filters.layer,
+      query: memory.filters.query,
+      includeHistory: memory.filters.include_history,
+      includeVaultRefs: memory.filters.include_vault_refs,
+      limit: memory.filters.limit,
+    });
+    setMemoryAccessDraft((current) => ({
+      ...current,
+      scopeId: current.scopeId || memory.filters.scope_id,
+      partition: current.partition || memory.filters.partition,
+    }));
+    setMemoryRetrieveDraft((current) => ({
+      ...current,
+      scopeId: current.scopeId || memory.filters.scope_id,
+      partition: current.partition || memory.filters.partition,
+    }));
+    setMemoryExportDraft((current) => ({
+      ...current,
+      scopeIds:
+        current.scopeIds || (memory.filters.scope_id ? memory.filters.scope_id : ""),
+    }));
+  }, [snapshot?.resources.memory.generated_at]);
+
+  useEffect(() => {
+    if (activeSection !== "memory" || !snapshot?.resources.memory) {
+      return;
+    }
+    const fallbackSubjectKey =
+      selectedMemorySubjectKey || firstMemorySubject(snapshot.resources.memory.records);
+    if (fallbackSubjectKey && fallbackSubjectKey !== selectedMemorySubjectKey) {
+      setSelectedMemorySubjectKey(fallbackSubjectKey);
+    }
+    void refreshMemoryDetails(fallbackSubjectKey);
+  }, [activeSection, snapshot?.resources.memory.generated_at]);
+
   const filteredSessions = (snapshot?.resources.sessions.sessions ?? []).filter((item) =>
     sessionMatches(item, deferredSessionFilter)
   );
@@ -405,7 +573,7 @@ export default function ControlPlane() {
   async function submitAction(
     actionId: string,
     params: Record<string, unknown>,
-    options?: { refreshConfigDraft?: boolean }
+    options?: { refreshConfigDraft?: boolean; subjectKey?: string }
   ) {
     setBusyActionId(actionId);
     setError(null);
@@ -426,6 +594,12 @@ export default function ControlPlane() {
       await refreshResources(result.resource_refs, {
         preserveConfigDraft: !(options?.refreshConfigDraft ?? false),
       });
+      if (
+        activeSection === "memory" &&
+        (actionId.startsWith("memory.") || actionId.startsWith("vault."))
+      ) {
+        await refreshMemoryDetails(options?.subjectKey);
+      }
       return result;
     } catch (err) {
       const message =
@@ -459,8 +633,15 @@ export default function ControlPlane() {
     );
   }
 
-  const { wizard, config, project_selector, sessions, automation, diagnostics } =
-    snapshot.resources;
+  const {
+    wizard,
+    config,
+    project_selector,
+    sessions,
+    automation,
+    diagnostics,
+    memory,
+  } = snapshot.resources;
   const availableProjects = project_selector.available_projects ?? [];
   const availableWorkspaces = project_selector.available_workspaces ?? [];
   const currentProject =
@@ -474,16 +655,19 @@ export default function ControlPlane() {
   const operatorItems = sessions.operator_items ?? [];
   const pairingItems = operatorItems.filter((item) => item.kind === "pairing_request");
   const diagnosticTone = statusTone(diagnostics.overall_status);
+  const lastMemoryAction = memoryActionResult(lastAction);
+  const selectedSubjectHistory =
+    memorySubject?.subject_key === selectedMemorySubjectKey ? memorySubject : null;
 
   return (
     <div className="control-shell">
       <aside className="control-sidebar">
         <div className="control-brand">
-          <p className="eyebrow">Feature 026</p>
+          <p className="eyebrow">Feature 026 / 027</p>
           <h1>OctoAgent Control Plane</h1>
           <p>
             统一消费 wizard / project / session / automation / diagnostics /
-            config contract。
+            memory / config contract。
           </p>
         </div>
         <nav className="control-nav" aria-label="Control sections">
@@ -1250,6 +1434,648 @@ export default function ControlPlane() {
                 ))}
               </div>
             </article>
+          </section>
+        ) : null}
+
+        {activeSection === "memory" ? (
+          <section className="stack-section">
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Memory Console</p>
+                  <h3>{memory.active_project_id || "未绑定 Project"}</h3>
+                </div>
+                <span className={`tone-chip ${statusTone(memory.status)}`}>
+                  {formatRelativeStatus(memory.status)}
+                </span>
+              </div>
+              <div className="meta-grid">
+                <span>Workspace {memory.active_workspace_id || "-"}</span>
+                <span>Scopes {memory.summary.scope_count}</span>
+                <span>Fragments {memory.summary.fragment_count}</span>
+                <span>SoR Current {memory.summary.sor_current_count}</span>
+                <span>SoR History {memory.summary.sor_history_count}</span>
+                <span>Vault Refs {memory.summary.vault_ref_count}</span>
+                <span>Proposals {memory.summary.proposal_count}</span>
+              </div>
+              <div className="form-grid">
+                <label>
+                  Scope ID
+                  <input
+                    value={memoryQueryDraft.scopeId}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        scopeId: event.target.value,
+                      }))
+                    }
+                    placeholder="scope-..."
+                  />
+                </label>
+                <label>
+                  Partition
+                  <input
+                    value={memoryQueryDraft.partition}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        partition: event.target.value,
+                      }))
+                    }
+                    placeholder="profile / credential"
+                  />
+                </label>
+                <label>
+                  Layer
+                  <input
+                    value={memoryQueryDraft.layer}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        layer: event.target.value,
+                      }))
+                    }
+                    placeholder="fragment / sor / vault"
+                  />
+                </label>
+                <label>
+                  Query
+                  <input
+                    value={memoryQueryDraft.query}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        query: event.target.value,
+                      }))
+                    }
+                    placeholder="subject / summary / evidence"
+                  />
+                </label>
+                <label>
+                  Limit
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={memoryQueryDraft.limit}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        limit: Number(event.target.value) || 50,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="checkbox-line">
+                  <input
+                    type="checkbox"
+                    checked={memoryQueryDraft.includeHistory}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        includeHistory: event.target.checked,
+                      }))
+                    }
+                  />
+                  包含 superseded 历史
+                </label>
+                <label className="checkbox-line">
+                  <input
+                    type="checkbox"
+                    checked={memoryQueryDraft.includeVaultRefs}
+                    onChange={(event) =>
+                      setMemoryQueryDraft((current) => ({
+                        ...current,
+                        includeVaultRefs: event.target.checked,
+                      }))
+                    }
+                  />
+                  包含 Vault 引用
+                </label>
+              </div>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() =>
+                    void submitAction("memory.query", {
+                      project_id: memory.active_project_id,
+                      workspace_id: memory.active_workspace_id,
+                      scope_id: memoryQueryDraft.scopeId,
+                      partition: memoryQueryDraft.partition,
+                      layer: memoryQueryDraft.layer,
+                      query: memoryQueryDraft.query,
+                      include_history: memoryQueryDraft.includeHistory,
+                      include_vault_refs: memoryQueryDraft.includeVaultRefs,
+                      limit: memoryQueryDraft.limit,
+                    })
+                  }
+                  disabled={busyActionId === "memory.query"}
+                >
+                  刷新 Memory 视图
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void refreshMemoryDetails(selectedMemorySubjectKey)}
+                  disabled={memoryBusy}
+                >
+                  刷新 Proposal / Vault
+                </button>
+              </div>
+              {memory.available_scopes.length > 0 ? (
+                <p className="muted">
+                  Available Scopes: {memory.available_scopes.join(", ")}
+                </p>
+              ) : null}
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Memory Records</p>
+                  <h3>{memory.records.length}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  {memory.available_layers.join(" / ") || "all layers"}
+                </span>
+              </div>
+              <div className="event-list">
+                {memory.records.map((record) => (
+                  <div key={record.record_id} className="event-item">
+                    <div>
+                      <strong>{record.summary || record.subject_key || record.record_id}</strong>
+                      <p>
+                        {record.layer} / {record.partition} / {record.scope_id}
+                      </p>
+                      <small>
+                        subject={record.subject_key || "-"} | status={record.status} | version=
+                        {record.version ?? "-"}
+                      </small>
+                    </div>
+                    <div className="action-row">
+                      <span
+                        className={`tone-chip ${
+                          record.requires_vault_authorization ? "warning" : "neutral"
+                        }`}
+                      >
+                        {record.requires_vault_authorization ? "Vault" : "Open"}
+                      </span>
+                      {record.subject_key ? (
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => {
+                            setSelectedMemorySubjectKey(record.subject_key);
+                            void refreshMemoryDetails(record.subject_key);
+                          }}
+                          disabled={memoryBusy}
+                        >
+                          查看历史
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <div className="section-grid">
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Subject History</p>
+                    <h3>{selectedSubjectHistory?.subject_key || "未选择 Subject"}</h3>
+                  </div>
+                  <span className="tone-chip neutral">
+                    {selectedSubjectHistory?.history.length ?? 0} history
+                  </span>
+                </div>
+                {selectedSubjectHistory ? (
+                  <>
+                    <p>
+                      Current:{" "}
+                      <strong>
+                        {selectedSubjectHistory.current_record?.summary ||
+                          selectedSubjectHistory.current_record?.record_id ||
+                          "无 current"}
+                      </strong>
+                    </p>
+                    <div className="event-list">
+                      {selectedSubjectHistory.history.map((record) => (
+                        <div key={record.record_id} className="event-item">
+                          <div>
+                            <strong>{record.summary || record.record_id}</strong>
+                            <p>
+                              {record.status} / v{record.version ?? "-"} /{" "}
+                              {formatDateTime(record.updated_at || record.created_at)}
+                            </p>
+                          </div>
+                          <small>{record.partition}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="muted">从上方记录列表选择一个带 subject_key 的条目。</p>
+                )}
+              </article>
+
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">WriteProposal Audit</p>
+                    <h3>{memoryProposals?.items.length ?? 0}</h3>
+                  </div>
+                  <span className="tone-chip neutral">
+                    Pending {memoryProposals?.summary.pending ?? 0}
+                  </span>
+                </div>
+                <div className="meta-grid">
+                  <span>Validated {memoryProposals?.summary.validated ?? 0}</span>
+                  <span>Rejected {memoryProposals?.summary.rejected ?? 0}</span>
+                  <span>Committed {memoryProposals?.summary.committed ?? 0}</span>
+                </div>
+                <div className="event-list">
+                  {(memoryProposals?.items ?? []).map((item) => (
+                    <div key={item.proposal_id} className="event-item">
+                      <div>
+                        <strong>{item.subject_key || item.proposal_id}</strong>
+                        <p>
+                          {item.action} / {item.partition} / {item.scope_id}
+                        </p>
+                        <small>{item.rationale || "无额外 rationale"}</small>
+                      </div>
+                      <small>{item.status}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Vault Authorization</p>
+                    <h3>{vaultAuthorization?.active_requests.length ?? 0}</h3>
+                  </div>
+                  <span className="tone-chip neutral">
+                    Grants {vaultAuthorization?.active_grants.length ?? 0}
+                  </span>
+                </div>
+                <div className="event-list">
+                  {(vaultAuthorization?.active_requests ?? []).map((item) => (
+                    <div key={item.request_id} className="event-item">
+                      <div>
+                        <strong>{item.subject_key || item.request_id}</strong>
+                        <p>
+                          {item.scope_id} / {item.partition || "-"} / {item.status}
+                        </p>
+                        <small>{item.reason || "未填写理由"}</small>
+                      </div>
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() =>
+                            void submitAction("vault.access.resolve", {
+                              request_id: item.request_id,
+                              decision: "approve",
+                              expires_in_seconds: 3600,
+                            })
+                          }
+                          disabled={busyActionId === "vault.access.resolve"}
+                        >
+                          批准授权
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() =>
+                            void submitAction("vault.access.resolve", {
+                              request_id: item.request_id,
+                              decision: "reject",
+                            })
+                          }
+                          disabled={busyActionId === "vault.access.resolve"}
+                        >
+                          拒绝
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="meta-grid">
+                  {(vaultAuthorization?.active_grants ?? []).slice(0, 4).map((grant) => (
+                    <span key={grant.grant_id}>
+                      {grant.subject_key || grant.grant_id}: {grant.status}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            </div>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Vault Actions</p>
+                  <h3>授权申请 / 检索 / 校验</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  Retrievals {vaultAuthorization?.recent_retrievals.length ?? 0}
+                </span>
+              </div>
+              <div className="form-grid">
+                <label>
+                  Access Scope
+                  <input
+                    value={memoryAccessDraft.scopeId}
+                    onChange={(event) =>
+                      setMemoryAccessDraft((current) => ({
+                        ...current,
+                        scopeId: event.target.value,
+                      }))
+                    }
+                    placeholder="scope-..."
+                  />
+                </label>
+                <label>
+                  Access Partition
+                  <input
+                    value={memoryAccessDraft.partition}
+                    onChange={(event) =>
+                      setMemoryAccessDraft((current) => ({
+                        ...current,
+                        partition: event.target.value,
+                      }))
+                    }
+                    placeholder="credential"
+                  />
+                </label>
+                <label>
+                  Access Subject
+                  <input
+                    value={memoryAccessDraft.subjectKey}
+                    onChange={(event) =>
+                      setMemoryAccessDraft((current) => ({
+                        ...current,
+                        subjectKey: event.target.value,
+                      }))
+                    }
+                    placeholder="subject_key"
+                  />
+                </label>
+                <label>
+                  Access Reason
+                  <input
+                    value={memoryAccessDraft.reason}
+                    onChange={(event) =>
+                      setMemoryAccessDraft((current) => ({
+                        ...current,
+                        reason: event.target.value,
+                      }))
+                    }
+                    placeholder="说明检索目的"
+                  />
+                </label>
+                <label>
+                  Export Scope IDs
+                  <input
+                    value={memoryExportDraft.scopeIds}
+                    onChange={(event) =>
+                      setMemoryExportDraft((current) => ({
+                        ...current,
+                        scopeIds: event.target.value,
+                      }))
+                    }
+                    placeholder="scope-a,scope-b"
+                  />
+                </label>
+                <label className="checkbox-line">
+                  <input
+                    type="checkbox"
+                    checked={memoryExportDraft.includeHistory}
+                    onChange={(event) =>
+                      setMemoryExportDraft((current) => ({
+                        ...current,
+                        includeHistory: event.target.checked,
+                      }))
+                    }
+                  />
+                  Export 包含历史
+                </label>
+                <label className="checkbox-line">
+                  <input
+                    type="checkbox"
+                    checked={memoryExportDraft.includeVaultRefs}
+                    onChange={(event) =>
+                      setMemoryExportDraft((current) => ({
+                        ...current,
+                        includeVaultRefs: event.target.checked,
+                      }))
+                    }
+                  />
+                  Export 包含 Vault 引用
+                </label>
+                <label>
+                  Retrieve Query
+                  <input
+                    value={memoryRetrieveDraft.query}
+                    onChange={(event) =>
+                      setMemoryRetrieveDraft((current) => ({
+                        ...current,
+                        query: event.target.value,
+                      }))
+                    }
+                    placeholder="summary contains..."
+                  />
+                </label>
+                <label>
+                  Retrieve Scope
+                  <input
+                    value={memoryRetrieveDraft.scopeId}
+                    onChange={(event) =>
+                      setMemoryRetrieveDraft((current) => ({
+                        ...current,
+                        scopeId: event.target.value,
+                      }))
+                    }
+                    placeholder="scope-..."
+                  />
+                </label>
+                <label>
+                  Retrieve Partition
+                  <input
+                    value={memoryRetrieveDraft.partition}
+                    onChange={(event) =>
+                      setMemoryRetrieveDraft((current) => ({
+                        ...current,
+                        partition: event.target.value,
+                      }))
+                    }
+                    placeholder="credential"
+                  />
+                </label>
+                <label>
+                  Retrieve Subject
+                  <input
+                    value={memoryRetrieveDraft.subjectKey}
+                    onChange={(event) =>
+                      setMemoryRetrieveDraft((current) => ({
+                        ...current,
+                        subjectKey: event.target.value,
+                      }))
+                    }
+                    placeholder="subject_key"
+                  />
+                </label>
+                <label>
+                  Grant ID
+                  <input
+                    value={memoryRetrieveDraft.grantId}
+                    onChange={(event) =>
+                      setMemoryRetrieveDraft((current) => ({
+                        ...current,
+                        grantId: event.target.value,
+                      }))
+                    }
+                    placeholder="可留空，自动匹配"
+                  />
+                </label>
+                <label>
+                  Snapshot Ref
+                  <input
+                    value={memoryRestoreDraft.snapshotRef}
+                    onChange={(event) =>
+                      setMemoryRestoreDraft((current) => ({
+                        ...current,
+                        snapshotRef: event.target.value,
+                      }))
+                    }
+                    placeholder="/path/to/memory-export.zip"
+                  />
+                </label>
+                <label>
+                  Restore Scope Mode
+                  <input
+                    value={memoryRestoreDraft.targetScopeMode}
+                    onChange={(event) =>
+                      setMemoryRestoreDraft((current) => ({
+                        ...current,
+                        targetScopeMode: event.target.value,
+                      }))
+                    }
+                    placeholder="current_project"
+                  />
+                </label>
+                <label>
+                  Restore Scope IDs
+                  <input
+                    value={memoryRestoreDraft.scopeIds}
+                    onChange={(event) =>
+                      setMemoryRestoreDraft((current) => ({
+                        ...current,
+                        scopeIds: event.target.value,
+                      }))
+                    }
+                    placeholder="scope-a,scope-b"
+                  />
+                </label>
+              </div>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    void submitAction("vault.access.request", {
+                      project_id: memory.active_project_id,
+                      workspace_id: memory.active_workspace_id,
+                      scope_id: memoryAccessDraft.scopeId,
+                      partition: memoryAccessDraft.partition,
+                      subject_key: memoryAccessDraft.subjectKey,
+                      reason: memoryAccessDraft.reason,
+                    })
+                  }
+                  disabled={busyActionId === "vault.access.request"}
+                >
+                  发起授权申请
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    void submitAction("vault.retrieve", {
+                      project_id: memory.active_project_id,
+                      workspace_id: memory.active_workspace_id,
+                      scope_id: memoryRetrieveDraft.scopeId || memoryAccessDraft.scopeId,
+                      partition:
+                        memoryRetrieveDraft.partition || memoryAccessDraft.partition,
+                      subject_key:
+                        memoryRetrieveDraft.subjectKey || memoryAccessDraft.subjectKey,
+                      query: memoryRetrieveDraft.query,
+                      grant_id: memoryRetrieveDraft.grantId,
+                    })
+                  }
+                  disabled={busyActionId === "vault.retrieve"}
+                >
+                  执行 Vault 检索
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() =>
+                    void submitAction("memory.export.inspect", {
+                      project_id: memory.active_project_id,
+                      workspace_id: memory.active_workspace_id,
+                      scope_ids: parseCsvList(memoryExportDraft.scopeIds),
+                      include_history: memoryExportDraft.includeHistory,
+                      include_vault_refs: memoryExportDraft.includeVaultRefs,
+                    })
+                  }
+                  disabled={busyActionId === "memory.export.inspect"}
+                >
+                  Export Inspect
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() =>
+                    void submitAction("memory.restore.verify", {
+                      project_id: memory.active_project_id,
+                      workspace_id: memory.active_workspace_id,
+                      snapshot_ref: memoryRestoreDraft.snapshotRef,
+                      target_scope_mode: memoryRestoreDraft.targetScopeMode,
+                      scope_ids: parseCsvList(memoryRestoreDraft.scopeIds),
+                    })
+                  }
+                  disabled={busyActionId === "memory.restore.verify"}
+                >
+                  Restore Verify
+                </button>
+              </div>
+              <div className="meta-grid">
+                {(vaultAuthorization?.recent_retrievals ?? []).slice(0, 4).map((item) => (
+                  <span key={item.retrieval_id}>
+                    {item.subject_key || item.retrieval_id}: {item.reason_code} /{" "}
+                    {item.result_count}
+                  </span>
+                ))}
+              </div>
+            </article>
+
+            {lastMemoryAction ? (
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Latest Memory Action</p>
+                    <h3>{lastMemoryAction.action_id}</h3>
+                  </div>
+                  <span className={`tone-chip ${statusTone(lastMemoryAction.status)}`}>
+                    {lastMemoryAction.code}
+                  </span>
+                </div>
+                <pre className="config-editor">{formatJson(lastMemoryAction.data)}</pre>
+              </article>
+            ) : null}
           </section>
         ) : null}
 

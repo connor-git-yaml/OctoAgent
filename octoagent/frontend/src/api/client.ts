@@ -12,6 +12,9 @@ import type {
   DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
+  MemoryConsoleDocument,
+  MemoryProposalAuditDocument,
+  MemorySubjectHistoryDocument,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
@@ -21,6 +24,7 @@ import type {
   TaskDetailResponse,
   TaskListResponse,
   UpdateAttemptSummary,
+  VaultAuthorizationDocument,
   WizardSessionDocument,
   ConfigSchemaDocument,
   AutomationJobDocument,
@@ -34,7 +38,23 @@ type ControlResourceName =
   | "project-selector"
   | "sessions"
   | "automation"
-  | "diagnostics";
+  | "diagnostics"
+  | "memory";
+
+interface MemoryResourceQuery {
+  projectId?: string;
+  workspaceId?: string;
+  scopeId?: string;
+  partition?: string;
+  layer?: string;
+  query?: string;
+  includeHistory?: boolean;
+  includeVaultRefs?: boolean;
+  limit?: number;
+  status?: string;
+  source?: string;
+  subjectKey?: string;
+}
 
 async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${BASE_URL}${path}`, {
@@ -58,6 +78,23 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   return resp.json() as Promise<T>;
+}
+
+function buildQueryString(params: Record<string, unknown>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (
+      value === undefined ||
+      value === null ||
+      value === "" ||
+      (typeof value === "number" && Number.isNaN(value))
+    ) {
+      continue;
+    }
+    search.set(key, String(value));
+  }
+  const rendered = search.toString();
+  return rendered ? `?${rendered}` : "";
 }
 
 /** GET /api/control/snapshot -- control plane 首屏快照 */
@@ -85,6 +122,9 @@ export async function fetchControlResource(
   resource: "diagnostics"
 ): Promise<DiagnosticsSummaryDocument>;
 export async function fetchControlResource(
+  resource: "memory"
+): Promise<MemoryConsoleDocument>;
+export async function fetchControlResource(
   resource: ControlResourceName
 ): Promise<
   | WizardSessionDocument
@@ -93,8 +133,52 @@ export async function fetchControlResource(
   | SessionProjectionDocument
   | AutomationJobDocument
   | DiagnosticsSummaryDocument
+  | MemoryConsoleDocument
 > {
   return apiFetch(`/api/control/resources/${resource}`);
+}
+
+export async function fetchMemorySubjectHistory(
+  subjectKey: string,
+  params: MemoryResourceQuery = {}
+): Promise<MemorySubjectHistoryDocument> {
+  return apiFetch<MemorySubjectHistoryDocument>(
+    `/api/control/resources/memory-subjects/${encodeURIComponent(subjectKey)}${buildQueryString(
+      {
+        project_id: params.projectId,
+        workspace_id: params.workspaceId,
+        scope_id: params.scopeId,
+      }
+    )}`
+  );
+}
+
+export async function fetchMemoryProposals(
+  params: MemoryResourceQuery = {}
+): Promise<MemoryProposalAuditDocument> {
+  return apiFetch<MemoryProposalAuditDocument>(
+    `/api/control/resources/memory-proposals${buildQueryString({
+      project_id: params.projectId,
+      workspace_id: params.workspaceId,
+      scope_id: params.scopeId,
+      status: params.status,
+      source: params.source,
+      limit: params.limit,
+    })}`
+  );
+}
+
+export async function fetchVaultAuthorization(
+  params: MemoryResourceQuery = {}
+): Promise<VaultAuthorizationDocument> {
+  return apiFetch<VaultAuthorizationDocument>(
+    `/api/control/resources/vault-authorization${buildQueryString({
+      project_id: params.projectId,
+      workspace_id: params.workspaceId,
+      scope_id: params.scopeId,
+      subject_key: params.subjectKey,
+    })}`
+  );
 }
 
 /** GET /api/control/events -- 读取 control-plane event stream */

@@ -7,6 +7,9 @@ from .enums import (
     MemoryPartition,
     ProposalStatus,
     SorStatus,
+    VaultAccessDecision,
+    VaultAccessGrantStatus,
+    VaultAccessRequestStatus,
     WriteAction,
 )
 from .imports import (
@@ -38,7 +41,10 @@ from .models import (
     ProposalNotValidatedError,
     ProposalValidation,
     SorRecord,
+    VaultAccessGrantRecord,
+    VaultAccessRequestRecord,
     VaultRecord,
+    VaultRetrievalAuditRecord,
     WriteProposal,
 )
 from .service import MemoryService
@@ -58,6 +64,9 @@ __all__ = [
     "MemoryPartition",
     "ProposalStatus",
     "SorStatus",
+    "VaultAccessDecision",
+    "VaultAccessGrantStatus",
+    "VaultAccessRequestStatus",
     "WriteAction",
     "CommitResult",
     "CompactionFlushResult",
@@ -71,6 +80,9 @@ __all__ = [
     "ProposalNotValidatedError",
     "ProposalValidation",
     "SorRecord",
+    "VaultAccessGrantRecord",
+    "VaultAccessRequestRecord",
+    "VaultRetrievalAuditRecord",
     "SqliteMemoryBackend",
     "SqliteMemoryStore",
     "ChatImportProcessor",

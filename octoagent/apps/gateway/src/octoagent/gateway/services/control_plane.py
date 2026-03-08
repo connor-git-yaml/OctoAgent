@@ -39,6 +39,9 @@ from octoagent.core.models import (
     Event,
     EventCausality,
     EventType,
+    MemoryConsoleDocument,
+    MemoryProposalAuditDocument,
+    MemorySubjectHistoryDocument,
     OperatorActionKind,
     OperatorActionRequest,
     OperatorActionSource,
@@ -51,12 +54,14 @@ from octoagent.core.models import (
     TaskPointers,
     TaskStatus,
     UpdateTriggerSource,
+    VaultAuthorizationDocument,
     WizardSessionDocument,
     WizardStepDocument,
     WorkspaceOption,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
 from octoagent.core.models.task import RequesterInfo
+from octoagent.memory import MemoryLayer, MemoryPartition, ProposalStatus, VaultAccessDecision
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.provider.dx.chat_import_service import ChatImportService
@@ -66,6 +71,10 @@ from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 from octoagent.provider.dx.litellm_generator import (
     check_litellm_sync_status,
     generate_litellm_config,
+)
+from octoagent.provider.dx.memory_console_service import (
+    MemoryConsoleError,
+    MemoryConsoleService,
 )
 from octoagent.provider.dx.onboarding_service import OnboardingService
 from ulid import ULID
@@ -99,6 +108,7 @@ class ControlPlaneService:
         telegram_state_store=None,
         update_status_store=None,
         update_service=None,
+        memory_console_service: MemoryConsoleService | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -109,6 +119,10 @@ class ControlPlaneService:
         self._telegram_state_store = telegram_state_store
         self._update_status_store = update_status_store
         self._update_service = update_service
+        self._memory_console_service = memory_console_service or MemoryConsoleService(
+            project_root,
+            store_group=store_group,
+        )
         self._state_store = ControlPlaneStateStore(project_root)
         self._automation_store = AutomationStore(project_root)
         self._automation_scheduler = None
@@ -129,6 +143,7 @@ class ControlPlaneService:
         sessions = await self.get_session_projection()
         automation = await self.get_automation_document()
         diagnostics = await self.get_diagnostics_summary()
+        memory = await self.get_memory_console()
         registry = self.get_action_registry()
         return {
             "contract_version": registry.contract_version,
@@ -141,6 +156,7 @@ class ControlPlaneService:
                 "sessions": sessions.model_dump(mode="json", by_alias=True),
                 "automation": automation.model_dump(mode="json", by_alias=True),
                 "diagnostics": diagnostics.model_dump(mode="json", by_alias=True),
+                "memory": memory.model_dump(mode="json", by_alias=True),
             },
             "registry": registry.model_dump(mode="json", by_alias=True),
             "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -631,6 +647,115 @@ class ControlPlaneService:
             ],
         )
 
+    async def get_memory_console(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        scope_id: str | None = None,
+        partition: str | None = None,
+        layer: str | None = None,
+        query: str | None = None,
+        include_history: bool = False,
+        include_vault_refs: bool = False,
+        limit: int = 50,
+    ) -> MemoryConsoleDocument:
+        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        document = await self._memory_console_service.get_memory_console(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+            scope_id=scope_id,
+            partition=self._parse_memory_partition(partition),
+            layer=self._parse_memory_layer(layer),
+            query=query,
+            include_history=include_history,
+            include_vault_refs=include_vault_refs,
+            limit=limit,
+        )
+        if fallback_reason:
+            document.warnings.append(fallback_reason)
+            document.degraded.is_degraded = True
+            if fallback_reason not in document.degraded.reasons:
+                document.degraded.reasons.append(fallback_reason)
+        return document
+
+    async def get_memory_subject_history(
+        self,
+        subject_key: str,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        scope_id: str | None = None,
+    ) -> MemorySubjectHistoryDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        return await self._memory_console_service.get_memory_subject_history(
+            subject_key=subject_key,
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+            scope_id=scope_id,
+        )
+
+    async def get_memory_proposal_audit(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        scope_id: str | None = None,
+        status: str | None = None,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> MemoryProposalAuditDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        proposal_status = ProposalStatus(status) if status else None
+        return await self._memory_console_service.get_proposal_audit(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+            scope_id=scope_id,
+            status=proposal_status,
+            source=source,
+            limit=limit,
+        )
+
+    async def get_vault_authorization(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        scope_id: str | None = None,
+        subject_key: str | None = None,
+    ) -> VaultAuthorizationDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        return await self._memory_console_service.get_vault_authorization(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+            scope_id=scope_id,
+            subject_key=subject_key,
+        )
+
     async def list_events(
         self, after: str | None = None, limit: int = 100
     ) -> list[ControlPlaneEvent]:
@@ -750,6 +875,22 @@ class ControlPlaneService:
                 data={"overall_status": diagnostics.overall_status},
                 resource_refs=[self._resource_ref("diagnostics_summary", "diagnostics:runtime")],
             )
+        if action_id == "memory.query":
+            return await self._handle_memory_query(request)
+        if action_id == "memory.subject.inspect":
+            return await self._handle_memory_subject_inspect(request)
+        if action_id == "memory.proposal.inspect":
+            return await self._handle_memory_proposal_inspect(request)
+        if action_id == "vault.access.request":
+            return await self._handle_vault_access_request(request)
+        if action_id == "vault.access.resolve":
+            return await self._handle_vault_access_resolve(request)
+        if action_id == "vault.retrieve":
+            return await self._handle_vault_retrieve(request)
+        if action_id == "memory.export.inspect":
+            return await self._handle_memory_export_inspect(request)
+        if action_id == "memory.restore.verify":
+            return await self._handle_memory_restore_verify(request)
         if action_id == "session.focus":
             return await self._handle_session_focus(request)
         if action_id == "session.export":
@@ -851,6 +992,326 @@ class ControlPlaneService:
                     target_type="project", target_id=project_id, label=project.name
                 )
             ],
+        )
+
+    async def _resolve_memory_action_context(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> tuple[str, str | None]:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        project_id = self._param_str(request.params, "project_id") or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        workspace_id = self._param_str(request.params, "workspace_id") or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        return project_id, workspace_id
+
+    async def _handle_memory_query(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        document = await self.get_memory_console(
+            project_id=project_id or None,
+            workspace_id=workspace_id,
+            scope_id=self._param_str(request.params, "scope_id") or None,
+            partition=self._param_str(request.params, "partition") or None,
+            layer=self._param_str(request.params, "layer") or None,
+            query=self._param_str(request.params, "query") or None,
+            include_history=self._param_bool(request.params, "include_history"),
+            include_vault_refs=self._param_bool(request.params, "include_vault_refs"),
+            limit=self._param_int(request.params, "limit", default=50),
+        )
+        return self._completed_result(
+            request=request,
+            code="MEMORY_QUERY_COMPLETED",
+            message="已刷新 Memory 总览。",
+            data={
+                "record_count": len(document.records),
+                "active_project_id": document.active_project_id,
+                "active_workspace_id": document.active_workspace_id,
+            },
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+        )
+
+    async def _handle_memory_subject_inspect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        subject_key = self._param_str(request.params, "subject_key")
+        if not subject_key:
+            raise ControlPlaneActionError("SUBJECT_KEY_REQUIRED", "subject_key 不能为空")
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        document = await self.get_memory_subject_history(
+            subject_key,
+            project_id=project_id or None,
+            workspace_id=workspace_id,
+            scope_id=self._param_str(request.params, "scope_id") or None,
+        )
+        return self._completed_result(
+            request=request,
+            code="MEMORY_SUBJECT_HISTORY_READY",
+            message="已加载 Subject 历史。",
+            data={
+                "subject_key": subject_key,
+                "history_count": len(document.history),
+                "scope_id": document.scope_id,
+            },
+            resource_refs=[
+                self._resource_ref(
+                    "memory_subject_history",
+                    f"memory-subject:{subject_key}",
+                )
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="memory_subject",
+                    target_id=subject_key,
+                    label=subject_key,
+                )
+            ],
+        )
+
+    async def _handle_memory_proposal_inspect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        document = await self.get_memory_proposal_audit(
+            project_id=project_id or None,
+            workspace_id=workspace_id,
+            scope_id=self._param_str(request.params, "scope_id") or None,
+            status=self._param_str(request.params, "status") or None,
+            source=self._param_str(request.params, "source") or None,
+            limit=self._param_int(request.params, "limit", default=50),
+        )
+        return self._completed_result(
+            request=request,
+            code="MEMORY_PROPOSAL_AUDIT_READY",
+            message="已加载 Memory Proposal 审计视图。",
+            data={"item_count": len(document.items)},
+            resource_refs=[
+                self._resource_ref(
+                    "memory_proposal_audit",
+                    "memory-proposals:overview",
+                )
+            ],
+        )
+
+    async def _handle_vault_access_request(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        vault_request, decision = await self._memory_console_service.request_vault_access(
+            actor_id=request.actor.actor_id,
+            actor_label=request.actor.actor_label,
+            active_project_id=project_id,
+            active_workspace_id=workspace_id or "",
+            project_id=project_id,
+            workspace_id=workspace_id or "",
+            scope_id=self._param_str(request.params, "scope_id") or None,
+            partition=self._param_str(request.params, "partition"),
+            subject_key=self._param_str(request.params, "subject_key") or None,
+            reason=self._param_str(request.params, "reason"),
+        )
+        if not decision.allowed or vault_request is None:
+            return self._rejected_result(
+                request=request,
+                code=decision.reason_code,
+                message=decision.message,
+            )
+        return self._completed_result(
+            request=request,
+            code="VAULT_ACCESS_REQUEST_CREATED",
+            message="已创建 Vault 授权申请。",
+            data={"request_id": vault_request.request_id},
+            resource_refs=[
+                self._resource_ref("vault_authorization", "vault:authorization"),
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="vault_request",
+                    target_id=vault_request.request_id,
+                )
+            ],
+        )
+
+    async def _handle_vault_access_resolve(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        request_id = self._param_str(request.params, "request_id")
+        decision_raw = self._param_str(request.params, "decision").lower()
+        if not request_id:
+            raise ControlPlaneActionError("REQUEST_ID_REQUIRED", "request_id 不能为空")
+        if decision_raw not in {"approve", "reject"}:
+            raise ControlPlaneActionError(
+                "VAULT_ACCESS_DECISION_INVALID",
+                "decision 必须是 approve/reject",
+            )
+        try:
+            resolved_request, grant = await self._memory_console_service.resolve_vault_access(
+                request_id=request_id,
+                decision=VaultAccessDecision(decision_raw),
+                actor_id=request.actor.actor_id,
+                actor_label=request.actor.actor_label,
+                expires_in_seconds=self._param_int(
+                    request.params,
+                    "expires_in_seconds",
+                    default=0,
+                ),
+            )
+        except MemoryConsoleError as exc:
+            return self._rejected_result(
+                request=request,
+                code=exc.code,
+                message=str(exc),
+            )
+        code = (
+            "VAULT_ACCESS_APPROVED"
+            if resolved_request.status is not None
+            and resolved_request.status.value == "approved"
+            else "VAULT_ACCESS_REJECTED"
+        )
+        message = (
+            "已批准 Vault 授权申请。"
+            if code == "VAULT_ACCESS_APPROVED"
+            else "已拒绝 Vault 授权申请。"
+        )
+        return self._completed_result(
+            request=request,
+            code=code,
+            message=message,
+            data={
+                "request_id": resolved_request.request_id,
+                "grant_id": grant.grant_id if grant is not None else "",
+            },
+            resource_refs=[
+                self._resource_ref("vault_authorization", "vault:authorization"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="vault_request",
+                    target_id=resolved_request.request_id,
+                )
+            ],
+        )
+
+    async def _handle_vault_retrieve(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        code, payload, decision = await self._memory_console_service.retrieve_vault(
+            actor_id=request.actor.actor_id,
+            actor_label=request.actor.actor_label,
+            active_project_id=project_id,
+            active_workspace_id=workspace_id or "",
+            project_id=project_id,
+            workspace_id=workspace_id or "",
+            scope_id=self._param_str(request.params, "scope_id") or None,
+            partition=self._param_str(request.params, "partition"),
+            subject_key=self._param_str(request.params, "subject_key") or None,
+            query=self._param_str(request.params, "query") or None,
+            grant_id=self._param_str(request.params, "grant_id") or None,
+        )
+        if code != "VAULT_RETRIEVE_AUTHORIZED":
+            return self._rejected_result(
+                request=request,
+                code=code if decision.allowed else decision.reason_code,
+                message=(
+                    "当前没有可用的 Vault 授权。"
+                    if decision.allowed
+                    else decision.message
+                ),
+                target_refs=self._memory_target_refs(request),
+            )
+        return self._completed_result(
+            request=request,
+            code=code,
+            message="已返回授权范围内的 Vault 检索结果。",
+            data=payload,
+            resource_refs=[
+                self._resource_ref("vault_authorization", "vault:authorization"),
+            ],
+            target_refs=self._memory_target_refs(request),
+        )
+
+    async def _handle_memory_export_inspect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        scope_ids = self._param_list(request.params, "scope_ids")
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        code, payload, decision = await self._memory_console_service.inspect_export(
+            active_project_id=project_id,
+            active_workspace_id=workspace_id or "",
+            project_id=project_id,
+            workspace_id=workspace_id or "",
+            scope_ids=scope_ids or None,
+            include_history=self._param_bool(request.params, "include_history"),
+            include_vault_refs=self._param_bool(request.params, "include_vault_refs"),
+        )
+        if code != "MEMORY_EXPORT_INSPECTION_READY":
+            return self._rejected_result(
+                request=request,
+                code=code if decision.allowed else decision.reason_code,
+                message=(
+                    "Memory 导出检查存在阻塞项。"
+                    if decision.allowed
+                    else decision.message
+                ),
+                target_refs=self._memory_target_refs(request),
+            )
+        return self._completed_result(
+            request=request,
+            code=code,
+            message="Memory 导出检查已就绪。",
+            data=payload,
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+            target_refs=self._memory_target_refs(request),
+        )
+
+    async def _handle_memory_restore_verify(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        snapshot_ref = self._param_str(request.params, "snapshot_ref")
+        if not snapshot_ref:
+            raise ControlPlaneActionError("SNAPSHOT_REF_REQUIRED", "snapshot_ref 不能为空")
+        project_id, _ = await self._resolve_memory_action_context(request)
+        code, payload, decision = await self._memory_console_service.verify_restore(
+            actor_id=request.actor.actor_id,
+            active_project_id=project_id,
+            active_workspace_id=self._param_str(request.params, "workspace_id"),
+            project_id=project_id,
+            workspace_id=self._param_str(request.params, "workspace_id"),
+            snapshot_ref=snapshot_ref,
+            target_scope_mode=self._param_str(
+                request.params,
+                "target_scope_mode",
+                default="current_project",
+            ),
+            scope_ids=self._param_list(request.params, "scope_ids") or None,
+        )
+        if code != "MEMORY_RESTORE_VERIFICATION_READY":
+            return self._rejected_result(
+                request=request,
+                code=code if decision.allowed else decision.reason_code,
+                message=(
+                    "Memory 恢复校验存在阻塞项。"
+                    if decision.allowed
+                    else decision.message
+                ),
+                target_refs=self._memory_target_refs(request),
+            )
+        return self._completed_result(
+            request=request,
+            code=code,
+            message="Memory 恢复校验已通过。",
+            data=payload,
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+            target_refs=self._memory_target_refs(request),
         )
 
     async def _handle_session_focus(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -1732,6 +2193,102 @@ class ControlPlaneService:
             }
         }
 
+    def _parse_memory_partition(self, raw: str | None) -> MemoryPartition | None:
+        if not raw:
+            return None
+        try:
+            return MemoryPartition(raw)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "MEMORY_PARTITION_INVALID",
+                f"非法 partition: {raw}",
+            ) from exc
+
+    def _parse_memory_layer(self, raw: str | None) -> MemoryLayer | None:
+        if not raw:
+            return None
+        try:
+            return MemoryLayer(raw)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "MEMORY_LAYER_INVALID",
+                f"非法 layer: {raw}",
+            ) from exc
+
+    def _param_str(
+        self,
+        params: Mapping[str, Any],
+        key: str,
+        *,
+        default: str = "",
+    ) -> str:
+        value = params.get(key, default)
+        return str(value or default).strip()
+
+    def _param_bool(self, params: Mapping[str, Any], key: str) -> bool:
+        value = params.get(key, False)
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _param_int(
+        self,
+        params: Mapping[str, Any],
+        key: str,
+        *,
+        default: int,
+    ) -> int:
+        value = params.get(key, default)
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ControlPlaneActionError(
+                f"{key.upper()}_INVALID",
+                f"{key} 必须是整数",
+            ) from exc
+
+    def _param_list(self, params: Mapping[str, Any], key: str) -> list[str]:
+        value = params.get(key)
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        value_str = str(value).strip()
+        if not value_str:
+            return []
+        return [item.strip() for item in value_str.split(",") if item.strip()]
+
+    def _memory_target_refs(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> list[ControlPlaneTargetRef]:
+        refs: list[ControlPlaneTargetRef] = []
+        if project_id := self._param_str(request.params, "project_id"):
+            refs.append(
+                ControlPlaneTargetRef(
+                    target_type="project",
+                    target_id=project_id,
+                )
+            )
+        if scope_id := self._param_str(request.params, "scope_id"):
+            refs.append(
+                ControlPlaneTargetRef(
+                    target_type="scope",
+                    target_id=scope_id,
+                )
+            )
+        if subject_key := self._param_str(request.params, "subject_key"):
+            refs.append(
+                ControlPlaneTargetRef(
+                    target_type="memory_subject",
+                    target_id=subject_key,
+                    label=subject_key,
+                )
+            )
+        return refs
+
     def _map_control_event_type(self, event_type: ControlPlaneEventType) -> EventType:
         mapping = {
             ControlPlaneEventType.RESOURCE_PROJECTED: EventType.CONTROL_PLANE_RESOURCE_PROJECTED,
@@ -1831,6 +2388,95 @@ class ControlPlaneService:
         }
         return mapping[surface]
 
+    def _param_str(
+        self,
+        params: Mapping[str, Any],
+        key: str,
+        *,
+        default: str = "",
+    ) -> str:
+        value = params.get(key, default)
+        if value is None:
+            return default
+        return str(value).strip()
+
+    def _param_bool(self, params: Mapping[str, Any], key: str) -> bool:
+        value = params.get(key, False)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    def _param_int(
+        self,
+        params: Mapping[str, Any],
+        key: str,
+        *,
+        default: int,
+    ) -> int:
+        value = params.get(key, default)
+        if value in {None, ""}:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ControlPlaneActionError(
+                "PARAM_INT_INVALID",
+                f"{key} 必须是整数",
+            ) from exc
+
+    def _param_list(self, params: Mapping[str, Any], key: str) -> list[str]:
+        value = params.get(key)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raise ControlPlaneActionError("PARAM_LIST_INVALID", f"{key} 必须是 string/list")
+
+    def _parse_memory_partition(self, value: str | None) -> MemoryPartition | None:
+        if not value:
+            return None
+        try:
+            return MemoryPartition(value)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "MEMORY_PARTITION_INVALID",
+                f"不支持的 partition: {value}",
+            ) from exc
+
+    def _parse_memory_layer(self, value: str | None) -> MemoryLayer | None:
+        if not value:
+            return None
+        try:
+            return MemoryLayer(value)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "MEMORY_LAYER_INVALID",
+                f"不支持的 layer: {value}",
+            ) from exc
+
+    def _memory_target_refs(self, request: ActionRequestEnvelope) -> list[ControlPlaneTargetRef]:
+        targets: list[ControlPlaneTargetRef] = []
+        for key, target_type in (
+            ("project_id", "project"),
+            ("workspace_id", "workspace"),
+            ("scope_id", "scope"),
+            ("subject_key", "memory_subject"),
+        ):
+            value = self._param_str(request.params, key)
+            if value:
+                targets.append(
+                    ControlPlaneTargetRef(
+                        target_type=target_type,
+                        target_id=value,
+                        label=value,
+                    )
+                )
+        return targets
+
     def _build_registry(self) -> ActionRegistryDocument:
         def definition(
             action_id: str,
@@ -1885,6 +2531,53 @@ class ControlPlaneService:
                     telegram_aliases=["/project select"],
                     params_schema={"type": "object", "required": ["project_id"]},
                     telegram_supported=True,
+                ),
+                definition("memory.query", "刷新 Memory 总览", category="memory"),
+                definition(
+                    "memory.subject.inspect",
+                    "查看 Subject 历史",
+                    category="memory",
+                    params_schema={"type": "object", "required": ["subject_key"]},
+                ),
+                definition(
+                    "memory.proposal.inspect",
+                    "查看 Proposal 审计",
+                    category="memory",
+                ),
+                definition(
+                    "vault.access.request",
+                    "申请 Vault 授权",
+                    category="memory",
+                    approval_hint="operator",
+                    params_schema={"type": "object", "required": ["project_id"]},
+                ),
+                definition(
+                    "vault.access.resolve",
+                    "处理 Vault 授权",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="operator",
+                    params_schema={"type": "object", "required": ["request_id", "decision"]},
+                ),
+                definition(
+                    "vault.retrieve",
+                    "检索 Vault 引用",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="operator",
+                ),
+                definition(
+                    "memory.export.inspect",
+                    "检查 Memory 导出范围",
+                    category="memory",
+                ),
+                definition(
+                    "memory.restore.verify",
+                    "校验 Memory 恢复快照",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="operator",
+                    params_schema={"type": "object", "required": ["snapshot_ref"]},
                 ),
                 definition("session.focus", "聚焦会话", category="sessions"),
                 definition("session.export", "导出会话", category="sessions"),
@@ -1970,6 +2663,48 @@ class ControlPlaneService:
                     category="diagnostics",
                     telegram_aliases=["/status"],
                     telegram_supported=True,
+                ),
+                definition("memory.query", "查询 Memory", category="memory"),
+                definition(
+                    "memory.subject.inspect",
+                    "查看 Subject 历史",
+                    category="memory",
+                ),
+                definition(
+                    "memory.proposal.inspect",
+                    "查看 Proposal 审计",
+                    category="memory",
+                ),
+                definition(
+                    "vault.access.request",
+                    "申请 Vault 授权",
+                    category="memory",
+                ),
+                definition(
+                    "vault.access.resolve",
+                    "审批 Vault 授权",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="operator",
+                ),
+                definition(
+                    "vault.retrieve",
+                    "检索 Vault",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="grant",
+                ),
+                definition(
+                    "memory.export.inspect",
+                    "检查 Memory 导出范围",
+                    category="memory",
+                ),
+                definition(
+                    "memory.restore.verify",
+                    "校验 Memory 恢复",
+                    category="memory",
+                    risk_hint="high",
+                    approval_hint="operator",
                 ),
             ],
             capabilities=[

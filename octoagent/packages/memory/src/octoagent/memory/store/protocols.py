@@ -2,7 +2,15 @@
 
 from typing import Protocol
 
-from ..models import FragmentRecord, SorRecord, VaultRecord, WriteProposal
+from ..models import (
+    FragmentRecord,
+    SorRecord,
+    VaultAccessGrantRecord,
+    VaultAccessRequestRecord,
+    VaultRecord,
+    VaultRetrievalAuditRecord,
+    WriteProposal,
+)
 
 
 class MemoryStore(Protocol):
@@ -11,6 +19,14 @@ class MemoryStore(Protocol):
     async def save_proposal(self, proposal: WriteProposal) -> None: ...
 
     async def get_proposal(self, proposal_id: str) -> WriteProposal | None: ...
+
+    async def list_proposals(
+        self,
+        *,
+        scope_ids: list[str] | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[WriteProposal]: ...
 
     async def replace_proposal(self, proposal: WriteProposal) -> None: ...
 
@@ -64,3 +80,72 @@ class MemoryStore(Protocol):
         query: str | None = None,
         limit: int = 10,
     ) -> list[VaultRecord]: ...
+
+    async def create_vault_access_request(
+        self,
+        record: VaultAccessRequestRecord,
+    ) -> None: ...
+
+    async def get_vault_access_request(
+        self,
+        request_id: str,
+    ) -> VaultAccessRequestRecord | None: ...
+
+    async def replace_vault_access_request(
+        self,
+        record: VaultAccessRequestRecord,
+    ) -> None: ...
+
+    async def list_vault_access_requests(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[VaultAccessRequestRecord]: ...
+
+    async def insert_vault_access_grant(
+        self,
+        record: VaultAccessGrantRecord,
+    ) -> None: ...
+
+    async def get_vault_access_grant(
+        self,
+        grant_id: str,
+    ) -> VaultAccessGrantRecord | None: ...
+
+    async def replace_vault_access_grant(
+        self,
+        record: VaultAccessGrantRecord,
+    ) -> None: ...
+
+    async def list_vault_access_grants(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        actor_id: str | None = None,
+        statuses: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[VaultAccessGrantRecord]: ...
+
+    async def append_vault_retrieval_audit(
+        self,
+        record: VaultRetrievalAuditRecord,
+    ) -> None: ...
+
+    async def list_vault_retrieval_audits(
+        self,
+        *,
+        project_id: str,
+        workspace_id: str | None = None,
+        scope_ids: list[str] | None = None,
+        subject_key: str | None = None,
+        actor_id: str | None = None,
+        limit: int = 50,
+    ) -> list[VaultRetrievalAuditRecord]: ...

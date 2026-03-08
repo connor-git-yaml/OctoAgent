@@ -563,6 +563,167 @@ export interface DiagnosticsSummaryDocument extends ControlPlaneDocumentBase {
   deep_refs: Record<string, string>;
 }
 
+export interface MemoryConsoleFilter {
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  partition: string;
+  layer: string;
+  query: string;
+  include_history: boolean;
+  include_vault_refs: boolean;
+  limit: number;
+  cursor: string;
+}
+
+export interface MemoryRecordProjection {
+  record_id: string;
+  layer: string;
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  partition: string;
+  subject_key: string;
+  summary: string;
+  status: string;
+  version: number | null;
+  created_at: string;
+  updated_at: string | null;
+  evidence_refs: Array<Record<string, unknown>>;
+  metadata: Record<string, unknown>;
+  requires_vault_authorization: boolean;
+}
+
+export interface MemoryConsoleSummary {
+  scope_count: number;
+  fragment_count: number;
+  sor_current_count: number;
+  sor_history_count: number;
+  vault_ref_count: number;
+  proposal_count: number;
+}
+
+export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
+  resource_type: "memory_console";
+  resource_id: "memory:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  filters: MemoryConsoleFilter;
+  summary: MemoryConsoleSummary;
+  records: MemoryRecordProjection[];
+  available_scopes: string[];
+  available_partitions: string[];
+  available_layers: string[];
+}
+
+export interface MemorySubjectHistoryDocument extends ControlPlaneDocumentBase {
+  resource_type: "memory_subject_history";
+  resource_id: "memory-subject:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  scope_id: string;
+  subject_key: string;
+  current_record: MemoryRecordProjection | null;
+  history: MemoryRecordProjection[];
+}
+
+export interface MemoryProposalSummary {
+  pending: number;
+  validated: number;
+  rejected: number;
+  committed: number;
+}
+
+export interface MemoryProposalAuditItem {
+  proposal_id: string;
+  scope_id: string;
+  partition: string;
+  action: string;
+  subject_key: string;
+  status: string;
+  confidence: number;
+  rationale: string;
+  is_sensitive: boolean;
+  evidence_refs: Array<Record<string, unknown>>;
+  created_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface MemoryProposalAuditDocument extends ControlPlaneDocumentBase {
+  resource_type: "memory_proposal_audit";
+  resource_id: "memory-proposals:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  summary: MemoryProposalSummary;
+  items: MemoryProposalAuditItem[];
+}
+
+export interface VaultAccessRequestItem {
+  request_id: string;
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  partition: string;
+  subject_key: string;
+  reason: string;
+  requester_actor_id: string;
+  requester_actor_label: string;
+  status: string;
+  decision: string;
+  requested_at: string;
+  resolved_at: string | null;
+  resolver_actor_id: string;
+  resolver_actor_label: string;
+}
+
+export interface VaultAccessGrantItem {
+  grant_id: string;
+  request_id: string;
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  partition: string;
+  subject_key: string;
+  granted_to_actor_id: string;
+  granted_to_actor_label: string;
+  granted_by_actor_id: string;
+  granted_by_actor_label: string;
+  granted_at: string;
+  expires_at: string | null;
+  status: string;
+}
+
+export interface VaultRetrievalAuditItem {
+  retrieval_id: string;
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  partition: string;
+  subject_key: string;
+  query: string;
+  grant_id: string;
+  actor_id: string;
+  actor_label: string;
+  authorized: boolean;
+  reason_code: string;
+  result_count: number;
+  retrieved_vault_ids: string[];
+  evidence_refs: Array<Record<string, unknown>>;
+  created_at: string;
+}
+
+export interface VaultAuthorizationDocument extends ControlPlaneDocumentBase {
+  resource_type: "vault_authorization";
+  resource_id: "vault:authorization";
+  active_project_id: string;
+  active_workspace_id: string;
+  active_requests: VaultAccessRequestItem[];
+  active_grants: VaultAccessGrantItem[];
+  recent_retrievals: VaultRetrievalAuditItem[];
+}
+
 export interface ActionDefinition {
   action_id: string;
   label: string;
@@ -638,6 +799,7 @@ export interface ControlPlaneSnapshot {
     sessions: SessionProjectionDocument;
     automation: AutomationJobDocument;
     diagnostics: DiagnosticsSummaryDocument;
+    memory: MemoryConsoleDocument;
   };
   registry: ActionRegistryDocument;
   generated_at: string;

@@ -70,6 +70,72 @@ CREATE TABLE IF NOT EXISTS memory_vault (
 );
 """
 
+_VAULT_ACCESS_REQUESTS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_vault_access_requests (
+    request_id             TEXT PRIMARY KEY,
+    schema_version         INTEGER NOT NULL DEFAULT 1,
+    project_id             TEXT NOT NULL,
+    workspace_id           TEXT,
+    scope_id               TEXT NOT NULL,
+    partition              TEXT,
+    subject_key            TEXT NOT NULL DEFAULT '',
+    reason                 TEXT NOT NULL DEFAULT '',
+    requester_actor_id     TEXT NOT NULL,
+    requester_actor_label  TEXT NOT NULL DEFAULT '',
+    status                 TEXT NOT NULL,
+    decision               TEXT,
+    requested_at           TEXT NOT NULL,
+    resolved_at            TEXT,
+    resolver_actor_id      TEXT NOT NULL DEFAULT '',
+    resolver_actor_label   TEXT NOT NULL DEFAULT '',
+    metadata               TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+_VAULT_ACCESS_GRANTS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_vault_access_grants (
+    grant_id                TEXT PRIMARY KEY,
+    schema_version          INTEGER NOT NULL DEFAULT 1,
+    request_id              TEXT NOT NULL,
+    project_id              TEXT NOT NULL,
+    workspace_id            TEXT,
+    scope_id                TEXT NOT NULL,
+    partition               TEXT,
+    subject_key             TEXT NOT NULL DEFAULT '',
+    granted_to_actor_id     TEXT NOT NULL,
+    granted_to_actor_label  TEXT NOT NULL DEFAULT '',
+    granted_by_actor_id     TEXT NOT NULL,
+    granted_by_actor_label  TEXT NOT NULL DEFAULT '',
+    granted_at              TEXT NOT NULL,
+    expires_at              TEXT,
+    status                  TEXT NOT NULL,
+    metadata                TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+_VAULT_RETRIEVAL_AUDITS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_vault_retrieval_audits (
+    retrieval_id         TEXT PRIMARY KEY,
+    schema_version       INTEGER NOT NULL DEFAULT 1,
+    project_id           TEXT NOT NULL,
+    workspace_id         TEXT,
+    scope_id             TEXT NOT NULL,
+    partition            TEXT,
+    subject_key          TEXT NOT NULL DEFAULT '',
+    query                TEXT NOT NULL DEFAULT '',
+    grant_id             TEXT NOT NULL DEFAULT '',
+    actor_id             TEXT NOT NULL,
+    actor_label          TEXT NOT NULL DEFAULT '',
+    authorized           INTEGER NOT NULL DEFAULT 0,
+    reason_code          TEXT NOT NULL,
+    result_count         INTEGER NOT NULL DEFAULT 0,
+    retrieved_vault_ids  TEXT NOT NULL DEFAULT '[]',
+    evidence_refs        TEXT NOT NULL DEFAULT '[]',
+    created_at           TEXT NOT NULL,
+    metadata             TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
 _INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_memory_fragments_scope_created "
@@ -97,6 +163,34 @@ _INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_memory_vault_scope_created "
         "ON memory_vault(scope_id, created_at DESC);"
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_requests_project_status "
+        "ON memory_vault_access_requests(project_id, status, requested_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_requests_scope_subject "
+        "ON memory_vault_access_requests(scope_id, subject_key, requested_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_grants_project_actor "
+        "ON memory_vault_access_grants(project_id, granted_to_actor_id, granted_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_grants_request "
+        "ON memory_vault_access_grants(request_id);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_retrieval_project_created "
+        "ON memory_vault_retrieval_audits(project_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_retrieval_scope_subject "
+        "ON memory_vault_retrieval_audits(scope_id, subject_key, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_vault_retrieval_actor "
+        "ON memory_vault_retrieval_audits(actor_id, created_at DESC);"
+    ),
 ]
 
 
@@ -111,6 +205,9 @@ async def init_memory_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_SOR_DDL)
     await conn.execute(_PROPOSALS_DDL)
     await conn.execute(_VAULT_DDL)
+    await conn.execute(_VAULT_ACCESS_REQUESTS_DDL)
+    await conn.execute(_VAULT_ACCESS_GRANTS_DDL)
+    await conn.execute(_VAULT_RETRIEVAL_AUDITS_DDL)
 
     for sql in _INDEXES:
         await conn.execute(sql)
@@ -126,6 +223,9 @@ async def verify_memory_tables(conn: aiosqlite.Connection) -> bool:
         "memory_sor",
         "memory_write_proposals",
         "memory_vault",
+        "memory_vault_access_requests",
+        "memory_vault_access_grants",
+        "memory_vault_retrieval_audits",
     }
     cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memory_%'"

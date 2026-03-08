@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ControlPlane from "./ControlPlane";
 
+type FetchArgs = [RequestInfo | URL, RequestInit | undefined];
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -57,6 +59,21 @@ function buildSnapshot(currentProjectId = "project-default") {
           approval_hint: "none",
           idempotency_hint: "request_id",
           resource_targets: ["session_projection"],
+        },
+        {
+          action_id: "memory.query",
+          label: "查询 Memory",
+          description: "",
+          category: "memory",
+          supported_surfaces: ["web", "telegram", "system"],
+          surface_aliases: { web: ["memory.query"], telegram: ["/memory query"] },
+          support_status_by_surface: { web: "supported", telegram: "supported" },
+          params_schema: {},
+          result_schema: {},
+          risk_hint: "low",
+          approval_hint: "none",
+          idempotency_hint: "request_id",
+          resource_targets: ["memory_console"],
         },
       ],
     },
@@ -307,7 +324,267 @@ function buildSnapshot(currentProjectId = "project-default") {
         },
         deep_refs: {},
       },
+      memory: {
+        contract_version: "1.0.0",
+        resource_type: "memory_console",
+        resource_id: "memory:overview",
+        schema_version: 1,
+        generated_at: "2026-03-08T09:00:00Z",
+        updated_at: "2026-03-08T09:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: currentProjectId,
+        active_workspace_id:
+          currentProjectId === "project-ops" ? "workspace-ops" : "workspace-default",
+        filters: {
+          project_id: currentProjectId,
+          workspace_id:
+            currentProjectId === "project-ops"
+              ? "workspace-ops"
+              : "workspace-default",
+          scope_id: "scope-prod",
+          partition: "",
+          layer: "",
+          query: "",
+          include_history: false,
+          include_vault_refs: true,
+          limit: 50,
+          cursor: "",
+        },
+        summary: {
+          scope_count: 1,
+          fragment_count: 1,
+          sor_current_count: 1,
+          sor_history_count: 1,
+          vault_ref_count: 1,
+          proposal_count: 1,
+        },
+        records: [
+          {
+            record_id: "sor-current-1",
+            layer: "sor",
+            project_id: currentProjectId,
+            workspace_id:
+              currentProjectId === "project-ops"
+                ? "workspace-ops"
+                : "workspace-default",
+            scope_id: "scope-prod",
+            partition: "profile",
+            subject_key: "user:alice",
+            summary: "Alice current profile",
+            status: "current",
+            version: 2,
+            created_at: "2026-03-08T09:00:00Z",
+            updated_at: "2026-03-08T09:05:00Z",
+            evidence_refs: [{ type: "task", id: "task-1" }],
+            metadata: { source: "manual" },
+            requires_vault_authorization: false,
+          },
+          {
+            record_id: "vault-1",
+            layer: "vault",
+            project_id: currentProjectId,
+            workspace_id:
+              currentProjectId === "project-ops"
+                ? "workspace-ops"
+                : "workspace-default",
+            scope_id: "scope-prod",
+            partition: "credential",
+            subject_key: "credential:db",
+            summary: "Database credential",
+            status: "sealed",
+            version: null,
+            created_at: "2026-03-08T09:01:00Z",
+            updated_at: null,
+            evidence_refs: [{ type: "artifact", id: "vault-1" }],
+            metadata: { owner: "ops" },
+            requires_vault_authorization: true,
+          },
+        ],
+        available_scopes: ["scope-prod"],
+        available_partitions: ["profile", "credential"],
+        available_layers: ["sor", "vault"],
+      },
     },
+  };
+}
+
+function buildMemorySubjectHistory() {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "memory_subject_history",
+    resource_id: "memory-subject:overview",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:10:00Z",
+    updated_at: "2026-03-08T09:10:00Z",
+    status: "ready",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: "project-default",
+    active_workspace_id: "workspace-default",
+    scope_id: "scope-prod",
+    subject_key: "user:alice",
+    current_record: {
+      record_id: "sor-current-1",
+      layer: "sor",
+      project_id: "project-default",
+      workspace_id: "workspace-default",
+      scope_id: "scope-prod",
+      partition: "profile",
+      subject_key: "user:alice",
+      summary: "Alice current profile",
+      status: "current",
+      version: 2,
+      created_at: "2026-03-08T09:00:00Z",
+      updated_at: "2026-03-08T09:05:00Z",
+      evidence_refs: [{ type: "task", id: "task-1" }],
+      metadata: { source: "manual" },
+      requires_vault_authorization: false,
+    },
+    history: [
+      {
+        record_id: "sor-old-1",
+        layer: "sor",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        scope_id: "scope-prod",
+        partition: "profile",
+        subject_key: "user:alice",
+        summary: "Alice superseded profile",
+        status: "superseded",
+        version: 1,
+        created_at: "2026-03-08T08:00:00Z",
+        updated_at: "2026-03-08T08:30:00Z",
+        evidence_refs: [{ type: "task", id: "task-0" }],
+        metadata: { source: "import" },
+        requires_vault_authorization: false,
+      },
+    ],
+  };
+}
+
+function buildMemoryProposals() {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "memory_proposal_audit",
+    resource_id: "memory-proposals:overview",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:10:00Z",
+    updated_at: "2026-03-08T09:10:00Z",
+    status: "ready",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: "project-default",
+    active_workspace_id: "workspace-default",
+    summary: {
+      pending: 1,
+      validated: 0,
+      rejected: 0,
+      committed: 1,
+    },
+    items: [
+      {
+        proposal_id: "proposal-1",
+        scope_id: "scope-prod",
+        partition: "profile",
+        action: "upsert",
+        subject_key: "user:alice",
+        status: "PENDING",
+        confidence: 0.92,
+        rationale: "新的联系人画像",
+        is_sensitive: false,
+        evidence_refs: [{ type: "task", id: "task-1" }],
+        created_at: "2026-03-08T09:00:00Z",
+        validated_at: null,
+        committed_at: null,
+        metadata: { source: "manual" },
+      },
+    ],
+  };
+}
+
+function buildVaultAuthorization(grantStatus = "ACTIVE") {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "vault_authorization",
+    resource_id: "vault:authorization",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:10:00Z",
+    updated_at: "2026-03-08T09:10:00Z",
+    status: "ready",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: "project-default",
+    active_workspace_id: "workspace-default",
+    active_requests:
+      grantStatus === "ACTIVE"
+        ? []
+        : [
+            {
+              request_id: "vault-request-1",
+              project_id: "project-default",
+              workspace_id: "workspace-default",
+              scope_id: "scope-prod",
+              partition: "credential",
+              subject_key: "credential:db",
+              reason: "排查生产数据库连接",
+              requester_actor_id: "user:web",
+              requester_actor_label: "Owner",
+              status: "pending",
+              decision: "",
+              requested_at: "2026-03-08T09:10:00Z",
+              resolved_at: null,
+              resolver_actor_id: "",
+              resolver_actor_label: "",
+            },
+          ],
+    active_grants: [
+      {
+        grant_id: "vault-grant-1",
+        request_id: "vault-request-1",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        scope_id: "scope-prod",
+        partition: "credential",
+        subject_key: "credential:db",
+        granted_to_actor_id: "user:web",
+        granted_to_actor_label: "Owner",
+        granted_by_actor_id: "system:owner",
+        granted_by_actor_label: "Owner",
+        granted_at: "2026-03-08T09:12:00Z",
+        expires_at: "2026-03-08T10:12:00Z",
+        status: grantStatus,
+      },
+    ],
+    recent_retrievals: [
+      {
+        retrieval_id: "retrieval-1",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        scope_id: "scope-prod",
+        partition: "credential",
+        subject_key: "credential:db",
+        query: "db credential",
+        grant_id: "vault-grant-1",
+        actor_id: "user:web",
+        actor_label: "Owner",
+        authorized: true,
+        reason_code: "VAULT_RETRIEVE_AUTHORIZED",
+        result_count: 1,
+        retrieved_vault_ids: ["vault-1"],
+        evidence_refs: [{ type: "grant", id: "vault-grant-1" }],
+        created_at: "2026-03-08T09:13:00Z",
+      },
+    ],
   };
 }
 
@@ -342,7 +619,7 @@ describe("ControlPlane", () => {
 
   it("使用 snapshot 渲染正式控制台首页与主导航", async () => {
     const snapshot = buildSnapshot();
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(snapshot));
@@ -364,6 +641,7 @@ describe("ControlPlane", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Projects/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Memory/i })).toBeInTheDocument();
     expect(screen.getByText("project-default")).toBeInTheDocument();
     expect(screen.getByText("网关升级失败")).toBeInTheDocument();
     expect(screen.getByText("TaskRunner / Execution runtime")).toBeInTheDocument();
@@ -374,7 +652,7 @@ describe("ControlPlane", () => {
     const beforeSnapshot = buildSnapshot("project-default");
     const afterSelector = buildSnapshot("project-ops").resources.project_selector;
 
-    fetchMock.mockImplementation((input, init) => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(beforeSnapshot));
@@ -440,18 +718,17 @@ describe("ControlPlane", () => {
       expect(screen.getAllByText("project-ops").length).toBeGreaterThan(0);
     });
 
-    const actionRequest = fetchMock.mock.calls.find(
-      ([url, init]) =>
-        String(url).includes("/api/control/actions") &&
-        init?.method === "POST"
-    );
+    const actionRequest = fetchMock.mock.calls.find((call) => {
+      const [url, init] = call as FetchArgs;
+      return String(url).includes("/api/control/actions") && init?.method === "POST";
+    });
     expect(actionRequest).toBeTruthy();
     expect(String(actionRequest?.[1]?.body)).toContain('"action_id":"project.select"');
     expect(String(actionRequest?.[1]?.body)).toContain('"project_id":"project-ops"');
 
     expect(
-      fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/api/control/resources/project-selector")
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/resources/project-selector")
       )
     ).toBe(true);
   });
@@ -469,7 +746,7 @@ describe("ControlPlane", () => {
       operator_items: [],
     };
 
-    fetchMock.mockImplementation((input, init) => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(snapshot));
@@ -528,19 +805,122 @@ describe("ControlPlane", () => {
       expect(screen.getByText(/Approvals 0/)).toBeInTheDocument();
     });
 
-    const actionRequest = fetchMock.mock.calls.find(
-      ([url, init]) =>
-        String(url).includes("/api/control/actions") &&
-        init?.method === "POST"
-    );
+    const actionRequest = fetchMock.mock.calls.find((call) => {
+      const [url, init] = call as FetchArgs;
+      return String(url).includes("/api/control/actions") && init?.method === "POST";
+    });
     expect(String(actionRequest?.[1]?.body)).toContain(
       '"action_id":"operator.approval.resolve"'
     );
     expect(String(actionRequest?.[1]?.body)).toContain('"approval_id":"approval-1"');
     expect(
-      fetchMock.mock.calls.some(([url]) =>
-        String(url).includes("/api/control/resources/sessions")
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/resources/sessions")
       )
     ).toBe(true);
+  });
+
+  it("Memory section 会加载 subject history / proposal / vault 明细并执行授权动作", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const snapshot = buildSnapshot();
+    const subjectHistory = buildMemorySubjectHistory();
+    const memoryProposals = buildMemoryProposals();
+    const initialVault = buildVaultAuthorization("ACTIVE");
+    const afterRequestVault = buildVaultAuthorization("PENDING");
+    afterRequestVault.active_grants = [];
+    afterRequestVault.active_requests[0].reason = "临时排障";
+    let requestCreated = false;
+
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      if (url.includes("/api/control/resources/memory-proposals")) {
+        return Promise.resolve(jsonResponse(memoryProposals));
+      }
+      if (url.includes("/api/control/resources/vault-authorization")) {
+        return Promise.resolve(jsonResponse(requestCreated ? afterRequestVault : initialVault));
+      }
+      if (url.includes("/api/control/resources/memory-subjects/user%3Aalice")) {
+        return Promise.resolve(jsonResponse(subjectHistory));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        requestCreated = true;
+        return Promise.resolve(
+          jsonResponse({
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-vault-request",
+              correlation_id: "req-vault-request",
+              action_id: "vault.access.request",
+              status: "completed",
+              code: "VAULT_ACCESS_REQUEST_CREATED",
+              message: "已创建 Vault 授权申请。",
+              data: {
+                request_id: "vault-request-1",
+              },
+              resource_refs: [
+                {
+                  resource_type: "vault_authorization",
+                  resource_id: "vault:authorization",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-08T09:15:00Z",
+              audit_event_id: "evt-vault-request",
+            },
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("project-default");
+    await userEvent.click(screen.getByRole("button", { name: /Memory/i }));
+
+    expect(await screen.findByText("Memory Console")).toBeInTheDocument();
+    expect((await screen.findAllByText("Alice current profile")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("新的联系人画像")).toBeInTheDocument();
+    expect(await screen.findByText(/Grants 1/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "查看历史" })[0]);
+    expect(await screen.findByText("Alice superseded profile")).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Access Subject" }),
+      "credential:db"
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Access Reason" }),
+      "临时排障"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "发起授权申请" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "已创建 Vault 授权申请。 [VAULT_ACCESS_REQUEST_CREATED]"
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText("临时排障")).toBeInTheDocument();
+    });
+
+    const actionRequest = fetchMock.mock.calls.find((call) => {
+      const [url, init] = call as FetchArgs;
+      return String(url).includes("/api/control/actions") && init?.method === "POST";
+    });
+    expect(String(actionRequest?.[1]?.body)).toContain('"action_id":"vault.access.request"');
+    expect(String(actionRequest?.[1]?.body)).toContain('"subject_key":"credential:db"');
   });
 });
