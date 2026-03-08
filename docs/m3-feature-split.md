@@ -1,9 +1,9 @@
-# M3 Feature 拆分方案（v1）
+# M3 Feature 拆分方案（v1.1）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1 — M3 初版拆分，目标从“增强能力”升级为“普通用户 Ready”  
-> **日期**: 2026-03-07
+> **状态**: v1.1 — 024-030 已交付，当前进入 Feature 031 最终收口
+> **日期**: 2026-03-08
 
 ---
 
@@ -11,29 +11,30 @@
 
 ### 1.1 当前基线
 
-进入 M3 前，OctoAgent 已具备：
+截至 2026-03-08，M3 的主功能线已经基本交付：
 
-- `octo config` / `octo doctor --live` / `octo onboard` 的首次使用闭环
-- Telegram pairing、operator inbox、backup/restore、chat import、Memory Core 等 M2 能力
-- React + Vite 的最小 Web UI、任务页、operator inbox、recovery panel
+- 024 已交付 installer / updater / doctor-migrate / verify operator flow
+- 025 已交付 project/workspace、default project migration、secret store、统一 wizard、asset manifest
+- 026 已交付正式 control plane backend 与 Web 控制台
+- 027 已交付 Memory Console + Vault authorized retrieval
+- 028 已交付 MemU deep integration 与 degrade path
+- 029 已交付 WeChat Import + Multi-source Import Workbench
+- 030 已交付 capability pack、ToolIndex、Delegation Plane、Skill Pipeline
 
-但从普通用户视角，当前系统仍然偏“工程师可用”，距离“开箱可用”还有明显差距：
+当前真正剩下的不是新的 M3 功能 Feature，而是发布前的收口缺口：
 
-- 配置与启动仍需要理解 provider、channel、LiteLLM、环境变量之间的关系
-- 密钥与 token 的存放位置没有完全收敛成统一的用户体验
-- Web 端还是最小控制面，不是完整的管理台
-- Memory 虽已有 SoR / Fragments / Vault 治理内核，但高级能力还没有真正产品化
+- 缺少正式的 Feature 031 acceptance 制品、release report 和 remaining risks 清单
+- 当前控制面的 trusted-network / 部署边界没有被写进正式验收门禁
+- 缺少一次面向真实 owner 的 OpenClaw -> OctoAgent 迁移演练
 
 ### 1.2 本轮复核后的结论
 
-M3 不应只继续堆砌高级能力名词，而应把 OctoAgent 推到一个**哪怕小白也能上手**的状态。
+M3 的功能建设已经足够完整，当前复核结论转为：
 
-这意味着 M3 的核心目标必须变成：
-
-1. **安装和升级足够简单**：用户可以一键安装、一键升级，并得到 doctor/migrate 的兜底。
-2. **配置和密钥足够统一**：Provider、Telegram、Gateway、模型选择都通过同一套向导和 Secret Store 管理，而不是散落在 shell env。
-3. **管理台足够完整**：用户可以在 Web 控制台里完成日常运维，而不是主要依赖终端。
-4. **Memory 足够可感知**：MemU 的高级能力要被吸纳进 OctoAgent 的记忆治理模型，而不是做成旁路插件。
+1. **不再新增 M3 功能 Feature**：024-030 已经覆盖 M3 的主能力闭环，后续工作应集中在 031。
+2. **把 031 升级为正式 release feature**：它必须拥有独立 spec、release gates、验收矩阵、迁移演练和最终报告。
+3. **把“可自用”与“可公开暴露”边界写清楚**：当前产品更接近单 owner / localhost 或 trusted-network 部署，Feature 031 必须把这一边界写入验收。
+4. **把 OpenClaw 迁移演练纳入 M3 签收**：否则无法证明 OctoAgent 已具备替换现有日常系统的条件。
 
 ### 1.3 调研证据（不仅 README）
 
@@ -71,6 +72,7 @@ M3 的一句话目标：
 | 内置 Skill/Tools 与 Bootstrap | OpenClaw 有 bundled skills + bootstrapping；Agent Zero 有 built-in tools + projects/skills UI | Feature 030 |
 | A2A / Worker / Subagent / Graph Agent | OpenClaw 有 `sessions_spawn` + nested subagents + ACP；Agent Zero 有 subordinate + A2A server/client | Feature 030 |
 | 管理 UI（agents/memory/权限/secrets/status） | OpenClaw Control UI + Agent Zero settings/projects/memory dashboard 已覆盖大部分 operator 面 | Feature 026 + Feature 027 |
+| 发布前收口 | OpenClaw 把 wizard、Control UI、updating、export session 组织成连续用户路径；Agent Zero 把 projects、backup、memory、tunnel 作为正式 operator flow | Feature 031 |
 
 ---
 
@@ -131,6 +133,13 @@ M3 的一句话目标：
 - `project/workspace` 至少要有最小 asset manifest 能力（upload / list / inspect / bind）；完整 file browser / editor / diff 可以延后到 M4
 - 术语必须收敛：`tool profile`、`auth profile`、`agent profile`、`readiness level` 分开命名；除记忆分区外不再使用裸 `profile`
 
+### 2.7 发布 / 迁移 / 信任边界约束（2026-03-08 追加）
+
+- Feature 031 不得再引入新业务能力，只做收口验收、最小接缝修补与 release report
+- 在当前实现下，control-plane / ops 入口仍按单 owner、localhost 或 trusted-network 心智使用；如果没有新增 front-door auth，则文档、默认部署方式和验收报告必须明确禁止“默认可直接公网暴露”的暗示
+- M3 正式签收前必须完成一次 OpenClaw -> OctoAgent 迁移演练，至少覆盖 project 建立、secret 处理、导入、memory 审计、dashboard 操作与 rollback 记录
+- 验收 harness 必须考虑共享 `.venv` 并发 `uv run` 的环境竞争；需要串行化相关步骤或显式使用隔离环境，避免把工具链竞争误判成产品不稳定
+
 ---
 
 ## 3. 并行拆分方案（M3 = 8 个 Feature）
@@ -159,6 +168,8 @@ M2 收口
        └── Feature 031：M3 User-Ready E2E Acceptance
 ```
 
+截至 2026-03-08，Feature 024-030 已全部合入 `master`；该依赖图现在主要用于解释 031 需要消费哪些上游能力与 release gates。
+
 ### 3.2 并行化原则
 
 1. **先打通用户主路径，再做高级能力炫技**：024/025/026 的优先级高于 028/030。
@@ -171,6 +182,8 @@ M2 收口
 ## 4. Feature 详细拆解
 
 ### Feature 024：Installer + Updater + Doctor/Migrate
+
+**实现状态**：已交付（截至 2026-03-08 已合入 master）
 
 **一句话目标**：把安装、升级、迁移和修复做成一条可重复、可恢复、可验证的 operator flow。
 
@@ -197,6 +210,8 @@ M2 收口
 ---
 
 ### Feature 025：Unified Config Wizard + Secret Store + Project Workspace
+
+**实现状态**：已交付（截至 2026-03-08 已合入 master）
 
 **一句话目标**：把 Provider、Telegram、Gateway、模型选择、secret 生命周期与 project/workspace 隔离统一到一条配置主路径中，环境变量退居高级路径。
 
@@ -286,11 +301,13 @@ M2 收口
 - 已打通 Telegram / Web 共用 action semantics，现有控制命令与 Web 操作统一落到同一 action registry。
 - 已交付正式 Web Control Plane：首页切换为 `Dashboard / Projects / Sessions / Operator / Automation / Diagnostics / Config / Channels`。
 - 已交付 Session Center、Automation/Scheduler 面板、Runtime Diagnostics Console、配置中心、channel/device 管理入口，以及 approvals/retry/cancel/backup/restore/import/update 的统一控制台入口。
-- Memory/Vault detailed view 仍明确留给 Feature 027；Secret Store 实值管理仍留给 025-B / 后续 Feature。
+- Memory/Vault detailed view 已由 Feature 027 收口；Secret Store 实值管理与 Wizard 深交互已由 Feature 025 收口，并通过现有 control-plane 资源消费。
 
 ---
 
 ### Feature 027：Memory Console + Vault Authorized Retrieval
+
+**实现状态**：已交付（2026-03-08）
 
 **一句话目标**：把 Memory 从“系统内部能力”变成“用户可理解、可检视、可授权”的产品面。
 
@@ -317,6 +334,8 @@ M2 收口
 ---
 
 ### Feature 028：MemU Deep Integration
+
+**实现状态**：已交付（2026-03-08）
 
 **一句话目标**：把 MemU 从“可选 adapter”提升为 OctoAgent Memory 体系中的高级 engine，但不破坏现有治理模型。
 
@@ -355,6 +374,8 @@ M2 收口
 ---
 
 ### Feature 029：WeChat Import + Multi-source Import Workbench
+
+**实现状态**：已交付（2026-03-08）
 
 **一句话目标**：把导入从单条 CLI 命令扩展成用户可操作、可预览、可修正的多源导入工作台。
 
@@ -427,6 +448,8 @@ M2 收口
 
 **一句话目标**：用真实用户路径证明 M3 不是“功能上线”，而是“产品可用”。
 
+**实现状态**：待启动（M3 唯一剩余 Feature）
+
 **任务拆解**：
 
 - F031-T01：定义 fresh machine install → onboard → first chat → dashboard → update → restore 的完整验收矩阵
@@ -437,6 +460,20 @@ M2 收口
 - F031-T06：定义 project / agent profile / automation 继承链验收：
   - 跨 project 切换不会串用 secrets、memory、agent profile
   - automation 触发的 work 会保留 project / agent profile / budget / target 继承来源
+- F031-T07：定义 control-plane / ops 的信任边界验收：
+  - 当前默认部署是否为 localhost / trusted network
+  - 如果走反向代理 / VPN / Tailscale，文档与运行方式是否明确说明保护前提
+  - 不允许把当前未内建 front-door auth 的入口误写成“可直接公网暴露”
+- F031-T08：定义 update / backup / restore drill 的发布门禁：
+  - backup-before-update
+  - preflight / migrate / restart / verify
+  - failure report / rollback suggestion / restore dry-run
+- F031-T09：定义 OpenClaw → OctoAgent 迁移演练：
+  - project / workspace / secret 处理
+  - import mapping / memory evidence / vault review
+  - dashboard / automation / control plane 验证
+  - rollback 与 deferred items 记录
+- F031-T10：产出 M3 release report，明确 pass / blocked / deferred / remaining risks
 
 **验收标准**：
 
@@ -444,6 +481,8 @@ M2 收口
 - 运维用户可以在管理台完成配置、审批、恢复、升级和 Memory 检查
 - 用户可以验证 project、agent profile、automation、work 之间的 effective config 继承关系，且跨 project 不串状态
 - 高级能力可感知，但不会破坏系统的安全、可审计与可恢复性
+- 部署边界清楚：当前产品若仍是单 owner / trusted-network 模式，报告与文档必须明确写实
+- 至少完成一次 OpenClaw 迁移演练，并留下人工步骤、风险与 rollback 证据
 
 ---
 
@@ -526,27 +565,17 @@ M2 收口
 
 ## 6. 本轮结论
 
-M3 不应该只是：
+截至 2026-03-08，M3 的主功能建设已经完成，024-030 均已交付并合入 `master`。
 
-- 微信导入
-- ToolIndex
-- Skill Pipeline
+因此，当前最重要的不是继续拆新功能，而是把 Feature 031 做成真正的发布收口：
 
-它必须同时补齐：
+- 正式验收矩阵与 release report
+- trusted-network / 部署边界写实
+- update / restore / rollback drill
+- project / secret / memory / import / delegation 的联合稳定性证明
+- OpenClaw -> OctoAgent 迁移演练
 
-- 一键安装 / 一键升级
-- 统一配置与 Secret Store
-- Project / Workspace 一等公民
-- Telegram / Web 控制命令面
-- Session / Chat Lifecycle Center
-- Automation / Scheduler
-- Runtime Diagnostics Console
-- 用户友好的 Web 管理台
-- 内置 Skill/Tools 与 Bootstrap Agent Pack
-- A2A / Work / Subagent / Graph Agent 委派平面
-- MemU 深度集成后的 Memory 产品化
-
-只有这样，M3 完成后 OctoAgent 才能称得上“普通用户 Ready”。
+只有当这些 gates 被 Feature 031 正式证明后，OctoAgent 的 M3 才能称得上“普通用户 Ready”并适合开始真实迁移。
 
 ---
 

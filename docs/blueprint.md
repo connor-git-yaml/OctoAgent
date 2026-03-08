@@ -12,7 +12,7 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-In-Progress（2026-03-07 同步）
+- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-In-Progress（2026-03-08 同步）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
@@ -2641,10 +2641,10 @@ M1.5 交付约束（已验证）：
 - [x] Logfire 面板可查看 trace 链路（Gateway → Kernel → Worker → LLM）
 - [x] `task_id/trace_id/span_id` 在关键链路透传一致并可校验
 
-### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周，进行中）
+### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周）✅ 已交付
 
 - 拆解文档：`docs/m2-feature-split.md`（2026-03-06 新增）
-- 当前基线（2026-03-07）：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022 已交付；023 待启动
+- 当前基线（2026-03-08）：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022 / 023 已交付
 - [x] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
 - [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
 - [x] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
@@ -2653,7 +2653,7 @@ M1.5 交付约束（已验证）：
 - [x] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
 - [x] Feature 021：Chat Import Core（`octo import chats` / dry-run / report）
 - [x] Feature 022：Backup/Restore + 会话导出 + 恢复演练记录
-- [ ] Feature 023：M2 集成验收（不引入新能力）
+- [x] Feature 023：M2 集成验收（不引入新能力）
 
 M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 
@@ -2674,35 +2674,42 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Chat Import 增量导入去重 + 窗口化摘要正确，且不污染主聊天 scope
 - 备份包可在 dry-run 中完成校验，并能恢复 tasks / events / chats / config 元数据
 
-### M3（用户 Ready 增强）：统一配置 / 管理台 / 记忆产品化（后续）
+### M3（用户 Ready 增强）：统一配置 / 管理台 / 记忆产品化（进行中）
 
-- 拆解文档：`docs/m3-feature-split.md`（2026-03-07 新增）
-- 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可理解**的状态
-- 参考复核（2026-03-07）：OpenClaw 的 installer / onboarding wizard / SecretRef / Control UI / update flow；Agent Zero 的 settings surface / secrets alias / memory dashboard / backup preview
-- [ ] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
-- [ ] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
-- [ ] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
-- [ ] Agent Profile / Worker Profile 一等对象（persona / model route / tool profile / capability pack / policy / budget / memory access）
-- [ ] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
-- [ ] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
-- [ ] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
-- [ ] Automation / Scheduler 产品化（recurring jobs / run history / project-scoped automation）
-- [ ] Runtime Diagnostics Console（logs / event stream / provider/model health / usage&cost / worker&subagent&work status）
-- [ ] Vault 授权检索 + Memory 浏览 / 证据追溯
-- [ ] Project Asset Manifest（knowledge / files / artifacts 的 upload / list / inspect / bind 最小产品面）
-- [ ] `MemUBackend` 深度集成（检索 / 索引 / 增量同步 / 多模态 / Category / ToM）
-- [ ] 微信导入插件 + 多源导入工作台
+- 拆解文档：`docs/m3-feature-split.md`（2026-03-08 已同步到“031 最终收口”版本）
+- 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可迁移**的状态
+- 参考复核（2026-03-08）：OpenClaw 的 wizard / onboarding protocol / Control UI / updating / export session / subagents；Agent Zero 的 projects / backup / memory / settings / tunnel
+- 当前里程碑判断：Feature 024-030 已交付并合入 `master`；Feature 031 为唯一剩余收口 Feature
+- [x] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
+- [x] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
+- [x] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
+- [x] Agent Profile / Worker Profile 一等对象（persona / model route / tool profile / capability pack / policy / budget / memory access）
+- [x] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
+- [x] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
+- [x] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
+- [x] Automation / Scheduler 产品化（recurring jobs / run history / project-scoped automation）
+- [x] Runtime Diagnostics Console（logs / event stream / provider/model health / usage&cost / worker&subagent&work status）
+- [x] Vault 授权检索 + Memory 浏览 / 证据追溯
+- [x] Project Asset Manifest（knowledge / files / artifacts 的 upload / list / inspect / bind 最小产品面）
+- [x] `MemUBackend` 深度集成（检索 / 索引 / 增量同步 / 多模态 / Category / ToM）
+- [x] 微信导入插件 + 多源导入工作台
 - [x] 内置 Skill/Tools 与 Bootstrap Agent Pack（bundled skills / bundled tools / worker bootstrap）
 - [x] Delegation Plane（A2A / Work graph / subagent / ACP-like runtime / graph agents）
 - [x] ToolIndex（向量检索）+ 动态工具注入
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
-- [ ] 多端远程节点 / companion surfaces（按需引入）
+- [ ] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
+- [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
 2026-03-08 进展：
 
+- Feature 024 已交付 installer / updater / preflight / migrate / restart / verify operator flow。
+- Feature 025 已交付 project/workspace、default project migration、Secret Store、统一 wizard 与 asset manifest。
 - Feature 026 已交付统一 control plane backend 与正式 Web 控制台：六类 canonical resources、snapshot/per-resource/actions/events routes、Telegram/Web 共用 action semantics、Session Center、Automation/Scheduler、Runtime Diagnostics Console、配置中心、channel/device 管理入口与统一 operator/ops 控制入口均已落地。
+- Feature 027 已交付 Memory Console、Vault authorized retrieval、proposal audit 与 memory inspect / export / restore verify 入口。
+- Feature 028 已交付 MemU integration point、检索/索引/降级路径与 evidence-aligned ingest。
+- Feature 029 已交付 WeChat adapter、Import Workbench、mapping/dry-run/dedupe/resume 与 memory effect 链路。
 - Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
-- Memory Console / Vault 详细领域视图仍留给 Feature 027；Secret Store 实值管理与 Wizard 深度交互仍留给 025-B / 后续能力。
+- 剩余唯一主线为 Feature 031：把上述能力收束成正式的 user-ready release 证明。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 
@@ -2719,6 +2726,9 @@ M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 - Agent / Worker / Subagent / Graph Agent 的管理与状态查询必须进入统一控制面，而不是散落在日志和底层脚本中；同时应提供 runtime diagnostics console，汇总 health、logs、event stream、usage/cost、provider/model 与 work graph 状态
 - `project/workspace` 至少要有最小 asset manifest 能力（upload / list / inspect / bind）；真正的 file browser / editor / diff 可以延后到 M4，但 M3 不能只有概念没有挂载点
 - 高级 Memory engine（MemU）必须服从 SoR / Fragments / Vault / WriteProposal 的治理边界，而不是绕过核心设计另起一套记忆模型
+- 若 control-plane / ops 入口继续维持当前单 owner、localhost 或 trusted-network 假设，则 Feature 031 的验收与最终报告必须明确写出部署边界；不得默认暗示“可直接公网暴露”
+- M3 正式签收前必须完成一次 OpenClaw -> OctoAgent 迁移演练，至少覆盖 project 建立、secret 处理、导入、memory/vault 审计、dashboard 操作与 rollback 记录
+- 验收 harness 必须考虑共享 `.venv` 并发 `uv run` 的环境竞争；需要串行化相关步骤或显式使用隔离环境，避免把工具链竞争误判成产品不稳定
 - 术语必须收敛：`tool profile`、`auth profile`、`agent profile`、`readiness level` 分开命名；除记忆分区外不再使用裸 `profile`
 
 M3 核心对象关系（2026-03-08 补充）：
@@ -2750,6 +2760,7 @@ M3 核心对象关系（2026-03-08 补充）：
 - 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
 - automation 触发的 work 必须保留其继承来源（project / agent profile / budget / target），并能在控制台与事件链中解释“为什么使用这套配置”
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
+- Feature 031 必须补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report，M3 才能正式签收
 
 ### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
 
