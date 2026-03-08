@@ -114,7 +114,7 @@ def test_resolve_stream_model_aliases_from_oauth_provider(
             model_aliases={
                 "main": ModelAlias(
                     provider="openai-codex",
-                    model="gpt-5.3-codex",
+                    model="gpt-5.4",
                 ),
                 "cheap": ModelAlias(
                     provider="openrouter",
@@ -141,7 +141,7 @@ def test_resolve_stream_model_aliases_falls_back_to_litellm_config(
                 "model_list:",
                 "  - model_name: main",
                 "    litellm_params:",
-                "      model: gpt-5.3-codex",
+                "      model: gpt-5.4",
                 "      api_base: https://chatgpt.com/backend-api/codex",
                 "  - model_name: cheap",
                 "    litellm_params:",

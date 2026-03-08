@@ -17,7 +17,7 @@ ReasoningSummary = Literal["auto", "concise", "detailed"]
 class ReasoningConfig(BaseModel):
     """Reasoning / Thinking 模式配置
 
-    适用于支持推理模式的模型（如 gpt-5.3-codex、o-系列）。
+    适用于支持推理模式的模型（如 gpt-5.4、o-系列）。
     Responses API 使用 reasoning 对象: {"effort": "high", "summary": "auto"}
     Chat Completions API 使用顶层 reasoning_effort: "high"
     """
