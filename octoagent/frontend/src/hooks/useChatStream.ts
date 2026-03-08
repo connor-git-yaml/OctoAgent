@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { buildFrontDoorSseUrl, frontDoorRequest } from "../api/client";
 
 /** 消息角色 */
 export type MessageRole = "user" | "agent";
@@ -68,7 +69,7 @@ export function useChatStream(): UseChatStreamReturn {
       // 发送到后端
       try {
         setError(null);
-        const resp = await fetch("/api/chat/send", {
+        const resp = await frontDoorRequest("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -98,7 +99,7 @@ export function useChatStream(): UseChatStreamReturn {
 
         // 连接 SSE 流
         closeStream();
-        const streamUrl = data.stream_url;
+        const streamUrl = buildFrontDoorSseUrl(data.stream_url);
         const es = new EventSource(streamUrl);
         eventSourceRef.current = es;
 

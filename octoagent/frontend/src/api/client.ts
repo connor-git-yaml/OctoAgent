@@ -38,8 +38,10 @@ import type {
 
 const BASE_URL = "";
 const FRONT_DOOR_TOKEN_STORAGE_KEY = "octoagent.frontdoorToken";
+const FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY = "octoagent.frontdoorToken.session";
 const FRONT_DOOR_ERROR_CODES = new Set([
   "FRONT_DOOR_LOOPBACK_ONLY",
+  "FRONT_DOOR_LOOPBACK_PROXY_REJECTED",
   "FRONT_DOOR_TOKEN_REQUIRED",
   "FRONT_DOOR_TOKEN_INVALID",
   "FRONT_DOOR_TOKEN_ENV_MISSING",
@@ -85,6 +87,11 @@ type ApiErrorPayload = {
   hint?: string;
 };
 
+type FrontDoorTokenStorageMode = "session" | "persistent";
+
+let memoryFrontDoorToken = "";
+let memoryFrontDoorTokenMode: FrontDoorTokenStorageMode = "session";
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -97,6 +104,54 @@ export class ApiError extends Error {
     this.code = options.code;
     this.hint = options.hint;
   }
+}
+
+function readStorage(storage: Storage | undefined, key: string): string {
+  if (!storage) {
+    return "";
+  }
+  try {
+    return storage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStorage(storage: Storage | undefined, key: string, value: string): boolean {
+  if (!storage) {
+    return false;
+  }
+  try {
+    storage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorage(storage: Storage | undefined, key: string): void {
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.removeItem(key);
+  } catch {
+    // 忽略浏览器存储不可用场景，回退到内存模式。
+  }
+}
+
+function getSessionStorage(): Storage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return window.sessionStorage;
+}
+
+function getLocalStorage(): Storage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return window.localStorage;
 }
 
 function parseErrorPayload(body: unknown): ApiErrorPayload {
@@ -133,24 +188,70 @@ async function buildApiError(resp: Response, body?: unknown): Promise<ApiError> 
 }
 
 export function getFrontDoorToken(): string {
-  if (typeof window === "undefined") {
-    return "";
+  const sessionToken = readStorage(
+    getSessionStorage(),
+    FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY
+  ).trim();
+  if (sessionToken) {
+    memoryFrontDoorToken = sessionToken;
+    memoryFrontDoorTokenMode = "session";
+    return sessionToken;
   }
-  return window.localStorage.getItem(FRONT_DOOR_TOKEN_STORAGE_KEY) ?? "";
+  const persistentToken = readStorage(getLocalStorage(), FRONT_DOOR_TOKEN_STORAGE_KEY).trim();
+  if (persistentToken) {
+    memoryFrontDoorToken = persistentToken;
+    memoryFrontDoorTokenMode = "persistent";
+    return persistentToken;
+  }
+  return memoryFrontDoorToken;
 }
 
-export function saveFrontDoorToken(token: string): void {
-  if (typeof window === "undefined") {
+export function getFrontDoorTokenStorageMode(): FrontDoorTokenStorageMode {
+  const sessionToken = readStorage(
+    getSessionStorage(),
+    FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY
+  ).trim();
+  if (sessionToken) {
+    return "session";
+  }
+  const persistentToken = readStorage(getLocalStorage(), FRONT_DOOR_TOKEN_STORAGE_KEY).trim();
+  if (persistentToken) {
+    return "persistent";
+  }
+  return memoryFrontDoorTokenMode;
+}
+
+export function saveFrontDoorToken(
+  token: string,
+  options?: { persist?: boolean }
+): void {
+  const normalized = token.trim();
+  const persist = options?.persist ?? false;
+  memoryFrontDoorToken = normalized;
+  memoryFrontDoorTokenMode = persist ? "persistent" : "session";
+
+  removeStorage(getSessionStorage(), FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY);
+  removeStorage(getLocalStorage(), FRONT_DOOR_TOKEN_STORAGE_KEY);
+
+  if (!normalized) {
     return;
   }
-  window.localStorage.setItem(FRONT_DOOR_TOKEN_STORAGE_KEY, token.trim());
+
+  const targetStorage = persist ? getLocalStorage() : getSessionStorage();
+  const targetKey = persist
+    ? FRONT_DOOR_TOKEN_STORAGE_KEY
+    : FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY;
+  const written = writeStorage(targetStorage, targetKey, normalized);
+  if (!written) {
+    memoryFrontDoorTokenMode = persist ? "persistent" : "session";
+  }
 }
 
 export function clearFrontDoorToken(): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.removeItem(FRONT_DOOR_TOKEN_STORAGE_KEY);
+  memoryFrontDoorToken = "";
+  memoryFrontDoorTokenMode = "session";
+  removeStorage(getSessionStorage(), FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY);
+  removeStorage(getLocalStorage(), FRONT_DOOR_TOKEN_STORAGE_KEY);
 }
 
 export function isApiError(error: unknown): error is ApiError {
@@ -183,6 +284,13 @@ async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
     headers,
     ...init,
   });
+}
+
+export async function frontDoorRequest(
+  path: string,
+  init?: RequestInit
+): Promise<Response> {
+  return apiRequest(path, init);
 }
 
 /** 通用 JSON fetch，非 2xx 直接抛错 */

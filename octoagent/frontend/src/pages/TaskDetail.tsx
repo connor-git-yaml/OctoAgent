@@ -20,7 +20,12 @@ import { useSSE } from "../hooks/useSSE";
 import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
 
 /** 终态集合 */
-const TERMINAL_STATES: Set<TaskStatus> = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
+const TERMINAL_STATES: Set<TaskStatus> = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "REJECTED",
+]);
 
 /** 格式化时间 */
 function formatTime(isoString: string): string {

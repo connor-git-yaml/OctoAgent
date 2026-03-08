@@ -17,6 +17,13 @@ log = structlog.get_logger()
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 _SSE_QUERY_TOKEN_PARAM = "access_token"
+_PROXY_HINT_HEADERS = (
+    "forwarded",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+)
 
 
 def _http_error(
@@ -45,6 +52,16 @@ class FrontDoorGuard:
 
         if config.mode == "loopback":
             if self._is_loopback_host(client_host):
+                if self._has_proxy_forwarding_headers(request):
+                    raise _http_error(
+                        403,
+                        "FRONT_DOOR_LOOPBACK_PROXY_REJECTED",
+                        "loopback 模式拒绝代理转发的 owner-facing API 请求。",
+                        hint=(
+                            "如果需要经反向代理访问，请切换到 bearer 或 trusted_proxy 模式；"
+                            "loopback 仅允许本机直连。"
+                        ),
+                    )
                 return
             raise _http_error(
                 403,
@@ -201,6 +218,10 @@ class FrontDoorGuard:
             return ipaddress.ip_address(host).is_loopback
         except ValueError:
             return False
+
+    @staticmethod
+    def _has_proxy_forwarding_headers(request: Request) -> bool:
+        return any(request.headers.get(name, "").strip() for name in _PROXY_HINT_HEADERS)
 
     @classmethod
     def _is_trusted_proxy_client(cls, host: str, cidrs: list[str]) -> bool:

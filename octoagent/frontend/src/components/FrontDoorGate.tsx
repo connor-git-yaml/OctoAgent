@@ -3,6 +3,7 @@ import {
   ApiError,
   clearFrontDoorToken,
   getFrontDoorToken,
+  getFrontDoorTokenStorageMode,
   saveFrontDoorToken,
 } from "../api/client";
 
@@ -34,7 +35,10 @@ function resolveGuidance(error: ApiError): string {
       "当前实例要求经受信反向代理访问，请检查代理来源 CIDR 与共享 header 配置。"
     );
   }
-  if (error.code === "FRONT_DOOR_LOOPBACK_ONLY") {
+  if (
+    error.code === "FRONT_DOOR_LOOPBACK_ONLY" ||
+    error.code === "FRONT_DOOR_LOOPBACK_PROXY_REJECTED"
+  ) {
     return (
       error.hint ??
       "当前实例只允许本机直连访问；如果要对外开放，请改成 bearer 或 trusted_proxy 模式。"
@@ -49,6 +53,9 @@ export default function FrontDoorGate({
   onRetry,
 }: FrontDoorGateProps) {
   const [tokenInput, setTokenInput] = useState(() => getFrontDoorToken());
+  const [persistToken, setPersistToken] = useState(
+    () => getFrontDoorTokenStorageMode() === "persistent"
+  );
   const [submitting, setSubmitting] = useState(false);
   const requiresToken = useMemo(() => TOKEN_CODES.has(error.code ?? ""), [error.code]);
 
@@ -59,7 +66,7 @@ export default function FrontDoorGate({
     }
     setSubmitting(true);
     try {
-      saveFrontDoorToken(tokenInput);
+      saveFrontDoorToken(tokenInput, { persist: persistToken });
       await onRetry();
     } finally {
       setSubmitting(false);
@@ -107,6 +114,22 @@ export default function FrontDoorGate({
               color: "var(--color-text)",
             }}
           />
+          <label
+            style={{
+              display: "flex",
+              gap: "10px",
+              alignItems: "center",
+              fontSize: "14px",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={persistToken}
+              onChange={(event) => setPersistToken(event.target.checked)}
+            />
+            在此设备记住 token（默认只保存到当前浏览器会话）
+          </label>
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button
               type="submit"

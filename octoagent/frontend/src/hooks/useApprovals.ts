@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { frontDoorRequest } from "../api/client";
 
 /** 审批列表项（对齐后端 ApprovalListItem） */
 export interface ApprovalItem {
@@ -51,7 +52,7 @@ export function useApprovals(): UseApprovalsReturn {
   /** 从 REST API 获取审批列表 */
   const fetchApprovals = useCallback(async () => {
     try {
-      const resp = await fetch("/api/approvals");
+      const resp = await frontDoorRequest("/api/approvals");
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
@@ -70,7 +71,7 @@ export function useApprovals(): UseApprovalsReturn {
   const resolve = useCallback(
     async (approvalId: string, decision: ApprovalDecision): Promise<boolean> => {
       try {
-        const resp = await fetch(`/api/approve/${approvalId}`, {
+        const resp = await frontDoorRequest(`/api/approve/${approvalId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ decision }),

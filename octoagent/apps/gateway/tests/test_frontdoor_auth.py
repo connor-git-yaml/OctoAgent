@@ -43,6 +43,20 @@ class TestFrontDoorAuth:
         payload = resp.json()
         assert payload["detail"]["code"] == "FRONT_DOOR_LOOPBACK_ONLY"
 
+    async def test_loopback_mode_rejects_proxy_forwarding_headers(self, frontdoor_app) -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=frontdoor_app),
+            base_url="http://test",
+        ) as client:
+            resp = await client.get(
+                "/api/control/snapshot",
+                headers={"X-Forwarded-For": "203.0.113.10"},
+            )
+
+        assert resp.status_code == 403
+        payload = resp.json()
+        assert payload["detail"]["code"] == "FRONT_DOOR_LOOPBACK_PROXY_REJECTED"
+
     async def test_bearer_mode_requires_token(
         self,
         frontdoor_app,

@@ -5,6 +5,7 @@ import {
   clearFrontDoorToken,
   fetchControlSnapshot,
   fetchTaskDetail,
+  getFrontDoorTokenStorageMode,
   saveFrontDoorToken,
 } from "./client";
 
@@ -30,6 +31,26 @@ describe("api client front-door auth", () => {
     const [, init] = fetchMock.mock.calls[0];
     const headers = new Headers(init?.headers);
     expect(headers.get("Authorization")).toBe("Bearer frontdoor-secret");
+  });
+
+  it("默认只把 token 保存到 sessionStorage", () => {
+    saveFrontDoorToken("frontdoor-secret");
+
+    expect(window.sessionStorage.getItem("octoagent.frontdoorToken.session")).toBe(
+      "frontdoor-secret"
+    );
+    expect(window.localStorage.getItem("octoagent.frontdoorToken")).toBeNull();
+    expect(getFrontDoorTokenStorageMode()).toBe("session");
+  });
+
+  it("显式持久化时写入 localStorage", () => {
+    saveFrontDoorToken("frontdoor-secret", { persist: true });
+
+    expect(window.localStorage.getItem("octoagent.frontdoorToken")).toBe(
+      "frontdoor-secret"
+    );
+    expect(window.sessionStorage.getItem("octoagent.frontdoorToken.session")).toBeNull();
+    expect(getFrontDoorTokenStorageMode()).toBe("persistent");
   });
 
   it("SSE URL 在有 token 时追加 access_token 查询参数", () => {
