@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -12,10 +13,13 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.models import (
     EventType,
+    ManagedRuntimeDescriptor,
     OperatorActionKind,
     OperatorActionSource,
     OrchestratorRequest,
+    SecretRefSourceType,
     TaskStatus,
+    utc_now,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -36,7 +40,9 @@ from octoagent.provider.dx.cli import main as provider_cli
 from octoagent.provider.dx.doctor import DoctorRunner
 from octoagent.provider.dx.models import CheckStatus, DoctorReport
 from octoagent.provider.dx.onboarding_models import OnboardingStep
+from octoagent.provider.dx.secret_service import SecretService
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
+from octoagent.provider.dx.update_status_store import UpdateStatusStore
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
 
@@ -216,12 +222,72 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
     assert env_check.status == CheckStatus.SKIP
     assert litellm_env_check.status == CheckStatus.SKIP
 
+    status_store = UpdateStatusStore(tmp_path)
+    status_store.save_runtime_descriptor(
+        ManagedRuntimeDescriptor(
+            project_root=str(tmp_path),
+            start_command=["uv", "run", "uvicorn", "octoagent.gateway.main:app"],
+            verify_url="http://127.0.0.1:8000/ready?profile=core",
+            workspace_sync_command=["uv", "sync"],
+            frontend_build_command=["npm", "run", "build"],
+            environment_overrides={"OCTOAGENT_PROJECT_ROOT": str(tmp_path)},
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+    )
+
+    async def _fake_restart(self, *, trigger_source: str):
+        assert trigger_source == "cli"
+        return SimpleNamespace(overall_status="SUCCEEDED")
+
+    async def _fake_verify(self, *, trigger_source: str):
+        assert trigger_source == "cli"
+        return SimpleNamespace(overall_status="SUCCEEDED")
+
+    monkeypatch.setattr(
+        "octoagent.provider.dx.secret_service.UpdateService.restart",
+        _fake_restart,
+    )
+    monkeypatch.setattr(
+        "octoagent.provider.dx.secret_service.UpdateService.verify",
+        _fake_verify,
+    )
+
+    secret_service = SecretService(
+        tmp_path,
+        environ={
+            "OPENROUTER_SOURCE": "provider-secret",
+            "MASTER_KEY_SOURCE": "master-secret",
+            "TELEGRAM_BOT_TOKEN_SOURCE": "test-token",
+        },
+    )
+    await secret_service.configure(
+        source_type=SecretRefSourceType.ENV,
+        locator={"env_name": "OPENROUTER_SOURCE"},
+        target_keys=["providers.openrouter.api_key_env"],
+    )
+    await secret_service.configure(
+        source_type=SecretRefSourceType.ENV,
+        locator={"env_name": "MASTER_KEY_SOURCE"},
+        target_keys=["runtime.master_key_env"],
+    )
+    await secret_service.configure(
+        source_type=SecretRefSourceType.ENV,
+        locator={"env_name": "TELEGRAM_BOT_TOKEN_SOURCE"},
+        target_keys=["channels.telegram.bot_token_env"],
+    )
+    await secret_service.apply()
+    await secret_service.reload()
+
     bot_client = AcceptanceBotClient()
     monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("OCTOAGENT_DB_PATH", str(tmp_path / "data" / "sqlite" / "octoagent.db"))
     monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(tmp_path / "data" / "artifacts"))
     monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN_SOURCE", "test-token")
+    monkeypatch.setenv("OPENROUTER_SOURCE", "provider-secret")
+    monkeypatch.setenv("MASTER_KEY_SOURCE", "master-secret")
 
     from octoagent.gateway import main as gateway_main
     from octoagent.provider.dx.onboarding_service import OnboardingService
