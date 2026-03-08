@@ -742,6 +742,126 @@ export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
   available_layers: string[];
 }
 
+export type ImportSourceType = "normalized-jsonl" | "wechat";
+
+export type ImportRunStatus =
+  | "preview"
+  | "ready_to_run"
+  | "running"
+  | "failed"
+  | "action_required"
+  | "resume_available"
+  | "completed"
+  | "partial_success";
+
+export interface ImportInputRef {
+  source_type: ImportSourceType;
+  input_path: string;
+  media_root: string | null;
+  format_hint: string | null;
+  account_id: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface DetectedConversation {
+  conversation_key: string;
+  label: string;
+  message_count: number;
+  attachment_count: number;
+  last_message_at: string | null;
+  participants: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface DetectedParticipant {
+  source_sender_id: string;
+  label: string;
+  message_count: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface ImportWorkbenchSummary {
+  source_count: number;
+  recent_run_count: number;
+  resume_available_count: number;
+  warning_count: number;
+  error_count: number;
+}
+
+export interface ImportMemoryEffectSummary {
+  fragment_count: number;
+  proposal_count: number;
+  committed_count: number;
+  vault_ref_count: number;
+  memu_sync_count: number;
+  memu_degraded_count: number;
+}
+
+export interface ImportResumeEntry {
+  resume_id: string;
+  source_id: string;
+  source_type: ImportSourceType;
+  project_id: string;
+  workspace_id: string;
+  scope_id: string;
+  last_cursor: string;
+  last_batch_id: string;
+  state: string;
+  blocking_reason: string;
+  next_action: string;
+  updated_at: string;
+}
+
+export interface ImportSourceDocument extends ControlPlaneDocumentBase {
+  resource_type: "import_source";
+  resource_id: string;
+  active_project_id: string;
+  active_workspace_id: string;
+  source_id: string;
+  source_type: ImportSourceType;
+  input_ref: ImportInputRef;
+  detected_conversations: DetectedConversation[];
+  detected_participants: DetectedParticipant[];
+  attachment_roots: string[];
+  errors: string[];
+  latest_mapping_id: string | null;
+  latest_run_id: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface ImportRunDocument extends ControlPlaneDocumentBase {
+  resource_type: "import_run";
+  resource_id: string;
+  active_project_id: string;
+  active_workspace_id: string;
+  source_id: string;
+  source_type: ImportSourceType;
+  status: ImportRunStatus;
+  dry_run: boolean;
+  mapping_id: string | null;
+  summary: Record<string, unknown>;
+  errors: string[];
+  dedupe_details: Array<Record<string, unknown>>;
+  cursor: Record<string, unknown> | null;
+  artifact_refs: string[];
+  memory_effects: ImportMemoryEffectSummary;
+  report_refs: string[];
+  resume_ref: string;
+  metadata: Record<string, unknown>;
+  completed_at: string | null;
+}
+
+export interface ImportWorkbenchDocument extends ControlPlaneDocumentBase {
+  resource_type: "import_workbench";
+  resource_id: "imports:workbench";
+  active_project_id: string;
+  active_workspace_id: string;
+  summary: ImportWorkbenchSummary;
+  sources: ImportSourceDocument[];
+  recent_runs: ImportRunDocument[];
+  resume_entries: ImportResumeEntry[];
+}
+
 export interface MemorySubjectHistoryDocument extends ControlPlaneDocumentBase {
   resource_type: "memory_subject_history";
   resource_id: "memory-subject:overview";
@@ -929,6 +1049,7 @@ export interface ControlPlaneSnapshot {
     automation: AutomationJobDocument;
     diagnostics: DiagnosticsSummaryDocument;
     memory: MemoryConsoleDocument;
+    imports: ImportWorkbenchDocument;
   };
   registry: ActionRegistryDocument;
   generated_at: string;

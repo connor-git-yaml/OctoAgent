@@ -1,9 +1,10 @@
-"""Chat import 领域模型。"""
+"""Chat import / import workbench 领域模型。"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from octoagent.core.models import MessageAttachment
 from pydantic import BaseModel, Field
@@ -25,6 +26,14 @@ class ImportSourceFormat(StrEnum):
     """导入源格式。"""
 
     NORMALIZED_JSONL = "normalized-jsonl"
+    WECHAT = "wechat"
+
+
+class ImportSourceType(StrEnum):
+    """029 source adapter 类型。"""
+
+    NORMALIZED_JSONL = "normalized-jsonl"
+    WECHAT = "wechat"
 
 
 class ImportWindowKind(StrEnum):
@@ -51,6 +60,105 @@ class ImportFactHint(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     partition: MemoryPartition = MemoryPartition.CHAT
     is_sensitive: bool = False
+
+
+class ImportInputRef(BaseModel):
+    """导入输入定位。"""
+
+    source_type: ImportSourceType = ImportSourceType.WECHAT
+    input_path: str
+    media_root: str | None = None
+    format_hint: str | None = None
+    account_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DetectedConversation(BaseModel):
+    """source detect 阶段发现的 conversation 摘要。"""
+
+    conversation_key: str
+    label: str = ""
+    message_count: int = 0
+    attachment_count: int = 0
+    last_message_at: datetime | None = None
+    participants: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DetectedParticipant(BaseModel):
+    """source detect 阶段发现的参与者摘要。"""
+
+    source_sender_id: str
+    label: str = ""
+    message_count: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportConversationMapping(BaseModel):
+    """conversation -> project/workspace/scope 映射。"""
+
+    conversation_key: str
+    conversation_label: str = ""
+    project_id: str
+    workspace_id: str
+    scope_id: str
+    partition: str = MemoryPartition.CHAT.value
+    sensitivity: str = "default"
+    enabled: bool = True
+
+
+class ImportSenderMapping(BaseModel):
+    """source sender -> normalized actor hint。"""
+
+    source_sender_id: str
+    source_sender_label: str = ""
+    normalized_actor_id: str = ""
+    normalized_actor_label: str = ""
+
+
+class ImportMappingProfile(BaseModel):
+    """project-scoped durable mapping profile。"""
+
+    mapping_id: str
+    source_id: str
+    source_type: ImportSourceType
+    project_id: str
+    workspace_id: str
+    conversation_mappings: list[ImportConversationMapping] = Field(default_factory=list)
+    sender_mappings: list[ImportSenderMapping] = Field(default_factory=list)
+    attachment_policy: str = "artifact-first"
+    memu_policy: str = "best-effort"
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportAttachmentEnvelope(BaseModel):
+    """附件导入与 provenance 账本项。"""
+
+    attachment_id: str
+    source_id: str
+    conversation_key: str
+    source_message_id: str | None = None
+    source_path: str = ""
+    mime_type: str = ""
+    checksum: str = ""
+    size_bytes: int = 0
+    artifact_id: str | None = None
+    fragment_ref_id: str | None = None
+    memu_sync_state: str = "pending"
+    warnings: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AttachmentMaterializationResult(BaseModel):
+    """单个附件 artifact/materialization 结果。"""
+
+    artifact_id: str | None = None
+    fragment_ref_id: str | None = None
+    materialized: bool = False
+    memu_sync_state: str = "pending"
+    warning: str = ""
+    error: str = ""
 
 
 class ImportedChatMessage(BaseModel):
@@ -135,6 +243,11 @@ class ImportSummary(BaseModel):
     window_count: int = 0
     proposal_count: int = 0
     committed_count: int = 0
+    attachment_count: int = 0
+    attachment_artifact_count: int = 0
+    attachment_fragment_count: int = 0
+    memu_sync_count: int = 0
+    memu_degraded_count: int = 0
     warning_count: int = 0
 
 

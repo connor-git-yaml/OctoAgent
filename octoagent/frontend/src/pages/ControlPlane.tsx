@@ -12,6 +12,9 @@ import {
   fetchControlResource,
   fetchMemoryConsole,
   fetchControlSnapshot,
+  fetchImportRun,
+  fetchImportSource,
+  fetchImportWorkbench,
   fetchMemoryProposals,
   fetchMemorySubjectHistory,
   fetchVaultAuthorization,
@@ -24,6 +27,9 @@ import type {
   ControlPlaneEvent,
   ControlPlaneResourceRef,
   ControlPlaneSnapshot,
+  DelegationPlaneDocument,
+  ImportRunDocument,
+  ImportSourceDocument,
   DelegationPlaneDocument,
   MemoryProposalAuditDocument,
   MemoryRecordProjection,
@@ -117,6 +123,7 @@ type SectionId =
   | "automation"
   | "diagnostics"
   | "memory"
+  | "imports"
   | "config"
   | "channels";
 
@@ -130,6 +137,7 @@ const SECTION_LABELS: Array<{ id: SectionId; label: string; accent: string }> = 
   { id: "operator", label: "Operator", accent: "Approvals / Retry / Cancel" },
   { id: "automation", label: "Automation", accent: "Scheduler" },
   { id: "diagnostics", label: "Diagnostics", accent: "Runtime Console" },
+  { id: "imports", label: "Imports", accent: "WeChat / Multi-source" },
   { id: "memory", label: "Memory", accent: "SoR / Vault / Proposal" },
   { id: "config", label: "Config", accent: "Schema + uiHints" },
   { id: "channels", label: "Channels", accent: "Telegram / Devices" },
@@ -145,7 +153,8 @@ type ControlResourceRoute =
   | "pipelines"
   | "automation"
   | "diagnostics"
-  | "memory";
+  | "memory"
+  | "import-workbench";
 
 type SnapshotResourceKey = keyof ControlPlaneSnapshot["resources"];
 
@@ -160,6 +169,9 @@ const RESOURCE_ROUTE_BY_TYPE: Record<string, ControlResourceRoute> = {
   automation_job: "automation",
   diagnostics_summary: "diagnostics",
   memory_console: "memory",
+  import_workbench: "import-workbench",
+  import_source: "import-workbench",
+  import_run: "import-workbench",
 };
 
 const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
@@ -176,6 +188,7 @@ const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   automation: "automation",
   diagnostics: "diagnostics",
   memory: "memory",
+  "import-workbench": "imports",
 };
 
 function makeRequestId(): string {
@@ -264,6 +277,10 @@ async function loadControlResource(
       includeVaultRefs?: boolean;
       limit?: number;
     };
+    importQuery?: {
+      projectId?: string;
+      workspaceId?: string;
+    };
   }
 ): Promise<ControlPlaneSnapshot["resources"][SnapshotResourceKey]> {
   switch (route) {
@@ -287,6 +304,8 @@ async function loadControlResource(
       return fetchControlResource("diagnostics");
     case "memory":
       return fetchMemoryConsole(options?.memoryQuery ?? {});
+    case "import-workbench":
+      return fetchImportWorkbench(options?.importQuery ?? {});
   }
 }
 
@@ -336,6 +355,22 @@ function buildMemoryQueryFromSnapshot(
     includeVaultRefs: draft.includeVaultRefs,
     limit: draft.limit,
   };
+}
+
+function slugifyImportScope(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "import-thread";
+}
+
+function buildDefaultImportMappings(source: ImportSourceDocument): Array<Record<string, unknown>> {
+  return source.detected_conversations.map((conversation) => ({
+    conversation_key: conversation.conversation_key,
+    conversation_label: conversation.label,
+    scope_id:
+      source.source_type === "wechat"
+        ? `chat:wechat_import:${slugifyImportScope(conversation.conversation_key)}`
+        : `chat:import:${slugifyImportScope(conversation.conversation_key)}`,
+    partition: "chat",
+  }));
 }
 
 function mapQuickAction(
@@ -435,9 +470,19 @@ export default function ControlPlane() {
     targetRoot: "",
   });
   const [importDraft, setImportDraft] = useState({
+    sourceType: "wechat",
     inputPath: "",
-    sourceFormat: "normalized_jsonl",
+    mediaRoot: "",
+    formatHint: "json",
   });
+  const [importMappingDraft, setImportMappingDraft] = useState("[]");
+  const [selectedImportSourceId, setSelectedImportSourceId] = useState("");
+  const [selectedImportRunId, setSelectedImportRunId] = useState("");
+  const [importSourceDetail, setImportSourceDetail] = useState<ImportSourceDocument | null>(
+    null
+  );
+  const [importRunDetail, setImportRunDetail] = useState<ImportRunDocument | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const [automationDraft, setAutomationDraft] = useState({
     name: "",
     actionId: "diagnostics.refresh",
@@ -542,6 +587,43 @@ export default function ControlPlane() {
     }
   }
 
+  async function refreshImportDetails(sourceId?: string, runId?: string) {
+    const imports = snapshot?.resources.imports;
+    if (!imports) {
+      return;
+    }
+    const resolvedSourceId = sourceId || selectedImportSourceId || imports.sources[0]?.source_id;
+    const resolvedRunId = runId || selectedImportRunId || imports.recent_runs[0]?.resource_id;
+    setImportBusy(true);
+    try {
+      const [nextSource, nextRun] = await Promise.all([
+        resolvedSourceId ? fetchImportSource(resolvedSourceId) : Promise.resolve(null),
+        resolvedRunId ? fetchImportRun(resolvedRunId) : Promise.resolve(null),
+      ]);
+      startTransition(() => {
+        setImportSourceDetail(nextSource);
+        setImportRunDetail(nextRun);
+        if (resolvedSourceId) {
+          setSelectedImportSourceId(resolvedSourceId);
+        }
+        if (resolvedRunId) {
+          setSelectedImportRunId(resolvedRunId);
+        }
+        if (nextSource) {
+          setImportMappingDraft(
+            formatJson(buildDefaultImportMappings(nextSource))
+          );
+        }
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Import 详情资源加载失败";
+      setError(message);
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function reloadData(options?: { preserveConfigDraft?: boolean }) {
     const preserveConfigDraft = options?.preserveConfigDraft ?? true;
     const [nextSnapshot, eventPayload] = await Promise.all([
@@ -573,6 +655,13 @@ export default function ControlPlane() {
             memoryQueryDraft
           )
         : undefined;
+    const importQuery =
+      snapshot?.resources.imports != null
+        ? {
+            projectId: snapshot.resources.imports.active_project_id,
+            workspaceId: snapshot.resources.imports.active_workspace_id,
+          }
+        : undefined;
 
     if (routes.length === 0) {
       await reloadData({ preserveConfigDraft });
@@ -584,6 +673,7 @@ export default function ControlPlane() {
         routes.map((route) =>
           loadControlResource(route, {
             memoryQuery: route === "memory" ? memoryQuery : undefined,
+            importQuery: route === "import-workbench" ? importQuery : undefined,
           })
         )
       );
@@ -715,6 +805,17 @@ export default function ControlPlane() {
     void refreshMemoryDetails(fallbackSubjectKey);
   }, [activeSection, snapshot?.resources.memory.generated_at]);
 
+  useEffect(() => {
+    if (activeSection !== "imports" || !snapshot?.resources.imports) {
+      return;
+    }
+    const fallbackSourceId =
+      selectedImportSourceId || snapshot.resources.imports.sources[0]?.source_id;
+    const fallbackRunId =
+      selectedImportRunId || snapshot.resources.imports.recent_runs[0]?.resource_id;
+    void refreshImportDetails(fallbackSourceId, fallbackRunId);
+  }, [activeSection, snapshot?.resources.imports.generated_at]);
+
   const filteredSessions = (snapshot?.resources.sessions.sessions ?? []).filter((item) =>
     sessionMatches(item, deferredSessionFilter)
   );
@@ -722,7 +823,12 @@ export default function ControlPlane() {
   async function submitAction(
     actionId: string,
     params: Record<string, unknown>,
-    options?: { refreshConfigDraft?: boolean; subjectKey?: string }
+    options?: {
+      refreshConfigDraft?: boolean;
+      subjectKey?: string;
+      sourceId?: string;
+      runId?: string;
+    }
   ) {
     setBusyActionId(actionId);
     setError(null);
@@ -748,6 +854,9 @@ export default function ControlPlane() {
         (actionId.startsWith("memory.") || actionId.startsWith("vault."))
       ) {
         await refreshMemoryDetails(options?.subjectKey);
+      }
+      if (activeSection === "imports" && actionId.startsWith("import.")) {
+        await refreshImportDetails(options?.sourceId, options?.runId);
       }
       return result;
     } catch (err) {
@@ -787,12 +896,13 @@ export default function ControlPlane() {
     config,
     project_selector,
     sessions,
-    memory,
     capability_pack,
     delegation,
     pipelines,
     automation,
     diagnostics,
+    memory,
+    imports,
   } = snapshot.resources;
   const capabilityPack: CapabilityPackDocument =
     capability_pack ?? EMPTY_CAPABILITY_PACK;
@@ -824,7 +934,8 @@ export default function ControlPlane() {
           <h1>OctoAgent Control Plane</h1>
           <p>
             统一消费 wizard / project / capability / delegation / pipeline /
-            session / automation / diagnostics / memory / config contract。
+            session / automation / diagnostics / memory / imports / config
+            contract。
           </p>
         </div>
         <nav className="control-nav" aria-label="Control sections">
@@ -1770,13 +1881,38 @@ export default function ControlPlane() {
                   />
                 </label>
                 <label>
-                  Source Format
+                  Source Type
                   <input
-                    value={importDraft.sourceFormat}
+                    value={importDraft.sourceType}
                     onChange={(event) =>
                       setImportDraft((current) => ({
                         ...current,
-                        sourceFormat: event.target.value,
+                        sourceType: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Media Root
+                  <input
+                    value={importDraft.mediaRoot}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        mediaRoot: event.target.value,
+                      }))
+                    }
+                    placeholder="/path/to/media"
+                  />
+                </label>
+                <label>
+                  Format Hint
+                  <input
+                    value={importDraft.formatHint}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        formatHint: event.target.value,
                       }))
                     }
                   />
@@ -1800,14 +1936,23 @@ export default function ControlPlane() {
                   type="button"
                   className="secondary-button"
                   onClick={() =>
-                    void submitAction("import.run", {
+                    void submitAction("import.source.detect", {
+                      source_type: importDraft.sourceType,
                       input_path: importDraft.inputPath,
-                      source_format: importDraft.sourceFormat,
+                      media_root: importDraft.mediaRoot,
+                      format_hint: importDraft.formatHint,
                     })
                   }
-                  disabled={busyActionId === "import.run"}
+                  disabled={busyActionId === "import.source.detect"}
                 >
-                  执行 Import
+                  识别 Import Source
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setActiveSection("imports")}
+                >
+                  打开 Import Workbench
                 </button>
                 <button
                   type="button"
@@ -1839,6 +1984,322 @@ export default function ControlPlane() {
                 ))}
               </div>
             </article>
+          </section>
+        ) : null}
+
+        {activeSection === "imports" ? (
+          <section className="stack-section">
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Import Workbench</p>
+                  <h3>{imports.summary.source_count}</h3>
+                </div>
+                <div className="chip-stack">
+                  <span className="tone-chip neutral">
+                    Runs {imports.summary.recent_run_count}
+                  </span>
+                  <span className="tone-chip warning">
+                    Resume {imports.summary.resume_available_count}
+                  </span>
+                </div>
+              </div>
+              <div className="form-grid">
+                <label>
+                  Source Type
+                  <input
+                    value={importDraft.sourceType}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        sourceType: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Input Path
+                  <input
+                    value={importDraft.inputPath}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        inputPath: event.target.value,
+                      }))
+                    }
+                    placeholder="/path/to/wechat-export"
+                  />
+                </label>
+                <label>
+                  Media Root
+                  <input
+                    value={importDraft.mediaRoot}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        mediaRoot: event.target.value,
+                      }))
+                    }
+                    placeholder="/path/to/media"
+                  />
+                </label>
+                <label>
+                  Format Hint
+                  <input
+                    value={importDraft.formatHint}
+                    onChange={(event) =>
+                      setImportDraft((current) => ({
+                        ...current,
+                        formatHint: event.target.value,
+                      }))
+                    }
+                    placeholder="json / html / sqlite"
+                  />
+                </label>
+              </div>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    void submitAction(
+                      "import.source.detect",
+                      {
+                        source_type: importDraft.sourceType,
+                        input_path: importDraft.inputPath,
+                        media_root: importDraft.mediaRoot,
+                        format_hint: importDraft.formatHint,
+                      },
+                      {}
+                    )
+                  }
+                  disabled={busyActionId === "import.source.detect"}
+                >
+                  Detect Source
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() =>
+                    void refreshImportDetails(selectedImportSourceId, selectedImportRunId)
+                  }
+                  disabled={importBusy}
+                >
+                  刷新 Workbench
+                </button>
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Detected Sources</p>
+                  <h3>{imports.sources.length}</h3>
+                </div>
+              </div>
+              <div className="event-list">
+                {imports.sources.map((item) => (
+                  <button
+                    key={item.source_id}
+                    type="button"
+                    className="event-item"
+                    onClick={() => void refreshImportDetails(item.source_id, selectedImportRunId)}
+                  >
+                    <div>
+                      <strong>{item.source_type}</strong>
+                      <p>{item.input_ref.input_path}</p>
+                    </div>
+                    <small>{item.detected_conversations.length} conversations</small>
+                  </button>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Recent Runs / Resume</p>
+                  <h3>{imports.recent_runs.length}</h3>
+                </div>
+              </div>
+              <div className="event-list">
+                {imports.recent_runs.map((item) => (
+                  <button
+                    key={item.resource_id}
+                    type="button"
+                    className="event-item"
+                    onClick={() => void refreshImportDetails(selectedImportSourceId, item.resource_id)}
+                  >
+                    <div>
+                      <strong>{item.status}</strong>
+                      <p>{item.source_id}</p>
+                    </div>
+                    <small>{formatDateTime(item.completed_at ?? item.updated_at)}</small>
+                  </button>
+                ))}
+                {imports.resume_entries.map((item) => (
+                  <div key={item.resume_id} className="event-item">
+                    <div>
+                      <strong>{item.resume_id}</strong>
+                      <p>{item.scope_id || item.source_id}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() =>
+                        void submitAction(
+                          "import.resume",
+                          { resume_id: item.resume_id },
+                          { runId: selectedImportRunId }
+                        )
+                      }
+                    >
+                      Resume
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            {importSourceDetail ? (
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Source Detail</p>
+                    <h3>{importSourceDetail.source_id}</h3>
+                  </div>
+                  <div className="chip-stack">
+                    <span className={`tone-chip ${statusTone(importSourceDetail.status)}`}>
+                      {importSourceDetail.status}
+                    </span>
+                  </div>
+                </div>
+                <div className="session-list compact">
+                  {importSourceDetail.detected_conversations.map((conversation) => (
+                    <div key={conversation.conversation_key} className="session-card">
+                      <div className="session-meta">
+                        <strong>{conversation.label || conversation.conversation_key}</strong>
+                        <span>{conversation.message_count} messages</span>
+                      </div>
+                      <p>conversation_key: {conversation.conversation_key}</p>
+                      <p>attachments: {conversation.attachment_count}</p>
+                    </div>
+                  ))}
+                </div>
+                <label className="textarea-label">
+                  Mapping JSON
+                  <textarea
+                    rows={10}
+                    value={importMappingDraft}
+                    onChange={(event) => setImportMappingDraft(event.target.value)}
+                  />
+                </label>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      setImportMappingDraft(
+                        formatJson(buildDefaultImportMappings(importSourceDetail))
+                      )
+                    }
+                  >
+                    生成默认 Mapping
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      try {
+                        const mappings = JSON.parse(importMappingDraft) as Array<Record<string, unknown>>;
+                        void submitAction(
+                          "import.mapping.save",
+                          {
+                            source_id: importSourceDetail.source_id,
+                            conversation_mappings: mappings,
+                          },
+                          { sourceId: importSourceDetail.source_id }
+                        );
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Mapping JSON 解析失败");
+                      }
+                    }}
+                    disabled={busyActionId === "import.mapping.save"}
+                  >
+                    保存 Mapping
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      void submitAction(
+                        "import.preview",
+                        { source_id: importSourceDetail.source_id },
+                        { sourceId: importSourceDetail.source_id }
+                      )
+                    }
+                    disabled={busyActionId === "import.preview"}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      void submitAction(
+                        "import.run",
+                        { source_id: importSourceDetail.source_id },
+                        { sourceId: importSourceDetail.source_id }
+                      )
+                    }
+                    disabled={busyActionId === "import.run"}
+                  >
+                    Run Import
+                  </button>
+                </div>
+              </article>
+            ) : null}
+
+            {importRunDetail ? (
+              <article className="panel">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Run Detail</p>
+                    <h3>{importRunDetail.resource_id}</h3>
+                  </div>
+                  <div className="chip-stack">
+                    <span className={`tone-chip ${statusTone(importRunDetail.status)}`}>
+                      {importRunDetail.status}
+                    </span>
+                  </div>
+                </div>
+                <pre className="config-preview">{formatJson(importRunDetail.summary)}</pre>
+                {importRunDetail.warnings.length ? (
+                  <div className="warning-list">
+                    {importRunDetail.warnings.map((item) => (
+                      <p key={item}>{item}</p>
+                    ))}
+                  </div>
+                ) : null}
+                {importRunDetail.errors.length ? (
+                  <div className="warning-list danger">
+                    {importRunDetail.errors.map((item) => (
+                      <p key={item}>{item}</p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="event-list">
+                  {importRunDetail.dedupe_details.slice(0, 10).map((item, index) => (
+                    <div key={`${index}-${String(item.message_key ?? item.reason ?? "detail")}`} className="event-item">
+                      <div>
+                        <strong>{String(item.reason ?? "detail")}</strong>
+                        <p>{String(item.preview ?? item.source_cursor ?? "")}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ) : null}
           </section>
         ) : null}
 

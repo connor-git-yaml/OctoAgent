@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -56,6 +57,18 @@ _AUDIT_TASK_ID = "ops-chat-import"
 _AUDIT_TRACE_ID = "trace-ops-chat-import"
 
 
+@dataclass(slots=True)
+class _AttachmentProcessingResult:
+    attachment_count: int = 0
+    artifact_count: int = 0
+    fragment_count: int = 0
+    memu_sync_count: int = 0
+    memu_degraded_count: int = 0
+    artifact_refs: list[str] = field(default_factory=list)
+    fragments: list[FragmentRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 class _NullChatImportState:
     """dry-run 且无持久化状态时的空读存储。"""
 
@@ -96,7 +109,7 @@ class ChatImportService:
         dry_run: bool = False,
         resume: bool = False,
     ) -> ImportReport:
-        normalized_format = ImportSourceFormat(source_format)
+        normalized_format = self._processor.normalize_source_format(source_format)
         resolved_input_path = Path(input_path).expanduser()
         if not resolved_input_path.is_absolute():
             resolved_input_path = (self._root / resolved_input_path).resolve()
@@ -110,16 +123,36 @@ class ChatImportService:
             channel_override=channel,
             thread_override=thread_id,
         )
+        return await self.import_messages(
+            input_label=resolved_input_path,
+            source_format=normalized_format.value,
+            source_id=resolved_source_id,
+            messages=messages,
+            dry_run=dry_run,
+            resume=resume,
+        )
 
+    async def import_messages(
+        self,
+        *,
+        input_label: str | Path,
+        source_format: str = ImportSourceFormat.NORMALIZED_JSONL.value,
+        source_id: str,
+        messages: list,
+        dry_run: bool = False,
+        resume: bool = False,
+        raise_on_failure: bool = True,
+    ) -> ImportReport:
+        normalized_format = self._processor.normalize_source_format(source_format)
         if dry_run:
             prepared = await self._prepare_dry_run_import(
-                source_id=resolved_source_id,
+                source_id=source_id,
                 messages=messages,
                 resume=resume,
             )
             return self._processor.build_report(
-                batch_id=f"dry-run:{resolved_source_id}",
-                source_id=resolved_source_id,
+                batch_id=f"dry-run:{source_id}",
+                source_id=source_id,
                 scope_id=prepared.scope_id,
                 dry_run=True,
                 imported_count=len(prepared.new_messages),
@@ -128,6 +161,11 @@ class ChatImportService:
                 window_count=len(prepared.windows),
                 proposal_count=0,
                 committed_count=0,
+                attachment_count=sum(len(item.attachments) for item in prepared.new_messages),
+                attachment_artifact_count=0,
+                attachment_fragment_count=0,
+                memu_sync_count=0,
+                memu_degraded_count=0,
                 cursor=prepared.projected_cursor,
                 artifact_refs=[],
                 warnings=prepared.warnings,
@@ -143,21 +181,23 @@ class ChatImportService:
 
             prepared = await self._processor.prepare_import(
                 store=import_store,
-                source_id=resolved_source_id,
+                source_id=source_id,
                 messages=messages,
                 resume=resume,
             )
 
-            return await self._run_persistent_import(
+            report = await self._run_persistent_import(
                 store_group=store_group,
                 import_store=import_store,
                 memory_store=memory_store,
                 memory_service=memory_service,
                 source_format=normalized_format,
-                source_id=resolved_source_id,
-                input_path=resolved_input_path,
+                source_id=source_id,
+                input_path=input_label,
                 prepared=prepared,
+                raise_on_failure=raise_on_failure,
             )
+            return report
 
     async def _run_persistent_import(
         self,
@@ -170,6 +210,7 @@ class ChatImportService:
         source_id: str,
         input_path: str | Path,
         prepared,
+        raise_on_failure: bool,
     ) -> ImportReport:
         batch = self._processor.create_batch(
             source_id=source_id,
@@ -202,6 +243,11 @@ class ChatImportService:
         proposal_count = 0
         committed_count = 0
         imported_count = 0
+        attachment_count = 0
+        attachment_artifact_count = 0
+        attachment_fragment_count = 0
+        memu_sync_count = 0
+        memu_degraded_count = 0
         cursor: ImportCursor | None = None
 
         try:
@@ -234,21 +280,40 @@ class ChatImportService:
                     ],
                     created_at=datetime.now(tz=UTC),
                 )
-                await memory_store.append_fragment(fragment)
+                await memory_service.record_fragment(fragment, autocommit=False)
 
-                proposal_ids, disposition, new_warnings, window_proposals, window_committed = (
-                    await self._process_fact_hints(
-                        memory_service=memory_service,
-                        memory_store=memory_store,
-                        scope_id=prepared.scope_id,
-                        batch=batch,
-                        artifact_id=artifact.artifact_id,
-                        messages=window_draft.messages,
-                    )
+                (
+                    proposal_ids,
+                    disposition,
+                    new_warnings,
+                    window_proposals,
+                    window_committed,
+                ) = await self._process_fact_hints(
+                    memory_service=memory_service,
+                    memory_store=memory_store,
+                    scope_id=prepared.scope_id,
+                    batch=batch,
+                    artifact_id=artifact.artifact_id,
+                    messages=window_draft.messages,
                 )
                 warnings.extend(new_warnings)
                 proposal_count += window_proposals
                 committed_count += window_committed
+                attachment_result = await self._process_attachments(
+                    store_group=store_group,
+                    memory_service=memory_service,
+                    scope_id=prepared.scope_id,
+                    batch=batch,
+                    conversation_channel=prepared.channel,
+                    conversation_thread_id=prepared.thread_id,
+                    messages=window_draft.messages,
+                )
+                warnings.extend(attachment_result.warnings)
+                attachment_count += attachment_result.attachment_count
+                attachment_artifact_count += attachment_result.artifact_count
+                attachment_fragment_count += attachment_result.fragment_count
+                memu_sync_count += attachment_result.memu_sync_count
+                memu_degraded_count += attachment_result.memu_degraded_count
 
                 window = ImportWindow(
                     window_id=str(ULID()),
@@ -279,8 +344,21 @@ class ChatImportService:
                         message_key = self._processor.build_message_key(message)
                         raise RuntimeError(f"chat import dedupe 冲突: {message_key}")
                 await store_group.conn.commit()
+                await memory_service.sync_fragment(fragment)
+                for attachment_fragment in attachment_result.fragments:
+                    backend_degraded_before = memory_service.backend_degraded
+                    await memory_service.sync_fragment(attachment_fragment)
+                    if memory_service.backend_id != "memu":
+                        continue
+                    if memory_service.backend_degraded:
+                        memu_degraded_count += 1
+                        if not backend_degraded_before:
+                            warnings.append("MemU 同步降级，附件已保留在 artifact/fragment 路径。")
+                    else:
+                        memu_sync_count += 1
                 imported_count += len(window_draft.messages)
                 artifact_refs.append(artifact.artifact_id)
+                artifact_refs.extend(attachment_result.artifact_refs)
                 await self._append_artifact_created_event(
                     store_group,
                     artifact,
@@ -310,6 +388,11 @@ class ChatImportService:
                 window_count=len(prepared.windows),
                 proposal_count=proposal_count,
                 committed_count=committed_count,
+                attachment_count=attachment_count,
+                attachment_artifact_count=attachment_artifact_count,
+                attachment_fragment_count=attachment_fragment_count,
+                memu_sync_count=memu_sync_count,
+                memu_degraded_count=memu_degraded_count,
                 cursor=cursor,
                 artifact_refs=artifact_refs,
                 warnings=warnings,
@@ -355,6 +438,11 @@ class ChatImportService:
                 window_count=len(prepared.windows),
                 proposal_count=proposal_count,
                 committed_count=committed_count,
+                attachment_count=attachment_count,
+                attachment_artifact_count=attachment_artifact_count,
+                attachment_fragment_count=attachment_fragment_count,
+                memu_sync_count=memu_sync_count,
+                memu_degraded_count=memu_degraded_count,
                 cursor=cursor,
                 artifact_refs=artifact_refs,
                 warnings=warnings,
@@ -386,7 +474,9 @@ class ChatImportService:
                 ),
                 idempotency_key=f"chat-import:{batch.batch_id}:failed",
             )
-            raise
+            if raise_on_failure:
+                raise
+            return report
 
     async def _write_window_artifact(
         self,
@@ -488,6 +578,79 @@ class ChatImportService:
             disposition = ImportFactDisposition.PROPOSED
 
         return proposal_ids, disposition, warnings, proposal_count, committed_count
+
+    async def _process_attachments(
+        self,
+        *,
+        store_group: StoreGroup,
+        memory_service: MemoryService,
+        scope_id: str,
+        batch: ImportBatch,
+        conversation_channel: str,
+        conversation_thread_id: str,
+        messages,
+    ) -> _AttachmentProcessingResult:
+        result = _AttachmentProcessingResult()
+        for message in messages:
+            conversation_key = str(
+                message.metadata.get("conversation_key") or conversation_thread_id
+            ).strip()
+            for index, attachment in enumerate(message.attachments, start=1):
+                result.attachment_count += 1
+                source_path = Path(attachment.storage_ref).expanduser()
+                if not source_path.is_absolute():
+                    source_path = (self._root / source_path).resolve()
+                if not source_path.exists() or not source_path.is_file():
+                    result.warnings.append(
+                        f"附件缺失，已跳过 materialization: {attachment.filename or attachment.id}"
+                    )
+                    if memory_service.backend_id == "memu":
+                        result.memu_degraded_count += 1
+                    continue
+
+                artifact = Artifact(
+                    artifact_id=str(ULID()),
+                    task_id=_AUDIT_TASK_ID,
+                    ts=datetime.now(tz=UTC),
+                    name=attachment.filename or source_path.name,
+                    description=f"Imported attachment for {scope_id}",
+                    parts=[ArtifactPart(type=PartType.FILE, mime=attachment.mime)],
+                    size=0,
+                    hash="",
+                )
+                await store_group.artifact_store.put_artifact(
+                    artifact,
+                    content=source_path.read_bytes(),
+                )
+                result.artifact_count += 1
+                result.artifact_refs.append(artifact.artifact_id)
+
+                fragment = FragmentRecord(
+                    fragment_id=str(ULID()),
+                    scope_id=scope_id,
+                    partition=MemoryPartition.CHAT,
+                    content=(
+                        f"Attachment {attachment.filename or attachment.id} "
+                        f"({attachment.mime}) imported from {conversation_key}"
+                    ),
+                    metadata={
+                        "source": "chat_import_attachment",
+                        "batch_id": batch.batch_id,
+                        "channel": conversation_channel,
+                        "thread_id": conversation_thread_id,
+                        "source_message_id": message.source_message_id or "",
+                        "conversation_key": conversation_key,
+                        "attachment_index": index,
+                        "artifact_id": artifact.artifact_id,
+                        "storage_ref": str(source_path),
+                    },
+                    evidence_refs=[EvidenceRef(ref_id=artifact.artifact_id, ref_type="artifact")],
+                    created_at=datetime.now(tz=UTC),
+                )
+                await memory_service.record_fragment(fragment, autocommit=False)
+                result.fragment_count += 1
+                result.fragments.append(fragment)
+        return result
 
     async def _append_artifact_created_event(
         self,

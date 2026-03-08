@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest_asyncio
@@ -67,6 +68,38 @@ async def _create_task(app, *, text: str, thread_id: str = "thread-control") -> 
     )
     assert created is True
     return task_id
+
+
+def _write_wechat_export(path: Path, media_root: Path) -> None:
+    media_root.mkdir(parents=True, exist_ok=True)
+    (media_root / "alpha.txt").write_text("alpha attachment", encoding="utf-8")
+    payload = {
+        "account": {"label": "Connor"},
+        "conversations": [
+            {
+                "conversation_key": "team-alpha",
+                "label": "Team Alpha",
+                "messages": [
+                    {
+                        "id": "wx-1",
+                        "cursor": "cursor-1",
+                        "sender_id": "alice",
+                        "sender_name": "Alice",
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                        "text": "wechat import from control plane",
+                        "attachments": [
+                            {
+                                "path": "alpha.txt",
+                                "filename": "alpha.txt",
+                                "mime": "text/plain",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 async def _seed_memory(app) -> dict[str, str]:
@@ -202,7 +235,7 @@ async def seeded_memory_control_plane(control_plane_app):
 
 
 class TestControlPlaneApi:
-    async def test_snapshot_returns_feature_030_resources_and_registry(
+    async def test_snapshot_returns_control_plane_resources_and_registry(
         self,
         control_plane_client: AsyncClient,
         seeded_memory_control_plane,
@@ -223,6 +256,7 @@ class TestControlPlaneApi:
             "automation",
             "diagnostics",
             "memory",
+            "imports",
         }
         assert payload["registry"]["resource_type"] == "action_registry"
         assert any(item["action_id"] == "project.select" for item in payload["registry"]["actions"])
@@ -231,12 +265,16 @@ class TestControlPlaneApi:
         assert any(
             item["action_id"] == "pipeline.resume" for item in payload["registry"]["actions"]
         )
+        assert any(
+            item["action_id"] == "import.source.detect" for item in payload["registry"]["actions"]
+        )
         assert "schema" in payload["resources"]["config"]
         assert "schema_payload" not in payload["resources"]["config"]
         assert payload["resources"]["memory"]["resource_type"] == "memory_console"
         assert payload["resources"]["memory"]["backend_id"]
         assert payload["resources"]["memory"]["retrieval_backend"]
         assert "index_health" in payload["resources"]["memory"]
+        assert payload["resources"]["imports"]["resource_type"] == "import_workbench"
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
@@ -295,6 +333,142 @@ class TestControlPlaneApi:
             }
         ]
 
+    async def test_import_workbench_detect_preview_run_and_inspect(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        export_path = control_plane_app.state.project_root / "wechat-export.json"
+        media_root = control_plane_app.state.project_root / "wechat-media"
+        _write_wechat_export(export_path, media_root)
+
+        detect_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.source.detect",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_type": "wechat",
+                    "input_path": str(export_path),
+                    "media_root": str(media_root),
+                    "format_hint": "json",
+                },
+            },
+        )
+
+        assert detect_resp.status_code == 200
+        detect_payload = detect_resp.json()["result"]
+        assert detect_payload["code"] == "IMPORT_SOURCE_DETECTED"
+        source_id = detect_payload["data"]["source_id"]
+
+        mapping_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.mapping.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                },
+            },
+        )
+
+        assert mapping_resp.status_code == 200
+        mapping_id = mapping_resp.json()["result"]["data"]["mapping_id"]
+
+        preview_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.preview",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                    "mapping_id": mapping_id,
+                },
+            },
+        )
+
+        assert preview_resp.status_code == 200
+        preview_payload = preview_resp.json()["result"]["data"]
+        assert preview_payload["status"] == "ready_to_run"
+        assert preview_payload["summary"]["attachment_count"] == 1
+
+        run_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.run",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                    "mapping_id": mapping_id,
+                },
+            },
+        )
+
+        assert run_resp.status_code == 200
+        run_payload = run_resp.json()["result"]["data"]
+        run_id = run_payload["resource_id"]
+        assert run_payload["status"] == "completed"
+        assert run_payload["summary"]["imported_count"] == 1
+        assert run_payload["summary"]["attachment_artifact_count"] == 1
+
+        workbench_resp = await control_plane_client.get("/api/control/resources/import-workbench")
+        assert workbench_resp.status_code == 200
+        workbench_payload = workbench_resp.json()
+        assert workbench_payload["resource_type"] == "import_workbench"
+        assert any(item["source_id"] == source_id for item in workbench_payload["sources"])
+        assert any(item["resource_id"] == run_id for item in workbench_payload["recent_runs"])
+
+        source_resp = await control_plane_client.get(
+            f"/api/control/resources/import-sources/{source_id}"
+        )
+        assert source_resp.status_code == 200
+        assert source_resp.json()["source_type"] == "wechat"
+
+        report_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.report.inspect",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "run_id": run_id,
+                },
+            },
+        )
+
+        assert report_resp.status_code == 200
+        assert report_resp.json()["result"]["data"]["resource_id"] == run_id
+
+        run_detail_resp = await control_plane_client.get(
+            f"/api/control/resources/import-runs/{run_id}"
+        )
+        assert run_detail_resp.status_code == 200
+        assert run_detail_resp.json()["status"] == "completed"
+
     async def test_memory_resources_and_vault_authorization_flow(
         self,
         control_plane_client: AsyncClient,
@@ -310,8 +484,7 @@ class TestControlPlaneApi:
         assert memory_payload["retrieval_backend"]
         assert "backend_diagnostics" in memory_payload["advanced_refs"]
         assert any(
-            item["subject_key"] == "work.project-alpha.status"
-            for item in memory_payload["records"]
+            item["subject_key"] == "work.project-alpha.status" for item in memory_payload["records"]
         )
         assert any(item["layer"] == "derived" for item in memory_payload["records"])
 

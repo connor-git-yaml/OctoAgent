@@ -80,6 +80,15 @@ from octoagent.provider.dx.chat_import_service import ChatImportService
 from octoagent.provider.dx.config_schema import OctoAgentConfig
 from octoagent.provider.dx.config_wizard import load_config, save_config
 from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+from octoagent.provider.dx.import_workbench_models import (
+    ImportRunDocument,
+    ImportSourceDocument,
+    ImportWorkbenchDocument,
+)
+from octoagent.provider.dx.import_workbench_service import (
+    ImportWorkbenchError,
+    ImportWorkbenchService,
+)
 from octoagent.provider.dx.litellm_generator import (
     check_litellm_sync_status,
     generate_litellm_config,
@@ -123,6 +132,7 @@ class ControlPlaneService:
         memory_console_service: MemoryConsoleService | None = None,
         capability_pack_service=None,
         delegation_plane_service=None,
+        import_workbench_service: ImportWorkbenchService | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -139,6 +149,11 @@ class ControlPlaneService:
         )
         self._capability_pack_service = capability_pack_service
         self._delegation_plane_service = delegation_plane_service
+        self._import_workbench_service = import_workbench_service or ImportWorkbenchService(
+            project_root,
+            surface="web",
+            store_group=store_group,
+        )
         self._state_store = ControlPlaneStateStore(project_root)
         self._automation_store = AutomationStore(project_root)
         self._automation_scheduler = None
@@ -163,6 +178,7 @@ class ControlPlaneService:
         automation = await self.get_automation_document()
         diagnostics = await self.get_diagnostics_summary()
         memory = await self.get_memory_console()
+        imports = await self.get_import_workbench()
         registry = self.get_action_registry()
         return {
             "contract_version": registry.contract_version,
@@ -177,6 +193,7 @@ class ControlPlaneService:
                 "automation": automation.model_dump(mode="json", by_alias=True),
                 "diagnostics": diagnostics.model_dump(mode="json", by_alias=True),
                 "memory": memory.model_dump(mode="json", by_alias=True),
+                "imports": imports.model_dump(mode="json", by_alias=True),
             },
             "registry": registry.model_dump(mode="json", by_alias=True),
             "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -961,6 +978,30 @@ class ControlPlaneService:
                 document.degraded.reasons.append(fallback_reason)
         return document
 
+    async def get_import_workbench(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> ImportWorkbenchDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else None
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else None
+        )
+        return await self._import_workbench_service.get_workbench(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+        )
+
+    async def get_import_source(self, source_id: str) -> ImportSourceDocument:
+        return await self._import_workbench_service.get_source(source_id)
+
+    async def get_import_run(self, run_id: str) -> ImportRunDocument:
+        return await self._import_workbench_service.get_run(run_id)
+
     async def get_memory_subject_history(
         self,
         subject_key: str,
@@ -1254,8 +1295,18 @@ class ControlPlaneService:
             return await self._handle_backup_create(request)
         if action_id == "restore.plan":
             return await self._handle_restore_plan(request)
+        if action_id == "import.source.detect":
+            return await self._handle_import_source_detect(request)
+        if action_id == "import.mapping.save":
+            return await self._handle_import_mapping_save(request)
+        if action_id == "import.preview":
+            return await self._handle_import_preview(request)
         if action_id == "import.run":
             return await self._handle_import_run(request)
+        if action_id == "import.resume":
+            return await self._handle_import_resume(request)
+        if action_id == "import.report.inspect":
+            return await self._handle_import_report_inspect(request)
         if action_id == "update.dry_run":
             return await self._handle_update_dry_run(request)
         if action_id == "update.apply":
@@ -2024,13 +2075,136 @@ class ControlPlaneService:
             resource_refs=[self._resource_ref("diagnostics_summary", "diagnostics:runtime")],
         )
 
+    async def _handle_import_source_detect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        source_type = str(request.params.get("source_type", "")).strip().lower()
+        input_path = str(request.params.get("input_path", "")).strip()
+        media_root = str(request.params.get("media_root", "")).strip() or None
+        format_hint = str(request.params.get("format_hint", "")).strip() or None
+        if not source_type:
+            raise ControlPlaneActionError("IMPORT_SOURCE_INVALID", "source_type 不能为空")
+        if not input_path:
+            raise ControlPlaneActionError("INPUT_PATH_REQUIRED", "input_path 不能为空")
+        try:
+            document = await self._import_workbench_service.detect_source(
+                source_type=source_type,
+                input_path=input_path,
+                media_root=media_root,
+                format_hint=format_hint,
+            )
+        except ImportWorkbenchError as exc:
+            raise ControlPlaneActionError(exc.code, exc.message) from exc
+        return self._completed_result(
+            request=request,
+            code="IMPORT_SOURCE_DETECTED",
+            message="已识别导入源",
+            data=document.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("import_workbench", "imports:workbench"),
+                self._resource_ref("import_source", document.resource_id),
+            ],
+        )
+
+    async def _handle_import_mapping_save(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        source_id = str(request.params.get("source_id", "")).strip()
+        if not source_id:
+            raise ControlPlaneActionError("IMPORT_SOURCE_INVALID", "source_id 不能为空")
+        raw_conversation_mappings = request.params.get("conversation_mappings")
+        raw_sender_mappings = request.params.get("sender_mappings")
+        conversation_mappings = (
+            list(raw_conversation_mappings)
+            if isinstance(raw_conversation_mappings, list)
+            else None
+        )
+        sender_mappings = (
+            list(raw_sender_mappings) if isinstance(raw_sender_mappings, list) else None
+        )
+        try:
+            profile = await self._import_workbench_service.save_mapping(
+                source_id=source_id,
+                conversation_mappings=conversation_mappings,
+                sender_mappings=sender_mappings,
+                attachment_policy=str(
+                    request.params.get("attachment_policy", "artifact-first")
+                ).strip()
+                or "artifact-first",
+                memu_policy=str(request.params.get("memu_policy", "best-effort")).strip()
+                or "best-effort",
+            )
+            source = await self._import_workbench_service.get_source(source_id)
+        except ImportWorkbenchError as exc:
+            raise ControlPlaneActionError(exc.code, exc.message) from exc
+        return self._completed_result(
+            request=request,
+            code="IMPORT_MAPPING_SAVED",
+            message="导入 mapping 已保存",
+            data=profile.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("import_workbench", "imports:workbench"),
+                self._resource_ref("import_source", source.resource_id),
+            ],
+        )
+
+    async def _handle_import_preview(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        source_id = str(request.params.get("source_id", "")).strip()
+        if not source_id:
+            raise ControlPlaneActionError("IMPORT_SOURCE_INVALID", "source_id 不能为空")
+        mapping_id = str(request.params.get("mapping_id", "")).strip() or None
+        try:
+            document = await self._import_workbench_service.preview(
+                source_id=source_id,
+                mapping_id=mapping_id,
+            )
+        except ImportWorkbenchError as exc:
+            raise ControlPlaneActionError(exc.code, exc.message) from exc
+        return self._completed_result(
+            request=request,
+            code="IMPORT_PREVIEW_READY",
+            message="已生成导入预览",
+            data=document.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("import_workbench", "imports:workbench"),
+                self._resource_ref("import_run", document.resource_id),
+            ],
+        )
+
     async def _handle_import_run(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        source_id = str(request.params.get("source_id", "")).strip()
+        mapping_id = str(request.params.get("mapping_id", "")).strip() or None
+        if source_id:
+            try:
+                document = await self._import_workbench_service.run(
+                    source_id=source_id,
+                    mapping_id=mapping_id,
+                    resume=bool(request.params.get("resume", False)),
+                )
+            except ImportWorkbenchError as exc:
+                raise ControlPlaneActionError(exc.code, exc.message) from exc
+            return self._completed_result(
+                request=request,
+                code="IMPORT_RUN_COMPLETED",
+                message="导入执行完成",
+                data=document.model_dump(mode="json"),
+                resource_refs=[
+                    self._resource_ref("import_workbench", "imports:workbench"),
+                    self._resource_ref("import_run", document.resource_id),
+                ],
+            )
+
         input_path = str(request.params.get("input_path", "")).strip()
         if not input_path:
             raise ControlPlaneActionError("INPUT_PATH_REQUIRED", "input_path 不能为空")
         report = await ChatImportService(self._project_root, store_group=self._stores).import_chats(
             input_path=input_path,
-            source_format=str(request.params.get("source_format", "normalized_jsonl")),
+            source_format=str(request.params.get("source_format", "normalized-jsonl")),
             source_id=(str(request.params.get("source_id", "")).strip() or None),
             channel=(str(request.params.get("channel", "")).strip() or None),
             thread_id=(str(request.params.get("thread_id", "")).strip() or None),
@@ -2043,6 +2217,44 @@ class ControlPlaneService:
             message="聊天导入已完成",
             data=report.model_dump(mode="json"),
             resource_refs=[self._resource_ref("diagnostics_summary", "diagnostics:runtime")],
+        )
+
+    async def _handle_import_resume(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        resume_id = str(request.params.get("resume_id", "")).strip()
+        if not resume_id:
+            raise ControlPlaneActionError("IMPORT_RESUME_BLOCKED", "resume_id 不能为空")
+        try:
+            document = await self._import_workbench_service.resume(resume_id=resume_id)
+        except ImportWorkbenchError as exc:
+            raise ControlPlaneActionError(exc.code, exc.message) from exc
+        return self._completed_result(
+            request=request,
+            code="IMPORT_RESUME_COMPLETED",
+            message="已恢复导入",
+            data=document.model_dump(mode="json"),
+            resource_refs=[
+                self._resource_ref("import_workbench", "imports:workbench"),
+                self._resource_ref("import_run", document.resource_id),
+            ],
+        )
+
+    async def _handle_import_report_inspect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        run_id = str(request.params.get("run_id", "")).strip()
+        if not run_id:
+            raise ControlPlaneActionError("IMPORT_REPORT_NOT_FOUND", "run_id 不能为空")
+        try:
+            document = self._import_workbench_service.inspect_report(run_id)
+        except ImportWorkbenchError as exc:
+            raise ControlPlaneActionError(exc.code, exc.message) from exc
+        return self._completed_result(
+            request=request,
+            code="IMPORT_REPORT_READY",
+            message="已加载导入报告",
+            data=document.model_dump(mode="json"),
+            resource_refs=[self._resource_ref("import_run", document.resource_id)],
         )
 
     async def _handle_update_dry_run(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -3148,7 +3360,48 @@ class ControlPlaneService:
                     telegram_supported=True,
                 ),
                 definition("restore.plan", "生成恢复计划", category="ops", risk_hint="medium"),
-                definition("import.run", "执行聊天导入", category="ops", risk_hint="medium"),
+                definition(
+                    "import.source.detect",
+                    "识别导入源",
+                    category="imports",
+                    risk_hint="low",
+                    params_schema={"type": "object", "required": ["source_type", "input_path"]},
+                ),
+                definition(
+                    "import.mapping.save",
+                    "保存导入 Mapping",
+                    category="imports",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["source_id"]},
+                ),
+                definition(
+                    "import.preview",
+                    "生成导入预览",
+                    category="imports",
+                    risk_hint="low",
+                    params_schema={"type": "object", "required": ["source_id"]},
+                ),
+                definition(
+                    "import.run",
+                    "执行聊天导入",
+                    category="imports",
+                    risk_hint="medium",
+                    params_schema={"type": "object"},
+                ),
+                definition(
+                    "import.resume",
+                    "恢复导入",
+                    category="imports",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["resume_id"]},
+                ),
+                definition(
+                    "import.report.inspect",
+                    "查看导入报告",
+                    category="imports",
+                    risk_hint="low",
+                    params_schema={"type": "object", "required": ["run_id"]},
+                ),
                 definition(
                     "update.dry_run",
                     "升级 Dry Run",

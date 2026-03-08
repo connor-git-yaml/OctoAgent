@@ -27,6 +27,16 @@ def compute_hash_and_size(content: bytes) -> tuple[str, int]:
     return hashlib.sha256(content).hexdigest(), len(content)
 
 
+def is_utf8_inline_safe(content: bytes) -> bool:
+    """判断内容是否可无损以内联 UTF-8 形式存储。"""
+
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return decoded.encode("utf-8") == content
+
+
 class SqliteArtifactStore:
     """ArtifactStore 的 SQLite + 文件系统实现"""
 
@@ -42,15 +52,15 @@ class SqliteArtifactStore:
         """存储 Artifact（元数据写 SQLite + 大文件写文件系统）
 
         如果 content 不为 None 且大小 >= ARTIFACT_INLINE_THRESHOLD，
-        写入文件系统并设置 storage_ref。
-        否则 inline 存储在 parts.content 中。
+        或者内容不是可无损 round-trip 的 UTF-8，则写入文件系统并设置 storage_ref。
+        其余小文本 inline 存储在 parts.content 中。
         """
         if content is not None:
             hash_hex, size = compute_hash_and_size(content)
             artifact.hash = hash_hex
             artifact.size = size
 
-            if size >= ARTIFACT_INLINE_THRESHOLD:
+            if size >= ARTIFACT_INLINE_THRESHOLD or not is_utf8_inline_safe(content):
                 # 大文件：写入文件系统
                 file_path = self._get_artifact_path(artifact.task_id, artifact.artifact_id)
                 file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,7 +73,7 @@ class SqliteArtifactStore:
             else:
                 # 小文件：inline 存储在 parts.content
                 if artifact.parts:
-                    artifact.parts[0].content = content.decode("utf-8", errors="replace")
+                    artifact.parts[0].content = content.decode("utf-8")
                     artifact.parts[0].uri = None
 
         # 写入 SQLite 元数据

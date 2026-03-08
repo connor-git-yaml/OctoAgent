@@ -93,6 +93,42 @@ async def get_control_memory(
     ).model_dump(mode="json", by_alias=True)
 
 
+@router.get("/api/control/resources/import-workbench")
+async def get_control_import_workbench(
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_import_workbench(
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/import-sources/{source_id}")
+async def get_control_import_source(
+    source_id: str,
+    control_plane=Depends(get_control_plane_service),
+):
+    return (await control_plane.get_import_source(source_id)).model_dump(
+        mode="json",
+        by_alias=True,
+    )
+
+
+@router.get("/api/control/resources/import-runs/{run_id}")
+async def get_control_import_run(
+    run_id: str,
+    control_plane=Depends(get_control_plane_service),
+):
+    return (await control_plane.get_import_run(run_id)).model_dump(
+        mode="json",
+        by_alias=True,
+    )
+
+
 @router.get("/api/control/resources/memory-subjects/{subject_key}")
 async def get_control_memory_subject_history(
     subject_key: str,

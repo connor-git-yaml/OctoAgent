@@ -25,6 +25,12 @@ from .models import (
 
 _DEFAULT_WINDOW_SIZE = 10
 
+_SOURCE_FORMAT_ALIASES = {
+    "normalized_jsonl": ImportSourceFormat.NORMALIZED_JSONL.value,
+    "normalized-jsonl": ImportSourceFormat.NORMALIZED_JSONL.value,
+    "wechat": ImportSourceFormat.WECHAT.value,
+}
+
 
 @dataclass(slots=True)
 class ImportWindowDraft:
@@ -79,7 +85,7 @@ class ChatImportProcessor:
         path = Path(input_path).expanduser()
         if not path.exists():
             raise FileNotFoundError(f"输入文件不存在: {path}")
-        source_format = ImportSourceFormat(source_format)
+        source_format = self.normalize_source_format(source_format)
         if source_format is not ImportSourceFormat.NORMALIZED_JSONL:
             raise ValueError(f"暂不支持导入格式: {source_format}")
 
@@ -206,6 +212,11 @@ class ChatImportProcessor:
         window_count: int,
         proposal_count: int,
         committed_count: int,
+        attachment_count: int,
+        attachment_artifact_count: int,
+        attachment_fragment_count: int,
+        memu_sync_count: int,
+        memu_degraded_count: int,
         cursor: ImportCursor | None,
         artifact_refs: list[str],
         warnings: list[str],
@@ -218,6 +229,11 @@ class ChatImportProcessor:
             window_count=window_count,
             proposal_count=proposal_count,
             committed_count=committed_count,
+            attachment_count=attachment_count,
+            attachment_artifact_count=attachment_artifact_count,
+            attachment_fragment_count=attachment_fragment_count,
+            memu_sync_count=memu_sync_count,
+            memu_degraded_count=memu_degraded_count,
             warning_count=len(warnings),
         )
         next_actions: list[str] = []
@@ -246,6 +262,15 @@ class ChatImportProcessor:
             errors=errors,
             next_actions=next_actions,
         )
+
+    @staticmethod
+    def normalize_source_format(source_format: ImportSourceFormat | str) -> ImportSourceFormat:
+        if isinstance(source_format, ImportSourceFormat):
+            return source_format
+        normalized = _SOURCE_FORMAT_ALIASES.get(str(source_format).strip().lower())
+        if normalized is None:
+            return ImportSourceFormat(source_format)
+        return ImportSourceFormat(normalized)
 
     def build_windows(self, messages: list[ImportedChatMessage]) -> list[ImportWindowDraft]:
         windows: list[ImportWindowDraft] = []
@@ -309,9 +334,7 @@ class ChatImportProcessor:
             return f"source:{message.source_message_id.strip()}"
         normalized_text = re.sub(r"\s+", " ", message.text.strip())
         base = (
-            f"{message.sender_id}|"
-            f"{message.timestamp.astimezone(UTC).isoformat()}|"
-            f"{normalized_text}"
+            f"{message.sender_id}|{message.timestamp.astimezone(UTC).isoformat()}|{normalized_text}"
         )
         return f"sha256:{hashlib.sha256(base.encode('utf-8')).hexdigest()}"
 

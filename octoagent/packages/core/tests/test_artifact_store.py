@@ -13,7 +13,11 @@ from pathlib import Path
 import aiosqlite
 import pytest_asyncio
 from octoagent.core.models import Artifact, ArtifactPart, PartType, RequesterInfo, Task
-from octoagent.core.store.artifact_store import SqliteArtifactStore, compute_hash_and_size
+from octoagent.core.store.artifact_store import (
+    SqliteArtifactStore,
+    compute_hash_and_size,
+    is_utf8_inline_safe,
+)
 from octoagent.core.store.sqlite_init import init_db
 from octoagent.core.store.task_store import SqliteTaskStore
 
@@ -100,6 +104,33 @@ class TestArtifactStore:
         # 文件内容检索
         retrieved_content = await artifact_store.get_artifact_content(
             "01JART_LARGE_000000000001"
+        )
+        assert retrieved_content == content
+
+    async def test_small_binary_stores_to_file_without_corruption(self, stores):
+        """小型二进制内容必须落文件，不能被 UTF-8 inline 损坏。"""
+        artifact_store, conn, _ = stores
+        now = datetime.now(UTC)
+
+        content = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+        assert is_utf8_inline_safe(content) is False
+        artifact = Artifact(
+            artifact_id="01JART_BINARY_00000000001",
+            task_id="01JTEST_ART_00000000000001",
+            ts=now,
+            name="tiny-binary",
+            parts=[ArtifactPart(type=PartType.FILE)],
+        )
+        await artifact_store.put_artifact(artifact, content)
+        await conn.commit()
+
+        retrieved = await artifact_store.get_artifact("01JART_BINARY_00000000001")
+        assert retrieved is not None
+        assert retrieved.storage_ref is not None
+        assert retrieved.parts[0].content is None
+
+        retrieved_content = await artifact_store.get_artifact_content(
+            "01JART_BINARY_00000000001"
         )
         assert retrieved_content == content
 

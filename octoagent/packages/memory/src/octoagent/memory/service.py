@@ -74,6 +74,14 @@ class MemoryService:
         self._backend_failure_message = ""
         self._pending_replay_count = 0
 
+    @property
+    def backend_id(self) -> str:
+        return self._backend.backend_id
+
+    @property
+    def backend_degraded(self) -> bool:
+        return self._backend_degraded
+
     async def propose_write(
         self,
         *,
@@ -136,9 +144,7 @@ class MemoryService:
                 errors.append("UPDATE/DELETE proposal 缺少 current 目标")
             elif expected_version is None:
                 expected_version = current.version
-            elif (
-                current.version != expected_version
-            ):
+            elif current.version != expected_version:
                 errors.append(
                     "expected_version="
                     f"{expected_version} 与 current.version={current.version} 不匹配"
@@ -224,10 +230,10 @@ class MemoryService:
             elif proposal.action is WriteAction.DELETE:
                 sor_id = await self._commit_delete(proposal, current, now)
 
-            if (
-                validation.persist_vault
-                and proposal.action in {WriteAction.ADD, WriteAction.UPDATE}
-            ):
+            if validation.persist_vault and proposal.action in {
+                WriteAction.ADD,
+                WriteAction.UPDATE,
+            }:
                 vault = self._build_vault_record(proposal, now)
                 vault_id = vault.vault_id
                 await self._store.insert_vault(vault)
@@ -270,6 +276,29 @@ class MemoryService:
             fragment_id=fragment.fragment_id,
             sor_id=sor_id,
             vault_id=vault_id,
+        )
+
+    async def record_fragment(
+        self,
+        fragment: FragmentRecord,
+        *,
+        autocommit: bool = True,
+    ) -> FragmentRecord:
+        """追加 fragment，并在可用时同步 backend。"""
+
+        await self._store.append_fragment(fragment)
+        if autocommit:
+            await self._conn.commit()
+            await self.sync_fragment(fragment)
+        return fragment
+
+    async def sync_fragment(self, fragment: FragmentRecord) -> None:
+        """仅同步已有 fragment 到 backend。"""
+
+        await self._sync_backend(
+            fragment=fragment,
+            current_sor_id=None,
+            current_vault_id=None,
         )
 
     async def search_memory(

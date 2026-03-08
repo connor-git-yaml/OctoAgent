@@ -14,6 +14,8 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 function buildSnapshot(currentProjectId = "project-default") {
+  const currentWorkspaceId =
+    currentProjectId === "project-ops" ? "workspace-ops" : "workspace-default";
   return {
     contract_version: "1.0.0",
     generated_at: "2026-03-08T09:00:00Z",
@@ -147,8 +149,7 @@ function buildSnapshot(currentProjectId = "project-default") {
         capabilities: [],
         refs: {},
         current_project_id: currentProjectId,
-        current_workspace_id:
-          currentProjectId === "project-ops" ? "workspace-ops" : "workspace-default",
+        current_workspace_id: currentWorkspaceId,
         default_project_id: "project-default",
         fallback_reason: "",
         switch_allowed: true,
@@ -214,10 +215,7 @@ function buildSnapshot(currentProjectId = "project-default") {
             channel: "telegram",
             requester_id: "owner",
             project_id: currentProjectId,
-            workspace_id:
-              currentProjectId === "project-ops"
-                ? "workspace-ops"
-                : "workspace-default",
+            workspace_id: currentWorkspaceId,
             latest_message_summary: "请检查 update plan",
             latest_event_at: "2026-03-08T09:10:00Z",
             execution_summary: {},
@@ -517,14 +515,10 @@ function buildSnapshot(currentProjectId = "project-default") {
         capabilities: [],
         refs: {},
         active_project_id: currentProjectId,
-        active_workspace_id:
-          currentProjectId === "project-ops" ? "workspace-ops" : "workspace-default",
+        active_workspace_id: currentWorkspaceId,
         filters: {
           project_id: currentProjectId,
-          workspace_id:
-            currentProjectId === "project-ops"
-              ? "workspace-ops"
-              : "workspace-default",
+          workspace_id: currentWorkspaceId,
           scope_id: "scope-prod",
           partition: "",
           layer: "",
@@ -547,10 +541,7 @@ function buildSnapshot(currentProjectId = "project-default") {
             record_id: "sor-current-1",
             layer: "sor",
             project_id: currentProjectId,
-            workspace_id:
-              currentProjectId === "project-ops"
-                ? "workspace-ops"
-                : "workspace-default",
+            workspace_id: currentWorkspaceId,
             scope_id: "scope-prod",
             partition: "profile",
             subject_key: "user:alice",
@@ -567,10 +558,7 @@ function buildSnapshot(currentProjectId = "project-default") {
             record_id: "vault-1",
             layer: "vault",
             project_id: currentProjectId,
-            workspace_id:
-              currentProjectId === "project-ops"
-                ? "workspace-ops"
-                : "workspace-default",
+            workspace_id: currentWorkspaceId,
             scope_id: "scope-prod",
             partition: "credential",
             subject_key: "credential:db",
@@ -588,7 +576,186 @@ function buildSnapshot(currentProjectId = "project-default") {
         available_partitions: ["profile", "credential"],
         available_layers: ["sor", "vault"],
       },
+      imports: buildImportWorkbench(currentProjectId, currentWorkspaceId),
     },
+  };
+}
+
+function buildImportSourceDocument(
+  currentProjectId = "project-default",
+  currentWorkspaceId = "workspace-default"
+) {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "import_source",
+    resource_id: "import-source:wechat-source-1",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:00:00Z",
+    updated_at: "2026-03-08T09:00:00Z",
+    status: "detected",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: currentProjectId,
+    active_workspace_id: currentWorkspaceId,
+    source_id: "wechat-source-1",
+    source_type: "wechat",
+    input_ref: {
+      source_type: "wechat",
+      input_path: "/tmp/wechat-export.json",
+      media_root: "/tmp/wechat-media",
+      format_hint: "json",
+      account_id: null,
+      metadata: {},
+    },
+    detected_conversations: [
+      {
+        conversation_key: "team-alpha",
+        label: "Team Alpha",
+        message_count: 2,
+        attachment_count: 1,
+        last_message_at: "2026-03-08T09:00:00Z",
+        participants: ["alice", "bob"],
+        metadata: {},
+      },
+    ],
+    detected_participants: [
+      {
+        source_sender_id: "alice",
+        label: "Alice",
+        message_count: 1,
+        metadata: {},
+      },
+      {
+        source_sender_id: "bob",
+        label: "Bob",
+        message_count: 1,
+        metadata: {},
+      },
+    ],
+    attachment_roots: ["/tmp/wechat-media"],
+    errors: [],
+    latest_mapping_id: "mapping-1",
+    latest_run_id: "import-run:wechat-1",
+    metadata: { format: "json" },
+  };
+}
+
+function buildImportRunDocument(
+  currentProjectId = "project-default",
+  currentWorkspaceId = "workspace-default"
+) {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "import_run",
+    resource_id: "import-run:wechat-1",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:10:00Z",
+    updated_at: "2026-03-08T09:10:00Z",
+    status: "ready_to_run",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: currentProjectId,
+    active_workspace_id: currentWorkspaceId,
+    source_id: "wechat-source-1",
+    source_type: "wechat",
+    dry_run: true,
+    mapping_id: "mapping-1",
+    summary: {
+      conversation_count: 1,
+      scope_count: 1,
+      imported_count: 2,
+      duplicate_count: 0,
+      window_count: 1,
+      proposal_count: 0,
+      committed_count: 0,
+      attachment_count: 1,
+      attachment_artifact_count: 1,
+      attachment_fragment_count: 1,
+    },
+    errors: [],
+    dedupe_details: [
+      {
+        reason: "duplicate_in_history",
+        preview: "hello from history",
+      },
+    ],
+    cursor: {
+      scopes: {
+        "chat:wechat_import:team-alpha": {
+          source_id: "wechat-source-1",
+          scope_id: "chat:wechat_import:team-alpha",
+          cursor_value: "cursor-2",
+          last_message_ts: "2026-03-08T09:02:00Z",
+          last_message_key: "wechat-source-1:cursor-2",
+          imported_count: 2,
+          duplicate_count: 0,
+          updated_at: "2026-03-08T09:10:00Z",
+        },
+      },
+    },
+    artifact_refs: ["artifact-1", "artifact-attachment-1"],
+    memory_effects: {
+      fragment_count: 2,
+      proposal_count: 0,
+      committed_count: 0,
+      vault_ref_count: 0,
+      memu_sync_count: 1,
+      memu_degraded_count: 0,
+    },
+    report_refs: ["report-1"],
+    resume_ref: "resume:wechat-source-1",
+    metadata: { mode: "preview" },
+    completed_at: "2026-03-08T09:10:00Z",
+  };
+}
+
+function buildImportWorkbench(
+  currentProjectId = "project-default",
+  currentWorkspaceId = "workspace-default"
+) {
+  return {
+    contract_version: "1.0.0",
+    resource_type: "import_workbench",
+    resource_id: "imports:workbench",
+    schema_version: 1,
+    generated_at: "2026-03-08T09:00:00Z",
+    updated_at: "2026-03-08T09:00:00Z",
+    status: "ready",
+    degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+    warnings: [],
+    capabilities: [],
+    refs: {},
+    active_project_id: currentProjectId,
+    active_workspace_id: currentWorkspaceId,
+    summary: {
+      source_count: 1,
+      recent_run_count: 1,
+      resume_available_count: 1,
+      warning_count: 0,
+      error_count: 0,
+    },
+    sources: [buildImportSourceDocument(currentProjectId, currentWorkspaceId)],
+    recent_runs: [buildImportRunDocument(currentProjectId, currentWorkspaceId)],
+    resume_entries: [
+      {
+        resume_id: "resume:wechat-source-1",
+        source_id: "wechat-source-1",
+        source_type: "wechat",
+        project_id: currentProjectId,
+        workspace_id: currentWorkspaceId,
+        scope_id: "chat:wechat_import:team-alpha",
+        last_cursor: "cursor-2",
+        last_batch_id: "report-1",
+        state: "ready",
+        blocking_reason: "",
+        next_action: "import.resume",
+        updated_at: "2026-03-08T09:10:00Z",
+      },
+    ],
   };
 }
 
@@ -1228,5 +1395,44 @@ describe("ControlPlane", () => {
     await userEvent.click(screen.getByRole("button", { name: /Pipelines/i }));
     expect(await screen.findByText("delegation:preflight")).toBeInTheDocument();
     expect(screen.getByText("tool index selected tools")).toBeInTheDocument();
+  });
+
+  it("Imports section 会加载 workbench/source/run 明细", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const snapshot = buildSnapshot();
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      if (url.includes("/api/control/resources/import-sources/")) {
+        return Promise.resolve(jsonResponse(buildImportSourceDocument()));
+      }
+      if (url.includes("/api/control/resources/import-runs/")) {
+        return Promise.resolve(jsonResponse(buildImportRunDocument()));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("project-default");
+    await userEvent.click(screen.getByRole("button", { name: /Imports/i }));
+
+    expect(await screen.findByText("Import Workbench")).toBeInTheDocument();
+    expect(await screen.findByText("Source Detail")).toBeInTheDocument();
+    expect((await screen.findAllByText("wechat-source-1")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Team Alpha")).toBeInTheDocument();
+    expect(await screen.findByText("Run Detail")).toBeInTheDocument();
+    expect((await screen.findAllByText("ready_to_run")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 });

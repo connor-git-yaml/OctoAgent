@@ -14,6 +14,9 @@ import type {
   DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
+  ImportRunDocument,
+  ImportSourceDocument,
+  ImportWorkbenchDocument,
   MemoryConsoleDocument,
   MemoryProposalAuditDocument,
   MemorySubjectHistoryDocument,
@@ -45,7 +48,8 @@ type ControlResourceName =
   | "pipelines"
   | "automation"
   | "diagnostics"
-  | "memory";
+  | "memory"
+  | "import-workbench";
 
 interface MemoryResourceQuery {
   projectId?: string;
@@ -140,6 +144,9 @@ export async function fetchControlResource(
   resource: "memory"
 ): Promise<MemoryConsoleDocument>;
 export async function fetchControlResource(
+  resource: "import-workbench"
+): Promise<ImportWorkbenchDocument>;
+export async function fetchControlResource(
   resource: ControlResourceName
 ): Promise<
   | WizardSessionDocument
@@ -152,6 +159,7 @@ export async function fetchControlResource(
   | AutomationJobDocument
   | DiagnosticsSummaryDocument
   | MemoryConsoleDocument
+  | ImportWorkbenchDocument
 > {
   return apiFetch(`/api/control/resources/${resource}`);
 }
@@ -214,6 +222,32 @@ export async function fetchVaultAuthorization(
       scope_id: params.scopeId,
       subject_key: params.subjectKey,
     })}`
+  );
+}
+
+export async function fetchImportWorkbench(params: {
+  projectId?: string;
+  workspaceId?: string;
+} = {}): Promise<ImportWorkbenchDocument> {
+  return apiFetch<ImportWorkbenchDocument>(
+    `/api/control/resources/import-workbench${buildQueryString({
+      project_id: params.projectId,
+      workspace_id: params.workspaceId,
+    })}`
+  );
+}
+
+export async function fetchImportSource(
+  sourceId: string
+): Promise<ImportSourceDocument> {
+  return apiFetch<ImportSourceDocument>(
+    `/api/control/resources/import-sources/${encodeURIComponent(sourceId)}`
+  );
+}
+
+export async function fetchImportRun(runId: string): Promise<ImportRunDocument> {
+  return apiFetch<ImportRunDocument>(
+    `/api/control/resources/import-runs/${encodeURIComponent(runId)}`
   );
 }
 

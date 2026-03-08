@@ -56,6 +56,30 @@ def _build_rows(now: datetime, *, include_hint: bool = False) -> list[dict]:
     return rows
 
 
+def _build_rows_with_attachment(now: datetime, attachment_path: Path) -> list[dict]:
+    return [
+        {
+            "source_message_id": "m1",
+            "source_cursor": "c1",
+            "channel": "wechat_import",
+            "thread_id": "project-alpha",
+            "sender_id": "alice",
+            "sender_name": "Alice",
+            "timestamp": now.isoformat(),
+            "text": "binary attachment incoming",
+            "attachments": [
+                {
+                    "id": "attachment-1",
+                    "mime": "image/jpeg",
+                    "filename": attachment_path.name,
+                    "size": attachment_path.stat().st_size,
+                    "storage_ref": str(attachment_path),
+                }
+            ],
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_chat_import_dry_run_has_no_side_effects(tmp_path: Path) -> None:
     input_path = tmp_path / "messages.jsonl"
@@ -150,6 +174,40 @@ async def test_chat_import_resume_only_imports_new_messages(tmp_path: Path) -> N
     )
     assert repeated.summary.imported_count == 0
     assert repeated.summary.duplicate_count == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_import_preserves_small_binary_attachment_bytes(tmp_path: Path) -> None:
+    attachment_path = tmp_path / "tiny.jpg"
+    attachment_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+    attachment_path.write_bytes(attachment_bytes)
+
+    input_path = tmp_path / "messages.jsonl"
+    _write_jsonl(
+        input_path,
+        _build_rows_with_attachment(datetime.now(tz=UTC), attachment_path),
+    )
+
+    service = ChatImportService(tmp_path)
+    report = await service.import_chats(input_path=input_path)
+
+    assert report.summary.attachment_count == 1
+    assert report.summary.attachment_artifact_count == 1
+
+    store_group = await create_store_group(
+        str(tmp_path / "data" / "sqlite" / "octoagent.db"),
+        tmp_path / "data" / "artifacts",
+    )
+    try:
+        artifacts = await store_group.artifact_store.list_artifacts_for_task("ops-chat-import")
+        attachment_artifact = next(item for item in artifacts if item.name == attachment_path.name)
+        assert attachment_artifact.storage_ref is not None
+        restored = await store_group.artifact_store.get_artifact_content(
+            attachment_artifact.artifact_id
+        )
+        assert restored == attachment_bytes
+    finally:
+        await store_group.conn.close()
 
 
 class _FailOnceChatImportService(ChatImportService):
