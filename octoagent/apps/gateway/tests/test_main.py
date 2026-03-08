@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+from fastapi import FastAPI
 from octoagent.core.models import ManagedRuntimeDescriptor, RuntimeManagementMode, utc_now
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
@@ -115,7 +116,7 @@ def test_resolve_stream_model_aliases_from_oauth_provider(
             model_aliases={
                 "main": ModelAlias(
                     provider="openai-codex",
-                    model="gpt-5.3-codex",
+                    model="gpt-5.4",
                 ),
                 "cheap": ModelAlias(
                     provider="openrouter",
@@ -142,7 +143,7 @@ def test_resolve_stream_model_aliases_falls_back_to_litellm_config(
                 "model_list:",
                 "  - model_name: main",
                 "    litellm_params:",
-                "      model: gpt-5.3-codex",
+                "      model: gpt-5.4",
                 "      api_base: https://chatgpt.com/backend-api/codex",
                 "  - model_name: cheap",
                 "    litellm_params:",
@@ -238,3 +239,22 @@ def test_persist_runtime_state_marks_managed_when_descriptor_exists(
     assert gateway_main._persist_runtime_state(tmp_path, store=FakeStore()) is True
     assert captured
     assert captured[0].management_mode == RuntimeManagementMode.MANAGED
+
+
+async def test_lifespan_ensures_default_project_migration(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DB_PATH", str(tmp_path / "data" / "sqlite" / "test.db"))
+    monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(tmp_path / "data" / "artifacts"))
+    monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+
+    app = FastAPI()
+    async with gateway_main.lifespan(app):
+        run = app.state.project_migration_run
+        default_project = await app.state.store_group.project_store.get_default_project()
+        assert run.validation.ok is True
+        assert default_project is not None

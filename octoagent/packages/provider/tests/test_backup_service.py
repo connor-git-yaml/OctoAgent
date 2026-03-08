@@ -5,7 +5,7 @@ import os
 import sqlite3
 import tempfile
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -387,7 +387,7 @@ async def test_export_chats_includes_explicit_ops_task_filter(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_export_chats_filters_events_and_artifacts_by_time_window(tmp_path: Path) -> None:
     task_id = await _seed_project(tmp_path)
-    later_ts = datetime(2026, 3, 7, 12, 0, tzinfo=UTC)
+    later_ts = datetime.now(tz=UTC) + timedelta(minutes=1)
     await _append_follow_up(tmp_path, ts=later_ts)
     service = BackupService(tmp_path)
 

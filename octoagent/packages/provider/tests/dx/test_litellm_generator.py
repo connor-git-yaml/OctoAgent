@@ -165,7 +165,7 @@ def test_generate_litellm_config_openai_codex_uses_codex_backend_route(
         aliases={
             "main": ModelAlias(
                 provider="openai-codex",
-                model="gpt-5.3-codex",
+                model="gpt-5.4",
                 thinking_level="xhigh",
             )
         },

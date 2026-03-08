@@ -118,7 +118,7 @@ def _write_codex_runtime_config(
             model_aliases={
                 "cheap": ModelAlias(
                     provider="openai-codex",
-                    model="gpt-5.3-codex",
+                    model="gpt-5.4",
                     description="doctor live ping",
                     thinking_level="low",
                 )
@@ -460,7 +460,7 @@ class TestDoctorChecks:
                     "model_list:",
                     "  - model_name: cheap",
                     "    litellm_params:",
-                    "      model: gpt-5.3-codex",
+                    "      model: gpt-5.4",
                     "      api_base: https://chatgpt.com/backend-api/codex",
                 ]
             )

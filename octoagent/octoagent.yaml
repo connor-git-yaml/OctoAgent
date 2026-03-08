@@ -4,7 +4,7 @@
 # NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
 #
 config_version: 1
-updated_at: '2026-03-07'
+updated_at: '2026-03-08'
 providers:
 - id: openai-codex
   name: OpenAI Codex (ChatGPT Pro OAuth)
@@ -14,13 +14,13 @@ providers:
 model_aliases:
   main:
     provider: openai-codex
-    model: gpt-5.3-codex
-    description: 主力模型（GPT-5.3 Codex，深度推理）
+    model: gpt-5.4
+    description: 主力模型（GPT-5.4，深度推理）
     thinking_level: xhigh
   cheap:
     provider: openai-codex
-    model: gpt-5.3-codex
-    description: 低成本模型（GPT-5.3 Codex，轻量推理）
+    model: gpt-5.4
+    description: 低成本模型（GPT-5.4，轻量推理）
     thinking_level: low
 runtime:
   llm_mode: litellm

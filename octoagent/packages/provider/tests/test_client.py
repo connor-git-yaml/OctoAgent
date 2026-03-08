@@ -190,7 +190,7 @@ class TestLiteLLMClientComplete:
         mock_acompletion.return_value = FakeStream(chunks)
         mock_stream_chunk_builder.return_value = _make_mock_litellm_response(
             content="streamed hello",
-            model="gpt-5.3-codex",
+            model="gpt-5.4",
         )
 
         result = await client.complete(
@@ -203,7 +203,7 @@ class TestLiteLLMClientComplete:
         assert call_kwargs["stream_options"] == {"include_usage": True}
         assert mock_stream_chunk_builder.call_args.kwargs["chunks"] == chunks
         assert result.content == "streamed hello"
-        assert result.model_name == "gpt-5.3-codex"
+        assert result.model_name == "gpt-5.4"
 
 
 class TestLiteLLMClientRoutingOverrides:

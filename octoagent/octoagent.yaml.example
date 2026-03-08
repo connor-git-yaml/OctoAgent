@@ -10,7 +10,7 @@
 #   octo config sync                       # 生成 litellm-config.yaml
 
 config_version: 1
-updated_at: "2026-03-04"
+updated_at: "2026-03-08"
 
 # Provider 列表 — 每个 Provider 对应一个 LLM 服务商
 # auth_type: api_key（API Key 认证）或 oauth（OAuth 认证）
@@ -35,6 +35,12 @@ providers:
   #   auth_type: api_key
   #   api_key_env: OPENAI_API_KEY
   #   enabled: false
+  #
+  # - id: openai-codex
+  #   name: "OpenAI Codex (ChatGPT Pro OAuth)"
+  #   auth_type: oauth
+  #   api_key_env: OPENAI_API_KEY
+  #   enabled: true
 
 # 模型别名映射 — 将用户可见别名绑定到具体 Provider 和模型字符串
 # provider: 对应 providers[].id（引用完整性，octo config 会自动校验）
@@ -55,6 +61,18 @@ model_aliases:
   #   provider: openrouter
   #   model: "openrouter/auto"
   #   description: "快速响应模型（低延迟任务）"
+  #
+  # OpenAI Codex 示例（GPT-5.4）
+  # main:
+  #   provider: openai-codex
+  #   model: "gpt-5.4"
+  #   description: "主力模型（GPT-5.4，深度推理）"
+  #   thinking_level: xhigh
+  # cheap:
+  #   provider: openai-codex
+  #   model: "gpt-5.4"
+  #   description: "低成本模型（GPT-5.4，轻量推理）"
+  #   thinking_level: low
 
 # 运行时配置 — 控制 OctoAgent 运行时行为
 # llm_mode: litellm（真实调用）或 echo（开发测试回显，不发起网络请求）

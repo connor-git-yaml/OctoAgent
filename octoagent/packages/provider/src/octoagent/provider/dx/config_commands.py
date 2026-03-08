@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from datetime import date
@@ -42,6 +43,7 @@ from .config_wizard import (
 )
 from .console_output import create_console
 from .litellm_generator import build_litellm_config_dict, generate_litellm_config
+from .project_migration import ProjectWorkspaceMigrationService
 
 console = create_console()
 err_console = create_console(stderr=True)
@@ -714,17 +716,118 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
 
 
 @config.command("migrate")
-@click.option("--dry-run", is_flag=True, default=False)
-@click.option("--yes", is_flag=True, default=False)
-def config_migrate(dry_run: bool, yes: bool) -> None:
-    """从三文件体系迁移到 octoagent.yaml（SHOULD 级别，尚未实现）
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="仅输出迁移计划，不写入 project/workspace 记录",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="跳过 apply/rollback 确认提示",
+)
+@click.option(
+    "--rollback",
+    default=None,
+    metavar="RUN_ID|latest",
+    help="回滚指定 migration run；传 latest 表示最近一次 apply",
+)
+@click.pass_context
+def config_migrate(
+    ctx: click.Context,
+    dry_run: bool,
+    yes: bool,
+    rollback: str | None,
+) -> None:
+    """执行 Project / Workspace default project migration。"""
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
 
-    此命令标记为 SHOULD 级别（FR-012 / contracts/cli-api.md §1.9），
-    计划在后续版本提供。
-    """
-    console.print("[yellow]此命令尚未实现，计划在后续版本提供。[/yellow]")
+    if dry_run and rollback:
+        err_console.print("[red]错误：--dry-run 与 --rollback 不能同时使用。[/red]")
+        raise SystemExit(2)
+
+    async def _run() -> int:
+        service = ProjectWorkspaceMigrationService(project_root)
+        if rollback:
+            if not yes and not click.confirm(
+                f"确认回滚 migration run={rollback}？",
+                default=False,
+            ):
+                return 2
+            run = await service.rollback(rollback)
+            _print_migration_run(run, heading="Project Migration Rollback")
+            return 0
+
+        if dry_run:
+            run = await service.plan()
+            _print_migration_run(run, heading="Project Migration Plan")
+            return 0 if run.validation.ok else 1
+
+        if not yes and not click.confirm(
+            "确认执行 default project migration？",
+            default=False,
+        ):
+            return 2
+        run = await service.apply()
+        _print_migration_run(run, heading="Project Migration Apply")
+        return 0 if run.status == "succeeded" else 1
+
+    try:
+        exit_code = asyncio.run(_run())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        err_console.print(f"[red]错误：迁移失败：{exc}[/red]")
+        raise SystemExit(1) from exc
+    raise SystemExit(exit_code)
+
+
+def _print_migration_run(run, *, heading: str) -> None:
     console.print()
-    console.print("当前可手动迁移：")
-    console.print("  1. 运行 octo config init 创建 octoagent.yaml")
-    console.print("  2. 运行 octo config provider add <id> 逐一添加 Provider")
-    console.print("  3. 运行 octo config sync 生成 litellm-config.yaml")
+    console.print(f"[bold]{heading}[/bold]")
+    console.print("══════════════════════════════════════════════")
+    console.print(f"run_id: {run.run_id}")
+    console.print(f"project_root: {run.project_root}")
+    console.print(f"status: {run.status}")
+    console.print(
+        "summary: "
+        f"created_project={run.summary.created_project}, "
+        f"created_workspace={run.summary.created_workspace}, "
+        f"binding_counts={run.summary.binding_counts}, "
+        f"legacy_counts={run.summary.legacy_counts}"
+    )
+    console.print(f"validation.ok: {run.validation.ok}")
+    if run.validation.missing_binding_keys:
+        console.print(
+            "missing_binding_keys: "
+            + ", ".join(run.validation.missing_binding_keys)
+        )
+    if run.validation.blocking_issues:
+        console.print(
+            "blocking_issues: " + "；".join(run.validation.blocking_issues)
+        )
+    if run.validation.warnings:
+        console.print("warnings:")
+        for warning in run.validation.warnings:
+            console.print(f"  - {warning}")
+    if run.validation.integrity_checks:
+        console.print("integrity_checks:")
+        for item in run.validation.integrity_checks:
+            console.print(f"  - {item}")
+    if run.rollback_plan.delete_binding_ids:
+        console.print(
+            f"rollback.delete_binding_ids={len(run.rollback_plan.delete_binding_ids)}"
+        )
+    if run.rollback_plan.delete_workspace_ids:
+        console.print(
+            f"rollback.delete_workspace_ids={len(run.rollback_plan.delete_workspace_ids)}"
+        )
+    if run.rollback_plan.delete_project_ids:
+        console.print(
+            f"rollback.delete_project_ids={len(run.rollback_plan.delete_project_ids)}"
+        )
+    if run.error_message:
+        console.print(f"[red]error: {run.error_message}[/red]")
