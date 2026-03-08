@@ -430,6 +430,43 @@ async def test_web_and_telegram_project_select_share_action_semantics(
 
 
 @pytest.mark.asyncio
+async def test_telegram_cancel_command_maps_to_session_interrupt(
+    tmp_path: Path,
+) -> None:
+    _write_config(tmp_path, dm_policy="open")
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await ProjectWorkspaceMigrationService(
+        project_root=tmp_path,
+        store_group=store_group,
+    ).ensure_default_project()
+    control_plane = ControlPlaneService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        telegram_state_store=TelegramStateStore(tmp_path),
+    )
+
+    request = control_plane.build_telegram_action_request(
+        "/cancel task-123",
+        actor_id="user:telegram:42",
+        actor_label="Owner",
+    )
+
+    assert request is not None
+    assert request.action_id == "session.interrupt"
+    assert request.params == {"task_id": "task-123"}
+    assert (
+        control_plane.get_action_definition("operator.task.cancel").surface_aliases.get("telegram")
+        is None
+    )
+
+    await store_group.conn.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("telegram_overrides", "update_sender_id", "expected_status"),
     [

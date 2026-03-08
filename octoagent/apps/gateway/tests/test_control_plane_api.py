@@ -170,8 +170,20 @@ class TestControlPlaneApi:
 
     async def test_automation_create_and_run_updates_projection(
         self,
+        control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        default_workspace = (
+            await control_plane_app.state.store_group.project_store.get_primary_workspace(
+                default_project.project_id
+            )
+        )
+        assert default_workspace is not None
+
         create_resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -218,6 +230,8 @@ class TestControlPlaneApi:
         payload = automation_resp.json()
         job_item = next(item for item in payload["jobs"] if item["job"]["job_id"] == job_id)
         assert job_item["job"]["action_id"] == "diagnostics.refresh"
+        assert job_item["job"]["project_id"] == default_project.project_id
+        assert job_item["job"]["workspace_id"] == default_workspace.workspace_id
         assert job_item["last_run"] is not None
         assert job_item["last_run"]["status"] in {"succeeded", "deferred"}
 
@@ -252,3 +266,31 @@ class TestControlPlaneApi:
         automation_resp = await control_plane_client.get("/api/control/resources/automation")
         assert automation_resp.status_code == 200
         assert automation_resp.json()["jobs"] == []
+
+    async def test_automation_create_rejects_invalid_schedule_kind(
+        self,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "automation.create",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "name": "invalid-kind-job",
+                    "action_id": "diagnostics.refresh",
+                    "schedule_kind": "weeklyish",
+                    "schedule_expr": "3600",
+                    "enabled": True,
+                },
+            },
+        )
+
+        assert create_resp.status_code == 400
+        payload = create_resp.json()["result"]
+        assert payload["code"] == "SCHEDULE_KIND_INVALID"

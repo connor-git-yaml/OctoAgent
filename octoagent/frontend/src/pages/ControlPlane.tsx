@@ -1018,6 +1018,8 @@ export default function ControlPlane() {
                     void submitAction("automation.create", {
                       name: automationDraft.name,
                       action_id: automationDraft.actionId,
+                      project_id: project_selector.current_project_id,
+                      workspace_id: project_selector.current_workspace_id,
                       schedule_kind: automationDraft.scheduleKind,
                       schedule_expr: automationDraft.scheduleExpr,
                       enabled: automationDraft.enabled,

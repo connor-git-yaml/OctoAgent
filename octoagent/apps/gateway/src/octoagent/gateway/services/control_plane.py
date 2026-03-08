@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -195,10 +196,10 @@ class ControlPlaneService:
         elif (
             command == "/cancel"
             and len(parts) >= 2
-            and self._has_telegram_alias("operator.task.cancel", "/cancel")
+            and self._has_telegram_alias("session.interrupt", "/cancel")
         ):
-            action_id = "operator.task.cancel"
-            params["item_id"] = f"task:{parts[1]}"
+            action_id = "session.interrupt"
+            params["task_id"] = parts[1]
         elif (
             command == "/retry"
             and len(parts) >= 2
@@ -1152,9 +1153,15 @@ class ControlPlaneService:
         action_id = str(request.params.get("action_id", "")).strip()
         schedule_kind_raw = str(request.params.get("schedule_kind", "interval")).strip()
         schedule_expr = str(request.params.get("schedule_expr", "")).strip()
+        action_params = request.params.get("action_params", {})
         if not name or not action_id or not schedule_expr:
             raise ControlPlaneActionError(
                 "AUTOMATION_PARAMS_REQUIRED", "name/action_id/schedule_expr 不能为空"
+            )
+        if not isinstance(action_params, Mapping):
+            raise ControlPlaneActionError(
+                "AUTOMATION_ACTION_PARAMS_INVALID",
+                "action_params 必须是 object/map",
             )
         if action_id.startswith("automation."):
             raise ControlPlaneActionError(
@@ -1165,14 +1172,60 @@ class ControlPlaneService:
                 "AUTOMATION_ACTION_INVALID",
                 f"automation job 引用的 action_id 未注册: {action_id}",
             )
+        try:
+            schedule_kind = AutomationScheduleKind(schedule_kind_raw)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "SCHEDULE_KIND_INVALID",
+                f"不支持的 schedule_kind: {schedule_kind_raw}",
+            ) from exc
+
+        project_id = str(request.params.get("project_id", "")).strip()
+        workspace_id = str(request.params.get("workspace_id", "")).strip()
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        if not project_id and selected_project is not None:
+            project_id = selected_project.project_id
+        if (
+            not workspace_id
+            and selected_workspace is not None
+            and selected_workspace.project_id == project_id
+        ):
+            workspace_id = selected_workspace.workspace_id
+        if not project_id:
+            raise ControlPlaneActionError(
+                "PROJECT_SELECTION_REQUIRED",
+                "automation job 需要绑定 project",
+            )
+
+        project = await self._stores.project_store.get_project(project_id)
+        if project is None:
+            raise ControlPlaneActionError(
+                "PROJECT_NOT_FOUND",
+                f"project 不存在: {project_id}",
+            )
+        if workspace_id:
+            workspace = await self._stores.project_store.get_workspace(workspace_id)
+            if workspace is None or workspace.project_id != project_id:
+                raise ControlPlaneActionError(
+                    "WORKSPACE_NOT_FOUND",
+                    "workspace 不存在或不属于指定 project",
+                )
+        else:
+            workspace = await self._stores.project_store.get_primary_workspace(project_id)
+            if workspace is None:
+                raise ControlPlaneActionError(
+                    "WORKSPACE_NOT_FOUND",
+                    f"project 缺少 primary workspace: {project_id}",
+                )
+            workspace_id = workspace.workspace_id
         job = AutomationJob(
             job_id=str(ULID()),
             name=name,
             action_id=action_id,
-            params=dict(request.params.get("action_params", {})),
-            project_id=str(request.params.get("project_id", "")).strip(),
-            workspace_id=str(request.params.get("workspace_id", "")).strip(),
-            schedule_kind=AutomationScheduleKind(schedule_kind_raw),
+            params=dict(action_params),
+            project_id=project_id,
+            workspace_id=workspace_id,
+            schedule_kind=schedule_kind,
             schedule_expr=schedule_expr,
             timezone=str(request.params.get("timezone", "UTC")).strip() or "UTC",
             enabled=bool(request.params.get("enabled", True)),
@@ -1864,8 +1917,6 @@ class ControlPlaneService:
                     "operator.task.cancel",
                     "取消任务",
                     category="operator",
-                    telegram_aliases=["/cancel"],
-                    telegram_supported=True,
                 ),
                 definition("channel.pairing.approve", "批准 Pairing", category="channels"),
                 definition("channel.pairing.reject", "拒绝 Pairing", category="channels"),
