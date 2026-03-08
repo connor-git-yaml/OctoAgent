@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import {
+  ApiError,
   executeControlAction,
   fetchControlEvents,
   fetchControlResource,
@@ -18,7 +19,9 @@ import {
   fetchMemoryProposals,
   fetchMemorySubjectHistory,
   fetchVaultAuthorization,
+  isFrontDoorApiError,
 } from "../api/client";
+import FrontDoorGate from "../components/FrontDoorGate";
 import type {
   ActionResultEnvelope,
   ActionRequestEnvelope,
@@ -530,6 +533,19 @@ export default function ControlPlane() {
   const [vaultAuthorization, setVaultAuthorization] =
     useState<VaultAuthorizationDocument | null>(null);
   const [memoryBusy, setMemoryBusy] = useState(false);
+  const [authError, setAuthError] = useState<ApiError | null>(null);
+
+  function applyPageError(err: unknown, fallback: string): string {
+    const message = err instanceof Error ? err.message : fallback;
+    setError(message);
+    setAuthError(isFrontDoorApiError(err) ? err : null);
+    return message;
+  }
+
+  function clearPageError() {
+    setError(null);
+    setAuthError(null);
+  }
 
   async function refreshEvents() {
     const eventPayload = await fetchControlEvents(undefined, 50);
@@ -578,9 +594,7 @@ export default function ControlPlane() {
         }
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Memory 细节资源加载失败";
-      setError(message);
+      applyPageError(err, "Memory 细节资源加载失败");
     } finally {
       setMemoryBusy(false);
     }
@@ -615,9 +629,7 @@ export default function ControlPlane() {
         }
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Import 详情资源加载失败";
-      setError(message);
+      applyPageError(err, "Import 详情资源加载失败");
     } finally {
       setImportBusy(false);
     }
@@ -629,6 +641,7 @@ export default function ControlPlane() {
       fetchControlSnapshot(),
       fetchControlEvents(undefined, 50),
     ]);
+    clearPageError();
     startTransition(() => {
       setSnapshot(nextSnapshot);
       setEvents(dedupeEvents(eventPayload.events));
@@ -712,8 +725,13 @@ export default function ControlPlane() {
         });
       });
       await refreshEvents();
-    } catch {
-      await reloadData({ preserveConfigDraft });
+    } catch (err) {
+      try {
+        await reloadData({ preserveConfigDraft });
+      } catch (reloadErr) {
+        applyPageError(reloadErr, "控制台资源刷新失败");
+        throw reloadErr;
+      }
     }
   }
 
@@ -729,6 +747,7 @@ export default function ControlPlane() {
         if (cancelled) {
           return;
         }
+        clearPageError();
         startTransition(() => {
           setSnapshot(nextSnapshot);
           setEvents(eventPayload.events);
@@ -738,7 +757,7 @@ export default function ControlPlane() {
         if (cancelled) {
           return;
         }
-        setError(err instanceof Error ? err.message : "控制台加载失败");
+        applyPageError(err, "控制台加载失败");
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -748,7 +767,9 @@ export default function ControlPlane() {
 
     void boot();
     const interval = window.setInterval(() => {
-      void reloadData();
+      void reloadData().catch((err) => {
+        applyPageError(err, "控制台刷新失败");
+      });
     }, 15000);
 
     return () => {
@@ -819,6 +840,26 @@ export default function ControlPlane() {
     sessionMatches(item, deferredSessionFilter)
   );
 
+  async function bootControlPlane() {
+    clearPageError();
+    setLoading(true);
+    try {
+      const [nextSnapshot, eventPayload] = await Promise.all([
+        fetchControlSnapshot(),
+        fetchControlEvents(undefined, 50),
+      ]);
+      startTransition(() => {
+        setSnapshot(nextSnapshot);
+        setEvents(eventPayload.events);
+        setConfigDraft(formatJson(nextSnapshot.resources.config.current_value));
+      });
+    } catch (err) {
+      applyPageError(err, "控制台加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function submitAction(
     actionId: string,
     params: Record<string, unknown>,
@@ -830,7 +871,7 @@ export default function ControlPlane() {
     }
   ) {
     setBusyActionId(actionId);
-    setError(null);
+    clearPageError();
     try {
       const payload: ActionRequestEnvelope = {
         contract_version: snapshot?.contract_version,
@@ -859,9 +900,7 @@ export default function ControlPlane() {
       }
       return result;
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : `动作执行失败: ${actionId}`;
-      setError(message);
+      applyPageError(err, `动作执行失败: ${actionId}`);
       return null;
     } finally {
       setBusyActionId(null);
@@ -870,6 +909,16 @@ export default function ControlPlane() {
 
   if (loading) {
     return <div className="control-loading">正在装载 Control Plane...</div>;
+  }
+
+  if (authError && snapshot === null) {
+    return (
+      <FrontDoorGate
+        error={authError}
+        title="Control Plane"
+        onRetry={bootControlPlane}
+      />
+    );
   }
 
   if (error && snapshot === null) {

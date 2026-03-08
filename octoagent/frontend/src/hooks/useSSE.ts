@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { buildFrontDoorSseUrl } from "../api/client";
 import type { SSEEventData } from "../types";
 
 export type SSEStatus = "connecting" | "connected" | "disconnected" | "closed";
@@ -51,7 +52,7 @@ export function useSSE({ taskId, enabled, onEvent }: UseSSEOptions): UseSSERetur
 
     setStatus("connecting");
 
-    const url = `/api/stream/task/${taskId}`;
+    const url = buildFrontDoorSseUrl(`/api/stream/task/${taskId}`);
     const es = new EventSource(url);
     eventSourceRef.current = es;
 

@@ -82,3 +82,18 @@ runtime:
   llm_mode: litellm
   litellm_proxy_url: "http://localhost:4000"
   master_key_env: LITELLM_MASTER_KEY
+
+# Front-door 边界 — 保护 owner-facing API（Control Plane / Tasks / Ops / Chat / SSE）
+# mode:
+#   loopback       仅允许本机直连（默认；只适合本机使用）
+#   bearer         要求所有 owner-facing API 提供 Bearer Token
+#   trusted_proxy  仅允许受信代理来源 IP + 共享 header token
+# bearer_token_env / trusted_proxy_token_env 只存环境变量名，不存凭证值。
+front_door:
+  mode: loopback
+  bearer_token_env: OCTOAGENT_FRONTDOOR_TOKEN
+  trusted_proxy_header: X-OctoAgent-Proxy-Auth
+  trusted_proxy_token_env: OCTOAGENT_TRUSTED_PROXY_TOKEN
+  trusted_proxy_cidrs:
+    - 127.0.0.1/32
+    - ::1/128

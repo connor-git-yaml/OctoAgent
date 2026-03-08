@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import warnings
 from typing import Any, Literal
 
@@ -161,6 +162,78 @@ class RuntimeConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# FrontDoorConfig — 对外入口边界配置
+# ---------------------------------------------------------------------------
+
+
+class FrontDoorConfig(BaseModel):
+    """Gateway front-door 边界配置。"""
+
+    mode: Literal["loopback", "bearer", "trusted_proxy"] = Field(
+        default="loopback",
+        description="owner-facing API 的 front-door 模式",
+    )
+    bearer_token_env: str = Field(
+        default="OCTOAGENT_FRONTDOOR_TOKEN",
+        description="bearer 模式下的 token 环境变量名",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    trusted_proxy_header: str = Field(
+        default="X-OctoAgent-Proxy-Auth",
+        description="trusted_proxy 模式下代理注入的共享鉴权 header",
+        min_length=1,
+    )
+    trusted_proxy_token_env: str = Field(
+        default="OCTOAGENT_TRUSTED_PROXY_TOKEN",
+        description="trusted_proxy 模式下代理共享 token 的环境变量名",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    trusted_proxy_cidrs: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1/32", "::1/128"],
+        description="trusted_proxy 模式下允许直接连接 Gateway 的代理来源 CIDR 列表",
+    )
+
+    @field_validator("trusted_proxy_header")
+    @classmethod
+    def normalize_trusted_proxy_header(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("trusted_proxy_header 不能为空")
+        return normalized
+
+    @field_validator("trusted_proxy_cidrs", mode="before")
+    @classmethod
+    def normalize_trusted_proxy_cidrs(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            normalized: list[str] = []
+            for item in value:
+                if not isinstance(item, str):
+                    raise TypeError("trusted_proxy_cidrs 仅支持字符串列表")
+                stripped = item.strip()
+                if stripped:
+                    normalized.append(stripped)
+            return normalized
+        raise TypeError("trusted_proxy_cidrs 必须是字符串列表或逗号分隔字符串")
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def validate_trusted_proxy_cidrs(cls, value: list[str]) -> list[str]:
+        for item in value:
+            ipaddress.ip_network(item, strict=False)
+        return value
+
+    @model_validator(mode="after")
+    def validate_mode_requirements(self) -> FrontDoorConfig:
+        if self.mode == "trusted_proxy" and not self.trusted_proxy_cidrs:
+            raise ValueError("front_door.mode=trusted_proxy 时必须提供 trusted_proxy_cidrs")
+        return self
+
+
+# ---------------------------------------------------------------------------
 # TelegramChannelConfig / ChannelsConfig — 渠道配置
 # ---------------------------------------------------------------------------
 
@@ -287,6 +360,10 @@ class OctoAgentConfig(BaseModel):
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
         description="运行时配置块",
+    )
+    front_door: FrontDoorConfig = Field(
+        default_factory=FrontDoorConfig,
+        description="owner-facing API 对外入口边界配置",
     )
     channels: ChannelsConfig = Field(
         default_factory=ChannelsConfig,
@@ -453,6 +530,17 @@ def build_config_schema_document(
                     "runtime.master_key_env",
                 ],
             },
+            "security": {
+                "title": "Front Door",
+                "description": "配置 owner-facing API 的对外访问边界。",
+                "fields": [
+                    "front_door.mode",
+                    "front_door.bearer_token_env",
+                    "front_door.trusted_proxy_header",
+                    "front_door.trusted_proxy_token_env",
+                    "front_door.trusted_proxy_cidrs",
+                ],
+            },
             "telegram": {
                 "title": "Telegram",
                 "description": "可选启用 Telegram channel。",
@@ -550,6 +638,58 @@ def build_config_schema_document(
                     "target_key": "runtime.master_key_env",
                 },
                 "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
+            },
+            "front_door.mode": {
+                "label": "Front-door 模式",
+                "input": "choice",
+                "required": True,
+                "recommended": True,
+                "choices": ["loopback", "bearer", "trusted_proxy"],
+                "default": config.front_door.mode if config else "loopback",
+            },
+            "front_door.bearer_token_env": {
+                "label": "Bearer Token 环境变量名",
+                "input": "env_name",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    config.front_door.bearer_token_env
+                    if config
+                    else "OCTOAGENT_FRONTDOOR_TOKEN"
+                ),
+            },
+            "front_door.trusted_proxy_header": {
+                "label": "Trusted Proxy Header",
+                "input": "text",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    config.front_door.trusted_proxy_header
+                    if config
+                    else "X-OctoAgent-Proxy-Auth"
+                ),
+            },
+            "front_door.trusted_proxy_token_env": {
+                "label": "Trusted Proxy Token 环境变量名",
+                "input": "env_name",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    config.front_door.trusted_proxy_token_env
+                    if config
+                    else "OCTOAGENT_TRUSTED_PROXY_TOKEN"
+                ),
+            },
+            "front_door.trusted_proxy_cidrs": {
+                "label": "Trusted Proxy CIDRs",
+                "input": "csv",
+                "required": True,
+                "recommended": True,
+                "default": (
+                    ", ".join(config.front_door.trusted_proxy_cidrs)
+                    if config
+                    else "127.0.0.1/32, ::1/128"
+                ),
             },
             "channels.telegram.enabled": {
                 "label": "启用 Telegram",

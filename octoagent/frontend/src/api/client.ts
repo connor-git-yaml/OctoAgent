@@ -37,6 +37,19 @@ import type {
 } from "../types";
 
 const BASE_URL = "";
+const FRONT_DOOR_TOKEN_STORAGE_KEY = "octoagent.frontdoorToken";
+const FRONT_DOOR_ERROR_CODES = new Set([
+  "FRONT_DOOR_LOOPBACK_ONLY",
+  "FRONT_DOOR_TOKEN_REQUIRED",
+  "FRONT_DOOR_TOKEN_INVALID",
+  "FRONT_DOOR_TOKEN_ENV_MISSING",
+  "FRONT_DOOR_TRUSTED_PROXY_REQUIRED",
+  "FRONT_DOOR_PROXY_TOKEN_REQUIRED",
+  "FRONT_DOOR_PROXY_TOKEN_INVALID",
+  "FRONT_DOOR_PROXY_TOKEN_ENV_MISSING",
+  "FRONT_DOOR_CONFIG_INVALID",
+  "FRONT_DOOR_MODE_UNSUPPORTED",
+]);
 
 type ControlResourceName =
   | "wizard"
@@ -66,12 +79,108 @@ interface MemoryResourceQuery {
   subjectKey?: string;
 }
 
+type ApiErrorPayload = {
+  code?: string;
+  message?: string;
+  hint?: string;
+};
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  hint?: string;
+
+  constructor(message: string, options: { status: number; code?: string; hint?: string }) {
+    super(message);
+    this.name = "ApiError";
+    this.status = options.status;
+    this.code = options.code;
+    this.hint = options.hint;
+  }
+}
+
+function parseErrorPayload(body: unknown): ApiErrorPayload {
+  if (!body || typeof body !== "object") {
+    return {};
+  }
+  const payload = body as Record<string, unknown>;
+  const error =
+    payload.error && typeof payload.error === "object"
+      ? (payload.error as Record<string, unknown>)
+      : payload.detail && typeof payload.detail === "object"
+        ? (payload.detail as Record<string, unknown>)
+        : payload.result && typeof payload.result === "object"
+          ? (payload.result as Record<string, unknown>)
+          : null;
+  if (!error) {
+    return {};
+  }
+  return {
+    code: typeof error.code === "string" ? error.code : undefined,
+    message: typeof error.message === "string" ? error.message : undefined,
+    hint: typeof error.hint === "string" ? error.hint : undefined,
+  };
+}
+
+async function buildApiError(resp: Response, body?: unknown): Promise<ApiError> {
+  const resolvedBody = body ?? (await resp.json().catch(() => null));
+  const payload = parseErrorPayload(resolvedBody);
+  return new ApiError(payload.message ?? `HTTP ${resp.status}`, {
+    status: resp.status,
+    code: payload.code,
+    hint: payload.hint,
+  });
+}
+
+export function getFrontDoorToken(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(FRONT_DOOR_TOKEN_STORAGE_KEY) ?? "";
+}
+
+export function saveFrontDoorToken(token: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(FRONT_DOOR_TOKEN_STORAGE_KEY, token.trim());
+}
+
+export function clearFrontDoorToken(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(FRONT_DOOR_TOKEN_STORAGE_KEY);
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError;
+}
+
+export function isFrontDoorApiError(error: unknown): error is ApiError {
+  return isApiError(error) && Boolean(error.code && FRONT_DOOR_ERROR_CODES.has(error.code));
+}
+
+export function buildFrontDoorSseUrl(path: string): string {
+  const token = getFrontDoorToken();
+  if (!token) {
+    return path;
+  }
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}access_token=${encodeURIComponent(token)}`;
+}
+
 async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
+  const token = getFrontDoorToken();
+  const headers = new Headers(init?.headers ?? undefined);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   return fetch(`${BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
     ...init,
   });
 }
@@ -80,12 +189,7 @@ async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await apiRequest(path, init);
   if (!resp.ok) {
-    const body = await resp.json().catch(() => null);
-    const message =
-      body?.error?.message ??
-      body?.result?.message ??
-      `HTTP ${resp.status}`;
-    throw new Error(message);
+    throw await buildApiError(resp);
   }
   return resp.json() as Promise<T>;
 }
@@ -274,14 +378,13 @@ export async function executeControlAction(
     method: "POST",
     body: JSON.stringify(body),
   });
-  const payload =
-    ((await resp.json().catch(() => null)) as ControlPlaneActionResponse | null) ??
-    null;
+  const rawPayload = await resp.json().catch(() => null);
+  const payload = (rawPayload as ControlPlaneActionResponse | null) ?? null;
   if (payload?.result) {
     return payload.result;
   }
   if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
+    throw await buildApiError(resp, rawPayload);
   }
   throw new Error("control action 返回体缺少 result");
 }

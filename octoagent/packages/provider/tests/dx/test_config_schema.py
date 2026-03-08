@@ -13,6 +13,7 @@ import pytest
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     ConfigParseError,
+    FrontDoorConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
@@ -78,9 +79,28 @@ def test_default_values() -> None:
     assert config.runtime.llm_mode == "litellm"
     assert config.runtime.litellm_proxy_url == "http://localhost:4000"
     assert config.runtime.master_key_env == "LITELLM_MASTER_KEY"
+    assert config.front_door.mode == "loopback"
+    assert config.front_door.bearer_token_env == "OCTOAGENT_FRONTDOOR_TOKEN"
     assert config.channels.telegram.enabled is False
     assert config.channels.telegram.mode == "webhook"
     assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
+
+
+def test_front_door_config_accepts_comma_separated_cidrs() -> None:
+    config = FrontDoorConfig(
+        mode="trusted_proxy",
+        trusted_proxy_cidrs="127.0.0.1/32,10.0.0.0/24",
+    )
+
+    assert config.trusted_proxy_cidrs == ["127.0.0.1/32", "10.0.0.0/24"]
+
+
+def test_front_door_config_rejects_invalid_cidr() -> None:
+    with pytest.raises(Exception):
+        FrontDoorConfig(
+            mode="trusted_proxy",
+            trusted_proxy_cidrs=["not-a-cidr"],
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from octoagent.core.config import get_artifacts_dir, get_db_path
 from octoagent.core.store import create_store_group
@@ -37,6 +37,7 @@ from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
+from .deps import require_front_door_access
 from .routes import (
     approvals,
     cancel,
@@ -56,6 +57,7 @@ from .services.automation_scheduler import AutomationSchedulerService
 from .services.capability_pack import CapabilityPackService
 from .services.control_plane import ControlPlaneService
 from .services.delegation_plane import DelegationPlaneService
+from .services.frontdoor_auth import FrontDoorGuard
 from .services.llm_service import LLMService
 from .services.operator_actions import OperatorActionService
 from .services.operator_inbox import OperatorInboxService
@@ -221,6 +223,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
     project_root = _resolve_project_root()
     app.state.project_root = project_root
+    app.state.front_door_guard = FrontDoorGuard(project_root)
     app.state.update_status_store = _build_update_status_store(project_root)
     app.state.update_service = _build_update_service(
         project_root,
@@ -523,19 +526,20 @@ def create_app() -> FastAPI:
     # 注册路由
     # 注意：watchdog.router 必须在 tasks.router 之前注册，
     # 确保 /api/tasks/journal 优先于 /api/tasks/{task_id} 匹配（contracts/rest-api.md 要求）
-    app.include_router(watchdog.router, tags=["watchdog"])
-    app.include_router(message.router, tags=["message"])
+    protected = [Depends(require_front_door_access)]
+    app.include_router(watchdog.router, tags=["watchdog"], dependencies=protected)
+    app.include_router(message.router, tags=["message"], dependencies=protected)
     app.include_router(telegram.router, tags=["telegram"])
-    app.include_router(tasks.router, tags=["tasks"])
-    app.include_router(cancel.router, tags=["cancel"])
-    app.include_router(execution.router, tags=["execution"])
-    app.include_router(stream.router, tags=["stream"])
+    app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
+    app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
+    app.include_router(execution.router, tags=["execution"], dependencies=protected)
+    app.include_router(stream.router, tags=["stream"], dependencies=protected)
     app.include_router(health.router, tags=["health"])
-    app.include_router(ops.router, tags=["ops"])
-    app.include_router(approvals.router, tags=["approvals"])
-    app.include_router(operator_inbox.router, tags=["operator"])
-    app.include_router(chat.router, tags=["chat"])
-    app.include_router(control_plane.router, tags=["control-plane"])
+    app.include_router(ops.router, tags=["ops"], dependencies=protected)
+    app.include_router(approvals.router, tags=["approvals"], dependencies=protected)
+    app.include_router(operator_inbox.router, tags=["operator"], dependencies=protected)
+    app.include_router(chat.router, tags=["chat"], dependencies=protected)
+    app.include_router(control_plane.router, tags=["control-plane"], dependencies=protected)
 
     # 挂载前端静态文件（frontend/dist/ -> /）
     # 在所有 API 路由之后挂载，确保 API 优先匹配

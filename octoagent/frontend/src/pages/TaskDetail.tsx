@@ -10,7 +10,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchTaskDetail } from "../api/client";
+import {
+  ApiError,
+  fetchTaskDetail,
+  isFrontDoorApiError,
+} from "../api/client";
+import FrontDoorGate from "../components/FrontDoorGate";
 import { useSSE } from "../hooks/useSSE";
 import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
 
@@ -48,33 +53,32 @@ export default function TaskDetail() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<ApiError | null>(null);
+
+  const loadTask = useCallback(async () => {
+    if (!taskId) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchTaskDetail(taskId);
+      setTask(data.task);
+      setEvents(data.events);
+      setArtifacts(data.artifacts);
+      setAuthError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load task");
+      setAuthError(isFrontDoorApiError(err) ? err : null);
+    } finally {
+      setLoading(false);
+    }
+  }, [taskId]);
 
   // 加载初始数据
   useEffect(() => {
-    if (!taskId) return;
-
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const data = await fetchTaskDetail(taskId!);
-        if (!cancelled) {
-          setTask(data.task);
-          setEvents(data.events);
-          setArtifacts(data.artifacts);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load task");
-          setLoading(false);
-        }
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [taskId]);
+    void loadTask();
+  }, [loadTask]);
 
   // SSE 事件回调
   const handleSSEEvent = useCallback((eventData: SSEEventData) => {
@@ -110,6 +114,10 @@ export default function TaskDetail() {
 
   if (loading) {
     return <div className="loading">Loading task...</div>;
+  }
+
+  if (authError) {
+    return <FrontDoorGate error={authError} title="Task Detail" onRetry={loadTask} />;
   }
 
   if (error || !task) {
