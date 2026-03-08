@@ -26,6 +26,7 @@ from octoagent.memory import (
     SqliteMemoryStore,
     WriteAction,
 )
+from octoagent.provider.dx.project_selector import ProjectSelectorService
 from ulid import ULID
 
 
@@ -53,13 +54,19 @@ async def control_plane_client(control_plane_app) -> AsyncClient:
         yield client
 
 
-async def _create_task(app, *, text: str, thread_id: str = "thread-control") -> str:
+async def _create_task(
+    app,
+    *,
+    text: str,
+    thread_id: str = "thread-control",
+    scope_id: str = "scope-control",
+) -> str:
     task_service = TaskService(app.state.store_group, app.state.sse_hub)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",
             thread_id=thread_id,
-            scope_id="scope-control",
+            scope_id=scope_id,
             sender_id="owner",
             sender_name="Owner",
             text=text,
@@ -773,6 +780,83 @@ class TestControlPlaneApi:
         assert all(item["task_id"] != "ops-control-plane" for item in session_items)
         assert all(item["title"] != "Control Plane Audit" for item in session_items)
 
+    async def test_session_projection_scopes_items_to_selected_project(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        selector = ProjectSelectorService(
+            control_plane_app.state.project_root,
+            surface="web",
+            store_group=control_plane_app.state.store_group,
+        )
+        beta_project, _, _ = await selector.create_project(
+            name="Beta",
+            slug="beta",
+            set_active=False,
+        )
+        beta_workspace = (
+            await control_plane_app.state.store_group.project_store.get_primary_workspace(
+                beta_project.project_id
+            )
+        )
+        assert beta_workspace is not None
+        await control_plane_app.state.store_group.project_store.create_binding(
+            ProjectBinding(
+                binding_id=str(ULID()),
+                project_id=beta_project.project_id,
+                workspace_id=beta_workspace.workspace_id,
+                binding_type=ProjectBindingType.SCOPE,
+                binding_key="chat:web:thread-beta",
+                binding_value="chat:web:thread-beta",
+                source="tests",
+                migration_run_id="control-plane-project-scope",
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
+        default_task_id = await _create_task(
+            control_plane_app,
+            text="default session",
+            thread_id="thread-default",
+            scope_id="scope-control",
+        )
+        beta_task_id = await _create_task(
+            control_plane_app,
+            text="beta session",
+            thread_id="thread-beta",
+            scope_id="chat:web:thread-beta",
+        )
+
+        default_sessions = await control_plane_client.get("/api/control/resources/sessions")
+        assert default_sessions.status_code == 200
+        default_task_ids = {item["task_id"] for item in default_sessions.json()["sessions"]}
+        assert default_task_id in default_task_ids
+        assert beta_task_id not in default_task_ids
+
+        select_beta = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "project.select",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": beta_project.project_id,
+                },
+            },
+        )
+        assert select_beta.status_code == 200
+
+        beta_sessions = await control_plane_client.get("/api/control/resources/sessions")
+        assert beta_sessions.status_code == 200
+        beta_task_ids = {item["task_id"] for item in beta_sessions.json()["sessions"]}
+        assert beta_task_id in beta_task_ids
+        assert default_task_id not in beta_task_ids
+
     async def test_project_select_action_emits_control_plane_events(
         self,
         control_plane_app,
@@ -902,6 +986,212 @@ class TestControlPlaneApi:
         assert job_item["job"]["workspace_id"] == default_workspace.workspace_id
         assert job_item["last_run"] is not None
         assert job_item["last_run"]["status"] in {"succeeded", "deferred"}
+
+    async def test_automation_projection_and_actions_scope_to_selected_project(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "automation.create",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "name": "default-only-job",
+                    "action_id": "diagnostics.refresh",
+                    "schedule_kind": "interval",
+                    "schedule_expr": "3600",
+                    "enabled": True,
+                },
+            },
+        )
+        assert create_resp.status_code == 200
+        job_id = create_resp.json()["result"]["data"]["job_id"]
+
+        selector = ProjectSelectorService(
+            control_plane_app.state.project_root,
+            surface="web",
+            store_group=control_plane_app.state.store_group,
+        )
+        beta_project, _, _ = await selector.create_project(
+            name="Beta Jobs",
+            slug="beta-jobs",
+            set_active=False,
+        )
+
+        select_beta = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "project.select",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": beta_project.project_id,
+                },
+            },
+        )
+        assert select_beta.status_code == 200
+
+        automation_resp = await control_plane_client.get("/api/control/resources/automation")
+        assert automation_resp.status_code == 200
+        assert all(
+            item["job"]["job_id"] != job_id for item in automation_resp.json()["jobs"]
+        )
+
+        run_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "automation.run",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "job_id": job_id,
+                },
+            },
+        )
+        assert run_resp.status_code == 403
+        assert run_resp.json()["result"]["code"] == "PROJECT_SCOPE_NOT_ALLOWED"
+
+    async def test_import_details_and_actions_reject_cross_project_access(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        tmp_path: Path,
+    ) -> None:
+        export_path = tmp_path / "wechat-export.json"
+        media_root = tmp_path / "wechat-media"
+        _write_wechat_export(export_path, media_root)
+
+        detect_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.source.detect",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_type": "wechat",
+                    "input_path": str(export_path),
+                    "media_root": str(media_root),
+                    "format_hint": "json",
+                },
+            },
+        )
+        assert detect_resp.status_code == 200
+        source_id = detect_resp.json()["result"]["data"]["source_id"]
+
+        mapping_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.mapping.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                },
+            },
+        )
+        assert mapping_resp.status_code == 200
+        mapping_id = mapping_resp.json()["result"]["data"]["mapping_id"]
+
+        preview_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.preview",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                    "mapping_id": mapping_id,
+                },
+            },
+        )
+        assert preview_resp.status_code == 200
+        run_id = preview_resp.json()["result"]["data"]["resource_id"]
+
+        selector = ProjectSelectorService(
+            control_plane_app.state.project_root,
+            surface="web",
+            store_group=control_plane_app.state.store_group,
+        )
+        beta_project, _, _ = await selector.create_project(
+            name="Beta Import Access",
+            slug="beta-import-access",
+            set_active=False,
+        )
+
+        select_beta = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "project.select",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": beta_project.project_id,
+                },
+            },
+        )
+        assert select_beta.status_code == 200
+
+        source_resp = await control_plane_client.get(
+            f"/api/control/resources/import-sources/{source_id}"
+        )
+        assert source_resp.status_code == 403
+        assert source_resp.json()["error"]["code"] == "IMPORT_SOURCE_NOT_ALLOWED"
+
+        run_detail_resp = await control_plane_client.get(
+            f"/api/control/resources/import-runs/{run_id}"
+        )
+        assert run_detail_resp.status_code == 403
+        assert run_detail_resp.json()["error"]["code"] == "IMPORT_REPORT_NOT_ALLOWED"
+
+        rerun_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "import.run",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "source_id": source_id,
+                    "mapping_id": mapping_id,
+                },
+            },
+        )
+        assert rerun_resp.status_code == 403
+        assert rerun_resp.json()["result"]["code"] == "IMPORT_SOURCE_NOT_ALLOWED"
 
     async def test_automation_create_rejects_unknown_target_action(
         self,

@@ -65,6 +65,57 @@ class TestProjectStore:
         assert len(bindings) == 1
         assert bindings[0].binding_key == "ops/default"
 
+    async def test_resolve_workspace_for_scope_supports_non_default_project(self, core_db):
+        store = SqliteProjectStore(core_db)
+        default_project = Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+        default_workspace = Workspace(
+            workspace_id="workspace-default-primary",
+            project_id=default_project.project_id,
+            slug="primary",
+            name="Primary Workspace",
+            root_path="/tmp/default",
+        )
+        beta_project = Project(
+            project_id="project-beta",
+            slug="beta",
+            name="Beta Project",
+            is_default=False,
+        )
+        beta_workspace = Workspace(
+            workspace_id="workspace-beta-primary",
+            project_id=beta_project.project_id,
+            slug="primary",
+            name="Beta Workspace",
+            root_path="/tmp/beta",
+        )
+        beta_binding = ProjectBinding(
+            binding_id="binding-scope-beta",
+            project_id=beta_project.project_id,
+            workspace_id=beta_workspace.workspace_id,
+            binding_type=ProjectBindingType.SCOPE,
+            binding_key="chat:web:thread-beta",
+            binding_value="chat:web:thread-beta",
+            source="tests",
+            migration_run_id="run-beta",
+        )
+
+        await store.create_project(default_project)
+        await store.create_workspace(default_workspace)
+        await store.create_project(beta_project)
+        await store.create_workspace(beta_workspace)
+        await store.create_binding(beta_binding)
+        await core_db.commit()
+
+        resolved = await store.resolve_workspace_for_scope("chat:web:thread-beta")
+
+        assert resolved is not None
+        assert resolved.workspace_id == beta_workspace.workspace_id
+
     async def test_save_and_read_migration_run(self, core_db):
         store = SqliteProjectStore(core_db)
         run = ProjectMigrationRun(

@@ -504,6 +504,11 @@ class ImportWorkbenchService:
                     "WORKSPACE_NOT_FOUND",
                     f"未找到 workspace: {workspace_id}",
                 )
+            if target.project_id != project.project_id:
+                raise ImportWorkbenchError(
+                    "WORKSPACE_PROJECT_MISMATCH",
+                    "workspace 不属于当前 project。",
+                )
             workspace = target
         return project, workspace
 

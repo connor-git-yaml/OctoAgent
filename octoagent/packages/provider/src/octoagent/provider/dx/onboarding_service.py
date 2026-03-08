@@ -243,12 +243,13 @@ class OnboardingService:
         except Exception:
             audit = None
         if audit is not None and audit.overall_status != "ready":
+            audit_detail = self._describe_secret_audit(audit)
             actions.append(
                 NextAction(
                     action_id="sync-project-secrets",
                     action_type="command",
                     title="收口当前 project secrets",
-                    description="当前 project 的 secret bindings 或 runtime sync 尚未完成。",
+                    description=audit_detail,
                     command="octo secrets audit",
                     blocking=True,
                     sort_order=40,
@@ -257,7 +258,11 @@ class OnboardingService:
 
         if actions:
             state.status = OnboardingStepStatus.ACTION_REQUIRED
-            state.summary = "provider/runtime 配置尚未完成。"
+            state.summary = (
+                f"provider/runtime 配置尚未完成：{actions[0].description}"
+                if actions
+                else "provider/runtime 配置尚未完成。"
+            )
             state.actions = actions
             state.completed_at = None
             return True
@@ -267,6 +272,22 @@ class OnboardingService:
         state.actions = []
         state.completed_at = datetime.now(tz=UTC)
         return False
+
+    @staticmethod
+    def _describe_secret_audit(audit) -> str:
+        if audit.unresolved_refs:
+            return f"secret ref 无法解析：{audit.unresolved_refs[0]}"
+        if audit.plaintext_risks:
+            return f"检测到明文 secret 风险：{audit.plaintext_risks[0]}"
+        if audit.missing_targets:
+            return f"缺少 secret target：{audit.missing_targets[0]}"
+        if audit.conflicts:
+            return f"secret bindings 存在冲突：{audit.conflicts[0]}"
+        if audit.reload_required:
+            return "secret bindings 已更新，但还需要 apply / reload 才能进入当前 runtime。"
+        if audit.warnings:
+            return audit.warnings[0]
+        return "当前 project 的 secret bindings 或 runtime sync 尚未完成。"
 
     async def _run_doctor(self, session: OnboardingSession, result: OnboardingRunResult) -> bool:
         state = session.steps[OnboardingStep.DOCTOR_LIVE]

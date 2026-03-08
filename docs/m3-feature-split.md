@@ -21,11 +21,11 @@
 - 029 已交付 WeChat Import + Multi-source Import Workbench
 - 030 已交付 capability pack、ToolIndex、Delegation Plane、Skill Pipeline
 
-当前真正剩下的不是新的 M3 功能 Feature，而是发布前的收口缺口：
+当前真正剩下的已经不是新的 M3 功能 Feature，而是发布后的持续硬化项：
 
 - Feature 031 已补齐 acceptance 制品、release report 和 remaining risks 清单
-- 当前控制面的 trusted-network / 部署边界没有被写进正式验收门禁
-- 缺少一次面向真实 owner 的 OpenClaw -> OctoAgent 迁移演练
+- control-plane 的 front-door 部署边界已经写入正式验收门禁，并对 `loopback` 模式补了代理转发 header 的 fail-closed 拒绝
+- OpenClaw -> OctoAgent 迁移演练已经完成，后续差距主要转入 live cutover 与长期运维阶段
 
 ### 1.2 本轮复核后的结论
 
@@ -33,8 +33,8 @@ M3 的功能建设已经足够完整，当前复核结论转为：
 
 1. **M3 主功能线已经完成**：024-031 已覆盖 M3 的主能力闭环。
 2. **031 已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告。
-3. **公网边界仍需按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
-4. **把 OpenClaw 迁移演练纳入 M3 签收**：否则无法证明 OctoAgent 已具备替换现有日常系统的条件。
+3. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
+4. **OpenClaw 迁移演练已纳入 M3 签收**：当前后续工作应转向 live cutover checklist，而不是再补迁移可信度。
 
 ### 1.3 调研证据（不仅 README）
 

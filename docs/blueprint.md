@@ -12,7 +12,7 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-In-Progress（2026-03-08 同步）
+- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered（2026-03-08 同步）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
@@ -2710,6 +2710,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 029 已交付 WeChat adapter、Import Workbench、mapping/dry-run/dedupe/resume 与 memory effect 链路。
 - Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
 - Feature 031 已完成：M3 现已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report。
+- front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 

@@ -556,23 +556,25 @@ class SqliteProjectStore:
         ),
     ) -> Workspace | None:
         default_project = await self.get_default_project()
-        if default_project is None:
-            return None
-
         if scope_id:
             placeholders = ",".join("?" for _ in binding_types)
-            values: list[str] = [default_project.project_id]
-            values.extend(binding_type.value for binding_type in binding_types)
+            values: list[str] = [binding_type.value for binding_type in binding_types]
             values.append(scope_id)
+            default_project_id = default_project.project_id if default_project is not None else ""
+            values.append(default_project_id)
             cursor = await self._conn.execute(
                 f"""
                 SELECT w.*
                 FROM project_bindings pb
                 JOIN workspaces w ON w.workspace_id = pb.workspace_id
-                WHERE pb.project_id = ?
-                  AND pb.binding_type IN ({placeholders})
+                WHERE pb.binding_type IN ({placeholders})
                   AND pb.binding_key = ?
-                ORDER BY pb.created_at ASC
+                ORDER BY
+                  CASE
+                    WHEN pb.project_id = ? THEN 0
+                    ELSE 1
+                  END,
+                  pb.created_at ASC
                 LIMIT 1
                 """,
                 tuple(values),
@@ -581,6 +583,8 @@ class SqliteProjectStore:
             if row is not None:
                 return self._row_to_workspace(row)
 
+        if default_project is None:
+            return None
         return await self.get_primary_workspace(default_project.project_id)
 
     async def _get_changes(self) -> int:

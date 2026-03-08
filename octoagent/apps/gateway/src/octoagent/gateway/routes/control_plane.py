@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from octoagent.core.models import ActionRequestEnvelope, ControlPlaneActionStatus
+from octoagent.provider.dx.import_workbench_service import ImportWorkbenchError
 
 from ..deps import get_control_plane_service
 
@@ -112,10 +113,15 @@ async def get_control_import_source(
     source_id: str,
     control_plane=Depends(get_control_plane_service),
 ):
-    return (await control_plane.get_import_source(source_id)).model_dump(
-        mode="json",
-        by_alias=True,
-    )
+    try:
+        document = await control_plane.get_import_source(source_id)
+    except ImportWorkbenchError as exc:
+        status_code = 403 if exc.code.endswith("_NOT_ALLOWED") else 404
+        return JSONResponse(
+            status_code=status_code,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )
+    return document.model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/import-runs/{run_id}")
@@ -123,10 +129,15 @@ async def get_control_import_run(
     run_id: str,
     control_plane=Depends(get_control_plane_service),
 ):
-    return (await control_plane.get_import_run(run_id)).model_dump(
-        mode="json",
-        by_alias=True,
-    )
+    try:
+        document = await control_plane.get_import_run(run_id)
+    except ImportWorkbenchError as exc:
+        status_code = 403 if exc.code.endswith("_NOT_ALLOWED") else 404
+        return JSONResponse(
+            status_code=status_code,
+            content={"error": {"code": exc.code, "message": exc.message}},
+        )
+    return document.model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/memory-subjects/{subject_key}")
@@ -236,6 +247,8 @@ def _resolve_action_status_code(code: str, status: ControlPlaneActionStatus) -> 
         return 503
     if code.endswith("_NOT_ALLOWED"):
         return 403
+    if code.endswith("_MISMATCH"):
+        return 409
     if code.endswith("_FAILED"):
         return 500
     return 409

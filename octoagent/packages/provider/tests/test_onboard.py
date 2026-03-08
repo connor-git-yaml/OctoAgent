@@ -21,6 +21,7 @@ from octoagent.provider.dx.onboarding_models import (
 )
 from octoagent.provider.dx.onboarding_service import OnboardingService
 from octoagent.provider.dx.onboarding_store import OnboardingSessionStore
+from octoagent.provider.dx.secret_models import SecretAuditReport
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 
 
@@ -209,6 +210,48 @@ async def test_onboarding_service_resume_from_channel_step(tmp_path: Path) -> No
         result.session.steps[OnboardingStep.CHANNEL_READINESS].status
         == OnboardingStepStatus.ACTION_REQUIRED
     )
+
+
+@pytest.mark.asyncio
+async def test_onboarding_service_surfaces_secret_audit_detail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _bootstrapper(tmp_path)
+
+    async def _fake_audit(self):
+        _ = self
+        return SecretAuditReport(
+            report_id="audit-1",
+            project_id="project-default",
+            overall_status="action_required",
+            missing_targets=["channels.telegram.bot_token_env"],
+        )
+
+    monkeypatch.setattr(
+        "octoagent.provider.dx.onboarding_service.check_litellm_sync_status",
+        lambda *_args, **_kwargs: (True, []),
+    )
+    monkeypatch.setattr(
+        "octoagent.provider.dx.onboarding_service.SecretService.audit",
+        _fake_audit,
+    )
+
+    service = OnboardingService(
+        tmp_path,
+        registry=ChannelVerifierRegistry(),
+        bootstrapper=_bootstrapper,
+        doctor_factory=lambda _root: FakeDoctorRunner(_ready_report()),
+    )
+
+    result = await service.run()
+
+    assert result.exit_code == 1
+    assert result.session is not None
+    provider_step = result.session.steps[OnboardingStep.PROVIDER_RUNTIME]
+    assert provider_step.status == OnboardingStepStatus.ACTION_REQUIRED
+    assert "channels.telegram.bot_token_env" in provider_step.summary
+    assert "channels.telegram.bot_token_env" in provider_step.actions[0].description
 
 
 def test_onboard_help() -> None:

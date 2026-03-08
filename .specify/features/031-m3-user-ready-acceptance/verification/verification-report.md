@@ -92,6 +92,7 @@ cd octoagent/frontend && npm run build
 
 - control plane 的 `project.select` 现在会同步 `selector-web`，delegation / capability pack / work dispatch 会继承同一 project/workspace。
 - 031 新增 acceptance tests，直接验证 first-use、front-door、project isolation 和 delegation inheritance。
+- front-door `loopback` 模式现在会拒绝带常见代理转发 header 的 owner-facing 请求，避免把“只允许本机直连”误用成“可经本机反向代理对外开放”。
 - WeChat import 新增 WeFlow `.jsonl` 读取能力，可直接消费 OpenClaw snapshot 中的微信导出样本。
 - blueprint 与 M3 feature split 已同步到“031 已完成”的状态，M3 进入正式签收态。
 
