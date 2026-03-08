@@ -6,16 +6,22 @@
 """
 
 import asyncio
+import json
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from octoagent.provider import (
     AliasRegistry,
     EchoMessageAdapter,
     FallbackManager,
     ModelCallResult,
+    TokenUsage,
 )
+from octoagent.skills import SkillExecutionContext, SkillManifest, SkillRunner, SkillRunStatus
+from octoagent.tooling.models import ToolProfile
+from pydantic import BaseModel, Field
 
 # ============================================================
 # M0 遗留类型（废弃，保留供旧测试兼容）
@@ -135,6 +141,22 @@ class MockProvider(LLMProvider):
 # ============================================================
 
 
+class _GenericSkillInput(BaseModel):
+    """普通聊天接 skill runner 的最小输入模型。"""
+
+    objective: str = Field(min_length=1)
+
+
+class _GenericSkillOutput(BaseModel):
+    """SkillRunner 普通聊天输出模型。"""
+
+    content: str = ""
+    complete: bool = False
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    skip_remaining_tools: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class LLMService:
     """LLM 服务 -- Feature 002 版本
 
@@ -151,6 +173,8 @@ class LLMService:
         fallback_manager: FallbackManager | None = None,
         alias_registry: AliasRegistry | None = None,
         default_provider: LLMProvider | None = None,
+        *,
+        skill_runner: SkillRunner | None = None,
     ) -> None:
         """初始化 LLM 服务
 
@@ -176,6 +200,7 @@ class LLMService:
         self._providers: dict[str, LLMProvider] = {}
         self._providers["echo"] = EchoProvider()
         self._providers["mock"] = MockProvider()
+        self._skill_runner = skill_runner
 
     def register(self, alias: str, provider: LLMProvider) -> None:
         """注册 LLM provider -- M0 兼容"""
@@ -185,6 +210,12 @@ class LLMService:
         self,
         prompt_or_messages: str | list[dict[str, str]],
         model_alias: str | None = None,
+        *,
+        task_id: str | None = None,
+        trace_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
     ) -> ModelCallResult:
         """调用 LLM
 
@@ -210,8 +241,140 @@ class LLMService:
         resolved_alias = model_alias or "main"
         resolved_alias = self._alias_registry.resolve(resolved_alias)
 
+        skill_result = await self._try_call_with_tools(
+            prompt_or_messages=prompt_or_messages,
+            model_alias=resolved_alias,
+            task_id=task_id,
+            trace_id=trace_id,
+            metadata=metadata or {},
+            worker_capability=worker_capability or "llm_generation",
+            tool_profile=tool_profile or "standard",
+        )
+        if skill_result is not None:
+            return skill_result
+
         # 通过 FallbackManager 调用
         return await self._fallback_manager.call_with_fallback(
             messages=messages,
             model_alias=resolved_alias,
+        )
+
+    async def _try_call_with_tools(
+        self,
+        *,
+        prompt_or_messages: str | list[dict[str, str]],
+        model_alias: str,
+        task_id: str | None,
+        trace_id: str | None,
+        metadata: dict[str, Any],
+        worker_capability: str,
+        tool_profile: str,
+    ) -> ModelCallResult | None:
+        if self._skill_runner is None or not task_id or not trace_id:
+            return None
+
+        selected_tools = self._parse_selected_tools(metadata)
+        if not selected_tools:
+            return None
+
+        prompt = self._coerce_prompt(prompt_or_messages)
+        if not prompt:
+            return None
+
+        try:
+            profile = ToolProfile(str(tool_profile).strip().lower() or ToolProfile.STANDARD)
+        except ValueError:
+            profile = ToolProfile.STANDARD
+
+        worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
+        manifest = SkillManifest(
+            skill_id=f"chat.{worker_type}.inline",
+            input_model=_GenericSkillInput,
+            output_model=_GenericSkillOutput,
+            model_alias=model_alias,
+            description=self._build_skill_description(worker_type, selected_tools),
+            tools_allowed=selected_tools,
+            tool_profile=profile,
+        )
+        execution_context = SkillExecutionContext(
+            task_id=task_id,
+            trace_id=trace_id,
+            caller=f"worker:{worker_type}",
+            metadata=metadata,
+        )
+
+        try:
+            result = await self._skill_runner.run(
+                manifest=manifest,
+                execution_context=execution_context,
+                skill_input={"objective": prompt},
+                prompt=prompt,
+            )
+        except Exception:
+            return None
+
+        if result.status != SkillRunStatus.SUCCEEDED or result.output is None:
+            return None
+
+        meta = result.output.metadata
+        usage = meta.get("token_usage", {}) if isinstance(meta, dict) else {}
+        return ModelCallResult(
+            content=result.output.content,
+            model_alias=model_alias,
+            model_name=str(meta.get("model_name", "")) if isinstance(meta, dict) else "",
+            provider=str(meta.get("provider", "")) if isinstance(meta, dict) else "",
+            duration_ms=result.duration_ms,
+            token_usage=TokenUsage(
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("total_tokens", 0) or 0),
+            ),
+            cost_usd=float(meta.get("cost_usd", 0.0) or 0.0) if isinstance(meta, dict) else 0.0,
+            cost_unavailable=bool(meta.get("cost_unavailable", True))
+            if isinstance(meta, dict)
+            else True,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+    @staticmethod
+    def _parse_selected_tools(metadata: dict[str, Any]) -> list[str]:
+        raw = metadata.get("selected_tools_json", "[]")
+        if isinstance(raw, list):
+            return [str(item).strip() for item in raw if str(item).strip()]
+        try:
+            payload = json.loads(str(raw or "[]"))
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [str(item).strip() for item in payload if str(item).strip()]
+
+    @staticmethod
+    def _coerce_prompt(prompt_or_messages: str | list[dict[str, str]]) -> str:
+        if isinstance(prompt_or_messages, str):
+            return prompt_or_messages.strip()
+        parts = [
+            str(item.get("content", "")).strip()
+            for item in prompt_or_messages
+            if str(item.get("content", "")).strip()
+        ]
+        return "\n\n".join(parts).strip()
+
+    @staticmethod
+    def _normalize_worker_type(value: Any) -> str:
+        raw = str(value).strip().lower()
+        if raw in {"ops", "research", "dev", "general"}:
+            return raw
+        return "general"
+
+    @staticmethod
+    def _build_skill_description(worker_type: str, selected_tools: list[str]) -> str:
+        tool_list = ", ".join(selected_tools)
+        return (
+            f"你是 OctoAgent 的 {worker_type} worker。"
+            f" 当前会话已经接入以下工具：{tool_list}。"
+            " 当用户问题需要 project/session/runtime 等事实时，优先调用工具核实。"
+            " 不要声称自己没有工具；只在确实没有必要时直接回答。"
+            " 完成后用自然语言给出最终答复。"
         )

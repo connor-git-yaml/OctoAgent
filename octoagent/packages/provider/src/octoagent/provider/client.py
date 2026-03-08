@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import AsyncIterator
@@ -16,7 +17,7 @@ import structlog
 
 from .cost import CostTracker
 from .exceptions import ProviderError, ProxyUnreachableError
-from .models import ModelCallResult, ReasoningConfig
+from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
 log = structlog.get_logger()
 
@@ -77,6 +78,8 @@ class LiteLLMClient:
         timeout_s: int = 30,
         *,
         stream_model_aliases: set[str] | None = None,
+        responses_model_aliases: set[str] | None = None,
+        responses_reasoning_aliases: dict[str, ReasoningConfig] | None = None,
     ) -> None:
         """初始化 LiteLLM Proxy 客户端
 
@@ -92,6 +95,8 @@ class LiteLLMClient:
         self._proxy_api_key = proxy_api_key
         self._timeout_s = timeout_s
         self._stream_model_aliases = set(stream_model_aliases or ())
+        self._responses_model_aliases = set(responses_model_aliases or ())
+        self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
 
     async def _collect_stream_response(
         self,
@@ -153,6 +158,178 @@ class LiteLLMClient:
             fallback_reason="",
         )
 
+    @staticmethod
+    def _build_responses_instructions(messages: list[dict[str, str]]) -> str:
+        """把 system 消息折叠为 Responses API 的 instructions。"""
+        instructions = [
+            str(message.get("content", "")).strip()
+            for message in messages
+            if message.get("role") == "system" and str(message.get("content", "")).strip()
+        ]
+        if instructions:
+            return "\n\n".join(instructions)
+        return "Reply helpfully."
+
+    @staticmethod
+    def _build_responses_input(messages: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """把 chat messages 转为 Responses API 的 input 列表。"""
+        input_items: list[dict[str, Any]] = []
+        for message in messages:
+            role = str(message.get("role", "user")).strip() or "user"
+            if role == "system":
+                continue
+            content = str(message.get("content", ""))
+            input_items.append(
+                {
+                    "role": role,
+                    "content": [{"type": "input_text", "text": content}],
+                }
+            )
+        return input_items
+
+    @staticmethod
+    def _build_responses_url(api_base: str) -> str:
+        base = api_base.rstrip("/")
+        if base.endswith("/backend-api") or base.endswith("/backend-api/codex"):
+            return f"{base}/responses"
+        return f"{base}/v1/responses"
+
+    async def _complete_via_responses_api(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        model_alias: str,
+        api_base: str,
+        api_key: str,
+        temperature: float,
+        max_tokens: int | None,
+        reasoning: ReasoningConfig | None,
+        extra_headers: dict[str, str] | None,
+        **kwargs,
+    ) -> ModelCallResult:
+        """通过 Proxy /v1/responses 调用 Codex-compatible alias。"""
+        start_time = time.monotonic()
+        text_parts: list[str] = []
+        response_model_name = ""
+        usage = TokenUsage()
+
+        request_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        if extra_headers:
+            request_headers.update(extra_headers)
+
+        resolved_reasoning = reasoning or self._responses_reasoning_aliases.get(model_alias)
+        body: dict[str, Any] = {
+            "model": model_alias,
+            "instructions": self._build_responses_instructions(messages),
+            "input": self._build_responses_input(messages),
+            "store": False,
+            "stream": True,
+        }
+        if max_tokens is not None:
+            body["max_output_tokens"] = max_tokens
+        if resolved_reasoning is not None:
+            body["reasoning"] = resolved_reasoning.to_responses_api_param()
+        body.update(kwargs)
+
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_s) as http_client:
+                async with http_client.stream(
+                    "POST",
+                    self._build_responses_url(api_base),
+                    headers=request_headers,
+                    json=body,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        payload = line[6:].strip()
+                        if not payload or payload == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+
+                        event_type = str(event.get("type", ""))
+                        if event_type == "response.output_text.delta":
+                            delta = str(event.get("delta", ""))
+                            if delta:
+                                text_parts.append(delta)
+                            continue
+
+                        if event_type != "response.completed":
+                            continue
+
+                        response = event.get("response", {})
+                        if isinstance(response, dict):
+                            response_model_name = str(response.get("model", "") or "")
+                            usage_payload = response.get("usage", {})
+                            if isinstance(usage_payload, dict):
+                                usage = TokenUsage(
+                                    prompt_tokens=int(usage_payload.get("input_tokens", 0) or 0),
+                                    completion_tokens=int(
+                                        usage_payload.get("output_tokens", 0) or 0
+                                    ),
+                                    total_tokens=int(usage_payload.get("total_tokens", 0) or 0),
+                                )
+                            if not text_parts:
+                                output_items = response.get("output", [])
+                                if isinstance(output_items, list):
+                                    for output in output_items:
+                                        if not isinstance(output, dict):
+                                            continue
+                                        for part in output.get("content", []):
+                                            if (
+                                                isinstance(part, dict)
+                                                and part.get("type") == "output_text"
+                                                and part.get("text")
+                                            ):
+                                                text_parts.append(str(part["text"]))
+        except Exception as e:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            sanitized_error = _redact_sensitive_text(str(e))
+            log.error(
+                "responses_call_failed",
+                model_alias=model_alias,
+                error=sanitized_error,
+                error_type=type(e).__name__,
+                duration_ms=duration_ms,
+            )
+            if _is_connection_error(e):
+                raise ProxyUnreachableError(
+                    proxy_url=self._proxy_base_url,
+                    original_error=e,
+                ) from e
+            raise ProviderError(
+                message=f"LLM 调用失败: {sanitized_error}",
+                recoverable=True,
+            ) from e
+
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        content = "".join(text_parts).strip()
+        if not content:
+            raise ProviderError(
+                message="LLM 返回了空的 Responses 响应",
+                recoverable=True,
+            )
+
+        return ModelCallResult(
+            content=content,
+            model_alias=model_alias,
+            model_name=response_model_name or model_alias,
+            provider="openai",
+            duration_ms=duration_ms,
+            token_usage=usage,
+            cost_usd=0.0,
+            cost_unavailable=True,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -191,6 +368,19 @@ class LiteLLMClient:
         # 路由决策：覆盖参数优先于实例默认值
         resolved_api_base = api_base or self._proxy_base_url
         resolved_api_key = api_key or self._proxy_api_key or "no-key"
+
+        if model_alias in self._responses_model_aliases:
+            return await self._complete_via_responses_api(
+                messages=messages,
+                model_alias=model_alias,
+                api_base=resolved_api_base,
+                api_key=resolved_api_key,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                reasoning=reasoning,
+                extra_headers=extra_headers,
+                **kwargs,
+            )
 
         try:
             # 构建调用参数

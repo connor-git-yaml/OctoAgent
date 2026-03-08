@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import inspect
 from datetime import UTC, datetime
 from typing import Any
 
@@ -291,6 +292,9 @@ class TaskService:
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
         execution_context=None,
+        dispatch_metadata: dict[str, str] | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
     ) -> None:
         """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储 + Checkpoint
 
@@ -392,7 +396,16 @@ class TaskService:
                 )
                 if first_record:
                     with bind_execution_context(execution_context):
-                        llm_result = await llm_service.call(user_text, model_alias=model_alias)
+                        llm_result = await self._call_llm_service(
+                            llm_service=llm_service,
+                            user_text=user_text,
+                            model_alias=model_alias,
+                            task_id=task_id,
+                            trace_id=trace_id,
+                            dispatch_metadata=dispatch_metadata or {},
+                            worker_capability=worker_capability,
+                            tool_profile=tool_profile,
+                        )
 
                     # 4. 存储 Artifact + 写入完成事件
                     artifact_id, artifact = await self._store_llm_artifact(
@@ -477,6 +490,50 @@ class TaskService:
             return
         except Exception as e:
             await self._handle_llm_failure(task_id, trace_id, effective_alias, e)
+
+    async def _call_llm_service(
+        self,
+        *,
+        llm_service,
+        user_text: str,
+        model_alias: str | None,
+        task_id: str,
+        trace_id: str,
+        dispatch_metadata: dict[str, str],
+        worker_capability: str | None,
+        tool_profile: str | None,
+    ):
+        call_fn = llm_service.call
+        kwargs: dict[str, Any] = {"model_alias": model_alias}
+        extra_kwargs = {
+            "task_id": task_id,
+            "trace_id": trace_id,
+            "metadata": dispatch_metadata,
+            "worker_capability": worker_capability,
+            "tool_profile": tool_profile,
+        }
+
+        try:
+            signature = inspect.signature(call_fn)
+        except (TypeError, ValueError):
+            signature = None
+
+        accepts_var_kwargs = False
+        accepted_names: set[str] = set()
+        if signature is not None:
+            accepted_names = set(signature.parameters.keys())
+            accepts_var_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature.parameters.values()
+            )
+
+        for key, value in extra_kwargs.items():
+            if value is None:
+                continue
+            if accepts_var_kwargs or key in accepted_names:
+                kwargs[key] = value
+
+        return await call_fn(user_text, **kwargs)
 
     def _truncate_response_summary(self, text: str, suffix: str = "see artifact") -> str:
         """截断超出字节限制的响应摘要（UTF-8 字节数）"""

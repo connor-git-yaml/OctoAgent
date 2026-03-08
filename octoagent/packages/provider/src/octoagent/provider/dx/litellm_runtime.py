@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 import yaml
 
+from ..models import ReasoningConfig
 from ..auth.oauth_provider import BUILTIN_PROVIDERS
 from .config_wizard import load_config
 from .litellm_generator import LITELLM_CONFIG_NAME
@@ -100,3 +101,32 @@ def resolve_codex_backend_aliases(project_root: Path) -> set[str]:
 def alias_uses_codex_backend(project_root: Path, alias_name: str) -> bool:
     """判断指定 alias 是否命中 Codex backend 路由。"""
     return alias_name in resolve_codex_backend_aliases(project_root)
+
+
+def resolve_codex_reasoning_aliases(project_root: Path) -> dict[str, ReasoningConfig]:
+    """解析 Codex backend alias 的默认 reasoning 配置。"""
+    try:
+        cfg = load_config(project_root)
+    except Exception as exc:
+        log.warning(
+            "codex_reasoning_aliases_config_invalid",
+            error_type=type(exc).__name__,
+        )
+        return {}
+
+    if cfg is None:
+        return {}
+
+    result: dict[str, ReasoningConfig] = {}
+    for alias_name, alias_cfg in cfg.model_aliases.items():
+        provider = cfg.get_provider(alias_cfg.provider)
+        if (
+            provider is None
+            or not provider.enabled
+            or provider.auth_type != "oauth"
+            or provider.id != "openai-codex"
+            or alias_cfg.thinking_level is None
+        ):
+            continue
+        result[alias_name] = ReasoningConfig(effort=alias_cfg.thinking_level)
+    return result

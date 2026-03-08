@@ -40,6 +40,39 @@ class SlowLLMService:
         )
 
 
+class CapturingLLMService:
+    """记录 WorkerRuntime 下发参数。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def call(
+        self,
+        prompt_or_messages,
+        model_alias: str | None = None,
+        **kwargs,
+    ) -> ModelCallResult:
+        self.calls.append(
+            {
+                "prompt_or_messages": prompt_or_messages,
+                "model_alias": model_alias,
+                **kwargs,
+            }
+        )
+        return ModelCallResult(
+            content="captured",
+            model_alias=model_alias or "main",
+            model_name="mock-capture",
+            provider="mock",
+            duration_ms=1,
+            token_usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+
 async def _create_task_with_envelope(tmp_path: Path, key: str) -> tuple:
     store_group = await create_store_group(
         str(tmp_path / f"{key}.db"),
@@ -153,5 +186,39 @@ class TestWorkerRuntime:
         task = await service.get_task(envelope.task_id)
         assert task is not None
         assert task.status == "CANCELLED"
+
+        await store_group.conn.close()
+
+    async def test_runtime_forwards_dispatch_metadata_to_llm_service(
+        self, tmp_path: Path
+    ) -> None:
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f009-runtime-005"
+        )
+        envelope.worker_capability = "ops"
+        envelope.tool_profile = "minimal"
+        envelope.metadata = {
+            "selected_tools_json": '["runtime.inspect"]',
+            "selected_worker_type": "ops",
+        }
+
+        llm_service = CapturingLLMService()
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+
+        result = await runtime.run(envelope, worker_id="worker.test")
+
+        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert len(llm_service.calls) == 1
+        call = llm_service.calls[0]
+        assert call["task_id"] == envelope.task_id
+        assert call["trace_id"] == envelope.trace_id
+        assert call["worker_capability"] == "ops"
+        assert call["tool_profile"] == "minimal"
+        assert call["metadata"] == envelope.metadata
 
         await store_group.conn.close()

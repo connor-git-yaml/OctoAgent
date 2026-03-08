@@ -409,7 +409,7 @@ class TestDoctorChecks:
             master_key_env="CUSTOM_MASTER_KEY",
         )
         monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
-        calls: list[dict[str, object]] = []
+        calls: list[tuple[str, dict[str, object]]] = []
 
         class FakeResponse:
             status_code = 200
@@ -430,8 +430,8 @@ class TestDoctorChecks:
                 del exc_type, exc, tb
 
             async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
-                del url, headers
-                calls.append(json)
+                del headers
+                calls.append((url, json))
                 return FakeResponse()
 
         monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
@@ -441,11 +441,20 @@ class TestDoctorChecks:
 
         assert result.status == CheckStatus.PASS
         assert calls == [
-            {
-                "model": "cheap",
-                "instructions": "reply briefly",
-                "messages": [{"role": "user", "content": "ping"}],
-            }
+            (
+                "http://yaml-proxy:4320/v1/responses",
+                {
+                    "model": "cheap",
+                    "instructions": "reply briefly",
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "ping"}],
+                        }
+                    ],
+                    "store": False,
+                },
+            )
         ]
 
     async def test_live_ping_uses_litellm_config_fallback_for_env_only_codex_alias(
@@ -468,7 +477,7 @@ class TestDoctorChecks:
         )
         monkeypatch.setenv("LITELLM_PROXY_URL", "http://env-proxy:4010")
         monkeypatch.setenv("LITELLM_PROXY_KEY", "env-key")
-        calls: list[dict[str, object]] = []
+        calls: list[tuple[str, dict[str, object]]] = []
 
         class FakeResponse:
             status_code = 200
@@ -489,8 +498,8 @@ class TestDoctorChecks:
                 del exc_type, exc, tb
 
             async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
-                del url, headers
-                calls.append(json)
+                del headers
+                calls.append((url, json))
                 return FakeResponse()
 
         monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
@@ -500,11 +509,20 @@ class TestDoctorChecks:
 
         assert result.status == CheckStatus.PASS
         assert calls == [
-            {
-                "model": "cheap",
-                "instructions": "reply briefly",
-                "messages": [{"role": "user", "content": "ping"}],
-            }
+            (
+                "http://env-proxy:4010/v1/responses",
+                {
+                    "model": "cheap",
+                    "instructions": "reply briefly",
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "ping"}],
+                        }
+                    ],
+                    "store": False,
+                },
+            )
         ]
 
     async def test_credential_valid_empty(self, tmp_path: Path) -> None:
@@ -565,7 +583,12 @@ class TestDoctorChecks:
         assert result.status == CheckStatus.SKIP
         assert "未启用" in result.message
 
-    async def test_telegram_token_warn_when_missing(self, tmp_path: Path) -> None:
+    async def test_telegram_token_warn_when_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         _write_telegram_config(tmp_path, enabled=True)
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_telegram_token()

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -26,6 +27,7 @@ from .config_wizard import save_config
 from .litellm_generator import generate_litellm_config
 
 PromptFunc = Callable[[str, str], str]
+ChoicePromptFunc = Callable[[str, list[str], str], str]
 
 
 class ConfigBootstrapResult(BaseModel):
@@ -42,6 +44,70 @@ class ConfigBootstrapError(ValueError):
 
 def _default_prompt(text: str, *, default: str) -> str:
     return str(click.prompt(text, default=default))
+
+
+def _default_choice_prompt(text: str, *, choices: list[str], default: str) -> str:
+    return str(click.prompt(text, type=click.Choice(choices), default=default))
+
+
+@dataclass(frozen=True)
+class _ProviderBootstrapPreset:
+    provider_id: str
+    provider_name: str
+    auth_type: Literal["api_key", "oauth"]
+    api_key_env: str
+    main_model: str
+    cheap_model: str
+    main_description: str
+    cheap_description: str
+    main_thinking: Literal["xhigh", "high", "medium", "low"] | None = None
+    cheap_thinking: Literal["xhigh", "high", "medium", "low"] | None = None
+
+
+_BOOTSTRAP_PRESETS: dict[str, _ProviderBootstrapPreset] = {
+    "openrouter": _ProviderBootstrapPreset(
+        provider_id="openrouter",
+        provider_name="OpenRouter",
+        auth_type="api_key",
+        api_key_env="OPENROUTER_API_KEY",
+        main_model="openrouter/auto",
+        cheap_model="openrouter/auto",
+        main_description="主力模型别名",
+        cheap_description="低成本模型别名（用于 octo doctor --live ping）",
+    ),
+    "openai": _ProviderBootstrapPreset(
+        provider_id="openai",
+        provider_name="OpenAI",
+        auth_type="api_key",
+        api_key_env="OPENAI_API_KEY",
+        main_model="openai/auto",
+        cheap_model="openai/auto",
+        main_description="主力模型别名",
+        cheap_description="低成本模型别名（用于 octo doctor --live ping）",
+    ),
+    "openai-codex": _ProviderBootstrapPreset(
+        provider_id="openai-codex",
+        provider_name="OpenAI Codex (ChatGPT Pro OAuth)",
+        auth_type="oauth",
+        api_key_env="OPENAI_API_KEY",
+        main_model="gpt-5.4",
+        cheap_model="gpt-5.4",
+        main_description="主力模型（GPT-5.4，深度推理）",
+        cheap_description="低成本模型（GPT-5.4，轻量推理）",
+        main_thinking="xhigh",
+        cheap_thinking="low",
+    ),
+    "anthropic": _ProviderBootstrapPreset(
+        provider_id="anthropic",
+        provider_name="Anthropic",
+        auth_type="api_key",
+        api_key_env="ANTHROPIC_API_KEY",
+        main_model="anthropic/auto",
+        cheap_model="anthropic/auto",
+        main_description="主力模型别名",
+        cheap_description="低成本模型别名（用于 octo doctor --live ping）",
+    ),
+}
 
 
 def apply_telegram_channel_config(
@@ -73,6 +139,7 @@ def build_bootstrap_config(
     *,
     echo: bool = False,
     prompt: PromptFunc | None = None,
+    choice_prompt: ChoicePromptFunc | None = None,
     enable_telegram: bool = False,
     telegram_mode: Literal["webhook", "polling"] = "polling",
     telegram_webhook_url: str = "",
@@ -97,21 +164,27 @@ def build_bootstrap_config(
         return config
 
     prompt_func = prompt or (lambda text, default: _default_prompt(text, default=default))
-    provider_id = prompt_func(
-        "Provider ID（如 openrouter / anthropic / openai）",
+    choice_func = choice_prompt or (
+        lambda text, choices, default: _default_choice_prompt(text, choices=choices, default=default)
+    )
+    provider_choice = choice_func(
+        "Provider 预设（openrouter / openai / openai-codex / anthropic）",
+        list(_BOOTSTRAP_PRESETS.keys()),
         "openrouter",
     )
-    provider_name = prompt_func("Provider 显示名称", provider_id.title())
+    preset = _BOOTSTRAP_PRESETS[provider_choice]
+    provider_id = preset.provider_id
+    provider_name = prompt_func("Provider 显示名称", preset.provider_name)
     api_key_env = prompt_func(
-        "凭证环境变量名（如 OPENROUTER_API_KEY）",
-        f"{provider_id.upper()}_API_KEY",
+        f"凭证环境变量名（如 {preset.api_key_env}）",
+        preset.api_key_env,
     )
 
     try:
         provider_entry = ProviderEntry(
             id=provider_id,
             name=provider_name,
-            auth_type="api_key",
+            auth_type=preset.auth_type,
             api_key_env=api_key_env,
         )
     except Exception as exc:
@@ -120,13 +193,15 @@ def build_bootstrap_config(
     default_aliases = {
         "main": ModelAlias(
             provider=provider_id,
-            model=f"{provider_id}/auto",
-            description="主力模型别名",
+            model=preset.main_model,
+            description=preset.main_description,
+            thinking_level=preset.main_thinking,
         ),
         "cheap": ModelAlias(
             provider=provider_id,
-            model=f"{provider_id}/auto",
-            description="低成本模型别名（用于 octo doctor --live ping）",
+            model=preset.cheap_model,
+            description=preset.cheap_description,
+            thinking_level=preset.cheap_thinking,
         ),
     }
 
@@ -153,6 +228,7 @@ def bootstrap_config(
     *,
     echo: bool = False,
     prompt: PromptFunc | None = None,
+    choice_prompt: ChoicePromptFunc | None = None,
     enable_telegram: bool = False,
     telegram_mode: Literal["webhook", "polling"] = "polling",
     telegram_webhook_url: str = "",
@@ -163,6 +239,7 @@ def bootstrap_config(
     config = build_bootstrap_config(
         echo=echo,
         prompt=prompt,
+        choice_prompt=choice_prompt,
         enable_telegram=enable_telegram,
         telegram_mode=telegram_mode,
         telegram_webhook_url=telegram_webhook_url,

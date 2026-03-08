@@ -205,6 +205,157 @@ class TestLiteLLMClientComplete:
         assert result.content == "streamed hello"
         assert result.model_name == "gpt-5.4"
 
+    async def test_responses_alias_uses_proxy_responses_stream_and_parses_content(self):
+        """Codex alias 应走 /v1/responses 并拼接 output_text delta。"""
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            async def aiter_lines(self):
+                for line in [
+                    'data: {"type":"response.output_text.delta","delta":"你好"}',
+                    'data: {"type":"response.output_text.delta","delta":"！"}',
+                    'data: {"type":"response.completed","response":{"model":"gpt-5.4","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}',
+                    "data: [DONE]",
+                ]:
+                    yield line
+
+        class _StreamContext:
+            async def __aenter__(self):
+                return FakeResponse()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+        calls: list[tuple[str, str, dict[str, str], dict[str, object]]] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            def stream(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: dict[str, str],
+                json: dict[str, object],
+            ):
+                calls.append((method, url, headers, json))
+                return _StreamContext()
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeAsyncClient):
+            result = await client.complete(
+                messages=[
+                    {"role": "system", "content": "请简短回复"},
+                    {"role": "user", "content": "你好"},
+                ],
+                model_alias="main",
+            )
+
+        assert result.content == "你好！"
+        assert result.model_name == "gpt-5.4"
+        assert result.provider == "openai"
+        assert result.token_usage.prompt_tokens == 3
+        assert result.token_usage.completion_tokens == 2
+        assert result.token_usage.total_tokens == 5
+        assert result.cost_unavailable is True
+        assert calls == [
+            (
+                "POST",
+                "http://localhost:4001/v1/responses",
+                {
+                    "Authorization": "Bearer sk-test",
+                    "Content-Type": "application/json",
+                },
+                {
+                    "model": "main",
+                    "instructions": "请简短回复",
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "你好"}],
+                        }
+                    ],
+                    "store": False,
+                    "stream": True,
+                },
+            )
+        ]
+
+    async def test_responses_alias_uses_default_reasoning_map(self):
+        """未显式传 reasoning 时，Responses alias 使用默认 reasoning 配置。"""
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            async def aiter_lines(self):
+                yield 'data: {"type":"response.completed","response":{"model":"gpt-5.4","output":[{"content":[{"type":"output_text","text":"ok"}]}]}}'
+                yield "data: [DONE]"
+
+        class _StreamContext:
+            async def __aenter__(self):
+                return FakeResponse()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+        captured: list[dict[str, object]] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            def stream(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: dict[str, str],
+                json: dict[str, object],
+            ):
+                del method, url, headers
+                captured.append(json)
+                return _StreamContext()
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+            responses_reasoning_aliases={"main": ReasoningConfig(effort="xhigh")},
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeAsyncClient):
+            result = await client.complete(
+                messages=[{"role": "user", "content": "你好"}],
+                model_alias="main",
+            )
+
+        assert result.content == "ok"
+        assert captured[0]["reasoning"] == {"effort": "xhigh"}
+
 
 class TestLiteLLMClientRoutingOverrides:
     """路由覆盖测试（003-b JWT 方案多认证隔离）"""

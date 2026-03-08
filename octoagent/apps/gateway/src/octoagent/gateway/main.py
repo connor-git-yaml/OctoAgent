@@ -28,16 +28,21 @@ from octoagent.provider import (
 )
 from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.dotenv_loader import load_project_dotenv
-from octoagent.provider.dx.litellm_runtime import resolve_codex_backend_aliases
+from octoagent.provider.dx.litellm_runtime import (
+    resolve_codex_backend_aliases,
+    resolve_codex_reasoning_aliases,
+)
 from octoagent.provider.dx.memory_console_service import MemoryConsoleService
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.provider.dx.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+from octoagent.skills import SkillRunner
+from octoagent.skills.litellm_client import LiteLLMSkillClient
 
+from .deps import require_front_door_access
 from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
-from .deps import require_front_door_access
 from .routes import (
     approvals,
     cancel,
@@ -99,6 +104,11 @@ def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> 
 def _resolve_stream_model_aliases(project_root: Path) -> set[str]:
     """解析需要走流式聚合的 model aliases。"""
     return resolve_codex_backend_aliases(project_root)
+
+
+def _resolve_responses_reasoning_aliases(project_root: Path) -> dict[str, Any]:
+    """解析需要通过 Responses API 传递的默认 reasoning 配置。"""
+    return resolve_codex_reasoning_aliases(project_root)
 
 
 def _resolve_verify_url(default_port: int = 8000, profile: str = "core") -> str:
@@ -296,6 +306,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             proxy_api_key=provider_config.proxy_api_key.get_secret_value(),
             timeout_s=provider_config.timeout_s,
             stream_model_aliases=_resolve_stream_model_aliases(project_root),
+            responses_model_aliases=_resolve_stream_model_aliases(project_root),
+            responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
         )
         echo_adapter = EchoMessageAdapter()
         fallback_manager = FallbackManager(
@@ -339,12 +351,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tool_broker=tool_broker,
     )
     await app.state.capability_pack_service.startup()
+    if provider_config.llm_mode == "litellm":
+        skill_runner = SkillRunner(
+            model_client=LiteLLMSkillClient(
+                proxy_url=provider_config.proxy_base_url,
+                master_key=provider_config.proxy_api_key.get_secret_value(),
+                tool_broker=tool_broker,
+                responses_model_aliases=_resolve_stream_model_aliases(project_root),
+                responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
+            ),
+            tool_broker=tool_broker,
+            event_store=store_group.event_store,
+        )
+        app.state.llm_service = LLMService(
+            fallback_manager=fallback_manager,
+            alias_registry=alias_registry,
+            skill_runner=skill_runner,
+        )
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,
         store_group=store_group,
         sse_hub=app.state.sse_hub,
         capability_pack=app.state.capability_pack_service,
     )
+    llm_service = app.state.llm_service
     app.state.task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=app.state.sse_hub,

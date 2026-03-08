@@ -199,6 +199,9 @@ class InlineRuntimeBackend:
             resume_from_node=envelope.resume_from_node,
             resume_state_snapshot=envelope.resume_state_snapshot,
             execution_context=execution_context,
+            dispatch_metadata=envelope.metadata,
+            worker_capability=envelope.worker_capability,
+            tool_profile=envelope.tool_profile,
         )
 
 

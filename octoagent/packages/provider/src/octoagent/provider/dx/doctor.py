@@ -86,8 +86,9 @@ class DoctorRunner:
     def _build_live_ping_payload(self) -> dict[str, Any]:
         """构建 live ping 请求体。
 
-        OpenAI Codex OAuth 路由通过 ChatGPT backend API 转发时，要求显式
-        提供 instructions，且不接受 doctor 旧探活里使用的 max_tokens。
+        OpenAI Codex OAuth 路由通过 ChatGPT backend API 的 Responses 接口转发时，
+        要求显式提供 instructions，且 input 必须为结构化列表；doctor 旧探活
+        使用的 chat/completions + max_tokens 组合会触发 404/400。
         其他 provider 继续沿用原有最小 chat/completions payload。
         """
         payload: dict[str, Any] = {
@@ -100,10 +101,27 @@ class DoctorRunner:
             return {
                 "model": "cheap",
                 "instructions": "reply briefly",
-                "messages": [{"role": "user", "content": "ping"}],
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "ping",
+                            }
+                        ],
+                    }
+                ],
+                "store": False,
             }
 
         return payload
+
+    def _build_live_ping_endpoint(self) -> str:
+        """根据 alias 路由选择 doctor live ping 使用的 Proxy 接口。"""
+        if alias_uses_codex_backend(self._root, "cheap"):
+            return "/v1/responses"
+        return "/v1/chat/completions"
 
     async def run_all_checks(self, live: bool = False) -> DoctorReport:
         """执行所有检查项
@@ -478,7 +496,7 @@ class DoctorRunner:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{proxy_url}/v1/chat/completions",
+                    f"{proxy_url}{self._build_live_ping_endpoint()}",
                     headers={"Authorization": f"Bearer {proxy_key}"},
                     json=self._build_live_ping_payload(),
                 )
