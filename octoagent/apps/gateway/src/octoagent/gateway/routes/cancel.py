@@ -11,10 +11,23 @@ from octoagent.core.models import TaskStatus
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from ..deps import get_sse_hub, get_store_group
+from ..deps import get_sse_hub, get_store_group, get_task_scope_guard
+from ..services.task_scope import TaskScopeGuardError
 from ..services.task_service import TaskService
 
 router = APIRouter()
+
+
+def _task_scope_error(exc: TaskScopeGuardError) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+            }
+        },
+    )
 
 
 class CancelResponse(BaseModel):
@@ -30,6 +43,7 @@ async def cancel_task(
     request: Request,
     store_group=Depends(get_store_group),
     sse_hub=Depends(get_sse_hub),
+    scope_guard=Depends(get_task_scope_guard),
 ):
     """取消非终态的任务
 
@@ -37,16 +51,31 @@ async def cancel_task(
     - 终态任务返回 409 Conflict
     - 不存在的任务返回 404
     """
+    service = TaskService(store_group, sse_hub)
+    existing = await service.get_task(task_id)
+    if existing is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {
+                    "code": "TASK_NOT_FOUND",
+                    "message": f"Task with id {task_id} does not exist",
+                }
+            },
+        )
+
+    try:
+        await scope_guard.ensure_task_visible(existing)
+    except TaskScopeGuardError as exc:
+        return _task_scope_error(exc)
+
     task_runner = getattr(request.app.state, "task_runner", None)
     if task_runner is not None:
         await task_runner.cancel_task(task_id)
 
-    service = TaskService(store_group, sse_hub)
-
     try:
         task = await service.cancel_task(task_id)
     except ValueError as e:
-        existing = await service.get_task(task_id)
         if existing is not None and existing.status == TaskStatus.CANCELLED:
             return JSONResponse(
                 status_code=200,
@@ -62,17 +91,6 @@ async def cancel_task(
                 "error": {
                     "code": "TASK_ALREADY_TERMINAL",
                     "message": str(e),
-                }
-            },
-        )
-
-    if task is None:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "error": {
-                    "code": "TASK_NOT_FOUND",
-                    "message": f"Task with id {task_id} does not exist",
                 }
             },
         )

@@ -8,10 +8,23 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from ..deps import get_execution_console_service, get_store_group
+from ..deps import get_execution_console_service, get_store_group, get_task_scope_guard
 from ..services.execution_console import ExecutionInputError
+from ..services.task_scope import TaskScopeGuardError
 
 router = APIRouter()
+
+
+def _task_scope_error(exc: TaskScopeGuardError) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+            }
+        },
+    )
 
 
 class AttachInputRequest(BaseModel):
@@ -28,6 +41,7 @@ async def get_execution_session(
     request: Request,
     execution_console=Depends(get_execution_console_service),
     store_group=Depends(get_store_group),
+    scope_guard=Depends(get_task_scope_guard),
 ):
     """Return the latest execution session projection for a task."""
     task = await store_group.task_store.get_task(task_id)
@@ -41,6 +55,10 @@ async def get_execution_session(
                 }
             },
         )
+    try:
+        await scope_guard.ensure_task_visible(task)
+    except TaskScopeGuardError as exc:
+        return _task_scope_error(exc)
     task_runner = getattr(request.app.state, "task_runner", None)
     if task_runner is not None:
         session = await task_runner.get_execution_session(task_id)
@@ -64,6 +82,7 @@ async def get_execution_events(
     task_id: str,
     execution_console=Depends(get_execution_console_service),
     store_group=Depends(get_store_group),
+    scope_guard=Depends(get_task_scope_guard),
 ):
     """Return normalized execution events for the latest session."""
     task = await store_group.task_store.get_task(task_id)
@@ -77,6 +96,10 @@ async def get_execution_events(
                 }
             },
         )
+    try:
+        await scope_guard.ensure_task_visible(task)
+    except TaskScopeGuardError as exc:
+        return _task_scope_error(exc)
     session = await execution_console.get_session(task_id)
     if session is None:
         return {"session_id": None, "events": []}
@@ -94,6 +117,7 @@ async def attach_execution_input(
     request: Request,
     execution_console=Depends(get_execution_console_service),
     store_group=Depends(get_store_group),
+    scope_guard=Depends(get_task_scope_guard),
 ):
     """Attach human input to a waiting execution session."""
     task = await store_group.task_store.get_task(task_id)
@@ -107,6 +131,10 @@ async def attach_execution_input(
                 }
             },
         )
+    try:
+        await scope_guard.ensure_task_visible(task)
+    except TaskScopeGuardError as exc:
+        return _task_scope_error(exc)
     try:
         task_runner = getattr(request.app.state, "task_runner", None)
         if task_runner is not None:

@@ -14,9 +14,22 @@ from octoagent.core.models import TERMINAL_STATES, TaskStatus
 from octoagent.core.models.event import Event
 from sse_starlette.sse import EventSourceResponse
 
-from ..deps import get_sse_hub, get_store_group
+from ..deps import get_sse_hub, get_store_group, get_task_scope_guard
+from ..services.task_scope import TaskScopeGuardError
 
 router = APIRouter()
+
+
+def _task_scope_error(exc: TaskScopeGuardError) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+            }
+        },
+    )
 
 
 def _event_to_sse_data(event: Event, is_final: bool = False) -> dict:
@@ -64,6 +77,7 @@ async def stream_task_events(
     request: Request,
     store_group=Depends(get_store_group),
     sse_hub=Depends(get_sse_hub),
+    scope_guard=Depends(get_task_scope_guard),
 ):
     """SSE 事件流端点
 
@@ -86,6 +100,11 @@ async def stream_task_events(
                 }
             },
         )
+
+    try:
+        await scope_guard.ensure_task_visible(task)
+    except TaskScopeGuardError as exc:
+        return _task_scope_error(exc)
 
     # 解析 Last-Event-ID（断线重连）
     last_event_id = request.headers.get("last-event-id")

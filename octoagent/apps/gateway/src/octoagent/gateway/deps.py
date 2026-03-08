@@ -11,6 +11,7 @@ from octoagent.core.store import StoreGroup
 from octoagent.policy.approval_manager import ApprovalManager
 
 from .services.frontdoor_auth import FrontDoorGuard
+from .services.task_scope import TaskScopeGuard
 
 
 def get_store_group(request: Request) -> StoreGroup:
@@ -62,3 +63,13 @@ async def require_front_door_access(
 ) -> None:
     """统一校验 owner-facing API 的 front-door 访问边界。"""
     await guard.authorize(request)
+
+
+def get_task_scope_guard(request: Request, store_group=Depends(get_store_group)) -> TaskScopeGuard:
+    """获取 raw task routes 的 project/workspace 视图隔离守卫。"""
+    project_root = getattr(
+        request.app.state,
+        "project_root",
+        Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd()))),
+    )
+    return TaskScopeGuard(Path(project_root), store_group)

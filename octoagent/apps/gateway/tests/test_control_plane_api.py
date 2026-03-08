@@ -77,6 +77,43 @@ async def _create_task(
     return task_id
 
 
+async def _create_project_with_scope_binding(
+    app,
+    *,
+    name: str,
+    slug: str,
+    scope_id: str,
+):
+    selector = ProjectSelectorService(
+        app.state.project_root,
+        surface="web",
+        store_group=app.state.store_group,
+    )
+    project, _, _ = await selector.create_project(
+        name=name,
+        slug=slug,
+        set_active=False,
+    )
+    workspace = await app.state.store_group.project_store.get_primary_workspace(
+        project.project_id
+    )
+    assert workspace is not None
+    await app.state.store_group.project_store.create_binding(
+        ProjectBinding(
+            binding_id=str(ULID()),
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            binding_type=ProjectBindingType.SCOPE,
+            binding_key=scope_id,
+            binding_value=scope_id,
+            source="tests",
+            migration_run_id=f"scope-binding-{slug}",
+        )
+    )
+    await app.state.store_group.conn.commit()
+    return project, workspace
+
+
 def _write_wechat_export(path: Path, media_root: Path) -> None:
     media_root.mkdir(parents=True, exist_ok=True)
     (media_root / "alpha.txt").write_text("alpha attachment", encoding="utf-8")
@@ -785,35 +822,12 @@ class TestControlPlaneApi:
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
-        selector = ProjectSelectorService(
-            control_plane_app.state.project_root,
-            surface="web",
-            store_group=control_plane_app.state.store_group,
-        )
-        beta_project, _, _ = await selector.create_project(
+        beta_project, _ = await _create_project_with_scope_binding(
+            control_plane_app,
             name="Beta",
             slug="beta",
-            set_active=False,
+            scope_id="chat:web:thread-beta",
         )
-        beta_workspace = (
-            await control_plane_app.state.store_group.project_store.get_primary_workspace(
-                beta_project.project_id
-            )
-        )
-        assert beta_workspace is not None
-        await control_plane_app.state.store_group.project_store.create_binding(
-            ProjectBinding(
-                binding_id=str(ULID()),
-                project_id=beta_project.project_id,
-                workspace_id=beta_workspace.workspace_id,
-                binding_type=ProjectBindingType.SCOPE,
-                binding_key="chat:web:thread-beta",
-                binding_value="chat:web:thread-beta",
-                source="tests",
-                migration_run_id="control-plane-project-scope",
-            )
-        )
-        await control_plane_app.state.store_group.conn.commit()
 
         default_task_id = await _create_task(
             control_plane_app,
@@ -856,6 +870,97 @@ class TestControlPlaneApi:
         beta_task_ids = {item["task_id"] for item in beta_sessions.json()["sessions"]}
         assert beta_task_id in beta_task_ids
         assert default_task_id not in beta_task_ids
+
+    async def test_raw_task_routes_scope_items_to_selected_project(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        beta_project, _ = await _create_project_with_scope_binding(
+            control_plane_app,
+            name="Beta Tasks",
+            slug="beta-tasks",
+            scope_id="chat:web:thread-beta-tasks",
+        )
+
+        default_task_id = await _create_task(
+            control_plane_app,
+            text="default raw task",
+            thread_id="thread-default-raw",
+            scope_id="scope-default-raw",
+        )
+        beta_task_id = await _create_task(
+            control_plane_app,
+            text="beta raw task",
+            thread_id="thread-beta-tasks",
+            scope_id="chat:web:thread-beta-tasks",
+        )
+
+        select_beta = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "project.select",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": beta_project.project_id,
+                },
+            },
+        )
+        assert select_beta.status_code == 200
+
+        list_resp = await control_plane_client.get("/api/tasks")
+        assert list_resp.status_code == 200
+        listed_task_ids = {item["task_id"] for item in list_resp.json()["tasks"]}
+        assert beta_task_id in listed_task_ids
+        assert default_task_id not in listed_task_ids
+
+        detail_resp = await control_plane_client.get(f"/api/tasks/{default_task_id}")
+        assert detail_resp.status_code == 403
+        assert detail_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        checkpoint_resp = await control_plane_client.get(
+            f"/api/tasks/{default_task_id}/checkpoints"
+        )
+        assert checkpoint_resp.status_code == 403
+        assert checkpoint_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        stream_resp = await control_plane_client.get(f"/api/stream/task/{default_task_id}")
+        assert stream_resp.status_code == 403
+        assert stream_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        execution_resp = await control_plane_client.get(
+            f"/api/tasks/{default_task_id}/execution"
+        )
+        assert execution_resp.status_code == 403
+        assert execution_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        execution_events_resp = await control_plane_client.get(
+            f"/api/tasks/{default_task_id}/execution/events"
+        )
+        assert execution_events_resp.status_code == 403
+        assert execution_events_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        execution_input_resp = await control_plane_client.post(
+            f"/api/tasks/{default_task_id}/execution/input",
+            json={"text": "cross-project input"},
+        )
+        assert execution_input_resp.status_code == 403
+        assert execution_input_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        resume_resp = await control_plane_client.post(f"/api/tasks/{default_task_id}/resume")
+        assert resume_resp.status_code == 403
+        assert resume_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
+
+        cancel_resp = await control_plane_client.post(
+            f"/api/tasks/{default_task_id}/cancel"
+        )
+        assert cancel_resp.status_code == 403
+        assert cancel_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
 
     async def test_project_select_action_emits_control_plane_events(
         self,
