@@ -923,4 +923,96 @@ describe("ControlPlane", () => {
     expect(String(actionRequest?.[1]?.body)).toContain('"action_id":"vault.access.request"');
     expect(String(actionRequest?.[1]?.body)).toContain('"subject_key":"credential:db"');
   });
+
+  it("memory.query 回刷 memory 资源时会保留当前过滤参数", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const snapshot = buildSnapshot();
+    const filteredMemory = {
+      ...snapshot.resources.memory,
+      generated_at: "2026-03-08T09:20:00Z",
+      updated_at: "2026-03-08T09:20:00Z",
+      filters: {
+        ...snapshot.resources.memory.filters,
+        partition: "credential",
+        query: "Database",
+      },
+      records: [snapshot.resources.memory.records[1]],
+    };
+
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      if (url.includes("/api/control/resources/memory?")) {
+        return Promise.resolve(jsonResponse(filteredMemory));
+      }
+      if (url.includes("/api/control/resources/memory-proposals")) {
+        return Promise.resolve(jsonResponse(buildMemoryProposals()));
+      }
+      if (url.includes("/api/control/resources/vault-authorization")) {
+        return Promise.resolve(jsonResponse(buildVaultAuthorization("ACTIVE")));
+      }
+      if (url.includes("/api/control/resources/memory-subjects/user%3Aalice")) {
+        return Promise.resolve(jsonResponse(buildMemorySubjectHistory()));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-memory-query",
+              correlation_id: "req-memory-query",
+              action_id: "memory.query",
+              status: "completed",
+              code: "MEMORY_QUERY_COMPLETED",
+              message: "已刷新 Memory 总览。",
+              data: {},
+              resource_refs: [
+                {
+                  resource_type: "memory_console",
+                  resource_id: "memory:overview",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-08T09:20:00Z",
+              audit_event_id: "evt-memory-query",
+            },
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("project-default");
+    await userEvent.click(screen.getByRole("button", { name: /Memory/i }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Partition" }), "credential");
+    await userEvent.type(screen.getByRole("textbox", { name: "Query" }), "Database");
+    await userEvent.click(screen.getByRole("button", { name: "刷新 Memory 视图" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "已刷新 Memory 总览。 [MEMORY_QUERY_COMPLETED]"
+      );
+    });
+
+    const memoryRefreshCall = fetchMock.mock.calls.find((call) =>
+      String((call as FetchArgs)[0]).includes("/api/control/resources/memory?")
+    );
+    expect(memoryRefreshCall).toBeTruthy();
+    const refreshUrl = String((memoryRefreshCall as FetchArgs)[0]);
+    expect(refreshUrl).toContain("partition=credential");
+    expect(refreshUrl).toContain("query=Database");
+    expect(refreshUrl).toContain("scope_id=scope-prod");
+  });
 });

@@ -10,6 +10,7 @@ import {
   executeControlAction,
   fetchControlEvents,
   fetchControlResource,
+  fetchMemoryConsole,
   fetchControlSnapshot,
   fetchMemoryProposals,
   fetchMemorySubjectHistory,
@@ -161,7 +162,20 @@ function isControlResourceDocument(
 }
 
 async function loadControlResource(
-  route: ControlResourceRoute
+  route: ControlResourceRoute,
+  options?: {
+    memoryQuery?: {
+      projectId?: string;
+      workspaceId?: string;
+      scopeId?: string;
+      partition?: string;
+      layer?: string;
+      query?: string;
+      includeHistory?: boolean;
+      includeVaultRefs?: boolean;
+      limit?: number;
+    };
+  }
 ): Promise<ControlPlaneSnapshot["resources"][SnapshotResourceKey]> {
   switch (route) {
     case "wizard":
@@ -177,7 +191,7 @@ async function loadControlResource(
     case "diagnostics":
       return fetchControlResource("diagnostics");
     case "memory":
-      return fetchControlResource("memory");
+      return fetchMemoryConsole(options?.memoryQuery ?? {});
   }
 }
 
@@ -201,6 +215,32 @@ function memoryActionResult(
   return result.action_id.startsWith("memory.") || result.action_id.startsWith("vault.")
     ? result
     : null;
+}
+
+function buildMemoryQueryFromSnapshot(
+  projectId: string,
+  workspaceId: string,
+  draft: {
+    scopeId: string;
+    partition: string;
+    layer: string;
+    query: string;
+    includeHistory: boolean;
+    includeVaultRefs: boolean;
+    limit: number;
+  }
+) {
+  return {
+    projectId,
+    workspaceId,
+    scopeId: draft.scopeId || undefined,
+    partition: draft.partition || undefined,
+    layer: draft.layer || undefined,
+    query: draft.query || undefined,
+    includeHistory: draft.includeHistory,
+    includeVaultRefs: draft.includeVaultRefs,
+    limit: draft.limit,
+  };
 }
 
 function mapQuickAction(
@@ -430,6 +470,14 @@ export default function ControlPlane() {
   ) {
     const preserveConfigDraft = options?.preserveConfigDraft ?? true;
     const routes = resolveResourceRoutes(refs);
+    const memoryQuery =
+      snapshot?.resources.memory != null
+        ? buildMemoryQueryFromSnapshot(
+            snapshot.resources.memory.active_project_id,
+            snapshot.resources.memory.active_workspace_id,
+            memoryQueryDraft
+          )
+        : undefined;
 
     if (routes.length === 0) {
       await reloadData({ preserveConfigDraft });
@@ -437,7 +485,13 @@ export default function ControlPlane() {
     }
 
     try {
-      const updates = await Promise.all(routes.map((route) => loadControlResource(route)));
+      const updates = await Promise.all(
+        routes.map((route) =>
+          loadControlResource(route, {
+            memoryQuery: route === "memory" ? memoryQuery : undefined,
+          })
+        )
+      );
       if (!updates.every((item) => isControlResourceDocument(item))) {
         throw new Error("control resource refresh returned malformed payload");
       }

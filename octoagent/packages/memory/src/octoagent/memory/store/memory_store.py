@@ -81,10 +81,13 @@ class SqliteMemoryStore:
         *,
         scope_ids: list[str] | None = None,
         statuses: list[str] | None = None,
+        source: str | None = None,
         limit: int = 50,
     ) -> list[WriteProposal]:
         sql = "SELECT * FROM memory_write_proposals WHERE 1 = 1"
         params: list[object] = []
+        if scope_ids is not None and len(scope_ids) == 0:
+            return []
         if scope_ids:
             placeholders = ",".join("?" for _ in scope_ids)
             sql += f" AND scope_id IN ({placeholders})"
@@ -93,6 +96,9 @@ class SqliteMemoryStore:
             placeholders = ",".join("?" for _ in statuses)
             sql += f" AND status IN ({placeholders})"
             params.extend(statuses)
+        if source:
+            sql += " AND json_extract(metadata, '$.source') = ?"
+            params.append(source)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._conn.execute(sql, tuple(params))
@@ -456,6 +462,8 @@ class SqliteMemoryStore:
         if workspace_id:
             sql += " AND workspace_id = ?"
             params.append(workspace_id)
+        if scope_ids is not None and len(scope_ids) == 0:
+            return []
         if scope_ids:
             placeholders = ",".join("?" for _ in scope_ids)
             sql += f" AND scope_id IN ({placeholders})"
@@ -560,6 +568,8 @@ class SqliteMemoryStore:
         if workspace_id:
             sql += " AND workspace_id = ?"
             params.append(workspace_id)
+        if scope_ids is not None and len(scope_ids) == 0:
+            return []
         if scope_ids:
             placeholders = ",".join("?" for _ in scope_ids)
             sql += f" AND scope_id IN ({placeholders})"
@@ -628,6 +638,8 @@ class SqliteMemoryStore:
         if workspace_id:
             sql += " AND workspace_id = ?"
             params.append(workspace_id)
+        if scope_ids is not None and len(scope_ids) == 0:
+            return []
         if scope_ids:
             placeholders = ",".join("?" for _ in scope_ids)
             sql += f" AND scope_id IN ({placeholders})"

@@ -138,6 +138,24 @@ export async function fetchControlResource(
   return apiFetch(`/api/control/resources/${resource}`);
 }
 
+export async function fetchMemoryConsole(
+  params: MemoryResourceQuery = {}
+): Promise<MemoryConsoleDocument> {
+  return apiFetch<MemoryConsoleDocument>(
+    `/api/control/resources/memory${buildQueryString({
+      project_id: params.projectId,
+      workspace_id: params.workspaceId,
+      scope_id: params.scopeId,
+      partition: params.partition,
+      layer: params.layer,
+      query: params.query,
+      include_history: params.includeHistory,
+      include_vault_refs: params.includeVaultRefs,
+      limit: params.limit,
+    })}`
+  );
+}
+
 export async function fetchMemorySubjectHistory(
   subjectKey: string,
   params: MemoryResourceQuery = {}
