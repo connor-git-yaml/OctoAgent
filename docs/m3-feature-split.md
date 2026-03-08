@@ -114,6 +114,23 @@ M3 的一句话目标：
 - 多模态记忆、Category、ToM 等结果必须带证据链，且可在管理台中追溯
 - MemU 不可用时系统必须自动降级回核心 Memory 能力
 
+### 2.6 核心对象关系与术语收口（2026-03-08 补充）
+
+| 对象 | 归属 / 作用域 | 主要承载 | 默认继承来源 | 说明 |
+|---|---|---|---|---|
+| `Project` | Owner 显式选择的一级产品对象 | instructions、memory bindings、secret bindings、asset bindings、channel/A2A routing | system defaults | M3 的根隔离单位 |
+| `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability pack refs、policy refs、budget defaults | project | 供 session / automation / work 选择 |
+| `Session` | 严格隶属于一个 project | history、queue、focus、effective config snapshot | project + selected agent profile | 正式会话对象 |
+| `Automation` | 严格隶属于一个 project | schedule、target、run history、effective config snapshot | project + selected agent profile | 可创建 session 或直接派生 work |
+| `Work` | 隶属于一个 session 或 automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 委派/合并/回放的一等单位 |
+
+补充约束：
+
+- 必须明确 `project -> session -> work` 与 `project -> automation -> work` 两条继承链，禁止在运行时临时拼装一套不可追溯的 effective config
+- `AgentProfile` / `WorkerProfile` 必须是正式产品对象，不能只作为 `AGENTS.md` 或 bootstrap 文件里的隐式约定
+- `project/workspace` 至少要有最小 asset manifest 能力（upload / list / inspect / bind）；完整 file browser / editor / diff 可以延后到 M4
+- 术语必须收敛：`tool profile`、`auth profile`、`agent profile`、`readiness level` 分开命名；除记忆分区外不再使用裸 `profile`
+
 ---
 
 ## 3. 并行拆分方案（M3 = 8 个 Feature）
@@ -193,10 +210,10 @@ M2 收口
 
 - F025-T01：定义统一 wizard session 协议，CLI / Web 共用同一套 step model
 - F025-T02：定义 `Project` 作为正式产品对象，统一承载：
-  - instructions / profile
+  - instructions / default agent profile binding
   - memory mode / partition bindings
   - secret bindings
-  - knowledge / files / workspace
+  - knowledge / files / workspace asset bindings
   - channel / A2A target bindings
 - F025-T03：设计 OctoAgent Secret Store 分层：
   - global provider auth store
@@ -207,14 +224,16 @@ M2 收口
 - F025-T06：收敛 Provider Key、OAuth Token、Telegram Bot Token、Gateway Token、Webhook Secret 的默认存储位置
 - F025-T07：在普通用户路径中移除“必须手工 export env 才能跑起来”的依赖
 - F025-T08：支持 SecretRef（env / file / exec / OS keychain fallback）与审计/轮换
+- F025-T09：实现 project asset manifest 的最小能力：upload / list / inspect / bind（knowledge / files / artifacts 共用）
 
 **验收标准**：
 
 - 新用户通过一个向导即可完成 provider、channel、gateway、model 的配置
-- 用户可以创建 / 选择 / 切换 project，并把 instructions、memory、secrets、files、routing 统一绑定到 project
+- 用户可以创建 / 选择 / 切换 project，并把 instructions、default agent profile、memory、secrets、files、routing 统一绑定到 project
 - 正常用户路径不再需要手工维护多处 `.env`
 - 所有高价值 secret 都能在同一入口中完成审计、应用、reload 和轮换
 - secret 不进入日志、事件、LLM 上下文，且按 project/scope 隔离
+- project 至少提供 asset manifest 的 upload / list / inspect / bind 路径，使 knowledge/files/artifacts 有稳定挂载点
 
 ---
 
@@ -372,14 +391,15 @@ M2 收口
 
 **任务拆解**：
 
-- F030-T01：定义 bundled capability pack：
-  - bundled skills
-  - bundled tools
-  - bundled worker bootstrap files（`AGENTS.md` / `BOOTSTRAP.md` / worker profile）
+- F030-T01：定义 `AgentProfile` / `WorkerProfile` 与 bundled capability pack：
+  - role / persona / instruction overlays
+  - model route / tool profile / capability pack refs
+  - policy refs / memory access hints / budget defaults
+  - bundled skills / bundled tools / bundled worker bootstrap files（`AGENTS.md` / `BOOTSTRAP.md` / worker profile）
 - F030-T02：实现 ToolIndex（向量检索 + metadata filter + 动态工具注入）
 - F030-T03：实现 Skill Pipeline Engine（节点重试、checkpoint、暂停、人工介入）
-- F030-T04：定义 `Work` 作为主 Agent 的委派/合并单位，支持 create / assign / merge / cancel / timeout / escalation
-- F030-T05：实现主 Agent → Worker / Subagent / ACP-like runtime / Graph Agent 的统一委派协议
+- F030-T04：定义 `Work` 作为主 Agent 的委派/合并单位，支持 create / assign / merge / cancel / timeout / escalation，并保留来源 session/automation 与 selected agent profile 的 effective config snapshot
+- F030-T05：实现主 Agent → Worker / Subagent / ACP-like runtime / Graph Agent 的统一委派协议，委派 envelope 必须携带 `agent_profile_id`、route reason 与 ownership
 - F030-T06：实现多 Worker 类型（ops/research/dev）的 capability registry 与派发策略
 - F030-T07：在管理台展示 tool hit、pipeline graph、worker routing reason、work ownership、subagent/runtime status
 - F030-T08：保证失败时可回退到单 Worker / 静态工具集路径
@@ -390,6 +410,7 @@ M2 收口
 - Skill Pipeline 支持 checkpoint / replay / HITL interrupt
 - 主 Agent 能创建/管理/合并 Work，并把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent
 - 多 Worker 派发具备可解释的 route reason，失败可降级
+- session / automation 可以显式绑定 `AgentProfile`，并在委派事件链与管理台中看到继承后的 effective config
 - bundled capability pack 能在新 agent / worker 首次启动时注入必要的基础能力与 bootstrap 上下文
 
 ---
@@ -405,11 +426,15 @@ M2 收口
 - F031-T03：定义 secret storage / rotate / reload / audit 的安全验收
 - F031-T04：定义 Memory + MemU + Vault + import 的验收样本
 - F031-T05：定义 Web 控制台移动端与桌面端验收用例
+- F031-T06：定义 project / agent profile / automation 继承链验收：
+  - 跨 project 切换不会串用 secrets、memory、agent profile
+  - automation 触发的 work 会保留 project / agent profile / budget / target 继承来源
 
 **验收标准**：
 
 - 新用户无需深度理解底层拓扑，也能在合理时间内完成首次可用
 - 运维用户可以在管理台完成配置、审批、恢复、升级和 Memory 检查
+- 用户可以验证 project、agent profile、automation、work 之间的 effective config 继承关系，且跨 project 不串状态
 - 高级能力可感知，但不会破坏系统的安全、可审计与可恢复性
 
 ---
