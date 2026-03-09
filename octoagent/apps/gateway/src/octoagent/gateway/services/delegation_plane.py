@@ -28,6 +28,11 @@ from octoagent.core.models.payloads import ToolIndexSelectedPayload
 from octoagent.skills import PipelineNodeOutcome, SkillPipelineEngine
 from ulid import ULID
 
+from .agent_context import (
+    build_scope_aware_session_id,
+    legacy_session_id_for_task,
+    session_state_matches_scope,
+)
 from .capability_pack import CapabilityPackService
 from .task_service import TaskService
 
@@ -79,6 +84,9 @@ class DelegationPlaneService:
 
     async def prepare_dispatch(self, request: OrchestratorRequest) -> DelegationPlan:
         project, workspace = await self._resolve_project_context(request)
+        agent_profile_id, context_frame_id = await self._resolve_task_context_refs(
+            request.task_id
+        )
         requested_target_kind = str(request.metadata.get("target_kind", "")).strip()
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
@@ -110,6 +118,8 @@ class DelegationPlaneService:
             ),
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
+            agent_profile_id=agent_profile_id,
+            context_frame_id=context_frame_id,
             metadata={
                 "requested_target_kind": requested_target_kind,
                 "requested_worker_type": (
@@ -126,6 +136,8 @@ class DelegationPlaneService:
                     "resume_from_node": request.resume_from_node or "",
                     "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
                     "tool_profile": request.tool_profile,
+                    "agent_profile_id": agent_profile_id,
+                    "context_frame_id": context_frame_id,
                     "metadata": dict(request.metadata),
                 },
             },
@@ -151,6 +163,8 @@ class DelegationPlaneService:
                 "resume_from_node": request.resume_from_node or "",
                 "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
                 "tool_profile": request.tool_profile,
+                "agent_profile_id": agent_profile_id,
+                "context_frame_id": context_frame_id,
                 "metadata": dict(request.metadata),
             },
         )
@@ -238,6 +252,8 @@ class DelegationPlaneService:
                 "selected_tools_json": json.dumps(selection.selected_tools, ensure_ascii=False),
                 "target_kind": updated_work.target_kind.value,
                 "tool_selection_id": selection.selection_id,
+                "agent_profile_id": updated_work.agent_profile_id,
+                "context_frame_id": updated_work.context_frame_id,
             },
         )
         return DelegationPlan(
@@ -827,6 +843,69 @@ class DelegationPlaneService:
         if project is None:
             project = await self._stores.project_store.get_default_project()
         if project is not None and workspace is None:
+            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
+        return project, workspace
+
+    async def _resolve_task_context_refs(self, task_id: str) -> tuple[str, str]:
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            return "", ""
+        project, workspace = await self._resolve_task_scope_context(task)
+        session_id = build_scope_aware_session_id(
+            task,
+            project_id=project.project_id if project is not None else "",
+            workspace_id=workspace.workspace_id if workspace is not None else "",
+        )
+        session_state = await self._stores.agent_context_store.get_session_context(session_id)
+        if session_state is None:
+            legacy_session_id = legacy_session_id_for_task(task)
+            legacy_state = await self._stores.agent_context_store.get_session_context(
+                legacy_session_id
+            )
+            if legacy_state is not None and session_state_matches_scope(
+                legacy_state,
+                task=task,
+                project_id=project.project_id if project is not None else "",
+                workspace_id=workspace.workspace_id if workspace is not None else "",
+            ):
+                session_state = legacy_state
+        if session_state is not None and session_state.last_context_frame_id:
+            frame = await self._stores.agent_context_store.get_context_frame(
+                session_state.last_context_frame_id
+            )
+            if frame is not None:
+                return frame.agent_profile_id, frame.context_frame_id
+        frames = await self._stores.agent_context_store.list_context_frames(
+            task_id=task_id,
+            limit=1,
+        )
+        if frames:
+            return frames[0].agent_profile_id, frames[0].context_frame_id
+        return "", ""
+
+    async def _resolve_task_scope_context(self, task):
+        workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
+        project = (
+            await self._stores.project_store.get_project(workspace.project_id)
+            if workspace is not None
+            else None
+        )
+        selector = await self._stores.project_store.get_selector_state(
+            task.requester.channel or "web"
+        )
+        if project is None and selector is not None:
+            project = await self._stores.project_store.get_project(selector.active_project_id)
+        if project is None:
+            project = await self._stores.project_store.get_default_project()
+        if project is None:
+            return None, None
+        if workspace is None and selector is not None and selector.active_workspace_id:
+            candidate = await self._stores.project_store.get_workspace(
+                selector.active_workspace_id
+            )
+            if candidate is not None and candidate.project_id == project.project_id:
+                workspace = candidate
+        if workspace is None or workspace.project_id != project.project_id:
             workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
         return project, workspace
 

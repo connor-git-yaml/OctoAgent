@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -92,6 +92,7 @@ class CompiledTaskContext:
     snapshot_text: str
     raw_tokens: int
     final_tokens: int
+    delivery_tokens: int
     latest_user_text: str
     compacted: bool = False
     compaction_reason: str = ""
@@ -99,6 +100,13 @@ class CompiledTaskContext:
     summary_model_alias: str = ""
     compressed_turn_count: int = 0
     kept_turn_count: int = 0
+    context_frame_id: str = ""
+    effective_agent_profile_id: str = ""
+    system_blocks: list[dict[str, str]] = field(default_factory=list)
+    recent_summary: str = ""
+    memory_hits: list[dict[str, Any]] = field(default_factory=list)
+    degraded_reason: str = ""
+    source_refs: list[dict[str, Any]] = field(default_factory=list)
 
 
 class ContextCompactionService:
@@ -156,6 +164,7 @@ class ContextCompactionService:
                 snapshot_text=snapshot,
                 raw_tokens=raw_tokens,
                 final_tokens=raw_tokens,
+                delivery_tokens=raw_tokens,
                 latest_user_text=latest_user_text,
             )
 
@@ -203,6 +212,7 @@ class ContextCompactionService:
                 snapshot_text=snapshot,
                 raw_tokens=raw_tokens,
                 final_tokens=raw_tokens,
+                delivery_tokens=raw_tokens,
                 latest_user_text=latest_user_text,
             )
 
@@ -226,6 +236,7 @@ class ContextCompactionService:
             snapshot_text=snapshot,
             raw_tokens=raw_tokens,
             final_tokens=final_tokens,
+            delivery_tokens=final_tokens,
             latest_user_text=latest_user_text,
             compacted=bool(summary_text),
             compaction_reason="history_over_budget",

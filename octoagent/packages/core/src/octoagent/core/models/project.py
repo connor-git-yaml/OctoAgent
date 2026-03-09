@@ -76,6 +76,7 @@ class Project(BaseModel):
     description: str = ""
     status: ProjectStatus = ProjectStatus.ACTIVE
     is_default: bool = False
+    default_agent_profile_id: str = ""
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)

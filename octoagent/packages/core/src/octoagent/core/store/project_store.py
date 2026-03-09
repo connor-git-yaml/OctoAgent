@@ -32,15 +32,16 @@ class SqliteProjectStore:
             """
             INSERT INTO projects (
                 project_id, slug, name, description, status, is_default,
-                metadata, created_at, updated_at
+                default_agent_profile_id, metadata, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id) DO UPDATE SET
                 slug = excluded.slug,
                 name = excluded.name,
                 description = excluded.description,
                 status = excluded.status,
                 is_default = excluded.is_default,
+                default_agent_profile_id = excluded.default_agent_profile_id,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at
             """,
@@ -51,6 +52,7 @@ class SqliteProjectStore:
                 project.description,
                 project.status.value,
                 1 if project.is_default else 0,
+                project.default_agent_profile_id,
                 json.dumps(project.metadata, ensure_ascii=False),
                 project.created_at.isoformat(),
                 project.updated_at.isoformat(),
@@ -63,9 +65,9 @@ class SqliteProjectStore:
             """
             INSERT OR IGNORE INTO projects (
                 project_id, slug, name, description, status, is_default,
-                metadata, created_at, updated_at
+                default_agent_profile_id, metadata, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project.project_id,
@@ -74,6 +76,7 @@ class SqliteProjectStore:
                 project.description,
                 project.status.value,
                 1 if project.is_default else 0,
+                project.default_agent_profile_id,
                 json.dumps(project.metadata, ensure_ascii=False),
                 project.created_at.isoformat(),
                 project.updated_at.isoformat(),
@@ -601,9 +604,10 @@ class SqliteProjectStore:
             description=row[3],
             status=row[4],
             is_default=bool(row[5]),
-            metadata=json.loads(row[6]),
-            created_at=datetime.fromisoformat(row[7]),
-            updated_at=datetime.fromisoformat(row[8]),
+            default_agent_profile_id=row[6],
+            metadata=json.loads(row[7]),
+            created_at=datetime.fromisoformat(row[8]),
+            updated_at=datetime.fromisoformat(row[9]),
         )
 
     @staticmethod

@@ -65,6 +65,7 @@ from octoagent.memory import (
 )
 from ulid import ULID
 
+from .agent_context import AgentContextService
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 
@@ -83,6 +84,7 @@ class TaskService:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._context_compaction = ContextCompactionService(store_group)
+        self._agent_context = AgentContextService(store_group)
 
     async def create_task(self, message: NormalizedMessage) -> tuple[str, bool]:
         """创建任务（消息接收入口）
@@ -509,8 +511,26 @@ class TaskService:
                         session_id=(
                             execution_context.session_id if execution_context is not None else None
                         ),
-                        source="llm-response",
-                    )
+                            source="llm-response",
+                        )
+                    if compiled_context is not None and compiled_context.context_frame_id:
+                        try:
+                            await self._agent_context.record_response_context(
+                                task_id=task_id,
+                                context_frame_id=compiled_context.context_frame_id,
+                                request_artifact_id=request_artifact_id,
+                                response_artifact_id=artifact_id,
+                                latest_user_text=compiled_context.latest_user_text,
+                                model_response=llm_result.content,
+                                recent_summary=compiled_context.recent_summary,
+                            )
+                        except Exception as exc:
+                            log.warning(
+                                "agent_context_response_update_degraded",
+                                task_id=task_id,
+                                error_type=type(exc).__name__,
+                                error=str(exc),
+                            )
                 else:
                     reused_artifact_id = await self._resolve_reused_artifact_id(
                         llm_call_idempotency_key
@@ -619,7 +639,7 @@ class TaskService:
         worker_capability: str | None,
         tool_profile: str | None,
     ) -> CompiledTaskContext:
-        return await self._context_compaction.build_context(
+        compiled = await self._context_compaction.build_context(
             task_id=task_id,
             fallback_user_text=fallback_user_text,
             llm_service=llm_service,
@@ -627,6 +647,24 @@ class TaskService:
             worker_capability=worker_capability,
             tool_profile=tool_profile,
         )
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            return compiled
+        try:
+            return await self._agent_context.build_task_context(
+                task=task,
+                compiled=compiled,
+                dispatch_metadata=dispatch_metadata,
+                worker_capability=worker_capability,
+            )
+        except Exception as exc:
+            log.warning(
+                "agent_context_resolve_degraded",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return compiled
 
     async def _store_request_snapshot_artifact(
         self,

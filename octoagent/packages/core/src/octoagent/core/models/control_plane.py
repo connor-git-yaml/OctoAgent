@@ -203,6 +203,73 @@ class SessionProjectionDocument(ControlPlaneDocument):
     operator_items: list[OperatorInboxItem] = Field(default_factory=list)
 
 
+class AgentProfileItem(BaseModel):
+    profile_id: str = Field(min_length=1)
+    scope: str = Field(default="system")
+    project_id: str = Field(default="")
+    name: str = Field(min_length=1)
+    persona_summary: str = Field(default="")
+    model_alias: str = Field(default="main")
+    tool_profile: str = Field(default="standard")
+    updated_at: datetime | None = None
+
+
+class AgentProfilesDocument(ControlPlaneDocument):
+    resource_type: str = "agent_profiles"
+    resource_id: str = "agent-profiles:overview"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    profiles: list[AgentProfileItem] = Field(default_factory=list)
+
+
+class OwnerProfileDocument(ControlPlaneDocument):
+    resource_type: str = "owner_profile"
+    resource_id: str = "owner-profile:default"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    profile: dict[str, Any] = Field(default_factory=dict)
+    overlays: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BootstrapSessionDocument(ControlPlaneDocument):
+    resource_type: str = "bootstrap_session"
+    resource_id: str = "bootstrap:current"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    session: dict[str, Any] = Field(default_factory=dict)
+    resumable: bool = False
+
+
+class ContextSessionItem(BaseModel):
+    session_id: str = Field(min_length=1)
+    thread_id: str = Field(default="")
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    rolling_summary: str = Field(default="")
+    last_context_frame_id: str = Field(default="")
+    updated_at: datetime | None = None
+
+
+class ContextFrameItem(BaseModel):
+    context_frame_id: str = Field(min_length=1)
+    task_id: str = Field(default="")
+    session_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
+    recent_summary: str = Field(default="")
+    memory_hit_count: int = Field(default=0, ge=0)
+    degraded_reason: str = Field(default="")
+    created_at: datetime | None = None
+
+
+class ContextContinuityDocument(ControlPlaneDocument):
+    resource_type: str = "context_continuity"
+    resource_id: str = "context:overview"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    sessions: list[ContextSessionItem] = Field(default_factory=list)
+    frames: list[ContextFrameItem] = Field(default_factory=list)
+
+
 class CapabilityPackDocument(ControlPlaneDocument):
     resource_type: str = "capability_pack"
     resource_id: str = "capability:bundled"
@@ -282,6 +349,8 @@ class AutomationJob(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
+    context_frame_id: str = Field(default="")
     schedule_kind: AutomationScheduleKind = AutomationScheduleKind.INTERVAL
     schedule_expr: str = Field(min_length=1)
     timezone: str = Field(default="UTC")
