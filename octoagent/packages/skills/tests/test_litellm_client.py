@@ -249,3 +249,94 @@ async def test_litellm_skill_client_uses_responses_api_and_roundtrips_function_c
     assert second.metadata["model_name"] == "gpt-5.4"
     assert captures[1]["json"]["input"][-1]["type"] == "function_call_output"
     assert captures[1]["json"]["input"][-1]["call_id"] == "call_123"
+
+
+@pytest.mark.asyncio
+async def test_litellm_skill_client_merges_system_history_into_responses_instructions(
+    monkeypatch,
+) -> None:
+    captures: list[dict[str, Any]] = []
+    payloads = [
+        [
+            'data: {"type":"response.output_text.delta","delta":"继续处理即可。"}',
+            "data: "
+            + json.dumps(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "model": "gpt-5.4",
+                        "usage": {
+                            "input_tokens": 12,
+                            "output_tokens": 4,
+                            "total_tokens": 16,
+                        },
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "继续处理即可。",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    ]
+
+    monkeypatch.setattr(
+        "octoagent.skills.litellm_client.httpx.AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(payloads, captures, **kwargs),
+    )
+
+    client = LiteLLMSkillClient(
+        proxy_url="http://proxy.local",
+        master_key="secret",
+        tool_broker=_FakeToolBroker(),
+        responses_model_aliases={"main"},
+    )
+    manifest = SkillManifest(
+        skill_id="chat.general.inline",
+        input_model=_SkillIO,
+        output_model=_SkillIO,
+        model_alias="main",
+        description="你可以调用工具。",
+        tools_allowed=["project.inspect"],
+        tool_profile=ToolProfile.MINIMAL,
+    )
+    context = SkillExecutionContext(
+        task_id="task-ctx",
+        trace_id="trace-ctx",
+        caller="test",
+        conversation_messages=[
+            {
+                "role": "system",
+                "content": "历史压缩摘要：用户已经确认当前 project 是 Default Project。",
+            },
+            {"role": "user", "content": "继续回答当前问题"},
+        ],
+    )
+
+    result = await client.generate(
+        manifest=manifest,
+        execution_context=context,
+        prompt="继续回答当前问题",
+        feedback=[],
+        attempt=1,
+        step=1,
+    )
+
+    assert result.complete is True
+    assert result.content == "继续处理即可。"
+    assert "你可以调用工具。" in captures[0]["json"]["instructions"]
+    assert "历史压缩摘要" in captures[0]["json"]["instructions"]
+    assert captures[0]["json"]["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "继续回答当前问题"}],
+        }
+    ]

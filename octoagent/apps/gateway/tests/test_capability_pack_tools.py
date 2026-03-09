@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import webbrowser
 from pathlib import Path
 
 from octoagent.core.models import (
+    BuiltinToolAvailabilityStatus,
     NormalizedMessage,
     OrchestratorRequest,
     Project,
@@ -25,6 +27,30 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.tooling import ExecutionContext, ToolBroker, ToolProfile
+
+
+class _FakeSearchResponse:
+    def __init__(self, *, text: str, url: str) -> None:
+        self.text = text
+        self.url = url
+        self.status_code = 200
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeSearchAsyncClient:
+    def __init__(self, responses: list[_FakeSearchResponse], **kwargs) -> None:
+        self._responses = responses
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url: str, *, params=None, follow_redirects=False):
+        return self._responses.pop(0)
 
 
 async def _build_runtime_services(tmp_path: Path):
@@ -119,6 +145,8 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "work.split",
             "work.merge",
             "web.fetch",
+            "web.search",
+            "browser.status",
             "memory.search",
         }.issubset(tool_names)
 
@@ -126,8 +154,119 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert spawn_tool.availability.value == "available"
         assert "agent_runtime" in spawn_tool.entrypoints
 
+        browser_tool = next(item for item in pack.tools if item.tool_name == "browser.status")
+        assert browser_tool.availability.value in {
+            "available",
+            "degraded",
+            "install_required",
+        }
+        assert "agent_runtime" in browser_tool.entrypoints
+
         tts_tool = next(item for item in pack.tools if item.tool_name == "tts.speak")
         assert tts_tool.availability.value in {"available", "install_required"}
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_web_search_tool_returns_parsed_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        _delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        responses = [
+            _FakeSearchResponse(
+                text="""
+                <html>
+                  <body>
+                    <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Farticle">
+                      OctoAgent Built-in Tools
+                    </a>
+                    <a class="result__a" href="https://example.org/post">Operator Guide</a>
+                  </body>
+                </html>
+                """,
+                url="https://html.duckduckgo.com/html/?q=octoagent",
+            )
+        ]
+        monkeypatch.setattr(
+            "httpx.AsyncClient",
+            lambda **kwargs: _FakeSearchAsyncClient(responses, **kwargs),
+        )
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="执行 web search",
+                idempotency_key="feature-032-web-search",
+            )
+        )
+        assert created is True
+
+        result = await tool_broker.execute(
+            "web.search",
+            {"query": "octoagent", "limit": 2},
+            ExecutionContext(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                caller="tests",
+                profile=ToolProfile.MINIMAL,
+            ),
+        )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["query"] == "octoagent"
+        assert payload["result_count"] == 2
+        assert payload["results"][0]["title"] == "OctoAgent Built-in Tools"
+        assert payload["results"][0]["url"] == "https://example.com/article"
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_capability_pack_marks_browser_tools_degraded_without_desktop_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        def _raise_browser_error():
+            raise webbrowser.Error("no browser registered")
+
+        monkeypatch.setattr(
+            "octoagent.gateway.services.capability_pack.webbrowser.get",
+            _raise_browser_error,
+        )
+        monkeypatch.setattr(
+            capability_pack,
+            "_desktop_session_available",
+            lambda: False,
+        )
+
+        pack = await capability_pack.refresh()
+        browser_tool = next(item for item in pack.tools if item.tool_name == "browser.status")
+
+        assert browser_tool.availability is BuiltinToolAvailabilityStatus.DEGRADED
+        assert browser_tool.availability_reason == "desktop_session_unavailable"
+        assert "GUI 环境" in browser_tool.install_hint
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

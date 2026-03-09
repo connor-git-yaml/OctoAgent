@@ -862,10 +862,20 @@ class ControlPlaneService:
                 ]
             ),
             "running": len([item for item in items if item.status == "running"]),
+            "source": "delegation_plane_pipeline_runs",
+            "graph_runtime_projection": "unavailable",
         }
         return SkillPipelineDocument(
             runs=items,
             summary=summary,
+            degraded=ControlPlaneDegradedState(
+                is_degraded=True,
+                reasons=["graph_runtime_projection_unavailable"],
+            ),
+            warnings=[
+                "当前视图仅展示 delegation preflight / skill pipeline runs，不代表 graph runtime 的真实执行步进。",
+                "graph runtime 细节目前仍需通过 execution console / session steps 查看。",
+            ],
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="pipeline.resume",

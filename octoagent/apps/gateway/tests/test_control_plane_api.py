@@ -393,6 +393,8 @@ class TestControlPlaneApi:
             "work.split",
             "work.merge",
             "web.fetch",
+            "web.search",
+            "browser.status",
             "memory.search",
         }.issubset(tool_names)
 
@@ -403,6 +405,22 @@ class TestControlPlaneApi:
         action_ids = {item["action_id"] for item in payload["registry"]["actions"]}
         assert "work.split" in action_ids
         assert "work.merge" in action_ids
+
+    async def test_pipeline_resource_is_explicitly_marked_as_delegation_projection(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.get("/api/control/resources/pipelines")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["resource_type"] == "skill_pipeline"
+        assert payload["degraded"]["is_degraded"] is True
+        assert "graph_runtime_projection_unavailable" in payload["degraded"]["reasons"]
+        assert payload["summary"]["source"] == "delegation_plane_pipeline_runs"
+        assert payload["summary"]["graph_runtime_projection"] == "unavailable"
+        assert any("delegation preflight" in item for item in payload["warnings"])
 
     async def test_work_split_and_merge_actions_create_child_work_lifecycle(
         self,

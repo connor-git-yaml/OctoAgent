@@ -277,6 +277,7 @@ class LLMService:
         if not selected_tools:
             return None
 
+        conversation_messages = self._coerce_messages(prompt_or_messages)
         prompt = self._coerce_prompt(prompt_or_messages)
         if not prompt:
             return None
@@ -300,6 +301,7 @@ class LLMService:
             task_id=task_id,
             trace_id=trace_id,
             caller=f"worker:{worker_type}",
+            conversation_messages=conversation_messages,
             metadata=metadata,
         )
 
@@ -351,14 +353,33 @@ class LLMService:
         return [str(item).strip() for item in payload if str(item).strip()]
 
     @staticmethod
-    def _coerce_prompt(prompt_or_messages: str | list[dict[str, str]]) -> str:
+    def _coerce_messages(
+        prompt_or_messages: str | list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        if isinstance(prompt_or_messages, str):
+            content = prompt_or_messages.strip()
+            return [{"role": "user", "content": content}] if content else []
+
+        normalized: list[dict[str, str]] = []
+        for item in prompt_or_messages:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            role = str(item.get("role", "user")).strip().lower() or "user"
+            if role not in {"system", "user", "assistant"}:
+                role = "user"
+            normalized.append({"role": role, "content": content})
+        return normalized
+
+    @classmethod
+    def _coerce_prompt(cls, prompt_or_messages: str | list[dict[str, str]]) -> str:
         if isinstance(prompt_or_messages, str):
             return prompt_or_messages.strip()
-        parts = [
-            str(item.get("content", "")).strip()
-            for item in prompt_or_messages
-            if str(item.get("content", "")).strip()
-        ]
+        messages = cls._coerce_messages(prompt_or_messages)
+        for item in reversed(messages):
+            if item["role"] == "user":
+                return item["content"]
+        parts = [item["content"] for item in messages]
         return "\n\n".join(parts).strip()
 
     @staticmethod
