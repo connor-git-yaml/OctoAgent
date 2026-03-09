@@ -44,6 +44,7 @@ from octoagent.core.models import (
     MemoryConsoleDocument,
     MemoryProposalAuditDocument,
     MemorySubjectHistoryDocument,
+    NormalizedMessage,
     OperatorActionKind,
     OperatorActionRequest,
     OperatorActionSource,
@@ -526,6 +527,7 @@ class ControlPlaneService:
         for thread_id, task_items in grouped.items():
             latest = max(task_items, key=lambda item: item.updated_at)
             execution_summary: dict[str, Any] = {}
+            latest_metadata = await self._extract_latest_user_metadata(latest.task_id)
             if self._task_runner is not None:
                 session = await self._task_runner.get_execution_session(latest.task_id)
                 if session is not None:
@@ -534,6 +536,8 @@ class ControlPlaneService:
                         "state": session.state.value,
                         "interactive": session.interactive,
                         "current_step": session.current_step,
+                        "runtime_kind": session.metadata.get("runtime_kind", ""),
+                        "work_id": session.metadata.get("work_id", ""),
                     }
             latest_message = await self._extract_latest_user_message(latest.task_id)
             workspace = await self._stores.project_store.resolve_workspace_for_scope(
@@ -553,12 +557,20 @@ class ControlPlaneService:
                     session_id=thread_id,
                     thread_id=thread_id,
                     task_id=latest.task_id,
+                    parent_task_id=str(latest_metadata.get("parent_task_id", "")),
+                    parent_work_id=str(latest_metadata.get("parent_work_id", "")),
                     title=latest.title,
                     status=latest.status.value,
                     channel=latest.requester.channel,
                     requester_id=latest.requester.sender_id,
                     project_id=workspace.project_id,
                     workspace_id=workspace.workspace_id,
+                    runtime_kind=str(
+                        execution_summary.get(
+                            "runtime_kind",
+                            latest_metadata.get("target_kind", ""),
+                        )
+                    ),
                     latest_message_summary=latest_message,
                     latest_event_at=latest.updated_at,
                     execution_summary=execution_summary,
@@ -701,6 +713,10 @@ class ControlPlaneService:
                 warnings=["delegation plane unavailable"],
             )
         works = await self._delegation_plane_service.list_works()
+        child_map: dict[str, list[str]] = defaultdict(list)
+        for work in works:
+            if work.parent_work_id:
+                child_map[work.parent_work_id].append(work.work_id)
         items = [
             WorkProjectionItem(
                 work_id=work.work_id,
@@ -717,6 +733,14 @@ class ControlPlaneService:
                 runtime_id=work.runtime_id,
                 project_id=work.project_id,
                 workspace_id=work.workspace_id,
+                child_work_ids=child_map.get(work.work_id, []),
+                child_work_count=len(child_map.get(work.work_id, [])),
+                merge_ready=self._is_work_merge_ready(work, works),
+                runtime_summary={
+                    "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
+                    "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
+                    "runtime_status": str(work.metadata.get("runtime_status", "")),
+                },
                 updated_at=work.updated_at,
                 capabilities=[
                     ControlPlaneCapability(
@@ -730,6 +754,28 @@ class ControlPlaneService:
                         capability_id="work.retry",
                         label="重试 Work",
                         action_id="work.retry",
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="work.split",
+                        label="拆分 Work",
+                        action_id="work.split",
+                        enabled=work.status.value not in {"merged", "cancelled"},
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="work.merge",
+                        label="合并 Work",
+                        action_id="work.merge",
+                        enabled=self._is_work_merge_ready(work, works),
+                        support_status=(
+                            ControlPlaneSupportStatus.SUPPORTED
+                            if self._is_work_merge_ready(work, works)
+                            else ControlPlaneSupportStatus.DEGRADED
+                        ),
+                        reason=(
+                            ""
+                            if self._is_work_merge_ready(work, works)
+                            else "存在未完成 child works 或尚未拆分"
+                        ),
                     ),
                     ControlPlaneCapability(
                         capability_id="work.escalate",
@@ -916,10 +962,7 @@ class ControlPlaneService:
                         else []
                     )
                     + (
-                        [
-                            "last_maintenance_at="
-                            f"{memory_backend.last_maintenance_at.isoformat()}"
-                        ]
+                        [f"last_maintenance_at={memory_backend.last_maintenance_at.isoformat()}"]
                         if memory_backend.last_maintenance_at is not None
                         else []
                     )
@@ -1383,6 +1426,10 @@ class ControlPlaneService:
             return await self._handle_work_cancel(request)
         if action_id == "work.retry":
             return await self._handle_work_retry(request)
+        if action_id == "work.split":
+            return await self._handle_work_split(request)
+        if action_id == "work.merge":
+            return await self._handle_work_merge(request)
         if action_id == "work.escalate":
             return await self._handle_work_escalate(request)
         if action_id == "pipeline.resume":
@@ -1662,8 +1709,7 @@ class ControlPlaneService:
             )
         code = (
             "VAULT_ACCESS_APPROVED"
-            if resolved_request.status is not None
-            and resolved_request.status.value == "approved"
+            if resolved_request.status is not None and resolved_request.status.value == "approved"
             else "VAULT_ACCESS_REJECTED"
         )
         message = (
@@ -1712,11 +1758,7 @@ class ControlPlaneService:
             return self._rejected_result(
                 request=request,
                 code=code if decision.allowed else decision.reason_code,
-                message=(
-                    "当前没有可用的 Vault 授权。"
-                    if decision.allowed
-                    else decision.message
-                ),
+                message=("当前没有可用的 Vault 授权。" if decision.allowed else decision.message),
                 target_refs=self._memory_target_refs(request),
             )
         return self._completed_result(
@@ -1749,11 +1791,7 @@ class ControlPlaneService:
             return self._rejected_result(
                 request=request,
                 code=code if decision.allowed else decision.reason_code,
-                message=(
-                    "Memory 导出检查存在阻塞项。"
-                    if decision.allowed
-                    else decision.message
-                ),
+                message=("Memory 导出检查存在阻塞项。" if decision.allowed else decision.message),
                 target_refs=self._memory_target_refs(request),
             )
         return self._completed_result(
@@ -1791,11 +1829,7 @@ class ControlPlaneService:
             return self._rejected_result(
                 request=request,
                 code=code if decision.allowed else decision.reason_code,
-                message=(
-                    "Memory 恢复校验存在阻塞项。"
-                    if decision.allowed
-                    else decision.message
-                ),
+                message=("Memory 恢复校验存在阻塞项。" if decision.allowed else decision.message),
                 target_refs=self._memory_target_refs(request),
             )
         return self._completed_result(
@@ -1938,6 +1972,107 @@ class ControlPlaneService:
             code="WORK_RETRIED",
             message="已重置 work 为待重试状态",
             data=updated.model_dump(mode="json"),
+            resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_work_split(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._task_runner is None:
+            raise ControlPlaneActionError(
+                "TASK_RUNNER_UNAVAILABLE", "当前 runtime 未启用 TaskRunner"
+            )
+        parent_work = await self._get_work_in_scope(work_id)
+        parent_task = await self._stores.task_store.get_task(parent_work.task_id)
+        if parent_task is None:
+            raise ControlPlaneActionError("PARENT_TASK_NOT_FOUND", "父 task 不存在")
+
+        objectives = request.params.get("objectives", [])
+        parsed_objectives = self._coerce_split_objectives(objectives)
+        if not parsed_objectives:
+            raise ControlPlaneActionError("OBJECTIVES_REQUIRED", "objectives 不能为空")
+
+        worker_type = self._param_str(request.params, "worker_type") or "general"
+        target_kind = self._param_str(request.params, "target_kind") or "subagent"
+        child_tasks: list[dict[str, Any]] = []
+        for objective in parsed_objectives:
+            message = NormalizedMessage(
+                channel=parent_task.requester.channel,
+                thread_id=f"{parent_task.thread_id}:child:{str(ULID())[:8]}",
+                scope_id=parent_task.scope_id,
+                sender_id=parent_task.requester.sender_id,
+                sender_name=parent_task.requester.sender_id or "owner",
+                text=objective,
+                metadata={
+                    "parent_task_id": parent_task.task_id,
+                    "parent_work_id": parent_work.work_id,
+                    "requested_worker_type": worker_type,
+                    "target_kind": target_kind,
+                    "spawned_by": "control_plane",
+                },
+                idempotency_key=f"control-plane-split:{parent_task.task_id}:{ULID()}",
+            )
+            child_task_id, created = await self._task_runner.launch_child_task(message)
+            child_tasks.append(
+                {
+                    "task_id": child_task_id,
+                    "created": created,
+                    "thread_id": message.thread_id,
+                    "objective": objective,
+                }
+            )
+
+        return self._completed_result(
+            request=request,
+            code="WORK_SPLIT_ACCEPTED",
+            message="已创建 child works 对应的 child tasks",
+            data={
+                "work_id": parent_work.work_id,
+                "child_tasks": child_tasks,
+                "requested_worker_type": worker_type,
+                "target_kind": target_kind,
+            },
+            resource_refs=[
+                self._resource_ref("delegation_plane", "delegation:overview"),
+                self._resource_ref("session_projection", "sessions:overview"),
+            ],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_work_merge(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        await self._get_work_in_scope(work_id)
+        child_works = await self._stores.work_store.list_works(parent_work_id=work_id)
+        if not child_works:
+            raise ControlPlaneActionError("CHILD_WORKS_REQUIRED", "当前 work 尚未拆分 child works")
+        blocking = [
+            item.work_id
+            for item in child_works
+            if item.status.value not in {"succeeded", "failed", "cancelled", "merged"}
+        ]
+        if blocking:
+            raise ControlPlaneActionError(
+                "CHILD_WORKS_ACTIVE",
+                f"仍有 child works 未完成: {', '.join(blocking)}",
+            )
+        summary = self._param_str(request.params, "summary") or "merged by control plane"
+        updated = await self._delegation_plane_service.merge_work(work_id, summary=summary)
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="WORK_MERGED",
+            message="已合并 child works",
+            data={
+                "work": updated.model_dump(mode="json"),
+                "child_work_ids": [item.work_id for item in child_works],
+            },
             resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
             target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
         )
@@ -2179,9 +2314,7 @@ class ControlPlaneService:
         raw_conversation_mappings = request.params.get("conversation_mappings")
         raw_sender_mappings = request.params.get("sender_mappings")
         conversation_mappings = (
-            list(raw_conversation_mappings)
-            if isinstance(raw_conversation_mappings, list)
-            else None
+            list(raw_conversation_mappings) if isinstance(raw_conversation_mappings, list) else None
         )
         sender_mappings = (
             list(raw_sender_mappings) if isinstance(raw_sender_mappings, list) else None
@@ -3022,6 +3155,26 @@ class ControlPlaneService:
                 return str(event.payload.get("text_preview", "")).strip()
         return ""
 
+    async def _extract_latest_user_metadata(self, task_id: str) -> dict[str, str]:
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
+            if event.type != EventType.USER_MESSAGE:
+                continue
+            raw = event.payload.get("metadata", {})
+            if not isinstance(raw, dict):
+                return {}
+            return {str(key): str(value) for key, value in raw.items()}
+        return {}
+
+    @staticmethod
+    def _is_work_merge_ready(work, works: list[Any]) -> bool:
+        children = [item for item in works if item.parent_work_id == work.work_id]
+        if not children:
+            return False
+        return all(
+            item.status.value in {"succeeded", "failed", "cancelled", "merged"} for item in children
+        )
+
     def _load_runtime_snapshot(self) -> dict[str, Any]:
         if self._update_status_store is None:
             return {}
@@ -3135,6 +3288,14 @@ class ControlPlaneService:
         if not value_str:
             return []
         return [item.strip() for item in value_str.split(",") if item.strip()]
+
+    def _coerce_split_objectives(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raw = str(value or "").strip()
+        if not raw:
+            return []
+        return [item.strip() for item in raw.splitlines() if item.strip()]
 
     def _memory_target_refs(
         self,
@@ -3614,6 +3775,20 @@ class ControlPlaneService:
                     category="delegation",
                     telegram_aliases=["/work retry"],
                     telegram_supported=True,
+                ),
+                definition(
+                    "work.split",
+                    "拆分 Work",
+                    category="delegation",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["work_id", "objectives"]},
+                ),
+                definition(
+                    "work.merge",
+                    "合并 Work",
+                    category="delegation",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["work_id"]},
                 ),
                 definition(
                     "work.escalate",

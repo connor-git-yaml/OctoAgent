@@ -374,6 +374,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sse_hub=app.state.sse_hub,
         capability_pack=app.state.capability_pack_service,
     )
+    app.state.capability_pack_service.bind_delegation_plane(app.state.delegation_plane_service)
     llm_service = app.state.llm_service
     app.state.task_runner = TaskRunner(
         store_group=store_group,
@@ -383,6 +384,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         completion_notifier=telegram_service.notify_task_result,
         delegation_plane=app.state.delegation_plane_service,
     )
+    app.state.capability_pack_service.bind_task_runner(app.state.task_runner)
+    await app.state.capability_pack_service.refresh()
     app.state.execution_console = app.state.task_runner.execution_console
     telegram_service.bind_task_runner(app.state.task_runner)
     await app.state.task_runner.startup()

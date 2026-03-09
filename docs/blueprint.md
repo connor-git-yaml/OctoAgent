@@ -2766,6 +2766,7 @@ M3 核心对象关系（2026-03-08 补充）：
 ### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
 
 - 本阶段聚焦“把已经 user-ready 的 M3 做得更丰富、更顺手、更有陪伴感”，而不是补 M3 主闭环缺口
+- [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
 - [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
 - [ ] Progressive Web App / companion surfaces / remote tunnel polish

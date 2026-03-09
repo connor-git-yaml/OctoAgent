@@ -27,6 +27,8 @@ class ExecutionRuntimeContext:
     worker_id: str
     backend: str
     console: ExecutionConsoleService
+    work_id: str = ""
+    runtime_kind: str = ""
     resume_state_snapshot: dict[str, Any] | None = None
     _resume_input_consumed: bool = field(default=False, init=False, repr=False)
 

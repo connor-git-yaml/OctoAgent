@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
+import octoagent.gateway.services.task_service as task_service_module
 import pytest
 import pytest_asyncio
 from octoagent.core.models import ActorType, Event, EventType, TaskStatus
@@ -22,8 +23,6 @@ from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
-
-import octoagent.gateway.services.task_service as task_service_module
 
 
 @pytest_asyncio.fixture
@@ -267,3 +266,30 @@ class TestTaskServiceHardening:
         task = await store_group.task_store.get_task(task_id)
         assert task is not None
         assert task.status == TaskStatus.FAILED
+
+    async def test_get_latest_user_metadata_preserves_child_runtime_hints_across_followups(
+        self, service_with_store
+    ):
+        service, _store_group = service_with_store
+        task_id, created = await service.create_task(
+            NormalizedMessage(
+                text="child objective",
+                idempotency_key="child-followup-metadata-001",
+                metadata={
+                    "parent_task_id": "task-parent-1",
+                    "parent_work_id": "work-parent-1",
+                    "requested_worker_type": "research",
+                    "target_kind": "subagent",
+                },
+            )
+        )
+        assert created is True
+
+        await service.append_user_message(task_id, "follow-up without extra metadata")
+
+        metadata = await service.get_latest_user_metadata(task_id)
+
+        assert metadata["parent_task_id"] == "task-parent-1"
+        assert metadata["parent_work_id"] == "work-parent-1"
+        assert metadata["requested_worker_type"] == "research"
+        assert metadata["target_kind"] == "subagent"

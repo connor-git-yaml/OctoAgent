@@ -22,6 +22,7 @@ from .backup import (
     SensitivityLevel,
 )
 from .capability import (
+    BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
     BundledToolDefinition,
@@ -282,6 +283,7 @@ __all__ = [
     "WorkerType",
     "RuntimeKind",
     "BundledToolDefinition",
+    "BuiltinToolAvailabilityStatus",
     "BundledSkillDefinition",
     "WorkerBootstrapFile",
     "WorkerCapabilityProfile",

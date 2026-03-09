@@ -31,6 +31,15 @@ class RuntimeKind(StrEnum):
     GRAPH_AGENT = "graph_agent"
 
 
+class BuiltinToolAvailabilityStatus(StrEnum):
+    """Built-in tool 可用性状态。"""
+
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+    INSTALL_REQUIRED = "install_required"
+
+
 class BundledToolDefinition(BaseModel):
     """内建工具定义。"""
 
@@ -42,6 +51,11 @@ class BundledToolDefinition(BaseModel):
     tags: list[str] = Field(default_factory=list)
     worker_types: list[WorkerType] = Field(default_factory=list)
     manifest_ref: str = Field(default="")
+    availability: BuiltinToolAvailabilityStatus = BuiltinToolAvailabilityStatus.AVAILABLE
+    availability_reason: str = Field(default="")
+    install_hint: str = Field(default="")
+    entrypoints: list[str] = Field(default_factory=list)
+    runtime_kinds: list[RuntimeKind] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

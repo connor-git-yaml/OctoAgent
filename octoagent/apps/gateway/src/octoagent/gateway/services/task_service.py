@@ -412,9 +412,7 @@ class TaskService:
                         task_id,
                         llm_result,
                         session_id=(
-                            execution_context.session_id
-                            if execution_context is not None
-                            else None
+                            execution_context.session_id if execution_context is not None else None
                         ),
                     )
                     await self._stores.side_effect_ledger_store.set_result_ref(
@@ -429,9 +427,7 @@ class TaskService:
                         artifact_id,
                         artifact,
                         session_id=(
-                            execution_context.session_id
-                            if execution_context is not None
-                            else None
+                            execution_context.session_id if execution_context is not None else None
                         ),
                         source="llm-response",
                     )
@@ -440,9 +436,7 @@ class TaskService:
                         llm_call_idempotency_key
                     )
                     if reused_artifact_id is None:
-                        raise RuntimeError(
-                            "检测到重复副作用幂等键，但缺少可复用结果引用"
-                        )
+                        raise RuntimeError("检测到重复副作用幂等键，但缺少可复用结果引用")
                     artifact_id = reused_artifact_id
                     await self._write_model_call_reused_events(
                         task_id=task_id,
@@ -627,8 +621,7 @@ class TaskService:
             for e in existing_events
         )
         has_artifact_created = any(
-            e.type == EventType.ARTIFACT_CREATED
-            and e.payload.get("artifact_id") == artifact_id
+            e.type == EventType.ARTIFACT_CREATED and e.payload.get("artifact_id") == artifact_id
             for e in existing_events
         )
         if has_model_completed and has_artifact_created:
@@ -720,9 +713,7 @@ class TaskService:
             return True
         if resume_from_node not in self._pipeline_nodes:
             return True
-        return self._pipeline_nodes.index(node_id) > self._pipeline_nodes.index(
-            resume_from_node
-        )
+        return self._pipeline_nodes.index(node_id) > self._pipeline_nodes.index(resume_from_node)
 
     def _derive_llm_call_idempotency_key(
         self,
@@ -920,9 +911,7 @@ class TaskService:
 
         # 验证流转合法性
         if not validate_transition(task.status, TaskStatus.CANCELLED):
-            raise ValueError(
-                f"Cannot transition from {task.status} to CANCELLED"
-            )
+            raise ValueError(f"Cannot transition from {task.status} to CANCELLED")
 
         trace_id = f"trace-{task_id}"
         await self._write_state_transition(
@@ -966,6 +955,19 @@ class TaskService:
     async def get_task(self, task_id: str) -> Task | None:
         """查询任务详情"""
         return await self._stores.task_store.get_task(task_id)
+
+    async def get_latest_user_metadata(self, task_id: str) -> dict[str, str]:
+        """读取当前任务累计生效的 USER_MESSAGE metadata。"""
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        merged: dict[str, str] = {}
+        for event in events:
+            if event.type != EventType.USER_MESSAGE:
+                continue
+            raw = event.payload.get("metadata", {})
+            if not isinstance(raw, dict):
+                continue
+            merged.update({str(key): str(value) for key, value in raw.items()})
+        return merged
 
     async def list_tasks(self, status: str | None = None) -> list[Task]:
         """查询任务列表"""

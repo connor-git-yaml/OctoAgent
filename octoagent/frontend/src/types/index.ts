@@ -460,12 +460,15 @@ export interface SessionProjectionItem {
   session_id: string;
   thread_id: string;
   task_id: string;
+  parent_task_id: string;
+  parent_work_id: string;
   title: string;
   status: string;
   channel: string;
   requester_id: string;
   project_id: string;
   workspace_id: string;
+  runtime_kind: string;
   latest_message_summary: string;
   latest_event_at: string | null;
   execution_summary: Record<string, unknown>;
@@ -490,6 +493,12 @@ export type RuntimeKind =
   | "acp_runtime"
   | "graph_agent";
 
+export type BuiltinToolAvailabilityStatus =
+  | "available"
+  | "degraded"
+  | "unavailable"
+  | "install_required";
+
 export interface BundledToolDefinition {
   tool_name: string;
   label: string;
@@ -499,6 +508,11 @@ export interface BundledToolDefinition {
   tags: string[];
   worker_types: WorkerType[];
   manifest_ref: string;
+  availability: BuiltinToolAvailabilityStatus;
+  availability_reason: string;
+  install_hint: string;
+  entrypoints: string[];
+  runtime_kinds: RuntimeKind[];
   metadata: Record<string, unknown>;
 }
 
@@ -567,6 +581,10 @@ export interface WorkProjectionItem {
   runtime_id: string;
   project_id: string;
   workspace_id: string;
+  child_work_ids: string[];
+  child_work_count: number;
+  merge_ready: boolean;
+  runtime_summary: Record<string, unknown>;
   updated_at: string | null;
   capabilities: ControlPlaneCapability[];
 }

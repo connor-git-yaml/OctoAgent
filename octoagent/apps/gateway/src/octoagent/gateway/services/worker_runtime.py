@@ -17,11 +17,12 @@ import shutil
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 import structlog
 from octoagent.core.models import (
+    DelegationTargetKind,
     DispatchEnvelope,
     ExecutionBackend,
     ExecutionSessionState,
@@ -86,9 +87,7 @@ class WorkerRuntimeConfig:
             docker_mode = "preferred"
 
         profile = (
-            os.environ.get("OCTOAGENT_WORKER_DEFAULT_TOOL_PROFILE", "standard")
-            .strip()
-            .lower()
+            os.environ.get("OCTOAGENT_WORKER_DEFAULT_TOOL_PROFILE", "standard").strip().lower()
         )
         if profile not in _ALLOWED_TOOL_PROFILES:
             profile = "standard"
@@ -121,9 +120,7 @@ class WorkerRuntimeConfig:
             between_output_timeout_seconds=_float_env(
                 "OCTOAGENT_WORKER_TIMEOUT_BETWEEN_OUTPUT_S", 15.0
             ),
-            max_execution_timeout_seconds=_float_env(
-                "OCTOAGENT_WORKER_TIMEOUT_MAX_EXEC_S", 180.0
-            ),
+            max_execution_timeout_seconds=_float_env("OCTOAGENT_WORKER_TIMEOUT_MAX_EXEC_S", 180.0),
             docker_mode=docker_mode,
             default_tool_profile=profile,
             privileged_approval_key=os.environ.get(
@@ -211,6 +208,150 @@ class DockerRuntimeBackend(InlineRuntimeBackend):
     name = "docker"
 
 
+@dataclass
+class GraphRuntimeState:
+    """Graph backend 执行态。"""
+
+    current_node: str = ""
+    completed_steps: list[str] = field(default_factory=list)
+    summary: str = ""
+
+
+@dataclass(frozen=True)
+class GraphRuntimeDeps:
+    """Graph backend 依赖。"""
+
+    task_service: TaskService
+    envelope: DispatchEnvelope
+    llm_service: Any
+    execution_context: ExecutionRuntimeContext | None = None
+    cancel_signal: asyncio.Event | None = None
+
+
+def _raise_if_graph_cancelled(cancel_signal: asyncio.Event | None) -> None:
+    if cancel_signal is not None and cancel_signal.is_set():
+        raise WorkerRuntimeCancelled("cancel_signal_received")
+
+
+async def _emit_graph_step(
+    deps: GraphRuntimeDeps,
+    state: GraphRuntimeState,
+    *,
+    step_name: str,
+    summary: str,
+) -> None:
+    state.current_node = step_name
+    state.summary = summary
+    state.completed_steps.append(step_name)
+    _raise_if_graph_cancelled(deps.cancel_signal)
+    if deps.execution_context is not None:
+        await deps.execution_context.emit_step(
+            step_name,
+            summary=summary,
+        )
+
+
+class GraphRuntimeBackend:
+    """真实消费 pydantic_graph 的 graph backend。"""
+
+    name = "graph"
+    supports_stream_progress = True
+
+    def __init__(self) -> None:
+        self._graph = None
+        self._start_node = None
+
+    def _graph_instance(self):
+        if self._graph is not None:
+            return self._graph
+        try:
+            from pydantic_graph import BaseNode, End, Graph, GraphRunContext
+        except ImportError as exc:  # pragma: no cover - 依赖缺失走 fail-closed
+            raise WorkerBackendUnavailableError("pydantic_graph backend is unavailable") from exc
+
+        class GraphFinalizeNode(BaseNode[GraphRuntimeState, GraphRuntimeDeps, str]):
+            async def run(
+                self,
+                ctx: GraphRunContext[GraphRuntimeState, GraphRuntimeDeps],
+            ) -> End[str]:
+                await _emit_graph_step(
+                    ctx.deps,
+                    ctx.state,
+                    step_name="graph.finalize",
+                    summary="graph runtime finalized",
+                )
+                return End("graph_runtime_succeeded")
+
+        class GraphExecuteNode(BaseNode[GraphRuntimeState, GraphRuntimeDeps, str]):
+            async def run(
+                self,
+                ctx: GraphRunContext[GraphRuntimeState, GraphRuntimeDeps],
+            ) -> GraphFinalizeNode:
+                await _emit_graph_step(
+                    ctx.deps,
+                    ctx.state,
+                    step_name="graph.execute",
+                    summary="graph runtime executing worker body",
+                )
+                await ctx.deps.task_service.process_task_with_llm(
+                    task_id=ctx.deps.envelope.task_id,
+                    user_text=ctx.deps.envelope.user_text,
+                    llm_service=ctx.deps.llm_service,
+                    model_alias=ctx.deps.envelope.model_alias,
+                    resume_from_node=ctx.deps.envelope.resume_from_node,
+                    resume_state_snapshot=ctx.deps.envelope.resume_state_snapshot,
+                    execution_context=ctx.deps.execution_context,
+                    dispatch_metadata=ctx.deps.envelope.metadata,
+                    worker_capability=ctx.deps.envelope.worker_capability,
+                    tool_profile=ctx.deps.envelope.tool_profile,
+                )
+                return GraphFinalizeNode()
+
+        class GraphPrepareNode(BaseNode[GraphRuntimeState, GraphRuntimeDeps, str]):
+            async def run(
+                self,
+                ctx: GraphRunContext[GraphRuntimeState, GraphRuntimeDeps],
+            ) -> GraphExecuteNode:
+                await _emit_graph_step(
+                    ctx.deps,
+                    ctx.state,
+                    step_name="graph.prepare",
+                    summary="graph runtime preparing dispatch",
+                )
+                return GraphExecuteNode()
+
+        self._graph = Graph(
+            nodes=[GraphPrepareNode, GraphExecuteNode, GraphFinalizeNode],
+            name="octoagent_worker_graph_runtime",
+            state_type=GraphRuntimeState,
+            run_end_type=str,
+        )
+        self._start_node = GraphPrepareNode
+        return self._graph
+
+    async def execute(
+        self,
+        *,
+        task_service: TaskService,
+        envelope: DispatchEnvelope,
+        llm_service,
+        execution_context: ExecutionRuntimeContext | None = None,
+    ) -> None:
+        graph = self._graph_instance()
+        deps = GraphRuntimeDeps(
+            task_service=task_service,
+            envelope=envelope,
+            llm_service=llm_service,
+            execution_context=execution_context,
+            cancel_signal=None,
+        )
+        await graph.run(
+            self._start_node(),
+            state=GraphRuntimeState(),
+            deps=deps,
+        )
+
+
 def default_docker_available_checker() -> bool:
     """检测 Docker daemon 可用性。"""
     docker_bin = shutil.which("docker")
@@ -261,6 +402,7 @@ class WorkerRuntime:
         self._execution_console = execution_console
         self._inline_backend = InlineRuntimeBackend()
         self._docker_backend = DockerRuntimeBackend()
+        self._graph_backend = GraphRuntimeBackend()
 
     async def run(self, envelope: DispatchEnvelope, *, worker_id: str) -> WorkerResult:
         profile = self._resolve_tool_profile(envelope)
@@ -289,9 +431,10 @@ class WorkerRuntime:
 
         try:
             self._check_profile_gate(profile, envelope)
-            backend = self._select_backend()
+            backend = self._select_backend(envelope)
             session.backend = backend.name
             session.state = WorkerRuntimeState.RUNNING
+            runtime_kind = self._resolve_runtime_kind(envelope, backend)
             if self._execution_console is not None:
                 await self._execution_console.register_session(
                     task_id=envelope.task_id,
@@ -305,6 +448,15 @@ class WorkerRuntime:
                     interactive=True,
                     input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
                     worker_id=worker_id,
+                    metadata={
+                        "work_id": str(envelope.metadata.get("work_id", "")),
+                        "runtime_kind": runtime_kind,
+                        "selected_worker_type": str(
+                            envelope.metadata.get("selected_worker_type", "")
+                        ),
+                        "parent_work_id": str(envelope.metadata.get("parent_work_id", "")),
+                        "parent_task_id": str(envelope.metadata.get("parent_task_id", "")),
+                    },
                     message="worker runtime selected backend",
                 )
 
@@ -316,6 +468,8 @@ class WorkerRuntime:
                     worker_id=worker_id,
                     backend=backend.name,
                     console=self._execution_console,
+                    work_id=str(envelope.metadata.get("work_id", "")),
+                    runtime_kind=runtime_kind,
                     resume_state_snapshot=envelope.resume_state_snapshot,
                 )
                 if self._execution_console is not None
@@ -542,8 +696,18 @@ class WorkerRuntime:
         if approved.strip().lower() not in {"1", "true", "yes"}:
             raise WorkerProfileDeniedError("privileged profile requires explicit approval")
 
-    def _select_backend(self) -> RuntimeBackend:
+    def _select_backend(self, envelope: DispatchEnvelope) -> RuntimeBackend:
+        requested_target = str(
+            envelope.metadata.get("target_kind", envelope.metadata.get("requested_target_kind", ""))
+        ).strip()
         docker_mode = self._config.docker_mode
+        if requested_target == DelegationTargetKind.GRAPH_AGENT.value:
+            if docker_mode == "required":
+                raise WorkerBackendUnavailableError(
+                    "graph backend is unavailable when docker isolation is required"
+                )
+            return self._graph_backend
+
         docker_available = self._docker_available_checker()
 
         if docker_mode == "disabled":
@@ -555,6 +719,17 @@ class WorkerRuntime:
         if docker_mode == "required":
             raise WorkerBackendUnavailableError("docker backend is required but unavailable")
         return self._inline_backend
+
+    @staticmethod
+    def _resolve_runtime_kind(envelope: DispatchEnvelope, backend: RuntimeBackend) -> str:
+        requested_target = str(
+            envelope.metadata.get("target_kind", envelope.metadata.get("requested_target_kind", ""))
+        ).strip()
+        if requested_target:
+            return requested_target
+        if backend.name == "graph":
+            return DelegationTargetKind.GRAPH_AGENT.value
+        return DelegationTargetKind.WORKER.value
 
     async def _await_backend_execute(
         self,
