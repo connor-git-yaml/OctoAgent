@@ -24,8 +24,16 @@ model_aliases:
     thinking_level: low
 runtime:
   llm_mode: litellm
-  litellm_proxy_url: http://localhost:4001
+  litellm_proxy_url: http://localhost:4000
   master_key_env: LITELLM_MASTER_KEY
+front_door:
+  mode: loopback
+  bearer_token_env: OCTOAGENT_FRONTDOOR_TOKEN
+  trusted_proxy_header: X-OctoAgent-Proxy-Auth
+  trusted_proxy_token_env: OCTOAGENT_TRUSTED_PROXY_TOKEN
+  trusted_proxy_cidrs:
+  - 127.0.0.1/32
+  - ::1/128
 channels:
   telegram:
     enabled: true
