@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from octoagent.core.models import (
     NormalizedMessage,
+    OrchestratorRequest,
     ProjectBinding,
     ProjectBindingType,
     ProjectSecretBinding,
@@ -94,9 +95,7 @@ async def _create_project_with_scope_binding(
         slug=slug,
         set_active=False,
     )
-    workspace = await app.state.store_group.project_store.get_primary_workspace(
-        project.project_id
-    )
+    workspace = await app.state.store_group.project_store.get_primary_workspace(project.project_id)
     assert workspace is not None
     await app.state.store_group.project_store.create_binding(
         ProjectBinding(
@@ -377,6 +376,128 @@ class TestControlPlaneApi:
             }
         ]
 
+    async def test_snapshot_exposes_builtin_tool_catalog_and_work_split_merge_actions(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.get("/api/control/snapshot")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        pack = payload["resources"]["capability_pack"]["pack"]
+        tool_names = {item["tool_name"] for item in pack["tools"]}
+        assert len(pack["tools"]) >= 15
+        assert {
+            "subagents.spawn",
+            "work.split",
+            "work.merge",
+            "web.fetch",
+            "memory.search",
+        }.issubset(tool_names)
+
+        spawn_tool = next(item for item in pack["tools"] if item["tool_name"] == "subagents.spawn")
+        assert spawn_tool["availability"] == "available"
+        assert "agent_runtime" in spawn_tool["entrypoints"]
+
+        action_ids = {item["action_id"] for item in payload["registry"]["actions"]}
+        assert "work.split" in action_ids
+        assert "work.merge" in action_ids
+
+    async def test_work_split_and_merge_actions_create_child_work_lifecycle(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        task_id = await _create_task(
+            control_plane_app,
+            text="请把当前工作拆分给两个 child workers",
+            thread_id="thread-work-split",
+            scope_id="scope-control",
+        )
+        plan = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请把当前工作拆分给两个 child workers",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+
+        split_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "work.split",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "work_id": plan.work.work_id,
+                    "objectives": ["先调研当前实现", "再补关键测试"],
+                    "worker_type": "research",
+                    "target_kind": "subagent",
+                },
+            },
+        )
+
+        assert split_resp.status_code == 200
+        split_payload = split_resp.json()["result"]
+        assert split_payload["code"] == "WORK_SPLIT_ACCEPTED"
+        assert len(split_payload["data"]["child_tasks"]) == 2
+
+        child_works = []
+        for _ in range(30):
+            child_works = await control_plane_app.state.store_group.work_store.list_works(
+                parent_work_id=plan.work.work_id
+            )
+            if len(child_works) >= 2:
+                break
+            await asyncio.sleep(0.05)
+
+        assert len(child_works) == 2
+        assert {item.parent_work_id for item in child_works} == {plan.work.work_id}
+        assert {item.selected_worker_type.value for item in child_works} == {"research"}
+        assert {item.target_kind.value for item in child_works} == {"subagent"}
+
+        for _ in range(30):
+            child_works = await control_plane_app.state.store_group.work_store.list_works(
+                parent_work_id=plan.work.work_id
+            )
+            if all(
+                item.status.value in {"succeeded", "failed", "cancelled", "merged"}
+                for item in child_works
+            ):
+                break
+            await asyncio.sleep(0.05)
+
+        merge_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "work.merge",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "work_id": plan.work.work_id,
+                    "summary": "child works merged after completion",
+                },
+            },
+        )
+
+        assert merge_resp.status_code == 200
+        merge_payload = merge_resp.json()["result"]
+        assert merge_payload["code"] == "WORK_MERGED"
+        merged = await control_plane_app.state.store_group.work_store.get_work(plan.work.work_id)
+        assert merged is not None
+        assert merged.status.value == "merged"
+
     async def test_import_workbench_detect_preview_run_and_inspect(
         self,
         control_plane_client: AsyncClient,
@@ -547,9 +668,7 @@ class TestControlPlaneApi:
 
         diagnostics_resp = await control_plane_client.get("/api/control/resources/diagnostics")
         diagnostics_payload = diagnostics_resp.json()
-        assert any(
-            item["subsystem_id"] == "memory" for item in diagnostics_payload["subsystems"]
-        )
+        assert any(item["subsystem_id"] == "memory" for item in diagnostics_payload["subsystems"])
         assert "memory" in diagnostics_payload["deep_refs"]
 
         request_resp = await control_plane_client.post(
@@ -658,9 +777,7 @@ class TestControlPlaneApi:
                     "scope_id": seeded["scope_id"],
                     "partition": "work",
                     "summary": "最近对话主要集中在 project alpha 测试与交付。",
-                    "evidence_refs": [
-                        {"ref_id": "artifact-flush-1", "ref_type": "artifact"}
-                    ],
+                    "evidence_refs": [{"ref_id": "artifact-flush-1", "ref_type": "artifact"}],
                 },
             },
         )
@@ -781,10 +898,7 @@ class TestControlPlaneApi:
         assert memory_payload["index_health"]["documents"] == 24
         assert memory_payload["index_health"]["project_binding"].endswith("/memu.primary")
         assert memory_payload["index_health"]["last_ingest_at"] == "2026-03-08T05:00:00+00:00"
-        assert (
-            memory_payload["index_health"]["last_maintenance_at"]
-            == "2026-03-08T05:10:00+00:00"
-        )
+        assert memory_payload["index_health"]["last_maintenance_at"] == "2026-03-08T05:10:00+00:00"
 
         assert diagnostics_resp.status_code == 200
         diagnostics_payload = diagnostics_resp.json()
@@ -933,9 +1047,7 @@ class TestControlPlaneApi:
         assert stream_resp.status_code == 403
         assert stream_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
 
-        execution_resp = await control_plane_client.get(
-            f"/api/tasks/{default_task_id}/execution"
-        )
+        execution_resp = await control_plane_client.get(f"/api/tasks/{default_task_id}/execution")
         assert execution_resp.status_code == 403
         assert execution_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
 
@@ -956,9 +1068,7 @@ class TestControlPlaneApi:
         assert resume_resp.status_code == 403
         assert resume_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
 
-        cancel_resp = await control_plane_client.post(
-            f"/api/tasks/{default_task_id}/cancel"
-        )
+        cancel_resp = await control_plane_client.post(f"/api/tasks/{default_task_id}/cancel")
         assert cancel_resp.status_code == 403
         assert cancel_resp.json()["error"]["code"] == "TASK_SCOPE_NOT_ALLOWED"
 
@@ -1149,9 +1259,7 @@ class TestControlPlaneApi:
 
         automation_resp = await control_plane_client.get("/api/control/resources/automation")
         assert automation_resp.status_code == 200
-        assert all(
-            item["job"]["job_id"] != job_id for item in automation_resp.json()["jobs"]
-        )
+        assert all(item["job"]["job_id"] != job_id for item in automation_resp.json()["jobs"])
 
         run_resp = await control_plane_client.post(
             "/api/control/actions",

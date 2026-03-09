@@ -79,17 +79,43 @@ class DelegationPlaneService:
 
     async def prepare_dispatch(self, request: OrchestratorRequest) -> DelegationPlan:
         project, workspace = await self._resolve_project_context(request)
+        requested_target_kind = str(request.metadata.get("target_kind", "")).strip()
+        requested_worker_type = self._coerce_worker_type(
+            str(request.metadata.get("requested_worker_type", "")).strip()
+        )
+        initial_target_kind = (
+            DelegationTargetKind(requested_target_kind)
+            if requested_target_kind in {item.value for item in DelegationTargetKind}
+            else DelegationTargetKind.WORKER
+        )
         work = Work(
             work_id=str(ULID()),
             task_id=request.task_id,
+            parent_work_id=request.metadata.get("parent_work_id") or None,
             title=request.user_text[:120],
             kind=WorkKind.DELEGATION,
+            target_kind=initial_target_kind,
             owner_id="orchestrator",
             requested_capability=request.worker_capability,
+            selected_worker_type=requested_worker_type or WorkerType.GENERAL,
+            route_reason=(
+                self._build_route_reason(
+                    requested_worker_type or WorkerType.GENERAL,
+                    request.worker_capability,
+                    requested_target_kind,
+                    explicit_worker_type=requested_worker_type is not None,
+                )
+                if requested_worker_type is not None or requested_target_kind
+                else ""
+            ),
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
             metadata={
-                "requested_target_kind": str(request.metadata.get("target_kind", "")),
+                "requested_target_kind": requested_target_kind,
+                "requested_worker_type": (
+                    requested_worker_type.value if requested_worker_type is not None else ""
+                ),
+                "parent_task_id": str(request.metadata.get("parent_task_id", "")),
                 "resume_from_node": request.resume_from_node or "",
                 "request_context": {
                     "trace_id": request.trace_id,
@@ -590,9 +616,20 @@ class DelegationPlaneService:
         requested = str(state.get("requested_capability", "")).strip()
         metadata = state.get("metadata", {})
         requested_target = str(metadata.get("target_kind", "")).strip()
-        worker_type = self._select_worker_type(requested, str(state.get("user_text", "")))
+        requested_worker_type = self._coerce_worker_type(
+            str(metadata.get("requested_worker_type", "")).strip()
+        )
+        worker_type = requested_worker_type or self._select_worker_type(
+            requested,
+            str(state.get("user_text", "")),
+        )
         target_kind = self._select_target_kind(requested_target, worker_type)
-        route_reason = self._build_route_reason(worker_type, requested, requested_target)
+        route_reason = self._build_route_reason(
+            worker_type,
+            requested,
+            requested_target,
+            explicit_worker_type=requested_worker_type is not None,
+        )
         return PipelineNodeOutcome(
             summary=route_reason,
             state_patch={
@@ -692,13 +729,26 @@ class DelegationPlaneService:
             return DelegationTargetKind.SUBAGENT
         return DelegationTargetKind.FALLBACK
 
+    @staticmethod
+    def _coerce_worker_type(raw: str) -> WorkerType | None:
+        if not raw:
+            return None
+        try:
+            return WorkerType(raw)
+        except ValueError:
+            return None
+
     def _build_route_reason(
         self,
         worker_type: WorkerType,
         requested_capability: str,
         requested_target: str,
+        *,
+        explicit_worker_type: bool = False,
     ) -> str:
         parts = [f"worker_type={worker_type.value}"]
+        if explicit_worker_type:
+            parts.append("worker_type_source=explicit")
         if requested_capability:
             parts.append(f"requested_capability={requested_capability}")
         if requested_target:

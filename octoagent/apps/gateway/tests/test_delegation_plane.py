@@ -143,9 +143,7 @@ async def test_prepare_dispatch_pause_resume_and_cancel_pipeline(tmp_path: Path)
     assert cancelled is not None
     assert cancelled.status.value == "cancelled"
 
-    cancelled_run = await store_group.work_store.get_pipeline_run(
-        paused_plan.work.pipeline_run_id
-    )
+    cancelled_run = await store_group.work_store.get_pipeline_run(paused_plan.work.pipeline_run_id)
     assert cancelled_run is not None
     assert cancelled_run.status.value == "cancelled"
     assert cancelled_run.pause_reason == "work_cancelled:operator_cancelled"
@@ -223,5 +221,41 @@ async def test_retry_work_requeues_successful_preflight_and_dispatches(tmp_path:
     assert scheduled_dispatches[0].task_id == task_id
     assert scheduled_dispatches[0].worker_capability == "dev"
     assert scheduled_dispatches[0].metadata["work_id"] == plan.work.work_id
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请把这项工作委派给 research subagent",
+            idempotency_key="delegation-explicit-child-route",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请把这项工作委派给 research subagent",
+            worker_capability="llm_generation",
+            metadata={
+                "parent_work_id": "work-parent-1",
+                "parent_task_id": "task-parent-1",
+                "requested_worker_type": "research",
+                "target_kind": "subagent",
+            },
+        )
+    )
+
+    assert plan.dispatch_envelope is not None
+    assert plan.work.parent_work_id == "work-parent-1"
+    assert plan.work.selected_worker_type.value == "research"
+    assert plan.work.target_kind.value == "subagent"
+    assert plan.dispatch_envelope.metadata["parent_work_id"] == "work-parent-1"
+    assert plan.dispatch_envelope.metadata["parent_task_id"] == "task-parent-1"
+    assert plan.dispatch_envelope.metadata["selected_worker_type"] == "research"
+    assert plan.dispatch_envelope.metadata["target_kind"] == "subagent"
 
     await store_group.conn.close()

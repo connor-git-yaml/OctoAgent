@@ -442,6 +442,12 @@ function sessionMatches(item: SessionProjectionItem, keyword: string): boolean {
 
 function statusTone(status: string): string {
   const normalized = status.toLowerCase();
+  if (normalized.includes("unavailable")) {
+    return "danger";
+  }
+  if (normalized.includes("degraded") || normalized.includes("install")) {
+    return "warning";
+  }
   if (normalized.includes("fail") || normalized.includes("reject")) {
     return "danger";
   }
@@ -1365,8 +1371,22 @@ export default function ControlPlane() {
                     <div>
                       <strong>{tool.tool_name}</strong>
                       <p>{tool.description || tool.tool_group}</p>
+                      <p className="muted">
+                        Entrypoints {tool.entrypoints.join(", ") || "-"} · Runtime{" "}
+                        {tool.runtime_kinds.join(", ") || "-"}
+                      </p>
+                      {tool.availability_reason || tool.install_hint ? (
+                        <p className="muted">
+                          {tool.availability_reason || tool.install_hint}
+                        </p>
+                      ) : null}
                     </div>
-                    <small>{tool.tags.join(", ") || tool.tool_profile}</small>
+                    <div style={{ display: "grid", gap: "0.25rem", justifyItems: "end" }}>
+                      <span className={`tone-chip ${statusTone(tool.availability)}`}>
+                        {tool.availability}
+                      </span>
+                      <small>{tool.tags.join(", ") || tool.tool_profile}</small>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1409,11 +1429,17 @@ export default function ControlPlane() {
                   <span>Target {work.target_kind || "-"}</span>
                   <span>Runtime {work.runtime_id || "-"}</span>
                   <span>Pipeline {work.pipeline_run_id || "-"}</span>
+                  <span>Children {work.child_work_count}</span>
+                  <span>Merge Ready {work.merge_ready ? "yes" : "no"}</span>
                 </div>
                 <p>{work.route_reason || "无 route reason"}</p>
                 <p className="muted">
                   Selected Tools: {work.selected_tools.join(", ") || "none"}
                 </p>
+                {work.runtime_summary &&
+                Object.keys(work.runtime_summary).length > 0 ? (
+                  <pre className="json-preview">{formatJson(work.runtime_summary)}</pre>
+                ) : null}
                 <div className="action-row">
                   <button
                     type="button"
@@ -1430,6 +1456,38 @@ export default function ControlPlane() {
                     disabled={busyActionId === "work.retry"}
                   >
                     重试
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void submitAction("work.split", {
+                        work_id: work.work_id,
+                        objectives: [
+                          `${work.title || work.task_id} / child-1`,
+                          `${work.title || work.task_id} / child-2`,
+                        ],
+                        worker_type: work.selected_worker_type || "general",
+                        target_kind:
+                          work.target_kind === "fallback" ? "subagent" : work.target_kind,
+                      })
+                    }
+                    disabled={busyActionId === "work.split"}
+                  >
+                    拆分
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void submitAction("work.merge", {
+                        work_id: work.work_id,
+                        summary: "merged from control plane",
+                      })
+                    }
+                    disabled={busyActionId === "work.merge" || !work.merge_ready}
+                  >
+                    合并
                   </button>
                   <button
                     type="button"
@@ -1546,7 +1604,15 @@ export default function ControlPlane() {
                   <span>Channel: {session.channel}</span>
                   <span>Requester: {session.requester_id}</span>
                   <span>Updated: {formatDateTime(session.latest_event_at)}</span>
+                  <span>Runtime: {session.runtime_kind || "-"}</span>
+                  <span>Parent Task: {session.parent_task_id || "-"}</span>
                 </div>
+                {session.execution_summary &&
+                Object.keys(session.execution_summary).length > 0 ? (
+                  <pre className="json-preview">
+                    {formatJson(session.execution_summary)}
+                  </pre>
+                ) : null}
                 <div className="action-row">
                   <button
                     type="button"

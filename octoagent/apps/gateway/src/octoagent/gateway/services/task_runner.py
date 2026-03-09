@@ -21,6 +21,7 @@ from octoagent.core.models import (
     DispatchEnvelope,
     ExecutionConsoleSession,
     ExecutionSessionState,
+    NormalizedMessage,
     ResumeFailureType,
     ResumeResult,
     TaskStatus,
@@ -157,6 +158,19 @@ class TaskRunner:
         if not created:
             return
         await self._start_job(task_id)
+
+    async def launch_child_task(
+        self,
+        message: NormalizedMessage,
+        *,
+        model_alias: str | None = None,
+    ) -> tuple[str, bool]:
+        """创建并启动 child task。"""
+        service = TaskService(self._stores, self._sse_hub)
+        task_id, created = await service.create_task(message)
+        if created:
+            await self.enqueue(task_id, message.text, model_alias=model_alias)
+        return task_id, created
 
     async def resume_task(self, task_id: str, trigger: str = "manual") -> ResumeResult:
         """手动触发恢复并在成功时启动执行。"""
@@ -459,12 +473,14 @@ class TaskRunner:
     ) -> None:
         service = TaskService(self._stores, self._sse_hub)
         if dispatch_envelope is None:
+            metadata = await service.get_latest_user_metadata(task_id)
             result = await self._orchestrator.dispatch(
                 task_id=task_id,
                 user_text=user_text,
                 model_alias=model_alias,
                 resume_from_node=resume_from_node,
                 resume_state_snapshot=resume_state_snapshot,
+                metadata=metadata,
             )
         else:
             result = await self._orchestrator.dispatch_prepared(dispatch_envelope)

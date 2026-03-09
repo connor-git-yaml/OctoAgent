@@ -8,6 +8,7 @@ from pathlib import Path
 from octoagent.core.models import DispatchEnvelope, WorkerExecutionStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.execution_console import ExecutionConsoleService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.worker_runtime import (
@@ -99,9 +100,7 @@ async def _create_task_with_envelope(tmp_path: Path, key: str) -> tuple:
 
 
 class TestWorkerRuntime:
-    async def test_privileged_profile_requires_explicit_approval(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_privileged_profile_requires_explicit_approval(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
             tmp_path, "f009-runtime-001"
         )
@@ -120,9 +119,7 @@ class TestWorkerRuntime:
 
         await store_group.conn.close()
 
-    async def test_required_docker_backend_fails_when_unavailable(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_required_docker_backend_fails_when_unavailable(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
             tmp_path, "f009-runtime-002"
         )
@@ -189,9 +186,7 @@ class TestWorkerRuntime:
 
         await store_group.conn.close()
 
-    async def test_runtime_forwards_dispatch_metadata_to_llm_service(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_runtime_forwards_dispatch_metadata_to_llm_service(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
             tmp_path, "f009-runtime-005"
         )
@@ -220,5 +215,70 @@ class TestWorkerRuntime:
         assert call["worker_capability"] == "ops"
         assert call["tool_profile"] == "minimal"
         assert call["metadata"] == envelope.metadata
+
+        await store_group.conn.close()
+
+    async def test_graph_target_kind_uses_real_graph_backend(self, tmp_path: Path) -> None:
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f032-runtime-graph"
+        )
+        envelope.metadata = {
+            "target_kind": "graph_agent",
+            "work_id": "work-graph-1",
+            "selected_worker_type": "dev",
+        }
+
+        llm_service = CapturingLLMService()
+        execution_console = ExecutionConsoleService(store_group, sse_hub)
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+            execution_console=execution_console,
+        )
+
+        result = await runtime.run(envelope, worker_id="worker.graph")
+
+        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.backend == "graph"
+        assert len(llm_service.calls) == 1
+
+        session = await execution_console.get_session(envelope.task_id)
+        assert session is not None
+        assert session.metadata["runtime_kind"] == "graph_agent"
+        assert session.metadata["work_id"] == "work-graph-1"
+        assert session.current_step == "graph.finalize"
+
+        await store_group.conn.close()
+
+    async def test_graph_target_kind_fails_closed_when_docker_is_required(
+        self, tmp_path: Path
+    ) -> None:
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f032-runtime-graph-docker-required"
+        )
+        envelope.metadata = {
+            "target_kind": "graph_agent",
+            "work_id": "work-graph-2",
+            "selected_worker_type": "dev",
+        }
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=CapturingLLMService(),
+            config=WorkerRuntimeConfig(docker_mode="required"),
+            docker_available_checker=lambda: True,
+        )
+
+        result = await runtime.run(envelope, worker_id="worker.graph")
+
+        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.error_type == "WorkerBackendUnavailableError"
+        assert (
+            result.error_message
+            == "graph backend is unavailable when docker isolation is required"
+        )
 
         await store_group.conn.close()

@@ -2,8 +2,8 @@
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1.2 — 024-031 已交付，M3 已完成正式收口
-> **日期**: 2026-03-08
+> **状态**: v1.3 — 024-031 已交付；2026-03-09 新增 Feature 033 作为 Agent context continuity 补位设计
+> **日期**: 2026-03-09
 
 ---
 
@@ -11,7 +11,7 @@
 
 ### 1.1 当前基线
 
-截至 2026-03-08，M3 的主功能线已经基本交付：
+截至 2026-03-09，M3 的主功能线已经基本交付：
 
 - 024 已交付 installer / updater / doctor-migrate / verify operator flow
 - 025 已交付 project/workspace、default project migration、secret store、统一 wizard、asset manifest
@@ -21,20 +21,22 @@
 - 029 已交付 WeChat Import + Multi-source Import Workbench
 - 030 已交付 capability pack、ToolIndex、Delegation Plane、Skill Pipeline
 
-当前真正剩下的已经不是新的 M3 功能 Feature，而是发布后的持续硬化项：
+031 完成后，原本判断当前剩余工作主要是发布后的持续硬化项；但 2026-03-09 的 live-usage 复核暴露出一个新的结构性缺口：
 
 - Feature 031 已补齐 acceptance 制品、release report 和 remaining risks 清单
 - control-plane 的 front-door 部署边界已经写入正式验收门禁，并对 `loopback` 模式补了代理转发 header 的 fail-closed 拒绝
 - OpenClaw -> OctoAgent 迁移演练已经完成，后续差距主要转入 live cutover 与长期运维阶段
+- 新增发现：主 Agent 运行时仍未真正消费 `AgentProfile`、owner basics、bootstrap guidance、recent session summary 与 long-term memory retrieval；当前 `TaskService -> LLMService` 仍基本以原始 `user_text` 驱动
 
 ### 1.2 本轮复核后的结论
 
-M3 的功能建设已经足够完整，当前复核结论转为：
+M3 的功能建设已经足够完整，但复核结论需修正为：
 
-1. **M3 主功能线已经完成**：024-031 已覆盖 M3 的主能力闭环。
-2. **031 已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告。
-3. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
-4. **OpenClaw 迁移演练已纳入 M3 签收**：当前后续工作应转向 live cutover checklist，而不是再补迁移可信度。
+1. **M3 主功能线 024-031 已交付**：Project、Control Plane、Memory Console、MemU、Import Workbench、Delegation Plane 和 acceptance harness 都已存在。
+2. **031 原范围已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告；但 M3 最终签收仍受 033 的 context continuity gate 阻塞。
+3. **033 成为新增 cutover-blocking 补位 Feature**：因为当前主 Agent 的上下文连续性没有真正落到运行链，M3 仍缺一条“日常可用”的主链闭环。
+4. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
+5. **OpenClaw 迁移演练已纳入 M3 签收**：但正式 live cutover 前，应优先完成 033，而不是先开启 M4 体验增强。
 
 ### 1.3 调研证据（不仅 README）
 
@@ -73,6 +75,7 @@ M3 的一句话目标：
 | A2A / Worker / Subagent / Graph Agent | OpenClaw 有 `sessions_spawn` + nested subagents + ACP；Agent Zero 有 subordinate + A2A server/client | Feature 030 |
 | 管理 UI（agents/memory/权限/secrets/status） | OpenClaw Control UI + Agent Zero settings/projects/memory dashboard 已覆盖大部分 operator 面 | Feature 026 + Feature 027 |
 | 发布前收口 | OpenClaw 把 wizard、Control UI、updating、export session 组织成连续用户路径；Agent Zero 把 projects、backup、memory、tunnel 作为正式 operator flow | Feature 031 |
+| 主 Agent 上下文连续性 | OpenClaw 用 bootstrapping + `AGENTS.md` / `USER.md` / `SOUL.md` 建立 session startup contract；Agent Zero 用 projects + memory + settings 让主会话保持长期连续性 | Feature 033 |
 
 ---
 
@@ -140,9 +143,17 @@ M3 的一句话目标：
 - M3 正式签收前必须完成一次 OpenClaw -> OctoAgent 迁移演练，至少覆盖 project 建立、secret 处理、导入、memory 审计、dashboard 操作与 rollback 记录
 - 验收 harness 必须考虑共享 `.venv` 并发 `uv run` 的环境竞争；需要串行化相关步骤或显式使用隔离环境，避免把工具链竞争误判成产品不稳定
 
+### 2.8 Agent Context Continuity 约束（2026-03-09 追加）
+
+- `AgentProfile` 不能只作为 blueprint 中的术语或 bootstrap 文件里的隐式约定，必须是正式 durable object
+- owner basics / assistant identity / bootstrap guidance 必须进入主 Agent 的真实运行链，而不是只停留在配置或文档层
+- 短期上下文连续性必须 durable，不能只依赖进程内 history
+- 长期 Memory 检索必须真正进入主 Agent / automation / delegation 路径，但不得绕过 020/027/028 的治理边界
+- control plane 必须能够解释“本次回答用了哪些 profile/bootstrap/recent summary/memory hits”，否则 033 视为未完成
+
 ---
 
-## 3. 并行拆分方案（M3 = 8 个 Feature）
+## 3. 并行拆分方案（M3 = 8 个主 Feature + 1 个补位 Feature）
 
 ### 3.1 依赖图
 
@@ -168,7 +179,14 @@ M2 收口
        └── Feature 031：M3 User-Ready E2E Acceptance
 ```
 
-截至 2026-03-08，Feature 024-030 已全部合入 `master`；该依赖图现在主要用于解释 031 需要消费哪些上游能力与 release gates。
+031 完成后新增：
+
+```text
+Feature 025 + 027 + 030 + 031
+   └── Feature 033：Agent Profile + Bootstrap + Context Continuity
+```
+
+截至 2026-03-09，Feature 024-031 已全部合入 `master`；新增 033 不推翻既有依赖图，而是用于修补“主 Agent 没有真正消费 profile/bootstrap/memory”这一条被 031 复核遗漏的主链缺口。
 
 ### 3.2 并行化原则
 
@@ -493,6 +511,47 @@ M2 收口
 
 ---
 
+### Feature 033：Agent Profile + Bootstrap + Context Continuity
+
+**一句话目标**：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进主 Agent 的运行链，让 OctoAgent 从“有 Memory 的系统”变成“有连续上下文的长期助手”。
+
+**实现状态**：规划中（2026-03-09 新增）
+
+**为什么不是 M4**：
+
+- 这是当前主聊天真正可用性的主链缺口，不是体验增强
+- 如果 033 不完成，M4 的语音/工作台/companion 只会建立在 stateless 主会话之上
+
+**借鉴来源**：
+
+- OpenClaw `docs/start/bootstrapping.md`、`docs/reference/templates/BOOTSTRAP.md`、`docs/reference/templates/AGENTS.md`
+- Agent Zero `docs/guides/projects.md`、`python/api/memory_dashboard.py`、`python/helpers/memory.py`
+- 当前 OctoAgent 的 025/027/030/031 既有基线
+
+**任务拆解**：
+
+- F033-T01：定义 `AgentProfile`、`OwnerProfile`、`BootstrapSession`、`SessionContextState`、`ContextFrame`
+- F033-T02：实现主 Agent 的统一 context assembly：
+  - project/workspace bindings
+  - owner/assistant basics
+  - bootstrap-derived guidance
+  - recent summary / recent artifacts
+  - memory retrieval hits / evidence refs
+- F033-T03：把 context assembly 真正接入 `TaskService -> LLMService`，禁止继续只传 `user_text`
+- F033-T04：把 `agent_profile_id` / `context_frame_id` 接入 session / automation / work / pipeline / worker runtime 继承链
+- F033-T05：把 profile / bootstrap / context provenance 接入 control plane
+- F033-T06：补齐 failing integration tests、恢复测试与真实 e2e，证明不是假实现
+
+**验收标准**：
+
+- 首聊后能形成最小 owner/assistant bootstrap，并在下一轮聊天中生效
+- recent session continuity 在重启后仍成立，不依赖进程内 history
+- main agent 的实际运行链能消费 profile/bootstrap/recent summary/memory hits，而不是仅当前一句话
+- 跨 project 切换不串用 agent profile、recent summary 或 memory retrieval
+- 控制台能解释某次回答用到了哪些 context sources 与 degraded reason
+
+---
+
 ## 5. 推荐技术选型（M3）
 
 ### 5.1 配置与管理台
@@ -572,17 +631,13 @@ M2 收口
 
 ## 6. 本轮结论
 
-截至 2026-03-08，M3 的主功能建设已经完成，024-030 均已交付并合入 `master`。
+截至 2026-03-09，M3 的主功能建设与 release harness 已完成 024-031，但 live-usage 复核新增了一个必须优先处理的补位结论：
 
-因此，当前最重要的不是继续拆新功能，而是把 Feature 031 做成真正的发布收口：
+1. 031 已证明 install / project / control plane / memory / import / delegation / migration drill 可以联合成立。
+2. 但 031 没有真正证明“主 Agent 拥有连续上下文”，因为当前运行链尚未正式消费 `AgentProfile`、owner basics、bootstrap 与 memory retrieval。
+3. 因此，当前最重要的不是直接转入 M4，而是先完成 Feature 033。
 
-- 正式验收矩阵与 release report
-- trusted-network / 部署边界写实
-- update / restore / rollback drill
-- project / secret / memory / import / delegation 的联合稳定性证明
-- OpenClaw -> OctoAgent 迁移演练
-
-只有当这些 gates 被 Feature 031 正式证明后，OctoAgent 的 M3 才能称得上“普通用户 Ready”并适合开始真实迁移。
+只有当 033 把主 Agent 的 context continuity 主链补齐后，OctoAgent 才能从“能力齐全的系统”真正推进到“日常可长期使用的助手”。
 
 ---
 

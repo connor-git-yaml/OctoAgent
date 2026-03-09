@@ -178,12 +178,15 @@ class SessionProjectionItem(BaseModel):
     session_id: str = Field(min_length=1)
     thread_id: str = Field(min_length=1)
     task_id: str = Field(default="")
+    parent_task_id: str = Field(default="")
+    parent_work_id: str = Field(default="")
     title: str = Field(default="")
     status: str = Field(default="")
     channel: str = Field(default="")
     requester_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    runtime_kind: str = Field(default="")
     latest_message_summary: str = Field(default="")
     latest_event_at: datetime | None = None
     execution_summary: dict[str, Any] = Field(default_factory=dict)
@@ -223,6 +226,10 @@ class WorkProjectionItem(BaseModel):
     runtime_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    child_work_ids: list[str] = Field(default_factory=list)
+    child_work_count: int = Field(default=0, ge=0)
+    merge_ready: bool = False
+    runtime_summary: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
     capabilities: list[ControlPlaneCapability] = Field(default_factory=list)
 
