@@ -112,6 +112,60 @@ class LiteLLMSkillClient:
         return f"{base}/v1/responses"
 
     @staticmethod
+    def _normalize_history_messages(
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for item in messages:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            role = str(item.get("role", "user")).strip().lower() or "user"
+            if role not in {"system", "user", "assistant"}:
+                role = "user"
+            normalized.append({"role": role, "content": content})
+        return normalized
+
+    @classmethod
+    def _build_initial_history(
+        cls,
+        *,
+        manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
+        prompt: str,
+        use_responses_api: bool,
+    ) -> list[dict[str, str]]:
+        history = cls._normalize_history_messages(execution_context.conversation_messages)
+        if not history and prompt.strip():
+            history = [{"role": "user", "content": prompt.strip()}]
+        if use_responses_api:
+            return history
+
+        system_msg = manifest.load_description() or "You are a helpful assistant."
+        return [{"role": "system", "content": system_msg}, *history]
+
+    @staticmethod
+    def _build_responses_instructions(
+        manifest: SkillManifest,
+        history: list[dict[str, Any]],
+    ) -> str:
+        instruction_parts: list[str] = []
+        manifest_description = manifest.load_description() or "You are a helpful assistant."
+        if manifest_description:
+            instruction_parts.append(manifest_description)
+
+        system_parts = [
+            str(message.get("content", "")).strip()
+            for message in history
+            if str(message.get("role", "user")).strip().lower() == "system"
+            and str(message.get("content", "")).strip()
+        ]
+        if system_parts:
+            instruction_parts.append("\n\n".join(system_parts))
+
+        return "\n\n".join(part for part in instruction_parts if part)
+
+    @staticmethod
     def _build_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for message in history:
@@ -162,7 +216,7 @@ class LiteLLMSkillClient:
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         body: dict[str, Any] = {
             "model": manifest.model_alias,
-            "instructions": manifest.load_description() or "You are a helpful assistant.",
+            "instructions": self._build_responses_instructions(manifest, history),
             "input": self._build_responses_input(history),
             "store": False,
             "stream": True,
@@ -270,19 +324,20 @@ class LiteLLMSkillClient:
                 }
             )
 
-        for item in response_payload.get("output", []):
-            if not isinstance(item, dict):
-                continue
-            item_type = str(item.get("type", ""))
-            if item_type != "message":
-                continue
-            for content_item in item.get("content", []):
-                if (
-                    isinstance(content_item, dict)
-                    and content_item.get("type") == "output_text"
-                    and content_item.get("text")
-                ):
-                    text_parts.append(str(content_item.get("text", "")))
+        if not text_parts:
+            for item in response_payload.get("output", []):
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get("type", ""))
+                if item_type != "message":
+                    continue
+                for content_item in item.get("content", []):
+                    if (
+                        isinstance(content_item, dict)
+                        and content_item.get("type") == "output_text"
+                        and content_item.get("text")
+                    ):
+                        text_parts.append(str(content_item.get("text", "")))
 
         usage = response_payload.get("usage", {})
         metadata = {
@@ -399,10 +454,12 @@ class LiteLLMSkillClient:
 
         if step == 1:
             # 初始化对话历史
-            history = [{"role": "user", "content": prompt}]
-            if not use_responses_api:
-                system_msg = manifest.load_description() or "You are a helpful assistant."
-                history.insert(0, {"role": "system", "content": system_msg})
+            history = self._build_initial_history(
+                manifest=manifest,
+                execution_context=execution_context,
+                prompt=prompt,
+                use_responses_api=use_responses_api,
+            )
             self._histories[key] = history
             self._last_call_ids[key] = []
 

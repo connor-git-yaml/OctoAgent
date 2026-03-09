@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import html
 import json
+import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
+import webbrowser
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
 from octoagent.core.models import (
@@ -368,9 +372,15 @@ class CapabilityPackService:
 
     def capability_snapshot(self) -> dict[str, Any]:
         pack = self._pack or BundledCapabilityPack()
+        availability_summary: dict[str, int] = {}
+        for item in pack.tools:
+            key = item.availability.value
+            availability_summary[key] = availability_summary.get(key, 0) + 1
         return {
             "backend": self._tool_index.backend_name,
             "degraded_reason": pack.degraded_reason,
+            "tool_count": len(pack.tools),
+            "tool_availability_summary": availability_summary,
             "worker_profiles": [item.model_dump(mode="json") for item in pack.worker_profiles],
             "browser_session_count": len(self._browser_sessions),
             "mcp": None
@@ -594,6 +604,8 @@ class CapabilityPackService:
                     "task_count": len(tasks),
                     "work_count": len(works),
                     "pipeline_run_count": len(pipeline_runs),
+                    "pipeline_run_source": "delegation_plane",
+                    "graph_runtime_projection": "execution_console_only",
                     "capability_backend": self._tool_index.backend_name,
                 },
                 ensure_ascii=False,
@@ -1071,6 +1083,33 @@ class CapabilityPackService:
             )
 
         @tool_contract(
+            name="web.search",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="network",
+            tags=["web", "search", "http"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://web.search",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def web_search(
+            query: str,
+            limit: int = 5,
+            timeout_seconds: float = 10.0,
+        ) -> str:
+            """执行无认证的网页搜索。"""
+
+            payload = await self._search_web(
+                query=query,
+                limit=limit,
+                timeout_seconds=timeout_seconds,
+            )
+            return json.dumps(payload, ensure_ascii=False)
+
+        @tool_contract(
             name="browser.open",
             side_effect_level=SideEffectLevel.REVERSIBLE,
             tool_profile=ToolProfile.STANDARD,
@@ -1102,8 +1141,8 @@ class CapabilityPackService:
             worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.status",
             metadata={
-                "entrypoints": ["agent_runtime"],
-                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
             },
         )
         async def browser_status() -> str:
@@ -1111,7 +1150,13 @@ class CapabilityPackService:
 
             page = self._get_browser_session(get_current_execution_context())
             if page is None:
-                return json.dumps({"status": "missing"}, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "status": "missing",
+                        "supported_actions": ["open", "navigate", "snapshot", "click", "close"],
+                    },
+                    ensure_ascii=False,
+                )
             return json.dumps(
                 self._browser_session_payload(page, action="status"),
                 ensure_ascii=False,
@@ -1654,6 +1699,7 @@ class CapabilityPackService:
             work_merge,
             work_delete,
             web_fetch,
+            web_search,
             browser_open,
             browser_status,
             browser_navigate,
@@ -1971,6 +2017,7 @@ class CapabilityPackService:
             "project.inspect": ["agent_runtime", "web"],
             "runtime.inspect": ["agent_runtime", "web"],
             "gateway.inspect": ["agent_runtime", "web"],
+            "browser.status": ["agent_runtime", "web"],
             "cron.list": ["agent_runtime", "web"],
             "nodes.list": ["agent_runtime", "web"],
             "work.split": ["agent_runtime", "web"],
@@ -2143,6 +2190,62 @@ class CapabilityPackService:
     def _tts_binary() -> str:
         return shutil.which("say") or shutil.which("espeak") or ""
 
+    @staticmethod
+    def _desktop_session_available() -> bool:
+        if platform.system() == "Darwin":
+            return True
+        return any(
+            os.environ.get(name)
+            for name in (
+                "DISPLAY",
+                "WAYLAND_DISPLAY",
+                "SWAYSOCK",
+                "XDG_CURRENT_DESKTOP",
+                "DESKTOP_SESSION",
+            )
+        )
+
+    def _resolve_browser_support(
+        self,
+    ) -> tuple[BuiltinToolAvailabilityStatus, str, str]:
+        try:
+            webbrowser.get()
+            return BuiltinToolAvailabilityStatus.AVAILABLE, "", ""
+        except webbrowser.Error:
+            pass
+
+        if self._desktop_session_available():
+            return (
+                BuiltinToolAvailabilityStatus.INSTALL_REQUIRED,
+                "browser_controller_missing",
+                "配置默认浏览器或设置 BROWSER 环境变量后再使用 browser.*",
+            )
+
+        return (
+            BuiltinToolAvailabilityStatus.DEGRADED,
+            "desktop_session_unavailable",
+            "当前 runtime 没有桌面会话；请在 GUI 环境中运行或设置 BROWSER 环境变量。",
+        )
+
+    def _browser_status_payload(self) -> dict[str, Any]:
+        status, reason, install_hint = self._resolve_browser_support()
+        controller = ""
+        controller_error = ""
+        try:
+            controller = type(webbrowser.get()).__name__
+        except webbrowser.Error as exc:
+            controller_error = str(exc)
+        return {
+            "availability": status.value,
+            "reason": reason,
+            "install_hint": install_hint,
+            "controller": controller,
+            "controller_error": controller_error,
+            "browser_env": os.environ.get("BROWSER", ""),
+            "desktop_session_available": self._desktop_session_available(),
+            "platform": platform.platform(),
+        }
+
     def _tts_command(self, *, text: str, voice: str = "") -> list[str]:
         binary = self._tts_binary()
         if not binary:
@@ -2158,6 +2261,100 @@ class CapabilityPackService:
             command.extend(["-v", voice.strip()])
         command.append(text)
         return command
+
+    async def _search_web(
+        self,
+        *,
+        query: str,
+        limit: int,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        import httpx
+
+        search_query = query.strip()
+        if not search_query:
+            raise ValueError("query must not be empty")
+
+        effective_limit = max(1, min(limit, 10))
+        search_urls = (
+            "https://html.duckduckgo.com/html/",
+            "https://duckduckgo.com/html/",
+        )
+        last_error = ""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+        }
+
+        async with httpx.AsyncClient(timeout=max(0.1, timeout_seconds), headers=headers) as client:
+            for search_url in search_urls:
+                try:
+                    response = await client.get(
+                        search_url,
+                        params={"q": search_query},
+                        follow_redirects=True,
+                    )
+                    response.raise_for_status()
+                except Exception as exc:
+                    last_error = f"{type(exc).__name__}: {exc}"
+                    continue
+
+                results = self._parse_duckduckgo_results(response.text, limit=effective_limit)
+                if not results:
+                    last_error = "no_search_results_parsed"
+                    continue
+                return {
+                    "query": search_query,
+                    "engine": "duckduckgo",
+                    "results": results,
+                    "result_count": len(results),
+                    "source_url": str(response.url),
+                }
+
+        raise RuntimeError(f"web search failed: {last_error or 'unknown_error'}")
+
+    @classmethod
+    def _parse_duckduckgo_results(
+        cls,
+        payload: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, str]]:
+        anchor_pattern = re.compile(
+            r"<a[^>]+class=[\"'][^\"']*(?:result__a|result-link)[^\"']*[\"'][^>]+"
+            r"href=[\"'](?P<href>[^\"']+)[\"'][^>]*>(?P<title>.*?)</a>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        results: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for match in anchor_pattern.finditer(payload):
+            raw_url = html.unescape(match.group("href"))
+            url = cls._normalize_search_result_url(raw_url)
+            title = cls._strip_html_text(match.group("title"))
+            if not url or not title or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            results.append({"title": title, "url": url})
+            if len(results) >= limit:
+                break
+        return results
+
+    @staticmethod
+    def _normalize_search_result_url(raw_url: str) -> str:
+        parsed = urlparse(raw_url)
+        if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+            encoded = parse_qs(parsed.query).get("uddg", [])
+            if encoded:
+                return unquote(encoded[0])
+        return raw_url
+
+    @staticmethod
+    def _strip_html_text(payload: str) -> str:
+        text = re.sub(r"<[^>]+>", "", payload)
+        text = html.unescape(text)
+        return " ".join(text.split())
 
     @staticmethod
     def _inspect_pdf_file(path: Path) -> dict[str, Any]:

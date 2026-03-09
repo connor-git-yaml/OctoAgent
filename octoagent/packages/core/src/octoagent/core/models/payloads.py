@@ -27,6 +27,7 @@ class UserMessagePayload(BaseModel):
 
     text_preview: str = Field(description="消息预览（截断到 200 字符）")
     text_length: int = Field(description="原始文本长度")
+    text: str = Field(default="", description="完整消息文本，供续对话和上下文压缩使用")
     attachment_count: int = Field(default=0)
     metadata: dict[str, str] = Field(default_factory=dict, description="渠道侧扩展元数据")
 
@@ -79,6 +80,20 @@ class ModelCallFailedPayload(BaseModel):
     model_name: str = Field(default="", description="尝试调用的模型名称")
     provider: str = Field(default="", description="尝试使用的 provider")
     is_fallback: bool = Field(default=False, description="失败时是否已在降级模式")
+
+
+class ContextCompactionCompletedPayload(BaseModel):
+    """上下文压缩完成事件 payload。"""
+
+    model_alias: str = Field(default="summarizer")
+    input_tokens_before: int = Field(default=0, ge=0)
+    input_tokens_after: int = Field(default=0, ge=0)
+    compressed_turn_count: int = Field(default=0, ge=0)
+    kept_turn_count: int = Field(default=0, ge=0)
+    summary_artifact_ref: str | None = Field(default=None)
+    request_artifact_ref: str | None = Field(default=None)
+    memory_flush_run_id: str | None = Field(default=None)
+    reason: str = Field(default="")
 
 
 class StateTransitionPayload(BaseModel):

@@ -58,6 +58,30 @@ if __name__ == "__main__":
     )
 
 
+class _FakeSearchResponse:
+    def __init__(self, *, text: str, url: str) -> None:
+        self.text = text
+        self.url = url
+        self.status_code = 200
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeSearchAsyncClient:
+    def __init__(self, responses: list[_FakeSearchResponse], **kwargs) -> None:
+        self._responses = responses
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url: str, *, params=None, follow_redirects=False):
+        return self._responses.pop(0)
+
+
 async def _build_runtime_services(tmp_path: Path):
     store_group = await create_store_group(
         str(tmp_path / "gateway.db"),
@@ -157,12 +181,22 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "browser.snapshot",
             "mcp.servers.list",
             "mcp.tools.list",
+            "web.search",
+            "browser.status",
             "memory.search",
         }.issubset(tool_names)
 
         spawn_tool = next(item for item in pack.tools if item.tool_name == "subagents.spawn")
         assert spawn_tool.availability.value == "available"
         assert "agent_runtime" in spawn_tool.entrypoints
+
+        browser_tool = next(item for item in pack.tools if item.tool_name == "browser.status")
+        assert browser_tool.availability.value in {
+            "available",
+            "degraded",
+            "install_required",
+        }
+        assert "agent_runtime" in browser_tool.entrypoints
 
         tts_tool = next(item for item in pack.tools if item.tool_name == "tts.speak")
         assert tts_tool.availability.value in {"available", "install_required"}
@@ -278,6 +312,70 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
         assert echo_payload["tool_name"] == "echo"
         assert echo_payload["content"][0]["text"] == "echo:hello"
     finally:
+        await store_group.conn.close()
+
+
+async def test_web_search_tool_returns_parsed_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        _delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        responses = [
+            _FakeSearchResponse(
+                text="""
+                <html>
+                  <body>
+                    <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Farticle">
+                      OctoAgent Built-in Tools
+                    </a>
+                    <a class="result__a" href="https://example.org/post">Operator Guide</a>
+                  </body>
+                </html>
+                """,
+                url="https://html.duckduckgo.com/html/?q=octoagent",
+            )
+        ]
+        monkeypatch.setattr(
+            "httpx.AsyncClient",
+            lambda **kwargs: _FakeSearchAsyncClient(responses, **kwargs),
+        )
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="执行 web search",
+                idempotency_key="feature-032-web-search",
+            )
+        )
+        assert created is True
+
+        result = await tool_broker.execute(
+            "web.search",
+            {"query": "octoagent", "limit": 2},
+            ExecutionContext(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                caller="tests",
+                profile=ToolProfile.MINIMAL,
+            ),
+        )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["query"] == "octoagent"
+        assert payload["result_count"] == 2
+        assert payload["results"][0]["title"] == "OctoAgent Built-in Tools"
+        assert payload["results"][0]["url"] == "https://example.com/article"
+    finally:
+        await task_runner.shutdown()
         await store_group.conn.close()
 
 
@@ -401,7 +499,6 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
-
 
 async def test_subagent_management_tools_list_kill_and_steer_descendants(
     tmp_path: Path,

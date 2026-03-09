@@ -8,14 +8,26 @@ from pathlib import Path
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from octoagent.core.models import (
+    AgentProfile,
+    AgentProfileScope,
+    BootstrapSession,
+    BootstrapSessionStatus,
+    ContextFrame,
     NormalizedMessage,
     OrchestratorRequest,
+    OwnerOverlayScope,
+    OwnerProfile,
+    OwnerProfileOverlay,
     ProjectBinding,
     ProjectBindingType,
     ProjectSecretBinding,
+    ProjectSelectorState,
     SecretBindingStatus,
     SecretRefSourceType,
     SecretTargetKind,
+    SessionContextState,
+    Workspace,
+    WorkspaceKind,
 )
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
@@ -264,6 +276,82 @@ async def _seed_memu_bridge(app, *, base_url: str = "https://workspace.memu.test
     await store_group.conn.commit()
 
 
+async def _seed_context_resources(app) -> None:
+    store_group = app.state.store_group
+    project = await store_group.project_store.get_default_project()
+    assert project is not None
+    workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+    assert workspace is not None
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id="agent-profile-default",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id,
+            name="Default Agent",
+            persona_summary="用于 control plane 可视化的默认 profile。",
+        )
+    )
+    await store_group.project_store.save_project(
+        project.model_copy(update={"default_agent_profile_id": "agent-profile-default"})
+    )
+    await store_group.agent_context_store.save_owner_profile(
+        OwnerProfile(
+            owner_profile_id="owner-profile-default",
+            display_name="Connor",
+            working_style="控制面应可见 owner profile。",
+        )
+    )
+    await store_group.agent_context_store.save_owner_overlay(
+        OwnerProfileOverlay(
+            owner_overlay_id="owner-overlay-default",
+            owner_profile_id="owner-profile-default",
+            scope=OwnerOverlayScope.PROJECT,
+            project_id=project.project_id,
+            assistant_identity_overrides={"assistant_name": "Default Agent"},
+        )
+    )
+    await store_group.agent_context_store.save_bootstrap_session(
+        BootstrapSession(
+            bootstrap_id="bootstrap-default",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            owner_profile_id="owner-profile-default",
+            owner_overlay_id="owner-overlay-default",
+            agent_profile_id="agent-profile-default",
+            status=BootstrapSessionStatus.COMPLETED,
+            current_step="done",
+            answers={"assistant_identity": "Default Agent"},
+        )
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id="thread-control-context",
+            thread_id="thread-control-context",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            task_ids=["task-context"],
+            rolling_summary="控制面可以直接看到 recent summary。",
+            last_context_frame_id="context-frame-default",
+        )
+    )
+    await store_group.agent_context_store.save_context_frame(
+        ContextFrame(
+            context_frame_id="context-frame-default",
+            task_id="task-context",
+            session_id="thread-control-context",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            agent_profile_id="agent-profile-default",
+            owner_profile_id="owner-profile-default",
+            owner_overlay_id="owner-overlay-default",
+            bootstrap_session_id="bootstrap-default",
+            recent_summary="控制面可以直接看到 recent summary。",
+            memory_hits=[{"record_id": "memory-1", "summary": "memory visible"}],
+        )
+    )
+    await store_group.conn.commit()
+
+
 @pytest_asyncio.fixture
 async def seeded_control_plane(control_plane_app):
     await _create_task(control_plane_app, text="control plane hello")
@@ -274,6 +362,7 @@ async def seeded_control_plane(control_plane_app):
 async def seeded_memory_control_plane(control_plane_app):
     await _create_task(control_plane_app, text="control plane hello")
     control_plane_app.state.seeded_memory = await _seed_memory(control_plane_app)
+    await _seed_context_resources(control_plane_app)
     return control_plane_app
 
 
@@ -293,6 +382,10 @@ class TestControlPlaneApi:
             "config",
             "project_selector",
             "sessions",
+            "agent_profiles",
+            "owner_profile",
+            "bootstrap_session",
+            "context_continuity",
             "capability_pack",
             "delegation",
             "pipelines",
@@ -318,6 +411,18 @@ class TestControlPlaneApi:
         assert payload["resources"]["memory"]["retrieval_backend"]
         assert "index_health" in payload["resources"]["memory"]
         assert payload["resources"]["imports"]["resource_type"] == "import_workbench"
+        assert payload["resources"]["agent_profiles"]["profiles"][0]["profile_id"] == (
+            "agent-profile-default"
+        )
+        assert payload["resources"]["owner_profile"]["profile"]["owner_profile_id"] == (
+            "owner-profile-default"
+        )
+        assert payload["resources"]["bootstrap_session"]["session"]["bootstrap_id"] == (
+            "bootstrap-default"
+        )
+        assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
+            "context-frame-default"
+        )
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
@@ -331,6 +436,15 @@ class TestControlPlaneApi:
         config_payload = config_resp.json()
         assert "schema" in config_payload
         assert "schema_payload" not in config_payload
+
+        profiles_resp = await control_plane_client.get("/api/control/resources/agent-profiles")
+        owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
+        bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
+        context_resp = await control_plane_client.get("/api/control/resources/context-frames")
+        assert profiles_resp.status_code == 200
+        assert owner_resp.status_code == 200
+        assert bootstrap_resp.status_code == 200
+        assert context_resp.status_code == 200
 
     async def test_capability_refresh_action_invokes_refresh(
         self,
@@ -376,6 +490,73 @@ class TestControlPlaneApi:
             }
         ]
 
+    async def test_context_frames_resource_filters_workspace_before_limit(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        await _seed_context_resources(control_plane_app)
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        primary_workspace = await store_group.project_store.get_primary_workspace(
+            project.project_id
+        )
+        assert primary_workspace is not None
+        secondary_workspace = Workspace(
+            workspace_id="workspace-secondary",
+            project_id=project.project_id,
+            slug="secondary",
+            name="Secondary",
+            kind=WorkspaceKind.CHAT,
+            root_path=str(control_plane_app.state.project_root / "secondary"),
+        )
+        await store_group.project_store.create_workspace(secondary_workspace)
+        await store_group.project_store.save_selector_state(
+            ProjectSelectorState(
+                selector_id="selector-web",
+                surface="web",
+                active_project_id=project.project_id,
+                active_workspace_id=secondary_workspace.workspace_id,
+                source="tests",
+            )
+        )
+        for index in range(25):
+            await store_group.agent_context_store.save_context_frame(
+                ContextFrame(
+                    context_frame_id=f"context-frame-primary-{index}",
+                    task_id=f"task-primary-{index}",
+                    session_id=f"session-primary-{index}",
+                    project_id=project.project_id,
+                    workspace_id=primary_workspace.workspace_id,
+                    agent_profile_id="agent-profile-default",
+                    owner_profile_id="owner-profile-default",
+                    created_at=datetime(2026, 3, 9, 10, index % 60, tzinfo=UTC),
+                )
+            )
+        await store_group.agent_context_store.save_context_frame(
+            ContextFrame(
+                context_frame_id="context-frame-secondary",
+                task_id="task-secondary",
+                session_id="session-secondary",
+                project_id=project.project_id,
+                workspace_id=secondary_workspace.workspace_id,
+                agent_profile_id="agent-profile-default",
+                owner_profile_id="owner-profile-default",
+                created_at=datetime(2026, 3, 9, 11, 0, tzinfo=UTC),
+            )
+        )
+        await store_group.conn.commit()
+
+        resp = await control_plane_client.get("/api/control/resources/context-frames")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["active_workspace_id"] == "workspace-secondary"
+        assert [item["context_frame_id"] for item in payload["frames"]] == [
+            "context-frame-secondary"
+        ]
+
     async def test_snapshot_exposes_builtin_tool_catalog_and_work_split_merge_actions(
         self,
         control_plane_client: AsyncClient,
@@ -400,6 +581,8 @@ class TestControlPlaneApi:
             "browser.snapshot",
             "mcp.servers.list",
             "mcp.tools.list",
+            "web.search",
+            "browser.status",
             "memory.search",
         }.issubset(tool_names)
 
@@ -411,6 +594,22 @@ class TestControlPlaneApi:
         assert "work.split" in action_ids
         assert "work.merge" in action_ids
         assert "work.delete" in action_ids
+
+    async def test_pipeline_resource_is_explicitly_marked_as_delegation_projection(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.get("/api/control/resources/pipelines")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["resource_type"] == "skill_pipeline"
+        assert payload["degraded"]["is_degraded"] is True
+        assert "graph_runtime_projection_unavailable" in payload["degraded"]["reasons"]
+        assert payload["summary"]["source"] == "delegation_plane_pipeline_runs"
+        assert payload["summary"]["graph_runtime_projection"] == "unavailable"
+        assert any("delegation preflight" in item for item in payload["warnings"])
 
     async def test_work_split_and_merge_actions_create_child_work_lifecycle(
         self,

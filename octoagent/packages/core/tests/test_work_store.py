@@ -43,6 +43,8 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         task_id="task-1",
         title="parent",
         status=WorkStatus.ASSIGNED,
+        agent_profile_id="agent-profile-parent",
+        context_frame_id="context-frame-parent",
     )
     child = Work(
         work_id="work-child",
@@ -50,6 +52,8 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         parent_work_id="work-parent",
         title="child",
         status=WorkStatus.WAITING_APPROVAL,
+        agent_profile_id="agent-profile-child",
+        context_frame_id="context-frame-child",
     )
 
     await _create_task(store_group, "task-1")
@@ -61,6 +65,8 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
     assert stored is not None
     assert stored.parent_work_id == "work-parent"
     assert stored.status == WorkStatus.WAITING_APPROVAL
+    assert stored.agent_profile_id == "agent-profile-child"
+    assert stored.context_frame_id == "context-frame-child"
 
     by_task = await store_group.work_store.list_works(task_id="task-1")
     assert [item.work_id for item in by_task] == ["work-child", "work-parent"]

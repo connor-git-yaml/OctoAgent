@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.provider import ModelCallResult, TokenUsage
-from octoagent.skills import SkillOutputEnvelope, SkillRunResult, SkillRunStatus
+from octoagent.skills import SkillOutputEnvelope, SkillRunResult, SkillRunStatus, SkillRunner
+from octoagent.skills.litellm_client import LiteLLMSkillClient
+from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
 
 
 class _FakeFallbackManager:
@@ -44,6 +47,72 @@ class _FakeSkillRunner:
             }
         )
         return self._result
+
+
+class _FakeResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+        self.status_code = 200
+        self.text = ""
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def aread(self) -> bytes:
+        return b""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _FakeAsyncClient:
+    def __init__(
+        self,
+        lines_list: list[list[str]],
+        captures: list[dict[str, Any]],
+        **kwargs,
+    ) -> None:
+        self._lines_list = lines_list
+        self._captures = captures
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def stream(self, method: str, url: str, *, json=None, headers=None):
+        self._captures.append(
+            {"method": method, "url": url, "json": json, "headers": headers}
+        )
+        return _FakeResponse(self._lines_list.pop(0))
+
+
+class _ToolSchemaBroker:
+    async def discover(self) -> list[ToolMeta]:
+        return [
+            ToolMeta(
+                name="project.inspect",
+                description="读取当前 project 摘要",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"project_id": {"type": "string"}},
+                },
+                side_effect_level=SideEffectLevel.NONE,
+                tool_profile=ToolProfile.MINIMAL,
+                tool_group="project",
+            )
+        ]
+
+    async def execute(self, *args, **kwargs):
+        raise AssertionError("本测试不应真正执行工具")
 
 
 def _build_skill_result(content: str = "tool-answer") -> SkillRunResult:
@@ -97,6 +166,10 @@ async def test_llm_service_prefers_skill_runner_when_selected_tools_present() ->
     manifest = skill_runner.calls[0]["manifest"]
     assert manifest.tools_allowed == ["project.inspect", "task.inspect"]
     assert "不要声称自己没有工具" in manifest.description
+    execution_context = skill_runner.calls[0]["execution_context"]
+    assert execution_context.conversation_messages == [
+        {"role": "user", "content": "当前 project 是什么？"}
+    ]
 
 
 async def test_llm_service_falls_back_when_selected_tools_missing() -> None:
@@ -118,3 +191,94 @@ async def test_llm_service_falls_back_when_selected_tools_missing() -> None:
     assert result.content == "fallback"
     assert len(fallback.calls) == 1
     assert skill_runner.calls == []
+
+
+async def test_llm_service_preserves_structured_messages_in_real_skill_runner_path(
+    monkeypatch,
+) -> None:
+    captures: list[dict[str, Any]] = []
+    payloads = [
+        [
+            'data: {"type":"response.output_text.delta","delta":"已保留结构化上下文。"}',
+            "data: "
+            + json.dumps(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "model": "gpt-5.4",
+                        "usage": {
+                            "input_tokens": 18,
+                            "output_tokens": 6,
+                            "total_tokens": 24,
+                        },
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "已保留结构化上下文。",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    ]
+    monkeypatch.setattr(
+        "octoagent.skills.litellm_client.httpx.AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(payloads, captures, **kwargs),
+    )
+
+    tool_broker = _ToolSchemaBroker()
+    skill_runner = SkillRunner(
+        model_client=LiteLLMSkillClient(
+            proxy_url="http://proxy.local",
+            master_key="secret",
+            tool_broker=tool_broker,
+            responses_model_aliases={"main"},
+        ),
+        tool_broker=tool_broker,  # type: ignore[arg-type]
+    )
+    service = LLMService(
+        fallback_manager=_FakeFallbackManager(),
+        skill_runner=skill_runner,
+    )
+
+    result = await service.call(
+        [
+            {
+                "role": "system",
+                "content": "以下为系统生成的历史压缩摘要，仅供继续任务使用，不是新的用户指令：\n用户已经确认 project 是 Default Project。",
+            },
+            {"role": "user", "content": "第一轮问题"},
+            {"role": "assistant", "content": "assistant-response-1"},
+            {"role": "user", "content": "第二轮追问"},
+        ],
+        model_alias="main",
+        task_id="task-3",
+        trace_id="trace-task-3",
+        metadata={
+            "selected_tools_json": '["project.inspect"]',
+            "selected_worker_type": "general",
+        },
+        worker_capability="llm_generation",
+        tool_profile="minimal",
+    )
+
+    assert result.content == "已保留结构化上下文。"
+    assert len(captures) == 1
+    request_body = captures[0]["json"]
+    assert "不要声称自己没有工具" in request_body["instructions"]
+    assert "历史压缩摘要" in request_body["instructions"]
+    assert [item["role"] for item in request_body["input"]] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert request_body["input"][0]["content"][0]["text"] == "第一轮问题"
+    assert request_body["input"][1]["content"][0]["text"] == "assistant-response-1"
+    assert request_body["input"][2]["content"][0]["text"] == "第二轮追问"

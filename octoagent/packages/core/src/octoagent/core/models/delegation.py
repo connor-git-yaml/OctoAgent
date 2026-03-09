@@ -68,6 +68,8 @@ class Work(BaseModel):
     route_reason: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
+    context_frame_id: str = Field(default="")
     tool_selection_id: str = Field(default="")
     selected_tools: list[str] = Field(default_factory=list)
     pipeline_run_id: str = Field(default="")

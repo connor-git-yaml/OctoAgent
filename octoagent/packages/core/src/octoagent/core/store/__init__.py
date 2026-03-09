@@ -7,6 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
 from .checkpoint_store import SqliteCheckpointStore
 from .event_store import SqliteEventStore
@@ -39,6 +40,7 @@ class StoreGroup:
         self.checkpoint_store = SqliteCheckpointStore(conn)
         self.side_effect_ledger_store = SqliteSideEffectLedgerStore(conn)
         self.project_store = SqliteProjectStore(conn)
+        self.agent_context_store = SqliteAgentContextStore(conn)
         self.work_store = SqliteWorkStore(conn)
 
 
@@ -79,6 +81,7 @@ __all__ = [
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",
     "SqliteProjectStore",
+    "SqliteAgentContextStore",
     "SqliteWorkStore",
     "init_db",
     "append_event_and_update_task",

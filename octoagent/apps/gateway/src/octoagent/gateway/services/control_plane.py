@@ -14,15 +14,21 @@ from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
     ActorType,
+    AgentProfileItem,
+    AgentProfilesDocument,
     AutomationJob,
     AutomationJobDocument,
     AutomationJobItem,
     AutomationJobRun,
     AutomationJobStatus,
     AutomationScheduleKind,
+    BootstrapSessionDocument,
     CapabilityPackDocument,
     ConfigFieldHint,
     ConfigSchemaDocument,
+    ContextContinuityDocument,
+    ContextFrameItem,
+    ContextSessionItem,
     ControlPlaneActionStatus,
     ControlPlaneActor,
     ControlPlaneCapability,
@@ -48,6 +54,7 @@ from octoagent.core.models import (
     OperatorActionKind,
     OperatorActionRequest,
     OperatorActionSource,
+    OwnerProfileDocument,
     PipelineRunItem,
     ProjectBindingType,
     ProjectOption,
@@ -195,6 +202,10 @@ class ControlPlaneService:
         config = await self.get_config_schema()
         project_selector = await self.get_project_selector()
         sessions = await self.get_session_projection()
+        agent_profiles = await self.get_agent_profiles_document()
+        owner_profile = await self.get_owner_profile_document()
+        bootstrap_session = await self.get_bootstrap_session_document()
+        context_continuity = await self.get_context_continuity_document()
         capability_pack = await self.get_capability_pack_document()
         delegation = await self.get_delegation_document()
         pipelines = await self.get_skill_pipeline_document()
@@ -210,6 +221,10 @@ class ControlPlaneService:
                 "config": config.model_dump(mode="json", by_alias=True),
                 "project_selector": project_selector.model_dump(mode="json", by_alias=True),
                 "sessions": sessions.model_dump(mode="json", by_alias=True),
+                "agent_profiles": agent_profiles.model_dump(mode="json", by_alias=True),
+                "owner_profile": owner_profile.model_dump(mode="json", by_alias=True),
+                "bootstrap_session": bootstrap_session.model_dump(mode="json", by_alias=True),
+                "context_continuity": context_continuity.model_dump(mode="json", by_alias=True),
                 "capability_pack": capability_pack.model_dump(mode="json", by_alias=True),
                 "delegation": delegation.model_dump(mode="json", by_alias=True),
                 "pipelines": pipelines.model_dump(mode="json", by_alias=True),
@@ -624,6 +639,167 @@ class ControlPlaneService:
             ],
         )
 
+    async def get_agent_profiles_document(self) -> AgentProfilesDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        profiles = await self._stores.agent_context_store.list_agent_profiles(
+            project_id=selected_project.project_id if selected_project is not None else None
+        )
+        items = [
+            AgentProfileItem(
+                profile_id=profile.profile_id,
+                scope=profile.scope.value,
+                project_id=profile.project_id,
+                name=profile.name,
+                persona_summary=profile.persona_summary,
+                model_alias=profile.model_alias,
+                tool_profile=profile.tool_profile,
+                updated_at=profile.updated_at,
+            )
+            for profile in profiles
+            if self._matches_selected_scope(
+                item_project_id=profile.project_id or None,
+                item_workspace_id=None,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            )
+        ]
+        return AgentProfilesDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            profiles=items,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="agent_profile.refresh",
+                    label="刷新 Agent Profiles",
+                    action_id="agent_profile.refresh",
+                )
+            ],
+            warnings=[] if items else ["当前作用域没有可见的 agent profiles。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=not bool(items),
+                reasons=["agent_profiles_empty"] if not items else [],
+            ),
+        )
+
+    async def get_owner_profile_document(self) -> OwnerProfileDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        profiles = await self._stores.agent_context_store.list_owner_profiles()
+        profile = next(
+            (item for item in profiles if item.owner_profile_id == "owner-profile-default"),
+            profiles[0] if profiles else None,
+        )
+        overlays = (
+            await self._stores.agent_context_store.list_owner_overlays(
+                project_id=selected_project.project_id if selected_project is not None else None
+            )
+            if selected_project is not None
+            else []
+        )
+        return OwnerProfileDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            profile=profile.model_dump(mode="json") if profile is not None else {},
+            overlays=[item.model_dump(mode="json") for item in overlays],
+            warnings=[] if profile is not None else ["尚未创建 owner profile。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=profile is None,
+                reasons=["owner_profile_missing"] if profile is None else [],
+            ),
+        )
+
+    async def get_bootstrap_session_document(self) -> BootstrapSessionDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        session = None
+        if selected_project is not None:
+            session = await self._stores.agent_context_store.get_latest_bootstrap_session(
+                project_id=selected_project.project_id,
+                workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
+            )
+        return BootstrapSessionDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            session=session.model_dump(mode="json") if session is not None else {},
+            resumable=bool(session is not None and session.status.value != "completed"),
+            warnings=[] if session is not None else ["当前 project 没有 bootstrap session。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=session is None,
+                reasons=["bootstrap_session_missing"] if session is None else [],
+            ),
+        )
+
+    async def get_context_continuity_document(self) -> ContextContinuityDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        sessions = (
+            await self._stores.agent_context_store.list_session_contexts(
+                project_id=selected_project.project_id if selected_project is not None else None,
+                workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else None
+                ),
+            )
+        )
+        frames = (
+            await self._stores.agent_context_store.list_context_frames(
+                project_id=selected_project.project_id if selected_project is not None else None,
+                workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else None
+                ),
+                limit=20,
+            )
+        )
+        session_items = [
+            ContextSessionItem(
+                session_id=item.session_id,
+                thread_id=item.thread_id,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                rolling_summary=item.rolling_summary,
+                last_context_frame_id=item.last_context_frame_id,
+                updated_at=item.updated_at,
+            )
+            for item in sessions
+        ]
+        frame_items = [
+            ContextFrameItem(
+                context_frame_id=item.context_frame_id,
+                task_id=item.task_id,
+                session_id=item.session_id,
+                agent_profile_id=item.agent_profile_id,
+                recent_summary=item.recent_summary,
+                memory_hit_count=len(item.memory_hits),
+                degraded_reason=item.degraded_reason,
+                created_at=item.created_at,
+            )
+            for item in frames
+        ]
+        return ContextContinuityDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            sessions=session_items,
+            frames=frame_items,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="context.refresh",
+                    label="刷新 Context",
+                    action_id="context.refresh",
+                )
+            ],
+            warnings=[] if frame_items else ["当前作用域还没有 context frames。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=not bool(frame_items),
+                reasons=["context_frames_empty"] if not frame_items else [],
+            ),
+        )
+
     async def get_automation_document(self) -> AutomationJobDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
         jobs = self._automation_store.list_jobs()
@@ -878,10 +1054,20 @@ class ControlPlaneService:
                 ]
             ),
             "running": len([item for item in items if item.status == "running"]),
+            "source": "delegation_plane_pipeline_runs",
+            "graph_runtime_projection": "unavailable",
         }
         return SkillPipelineDocument(
             runs=items,
             summary=summary,
+            degraded=ControlPlaneDegradedState(
+                is_degraded=True,
+                reasons=["graph_runtime_projection_unavailable"],
+            ),
+            warnings=[
+                "当前视图仅展示 delegation preflight / skill pipeline runs，不代表 graph runtime 的真实执行步进。",
+                "graph runtime 细节目前仍需通过 execution console / session steps 查看。",
+            ],
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="pipeline.resume",
@@ -3213,6 +3399,9 @@ class ControlPlaneService:
         events = await self._stores.event_store.get_events_for_task(task_id)
         for event in reversed(events):
             if event.type == EventType.USER_MESSAGE:
+                text = str(event.payload.get("text", "")).strip()
+                if text:
+                    return text
                 return str(event.payload.get("text_preview", "")).strip()
         return ""
 

@@ -5,14 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from octoagent.core.models import (
+    ContextFrame,
     NormalizedMessage,
     OrchestratorRequest,
     Project,
     ProjectSelectorState,
+    SessionContextState,
     Workspace,
     WorkStatus,
 )
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.agent_context import build_scope_aware_session_id
 from octoagent.gateway.services.capability_pack import CapabilityPackService
 from octoagent.gateway.services.delegation_plane import DelegationPlaneService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -102,6 +105,171 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     assert stored.pipeline_run_id
     assert stored.project_id == "project-default"
     assert stored.workspace_id == "workspace-default"
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请沿用当前上下文继续处理",
+            thread_id="thread-context",
+            idempotency_key="delegation-context-route",
+        )
+    )
+    task = await store_group.task_store.get_task(task_id)
+    assert task is not None
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id=build_scope_aware_session_id(
+                task,
+                project_id="project-default",
+                workspace_id="workspace-default",
+            ),
+            thread_id="thread-context",
+            project_id="project-default",
+            workspace_id="workspace-default",
+            task_ids=[task_id],
+            last_context_frame_id="context-frame-1",
+        )
+    )
+    await store_group.agent_context_store.save_context_frame(
+        ContextFrame(
+            context_frame_id="context-frame-1",
+            task_id=task_id,
+            session_id=build_scope_aware_session_id(
+                task,
+                project_id="project-default",
+                workspace_id="workspace-default",
+            ),
+            project_id="project-default",
+            workspace_id="workspace-default",
+            agent_profile_id="agent-profile-default",
+            owner_profile_id="owner-profile-default",
+        )
+    )
+    await store_group.conn.commit()
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请沿用当前上下文继续处理",
+            worker_capability="llm_generation",
+            metadata={},
+        )
+    )
+
+    assert plan.work.agent_profile_id == "agent-profile-default"
+    assert plan.work.context_frame_id == "context-frame-1"
+    assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.metadata["agent_profile_id"] == "agent-profile-default"
+    assert plan.dispatch_envelope.metadata["context_frame_id"] == "context-frame-1"
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    alpha_task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="Alpha task",
+            thread_id="thread-shared",
+            scope_id="scope-alpha",
+            idempotency_key="delegation-scope-alpha",
+        )
+    )
+    beta_task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="Beta task",
+            thread_id="thread-shared",
+            scope_id="scope-beta",
+            idempotency_key="delegation-scope-beta",
+        )
+    )
+    alpha_task = await store_group.task_store.get_task(alpha_task_id)
+    beta_task = await store_group.task_store.get_task(beta_task_id)
+    assert alpha_task is not None
+    assert beta_task is not None
+
+    alpha_session_id = build_scope_aware_session_id(
+        alpha_task,
+        project_id="project-default",
+        workspace_id="workspace-default",
+    )
+    beta_session_id = build_scope_aware_session_id(
+        beta_task,
+        project_id="project-default",
+        workspace_id="workspace-default",
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id=alpha_session_id,
+            thread_id="thread-shared",
+            project_id="project-default",
+            workspace_id="workspace-default",
+            task_ids=[alpha_task_id],
+            last_context_frame_id="context-frame-alpha",
+        )
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id=beta_session_id,
+            thread_id="thread-shared",
+            project_id="project-default",
+            workspace_id="workspace-default",
+            task_ids=[beta_task_id],
+            last_context_frame_id="context-frame-beta",
+        )
+    )
+    await store_group.agent_context_store.save_context_frame(
+        ContextFrame(
+            context_frame_id="context-frame-alpha",
+            task_id=alpha_task_id,
+            session_id=alpha_session_id,
+            project_id="project-default",
+            workspace_id="workspace-default",
+            agent_profile_id="agent-profile-alpha",
+            owner_profile_id="owner-profile-default",
+        )
+    )
+    await store_group.agent_context_store.save_context_frame(
+        ContextFrame(
+            context_frame_id="context-frame-beta",
+            task_id=beta_task_id,
+            session_id=beta_session_id,
+            project_id="project-default",
+            workspace_id="workspace-default",
+            agent_profile_id="agent-profile-beta",
+            owner_profile_id="owner-profile-default",
+        )
+    )
+    await store_group.conn.commit()
+
+    alpha_plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=alpha_task_id,
+            trace_id=f"trace-{alpha_task_id}",
+            user_text="Alpha task",
+            worker_capability="llm_generation",
+            metadata={},
+        )
+    )
+    beta_plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=beta_task_id,
+            trace_id=f"trace-{beta_task_id}",
+            user_text="Beta task",
+            worker_capability="llm_generation",
+            metadata={},
+        )
+    )
+
+    assert alpha_plan.work.context_frame_id == "context-frame-alpha"
+    assert alpha_plan.work.agent_profile_id == "agent-profile-alpha"
+    assert beta_plan.work.context_frame_id == "context-frame-beta"
+    assert beta_plan.work.agent_profile_id == "agent-profile-beta"
 
     await store_group.conn.close()
 

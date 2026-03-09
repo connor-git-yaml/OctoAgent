@@ -65,6 +65,38 @@ M4 从 032 开始启用更严格的“真实可用”门禁。以下任一条不
 - `graph_agent` 已接到真实 `pydantic_graph` backend，并进入 execution console / control plane 投影
 - control plane 与现有 Web 控制台已能展示 tool availability、runtime truth、child work 关系与 split/merge 动作
 
+#### Feature 035：Guided User Workbench + Visual Config Center
+
+状态：**Planned（2026-03-09）**
+
+目标：
+
+- 把默认 Web 入口从 operator/resource console 改成普通用户可走通的工作台
+- 把主 Agent / Work / Memory / Channels 的常见配置变更做成图形化设置中心
+- 把聊天、任务、审批、记忆和高级控制面组织成连续路径，而不是散落在多个页面和 CLI 中
+
+范围冻结：
+
+- 新一级导航：`Home / Chat / Work / Memory / Settings / Advanced`
+- 首页 readiness / next actions / 待你确认 / project 状态
+- 图形化设置中心，继续消费 `ConfigSchemaDocument + ui_hints + config.apply`
+- 聊天工作台，继续消费 `chat.send + SSE + task/execution + sessions/delegation/memory`
+- Work 看板与 Memory 中心
+- 现有 `ControlPlane` 收编为 `Advanced`
+- 直接消费 Feature 033 的 context provenance 与 Feature 034 的 compaction status
+
+明确排除：
+
+- 新建平行 settings/chat-workbench backend
+- 重做 015 wizard、026 control-plane contract、027 memory governance
+- file browser / editor / diff
+- voice / PWA / remote companion / nodes
+
+本轮规划结论：
+
+- 035 必须坚持“页面状态和动作均可追溯到 canonical backend”的反假实现门禁
+- 035 的成功标准是“普通用户不用终端也能走通首页检查、图形化改配置、发消息、处理确认、查看记忆摘要”
+
 ## 5. 交付顺序建议
 
 1. 先补 `BuiltinToolCatalog`、availability / install hint / degraded truth
@@ -75,5 +107,5 @@ M4 从 032 开始启用更严格的“真实可用”门禁。以下任一条不
 ## 6. 与后续 Feature 的边界
 
 - 032 负责“built-in tools 与 live runtime truth”
-- 033 可以单开为 `Channel Action Packs`
-- 034 以后再处理 remote nodes / companion surfaces / richer multimodal surfaces
+- 035 负责“用户工作台、图形化配置和聊天/工作/记忆一体化入口”，但必须复用 015/017/025/026/027/030/033/034 的既有 contract
+- 更后的 M4 才继续处理 remote nodes / companion surfaces / richer multimodal surfaces

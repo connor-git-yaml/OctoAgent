@@ -1,20 +1,25 @@
-/**
- * App 主组件 -- React Router 配置
- *
- * 路由：
- * - / -> TaskList
- * - /tasks/:taskId -> TaskDetail
- */
-
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import ControlPlane from "./pages/ControlPlane";
+import WorkbenchLayout from "./components/shell/WorkbenchLayout";
+import AdvancedControlPlane from "./pages/AdvancedControlPlane";
+import ChatWorkbench from "./pages/ChatWorkbench";
+import Home from "./pages/Home";
+import MemoryCenter from "./pages/MemoryCenter";
+import SettingsCenter from "./pages/SettingsCenter";
 import TaskDetail from "./pages/TaskDetail";
+import WorkbenchBoard from "./pages/WorkbenchBoard";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<ControlPlane />} />
+        <Route path="/" element={<WorkbenchLayout />}>
+          <Route index element={<Home />} />
+          <Route path="chat" element={<ChatWorkbench />} />
+          <Route path="work" element={<WorkbenchBoard />} />
+          <Route path="memory" element={<MemoryCenter />} />
+          <Route path="settings" element={<SettingsCenter />} />
+          <Route path="advanced" element={<AdvancedControlPlane />} />
+        </Route>
         <Route path="/tasks/:taskId" element={<TaskDetail />} />
       </Routes>
     </BrowserRouter>
