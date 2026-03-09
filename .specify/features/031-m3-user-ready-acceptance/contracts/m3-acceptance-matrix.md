@@ -2,7 +2,8 @@
 
 **Feature**: `031-m3-user-ready-acceptance`
 **Created**: 2026-03-08
-**Traces to**: `FR-001` ~ `FR-012`
+**Updated**: 2026-03-09
+**Traces to**: `FR-001` ~ `FR-012` + Feature 033 carry-forward gate
 
 ---
 
@@ -10,12 +11,13 @@
 
 本文定义 031 的单一验收事实源：
 
-- M3 八个 release gates
+- M3 九个 release gates（其中 `GATE-M3-CONTEXT-CONTINUITY` 由 Feature 033 承接）
 - 对应的自动化场景与 supporting evidence
 - 最低通过标准
 - 剩余风险记录位置
 
 031 的测试、migration rehearsal、verification report 和里程碑结论必须以本矩阵为准。
+2026-03-09 起，本矩阵同时承担 M3 最终签收的 carry-forward gate 事实源。
 
 ---
 
@@ -31,6 +33,7 @@
 | `GATE-M3-DELEGATION-AUTOMATION` | `SCN-031-006` | automation + delegation inheritance | control plane + delegation plane | automation job 与 work dispatch 继承正确 project/workspace | `octoagent/tests/integration/test_f031_m3_acceptance.py::test_m3_project_selection_syncs_delegation_work_context` | `octoagent/apps/gateway/tests/test_delegation_plane.py`、`octoagent/apps/gateway/tests/test_control_plane_api.py` |
 | `GATE-M3-MIGRATION-OPENCLAW` | `SCN-031-007` | OpenClaw migration rehearsal | local snapshot + import path | 完成一次有 mapping / rollback / deferred items 的 rehearsal | `.specify/features/031-m3-user-ready-acceptance/verification/openclaw-migration-rehearsal.md` | `_references/openclaw-snapshot/`、`octoagent/packages/provider/tests/test_import_workbench_service.py::test_import_workbench_detects_weflow_jsonl_export` |
 | `GATE-M3-RELEASE-REPORT` | `SCN-031-008` | release report | spec / docs | 形成 gates / evidence / risks / boundary 汇总报告 | `.specify/features/031-m3-user-ready-acceptance/verification/verification-report.md` | `docs/blueprint.md`、`docs/m3-feature-split.md` |
+| `GATE-M3-CONTEXT-CONTINUITY` | `SCN-031-009` | main agent context continuity | gateway + agent runtime + memory | 主 Agent 真实消费 profile/bootstrap/recent summary/memory retrieval，且 automation/work/pipeline/worker 复用同一 canonical context semantics | `.specify/features/033-agent-context-continuity/verification/verification-report.md` | `.specify/features/033-agent-context-continuity/spec.md`、`.specify/features/033-agent-context-continuity/contracts/agent-context-contract.md` |
 
 ---
 
@@ -46,12 +49,20 @@
 
 ### Feature 级通过规则
 
-031 通过必须满足：
+031 原范围通过必须满足：
 
 1. `SCN-031-001` ~ `SCN-031-008` 均回填完成；
 2. 不超出 031 定义范围；
 3. migration rehearsal 已生成；
 4. release report 已明确写出“是否可对用户开放”。
+
+### M3 最终签收规则（2026-03-09 补充）
+
+M3 最终签收必须额外满足：
+
+1. `SCN-031-009` 已由 Feature 033 交付并回填主证据；
+2. 主 Agent 不再依赖 stateless chat shell 行为；
+3. release report 已明确说明 context continuity gate 的结论。
 
 ---
 
