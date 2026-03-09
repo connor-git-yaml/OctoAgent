@@ -64,6 +64,7 @@ from .services.control_plane import ControlPlaneService
 from .services.delegation_plane import DelegationPlaneService
 from .services.frontdoor_auth import FrontDoorGuard
 from .services.llm_service import LLMService
+from .services.mcp_registry import McpRegistryService
 from .services.operator_actions import OperatorActionService
 from .services.operator_inbox import OperatorInboxService
 from .services.sse_hub import SSEHub
@@ -350,6 +351,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
         tool_broker=tool_broker,
     )
+    app.state.mcp_registry = McpRegistryService(
+        project_root=project_root,
+        tool_broker=tool_broker,
+    )
+    app.state.capability_pack_service.bind_mcp_registry(app.state.mcp_registry)
     await app.state.capability_pack_service.startup()
     if provider_config.llm_mode == "litellm":
         skill_runner = SkillRunner(

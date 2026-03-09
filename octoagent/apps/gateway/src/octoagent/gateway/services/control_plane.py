@@ -106,6 +106,7 @@ from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
 _AUDIT_TRACE_ID = "trace-ops-control-plane"
+_TERMINAL_WORK_STATUSES = {"succeeded", "failed", "cancelled", "merged", "timed_out", "deleted"}
 
 
 class ControlPlaneActionError(RuntimeError):
@@ -321,6 +322,14 @@ class ControlPlaneService:
             and self._has_telegram_alias("work.retry", "/work retry")
         ):
             action_id = "work.retry"
+            params["work_id"] = parts[2]
+        elif (
+            command == "/work"
+            and len(parts) >= 3
+            and parts[1].lower() == "delete"
+            and self._has_telegram_alias("work.delete", "/work delete")
+        ):
+            action_id = "work.delete"
             params["work_id"] = parts[2]
         elif (
             command == "/work"
@@ -747,19 +756,19 @@ class ControlPlaneService:
                         capability_id="work.cancel",
                         label="取消 Work",
                         action_id="work.cancel",
-                        enabled=work.status.value
-                        not in {"succeeded", "failed", "cancelled", "merged"},
+                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.retry",
                         label="重试 Work",
                         action_id="work.retry",
+                        enabled=work.status.value != "deleted",
                     ),
                     ControlPlaneCapability(
                         capability_id="work.split",
                         label="拆分 Work",
                         action_id="work.split",
-                        enabled=work.status.value not in {"merged", "cancelled"},
+                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.merge",
@@ -776,6 +785,13 @@ class ControlPlaneService:
                             if self._is_work_merge_ready(work, works)
                             else "存在未完成 child works 或尚未拆分"
                         ),
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="work.delete",
+                        label="删除 Work",
+                        action_id="work.delete",
+                        enabled=work.status.value in _TERMINAL_WORK_STATUSES
+                        and work.status.value != "deleted",
                     ),
                     ControlPlaneCapability(
                         capability_id="work.escalate",
@@ -1430,6 +1446,8 @@ class ControlPlaneService:
             return await self._handle_work_split(request)
         if action_id == "work.merge":
             return await self._handle_work_merge(request)
+        if action_id == "work.delete":
+            return await self._handle_work_delete(request)
         if action_id == "work.escalate":
             return await self._handle_work_escalate(request)
         if action_id == "pipeline.resume":
@@ -1939,7 +1957,10 @@ class ControlPlaneService:
             raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
         work = await self._get_work_in_scope(work_id)
         if self._task_runner is not None:
-            await self._task_runner.cancel_task(work.task_id)
+            descendants = await self._delegation_plane_service.list_descendant_works(work_id)
+            task_ids = [item.task_id for item in descendants] + [work.task_id]
+            for task_id in dict.fromkeys(task_ids):
+                await self._task_runner.cancel_task(task_id)
         updated = await self._delegation_plane_service.cancel_work(
             work_id, reason="control_plane_cancel"
         )
@@ -1963,7 +1984,9 @@ class ControlPlaneService:
             raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
         if self._delegation_plane_service is None:
             raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
-        await self._get_work_in_scope(work_id)
+        work = await self._get_work_in_scope(work_id)
+        if work.status.value == "deleted":
+            raise ControlPlaneActionError("WORK_DELETED", "已删除的 work 不能重试")
         updated = await self._delegation_plane_service.retry_work(work_id)
         if updated is None:
             raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
@@ -2054,7 +2077,7 @@ class ControlPlaneService:
         blocking = [
             item.work_id
             for item in child_works
-            if item.status.value not in {"succeeded", "failed", "cancelled", "merged"}
+            if item.status.value not in _TERMINAL_WORK_STATUSES
         ]
         if blocking:
             raise ControlPlaneActionError(
@@ -2072,6 +2095,44 @@ class ControlPlaneService:
             data={
                 "work": updated.model_dump(mode="json"),
                 "child_work_ids": [item.work_id for item in child_works],
+            },
+            resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_work_delete(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._delegation_plane_service is None:
+            raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
+        work = await self._get_work_in_scope(work_id)
+        descendants = await self._delegation_plane_service.list_descendant_works(work_id)
+        active = [
+            item.work_id
+            for item in descendants
+            if item.status.value not in _TERMINAL_WORK_STATUSES
+        ]
+        if work.status.value not in _TERMINAL_WORK_STATUSES:
+            active.insert(0, work.work_id)
+        if active:
+            raise ControlPlaneActionError(
+                "WORK_DELETE_REQUIRES_TERMINAL",
+                f"存在仍在运行的 work，不能删除: {', '.join(active)}",
+            )
+        updated = await self._delegation_plane_service.delete_work(
+            work_id,
+            reason="control_plane_delete",
+        )
+        if updated is None:
+            raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
+        return self._completed_result(
+            request=request,
+            code="WORK_DELETED",
+            message="已删除 work",
+            data={
+                "work": updated.model_dump(mode="json"),
+                "child_work_ids": [item.work_id for item in descendants],
             },
             resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
             target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
@@ -3172,7 +3233,7 @@ class ControlPlaneService:
         if not children:
             return False
         return all(
-            item.status.value in {"succeeded", "failed", "cancelled", "merged"} for item in children
+            item.status.value in _TERMINAL_WORK_STATUSES for item in children
         )
 
     def _load_runtime_snapshot(self) -> dict[str, Any]:
@@ -3789,6 +3850,14 @@ class ControlPlaneService:
                     category="delegation",
                     risk_hint="medium",
                     params_schema={"type": "object", "required": ["work_id"]},
+                ),
+                definition(
+                    "work.delete",
+                    "删除 Work",
+                    category="delegation",
+                    telegram_aliases=["/work delete"],
+                    risk_hint="medium",
+                    telegram_supported=True,
                 ),
                 definition(
                     "work.escalate",

@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
+import httpx
 from octoagent.core.models import (
+    ExecutionBackend,
+    ExecutionConsoleSession,
+    ExecutionSessionState,
+    HumanInputPolicy,
     NormalizedMessage,
     OrchestratorRequest,
     Project,
@@ -16,15 +24,38 @@ from octoagent.core.models import (
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.capability_pack import CapabilityPackService
 from octoagent.gateway.services.delegation_plane import DelegationPlaneService
+from octoagent.gateway.services.execution_console import AttachInputResult
 from octoagent.gateway.services.execution_context import (
     ExecutionRuntimeContext,
     bind_execution_context,
 )
 from octoagent.gateway.services.llm_service import LLMService
+from octoagent.gateway.services.mcp_registry import McpRegistryService, McpServerConfig
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.tooling import ExecutionContext, ToolBroker, ToolProfile
+
+
+def _write_mcp_echo_server(path: Path) -> None:
+    path.write_text(
+        """
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("demo")
+
+
+@mcp.tool()
+def echo(text: str) -> str:
+    return f"echo:{text}"
+
+
+if __name__ == "__main__":
+    mcp.run("stdio")
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 async def _build_runtime_services(tmp_path: Path):
@@ -112,13 +143,20 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         pack = await capability_pack.get_pack()
         tool_names = {item.tool_name for item in pack.tools}
 
-        assert len(pack.tools) >= 15
+        assert len(pack.tools) >= 20
         assert {
             "project.inspect",
             "subagents.spawn",
+            "subagents.list",
+            "subagents.kill",
+            "subagents.steer",
             "work.split",
             "work.merge",
+            "work.delete",
             "web.fetch",
+            "browser.snapshot",
+            "mcp.servers.list",
+            "mcp.tools.list",
             "memory.search",
         }.issubset(tool_names)
 
@@ -128,6 +166,407 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
 
         tts_tool = next(item for item in pack.tools if item.tool_name == "tts.speak")
         assert tts_tool.availability.value in {"available", "install_required"}
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degradation(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await store_group.project_store.create_project(
+        Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+    )
+    await store_group.project_store.create_workspace(
+        Workspace(
+            workspace_id="workspace-default",
+            project_id="project-default",
+            slug="primary",
+            name="Primary",
+            root_path=str(tmp_path),
+        )
+    )
+    await store_group.project_store.save_selector_state(
+        ProjectSelectorState(
+            selector_id="selector-web",
+            surface="web",
+            active_project_id="project-default",
+            active_workspace_id="workspace-default",
+            source="tests",
+        )
+    )
+    await store_group.conn.commit()
+
+    server_script = tmp_path / "mcp_echo_server.py"
+    _write_mcp_echo_server(server_script)
+
+    tool_broker = ToolBroker(event_store=store_group.event_store)
+    capability_pack = CapabilityPackService(
+        project_root=tmp_path,
+        store_group=store_group,
+        tool_broker=tool_broker,
+    )
+    mcp_registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=tool_broker,
+        server_configs=[
+            McpServerConfig(
+                name="demo",
+                command=sys.executable,
+                args=[str(server_script)],
+            )
+        ],
+    )
+    capability_pack.bind_mcp_registry(mcp_registry)
+
+    try:
+        await capability_pack.startup()
+        pack = await capability_pack.get_pack()
+        by_name = {item.tool_name: item for item in pack.tools}
+        task_service = TaskService(store_group, SSEHub())
+        mcp_task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="执行 MCP 工具测试",
+                idempotency_key="feature-032-mcp-runtime",
+            )
+        )
+        assert created is True
+
+        assert "mcp.demo.echo" in by_name
+        assert by_name["mcp.demo.echo"].availability.value == "available"
+        assert by_name["sessions.list"].availability.value == "degraded"
+        assert by_name["subagents.spawn"].availability.value == "unavailable"
+        assert by_name["mcp.servers.list"].availability.value == "available"
+
+        tools_result = await tool_broker.execute(
+            "mcp.tools.list",
+            {},
+            ExecutionContext(
+                task_id=mcp_task_id,
+                trace_id=f"trace-{mcp_task_id}",
+                caller="tests",
+                profile=ToolProfile.MINIMAL,
+            ),
+        )
+        echo_result = await tool_broker.execute(
+            "mcp.demo.echo",
+            {"text": "hello"},
+            ExecutionContext(
+                task_id=mcp_task_id,
+                trace_id=f"trace-{mcp_task_id}",
+                caller="tests",
+                profile=ToolProfile.STANDARD,
+            ),
+        )
+
+        assert tools_result.is_error is False
+        tools_payload = json.loads(tools_result.output)
+        assert {item["registered_name"] for item in tools_payload["tools"]} == {"mcp.demo.echo"}
+
+        assert echo_result.is_error is False
+        echo_payload = json.loads(echo_result.output)
+        assert echo_payload["server_name"] == "demo"
+        assert echo_payload["tool_name"] == "echo"
+        assert echo_payload["content"][0]["text"] == "echo:hello"
+    finally:
+        await store_group.conn.close()
+
+
+async def test_browser_tools_persist_session_and_follow_clickable_refs(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请打开站点并点击链接",
+                idempotency_key="feature-032-browser-session",
+            )
+        )
+        assert created is True
+
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请打开站点并点击链接",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-032-browser",
+            worker_id="worker.test",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="subagent",
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:test",
+            profile=ToolProfile.STANDARD,
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://example.com":
+                return httpx.Response(
+                    200,
+                    text=(
+                        "<html><head><title>Home</title></head>"
+                        "<body><a href='/docs'>Docs</a><p>Landing page.</p></body></html>"
+                    ),
+                    headers={"content-type": "text/html"},
+                )
+            if str(request.url) == "https://example.com/docs":
+                return httpx.Response(
+                    200,
+                    text=(
+                        "<html><head><title>Docs</title></head>"
+                        "<body><p>Documentation page.</p></body></html>"
+                    ),
+                    headers={"content-type": "text/html"},
+                )
+            return httpx.Response(404, text="missing", headers={"content-type": "text/plain"})
+
+        transport = httpx.MockTransport(handler)
+        real_async_client = httpx.AsyncClient
+
+        def client_factory(*args, **kwargs):
+            return real_async_client(*args, transport=transport, **kwargs)
+
+        with patch(
+            "octoagent.gateway.services.capability_pack.httpx.AsyncClient",
+            new=client_factory,
+        ), bind_execution_context(runtime_context):
+            opened = await tool_broker.execute(
+                "browser.open",
+                {"url": "https://example.com"},
+                broker_context,
+            )
+            snapshot = await tool_broker.execute("browser.snapshot", {}, broker_context)
+            clicked = await tool_broker.execute(
+                "browser.act",
+                {"kind": "click", "ref": "link:1"},
+                broker_context,
+            )
+            status = await tool_broker.execute("browser.status", {}, broker_context)
+            closed = await tool_broker.execute("browser.close", {}, broker_context)
+            missing = await tool_broker.execute("browser.status", {}, broker_context)
+
+        assert opened.is_error is False
+        opened_payload = json.loads(opened.output)
+        assert opened_payload["title"] == "Home"
+        assert opened_payload["links"][0]["ref"] == "link:1"
+
+        assert snapshot.is_error is False
+        snapshot_payload = json.loads(snapshot.output)
+        assert "Landing page." in snapshot_payload["text_preview"]
+
+        assert clicked.is_error is False
+        clicked_payload = json.loads(clicked.output)
+        assert clicked_payload["clicked"]["url"] == "https://example.com/docs"
+        assert clicked_payload["title"] == "Docs"
+
+        assert status.is_error is False
+        status_payload = json.loads(status.output)
+        assert status_payload["final_url"] == "https://example.com/docs"
+
+        assert closed.is_error is False
+        assert json.loads(closed.output)["closed"] is True
+        assert json.loads(missing.output)["status"] == "missing"
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_subagent_management_tools_list_kill_and_steer_descendants(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请启动并管理一个子代理",
+                idempotency_key="feature-032-subagents-manage",
+            )
+        )
+        assert created is True
+
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请启动并管理一个子代理",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-032-manage",
+            worker_id="worker.test",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="subagent",
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:test",
+            profile=ToolProfile.STANDARD,
+        )
+
+        child_task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请先停下来等待我下一步指令",
+                idempotency_key="feature-032-subagents-child-manage",
+                metadata={
+                    "parent_task_id": task_id,
+                    "parent_work_id": plan.work.work_id,
+                    "requested_worker_type": "research",
+                    "target_kind": "subagent",
+                    "spawned_by": "tests",
+                    "child_title": "待命子任务",
+                },
+            )
+        )
+        assert created is True
+
+        child_plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=child_task_id,
+                trace_id=f"trace-{child_task_id}",
+                user_text="请先停下来等待我下一步指令",
+                worker_capability="llm_generation",
+                metadata={
+                    "parent_task_id": task_id,
+                    "parent_work_id": plan.work.work_id,
+                    "requested_worker_type": "research",
+                    "target_kind": "subagent",
+                },
+            )
+        )
+        child_work = child_plan.work
+
+        fake_session = ExecutionConsoleSession(
+            session_id="child-session-001",
+            task_id=child_task_id,
+            backend=ExecutionBackend.INLINE,
+            backend_job_id="child-job-001",
+            state=ExecutionSessionState.WAITING_INPUT,
+            interactive=True,
+            input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
+            started_at=datetime.now(tz=UTC),
+            updated_at=datetime.now(tz=UTC),
+            live=True,
+            can_attach_input=True,
+            can_cancel=True,
+        )
+        attach_result = AttachInputResult(
+            task_id=child_task_id,
+            session_id=fake_session.session_id,
+            request_id="req-child-001",
+            artifact_id="artifact-child-001",
+            delivered_live=True,
+            approval_id=None,
+        )
+
+        async def _session_lookup(task_id_arg: str):
+            if task_id_arg == child_task_id:
+                return fake_session
+            return None
+
+        with (
+            patch.object(
+                task_runner,
+                "get_execution_session",
+                new=AsyncMock(side_effect=_session_lookup),
+            ),
+            patch.object(
+                task_runner,
+                "attach_input",
+                new=AsyncMock(return_value=attach_result),
+            ) as attach_mock,
+            patch.object(
+                task_runner,
+                "cancel_task",
+                new=AsyncMock(return_value=True),
+            ) as cancel_mock,
+            bind_execution_context(runtime_context),
+        ):
+            list_result = await tool_broker.execute(
+                "subagents.list",
+                {"include_terminal": True},
+                broker_context,
+            )
+            steer_result = await tool_broker.execute(
+                "subagents.steer",
+                {"task_id": child_task_id, "text": "继续，但先输出一版摘要"},
+                broker_context,
+            )
+            kill_result = await tool_broker.execute(
+                "subagents.kill",
+                {"work_id": child_work.work_id, "reason": "parent-stop"},
+                broker_context,
+            )
+
+        assert list_result.is_error is False
+        list_payload = json.loads(list_result.output)
+        assert list_payload["count"] >= 1
+        item = next(entry for entry in list_payload["items"] if entry["task_id"] == child_task_id)
+        assert item["steerable"] is True
+        assert item["execution_session"]["session_id"] == fake_session.session_id
+
+        assert steer_result.is_error is False
+        attach_mock.assert_awaited_once_with(
+            child_task_id,
+            "继续，但先输出一版摘要",
+            actor=f"parent:{task_id}",
+            approval_id=None,
+        )
+
+        assert kill_result.is_error is False
+        cancel_mock.assert_awaited_once_with(child_task_id)
+        updated_child = await store_group.work_store.get_work(child_work.work_id)
+        assert updated_child is not None
+        assert updated_child.status.value == "cancelled"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

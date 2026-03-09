@@ -387,12 +387,19 @@ class TestControlPlaneApi:
         payload = resp.json()
         pack = payload["resources"]["capability_pack"]["pack"]
         tool_names = {item["tool_name"] for item in pack["tools"]}
-        assert len(pack["tools"]) >= 15
+        assert len(pack["tools"]) >= 20
         assert {
             "subagents.spawn",
+            "subagents.list",
+            "subagents.kill",
+            "subagents.steer",
             "work.split",
             "work.merge",
+            "work.delete",
             "web.fetch",
+            "browser.snapshot",
+            "mcp.servers.list",
+            "mcp.tools.list",
             "memory.search",
         }.issubset(tool_names)
 
@@ -403,6 +410,7 @@ class TestControlPlaneApi:
         action_ids = {item["action_id"] for item in payload["registry"]["actions"]}
         assert "work.split" in action_ids
         assert "work.merge" in action_ids
+        assert "work.delete" in action_ids
 
     async def test_work_split_and_merge_actions_create_child_work_lifecycle(
         self,
@@ -497,6 +505,104 @@ class TestControlPlaneApi:
         merged = await control_plane_app.state.store_group.work_store.get_work(plan.work.work_id)
         assert merged is not None
         assert merged.status.value == "merged"
+
+    async def test_work_cancel_and_delete_actions_cascade_to_child_works(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        parent_task_id = await _create_task(
+            control_plane_app,
+            text="请先暂停这项父 work",
+            thread_id="thread-work-cascade-parent",
+        )
+        parent = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=parent_task_id,
+                trace_id=f"trace-{parent_task_id}",
+                user_text="请先暂停这项父 work",
+                worker_capability="llm_generation",
+                metadata={"delegation_pause": "approval"},
+            )
+        )
+        child_task_id = await _create_task(
+            control_plane_app,
+            text="请先暂停这项 child work",
+            thread_id="thread-work-cascade-child",
+        )
+        child = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=child_task_id,
+                trace_id=f"trace-{child_task_id}",
+                user_text="请先暂停这项 child work",
+                worker_capability="llm_generation",
+                metadata={
+                    "delegation_pause": "approval",
+                    "parent_work_id": parent.work.work_id,
+                    "parent_task_id": parent_task_id,
+                    "requested_worker_type": "research",
+                    "target_kind": "subagent",
+                },
+            )
+        )
+
+        cancel_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "work.cancel",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {"work_id": parent.work.work_id},
+            },
+        )
+
+        assert cancel_resp.status_code == 200
+        cancel_payload = cancel_resp.json()["result"]
+        assert cancel_payload["code"] == "WORK_CANCELLED"
+
+        parent_after_cancel = await control_plane_app.state.store_group.work_store.get_work(
+            parent.work.work_id
+        )
+        child_after_cancel = await control_plane_app.state.store_group.work_store.get_work(
+            child.work.work_id
+        )
+        assert parent_after_cancel is not None
+        assert child_after_cancel is not None
+        assert parent_after_cancel.status.value == "cancelled"
+        assert child_after_cancel.status.value == "cancelled"
+
+        delete_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "work.delete",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {"work_id": parent.work.work_id},
+            },
+        )
+
+        assert delete_resp.status_code == 200
+        delete_payload = delete_resp.json()["result"]
+        assert delete_payload["code"] == "WORK_DELETED"
+
+        parent_after_delete = await control_plane_app.state.store_group.work_store.get_work(
+            parent.work.work_id
+        )
+        child_after_delete = await control_plane_app.state.store_group.work_store.get_work(
+            child.work.work_id
+        )
+        assert parent_after_delete is not None
+        assert child_after_delete is not None
+        assert parent_after_delete.status.value == "deleted"
+        assert child_after_delete.status.value == "deleted"
 
     async def test_import_workbench_detect_preview_run_and_inspect(
         self,

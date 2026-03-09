@@ -43,6 +43,16 @@ class DelegationPlan:
     deferred_reason: str = ""
 
 
+_WORK_TERMINAL_STATUSES = {
+    WorkStatus.SUCCEEDED,
+    WorkStatus.FAILED,
+    WorkStatus.CANCELLED,
+    WorkStatus.MERGED,
+    WorkStatus.TIMED_OUT,
+    WorkStatus.DELETED,
+}
+
+
 class DelegationPlaneService:
     """统一 Work / delegation / multi-worker 路由平面。"""
 
@@ -303,18 +313,10 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
-        if work.pipeline_run_id:
-            run = await self._stores.work_store.get_pipeline_run(work.pipeline_run_id)
-            if run is not None and run.status not in {
-                PipelineRunStatus.SUCCEEDED,
-                PipelineRunStatus.FAILED,
-                PipelineRunStatus.CANCELLED,
-            }:
-                await self._pipeline_engine.cancel_run(
-                    work.pipeline_run_id,
-                    reason=f"work_cancelled:{reason}",
-                )
-        return await self._transition_work(work_id, status=WorkStatus.CANCELLED, reason=reason)
+        descendants = await self.list_descendant_works(work_id)
+        for child in reversed(descendants):
+            await self._cancel_one_work(child, reason=f"{reason}:cascade")
+        return await self._cancel_one_work(work, reason=reason)
 
     async def escalate_work(
         self, work_id: str, *, reason: str = "manual_escalation"
@@ -388,6 +390,15 @@ class DelegationPlaneService:
     async def merge_work(self, work_id: str, *, summary: str = "merged") -> Work | None:
         return await self._transition_work(work_id, status=WorkStatus.MERGED, reason=summary)
 
+    async def delete_work(self, work_id: str, *, reason: str = "deleted") -> Work | None:
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            return None
+        descendants = await self.list_descendant_works(work_id)
+        for child in reversed(descendants):
+            await self._transition_work(child.work_id, status=WorkStatus.DELETED, reason=reason)
+        return await self._transition_work(work_id, status=WorkStatus.DELETED, reason=reason)
+
     async def resume_pipeline(
         self,
         work_id: str,
@@ -422,6 +433,16 @@ class DelegationPlaneService:
 
     async def list_works(self, *, task_id: str | None = None) -> list[Work]:
         return await self._stores.work_store.list_works(task_id=task_id)
+
+    async def list_descendant_works(self, work_id: str) -> list[Work]:
+        pending = [work_id]
+        descendants: list[Work] = []
+        while pending:
+            parent_id = pending.pop()
+            children = await self._stores.work_store.list_works(parent_work_id=parent_id)
+            descendants.extend(children)
+            pending.extend(item.work_id for item in children)
+        return descendants
 
     async def list_pipeline_runs(self, *, task_id: str | None = None):
         return await self._stores.work_store.list_pipeline_runs(task_id=task_id)
@@ -780,6 +801,22 @@ class DelegationPlaneService:
         }
         return mapping[status]
 
+    async def _cancel_one_work(self, work: Work, *, reason: str) -> Work | None:
+        if work.pipeline_run_id:
+            run = await self._stores.work_store.get_pipeline_run(work.pipeline_run_id)
+            if run is not None and run.status not in {
+                PipelineRunStatus.SUCCEEDED,
+                PipelineRunStatus.FAILED,
+                PipelineRunStatus.CANCELLED,
+            }:
+                await self._pipeline_engine.cancel_run(
+                    work.pipeline_run_id,
+                    reason=f"work_cancelled:{reason}",
+                )
+        if work.status in _WORK_TERMINAL_STATUSES:
+            return await self._stores.work_store.get_work(work.work_id)
+        return await self._transition_work(work.work_id, status=WorkStatus.CANCELLED, reason=reason)
+
     async def _transition_work(
         self,
         work_id: str,
@@ -797,7 +834,7 @@ class DelegationPlaneService:
                 "updated_at": datetime.now(tz=UTC),
                 "completed_at": (
                     datetime.now(tz=UTC)
-                    if status in {WorkStatus.CANCELLED, WorkStatus.MERGED}
+                    if status in {WorkStatus.CANCELLED, WorkStatus.MERGED, WorkStatus.DELETED}
                     else work.completed_at
                 ),
             }

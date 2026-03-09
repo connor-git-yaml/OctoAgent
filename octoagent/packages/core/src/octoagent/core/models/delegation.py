@@ -39,6 +39,7 @@ class WorkStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    DELETED = "deleted"
 
 
 class DelegationTargetKind(StrEnum):

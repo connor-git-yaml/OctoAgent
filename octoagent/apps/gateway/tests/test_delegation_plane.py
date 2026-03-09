@@ -225,6 +225,59 @@ async def test_retry_work_requeues_successful_preflight_and_dispatches(tmp_path:
     await store_group.conn.close()
 
 
+async def test_cancel_work_cascades_to_descendant_works(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    parent_task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请先暂停父 work",
+            idempotency_key="delegation-parent-cancel-cascade",
+        )
+    )
+    parent = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=parent_task_id,
+            trace_id=f"trace-{parent_task_id}",
+            user_text="请先暂停父 work",
+            worker_capability="llm_generation",
+            metadata={"delegation_pause": "approval"},
+        )
+    )
+
+    child_task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请先暂停子 work",
+            idempotency_key="delegation-child-cancel-cascade",
+        )
+    )
+    child = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=child_task_id,
+            trace_id=f"trace-{child_task_id}",
+            user_text="请先暂停子 work",
+            worker_capability="llm_generation",
+            metadata={
+                "delegation_pause": "approval",
+                "parent_work_id": parent.work.work_id,
+                "parent_task_id": parent_task_id,
+            },
+        )
+    )
+
+    cancelled = await delegation_plane.cancel_work(parent.work.work_id, reason="cascade_cancelled")
+    assert cancelled is not None
+    assert cancelled.status.value == "cancelled"
+
+    child_after = await store_group.work_store.get_work(child.work.work_id)
+    child_run = await store_group.work_store.get_pipeline_run(child.work.pipeline_run_id)
+    assert child_after is not None
+    assert child_after.status.value == "cancelled"
+    assert child_run is not None
+    assert child_run.status.value == "cancelled"
+    assert child_run.pause_reason == "work_cancelled:cascade_cancelled:cascade"
+
+    await store_group.conn.close()
+
+
 async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path: Path) -> None:
     store_group, task_service, delegation_plane = await _build_services(tmp_path)
     task_id, _ = await task_service.create_task(
