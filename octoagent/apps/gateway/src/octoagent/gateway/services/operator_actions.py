@@ -799,6 +799,9 @@ class OperatorActionService:
         for event in reversed(events):
             if event.type != EventType.USER_MESSAGE:
                 continue
+            text = str(event.payload.get("text", "")).strip()
+            if text:
+                return text
             preview = str(event.payload.get("text_preview", "")).strip()
             if preview:
                 return preview

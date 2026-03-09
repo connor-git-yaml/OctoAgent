@@ -3019,6 +3019,9 @@ class ControlPlaneService:
         events = await self._stores.event_store.get_events_for_task(task_id)
         for event in reversed(events):
             if event.type == EventType.USER_MESSAGE:
+                text = str(event.payload.get("text", "")).strip()
+                if text:
+                    return text
                 return str(event.payload.get("text_preview", "")).strip()
         return ""
 

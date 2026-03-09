@@ -1158,6 +1158,13 @@ M3 产品化集成约束（2026-03-07）：
 
 说明：上下文压缩 / auto-compaction 不属于 Memory Core 本体；Memory 仅提供 `before_compaction_flush()` 钩子承接 cheap/summarizer 模型产出的摘要与 WriteProposal 草案。
 
+Feature 034（2026-03-09，M4 hardening）补充约束：
+
+- 上下文压缩必须落在主 Agent / Worker 的真实 prompt assembly 路径，不能只做离线 helper
+- Subagent 默认不接入上下文压缩，避免 delegation 运行链双重压缩
+- compaction 必须产生 request snapshot artifact、summary artifact 与结构化事件，并通过 maintenance/flush evidence 链接入 Memory
+- summarizer 不可用时必须优雅降级到原始历史，不能静默丢轮次或让主模型调用一起失败
+
 ---
 
 ### 8.8 Execution Plane：Worker + JobRunner + Sandboxing
@@ -2766,6 +2773,7 @@ M3 核心对象关系（2026-03-08 补充）：
 ### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
 
 - 本阶段聚焦“把已经 user-ready 的 M3 做得更丰富、更顺手、更有陪伴感”，而不是补 M3 主闭环缺口
+- [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
 - [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
 - [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
 - [ ] Progressive Web App / companion surfaces / remote tunnel polish
@@ -2774,6 +2782,7 @@ M3 核心对象关系（2026-03-08 补充）：
 M4 约束：
 
 - M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
+- 上下文压缩类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
 - 文件工作台优先服务 artifacts / configs / generated files / project workspace，不以“内建 IDE”作为第一目标
 - 语音、PWA、remote access 等增强能力不得破坏现有 secret / approval / audit / device trust 边界
 

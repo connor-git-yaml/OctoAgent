@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import hashlib
 import inspect
 from datetime import UTC, datetime
 from typing import Any
@@ -38,6 +39,7 @@ from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.models.payloads import (
     ArtifactCreatedPayload,
     CheckpointSavedPayload,
+    ContextCompactionCompletedPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
@@ -53,8 +55,17 @@ from octoagent.core.store.transaction import (
     append_event_only,
     create_task_with_initial_events,
 )
+from octoagent.memory import (
+    EvidenceRef,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceCommandKind,
+    MemoryPartition,
+    MemoryService,
+    init_memory_db,
+)
 from ulid import ULID
 
+from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 
 log = structlog.get_logger()
@@ -71,6 +82,7 @@ class TaskService:
     def __init__(self, store_group: StoreGroup, sse_hub=None) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
+        self._context_compaction = ContextCompactionService(store_group)
 
     async def create_task(self, message: NormalizedMessage) -> tuple[str, bool]:
         """创建任务（消息接收入口）
@@ -143,6 +155,7 @@ class TaskService:
             payload=UserMessagePayload(
                 text_preview=text_preview,
                 text_length=len(message.text),
+                text=message.text,
                 attachment_count=len(message.attachments),
                 metadata=message.metadata,
             ).model_dump(),
@@ -206,6 +219,7 @@ class TaskService:
                 payload=UserMessagePayload(
                     text_preview=text_preview,
                     text_length=len(text),
+                    text=text,
                     attachment_count=attachment_count,
                     metadata=metadata or {},
                 ).model_dump(),
@@ -253,22 +267,36 @@ class TaskService:
         name: str,
         description: str,
         content: str,
+        artifact_id: str | None = None,
+        allow_existing: bool = False,
         trace_id: str | None = None,
         emit_event: bool = True,
         session_id: str | None = None,
         source: str = "",
     ) -> Artifact:
         """创建文本 Artifact 并写入 ARTIFACT_CREATED 事件。"""
+        if artifact_id and allow_existing:
+            existing = await self._stores.artifact_store.get_artifact(artifact_id)
+            if existing is not None:
+                return existing
+
         artifact = Artifact(
-            artifact_id=str(ULID()),
+            artifact_id=artifact_id or str(ULID()),
             task_id=task_id,
             ts=datetime.now(UTC),
             name=name,
             description=description,
             parts=[ArtifactPart(type=PartType.TEXT, content=content)],
         )
-        await self._stores.artifact_store.put_artifact(artifact, content.encode("utf-8"))
-        await self._stores.conn.commit()
+        try:
+            await self._stores.artifact_store.put_artifact(artifact, content.encode("utf-8"))
+            await self._stores.conn.commit()
+        except aiosqlite.IntegrityError:
+            if artifact_id and allow_existing:
+                existing = await self._stores.artifact_store.get_artifact(artifact_id)
+                if existing is not None:
+                    return existing
+            raise
         if emit_event:
             await self._write_artifact_created(
                 task_id=task_id,
@@ -324,6 +352,16 @@ class TaskService:
             if resume_state_snapshot and resume_state_snapshot.get("artifact_id")
             else None
         )
+        request_artifact_id = (
+            str(resume_state_snapshot.get("request_artifact_id"))
+            if resume_state_snapshot and resume_state_snapshot.get("request_artifact_id")
+            else ""
+        )
+        model_call_started_idempotency_key = (
+            f"{llm_call_idempotency_key}:model_call_started"
+        )
+        compaction_idempotency_key = f"{llm_call_idempotency_key}:context_compaction"
+        compiled_context: CompiledTaskContext | None = None
         try:
             # 1. STATE_TRANSITION: CREATED -> RUNNING（恢复路径按 checkpoint 起点跳过）
             if self._should_execute_node("state_running", resume_from_node):
@@ -352,9 +390,42 @@ class TaskService:
                     },
                 )
 
-            # 2. MODEL_CALL_STARTED 事件
-            request_summary = f"User asks: {user_text[:100]}"
+            compiled_context = await self._build_task_context(
+                task_id=task_id,
+                fallback_user_text=user_text,
+                llm_service=llm_service,
+                dispatch_metadata=dispatch_metadata or {},
+                worker_capability=worker_capability,
+                tool_profile=tool_profile,
+            )
+            request_summary = compiled_context.request_summary
             if self._should_execute_node("model_call_started", resume_from_node):
+                request_artifact_id = await self._store_request_snapshot_artifact(
+                    task_id=task_id,
+                    compiled=compiled_context,
+                    llm_call_idempotency_key=llm_call_idempotency_key,
+                    trace_id=trace_id,
+                    session_id=(
+                        execution_context.session_id
+                        if execution_context is not None
+                        else None
+                    ),
+                )
+                if compiled_context.compacted:
+                    await self._record_context_compaction_once(
+                        task_id=task_id,
+                        trace_id=trace_id,
+                        compiled=compiled_context,
+                        llm_call_idempotency_key=llm_call_idempotency_key,
+                        compaction_idempotency_key=compaction_idempotency_key,
+                        request_artifact_id=request_artifact_id,
+                        session_id=(
+                            execution_context.session_id
+                            if execution_context is not None
+                            else None
+                        ),
+                        worker_capability=worker_capability,
+                    )
                 started_event = await self._append_event_only_with_retry(
                     task_id=task_id,
                     event_builder=lambda seq: Event(
@@ -367,8 +438,12 @@ class TaskService:
                         payload=ModelCallStartedPayload(
                             model_alias=effective_alias,
                             request_summary=request_summary,
+                            artifact_ref=request_artifact_id or None,
                         ).model_dump(),
                         trace_id=trace_id,
+                        causality=EventCausality(
+                            idempotency_key=model_call_started_idempotency_key
+                        ),
                     ),
                 )
                 if self._sse_hub:
@@ -383,6 +458,7 @@ class TaskService:
                         "request_summary": request_summary,
                         "model_alias": effective_alias,
                         "llm_call_idempotency_key": llm_call_idempotency_key,
+                        "request_artifact_id": request_artifact_id,
                     },
                 )
 
@@ -398,8 +474,12 @@ class TaskService:
                     with bind_execution_context(execution_context):
                         llm_result = await self._call_llm_service(
                             llm_service=llm_service,
-                            user_text=user_text,
-                            model_alias=model_alias,
+                            prompt_or_messages=(
+                                compiled_context.messages
+                                if compiled_context is not None
+                                else user_text
+                            ),
+                            model_alias=effective_alias,
                             task_id=task_id,
                             trace_id=trace_id,
                             dispatch_metadata=dispatch_metadata or {},
@@ -495,7 +575,7 @@ class TaskService:
         self,
         *,
         llm_service,
-        user_text: str,
+        prompt_or_messages: str | list[dict[str, str]],
         model_alias: str | None,
         task_id: str,
         trace_id: str,
@@ -533,7 +613,245 @@ class TaskService:
             if accepts_var_kwargs or key in accepted_names:
                 kwargs[key] = value
 
-        return await call_fn(user_text, **kwargs)
+        return await call_fn(prompt_or_messages, **kwargs)
+
+    async def _build_task_context(
+        self,
+        *,
+        task_id: str,
+        fallback_user_text: str,
+        llm_service,
+        dispatch_metadata: dict[str, str],
+        worker_capability: str | None,
+        tool_profile: str | None,
+    ) -> CompiledTaskContext:
+        return await self._context_compaction.build_context(
+            task_id=task_id,
+            fallback_user_text=fallback_user_text,
+            llm_service=llm_service,
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
+        )
+
+    async def _store_request_snapshot_artifact(
+        self,
+        *,
+        task_id: str,
+        compiled: CompiledTaskContext,
+        llm_call_idempotency_key: str,
+        trace_id: str,
+        session_id: str | None,
+    ) -> str:
+        artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name="llm-request-context",
+            description="主模型请求上下文快照",
+            content=compiled.snapshot_text,
+            artifact_id=self._derive_artifact_id(
+                "ctxreq",
+                task_id,
+                llm_call_idempotency_key,
+            ),
+            allow_existing=True,
+            trace_id=trace_id,
+            emit_event=False,
+            session_id=session_id,
+            source="llm-request-context",
+        )
+        return artifact.artifact_id
+
+    async def _record_context_compaction_once(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        compiled: CompiledTaskContext,
+        llm_call_idempotency_key: str,
+        compaction_idempotency_key: str,
+        request_artifact_id: str,
+        session_id: str | None,
+        worker_capability: str | None,
+    ) -> None:
+        step_key = f"context_compaction:{llm_call_idempotency_key}"
+        first_record = await self._stores.side_effect_ledger_store.try_record(
+            task_id=task_id,
+            step_key=step_key,
+            idempotency_key=compaction_idempotency_key,
+            effect_type="context_compaction",
+        )
+        if first_record:
+            event = await self._record_context_compaction(
+                task_id=task_id,
+                trace_id=trace_id,
+                compiled=compiled,
+                compaction_idempotency_key=compaction_idempotency_key,
+                request_artifact_id=request_artifact_id,
+                session_id=session_id,
+                worker_capability=worker_capability,
+            )
+            await self._stores.side_effect_ledger_store.set_result_ref(
+                compaction_idempotency_key,
+                event.event_id,
+            )
+            return
+
+        entry = await self._stores.side_effect_ledger_store.get_entry(compaction_idempotency_key)
+        if entry is not None and entry.result_ref:
+            return
+
+        existing_event = await self._find_event_by_idempotency_key(
+            task_id,
+            f"{compaction_idempotency_key}:event",
+        )
+        if existing_event is not None:
+            await self._stores.side_effect_ledger_store.set_result_ref(
+                compaction_idempotency_key,
+                existing_event.event_id,
+            )
+            return
+
+        event = await self._record_context_compaction(
+            task_id=task_id,
+            trace_id=trace_id,
+            compiled=compiled,
+            compaction_idempotency_key=compaction_idempotency_key,
+            request_artifact_id=request_artifact_id,
+            session_id=session_id,
+            worker_capability=worker_capability,
+        )
+        await self._stores.side_effect_ledger_store.set_result_ref(
+            compaction_idempotency_key,
+            event.event_id,
+        )
+
+    async def _record_context_compaction(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        compiled: CompiledTaskContext,
+        compaction_idempotency_key: str,
+        request_artifact_id: str,
+        session_id: str | None,
+        worker_capability: str | None,
+    ) -> Event:
+        if not compiled.compacted or not compiled.summary_text:
+            raise ValueError("仅在 compaction 成功时记录上下文压缩事件")
+
+        summary_artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name="context-compaction-summary",
+            description="小模型生成的历史压缩摘要",
+            content=compiled.summary_text,
+            artifact_id=self._derive_artifact_id(
+                "ctxsum",
+                task_id,
+                compaction_idempotency_key,
+            ),
+            allow_existing=True,
+            trace_id=trace_id,
+            emit_event=False,
+            session_id=session_id,
+            source="context-compaction-summary",
+        )
+
+        memory_flush_run_id = await self._persist_compaction_flush(
+            task_id=task_id,
+            summary_text=compiled.summary_text,
+            summary_artifact_id=summary_artifact.artifact_id,
+            request_artifact_id=request_artifact_id,
+            flush_idempotency_key=f"{compaction_idempotency_key}:flush",
+            worker_capability=worker_capability,
+            compressed_turn_count=compiled.compressed_turn_count,
+        )
+
+        event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.CONTEXT_COMPACTION_COMPLETED,
+                actor=ActorType.SYSTEM,
+                payload=ContextCompactionCompletedPayload(
+                    model_alias=compiled.summary_model_alias or "summarizer",
+                    input_tokens_before=compiled.raw_tokens,
+                    input_tokens_after=compiled.final_tokens,
+                    compressed_turn_count=compiled.compressed_turn_count,
+                    kept_turn_count=compiled.kept_turn_count,
+                    summary_artifact_ref=summary_artifact.artifact_id,
+                    request_artifact_ref=request_artifact_id or None,
+                    memory_flush_run_id=memory_flush_run_id or None,
+                    reason=compiled.compaction_reason,
+                ).model_dump(),
+                trace_id=trace_id,
+                causality=EventCausality(
+                    idempotency_key=f"{compaction_idempotency_key}:event"
+                ),
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+        return event
+
+    async def _persist_compaction_flush(
+        self,
+        *,
+        task_id: str,
+        summary_text: str,
+        summary_artifact_id: str,
+        request_artifact_id: str,
+        flush_idempotency_key: str,
+        worker_capability: str | None,
+        compressed_turn_count: int,
+    ) -> str:
+        task = await self.get_task(task_id)
+        if task is None or not task.scope_id:
+            return ""
+
+        try:
+            await init_memory_db(self._stores.conn)
+            memory_service = MemoryService(self._stores.conn)
+            run = await memory_service.run_memory_maintenance(
+                MemoryMaintenanceCommand(
+                    command_id=str(ULID()),
+                    kind=MemoryMaintenanceCommandKind.FLUSH,
+                    scope_id=task.scope_id,
+                    partition=MemoryPartition.WORK,
+                    reason="context compaction flush",
+                    requested_by=f"context_compaction:{worker_capability or 'main'}",
+                    idempotency_key=flush_idempotency_key,
+                    summary=summary_text,
+                    evidence_refs=[
+                        EvidenceRef(
+                            ref_id=summary_artifact_id,
+                            ref_type="artifact",
+                            snippet=summary_text[:120],
+                        ),
+                        EvidenceRef(
+                            ref_id=request_artifact_id,
+                            ref_type="artifact",
+                            snippet="llm request context snapshot",
+                        ),
+                    ],
+                    metadata={
+                        "source": "context_compaction",
+                        "task_id": task_id,
+                        "compressed_turn_count": compressed_turn_count,
+                    },
+                )
+            )
+            return run.run_id
+        except Exception as exc:
+            log.warning(
+                "context_compaction_flush_degraded",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return ""
 
     def _truncate_response_summary(self, text: str, suffix: str = "see artifact") -> str:
         """截断超出字节限制的响应摘要（UTF-8 字节数）"""
@@ -995,6 +1313,17 @@ class TaskService:
         text = str(error)
         return "idx_events_idempotency_key" in text or "events.idempotency_key" in text
 
+    async def _find_event_by_idempotency_key(
+        self,
+        task_id: str,
+        idempotency_key: str,
+    ) -> Event | None:
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
+            if event.causality.idempotency_key == idempotency_key:
+                return event
+        return None
+
     async def _append_event_only_with_retry(self, task_id: str, event_builder):
         """写事件并在 task_seq 冲突时重试。"""
         lock = await self._get_task_lock(task_id)
@@ -1010,6 +1339,15 @@ class TaskService:
                     )
                     return event
                 except aiosqlite.IntegrityError as e:
+                    if self._is_idempotency_conflict(e):
+                        idem_key = event.causality.idempotency_key
+                        if idem_key:
+                            existing = await self._find_event_by_idempotency_key(
+                                task_id,
+                                idem_key,
+                            )
+                            if existing is not None:
+                                return existing
                     if self._is_task_seq_conflict(e) and attempt < self._max_task_seq_retries:
                         log.warning(
                             "task_seq_conflict_retry",
@@ -1020,6 +1358,12 @@ class TaskService:
                     raise
 
         raise RuntimeError("failed to append event after retries")
+
+    @staticmethod
+    def _derive_artifact_id(prefix: str, *parts: str) -> str:
+        seed = "|".join(parts)
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+        return f"{prefix}-{digest}"
 
     async def _append_event_and_update_task_with_retry(
         self,

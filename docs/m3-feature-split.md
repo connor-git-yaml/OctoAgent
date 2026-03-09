@@ -590,6 +590,7 @@ M2 收口
 
 这些能力重要，但不应抢占 M3 的 user-ready 主闭环资源：
 
+- Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 辅助大模型，Subagent 排除）
 - 文件/工作区工作台：file browser / editor / diff / git-aware workspace inspector
 - 语音与多模态交互表面：STT / TTS / voice session / richer multimodal chat surfaces
 - Progressive Web App / companion surfaces / remote tunnel polish
@@ -598,4 +599,5 @@ M2 收口
 M4 原则：
 
 - 只在 M3 的 project / session / automation / runtime console 成型后推进
+- 像上下文压缩这类运行时增强必须接在真实主链路，而不是只做 demo helper
 - 以“增强体验”优先，不以重建核心产品对象为目标
