@@ -26,6 +26,7 @@ class TestProjectStore:
             slug="default",
             name="Default Project",
             is_default=True,
+            default_agent_profile_id="agent-profile-default",
         )
         workspace = Workspace(
             workspace_id="workspace-default-primary",
@@ -60,6 +61,7 @@ class TestProjectStore:
         assert created_workspace is True
         assert created_binding is True
         assert default_project.project_id == project.project_id
+        assert default_project.default_agent_profile_id == "agent-profile-default"
         assert resolved_workspace is not None
         assert resolved_workspace.workspace_id == workspace.workspace_id
         assert len(bindings) == 1

@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS projects (
     description  TEXT NOT NULL DEFAULT '',
     status       TEXT NOT NULL DEFAULT 'active',
     is_default   INTEGER NOT NULL DEFAULT 0,
+    default_agent_profile_id TEXT NOT NULL DEFAULT '',
     metadata     TEXT NOT NULL DEFAULT '{}',
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
@@ -274,6 +275,8 @@ CREATE TABLE IF NOT EXISTS works (
     route_reason            TEXT NOT NULL DEFAULT '',
     project_id              TEXT NOT NULL DEFAULT '',
     workspace_id            TEXT NOT NULL DEFAULT '',
+    agent_profile_id        TEXT NOT NULL DEFAULT '',
+    context_frame_id        TEXT NOT NULL DEFAULT '',
     tool_selection_id       TEXT NOT NULL DEFAULT '',
     selected_tools          TEXT NOT NULL DEFAULT '[]',
     pipeline_run_id         TEXT NOT NULL DEFAULT '',
@@ -287,6 +290,129 @@ CREATE TABLE IF NOT EXISTS works (
     completed_at            TEXT,
 
     FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
+_AGENT_PROFILES_DDL = """
+CREATE TABLE IF NOT EXISTS agent_profiles (
+    profile_id              TEXT PRIMARY KEY,
+    scope                   TEXT NOT NULL DEFAULT 'system',
+    project_id              TEXT NOT NULL DEFAULT '',
+    name                    TEXT NOT NULL,
+    persona_summary         TEXT NOT NULL DEFAULT '',
+    instruction_overlays    TEXT NOT NULL DEFAULT '[]',
+    model_alias             TEXT NOT NULL DEFAULT 'main',
+    tool_profile            TEXT NOT NULL DEFAULT 'standard',
+    policy_refs             TEXT NOT NULL DEFAULT '[]',
+    memory_access_policy    TEXT NOT NULL DEFAULT '{}',
+    context_budget_policy   TEXT NOT NULL DEFAULT '{}',
+    bootstrap_template_ids  TEXT NOT NULL DEFAULT '[]',
+    metadata                TEXT NOT NULL DEFAULT '{}',
+    version                 INTEGER NOT NULL DEFAULT 1,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
+);
+"""
+
+_OWNER_PROFILES_DDL = """
+CREATE TABLE IF NOT EXISTS owner_profiles (
+    owner_profile_id         TEXT PRIMARY KEY,
+    display_name             TEXT NOT NULL DEFAULT 'Owner',
+    preferred_address        TEXT NOT NULL DEFAULT '你',
+    timezone                 TEXT NOT NULL DEFAULT 'UTC',
+    locale                   TEXT NOT NULL DEFAULT 'zh-CN',
+    working_style            TEXT NOT NULL DEFAULT '',
+    interaction_preferences  TEXT NOT NULL DEFAULT '[]',
+    boundary_notes           TEXT NOT NULL DEFAULT '[]',
+    main_session_only_fields TEXT NOT NULL DEFAULT '[]',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    version                  INTEGER NOT NULL DEFAULT 1,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
+"""
+
+_OWNER_PROFILE_OVERLAYS_DDL = """
+CREATE TABLE IF NOT EXISTS owner_profile_overlays (
+    owner_overlay_id                 TEXT PRIMARY KEY,
+    owner_profile_id                 TEXT NOT NULL,
+    scope                            TEXT NOT NULL DEFAULT 'project',
+    project_id                       TEXT NOT NULL DEFAULT '',
+    workspace_id                     TEXT NOT NULL DEFAULT '',
+    assistant_identity_overrides     TEXT NOT NULL DEFAULT '{}',
+    working_style_override           TEXT NOT NULL DEFAULT '',
+    interaction_preferences_override TEXT NOT NULL DEFAULT '[]',
+    boundary_notes_override          TEXT NOT NULL DEFAULT '[]',
+    bootstrap_template_ids           TEXT NOT NULL DEFAULT '[]',
+    main_session_only_overrides      TEXT NOT NULL DEFAULT '[]',
+    metadata                         TEXT NOT NULL DEFAULT '{}',
+    version                          INTEGER NOT NULL DEFAULT 1,
+    created_at                       TEXT NOT NULL,
+    updated_at                       TEXT NOT NULL,
+
+    FOREIGN KEY (owner_profile_id) REFERENCES owner_profiles(owner_profile_id)
+);
+"""
+
+_BOOTSTRAP_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS bootstrap_sessions (
+    bootstrap_id             TEXT PRIMARY KEY,
+    project_id               TEXT NOT NULL DEFAULT '',
+    workspace_id             TEXT NOT NULL DEFAULT '',
+    owner_profile_id         TEXT NOT NULL DEFAULT '',
+    owner_overlay_id         TEXT NOT NULL DEFAULT '',
+    agent_profile_id         TEXT NOT NULL DEFAULT '',
+    status                   TEXT NOT NULL DEFAULT 'pending',
+    current_step             TEXT NOT NULL DEFAULT 'owner_basics',
+    steps                    TEXT NOT NULL DEFAULT '[]',
+    answers                  TEXT NOT NULL DEFAULT '{}',
+    generated_profile_ids    TEXT NOT NULL DEFAULT '[]',
+    generated_owner_revision INTEGER NOT NULL DEFAULT 0,
+    blocking_reason          TEXT NOT NULL DEFAULT '',
+    surface                  TEXT NOT NULL DEFAULT 'chat',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    completed_at             TEXT
+);
+"""
+
+_SESSION_CONTEXT_STATES_DDL = """
+CREATE TABLE IF NOT EXISTS session_context_states (
+    session_id            TEXT PRIMARY KEY,
+    thread_id             TEXT NOT NULL DEFAULT '',
+    project_id            TEXT NOT NULL DEFAULT '',
+    workspace_id          TEXT NOT NULL DEFAULT '',
+    task_ids              TEXT NOT NULL DEFAULT '[]',
+    recent_turn_refs      TEXT NOT NULL DEFAULT '[]',
+    recent_artifact_refs  TEXT NOT NULL DEFAULT '[]',
+    rolling_summary       TEXT NOT NULL DEFAULT '',
+    summary_artifact_id   TEXT NOT NULL DEFAULT '',
+    last_context_frame_id TEXT NOT NULL DEFAULT '',
+    updated_at            TEXT NOT NULL
+);
+"""
+
+_CONTEXT_FRAMES_DDL = """
+CREATE TABLE IF NOT EXISTS context_frames (
+    context_frame_id       TEXT PRIMARY KEY,
+    task_id                TEXT NOT NULL DEFAULT '',
+    session_id             TEXT NOT NULL DEFAULT '',
+    project_id             TEXT NOT NULL DEFAULT '',
+    workspace_id           TEXT NOT NULL DEFAULT '',
+    agent_profile_id       TEXT NOT NULL DEFAULT '',
+    owner_profile_id       TEXT NOT NULL DEFAULT '',
+    owner_overlay_id       TEXT NOT NULL DEFAULT '',
+    owner_profile_revision INTEGER,
+    bootstrap_session_id   TEXT,
+    system_blocks          TEXT NOT NULL DEFAULT '[]',
+    recent_summary         TEXT NOT NULL DEFAULT '',
+    memory_hits            TEXT NOT NULL DEFAULT '[]',
+    delegation_context     TEXT NOT NULL DEFAULT '{}',
+    budget                 TEXT NOT NULL DEFAULT '{}',
+    degraded_reason        TEXT NOT NULL DEFAULT '',
+    source_refs            TEXT NOT NULL DEFAULT '[]',
+    created_at             TEXT NOT NULL
 );
 """
 
@@ -375,6 +501,8 @@ _WORK_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_works_task_created ON works(task_id, created_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_status_updated ON works(status, updated_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_parent_work ON works(parent_work_id, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_works_agent_profile ON works(agent_profile_id);",
+    "CREATE INDEX IF NOT EXISTS idx_works_context_frame ON works(context_frame_id);",
     (
         "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_runs_work_updated "
         "ON skill_pipeline_runs(work_id, updated_at DESC);"
@@ -386,6 +514,41 @@ _WORK_INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_checkpoints_run_created "
         "ON skill_pipeline_checkpoints(run_id, created_at ASC);"
+    ),
+]
+
+_AGENT_CONTEXT_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_agent_profiles_scope_project "
+        "ON agent_profiles(scope, project_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_owner_profile_overlays_scope "
+        "ON owner_profile_overlays(scope, project_id, workspace_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_bootstrap_sessions_scope "
+        "ON bootstrap_sessions(project_id, workspace_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_session_context_states_thread "
+        "ON session_context_states(thread_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_session_context_states_project "
+        "ON session_context_states(project_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_context_frames_session_created "
+        "ON context_frames(session_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_context_frames_task_created "
+        "ON context_frames(task_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_context_frames_project_created "
+        "ON context_frames(project_id, created_at DESC);"
     ),
 ]
 
@@ -402,6 +565,22 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     task_columns = await _table_columns(conn, "tasks")
     if task_columns and "trace_id" not in task_columns:
         await conn.execute("ALTER TABLE tasks ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+
+    project_columns = await _table_columns(conn, "projects")
+    if project_columns and "default_agent_profile_id" not in project_columns:
+        await conn.execute(
+            "ALTER TABLE projects ADD COLUMN default_agent_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    work_columns = await _table_columns(conn, "works")
+    if work_columns and "agent_profile_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "context_frame_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''"
+        )
 
 
 async def init_db(conn: aiosqlite.Connection) -> None:
@@ -429,6 +608,12 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_PROJECT_SELECTOR_STATE_DDL)
     await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
     await conn.execute(_WORKS_DDL)
+    await conn.execute(_AGENT_PROFILES_DDL)
+    await conn.execute(_OWNER_PROFILES_DDL)
+    await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
+    await conn.execute(_BOOTSTRAP_SESSIONS_DDL)
+    await conn.execute(_SESSION_CONTEXT_STATES_DDL)
+    await conn.execute(_CONTEXT_FRAMES_DDL)
     await conn.execute(_SKILL_PIPELINE_RUNS_DDL)
     await conn.execute(_SKILL_PIPELINE_CHECKPOINTS_DDL)
     await _migrate_legacy_tables(conn)
@@ -443,6 +628,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _SIDE_EFFECT_LEDGER_INDEXES
         + _PROJECT_INDEXES
         + _WORK_INDEXES
+        + _AGENT_CONTEXT_INDEXES
     ):
         await conn.execute(idx_sql)
 

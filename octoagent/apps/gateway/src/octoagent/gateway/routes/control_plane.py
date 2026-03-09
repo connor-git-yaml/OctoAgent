@@ -37,6 +37,34 @@ async def get_control_sessions(control_plane=Depends(get_control_plane_service))
     return (await control_plane.get_session_projection()).model_dump(mode="json", by_alias=True)
 
 
+@router.get("/api/control/resources/agent-profiles")
+async def get_control_agent_profiles(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_agent_profiles_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/owner-profile")
+async def get_control_owner_profile(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_owner_profile_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/bootstrap-session")
+async def get_control_bootstrap_session(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_bootstrap_session_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/context-frames")
+async def get_control_context_continuity(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_context_continuity_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
 @router.get("/api/control/resources/capability-pack")
 async def get_control_capability_pack(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_capability_pack_document()).model_dump(
