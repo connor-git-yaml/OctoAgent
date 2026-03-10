@@ -1298,7 +1298,7 @@ class ControlPlaneService:
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="setup.review",
-                    label="审查 Setup 风险",
+                    label="检查配置",
                     action_id="setup.review",
                 ),
                 ControlPlaneCapability(
@@ -2287,7 +2287,7 @@ class ControlPlaneService:
         return self._completed_result(
             request=request,
             code="SETUP_REVIEW_READY",
-            message="Setup review 已生成。",
+            message="配置检查已完成。",
             data={"review": review.model_dump(mode="json")},
             resource_refs=[self._resource_ref("setup_governance", "setup:governance")],
         )
@@ -2307,7 +2307,7 @@ class ControlPlaneService:
             blocking = "、".join(review.blocking_reasons) or "存在未通过项"
             raise ControlPlaneActionError(
                 "SETUP_REVIEW_BLOCKED",
-                f"setup.review 未通过，当前不能 apply：{blocking}",
+                f"配置检查未通过，当前不能保存：{blocking}",
             )
 
         current_config = load_config(self._project_root)
@@ -2401,7 +2401,7 @@ class ControlPlaneService:
         return self._completed_result(
             request=request,
             code="SETUP_APPLIED",
-            message="Setup 已应用，主配置与治理设置已同步。",
+            message="配置已保存，主 Agent 与系统设置已同步。",
             data=data,
             resource_refs=self._dedupe_resource_refs(resource_refs),
         )
@@ -3422,7 +3422,7 @@ class ControlPlaneService:
         return self._completed_result(
             request=request,
             code="AGENT_PROFILE_SAVED",
-            message="主 Agent profile 已保存。",
+            message="主 Agent 设置已保存。",
             data={
                 "profile_id": saved.profile_id,
                 "project_id": saved.project_id,
@@ -4302,14 +4302,14 @@ class ControlPlaneService:
             "runtime.litellm_proxy_url": ConfigFieldHint(
                 field_path="runtime.litellm_proxy_url",
                 section="runtime",
-                label="LiteLLM Proxy URL",
+                label="LiteLLM 代理地址",
                 placeholder="http://localhost:4000",
                 order=20,
             ),
             "runtime.master_key_env": ConfigFieldHint(
                 field_path="runtime.master_key_env",
                 section="runtime",
-                label="Master Key 环境变量",
+                label="主密钥环境变量",
                 widget="env-ref",
                 sensitive=True,
                 order=30,
@@ -4317,16 +4317,18 @@ class ControlPlaneService:
             "providers": ConfigFieldHint(
                 field_path="providers",
                 section="providers",
-                label="Providers",
-                description="Provider 列表",
+                label="模型提供方列表",
+                description="这里配置 OpenRouter、OpenAI 等模型提供方。",
                 widget="provider-list",
+                placeholder="[]",
                 order=40,
             ),
             "model_aliases": ConfigFieldHint(
                 field_path="model_aliases",
                 section="models",
-                label="Model Aliases",
+                label="模型别名",
                 widget="alias-map",
+                placeholder="{}",
                 order=50,
             ),
             "front_door.mode": ConfigFieldHint(
@@ -4703,6 +4705,11 @@ class ControlPlaneService:
             if isinstance(item, dict) and item.get("enabled", True)
         ]
         model_aliases = config.get("model_aliases", {})
+        runtime_cfg = (
+            config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
+        )
+        llm_mode = str(runtime_cfg.get("llm_mode", "echo")).strip().lower() or "echo"
+        requires_real_model = llm_mode != "echo"
         front_door = (
             config.get("front_door", {}) if isinstance(config.get("front_door"), dict) else {}
         )
@@ -4719,7 +4726,7 @@ class ControlPlaneService:
                     title="配置草稿未通过校验",
                     summary=message,
                     blocking=True,
-                    recommended_action="先修正配置字段，再重新执行 setup.review。",
+                    recommended_action='先修正配置字段，再点击“检查配置”。',
                     source_ref=config_ref,
                 )
             )
@@ -4739,11 +4746,19 @@ class ControlPlaneService:
             provider_runtime_risks.append(
                 SetupRiskItem(
                     risk_id="provider_missing",
-                    severity="high",
+                    severity="high" if requires_real_model else "warning",
                     title="还没有可用 Provider",
-                    summary="当前没有任何启用中的 provider，主 Agent 不能调用真实模型。",
-                    blocking=True,
-                    recommended_action="至少配置 1 个 provider，并补齐对应 secret 引用。",
+                    summary=(
+                        "当前没有任何启用中的 provider，主 Agent 不能调用真实模型。"
+                        if requires_real_model
+                        else "当前处于体验模式，还没有接入真实模型；你仍然可以先用 Web 跑通基础流程。"
+                    ),
+                    blocking=requires_real_model,
+                    recommended_action=(
+                        "至少配置 1 个 provider，并补齐对应 secret 引用。"
+                        if requires_real_model
+                        else "如果你只是先体验本地 Web，可暂时保留为空；接 OpenRouter / OpenAI 时再补齐。"
+                    ),
                     source_ref=config_ref,
                 )
             )
@@ -4751,11 +4766,19 @@ class ControlPlaneService:
             provider_runtime_risks.append(
                 SetupRiskItem(
                     risk_id="main_alias_missing",
-                    severity="high",
+                    severity="high" if requires_real_model else "warning",
                     title="缺少 main 模型别名",
-                    summary="主 Agent 依赖 main alias，当前 setup 还没有可用的默认模型。",
-                    blocking=True,
-                    recommended_action="先为 main alias 指定 provider 和模型。",
+                    summary=(
+                        "主 Agent 依赖 main alias，当前 setup 还没有可用的默认模型。"
+                        if requires_real_model
+                        else "当前是体验模式，main alias 可以稍后再补；接入真实模型前需要配置好它。"
+                    ),
+                    blocking=requires_real_model,
+                    recommended_action=(
+                        "先为 main alias 指定 provider 和模型。"
+                        if requires_real_model
+                        else "准备接真实模型时，再为 main alias 指定 provider 和模型。"
+                    ),
                     source_ref=config_ref,
                 )
             )
@@ -4843,10 +4866,10 @@ class ControlPlaneService:
                 SetupRiskItem(
                     risk_id="agent_profile_missing",
                     severity="high",
-                    title="主 Agent profile 尚未配置",
-                    summary="当前 project 还没有清晰的主 Agent persona / model / tool profile。",
+                    title="主 Agent 设置还没有保存",
+                    summary="当前 project 还没有保存主 Agent 的名称、Persona 和默认能力。",
                     blocking=True,
-                    recommended_action="先保存一个 project-scope 的主 Agent profile。",
+                    recommended_action='先确认右侧主 Agent 名称和 Persona，再点击“保存配置”。',
                     source_ref=agent_ref,
                 )
             )
@@ -4856,9 +4879,9 @@ class ControlPlaneService:
                     risk_id="agent_profile_name_missing",
                     severity="high",
                     title="主 Agent 名称不能为空",
-                    summary="当前草稿缺少主 Agent name，setup.apply 无法保存该 profile。",
+                    summary="主 Agent 名称还是空的，当前设置还不能保存。",
                     blocking=True,
-                    recommended_action="先填写主 Agent 名称，再重新执行 setup.review。",
+                    recommended_action='先填写主 Agent 名称，再点击“检查配置”。',
                     source_ref=agent_ref,
                 )
             )
@@ -4898,14 +4921,23 @@ class ControlPlaneService:
         for item in skill_governance.items:
             if item.availability == "available":
                 continue
+            is_blocking = item.blocking and requires_real_model
             tool_skill_readiness_risks.append(
                 SetupRiskItem(
                     risk_id=f"{item.item_id}:not_ready",
-                    severity="high" if item.blocking else "warning",
+                    severity="high" if is_blocking else "warning",
                     title=f"{item.label} 尚未就绪",
-                    summary="；".join(item.missing_requirements) or f"状态={item.availability}",
-                    blocking=item.blocking,
-                    recommended_action=item.install_hint or "先处理缺失依赖后再启用该能力。",
+                    summary=(
+                        "；".join(item.missing_requirements) or f"状态={item.availability}"
+                        if requires_real_model
+                        else "当前处于体验模式，这项扩展能力可以稍后再接入。"
+                    ),
+                    blocking=is_blocking,
+                    recommended_action=(
+                        item.install_hint or "先处理缺失依赖后再启用该能力。"
+                        if requires_real_model
+                        else "如果你只是先跑通 Web，可暂时忽略；需要真实模型或扩展能力时再处理。"
+                    ),
                     source_ref=skill_ref,
                 )
             )
@@ -4919,7 +4951,7 @@ class ControlPlaneService:
                         summary=f"{target_key} 还没有完成 canonical secret binding。",
                         blocking=True,
                         recommended_action=(
-                            "先完成 secret configure/apply，再重新执行 setup.review。"
+                            '先完成 Secret 绑定后，再点击“检查配置”。'
                         ),
                         source_ref=config_ref,
                     )
@@ -4956,7 +4988,7 @@ class ControlPlaneService:
                         title="Secret 绑定已变更但尚未重载",
                         summary="当前 secret bindings 已更新，但 runtime 仍需要 reload / restart。",
                         blocking=False,
-                        recommended_action="完成 reload 或重启后再做 doctor / setup.apply。",
+                        recommended_action="完成 reload 或重启后，再做健康检查或保存配置。",
                         source_ref=diagnostics_ref,
                     )
                 )
@@ -5004,15 +5036,19 @@ class ControlPlaneService:
             risk_level = "info"
         next_actions: list[str] = []
         if any(item.blocking for item in secret_binding_risks):
-            next_actions.append("先补齐 Secret 绑定，再重新执行 setup.review。")
+            next_actions.append('先补齐 Secret 绑定，再点击“检查配置”。')
         if any(item.blocking for item in provider_runtime_risks):
             next_actions.append("先修正 Provider / model alias 配置，确保主 Agent 可调用模型。")
         if any(item.blocking for item in agent_autonomy_risks):
-            next_actions.append("先补齐主 Agent profile 的必填项并保存，再继续 apply。")
+            next_actions.append('先确认右侧主 Agent 名称和 Persona，再点击“保存配置”。')
         if any(item.blocking for item in tool_skill_readiness_risks):
             next_actions.append("先处理 skills / MCP 缺失依赖，避免首用时能力不可用。")
         if not next_actions:
-            next_actions.append("当前 setup review 已通过，可以继续执行 setup.apply。")
+            if requires_real_model:
+                next_actions.append('检查已通过，可以点击“保存配置”。')
+            else:
+                next_actions.append("当前是体验模式，可以先保存默认配置并直接开始使用。")
+                next_actions.append("后续如需真实模型，再补齐 Provider 和 main alias。")
         return SetupReviewSummary(
             ready=not bool(blocking_reasons),
             risk_level=risk_level,
@@ -5402,17 +5438,17 @@ class ControlPlaneService:
                 ),
                 definition(
                     "setup.review",
-                    "审查 Setup 风险",
+                    "检查配置",
                     category="setup",
-                    description="聚合 Provider / Channel / Agent / Skills 的风险和阻塞项。",
+                    description="统一检查模型、渠道、主 Agent 和技能配置是否可以保存。",
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),
                 definition(
                     "setup.apply",
-                    "应用 Setup 配置",
+                    "保存配置",
                     category="setup",
-                    description="在 review 通过后统一保存 Provider / Channel / Agent / Policy。",
+                    description="把当前主 Agent、模型和渠道设置一起保存。",
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),

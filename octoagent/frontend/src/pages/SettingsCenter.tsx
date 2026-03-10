@@ -19,12 +19,32 @@ import type {
 type FieldState = Record<string, string | boolean>;
 type FieldErrors = Record<string, string>;
 
+const DEFAULT_AGENT_NAME = "OctoAgent";
+const DEFAULT_AGENT_PERSONA =
+  "通用个人助手，优先帮助用户完成当前任务，并在需要时给出下一步建议。";
+const DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32\n::1/128";
+
 interface AgentDraft {
   scope: string;
   name: string;
   persona_summary: string;
   model_alias: string;
   tool_profile: string;
+}
+
+interface BlockingGuide {
+  guide_id: string;
+  section_id: string;
+  section_label: string;
+  risk: SetupRiskItem;
+}
+
+interface FieldGuide {
+  title: string;
+  description: string;
+  example?: string;
+  exampleLabel?: string;
+  actions?: Array<{ label: string; value: string }>;
 }
 
 function buildFieldState(
@@ -62,8 +82,9 @@ function buildConfigPayload(
 function buildAgentDraft(profile: AgentProfileItem | null): AgentDraft {
   return {
     scope: profile?.scope ?? "project",
-    name: profile?.name ?? "",
-    persona_summary: profile?.persona_summary ?? "",
+    name: profile?.name?.trim() ? profile.name : DEFAULT_AGENT_NAME,
+    persona_summary:
+      profile?.persona_summary?.trim() ? profile.persona_summary : DEFAULT_AGENT_PERSONA,
     model_alias: profile?.model_alias ?? "main",
     tool_profile: profile?.tool_profile ?? "standard",
   };
@@ -157,6 +178,178 @@ function renderRiskList(title: string, risks: SetupRiskItem[]) {
       </div>
     </div>
   );
+}
+
+function parseJsonFieldValue(
+  rawValue: string | boolean | undefined,
+  fallback: Record<string, unknown> | unknown[]
+): Record<string, unknown> | unknown[] {
+  const value = typeof rawValue === "string" ? rawValue.trim() : "";
+  if (!value) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, unknown> | unknown[];
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function detectPrimaryProviderId(fieldState: FieldState): string {
+  const providers = parseJsonFieldValue(fieldState.providers, []) as Array<Record<string, unknown>>;
+  const firstEnabled = providers.find(
+    (item) => typeof item?.id === "string" && item.enabled !== false
+  );
+  return typeof firstEnabled?.id === "string" ? firstEnabled.id : "openrouter";
+}
+
+function providerExampleJson(): string {
+  return JSON.stringify(
+    [
+      {
+        id: "openrouter",
+        name: "OpenRouter",
+        auth_type: "api_key",
+        api_key_env: "OPENROUTER_API_KEY",
+        enabled: true,
+      },
+    ],
+    null,
+    2
+  );
+}
+
+function modelAliasesExampleJson(providerId: string): string {
+  return JSON.stringify(
+    {
+      main: {
+        provider: providerId,
+        model: "openai/gpt-4.1-mini",
+      },
+      cheap: {
+        provider: providerId,
+        model: "openai/gpt-4.1-nano",
+      },
+    },
+    null,
+    2
+  );
+}
+
+function buildFieldGuide(
+  hint: ConfigFieldHint,
+  fieldState: FieldState,
+  usingEchoMode: boolean
+): FieldGuide | null {
+  if (hint.widget === "env-ref") {
+    return {
+      title: "怎么填",
+      description:
+        "这里只填写环境变量名，不要把真实 token 或 API Key 直接贴进来。真实值应放在 ~/.octoagent/.env 或 ~/.octoagent/.env.litellm 里。",
+    };
+  }
+  if (hint.field_path === "runtime.llm_mode") {
+    return {
+      title: "推荐选择",
+      description: usingEchoMode
+        ? "首次体验建议先保持 echo，这样不需要额外配置模型，也能跑通 Web 和任务流。"
+        : "当你准备接入真实模型时，再切换到 litellm 并补齐 Provider 与模型别名。",
+    };
+  }
+  if (hint.field_path === "providers") {
+    return {
+      title: "这里填什么",
+      description: usingEchoMode
+        ? "如果你现在只是先体验本地 Web，这里可以先留空。准备接 OpenRouter / OpenAI 时，再填一个 provider。"
+        : "这里填写模型提供方列表。通常先填一个 provider 就够了，例如 OpenRouter。",
+      exampleLabel: "OpenRouter 示例",
+      example: providerExampleJson(),
+      actions: [
+        { label: "填入 OpenRouter 示例", value: providerExampleJson() },
+        { label: "清空", value: "[]" },
+      ],
+    };
+  }
+  if (hint.field_path === "model_aliases") {
+    const providerId = detectPrimaryProviderId(fieldState);
+    return {
+      title: "这里填什么",
+      description: usingEchoMode
+        ? "体验模式下可以先不填。准备接真实模型时，至少补一个 main，建议再补一个 cheap。"
+        : "这里把业务里的通用别名映射到真实模型。主 Agent 至少需要 main，便宜模型建议叫 cheap。",
+      exampleLabel: `使用 ${providerId} 的别名示例`,
+      example: modelAliasesExampleJson(providerId),
+      actions: [
+        { label: "填入 main / cheap 示例", value: modelAliasesExampleJson(providerId) },
+        { label: "清空", value: "{}" },
+      ],
+    };
+  }
+  if (hint.field_path === "front_door.trusted_proxy_cidrs") {
+    return {
+      title: "填写格式",
+      description: "每行一个 CIDR。只在 trusted_proxy 模式下需要，本机默认值通常就是下面这两个。",
+      exampleLabel: "本机默认值",
+      example: DEFAULT_TRUSTED_PROXY_CIDRS,
+      actions: [{ label: "恢复本机默认值", value: DEFAULT_TRUSTED_PROXY_CIDRS }],
+    };
+  }
+  if (
+    hint.widget === "string-list" &&
+    hint.field_path.startsWith("channels.telegram.")
+  ) {
+    return {
+      title: "填写格式",
+      description: "每行一项。可以填 Telegram 用户 ID、群组 ID 或用户名，按字段含义分别填写。",
+    };
+  }
+  return null;
+}
+
+function collectBlockingGuides(review: SetupReviewSummary): BlockingGuide[] {
+  return [
+    ...review.provider_runtime_risks.map((risk) => ({
+      guide_id: `provider-${risk.risk_id}`,
+      section_id: "main-agent",
+      section_label: "主 Agent 与模型",
+      risk,
+    })),
+    ...review.channel_exposure_risks.map((risk) => ({
+      guide_id: `channel-${risk.risk_id}`,
+      section_id: "channels",
+      section_label: "渠道接入",
+      risk,
+    })),
+    ...review.agent_autonomy_risks.map((risk) => ({
+      guide_id: `agent-${risk.risk_id}`,
+      section_id: "governance",
+      section_label: "主 Agent",
+      risk,
+    })),
+    ...review.tool_skill_readiness_risks.map((risk) => ({
+      guide_id: `skill-${risk.risk_id}`,
+      section_id: "governance",
+      section_label: "主 Agent",
+      risk,
+    })),
+    ...review.secret_binding_risks.map((risk) => ({
+      guide_id: `secret-${risk.risk_id}`,
+      section_id: "advanced",
+      section_label: "更多设置",
+      risk,
+    })),
+  ].filter((item) => item.risk.blocking);
+}
+
+function guideButtonLabel(guide: BlockingGuide): string {
+  if (guide.section_id === "governance") {
+    return "去填写主 Agent 信息";
+  }
+  return `去“${guide.section_label}”处理`;
 }
 
 export default function SettingsCenter() {
@@ -264,6 +457,29 @@ export default function SettingsCenter() {
   const unavailableSkills = skillGovernance.items.filter(
     (item) => item.availability !== "available"
   );
+  const runtimeMode =
+    String(
+      fieldState["runtime.llm_mode"] ??
+        getValueAtPath(config.current_value, "runtime.llm_mode") ??
+        "echo"
+    )
+      .trim()
+      .toLowerCase() || "echo";
+  const usingEchoMode = runtimeMode === "echo";
+  const blockingGuides = collectBlockingGuides(review);
+
+  function updateFieldValue(fieldPath: string, value: string | boolean) {
+    setFieldState((state) => ({
+      ...state,
+      [fieldPath]: value,
+    }));
+  }
+
+  function scrollToSection(sectionId: string) {
+    document
+      .getElementById(`settings-group-${sectionId}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div className="wb-page">
@@ -280,7 +496,7 @@ export default function SettingsCenter() {
             onClick={() => void handleReview()}
             disabled={busyActionId === "setup.review" || busyActionId === "setup.apply"}
           >
-            审查 Setup
+            检查配置
           </button>
           <button
             type="button"
@@ -288,7 +504,7 @@ export default function SettingsCenter() {
             onClick={() => void handleApply()}
             disabled={busyActionId === "setup.review" || busyActionId === "setup.apply"}
           >
-            应用 Setup
+            保存配置
           </button>
         </div>
       </section>
@@ -335,12 +551,32 @@ export default function SettingsCenter() {
                 ))}
               </div>
             </div>
-            {review.blocking_reasons.length > 0 ? (
+            <div className="wb-note">
+              <strong>当前模式</strong>
+              <span>
+                {usingEchoMode
+                  ? "你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。"
+                  : "你正在准备接入真实模型，请优先完成 Provider 和模型别名配置。"}
+              </span>
+            </div>
+            {blockingGuides.length > 0 ? (
               <div className="wb-note">
-                <strong>阻塞项</strong>
+                <strong>需要先处理的问题</strong>
                 <div className="wb-note-stack">
-                  {review.blocking_reasons.map((item) => (
-                    <span key={item}>{item}</span>
+                  {blockingGuides.map((guide) => (
+                    <div key={guide.guide_id} className="wb-guide-card">
+                      <strong>{guide.risk.title}</strong>
+                      <span>{guide.risk.summary}</span>
+                      {guide.risk.recommended_action ? <small>{guide.risk.recommended_action}</small> : null}
+                      <button
+                        type="button"
+                        aria-label={guideButtonLabel(guide)}
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() => scrollToSection(guide.section_id)}
+                      >
+                        {guideButtonLabel(guide)}
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -353,11 +589,11 @@ export default function SettingsCenter() {
           </div>
         </section>
 
-        <section className="wb-panel">
+        <section id="settings-group-governance" className="wb-panel">
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">主 Agent</p>
-              <h3>名称、权限级别和默认能力</h3>
+              <h3>名称、Persona 和默认能力</h3>
             </div>
           </div>
 
@@ -413,10 +649,12 @@ export default function SettingsCenter() {
             </label>
 
             <label className="wb-field wb-field-span-2">
-              <span>角色说明</span>
+              <span>Persona（角色说明）</span>
+              <small>这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。</small>
               <textarea
                 rows={4}
                 value={agentDraft.persona_summary}
+                placeholder="例如：通用个人助手，优先帮助我处理当前任务，并在需要时提醒风险。"
                 onChange={(event) =>
                   setAgentDraft((state) => ({
                     ...state,
@@ -473,7 +711,7 @@ export default function SettingsCenter() {
       {Object.entries(groupedHints).map(([groupId, hints]) => {
         const group = groupLabel(groupId);
         return (
-          <section key={groupId} className="wb-panel">
+          <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">{group.title}</p>
@@ -485,6 +723,7 @@ export default function SettingsCenter() {
                 const currentValue = fieldState[hint.field_path] ?? "";
                 const options = selectOptions(config.schema, hint);
                 const error = fieldErrors[hint.field_path];
+                const fieldGuide = buildFieldGuide(hint, fieldState, usingEchoMode);
                 return (
                   <label
                     key={hint.field_path}
@@ -492,25 +731,46 @@ export default function SettingsCenter() {
                   >
                     <span>{hint.label}</span>
                     {hint.help_text ? <small>{hint.help_text}</small> : null}
+                    {fieldGuide ? (
+                      <div className="wb-field-guide">
+                        <strong>{fieldGuide.title}</strong>
+                        <p>{fieldGuide.description}</p>
+                        {fieldGuide.actions?.length ? (
+                          <div className="wb-inline-actions wb-inline-actions-wrap">
+                            {fieldGuide.actions.map((action) => (
+                              <button
+                                key={action.label}
+                                type="button"
+                                aria-label={action.label}
+                                className="wb-button wb-button-tertiary wb-button-inline"
+                                onClick={() => updateFieldValue(hint.field_path, action.value)}
+                              >
+                                {action.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                        {fieldGuide.example ? (
+                          <div className="wb-field-guide-sample">
+                            <small>{fieldGuide.exampleLabel ?? "示例"}</small>
+                            <pre>{fieldGuide.example}</pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {hint.widget === "toggle" ? (
                       <input
                         type="checkbox"
                         checked={Boolean(currentValue)}
                         onChange={(event) =>
-                          setFieldState((state) => ({
-                            ...state,
-                            [hint.field_path]: event.target.checked,
-                          }))
+                          updateFieldValue(hint.field_path, event.target.checked)
                         }
                       />
                     ) : hint.widget === "select" && options.length > 0 ? (
                       <select
                         value={String(currentValue)}
                         onChange={(event) =>
-                          setFieldState((state) => ({
-                            ...state,
-                            [hint.field_path]: event.target.value,
-                          }))
+                          updateFieldValue(hint.field_path, event.target.value)
                         }
                       >
                         {options.map((option) => (
@@ -527,10 +787,7 @@ export default function SettingsCenter() {
                         value={String(currentValue)}
                         placeholder={hint.placeholder}
                         onChange={(event) =>
-                          setFieldState((state) => ({
-                            ...state,
-                            [hint.field_path]: event.target.value,
-                          }))
+                          updateFieldValue(hint.field_path, event.target.value)
                         }
                       />
                     ) : (
@@ -539,10 +796,7 @@ export default function SettingsCenter() {
                         value={String(currentValue)}
                         placeholder={hint.placeholder}
                         onChange={(event) =>
-                          setFieldState((state) => ({
-                            ...state,
-                            [hint.field_path]: event.target.value,
-                          }))
+                          updateFieldValue(hint.field_path, event.target.value)
                         }
                       />
                     )}

@@ -670,6 +670,9 @@ class TestControlPlaneApi:
                 "params": {
                     "draft": {
                         "config": {
+                            "runtime": {
+                                "llm_mode": "litellm",
+                            },
                             "providers": [
                                 {
                                     "id": "openrouter",
@@ -708,6 +711,47 @@ class TestControlPlaneApi:
         serialized = json.dumps(review, ensure_ascii=False)
         assert "api_key_env" not in serialized
         assert "sk-" not in serialized
+
+    async def test_setup_review_echo_mode_does_not_block_on_provider_or_alias(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "runtime": {
+                                "llm_mode": "echo",
+                            },
+                            "providers": [],
+                            "model_aliases": {},
+                        }
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        review = resp.json()["result"]["data"]["review"]
+        assert "provider_missing" not in review["blocking_reasons"]
+        assert "main_alias_missing" not in review["blocking_reasons"]
+        assert any(
+            item["risk_id"] == "provider_missing" and item["blocking"] is False
+            for item in review["provider_runtime_risks"]
+        )
+        assert any(
+            "体验模式" in item["summary"] for item in review["provider_runtime_risks"]
+        )
 
     async def test_setup_review_uses_draft_aliases_for_skill_governance(
         self,

@@ -430,7 +430,7 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
           risk_level: "info",
           warnings: [],
           blocking_reasons: [],
-          next_actions: ["当前 setup review 已通过，可以继续执行 setup.apply。"],
+          next_actions: ['检查已通过，可以点击“保存配置”。'],
           provider_runtime_risks: [],
           channel_exposure_risks: [],
           agent_autonomy_risks: [],
@@ -699,7 +699,7 @@ describe("App workbench routing", () => {
     const nextSnapshot = buildSnapshot("http://localhost:4100");
     nextSnapshot.resources.setup_governance.review = {
       ...nextSnapshot.resources.setup_governance.review,
-      next_actions: ["当前 setup review 已通过，可以继续执行 setup.apply。"],
+      next_actions: ['检查已通过，可以点击“保存配置”。'],
     };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, _init) => {
       const url = String(input);
@@ -719,7 +719,7 @@ describe("App workbench routing", () => {
                 action_id: "setup.review",
                 status: "completed",
                 code: "SETUP_REVIEW_READY",
-                message: "Setup review 已生成。",
+                message: "配置检查已完成。",
                 data: {
                   review: nextSnapshot.resources.setup_governance.review,
                 },
@@ -746,7 +746,7 @@ describe("App workbench routing", () => {
               action_id: "setup.apply",
               status: "completed",
               code: "SETUP_APPLIED",
-              message: "Setup 已应用，主配置与治理设置已同步。",
+              message: "配置已保存，主 Agent 与系统设置已同步。",
               data: {
                 review: nextSnapshot.resources.setup_governance.review,
               },
@@ -814,7 +814,7 @@ describe("App workbench routing", () => {
     const input = await screen.findByLabelText("LiteLLM Proxy URL");
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
-    await userEvent.click(screen.getByRole("button", { name: "应用 Setup" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
     await waitFor(() =>
       expect(
@@ -837,7 +837,7 @@ describe("App workbench routing", () => {
     expect(
       actionBodies.some((body) => body.includes("http://localhost:4100"))
     ).toBe(true);
-    expect(await screen.findByText(/主配置与治理设置已同步/)).toBeInTheDocument();
+    expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
 
   it("设置页执行 setup.review 时保留未提交的主 Agent 草稿", async () => {
@@ -866,7 +866,7 @@ describe("App workbench routing", () => {
               action_id: "setup.review",
               status: "completed",
               code: "SETUP_REVIEW_READY",
-              message: "Setup review 已生成。",
+              message: "配置检查已完成。",
               data: {
                 review: refreshedSetup.review,
               },
@@ -894,10 +894,138 @@ describe("App workbench routing", () => {
     const nameInput = (await screen.findByLabelText("主 Agent 名称")) as HTMLInputElement;
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "新的主 Agent");
-    await userEvent.click(screen.getByRole("button", { name: "审查 Setup" }));
+    await userEvent.click(screen.getByRole("button", { name: "检查配置" }));
 
-    await screen.findByText(/Setup review 已生成/);
+    await screen.findByText(/配置检查已完成/);
     expect(nameInput.value).toBe("新的主 Agent");
+  });
+
+  it("设置页会为体验模式展示可执行的说明和 JSON 示例", async () => {
+    window.history.pushState({}, "", "/settings");
+
+    const snapshot = buildSnapshot() as any;
+    snapshot.resources.config.schema = {
+      type: "object",
+      properties: {
+        runtime: {
+          type: "object",
+          properties: {
+            llm_mode: { type: "string", enum: ["echo", "litellm"] },
+            litellm_proxy_url: { type: "string" },
+          },
+        },
+        providers: { type: "array", items: { type: "object" } },
+        model_aliases: { type: "object" },
+      },
+    };
+    snapshot.resources.config.ui_hints = {
+      "runtime.llm_mode": {
+        field_path: "runtime.llm_mode",
+        section: "runtime",
+        label: "LLM 模式",
+        description: "",
+        widget: "select",
+        placeholder: "",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 10,
+      },
+      providers: {
+        field_path: "providers",
+        section: "providers",
+        label: "模型提供方列表",
+        description: "",
+        widget: "provider-list",
+        placeholder: "[]",
+        help_text: "",
+        sensitive: false,
+        multiline: true,
+        order: 20,
+      },
+      model_aliases: {
+        field_path: "model_aliases",
+        section: "models",
+        label: "模型别名",
+        description: "",
+        widget: "alias-map",
+        placeholder: "{}",
+        help_text: "",
+        sensitive: false,
+        multiline: true,
+        order: 30,
+      },
+    };
+    snapshot.resources.config.current_value = {
+      runtime: {
+        llm_mode: "echo",
+        litellm_proxy_url: "http://localhost:4000",
+      },
+      providers: [],
+      model_aliases: {},
+    };
+    snapshot.resources.setup_governance.review = {
+      ready: false,
+      risk_level: "warning",
+      warnings: ["当前处于体验模式。"],
+      blocking_reasons: ["agent_profile_name_missing"],
+      next_actions: ["先填写主 Agent 名称，再重新保存。"],
+      provider_runtime_risks: [
+        {
+          risk_id: "provider_missing",
+          severity: "warning",
+          title: "还没有可用 Provider",
+          summary: "当前处于体验模式，还没有接入真实模型；你仍然可以先用 Web 跑通基础流程。",
+          blocking: false,
+          recommended_action: "如果你只是先体验本地 Web，可暂时保留为空。",
+          source_ref: "config:octoagent",
+        },
+      ],
+      channel_exposure_risks: [],
+      agent_autonomy_risks: [
+        {
+          risk_id: "agent_profile_name_missing",
+          severity: "high",
+          title: "主 Agent 名称不能为空",
+          summary: "当前草稿缺少主 Agent 名称。",
+          blocking: true,
+          recommended_action: '先填写主 Agent 名称，再点击“检查配置”。',
+          source_ref: "agent-profiles:overview",
+        },
+      ],
+      tool_skill_readiness_risks: [],
+      secret_binding_risks: [],
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
+    expect(screen.getByText("Persona（角色说明）")).toBeInTheDocument();
+    expect(
+      screen.getByText("这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。")
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /填入 OpenRouter 示例/ }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue(/OPENROUTER_API_KEY/)).toBeInTheDocument()
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /填入 main \/ cheap 示例/ }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue(/"main"/)).toBeInTheDocument()
+    );
+    expect(screen.getByDisplayValue(/"cheap"/)).toBeInTheDocument();
   });
 
   it("Work 页面会先展示 worker.review 方案，再批准 worker.apply", async () => {

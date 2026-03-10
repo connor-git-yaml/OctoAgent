@@ -1705,6 +1705,45 @@ button {
   line-height: 1.5;
 }
 
+.wb-field-guide,
+.wb-field-guide-sample,
+.wb-guide-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(245, 248, 249, 0.92);
+  border: 1px solid rgba(20, 32, 47, 0.08);
+}
+
+.wb-field-guide strong,
+.wb-field-guide-sample small,
+.wb-guide-card strong {
+  color: var(--cp-ink);
+}
+
+.wb-field-guide p,
+.wb-guide-card p {
+  margin: 0;
+}
+
+.wb-field-guide-sample pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  overflow: auto;
+  background: rgba(20, 32, 47, 0.94);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.wb-button-inline {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.88rem;
+}
+
 .wb-field input[type="checkbox"] {
   width: 22px;
   height: 22px;
