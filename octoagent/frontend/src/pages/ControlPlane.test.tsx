@@ -1045,7 +1045,7 @@ describe("ControlPlane", () => {
     expect(screen.getByRole("button", { name: /Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Projects/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Memory/i })).toBeInTheDocument();
-    expect(screen.getByText("project-default")).toBeInTheDocument();
+    expect(screen.getAllByText(/project-default/).length).toBeGreaterThan(0);
     expect(screen.getByText("网关升级失败")).toBeInTheDocument();
     expect(screen.getByText("TaskRunner / Execution runtime")).toBeInTheDocument();
   });
@@ -1104,7 +1104,7 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("project-default")).toBeInTheDocument();
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: /Projects/i }));
     expect(await screen.findByText("Ops Project")).toBeInTheDocument();
@@ -1113,12 +1113,11 @@ describe("ControlPlane", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "已切换当前 project [PROJECT_SELECTED]"
-      );
+      expect(screen.getByRole("status")).toHaveTextContent("已切换当前 project");
+      expect(screen.getByRole("status")).toHaveTextContent("PROJECT_SELECTED");
     });
     await waitFor(() => {
-      expect(screen.getAllByText("project-ops").length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/project-ops/).length).toBeGreaterThan(0);
     });
 
     const actionRequest = fetchMock.mock.calls.find((call) => {
@@ -1195,14 +1194,13 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("project-default");
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /Operator/i }));
     await userEvent.click(screen.getByRole("button", { name: "批准一次" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "审批已处理 [APPROVAL_RESOLVED]"
-      );
+      expect(screen.getByRole("status")).toHaveTextContent("审批已处理");
+      expect(screen.getByRole("status")).toHaveTextContent("APPROVAL_RESOLVED");
     });
     await waitFor(() => {
       expect(screen.getByText(/Approvals 0/)).toBeInTheDocument();
@@ -1289,10 +1287,10 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("project-default");
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /Memory/i }));
 
-    expect(await screen.findByText("Memory Console")).toBeInTheDocument();
+    expect(await screen.findByText(/Memory Console/)).toBeInTheDocument();
     expect((await screen.findAllByText("Alice current profile")).length).toBeGreaterThan(0);
     expect(await screen.findByText("新的联系人画像")).toBeInTheDocument();
     expect(await screen.findByText(/Grants 1/)).toBeInTheDocument();
@@ -1300,19 +1298,26 @@ describe("ControlPlane", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "查看历史" })[0]);
     expect(await screen.findByText("Alice superseded profile")).toBeInTheDocument();
 
+    const accessSubjectInput = screen.getByRole("textbox", { name: "申请目标条目" });
+    await userEvent.clear(accessSubjectInput);
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "申请内容类型" }),
+      "credential"
+    );
     await userEvent.type(
-      screen.getByRole("textbox", { name: "Access Subject" }),
+      accessSubjectInput,
       "credential:db"
     );
     await userEvent.type(
-      screen.getByRole("textbox", { name: "Access Reason" }),
+      screen.getByRole("textbox", { name: "申请原因" }),
       "临时排障"
     );
     await userEvent.click(screen.getByRole("button", { name: "发起授权申请" }));
 
     await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("已创建 Vault 授权申请。");
       expect(screen.getByRole("status")).toHaveTextContent(
-        "已创建 Vault 授权申请。 [VAULT_ACCESS_REQUEST_CREATED]"
+        "VAULT_ACCESS_REQUEST_CREATED"
       );
     });
     await waitFor(() => {
@@ -1397,16 +1402,18 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("project-default");
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /Memory/i }));
-    await userEvent.type(screen.getByRole("textbox", { name: "Partition" }), "credential");
-    await userEvent.type(screen.getByRole("textbox", { name: "Query" }), "Database");
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "想看哪类内容" }),
+      "credential"
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "关键词" }), "Database");
     await userEvent.click(screen.getByRole("button", { name: "刷新 Memory 视图" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "已刷新 Memory 总览。 [MEMORY_QUERY_COMPLETED]"
-      );
+      expect(screen.getByRole("status")).toHaveTextContent("已刷新 Memory 总览。");
+      expect(screen.getByRole("status")).toHaveTextContent("MEMORY_QUERY_COMPLETED");
     });
 
     const memoryRefreshCall = fetchMock.mock.calls.find((call) =>
@@ -1438,7 +1445,7 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("project-default");
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: /Capability/i }));
     expect(await screen.findByText("bundled:default")).toBeInTheDocument();
@@ -1480,7 +1487,7 @@ describe("ControlPlane", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("project-default");
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /Imports/i }));
 
     expect(await screen.findByText("Import Workbench")).toBeInTheDocument();

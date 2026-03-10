@@ -693,10 +693,8 @@ button {
 
 .control-shell {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
-  gap: var(--cp-space-5);
-  min-height: 100vh;
-  padding: var(--cp-space-5);
+  gap: var(--cp-space-4);
+  min-width: 0;
 }
 
 .control-sidebar {
@@ -716,6 +714,7 @@ button {
 }
 
 .control-brand h1,
+.control-overview h1,
 .control-empty-state h1 {
   margin: 0;
   font-size: clamp(2rem, 3vw, 2.8rem);
@@ -724,6 +723,7 @@ button {
 }
 
 .control-brand p,
+.control-overview p,
 .control-empty-state p {
   margin: var(--cp-space-2) 0 0;
   color: var(--cp-muted);
@@ -783,6 +783,11 @@ button {
   min-width: 0;
 }
 
+.control-overview {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
 .control-hero,
 .panel-head,
 .workspace-card,
@@ -814,6 +819,85 @@ button {
   background:
     radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 28%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(253, 244, 230, 0.92));
+}
+
+.control-lead {
+  max-width: 68ch;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.control-summary-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.control-summary-card {
+  display: grid;
+  gap: 8px;
+  padding: var(--cp-space-3);
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  border-radius: var(--cp-radius-md);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.control-summary-card strong {
+  font-size: 1.15rem;
+  color: var(--cp-ink);
+}
+
+.control-summary-card span {
+  color: var(--cp-muted);
+}
+
+.control-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cp-space-2);
+}
+
+.control-section-button {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 180px;
+  min-height: 64px;
+  padding: var(--cp-space-3);
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  border-radius: var(--cp-radius-lg);
+  background: rgba(255, 255, 255, 0.68);
+  text-align: left;
+  color: var(--cp-ink);
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.control-section-button span {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.control-section-button small {
+  color: var(--cp-muted);
+}
+
+.control-section-button:hover,
+.control-section-button.active {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.24);
+  background: linear-gradient(
+    135deg,
+    rgba(15, 118, 110, 0.1),
+    rgba(221, 107, 32, 0.08)
+  );
+  box-shadow: 0 12px 24px rgba(20, 32, 47, 0.06);
+}
+
+.control-section-guide p {
+  max-width: 72ch;
 }
 
 .panel h3 {
@@ -1047,9 +1131,28 @@ button {
   gap: var(--cp-space-3);
 }
 
+.disclosure-card {
+  margin-top: var(--cp-space-3);
+  padding: var(--cp-space-3);
+  border: 1px dashed rgba(20, 32, 47, 0.14);
+  border-radius: var(--cp-radius-md);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.disclosure-card summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--cp-ink);
+}
+
+.disclosure-card[open] summary {
+  margin-bottom: var(--cp-space-3);
+}
+
 @media (max-width: 1100px) {
-  .control-shell {
-    grid-template-columns: 1fr;
+  .control-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .control-sidebar {
@@ -1064,10 +1167,6 @@ button {
 }
 
 @media (max-width: 720px) {
-  .control-shell {
-    padding: var(--cp-space-3);
-  }
-
   .control-sidebar,
   .panel,
   .action-banner {
@@ -1085,6 +1184,14 @@ button {
   .form-grid,
   .config-layout {
     grid-template-columns: 1fr;
+  }
+
+  .control-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .control-section-button {
+    flex-basis: 100%;
   }
 }
 
