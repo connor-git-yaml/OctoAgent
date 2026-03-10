@@ -2,6 +2,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import type {
+  ControlPlaneCapability,
+  ControlPlaneSnapshot,
+  SessionProjectionItem,
+  WorkProjectionItem,
+} from "./types";
 
 type FetchArgs = [RequestInfo | URL, RequestInit | undefined];
 
@@ -12,7 +18,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-function buildSnapshot(proxyUrl = "http://localhost:4000") {
+function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot {
   return {
     contract_version: "1.0.0",
     generated_at: "2026-03-09T10:00:00Z",
@@ -512,6 +518,10 @@ function buildSnapshot(proxyUrl = "http://localhost:4000") {
         refs: {},
         active_project_id: "project-default",
         active_workspace_id: "workspace-default",
+        backend_id: "memu",
+        retrieval_backend: "memu",
+        backend_state: "healthy",
+        index_health: {},
         filters: {
           project_id: "project-default",
           workspace_id: "workspace-default",
@@ -531,11 +541,13 @@ function buildSnapshot(proxyUrl = "http://localhost:4000") {
           sor_history_count: 0,
           vault_ref_count: 0,
           proposal_count: 1,
+          pending_replay_count: 0,
         },
         records: [],
         available_scopes: [],
         available_partitions: [],
         available_layers: [],
+        advanced_refs: {},
       },
       imports: {
         contract_version: "1.0.0",
@@ -581,7 +593,7 @@ function buildWorkspace(
   };
 }
 
-function buildSession(taskId: string, workId: string) {
+function buildSession(taskId: string, workId: string): SessionProjectionItem {
   return {
     session_id: `thread-${taskId}`,
     thread_id: `thread-${taskId}`,
@@ -610,10 +622,10 @@ function buildWork(
   status: string,
   options?: {
     title?: string;
-    capabilities?: Array<Record<string, unknown>>;
+    capabilities?: ControlPlaneCapability[];
     runtimeSummary?: Record<string, unknown>;
   }
-) {
+): WorkProjectionItem {
   return {
     work_id: workId,
     task_id: `task-${workId}`,
@@ -1102,10 +1114,13 @@ describe("App workbench routing", () => {
     afterSnapshot.resources.project_selector.available_workspaces =
       beforeSnapshot.resources.project_selector.available_workspaces;
     afterSnapshot.resources.sessions.operator_summary = {
-      ...afterSnapshot.resources.sessions.operator_summary,
       total_pending: 4,
       approvals: 3,
+      alerts: 0,
+      retryable_failures: 0,
       pairing_requests: 1,
+      degraded_sources: [],
+      generated_at: "2026-03-09T10:03:00Z",
     };
     afterSnapshot.resources.delegation.works = [
       buildWork("work-ops", "running", { title: "Ops Work" }),
@@ -1465,6 +1480,7 @@ describe("App workbench routing", () => {
             action_id: "work.split",
             enabled: true,
             support_status: "supported",
+            reason: "",
           },
         ],
       }),
@@ -1494,11 +1510,11 @@ describe("App workbench routing", () => {
     render(<App />);
 
     await screen.findByRole("heading", {
-      name: "把 session、work 和 child work 放到一张板上",
+      name: "3 条工作正在推进",
     });
 
-    const activeCard = screen.getByText("进行中").closest("article");
-    const doneCard = screen.getByText("已结束").closest("article");
+    const activeCard = screen.getAllByText("进行中")[0]?.closest("article");
+    const doneCard = screen.getAllByText("已结束")[0]?.closest("article");
     expect(activeCard).not.toBeNull();
     expect(doneCard).not.toBeNull();
     expect(within(activeCard!).getByText("3")).toBeInTheDocument();
@@ -1510,5 +1526,118 @@ describe("App workbench routing", () => {
 
     expect(await screen.findByText("拆分失败")).toBeInTheDocument();
     expect(textarea).toHaveValue("整理依赖\n补测试");
+  });
+
+  it("Memory 页面会按当前筛选条件提交查询并展示可读摘要", async () => {
+    window.history.pushState({}, "", "/memory");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.memory.available_layers = ["sor", "fragment"];
+    snapshot.resources.memory.available_partitions = ["contact"];
+    snapshot.resources.memory.summary = {
+      ...snapshot.resources.memory.summary,
+      pending_replay_count: 1,
+    };
+
+    const nextMemory = {
+      ...snapshot.resources.memory,
+      warnings: ["memory backlog"],
+      filters: {
+        ...snapshot.resources.memory.filters,
+        query: "Alice",
+        layer: "sor",
+        partition: "contact",
+        include_history: true,
+        limit: 50,
+      },
+      available_scopes: ["scope-contact"],
+      records: [
+        {
+          record_id: "record-alice",
+          layer: "sor",
+          project_id: "project-default",
+          workspace_id: "workspace-default",
+          scope_id: "scope-contact",
+          partition: "contact",
+          subject_key: "Alice",
+          summary: "Alice 偏好异步沟通",
+          status: "current",
+          version: 3,
+          created_at: "2026-03-09T10:00:00Z",
+          updated_at: "2026-03-09T10:05:00Z",
+          evidence_refs: [{ type: "message", id: "msg-1" }],
+          derived_refs: ["derived-1"],
+          proposal_refs: ["proposal-1"],
+          metadata: {
+            source: "chat",
+            owner: "Connor",
+          },
+          requires_vault_authorization: false,
+          retrieval_backend: "memu",
+        },
+      ],
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-memory-query",
+              correlation_id: "req-memory-query",
+              action_id: "memory.query",
+              status: "completed",
+              code: "MEMORY_QUERY_COMPLETED",
+              message: "已刷新 Memory 总览。",
+              data: {},
+              resource_refs: [
+                {
+                  resource_type: "memory_console",
+                  resource_id: "memory:overview",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:06:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/memory")) {
+        return Promise.resolve(jsonResponse(nextMemory));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "当前有记忆数据，但还没有命中可读摘要" });
+    await userEvent.selectOptions(screen.getByLabelText("Layer"), "sor");
+    await userEvent.selectOptions(screen.getByLabelText("Partition"), "contact");
+    await userEvent.selectOptions(screen.getByLabelText("Limit"), "50");
+    await userEvent.type(screen.getByLabelText("关键词"), "Alice");
+    await userEvent.click(screen.getByLabelText("包含历史版本"));
+    await userEvent.click(screen.getByRole("button", { name: "刷新摘要" }));
+
+    const actionCall = fetchMock.mock.calls.find((call) => {
+      const [url, init] = call as FetchArgs;
+      return String(url).includes("/api/control/actions") && init?.method === "POST";
+    }) as FetchArgs | undefined;
+
+    expect(String(actionCall?.[1]?.body)).toContain('"action_id":"memory.query"');
+    expect(String(actionCall?.[1]?.body)).toContain('"query":"Alice"');
+    expect(String(actionCall?.[1]?.body)).toContain('"layer":"sor"');
+    expect(String(actionCall?.[1]?.body)).toContain('"partition":"contact"');
+    expect(String(actionCall?.[1]?.body)).toContain('"include_history":true');
+    expect(String(actionCall?.[1]?.body)).toContain('"limit":50');
+
+    expect(await screen.findByText("Alice 偏好异步沟通")).toBeInTheDocument();
+    expect(await screen.findByText("Memory 当前存在提醒")).toBeInTheDocument();
   });
 });

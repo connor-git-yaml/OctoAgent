@@ -305,6 +305,68 @@ function buildSnapshot(currentProjectId = "project-default") {
           },
         ],
       },
+      context_continuity: {
+        contract_version: "1.0.0",
+        resource_type: "context_continuity",
+        resource_id: "context:overview",
+        schema_version: 1,
+        generated_at: "2026-03-08T09:00:00Z",
+        updated_at: "2026-03-08T09:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: currentProjectId,
+        active_workspace_id: currentWorkspaceId,
+        sessions: [
+          {
+            session_id: "thread-1",
+            thread_id: "thread-1",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            rolling_summary: "最近一轮上下文已经压缩完成。",
+            last_context_frame_id: "frame-context-1",
+            updated_at: "2026-03-08T09:12:00Z",
+          },
+        ],
+        frames: [
+          {
+            context_frame_id: "frame-context-1",
+            task_id: "task-1",
+            session_id: "thread-1",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            agent_profile_id: "owner-profile",
+            recent_summary: "围绕网关升级失败形成了新的上下文摘要。",
+            memory_hit_count: 2,
+            memory_hits: [
+              {
+                subject_key: "release.plan",
+                layer: "sor",
+              },
+              {
+                subject_key: "incident.runtime",
+                layer: "fragment",
+              },
+            ],
+            memory_recall: {
+              summary: "命中 2 条记忆记录",
+            },
+            budget: {
+              input_tokens: 1200,
+            },
+            source_refs: [
+              {
+                type: "memory_record",
+                id: "record-1",
+              },
+            ],
+            degraded_reason: "",
+            created_at: "2026-03-08T09:11:30Z",
+          },
+        ],
+      },
       capability_pack: {
         contract_version: "1.0.0",
         resource_type: "capability_pack",

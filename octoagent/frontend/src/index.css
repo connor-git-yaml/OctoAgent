@@ -1218,16 +1218,19 @@ button {
 }
 
 .wb-main {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--cp-space-4);
   padding: var(--cp-space-5);
+  min-height: calc(100vh - (var(--cp-space-5) * 2));
 }
 
 .wb-sidebar {
   position: sticky;
   top: var(--cp-space-5);
   align-self: start;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--cp-space-3);
   padding: var(--cp-space-4);
   background:
@@ -1363,6 +1366,19 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: var(--cp-space-3);
+  padding-bottom: 4px;
+}
+
+.wb-topbar-leading,
+.wb-topbar-copy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-topbar-copy {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .wb-topbar h2 {
@@ -1422,6 +1438,7 @@ button {
 .wb-page {
   display: grid;
   gap: var(--cp-space-4);
+  align-content: start;
 }
 
 .wb-hero {
@@ -1439,6 +1456,12 @@ button {
   box-shadow: var(--cp-shadow);
 }
 
+.wb-hero-copy {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
 .wb-hero h1 {
   font-size: clamp(1.8rem, 2.8vw, 2.8rem);
   line-height: 1.02;
@@ -1446,6 +1469,28 @@ button {
 
 .wb-hero-compact h1 {
   font-size: clamp(1.45rem, 2.1vw, 2.1rem);
+}
+
+.wb-hero-insights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: min(520px, 100%);
+}
+
+.wb-hero-metric {
+  display: grid;
+  gap: 6px;
+  min-height: 132px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.wb-hero-metric strong {
+  font-size: 1.65rem;
+  color: var(--cp-ink);
 }
 
 .wb-split {
@@ -1477,7 +1522,10 @@ button {
 .wb-action-list,
 .wb-note-stack,
 .wb-list,
-.wb-work-list {
+.wb-work-list,
+.wb-record-list,
+.wb-priority-list,
+.wb-section-stack {
   display: grid;
   gap: 12px;
 }
@@ -1486,6 +1534,8 @@ button {
 .wb-note,
 .wb-list-row,
 .wb-work-card,
+.wb-priority-card,
+.wb-memory-card,
 .wb-empty-state {
   display: grid;
   gap: 6px;
@@ -1498,6 +1548,8 @@ button {
 .wb-action-card strong,
 .wb-list-row strong,
 .wb-work-card strong,
+.wb-priority-card strong,
+.wb-memory-card strong,
 .wb-empty-state strong {
   font-size: 1rem;
   color: var(--cp-ink);
@@ -1580,6 +1632,34 @@ button {
 .wb-status-pill.is-danger {
   background: rgba(194, 65, 12, 0.14);
   color: var(--cp-danger);
+}
+
+.wb-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(20, 32, 47, 0.06);
+  color: var(--cp-ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.wb-chip.is-success {
+  background: rgba(21, 128, 61, 0.12);
+  color: var(--cp-success);
+}
+
+.wb-chip.is-warning {
+  background: rgba(221, 107, 32, 0.14);
+  color: var(--cp-primary-ink);
 }
 
 .wb-field {
@@ -1696,8 +1776,16 @@ button {
   gap: var(--cp-space-4);
 }
 
+.wb-inline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .wb-work-card,
-.wb-note {
+.wb-note,
+.wb-priority-card,
+.wb-memory-card {
   background: rgba(250, 252, 252, 0.9);
 }
 
@@ -1706,6 +1794,108 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.wb-work-detail-grid,
+.wb-stat-grid,
+.wb-toolbar-grid,
+.wb-memory-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-work-detail-grid,
+.wb-stat-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-toolbar-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.wb-memory-layout {
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
+  align-items: start;
+}
+
+.wb-detail-block {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(244, 247, 249, 0.82);
+  border: 1px solid rgba(20, 32, 47, 0.07);
+}
+
+.wb-key-value-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+}
+
+.wb-key-value-list > span {
+  color: var(--cp-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-key-value-list > strong {
+  font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.wb-key-value-item {
+  display: contents;
+}
+
+.wb-text-link {
+  color: var(--cp-secondary-ink);
+  font-weight: 600;
+}
+
+.wb-priority-card,
+.wb-memory-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-priority-card {
+  border: 1px solid rgba(15, 118, 110, 0.1);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 30%),
+    rgba(250, 252, 252, 0.94);
+}
+
+.wb-toolbar-grid .wb-field {
+  min-width: 0;
+}
+
+.wb-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 32, 47, 0.1);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.wb-toggle span {
+  color: var(--cp-ink);
+  font-weight: 600;
 }
 
 .wb-split-form {
@@ -1926,7 +2116,12 @@ button {
   .wb-card-grid-3,
   .wb-split,
   .wb-chat-layout,
-  .wb-form-grid {
+  .wb-form-grid,
+  .wb-hero-insights,
+  .wb-work-detail-grid,
+  .wb-stat-grid,
+  .wb-toolbar-grid,
+  .wb-memory-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -1939,11 +2134,15 @@ button {
 
   .wb-hero,
   .wb-topbar,
+  .wb-topbar-leading,
   .wb-panel-head,
   .wb-list-row,
   .wb-work-head,
+  .wb-priority-card,
+  .wb-memory-head,
   .wb-inline-banner,
-  .wb-chat-form {
+  .wb-chat-form,
+  .wb-toggle-row {
     flex-direction: column;
     align-items: flex-start;
   }

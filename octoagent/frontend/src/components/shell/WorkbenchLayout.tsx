@@ -94,6 +94,12 @@ export default function WorkbenchLayout() {
     selector.available_workspaces.find(
       (item) => item.workspace_id === selector.current_workspace_id
     ) ?? null;
+  const pendingTotal = sessions.operator_summary?.total_pending ?? 0;
+  const activeMemoryCount =
+    memory.summary.sor_current_count +
+    memory.summary.fragment_count +
+    memory.summary.vault_ref_count;
+  const workCount = snapshot.resources.delegation.works.length;
 
   return (
     <WorkbenchContext.Provider value={workbench}>
@@ -154,20 +160,28 @@ export default function WorkbenchLayout() {
 
         <div className="wb-main">
           <header className="wb-topbar">
-            <button
-              type="button"
-              className="wb-topbar-menu"
-              onClick={() => setNavOpen((current) => !current)}
-              aria-label="切换导航"
-            >
-              导航
-            </button>
-            <div>
-              <p className="wb-topbar-meta">
-                {currentProject?.slug ?? selector.current_project_id} /{" "}
-                {currentWorkspace?.slug ?? selector.current_workspace_id}
-              </p>
-              <h2>欢迎回来</h2>
+            <div className="wb-topbar-leading">
+              <button
+                type="button"
+                className="wb-topbar-menu"
+                onClick={() => setNavOpen((current) => !current)}
+                aria-label="切换导航"
+              >
+                导航
+              </button>
+              <div className="wb-topbar-copy">
+                <p className="wb-topbar-meta">
+                  {currentProject?.slug ?? selector.current_project_id} /{" "}
+                  {currentWorkspace?.slug ?? selector.current_workspace_id}
+                </p>
+                <h2>{currentProject?.name ?? "OctoAgent Workbench"}</h2>
+                <div className="wb-chip-row">
+                  <span className="wb-chip">待确认 {pendingTotal}</span>
+                  <span className="wb-chip">可见 work {workCount}</span>
+                  <span className="wb-chip">记忆记录 {activeMemoryCount}</span>
+                  <span className="wb-chip">更新于 {formatDateTime(snapshot.generated_at)}</span>
+                </div>
+              </div>
             </div>
             <div className="wb-topbar-actions">
               <span className={`wb-status-pill is-${diagnostics.overall_status}`}>

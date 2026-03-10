@@ -921,8 +921,11 @@ export interface MemoryRecordProjection {
   created_at: string;
   updated_at: string | null;
   evidence_refs: Array<Record<string, unknown>>;
+  derived_refs: string[];
+  proposal_refs: string[];
   metadata: Record<string, unknown>;
   requires_vault_authorization: boolean;
+  retrieval_backend: string;
 }
 
 export interface MemoryConsoleSummary {
@@ -932,6 +935,7 @@ export interface MemoryConsoleSummary {
   sor_history_count: number;
   vault_ref_count: number;
   proposal_count: number;
+  pending_replay_count: number;
 }
 
 export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
@@ -939,12 +943,17 @@ export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
   resource_id: "memory:overview";
   active_project_id: string;
   active_workspace_id: string;
+  backend_id: string;
+  retrieval_backend: string;
+  backend_state: string;
+  index_health: Record<string, unknown>;
   filters: MemoryConsoleFilter;
   summary: MemoryConsoleSummary;
   records: MemoryRecordProjection[];
   available_scopes: string[];
   available_partitions: string[];
   available_layers: string[];
+  advanced_refs: Record<string, string>;
 }
 
 export type ImportSourceType = "normalized-jsonl" | "wechat";
