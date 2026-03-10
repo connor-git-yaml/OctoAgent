@@ -46,9 +46,7 @@ async def get_control_agent_profiles(control_plane=Depends(get_control_plane_ser
 
 @router.get("/api/control/resources/owner-profile")
 async def get_control_owner_profile(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_owner_profile_document()).model_dump(
-        mode="json", by_alias=True
-    )
+    return (await control_plane.get_owner_profile_document()).model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/resources/bootstrap-session")
@@ -65,9 +63,30 @@ async def get_control_context_continuity(control_plane=Depends(get_control_plane
     )
 
 
+@router.get("/api/control/resources/policy-profiles")
+async def get_control_policy_profiles(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_policy_profiles_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
 @router.get("/api/control/resources/capability-pack")
 async def get_control_capability_pack(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_capability_pack_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/skill-governance")
+async def get_control_skill_governance(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_skill_governance_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/setup-governance")
+async def get_control_setup_governance(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_setup_governance_document()).model_dump(
         mode="json", by_alias=True
     )
 

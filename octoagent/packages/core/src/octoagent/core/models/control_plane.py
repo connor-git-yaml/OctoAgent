@@ -277,6 +277,122 @@ class ContextContinuityDocument(ControlPlaneDocument):
     frames: list[ContextFrameItem] = Field(default_factory=list)
 
 
+class SetupRiskItem(BaseModel):
+    risk_id: str = Field(min_length=1)
+    severity: str = Field(default="info")
+    title: str = Field(min_length=1)
+    summary: str = Field(default="")
+    blocking: bool = False
+    recommended_action: str = Field(default="")
+    source_ref: ControlPlaneResourceRef | None = None
+
+
+class SetupGovernanceSection(BaseModel):
+    section_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    status: str = Field(default="ready")
+    summary: str = Field(default="")
+    warnings: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[ControlPlaneResourceRef] = Field(default_factory=list)
+
+
+class SetupReviewSummary(BaseModel):
+    ready: bool = False
+    risk_level: str = Field(default="info")
+    warnings: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    provider_runtime_risks: list[SetupRiskItem] = Field(default_factory=list)
+    channel_exposure_risks: list[SetupRiskItem] = Field(default_factory=list)
+    agent_autonomy_risks: list[SetupRiskItem] = Field(default_factory=list)
+    tool_skill_readiness_risks: list[SetupRiskItem] = Field(default_factory=list)
+    secret_binding_risks: list[SetupRiskItem] = Field(default_factory=list)
+
+
+class PolicyProfileItem(BaseModel):
+    profile_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str = Field(default="")
+    allowed_tool_profile: str = Field(default="standard")
+    approval_policy: str = Field(default="")
+    risk_level: str = Field(default="info")
+    recommended_for: list[str] = Field(default_factory=list)
+    is_active: bool = False
+
+
+class PolicyProfilesDocument(ControlPlaneDocument):
+    resource_type: str = "policy_profiles"
+    resource_id: str = "policy:profiles"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    active_profile_id: str = Field(default="")
+    profiles: list[PolicyProfileItem] = Field(default_factory=list)
+
+
+class SkillGovernanceItem(BaseModel):
+    item_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    source_kind: str = Field(default="builtin")
+    scope: str = Field(default="project")
+    enabled_by_default: bool = False
+    availability: str = Field(default="available")
+    trust_level: str = Field(default="trusted")
+    blocking: bool = False
+    required_secrets: list[str] = Field(default_factory=list)
+    missing_requirements: list[str] = Field(default_factory=list)
+    install_hint: str = Field(default="")
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillGovernanceDocument(ControlPlaneDocument):
+    resource_type: str = "skill_governance"
+    resource_id: str = "skills:governance"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    items: list[SkillGovernanceItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class SetupGovernanceDocument(ControlPlaneDocument):
+    resource_type: str = "setup_governance"
+    resource_id: str = "setup:governance"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    project_scope: SetupGovernanceSection = Field(
+        default_factory=lambda: SetupGovernanceSection(
+            section_id="project_scope",
+            label="Project Scope",
+        )
+    )
+    provider_runtime: SetupGovernanceSection = Field(
+        default_factory=lambda: SetupGovernanceSection(
+            section_id="provider_runtime",
+            label="Provider Runtime",
+        )
+    )
+    channel_access: SetupGovernanceSection = Field(
+        default_factory=lambda: SetupGovernanceSection(
+            section_id="channel_access",
+            label="Channel Access",
+        )
+    )
+    agent_governance: SetupGovernanceSection = Field(
+        default_factory=lambda: SetupGovernanceSection(
+            section_id="agent_governance",
+            label="Agent Governance",
+        )
+    )
+    tools_skills: SetupGovernanceSection = Field(
+        default_factory=lambda: SetupGovernanceSection(
+            section_id="tools_skills",
+            label="Tools & Skills",
+        )
+    )
+    review: SetupReviewSummary = Field(default_factory=SetupReviewSummary)
+
+
 class CapabilityPackDocument(ControlPlaneDocument):
     resource_type: str = "capability_pack"
     resource_id: str = "capability:bundled"

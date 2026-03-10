@@ -97,6 +97,36 @@ M4 从 032 开始启用更严格的“真实可用”门禁。以下任一条不
 - 035 必须坚持“页面状态和动作均可追溯到 canonical backend”的反假实现门禁
 - 035 的成功标准是“普通用户不用终端也能走通首页检查、图形化改配置、发消息、处理确认、查看记忆摘要”
 
+#### Feature 036：Guided Setup Governance
+
+状态：**Planned（2026-03-10）**
+
+目标：
+
+- 把 `Provider / Channel / Agent Profile / 权限 / Tools / Skills` 的初始化配置与默认治理收口成一条 canonical setup 主链
+- 让 Web `Settings / Setup Center` 与 CLI `octo init / octo onboard` 共享同一套 review / apply 语义
+- 把安全边界、默认权限与 skill readiness 提前到新手路径中，而不是藏在高级模式和静默默认值里
+
+范围冻结：
+
+- `setup-governance`、`policy-profiles`、`skill-governance` canonical resources
+- `setup.review`、`setup.apply`、`agent_profile.save`、`policy_profile.select`、`skills.selection.save`
+- 扩展 wizard/onboarding，使其覆盖 front-door、Telegram access policy、主 Agent profile、policy preset、tools/skills readiness
+- 035 `Settings` / `Home` 接入 setup-governance
+- secrets refs-only、risk review、missing requirements / install hints、CLI/Web 一致性测试
+
+明确排除：
+
+- 新建 `/api/setup/*` 私有接口
+- 新造第二套配置存储
+- OAuth broker / marketplace / 多用户 RBAC
+- 让 036 自己重做 033 的 context continuity 领域逻辑
+
+本轮规划结论：
+
+- 036 必须坚持“setup 状态和 apply 行为都由 canonical control-plane 产出”的反平行实现门禁
+- 036 的成功标准是“普通用户能安全完成初始化，并明确理解主 Agent、Channel、Tools、Skills 的实际权限与暴露面”
+
 ## 5. 交付顺序建议
 
 1. 先补 `BuiltinToolCatalog`、availability / install hint / degraded truth

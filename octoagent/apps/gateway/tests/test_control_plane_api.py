@@ -44,13 +44,17 @@ from octoagent.provider.dx.project_selector import ProjectSelectorService
 from ulid import ULID
 
 
-@pytest_asyncio.fixture
-async def control_plane_app(tmp_path: Path, monkeypatch):
+def _configure_control_plane_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OCTOAGENT_DB_PATH", str(tmp_path / "data" / "sqlite" / "test.db"))
     monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(tmp_path / "data" / "artifacts"))
     monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
     monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+
+
+@pytest_asyncio.fixture
+async def control_plane_app(tmp_path: Path, monkeypatch):
+    _configure_control_plane_env(tmp_path, monkeypatch)
 
     from octoagent.gateway.main import create_app
 
@@ -429,7 +433,10 @@ class TestControlPlaneApi:
             "owner_profile",
             "bootstrap_session",
             "context_continuity",
+            "policy_profiles",
             "capability_pack",
+            "skill_governance",
+            "setup_governance",
             "delegation",
             "pipelines",
             "automation",
@@ -439,6 +446,7 @@ class TestControlPlaneApi:
         }
         assert payload["registry"]["resource_type"] == "action_registry"
         assert any(item["action_id"] == "project.select" for item in payload["registry"]["actions"])
+        assert any(item["action_id"] == "setup.review" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "memory.query" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "work.cancel" for item in payload["registry"]["actions"])
         assert any(
@@ -478,6 +486,9 @@ class TestControlPlaneApi:
         ]
         assert frame["budget"]["final_prompt_tokens"] == 256
         assert frame["source_refs"][0]["ref_type"] == "memory_scope"
+        assert payload["resources"]["policy_profiles"]["active_profile_id"] == "default"
+        assert payload["resources"]["skill_governance"]["resource_type"] == "skill_governance"
+        assert payload["resources"]["setup_governance"]["resource_type"] == "setup_governance"
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
@@ -496,6 +507,9 @@ class TestControlPlaneApi:
         owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
         bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
         context_resp = await control_plane_client.get("/api/control/resources/context-frames")
+        policy_resp = await control_plane_client.get("/api/control/resources/policy-profiles")
+        skill_resp = await control_plane_client.get("/api/control/resources/skill-governance")
+        setup_resp = await control_plane_client.get("/api/control/resources/setup-governance")
         assert profiles_resp.status_code == 200
         assert owner_resp.status_code == 200
         assert bootstrap_resp.status_code == 200
@@ -504,6 +518,9 @@ class TestControlPlaneApi:
         assert context_payload["resource_type"] == "context_continuity"
         assert context_payload["frames"][0]["memory_recall"]["hit_count"] == 1
         assert context_payload["frames"][0]["source_refs"][1]["ref_id"] == "memory-1"
+        assert policy_resp.status_code == 200
+        assert skill_resp.status_code == 200
+        assert setup_resp.status_code == 200
 
     async def test_capability_refresh_action_invokes_refresh(
         self,
@@ -615,6 +632,338 @@ class TestControlPlaneApi:
         assert [item["context_frame_id"] for item in payload["frames"]] == [
             "context-frame-secondary"
         ]
+
+    async def test_setup_governance_surfaces_policy_skill_and_review_sections(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        resp = await control_plane_client.get("/api/control/resources/setup-governance")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["resource_type"] == "setup_governance"
+        assert payload["project_scope"]["status"] == "ready"
+        assert payload["provider_runtime"]["details"]["enabled_provider_ids"] == []
+        assert payload["agent_governance"]["details"]["active_agent_profile"]["profile_id"] == (
+            "agent-profile-default"
+        )
+        assert payload["tools_skills"]["details"]["skill_summary"]["builtin_skill_count"] >= 1
+        assert "next_actions" in payload["review"]
+
+    async def test_setup_review_returns_blocking_reasons_without_secret_leak(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {},
+                            "channels": {
+                                "telegram": {
+                                    "enabled": True,
+                                    "mode": "webhook",
+                                    "bot_token_env": "TELEGRAM_BOT_TOKEN",
+                                    "webhook_url": "",
+                                }
+                            },
+                        },
+                        "policy_profile_id": "permissive",
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_REVIEW_READY"
+        review = result["data"]["review"]
+        assert review["ready"] is False
+        assert "main_alias_missing" in review["blocking_reasons"]
+        assert any(
+            item["risk_id"] == "telegram_webhook_url_missing"
+            for item in review["channel_exposure_risks"]
+        )
+        serialized = json.dumps(review, ensure_ascii=False)
+        assert "api_key_env" not in serialized
+        assert "sk-" not in serialized
+
+    async def test_setup_review_uses_draft_aliases_for_skill_governance(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openai/gpt-4o-mini",
+                                }
+                            },
+                        }
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        review = resp.json()["result"]["data"]["review"]
+        assert all(
+            not risk["risk_id"].startswith("skill:")
+            for risk in review["tool_skill_readiness_risks"]
+            if risk["blocking"]
+        )
+
+    async def test_policy_profile_select_updates_project_metadata_and_runtime(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "policy_profile.select",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {"profile_id": "strict"},
+            },
+        )
+
+        assert resp.status_code == 200
+        payload = resp.json()["result"]
+        assert payload["code"] == "POLICY_PROFILE_SELECTED"
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        assert default_project.metadata["policy_profile_id"] == "strict"
+        assert control_plane_app.state.policy_engine.profile.name == "strict"
+
+        document = (
+            await control_plane_app.state.control_plane_service.get_policy_profiles_document()
+        ).model_dump(mode="json")
+        assert document["active_profile_id"] == "strict"
+
+    async def test_agent_profile_save_binds_selected_project_default_profile(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "agent_profile.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile": {
+                        "scope": "project",
+                        "name": "安全优先主 Agent",
+                        "persona_summary": "更保守，适合首次使用。",
+                        "tool_profile": "minimal",
+                        "model_alias": "main",
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        payload = resp.json()["result"]
+        assert payload["code"] == "AGENT_PROFILE_SAVED"
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        saved_profile_id = payload["data"]["profile_id"]
+        assert default_project.default_agent_profile_id == saved_profile_id
+        saved = await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
+            saved_profile_id
+        )
+        assert saved is not None
+        assert saved.name == "安全优先主 Agent"
+
+    async def test_agent_profile_save_updates_target_project_default_profile(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        selector = ProjectSelectorService(
+            control_plane_app.state.project_root,
+            surface="web",
+            store_group=control_plane_app.state.store_group,
+        )
+        target_project, _, _ = await selector.create_project(
+            name="Project Secondary",
+            slug="project-secondary",
+            set_active=False,
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "agent_profile.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile": {
+                        "scope": "project",
+                        "project_id": target_project.project_id,
+                        "name": "Secondary Agent",
+                        "tool_profile": "minimal",
+                        "model_alias": "main",
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        saved_profile_id = resp.json()["result"]["data"]["profile_id"]
+        reloaded_default = await control_plane_app.state.store_group.project_store.get_project(
+            default_project.project_id
+        )
+        reloaded_target = await control_plane_app.state.store_group.project_store.get_project(
+            target_project.project_id
+        )
+        assert reloaded_default is not None
+        assert reloaded_target is not None
+        assert reloaded_default.default_agent_profile_id != saved_profile_id
+        assert reloaded_target.default_agent_profile_id == saved_profile_id
+
+    async def test_policy_engine_uses_persisted_selected_project_profile_on_restart(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        _configure_control_plane_env(tmp_path, monkeypatch)
+
+        from octoagent.gateway.main import create_app
+
+        app = create_app()
+        async with app.router.lifespan_context(app):
+            default_project = await app.state.store_group.project_store.get_default_project()
+            assert default_project is not None
+            selector = ProjectSelectorService(
+                app.state.project_root,
+                surface="web",
+                store_group=app.state.store_group,
+            )
+            secondary_project, _, _ = await selector.create_project(
+                name="Restart Secondary",
+                slug="restart-secondary",
+                set_active=False,
+            )
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                select_resp = await client.post(
+                    "/api/control/actions",
+                    json={
+                        "request_id": str(ULID()),
+                        "action_id": "project.select",
+                        "surface": "web",
+                        "actor": {
+                            "actor_id": "user:web",
+                            "actor_label": "Owner",
+                        },
+                        "params": {"project_id": secondary_project.project_id},
+                    },
+                )
+                assert select_resp.status_code == 200
+                profile_resp = await client.post(
+                    "/api/control/actions",
+                    json={
+                        "request_id": str(ULID()),
+                        "action_id": "policy_profile.select",
+                        "surface": "web",
+                        "actor": {
+                            "actor_id": "user:web",
+                            "actor_label": "Owner",
+                        },
+                        "params": {"profile_id": "strict"},
+                    },
+                )
+                assert profile_resp.status_code == 200
+
+        restarted_app = create_app()
+        async with restarted_app.router.lifespan_context(restarted_app):
+            document = (
+                await restarted_app.state.control_plane_service.get_policy_profiles_document()
+            ).model_dump(mode="json")
+            assert document["active_project_id"] == secondary_project.project_id
+            assert document["active_profile_id"] == "strict"
+            assert restarted_app.state.policy_engine.profile.name == "strict"
+
+    async def test_config_resource_exposes_frontdoor_and_telegram_governance_hints(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.get("/api/control/resources/config")
+
+        assert resp.status_code == 200
+        hints = resp.json()["ui_hints"]
+        assert "front_door.mode" in hints
+        assert "channels.telegram.dm_policy" in hints
+        assert "channels.telegram.group_policy" in hints
+        assert "channels.telegram.group_allow_users" in hints
 
     async def test_snapshot_exposes_builtin_tool_catalog_and_work_split_merge_actions(
         self,

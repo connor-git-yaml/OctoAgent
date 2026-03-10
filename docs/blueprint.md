@@ -2797,6 +2797,7 @@ M3 核心对象关系（2026-03-08 补充）：
 - [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [ ] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced`，图形化配置主 Agent / Work / Memory / Channels，直接消费 015/017/025/026/027/030/033/034 contract）
+- [ ] Feature 036：Guided Setup Governance（把 `Provider / Channel / Agent Profile / 权限 / Tools / Skills` 的初始化配置与默认治理收口为 canonical setup flow，复用 015/025/026/030/035，不得新造平行 backend）
 - [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
 - [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
 - [ ] Progressive Web App / companion surfaces / remote tunnel polish
@@ -2807,6 +2808,7 @@ M4 约束：
 - M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
 - 上下文压缩类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
 - 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
+- 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
 - 文件工作台优先服务 artifacts / configs / generated files / project workspace，不以“内建 IDE”作为第一目标
 - 语音、PWA、remote access 等增强能力不得破坏现有 secret / approval / audit / device trust 边界
 

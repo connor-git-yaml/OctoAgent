@@ -160,6 +160,42 @@ def _build_update_service(project_root: Path, *, status_store: Any | None = None
         return UpdateService(project_root)
 
 
+def _resolve_policy_profile_from_project(project: Any | None) -> Any | None:
+    """从 Project metadata 解析预设 policy profile。"""
+    if project is None:
+        return None
+    metadata = getattr(project, "metadata", {}) or {}
+    profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
+    if not profile_id:
+        return None
+    from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE
+
+    catalog = {
+        "strict": STRICT_PROFILE,
+        "default": DEFAULT_PROFILE,
+        "permissive": PERMISSIVE_PROFILE,
+    }
+    return catalog.get(profile_id)
+
+
+async def _resolve_policy_project_for_startup(store_group, project_root: Path) -> Any | None:
+    """启动时优先对齐当前 control plane 已选中的 project。"""
+    from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+
+    state = ControlPlaneStateStore(project_root).load()
+    selector = await store_group.project_store.get_selector_state("web")
+
+    if state.selected_project_id:
+        project = await store_group.project_store.get_project(state.selected_project_id)
+        if project is not None:
+            return project
+    if selector is not None and selector.active_project_id:
+        project = await store_group.project_store.get_project(selector.active_project_id)
+        if project is not None:
+            return project
+    return await store_group.project_store.get_default_project()
+
+
 def _create_runtime_state_snapshot(
     project_root: Path,
     *,
@@ -280,7 +316,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sse_broadcaster,
         TelegramApprovalBroadcaster(telegram_service),
     )
+    default_project = await _resolve_policy_project_for_startup(store_group, project_root)
     policy_engine = PolicyEngine(
+        profile=_resolve_policy_profile_from_project(default_project),
         event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
         sse_broadcaster=approval_broadcaster,
     )
@@ -475,6 +513,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ),
         capability_pack_service=app.state.capability_pack_service,
         delegation_plane_service=app.state.delegation_plane_service,
+        policy_engine=app.state.policy_engine,
     )
     app.state.automation_scheduler = AutomationSchedulerService(
         control_plane_service=app.state.control_plane_service,

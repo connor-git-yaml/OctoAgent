@@ -14,7 +14,9 @@ from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
     ActorType,
+    AgentProfile,
     AgentProfileItem,
+    AgentProfileScope,
     AgentProfilesDocument,
     AutomationJob,
     AutomationJobDocument,
@@ -56,12 +58,20 @@ from octoagent.core.models import (
     OperatorActionSource,
     OwnerProfileDocument,
     PipelineRunItem,
+    PolicyProfileItem,
+    PolicyProfilesDocument,
     ProjectBindingType,
     ProjectOption,
     ProjectSelectorDocument,
     ProjectSelectorState,
     SessionProjectionDocument,
     SessionProjectionItem,
+    SetupGovernanceDocument,
+    SetupGovernanceSection,
+    SetupReviewSummary,
+    SetupRiskItem,
+    SkillGovernanceDocument,
+    SkillGovernanceItem,
     SkillPipelineDocument,
     Task,
     TaskPointers,
@@ -83,6 +93,7 @@ from octoagent.memory import (
     ProposalStatus,
     VaultAccessDecision,
 )
+from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE, PolicyProfile
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.provider.dx.chat_import_service import ChatImportService
@@ -107,6 +118,7 @@ from octoagent.provider.dx.memory_console_service import (
     MemoryConsoleService,
 )
 from octoagent.provider.dx.onboarding_service import OnboardingService
+from octoagent.provider.dx.secret_service import SecretService
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
@@ -114,6 +126,8 @@ from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
 _AUDIT_TRACE_ID = "trace-ops-control-plane"
+_POLICY_TASK_ID = "system"
+_POLICY_TRACE_ID = "trace-policy-engine"
 _TERMINAL_WORK_STATUSES = {"succeeded", "failed", "cancelled", "merged", "timed_out", "deleted"}
 
 
@@ -144,6 +158,7 @@ class ControlPlaneService:
         capability_pack_service=None,
         delegation_plane_service=None,
         import_workbench_service: ImportWorkbenchService | None = None,
+        policy_engine=None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -165,6 +180,7 @@ class ControlPlaneService:
             surface="web",
             store_group=store_group,
         )
+        self._policy_engine = policy_engine
         self._state_store = ControlPlaneStateStore(project_root)
         self._automation_store = AutomationStore(project_root)
         self._automation_scheduler = None
@@ -207,7 +223,10 @@ class ControlPlaneService:
         owner_profile = await self.get_owner_profile_document()
         bootstrap_session = await self.get_bootstrap_session_document()
         context_continuity = await self.get_context_continuity_document()
+        policy_profiles = await self.get_policy_profiles_document()
         capability_pack = await self.get_capability_pack_document()
+        skill_governance = await self.get_skill_governance_document()
+        setup_governance = await self.get_setup_governance_document()
         delegation = await self.get_delegation_document()
         pipelines = await self.get_skill_pipeline_document()
         automation = await self.get_automation_document()
@@ -226,7 +245,10 @@ class ControlPlaneService:
                 "owner_profile": owner_profile.model_dump(mode="json", by_alias=True),
                 "bootstrap_session": bootstrap_session.model_dump(mode="json", by_alias=True),
                 "context_continuity": context_continuity.model_dump(mode="json", by_alias=True),
+                "policy_profiles": policy_profiles.model_dump(mode="json", by_alias=True),
                 "capability_pack": capability_pack.model_dump(mode="json", by_alias=True),
+                "skill_governance": skill_governance.model_dump(mode="json", by_alias=True),
+                "setup_governance": setup_governance.model_dump(mode="json", by_alias=True),
                 "delegation": delegation.model_dump(mode="json", by_alias=True),
                 "pipelines": pipelines.model_dump(mode="json", by_alias=True),
                 "automation": automation.model_dump(mode="json", by_alias=True),
@@ -828,22 +850,18 @@ class ControlPlaneService:
 
     async def get_context_continuity_document(self) -> ContextContinuityDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        sessions = (
-            await self._stores.agent_context_store.list_session_contexts(
-                project_id=selected_project.project_id if selected_project is not None else None,
-                workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else None
-                ),
-            )
+        sessions = await self._stores.agent_context_store.list_session_contexts(
+            project_id=selected_project.project_id if selected_project is not None else None,
+            workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else None
+            ),
         )
-        frames = (
-            await self._stores.agent_context_store.list_context_frames(
-                project_id=selected_project.project_id if selected_project is not None else None,
-                workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else None
-                ),
-                limit=20,
-            )
+        frames = await self._stores.agent_context_store.list_context_frames(
+            project_id=selected_project.project_id if selected_project is not None else None,
+            workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else None
+            ),
+            limit=20,
         )
         session_items = [
             ContextSessionItem(
@@ -895,6 +913,405 @@ class ControlPlaneService:
                 is_degraded=not bool(frame_items),
                 reasons=["context_frames_empty"] if not frame_items else [],
             ),
+        )
+
+    async def get_policy_profiles_document(self) -> PolicyProfilesDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        active_profile_id, _ = self._resolve_effective_policy_profile(selected_project)
+        profiles = [
+            PolicyProfileItem(
+                profile_id=profile_id,
+                label=label,
+                description=profile.description,
+                allowed_tool_profile=profile.allowed_tool_profile.value,
+                approval_policy=self._describe_policy_approval(profile),
+                risk_level=risk_level,
+                recommended_for=recommended_for,
+                is_active=profile_id == active_profile_id,
+            )
+            for profile_id, label, profile, risk_level, recommended_for in self._policy_catalog()
+        ]
+        return PolicyProfilesDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            active_profile_id=active_profile_id,
+            profiles=profiles,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="policy_profile.select",
+                    label="切换安全等级",
+                    action_id="policy_profile.select",
+                )
+            ],
+        )
+
+    async def get_skill_governance_document(
+        self,
+        *,
+        config_value: dict[str, Any] | None = None,
+        policy_profile_id: str | None = None,
+        selected_project: Any | None = None,
+        selected_workspace: Any | None = None,
+    ) -> SkillGovernanceDocument:
+        if selected_project is None and selected_workspace is None:
+            _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        elif selected_project is None:
+            _, selected_project, _, _ = await self._resolve_selection()
+        if policy_profile_id:
+            effective_policy = self._policy_profile_by_id(policy_profile_id) or DEFAULT_PROFILE
+        else:
+            _, effective_policy = self._resolve_effective_policy_profile(selected_project)
+        capability_pack = await self.get_capability_pack_document()
+        capability_snapshot = (
+            self._capability_pack_service.capability_snapshot()
+            if self._capability_pack_service is not None
+            else {}
+        )
+        items: list[SkillGovernanceItem] = []
+        if config_value is None:
+            config_value = (await self.get_config_schema()).current_value
+        model_aliases_raw = (
+            config_value.get("model_aliases", {}) if isinstance(config_value, dict) else {}
+        )
+        model_aliases = (
+            set(model_aliases_raw.keys()) if isinstance(model_aliases_raw, dict) else set()
+        )
+        for skill in capability_pack.pack.skills:
+            required_profile = str(skill.metadata.get("tool_profile", "standard"))
+            missing_requirements: list[str] = []
+            availability = "available"
+            blocking = False
+            if skill.model_alias not in model_aliases:
+                availability = "degraded"
+                blocking = True
+                missing_requirements.append(f"缺少 model alias: {skill.model_alias}")
+            if not self._tool_profile_allowed(
+                required_profile,
+                effective_policy.allowed_tool_profile.value,
+            ):
+                availability = "policy_blocked"
+                missing_requirements.append(
+                    f"当前安全等级只允许 {effective_policy.allowed_tool_profile.value} 工具。"
+                )
+            items.append(
+                SkillGovernanceItem(
+                    item_id=f"skill:{skill.skill_id}",
+                    label=skill.label or skill.skill_id,
+                    source_kind="builtin",
+                    scope="project",
+                    enabled_by_default=True,
+                    availability=availability,
+                    trust_level="trusted",
+                    blocking=blocking,
+                    missing_requirements=missing_requirements,
+                    details={
+                        "skill_id": skill.skill_id,
+                        "model_alias": skill.model_alias,
+                        "tools_allowed": list(skill.tools_allowed),
+                        "required_tool_profile": required_profile,
+                        "worker_types": [item.value for item in skill.worker_types],
+                    },
+                )
+            )
+
+        mcp_tools: dict[str, list[Any]] = defaultdict(list)
+        for tool in capability_pack.pack.tools:
+            if tool.tool_group != "mcp":
+                continue
+            server_name = str(tool.metadata.get("mcp_server_name", "")).strip() or "mcp"
+            mcp_tools[server_name].append(tool)
+        for server_name, tools in mcp_tools.items():
+            availability = "available"
+            missing_requirements: list[str] = []
+            install_hints = [item.install_hint for item in tools if item.install_hint]
+            if any(item.availability.value == "unavailable" for item in tools):
+                availability = "unavailable"
+                missing_requirements.append("存在不可用的 MCP tools。")
+            elif any(item.availability.value != "available" for item in tools):
+                availability = "degraded"
+                missing_requirements.append("部分 MCP tools 当前处于降级状态。")
+            items.append(
+                SkillGovernanceItem(
+                    item_id=f"mcp:{server_name}",
+                    label=f"MCP / {server_name}",
+                    source_kind="mcp",
+                    scope="project",
+                    enabled_by_default=False,
+                    availability=availability,
+                    trust_level="external",
+                    missing_requirements=missing_requirements,
+                    install_hint=install_hints[0] if install_hints else "",
+                    details={
+                        "server_name": server_name,
+                        "tool_count": len(tools),
+                        "tools": [item.tool_name for item in tools],
+                    },
+                )
+            )
+        if capability_snapshot.get("mcp") and not mcp_tools:
+            mcp_summary = capability_snapshot["mcp"]
+            items.append(
+                SkillGovernanceItem(
+                    item_id="mcp:registry",
+                    label="MCP Registry",
+                    source_kind="mcp",
+                    scope="project",
+                    enabled_by_default=False,
+                    availability=(
+                        "degraded" if mcp_summary.get("configured_server_count", 0) else "disabled"
+                    ),
+                    trust_level="external",
+                    missing_requirements=[str(mcp_summary.get("config_error", "")).strip()]
+                    if mcp_summary.get("config_error")
+                    else [],
+                    details=dict(mcp_summary),
+                )
+            )
+        blocked_items = len([item for item in items if item.blocking])
+        warnings = [] if items else ["当前没有可治理的 skills / MCP readiness 条目。"]
+        return SkillGovernanceDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            items=items,
+            summary={
+                "item_count": len(items),
+                "blocked_count": blocked_items,
+                "builtin_skill_count": len(
+                    [item for item in items if item.source_kind == "builtin"]
+                ),
+                "mcp_item_count": len([item for item in items if item.source_kind == "mcp"]),
+            },
+            warnings=warnings,
+            degraded=ControlPlaneDegradedState(
+                is_degraded=bool(blocked_items),
+                reasons=["skills_blocked"] if blocked_items else [],
+            ),
+        )
+
+    async def get_setup_governance_document(self) -> SetupGovernanceDocument:
+        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        project_selector = await self.get_project_selector()
+        config = await self.get_config_schema()
+        diagnostics = await self.get_diagnostics_summary()
+        agent_profiles = await self.get_agent_profiles_document()
+        owner_profile = await self.get_owner_profile_document()
+        capability_pack = await self.get_capability_pack_document()
+        policy_profiles = await self.get_policy_profiles_document()
+        skill_governance = await self.get_skill_governance_document()
+        secret_audit = await self._safe_secret_audit(
+            selected_project.project_id if selected_project else None
+        )
+        active_agent_profile = self._resolve_active_agent_profile_payload(
+            agent_profiles=agent_profiles,
+            selected_project=selected_project,
+        )
+        review = self._build_setup_review_summary(
+            config=config.current_value,
+            config_warnings=config.warnings,
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+            diagnostics=diagnostics,
+            active_agent_profile=active_agent_profile,
+            policy_profile_id=policy_profiles.active_profile_id,
+            skill_governance=skill_governance,
+            secret_audit=secret_audit,
+            validation_errors=[],
+        )
+        project_scope = SetupGovernanceSection(
+            section_id="project_scope",
+            label="Project Scope",
+            status="ready" if selected_project is not None else "blocked",
+            summary=(
+                (
+                    f"{selected_project.name} / "
+                    f"{self._workspace_summary_label(selected_workspace)}"
+                )
+                if selected_project is not None
+                else "当前还没有可用 project。"
+            ),
+            warnings=[fallback_reason] if fallback_reason else [],
+            blocking_reasons=["project_unavailable"] if selected_project is None else [],
+            details={
+                "project_id": selected_project.project_id if selected_project is not None else "",
+                "project_name": selected_project.name if selected_project is not None else "",
+                "workspace_id": (
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
+                "workspace_name": selected_workspace.name if selected_workspace is not None else "",
+                "fallback_reason": fallback_reason,
+                "default_project_id": project_selector.default_project_id,
+            },
+            source_refs=[self._resource_ref("project_selector", "project:selector")],
+        )
+        provider_runtime = SetupGovernanceSection(
+            section_id="provider_runtime",
+            label="Provider Runtime",
+            status="blocked"
+            if review.provider_runtime_risks
+            and any(item.blocking for item in review.provider_runtime_risks)
+            else ("action_required" if review.provider_runtime_risks else "ready"),
+            summary=(
+                f"已启用 {len(config.current_value.get('providers', []))} 个 provider，"
+                f"runtime={config.current_value.get('runtime', {}).get('llm_mode', '')}"
+            ),
+            warnings=list(config.warnings),
+            blocking_reasons=[
+                item.risk_id for item in review.provider_runtime_risks if item.blocking
+            ],
+            details={
+                "enabled_provider_ids": [
+                    item.get("id", "")
+                    for item in config.current_value.get("providers", [])
+                    if item.get("enabled", True)
+                ],
+                "model_aliases": sorted(config.current_value.get("model_aliases", {}).keys()),
+                "litellm_sync_ok": not config.degraded.is_degraded,
+                "bridge_ref_count": len(config.bridge_refs),
+                "secret_audit_status": secret_audit.overall_status if secret_audit else "unknown",
+            },
+            source_refs=[
+                self._resource_ref("config_schema", "config:octoagent"),
+                self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            ],
+        )
+        channel_summary = diagnostics.channel_summary.get("telegram", {})
+        channel_access = SetupGovernanceSection(
+            section_id="channel_access",
+            label="Channel Access",
+            status="blocked"
+            if review.channel_exposure_risks
+            and any(item.blocking for item in review.channel_exposure_risks)
+            else ("action_required" if review.channel_exposure_risks else "ready"),
+            summary=(
+                f"front_door={config.current_value.get('front_door', {}).get('mode', 'loopback')}，"
+                f"telegram={'enabled' if channel_summary.get('enabled') else 'disabled'}"
+            ),
+            warnings=[item.summary for item in review.channel_exposure_risks if not item.blocking],
+            blocking_reasons=[
+                item.risk_id for item in review.channel_exposure_risks if item.blocking
+            ],
+            details={
+                "front_door": dict(config.current_value.get("front_door", {})),
+                "telegram": dict(channel_summary),
+            },
+            source_refs=[
+                self._resource_ref("config_schema", "config:octoagent"),
+                self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            ],
+        )
+        agent_governance = SetupGovernanceSection(
+            section_id="agent_governance",
+            label="Agent Governance",
+            status="blocked"
+            if review.agent_autonomy_risks
+            and any(item.blocking for item in review.agent_autonomy_risks)
+            else ("action_required" if review.agent_autonomy_risks else "ready"),
+            summary=(
+                f"主 Agent={active_agent_profile.get('name', '未配置')}，"
+                f"安全等级={policy_profiles.active_profile_id or 'default'}"
+            ),
+            warnings=[item.summary for item in review.agent_autonomy_risks if not item.blocking],
+            blocking_reasons=[
+                item.risk_id for item in review.agent_autonomy_risks if item.blocking
+            ],
+            details={
+                "active_agent_profile": active_agent_profile,
+                "owner_profile_id": str(
+                    owner_profile.profile.get("owner_profile_id", "")
+                    if isinstance(owner_profile.profile, dict)
+                    else ""
+                ),
+                "owner_overlay_count": len(owner_profile.overlays),
+                "policy_profile_id": policy_profiles.active_profile_id,
+            },
+            source_refs=[
+                self._resource_ref("agent_profiles", "agent-profiles:overview"),
+                self._resource_ref("owner_profile", "owner-profile:default"),
+                self._resource_ref("policy_profiles", "policy:profiles"),
+            ],
+        )
+        tools_skills = SetupGovernanceSection(
+            section_id="tools_skills",
+            label="Tools & Skills",
+            status="blocked"
+            if review.tool_skill_readiness_risks
+            and any(item.blocking for item in review.tool_skill_readiness_risks)
+            else ("action_required" if review.tool_skill_readiness_risks else "ready"),
+            summary=(
+                f"tools={len(capability_pack.pack.tools)}，"
+                f"skills={skill_governance.summary.get('builtin_skill_count', 0)}，"
+                f"mcp={skill_governance.summary.get('mcp_item_count', 0)}"
+            ),
+            warnings=[
+                item.summary for item in review.tool_skill_readiness_risks if not item.blocking
+            ],
+            blocking_reasons=[
+                item.risk_id for item in review.tool_skill_readiness_risks if item.blocking
+            ],
+            details={
+                "capability_summary": (
+                    self._capability_pack_service.capability_snapshot()
+                    if self._capability_pack_service is not None
+                    else {}
+                ),
+                "skill_summary": dict(skill_governance.summary),
+            },
+            source_refs=[
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
+            ],
+        )
+        warnings = list(review.warnings)
+        if not warnings and not review.ready:
+            warnings.append("当前 setup 仍有待完成项。")
+        return SetupGovernanceDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            project_scope=project_scope,
+            provider_runtime=provider_runtime,
+            channel_access=channel_access,
+            agent_governance=agent_governance,
+            tools_skills=tools_skills,
+            review=review,
+            warnings=warnings,
+            degraded=ControlPlaneDegradedState(
+                is_degraded=not review.ready,
+                reasons=list(review.blocking_reasons),
+                unavailable_sections=[
+                    item.section_id
+                    for item in (
+                        project_scope,
+                        provider_runtime,
+                        channel_access,
+                        agent_governance,
+                        tools_skills,
+                    )
+                    if item.status == "blocked"
+                ],
+            ),
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="setup.review",
+                    label="审查 Setup 风险",
+                    action_id="setup.review",
+                ),
+                ControlPlaneCapability(
+                    capability_id="agent_profile.save",
+                    label="保存主 Agent",
+                    action_id="agent_profile.save",
+                ),
+                ControlPlaneCapability(
+                    capability_id="policy_profile.select",
+                    label="切换安全等级",
+                    action_id="policy_profile.select",
+                ),
+            ],
         )
 
     async def get_automation_document(self) -> AutomationJobDocument:
@@ -1582,6 +1999,8 @@ class ControlPlaneService:
             )
         if action_id == "project.select":
             return await self._handle_project_select(request)
+        if action_id == "setup.review":
+            return await self._handle_setup_review(request)
         if action_id == "diagnostics.refresh":
             diagnostics = await self.get_diagnostics_summary()
             return self._completed_result(
@@ -1688,6 +2107,10 @@ class ControlPlaneService:
                 request,
                 kind=OperatorActionKind.REJECT_PAIRING,
             )
+        if action_id == "agent_profile.save":
+            return await self._handle_agent_profile_save(request)
+        if action_id == "policy_profile.select":
+            return await self._handle_policy_profile_select(request)
         if action_id == "config.apply":
             return await self._handle_config_apply(request)
         if action_id == "backup.create":
@@ -1771,6 +2194,7 @@ class ControlPlaneService:
             workspace=workspace,
             source="control_plane_action",
         )
+        await self._sync_policy_engine_for_project(project)
         await self._stores.conn.commit()
         return self._completed_result(
             request=request,
@@ -1786,6 +2210,73 @@ class ControlPlaneService:
                     target_type="project", target_id=project_id, label=project.name
                 )
             ],
+        )
+
+    async def _handle_setup_review(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        current_config = load_config(self._project_root)
+        if current_config is None:
+            current_config = OctoAgentConfig(updated_at=date.today().isoformat())
+        draft = request.params.get("draft", {})
+        config_patch = draft.get("config", {}) if isinstance(draft, dict) else {}
+        config_data = current_config.model_dump(mode="python")
+        candidate_config_payload: dict[str, Any] = config_data
+        if isinstance(config_patch, dict):
+            config_data = self._deep_merge_dicts(config_data, config_patch)
+            candidate_config_payload = config_data
+        validation_errors: list[str] = []
+        try:
+            candidate_config = OctoAgentConfig.model_validate(config_data)
+            candidate_config_payload = candidate_config.model_dump(mode="json")
+        except Exception as exc:
+            candidate_config = current_config
+            validation_errors.append(str(exc))
+
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        agent_profiles = await self.get_agent_profiles_document()
+        active_agent_profile = self._resolve_active_agent_profile_payload(
+            agent_profiles=agent_profiles,
+            selected_project=selected_project,
+        )
+        agent_profile_patch = draft.get("agent_profile", {}) if isinstance(draft, dict) else {}
+        if isinstance(agent_profile_patch, dict) and agent_profile_patch:
+            active_agent_profile = self._merge_agent_profile_payload(
+                active_agent_profile,
+                agent_profile_patch,
+                selected_project=selected_project,
+            )
+        policy_profile_id = (
+            str(draft.get("policy_profile_id", "")).strip() if isinstance(draft, dict) else ""
+        )
+        if not policy_profile_id:
+            policy_profile_id, _ = self._resolve_effective_policy_profile(selected_project)
+        skill_governance = await self.get_skill_governance_document(
+            config_value=candidate_config_payload,
+            policy_profile_id=policy_profile_id,
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        diagnostics = await self.get_diagnostics_summary()
+        secret_audit = await self._safe_secret_audit(
+            selected_project.project_id if selected_project else None
+        )
+        review = self._build_setup_review_summary(
+            config=candidate_config_payload,
+            config_warnings=[],
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+            diagnostics=diagnostics,
+            active_agent_profile=active_agent_profile,
+            policy_profile_id=policy_profile_id,
+            skill_governance=skill_governance,
+            secret_audit=secret_audit,
+            validation_errors=validation_errors,
+        )
+        return self._completed_result(
+            request=request,
+            code="SETUP_REVIEW_READY",
+            message="Setup review 已生成。",
+            data={"review": review.model_dump(mode="json")},
+            resource_refs=[self._resource_ref("setup_governance", "setup:governance")],
         )
 
     async def _resolve_memory_action_context(
@@ -2422,9 +2913,7 @@ class ControlPlaneService:
         if not child_works:
             raise ControlPlaneActionError("CHILD_WORKS_REQUIRED", "当前 work 尚未拆分 child works")
         blocking = [
-            item.work_id
-            for item in child_works
-            if item.status.value not in _TERMINAL_WORK_STATUSES
+            item.work_id for item in child_works if item.status.value not in _TERMINAL_WORK_STATUSES
         ]
         if blocking:
             raise ControlPlaneActionError(
@@ -2456,9 +2945,7 @@ class ControlPlaneService:
         work = await self._get_work_in_scope(work_id)
         descendants = await self._delegation_plane_service.list_descendant_works(work_id)
         active = [
-            item.work_id
-            for item in descendants
-            if item.status.value not in _TERMINAL_WORK_STATUSES
+            item.work_id for item in descendants if item.status.value not in _TERMINAL_WORK_STATUSES
         ]
         if work.status.value not in _TERMINAL_WORK_STATUSES:
             active.insert(0, work.work_id)
@@ -2647,6 +3134,183 @@ class ControlPlaneService:
             resource_refs=[
                 self._resource_ref("config_schema", "config:octoagent"),
                 self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            ],
+        )
+
+    async def _handle_agent_profile_save(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        payload = request.params.get("profile")
+        raw = payload if isinstance(payload, dict) else request.params
+        _, selected_project, _, _ = await self._resolve_selection()
+        scope = self._param_str(raw, "scope", default="project").lower()
+        if scope not in {"system", "project"}:
+            raise ControlPlaneActionError(
+                "AGENT_PROFILE_SCOPE_INVALID", "scope 必须是 system/project"
+            )
+        project_id = self._param_str(raw, "project_id")
+        if scope == "project" and not project_id:
+            if selected_project is None:
+                raise ControlPlaneActionError(
+                    "PROJECT_REQUIRED",
+                    "project scope 的 agent profile 需要 project_id",
+                )
+            project_id = selected_project.project_id
+        profile_id = self._param_str(raw, "profile_id")
+        if not profile_id:
+            profile_id = (
+                f"agent-profile-{project_id or 'system-default'}"
+                if scope == "project"
+                else "agent-profile-system-default"
+            )
+        existing = await self._stores.agent_context_store.get_agent_profile(profile_id)
+        instruction_overlays = raw.get("instruction_overlays", [])
+        if not isinstance(instruction_overlays, list):
+            instruction_overlays = []
+        policy_refs = raw.get("policy_refs", [])
+        if not isinstance(policy_refs, list):
+            policy_refs = []
+        profile = AgentProfileItem.model_validate(
+            {
+                "profile_id": profile_id,
+                "scope": scope,
+                "project_id": project_id,
+                "name": self._param_str(raw, "name") or (existing.name if existing else ""),
+                "persona_summary": self._param_str(raw, "persona_summary")
+                or (existing.persona_summary if existing else ""),
+                "model_alias": self._param_str(raw, "model_alias", default="main")
+                or (existing.model_alias if existing else "main"),
+                "tool_profile": self._param_str(raw, "tool_profile", default="standard")
+                or (existing.tool_profile if existing else "standard"),
+            }
+        )
+        if not profile.name:
+            raise ControlPlaneActionError("AGENT_PROFILE_NAME_REQUIRED", "name 不能为空")
+        saved = await self._stores.agent_context_store.save_agent_profile(
+            AgentProfile(
+                profile_id=profile.profile_id,
+                scope=AgentProfileScope(profile.scope),
+                project_id=profile.project_id,
+                name=profile.name,
+                persona_summary=profile.persona_summary,
+                instruction_overlays=[str(item) for item in instruction_overlays],
+                model_alias=profile.model_alias,
+                tool_profile=profile.tool_profile,
+                policy_refs=[str(item) for item in policy_refs],
+                memory_access_policy=(
+                    dict(raw.get("memory_access_policy", {}))
+                    if isinstance(raw.get("memory_access_policy"), dict)
+                    else {}
+                ),
+                context_budget_policy=(
+                    dict(raw.get("context_budget_policy", {}))
+                    if isinstance(raw.get("context_budget_policy"), dict)
+                    else {}
+                ),
+                bootstrap_template_ids=[str(item) for item in raw.get("bootstrap_template_ids", [])]
+                if isinstance(raw.get("bootstrap_template_ids"), list)
+                else [],
+                metadata=dict(raw.get("metadata", {}))
+                if isinstance(raw.get("metadata"), dict)
+                else {},
+                version=(existing.version if existing is not None else 1),
+                created_at=(existing.created_at if existing is not None else datetime.now(tz=UTC)),
+                updated_at=datetime.now(tz=UTC),
+            )
+        )
+        set_as_default = (
+            True
+            if scope == "project" and "set_as_default" not in raw
+            else self._param_bool(raw, "set_as_default")
+        )
+        target_project = None
+        if scope == "project":
+            target_project = await self._stores.project_store.get_project(project_id)
+            if target_project is None:
+                raise ControlPlaneActionError(
+                    "PROJECT_NOT_FOUND",
+                    "project_id 对应的 project 不存在",
+                )
+        if scope == "project" and target_project is not None and set_as_default:
+            await self._stores.project_store.save_project(
+                target_project.model_copy(
+                    update={
+                        "default_agent_profile_id": saved.profile_id,
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
+        await self._stores.conn.commit()
+        return self._completed_result(
+            request=request,
+            code="AGENT_PROFILE_SAVED",
+            message="主 Agent profile 已保存。",
+            data={
+                "profile_id": saved.profile_id,
+                "project_id": saved.project_id,
+                "scope": saved.scope.value,
+                "set_as_default": scope == "project" and set_as_default,
+            },
+            resource_refs=[
+                self._resource_ref("agent_profiles", "agent-profiles:overview"),
+                self._resource_ref("setup_governance", "setup:governance"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="agent_profile",
+                    target_id=saved.profile_id,
+                    label=saved.name,
+                )
+            ],
+        )
+
+    async def _handle_policy_profile_select(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        profile_id = self._param_str(request.params, "profile_id").lower()
+        if not profile_id:
+            raise ControlPlaneActionError("POLICY_PROFILE_REQUIRED", "profile_id 不能为空")
+        profile = self._policy_profile_by_id(profile_id)
+        if profile is None:
+            raise ControlPlaneActionError("POLICY_PROFILE_INVALID", "不支持的 policy profile")
+        _, selected_project, _, _ = await self._resolve_selection()
+        if selected_project is None:
+            raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
+        metadata = dict(selected_project.metadata)
+        metadata["policy_profile_id"] = profile_id
+        await self._stores.project_store.save_project(
+            selected_project.model_copy(
+                update={
+                    "metadata": metadata,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        await self._sync_policy_engine_for_project(
+            selected_project.model_copy(update={"metadata": metadata})
+        )
+        await self._stores.conn.commit()
+        return self._completed_result(
+            request=request,
+            code="POLICY_PROFILE_SELECTED",
+            message="安全等级已更新。",
+            data={
+                "profile_id": profile_id,
+                "allowed_tool_profile": profile.allowed_tool_profile.value,
+                "approval_policy": self._describe_policy_approval(profile),
+            },
+            resource_refs=[
+                self._resource_ref("policy_profiles", "policy:profiles"),
+                self._resource_ref("setup_governance", "setup:governance"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="policy_profile",
+                    target_id=profile_id,
+                    label=profile_id,
+                )
             ],
         )
 
@@ -3265,6 +3929,27 @@ class ControlPlaneService:
             await self._stores.conn.commit()
         self._audit_task_ensured = True
 
+    async def _ensure_policy_system_task(self) -> None:
+        existing = await self._stores.task_store.get_task(_POLICY_TASK_ID)
+        if existing is not None:
+            return
+        now = datetime.now(tz=UTC)
+        await self._stores.task_store.create_task(
+            Task(
+                task_id=_POLICY_TASK_ID,
+                created_at=now,
+                updated_at=now,
+                status=TaskStatus.RUNNING,
+                title="Policy Engine Runtime",
+                thread_id="ops:policy-engine",
+                scope_id="ops:policy-engine",
+                requester=RequesterInfo(channel="system", sender_id="system:policy-engine"),
+                pointers=TaskPointers(),
+                trace_id=_POLICY_TRACE_ID,
+            )
+        )
+        await self._stores.conn.commit()
+
     async def _resolve_selection(self) -> tuple[ControlPlaneState, Any | None, Any | None, str]:
         state = self._state_store.load()
         fallback_reason = ""
@@ -3467,11 +4152,53 @@ class ControlPlaneService:
                 widget="alias-map",
                 order=50,
             ),
+            "front_door.mode": ConfigFieldHint(
+                field_path="front_door.mode",
+                section="security",
+                label="对外访问模式",
+                description="控制谁可以访问 owner-facing API。",
+                widget="select",
+                help_text="小白默认建议 loopback；公网场景建议 bearer 或 trusted_proxy。",
+                order=55,
+            ),
+            "front_door.bearer_token_env": ConfigFieldHint(
+                field_path="front_door.bearer_token_env",
+                section="security",
+                label="Bearer Token 环境变量",
+                widget="env-ref",
+                sensitive=True,
+                help_text="仅在 bearer 模式下需要。",
+                order=56,
+            ),
+            "front_door.trusted_proxy_header": ConfigFieldHint(
+                field_path="front_door.trusted_proxy_header",
+                section="security",
+                label="Trusted Proxy Header",
+                help_text="trusted_proxy 模式下由反向代理注入的共享 header。",
+                order=57,
+            ),
+            "front_door.trusted_proxy_token_env": ConfigFieldHint(
+                field_path="front_door.trusted_proxy_token_env",
+                section="security",
+                label="Trusted Proxy Token 环境变量",
+                widget="env-ref",
+                sensitive=True,
+                order=58,
+            ),
+            "front_door.trusted_proxy_cidrs": ConfigFieldHint(
+                field_path="front_door.trusted_proxy_cidrs",
+                section="security",
+                label="Trusted Proxy 来源 CIDR",
+                widget="string-list",
+                help_text="必须限制为受信代理来源，避免旁路直接访问 Gateway。",
+                order=59,
+            ),
             "channels.telegram.enabled": ConfigFieldHint(
                 field_path="channels.telegram.enabled",
                 section="channels",
                 label="启用 Telegram",
                 widget="toggle",
+                help_text="建议先完成 Provider / Secret 配置，再启用 Telegram。",
                 order=60,
             ),
             "channels.telegram.mode": ConfigFieldHint(
@@ -3493,7 +4220,24 @@ class ControlPlaneService:
                 field_path="channels.telegram.webhook_url",
                 section="channels",
                 label="Webhook URL",
+                help_text="仅 webhook 模式需要；没有公网 HTTPS 时优先用 polling。",
                 order=90,
+            ),
+            "channels.telegram.webhook_secret_env": ConfigFieldHint(
+                field_path="channels.telegram.webhook_secret_env",
+                section="channels",
+                label="Webhook Secret 环境变量",
+                widget="env-ref",
+                sensitive=True,
+                order=95,
+            ),
+            "channels.telegram.dm_policy": ConfigFieldHint(
+                field_path="channels.telegram.dm_policy",
+                section="channels",
+                label="私聊访问策略",
+                widget="select",
+                help_text="默认推荐 pairing；open 会允许陌生人直接触发主 Agent。",
+                order=97,
             ),
             "channels.telegram.allow_users": ConfigFieldHint(
                 field_path="channels.telegram.allow_users",
@@ -3502,12 +4246,27 @@ class ControlPlaneService:
                 widget="string-list",
                 order=100,
             ),
+            "channels.telegram.group_policy": ConfigFieldHint(
+                field_path="channels.telegram.group_policy",
+                section="channels",
+                label="群聊访问策略",
+                widget="select",
+                help_text="默认推荐 allowlist，避免 Agent 在任意群聊被触发。",
+                order=105,
+            ),
             "channels.telegram.allowed_groups": ConfigFieldHint(
                 field_path="channels.telegram.allowed_groups",
                 section="channels",
                 label="允许的群组",
                 widget="string-list",
                 order=110,
+            ),
+            "channels.telegram.group_allow_users": ConfigFieldHint(
+                field_path="channels.telegram.group_allow_users",
+                section="channels",
+                label="群聊内允许用户",
+                widget="string-list",
+                order=115,
             ),
         }
         return hints
@@ -3582,9 +4341,7 @@ class ControlPlaneService:
         children = [item for item in works if item.parent_work_id == work.work_id]
         if not children:
             return False
-        return all(
-            item.status.value in _TERMINAL_WORK_STATUSES for item in children
-        )
+        return all(item.status.value in _TERMINAL_WORK_STATUSES for item in children)
 
     def _load_runtime_snapshot(self) -> dict[str, Any]:
         if self._update_status_store is None:
@@ -3632,6 +4389,466 @@ class ControlPlaneService:
                 "allowed_groups": list(getattr(telegram_cfg, "allowed_groups", []) or []),
             }
         }
+
+    def _policy_catalog(
+        self,
+    ) -> list[tuple[str, str, PolicyProfile, str, list[str]]]:
+        return [
+            ("strict", "谨慎", STRICT_PROFILE, "warning", ["首次使用", "公网暴露", "高风险项目"]),
+            ("default", "平衡", DEFAULT_PROFILE, "info", ["本地开发", "可信内网", "默认推荐"]),
+            ("permissive", "自主", PERMISSIVE_PROFILE, "high", ["完全受信任环境", "高级用户"]),
+        ]
+
+    def _policy_profile_by_id(self, profile_id: str) -> PolicyProfile | None:
+        catalog = {item_id: profile for item_id, _, profile, _, _ in self._policy_catalog()}
+        return catalog.get(str(profile_id).strip().lower())
+
+    def _resolve_effective_policy_profile(
+        self,
+        project: Any | None,
+    ) -> tuple[str, PolicyProfile]:
+        if project is not None:
+            metadata = getattr(project, "metadata", {}) or {}
+            stored_profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
+            stored_profile = self._policy_profile_by_id(stored_profile_id)
+            if stored_profile is not None:
+                return stored_profile_id, stored_profile
+        if self._policy_engine is not None:
+            runtime_profile = self._policy_engine.profile
+            runtime_profile_id = str(runtime_profile.name).strip().lower() or "default"
+            mapped = self._policy_profile_by_id(runtime_profile_id)
+            if mapped is not None:
+                return runtime_profile_id, mapped
+        return "default", DEFAULT_PROFILE
+
+    async def _sync_policy_engine_for_project(self, project: Any | None) -> None:
+        if self._policy_engine is None:
+            return
+        _, profile = self._resolve_effective_policy_profile(project)
+        current_name = str(self._policy_engine.profile.name).strip().lower()
+        if current_name == profile.name:
+            return
+        await self._ensure_policy_system_task()
+        await self._policy_engine.update_profile(profile)
+
+    @staticmethod
+    def _describe_policy_approval(profile: PolicyProfile) -> str:
+        if profile.reversible_action.value == "ask" and profile.irreversible_action.value == "ask":
+            return "可逆 / 不可逆操作都需要确认"
+        if profile.irreversible_action.value == "ask":
+            return "仅不可逆操作需要确认"
+        return "默认直接执行"
+
+    @staticmethod
+    def _tool_profile_allowed(required: str, allowed: str) -> bool:
+        ranking = {"minimal": 0, "standard": 1, "privileged": 2}
+        return ranking.get(required, 1) <= ranking.get(allowed, 1)
+
+    async def _safe_secret_audit(self, project_ref: str | None):
+        try:
+            return await SecretService(
+                self._project_root,
+                store_group=self._stores,
+            ).audit(project_ref=project_ref)
+        except Exception:
+            return None
+
+    def _resolve_active_agent_profile_payload(
+        self,
+        *,
+        agent_profiles: AgentProfilesDocument,
+        selected_project: Any | None,
+    ) -> dict[str, Any]:
+        if not agent_profiles.profiles:
+            return {}
+        if selected_project is not None and selected_project.default_agent_profile_id:
+            matched = next(
+                (
+                    item
+                    for item in agent_profiles.profiles
+                    if item.profile_id == selected_project.default_agent_profile_id
+                ),
+                None,
+            )
+            if matched is not None:
+                return matched.model_dump(mode="json")
+        return agent_profiles.profiles[0].model_dump(mode="json")
+
+    def _merge_agent_profile_payload(
+        self,
+        base: dict[str, Any],
+        patch: dict[str, Any],
+        *,
+        selected_project: Any | None,
+    ) -> dict[str, Any]:
+        merged = self._deep_merge_dicts(base, patch)
+        if (
+            str(merged.get("scope", "")).strip().lower() == "project"
+            and selected_project is not None
+        ):
+            merged.setdefault("project_id", selected_project.project_id)
+        return merged
+
+    @staticmethod
+    def _workspace_summary_label(workspace: Any | None) -> str:
+        if workspace is None:
+            return "default workspace"
+        return str(getattr(workspace, "name", "") or "default workspace")
+
+    def _build_setup_review_summary(
+        self,
+        *,
+        config: dict[str, Any],
+        config_warnings: list[str],
+        selected_project: Any | None,
+        selected_workspace: Any | None,
+        diagnostics: DiagnosticsSummaryDocument,
+        active_agent_profile: dict[str, Any],
+        policy_profile_id: str,
+        skill_governance: SkillGovernanceDocument,
+        secret_audit: Any | None,
+        validation_errors: list[str],
+    ) -> SetupReviewSummary:
+        config_ref = self._resource_ref("config_schema", "config:octoagent")
+        diagnostics_ref = self._resource_ref("diagnostics_summary", "diagnostics:runtime")
+        agent_ref = self._resource_ref("agent_profiles", "agent-profiles:overview")
+        policy_ref = self._resource_ref("policy_profiles", "policy:profiles")
+        skill_ref = self._resource_ref("skill_governance", "skills:governance")
+        provider_runtime_risks: list[SetupRiskItem] = []
+        channel_exposure_risks: list[SetupRiskItem] = []
+        agent_autonomy_risks: list[SetupRiskItem] = []
+        tool_skill_readiness_risks: list[SetupRiskItem] = []
+        secret_binding_risks: list[SetupRiskItem] = []
+
+        providers = [
+            item
+            for item in config.get("providers", [])
+            if isinstance(item, dict) and item.get("enabled", True)
+        ]
+        model_aliases = config.get("model_aliases", {})
+        front_door = (
+            config.get("front_door", {}) if isinstance(config.get("front_door"), dict) else {}
+        )
+        telegram_cfg = (
+            config.get("channels", {}).get("telegram", {})
+            if isinstance(config.get("channels"), dict)
+            else {}
+        )
+        for message in validation_errors:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="config_validation_failed",
+                    severity="high",
+                    title="配置草稿未通过校验",
+                    summary=message,
+                    blocking=True,
+                    recommended_action="先修正配置字段，再重新执行 setup.review。",
+                    source_ref=config_ref,
+                )
+            )
+        if selected_project is None:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="project_unavailable",
+                    severity="high",
+                    title="当前没有可用 Project",
+                    summary="setup 需要先解析到一个可用的 project / workspace。",
+                    blocking=True,
+                    recommended_action="先完成 project 选择或初始化默认项目。",
+                    source_ref=self._resource_ref("project_selector", "project:selector"),
+                )
+            )
+        if not providers:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="provider_missing",
+                    severity="high",
+                    title="还没有可用 Provider",
+                    summary="当前没有任何启用中的 provider，主 Agent 不能调用真实模型。",
+                    blocking=True,
+                    recommended_action="至少配置 1 个 provider，并补齐对应 secret 引用。",
+                    source_ref=config_ref,
+                )
+            )
+        if "main" not in model_aliases:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="main_alias_missing",
+                    severity="high",
+                    title="缺少 main 模型别名",
+                    summary="主 Agent 依赖 main alias，当前 setup 还没有可用的默认模型。",
+                    blocking=True,
+                    recommended_action="先为 main alias 指定 provider 和模型。",
+                    source_ref=config_ref,
+                )
+            )
+        if "cheap" not in model_aliases:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="cheap_alias_missing",
+                    severity="warning",
+                    title="缺少 cheap 模型别名",
+                    summary="当前系统仍可运行，但自动降级与低成本路径不可用。",
+                    blocking=False,
+                    recommended_action="建议补一个 cheap alias，便于 fallback 和后台任务使用。",
+                    source_ref=config_ref,
+                )
+            )
+        for warning in config_warnings:
+            provider_runtime_risks.append(
+                SetupRiskItem(
+                    risk_id="config_warning",
+                    severity="warning",
+                    title="Provider / Runtime 仍有告警",
+                    summary=warning,
+                    blocking=False,
+                    recommended_action="建议先处理 bridge 或 LiteLLM sync 告警。",
+                    source_ref=diagnostics_ref,
+                )
+            )
+        front_door_mode = str(front_door.get("mode", "loopback")).strip().lower() or "loopback"
+        if front_door_mode == "trusted_proxy" and not front_door.get("trusted_proxy_cidrs"):
+            channel_exposure_risks.append(
+                SetupRiskItem(
+                    risk_id="trusted_proxy_cidrs_missing",
+                    severity="high",
+                    title="Trusted Proxy 未限制来源",
+                    summary="trusted_proxy 模式缺少受信代理来源 CIDR。",
+                    blocking=True,
+                    recommended_action="补齐 trusted_proxy_cidrs，避免非代理来源直接访问 Gateway。",
+                    source_ref=config_ref,
+                )
+            )
+        if telegram_cfg.get("enabled"):
+            telegram_mode = str(telegram_cfg.get("mode", "webhook")).strip().lower()
+            if telegram_mode == "webhook" and not telegram_cfg.get("webhook_url"):
+                channel_exposure_risks.append(
+                    SetupRiskItem(
+                        risk_id="telegram_webhook_url_missing",
+                        severity="high",
+                        title="Telegram webhook 配置不完整",
+                        summary="Telegram webhook 模式缺少 webhook_url。",
+                        blocking=True,
+                        recommended_action="补齐 webhook_url，或切换到 polling 模式。",
+                        source_ref=config_ref,
+                    )
+                )
+            if str(
+                telegram_cfg.get("dm_policy", "")
+            ).strip().lower() == "open" and not telegram_cfg.get("allow_users"):
+                channel_exposure_risks.append(
+                    SetupRiskItem(
+                        risk_id="telegram_dm_open",
+                        severity="warning",
+                        title="Telegram 私聊对任意用户开放",
+                        summary="当前 DM policy=open，陌生人也可以直接触发主 Agent。",
+                        blocking=False,
+                        recommended_action="小白默认建议使用 pairing 或 allowlist。",
+                        source_ref=diagnostics_ref,
+                    )
+                )
+            if str(
+                telegram_cfg.get("group_policy", "")
+            ).strip().lower() == "open" and not telegram_cfg.get("allowed_groups"):
+                channel_exposure_risks.append(
+                    SetupRiskItem(
+                        risk_id="telegram_group_open",
+                        severity="warning",
+                        title="Telegram 群聊默认开放",
+                        summary="当前 group policy=open，未限制 allowed_groups。",
+                        blocking=False,
+                        recommended_action="建议至少限制 allowed_groups 或改为 allowlist。",
+                        source_ref=diagnostics_ref,
+                    )
+                )
+        if not active_agent_profile:
+            agent_autonomy_risks.append(
+                SetupRiskItem(
+                    risk_id="agent_profile_missing",
+                    severity="high",
+                    title="主 Agent profile 尚未配置",
+                    summary="当前 project 还没有清晰的主 Agent persona / model / tool profile。",
+                    blocking=True,
+                    recommended_action="先保存一个 project-scope 的主 Agent profile。",
+                    source_ref=agent_ref,
+                )
+            )
+        policy_profile = self._policy_profile_by_id(policy_profile_id) or DEFAULT_PROFILE
+        if policy_profile_id == "permissive":
+            agent_autonomy_risks.append(
+                SetupRiskItem(
+                    risk_id="policy_profile_permissive",
+                    severity="high",
+                    title="当前安全等级为自主",
+                    summary="自主模式会放宽审批和工具边界，只适用于完全受信环境。",
+                    blocking=False,
+                    recommended_action="普通用户默认建议使用谨慎或平衡。",
+                    source_ref=policy_ref,
+                )
+            )
+        if active_agent_profile:
+            agent_tool_profile = str(active_agent_profile.get("tool_profile", "standard")).strip()
+            if not self._tool_profile_allowed(
+                agent_tool_profile,
+                policy_profile.allowed_tool_profile.value,
+            ):
+                agent_autonomy_risks.append(
+                    SetupRiskItem(
+                        risk_id="agent_profile_exceeds_policy",
+                        severity="warning",
+                        title="主 Agent 工具级别高于当前安全等级",
+                        summary=(
+                            f"Agent 要求 {agent_tool_profile}，但当前安全等级只允许 "
+                            f"{policy_profile.allowed_tool_profile.value}。"
+                        ),
+                        blocking=False,
+                        recommended_action="降低 Agent tool_profile，或显式切换更高安全 preset。",
+                        source_ref=policy_ref,
+                    )
+                )
+        for item in skill_governance.items:
+            if item.availability == "available":
+                continue
+            tool_skill_readiness_risks.append(
+                SetupRiskItem(
+                    risk_id=f"{item.item_id}:not_ready",
+                    severity="high" if item.blocking else "warning",
+                    title=f"{item.label} 尚未就绪",
+                    summary="；".join(item.missing_requirements) or f"状态={item.availability}",
+                    blocking=item.blocking,
+                    recommended_action=item.install_hint or "先处理缺失依赖后再启用该能力。",
+                    source_ref=skill_ref,
+                )
+            )
+        if secret_audit is not None:
+            for target_key in secret_audit.missing_targets:
+                secret_binding_risks.append(
+                    SetupRiskItem(
+                        risk_id=f"secret_missing:{target_key}",
+                        severity="high",
+                        title="缺少 Secret 绑定",
+                        summary=f"{target_key} 还没有完成 canonical secret binding。",
+                        blocking=True,
+                        recommended_action=(
+                            "先完成 secret configure/apply，再重新执行 setup.review。"
+                        ),
+                        source_ref=config_ref,
+                    )
+                )
+            for unresolved in secret_audit.unresolved_refs:
+                secret_binding_risks.append(
+                    SetupRiskItem(
+                        risk_id=f"secret_unresolved:{unresolved}",
+                        severity="high",
+                        title="Secret 引用无法解析",
+                        summary=unresolved,
+                        blocking=True,
+                        recommended_action="修正 secret ref 或环境变量后重试。",
+                        source_ref=config_ref,
+                    )
+                )
+            for plaintext in secret_audit.plaintext_risks:
+                secret_binding_risks.append(
+                    SetupRiskItem(
+                        risk_id="secret_plaintext_risk",
+                        severity="high",
+                        title="检测到明文 Secret 风险",
+                        summary=plaintext,
+                        blocking=True,
+                        recommended_action="移除明文凭证，改用 refs-only secret binding。",
+                        source_ref=config_ref,
+                    )
+                )
+            if secret_audit.reload_required:
+                secret_binding_risks.append(
+                    SetupRiskItem(
+                        risk_id="secret_reload_required",
+                        severity="warning",
+                        title="Secret 绑定已变更但尚未重载",
+                        summary="当前 secret bindings 已更新，但 runtime 仍需要 reload / restart。",
+                        blocking=False,
+                        recommended_action="完成 reload 或重启后再做 doctor / setup.apply。",
+                        source_ref=diagnostics_ref,
+                    )
+                )
+            for warning in secret_audit.warnings:
+                secret_binding_risks.append(
+                    SetupRiskItem(
+                        risk_id="secret_warning",
+                        severity="warning",
+                        title="Secret 配置仍有告警",
+                        summary=warning,
+                        blocking=False,
+                        recommended_action=(
+                            "建议把 legacy / provider bridge 迁移到 "
+                            "canonical secret binding。"
+                        ),
+                        source_ref=config_ref,
+                    )
+                )
+        else:
+            secret_binding_risks.append(
+                SetupRiskItem(
+                    risk_id="secret_audit_unavailable",
+                    severity="warning",
+                    title="Secret audit 当前不可用",
+                    summary="暂时无法确认 provider / runtime / channel 所需的 secret 是否完整。",
+                    blocking=False,
+                    recommended_action="稍后重试或检查 secret service 是否可用。",
+                    source_ref=diagnostics_ref,
+                )
+            )
+        all_risks = (
+            provider_runtime_risks
+            + channel_exposure_risks
+            + agent_autonomy_risks
+            + tool_skill_readiness_risks
+            + secret_binding_risks
+        )
+        blocking_reasons = [item.risk_id for item in all_risks if item.blocking]
+        warnings = [item.summary for item in all_risks if item.severity != "info"]
+        if any(item.severity == "high" for item in all_risks):
+            risk_level = "high"
+        elif all_risks:
+            risk_level = "warning"
+        else:
+            risk_level = "info"
+        next_actions: list[str] = []
+        if any(item.blocking for item in secret_binding_risks):
+            next_actions.append("先补齐 Secret 绑定，再重新执行 setup.review。")
+        if any(item.blocking for item in provider_runtime_risks):
+            next_actions.append("先修正 Provider / model alias 配置，确保主 Agent 可调用模型。")
+        if any(item.blocking for item in agent_autonomy_risks):
+            next_actions.append("先保存主 Agent profile，再继续 apply。")
+        if any(item.blocking for item in tool_skill_readiness_risks):
+            next_actions.append("先处理 skills / MCP 缺失依赖，避免首用时能力不可用。")
+        if not next_actions:
+            next_actions.append("当前 setup review 已通过，可以继续执行 setup.apply。")
+        return SetupReviewSummary(
+            ready=not bool(blocking_reasons),
+            risk_level=risk_level,
+            warnings=warnings,
+            blocking_reasons=blocking_reasons,
+            next_actions=next_actions,
+            provider_runtime_risks=provider_runtime_risks,
+            channel_exposure_risks=channel_exposure_risks,
+            agent_autonomy_risks=agent_autonomy_risks,
+            tool_skill_readiness_risks=tool_skill_readiness_risks,
+            secret_binding_risks=secret_binding_risks,
+        )
+
+    def _deep_merge_dicts(
+        self,
+        base: dict[str, Any],
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in patch.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = self._deep_merge_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     def _parse_memory_partition(self, raw: str | None) -> MemoryPartition | None:
         if not raw:
@@ -3980,6 +5197,14 @@ class ControlPlaneService:
                     params_schema={"type": "object", "required": ["project_id"]},
                     telegram_supported=True,
                 ),
+                definition(
+                    "setup.review",
+                    "审查 Setup 风险",
+                    category="setup",
+                    description="聚合 Provider / Channel / Agent / Skills 的风险和阻塞项。",
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
                 definition("memory.query", "刷新 Memory 总览", category="memory"),
                 definition(
                     "memory.subject.inspect",
@@ -4087,6 +5312,19 @@ class ControlPlaneService:
                 ),
                 definition("channel.pairing.approve", "批准 Pairing", category="channels"),
                 definition("channel.pairing.reject", "拒绝 Pairing", category="channels"),
+                definition(
+                    "agent_profile.save",
+                    "保存主 Agent",
+                    category="setup",
+                    risk_hint="medium",
+                    params_schema={"type": "object"},
+                ),
+                definition(
+                    "policy_profile.select",
+                    "切换安全等级",
+                    category="setup",
+                    params_schema={"type": "object", "required": ["profile_id"]},
+                ),
                 definition("config.apply", "保存配置", category="config", risk_hint="medium"),
                 definition(
                     "backup.create",
