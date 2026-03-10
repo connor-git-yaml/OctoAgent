@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -677,7 +677,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "已经可以开始" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "可以开始使用" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
@@ -1159,7 +1159,7 @@ describe("App workbench routing", () => {
 
     const { container } = render(<App />);
 
-    await screen.findByRole("heading", { name: "已经可以开始" });
+    await screen.findByRole("heading", { name: "可以开始使用" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Project"), "project-ops");
     await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-ops");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
@@ -1250,7 +1250,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "已经可以开始" });
+    await screen.findByRole("heading", { name: "可以开始使用" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-analysis");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
 
@@ -1269,6 +1269,7 @@ describe("App workbench routing", () => {
 
     class FakeEventSource {
       static CLOSED = 2;
+      static instances: FakeEventSource[] = [];
       readyState = 1;
       onopen: ((this: EventSource, ev: Event) => void) | null = null;
       onerror:
@@ -1277,10 +1278,34 @@ describe("App workbench routing", () => {
       onmessage:
         | ((this: EventSource, ev: MessageEvent) => void)
         | null = null;
+      listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
 
-      addEventListener(): void {}
+      constructor() {
+        FakeEventSource.instances.push(this);
+      }
 
-      removeEventListener(): void {}
+      addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
+        const current = this.listeners.get(type) ?? [];
+        current.push(listener);
+        this.listeners.set(type, current);
+      }
+
+      removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
+        const current = this.listeners.get(type) ?? [];
+        this.listeners.set(
+          type,
+          current.filter((item) => item !== listener)
+        );
+      }
+
+      emit(type: string, payload: unknown): void {
+        const event = {
+          data: JSON.stringify(payload),
+        } as MessageEvent;
+        for (const listener of this.listeners.get(type) ?? []) {
+          listener(event);
+        }
+      }
 
       close(): void {
         this.readyState = FakeEventSource.CLOSED;
@@ -1372,9 +1397,28 @@ describe("App workbench routing", () => {
     await userEvent.type(input, "帮我整理发布计划");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeEventSource.instances[0]?.emit("MODEL_CALL_COMPLETED", {
+        event_id: "evt-model-completed",
+        task_id: "task-chat-1",
+        task_seq: 3,
+        ts: "2026-03-09T10:05:30Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "已为你整理出一版发布计划。",
+        },
+        final: false,
+      });
+    });
+
     expect(await screen.findByText("Chat Task")).toBeInTheDocument();
     expect(await screen.findByText("Chat Planner Work")).toBeInTheDocument();
     expect(await screen.findByText("当前 task 的上下文摘要。")).toBeInTheDocument();
+    expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
     expect(screen.queryByText("别的任务的摘要。")).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some((call) =>

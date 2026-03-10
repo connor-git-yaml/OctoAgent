@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from octoagent.provider.dx import install_bootstrap
+from octoagent.provider.dx.update_status_store import UpdateStatusStore
 
 
 def test_run_install_bootstrap_writes_descriptor(tmp_path: Path, monkeypatch) -> None:
@@ -46,3 +47,64 @@ def test_run_install_bootstrap_missing_pyproject_fails(tmp_path: Path) -> None:
 
     assert attempt.status == "FAILED"
     assert attempt.errors
+
+
+def test_run_install_bootstrap_bootstraps_home_instance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='octoagent'\n", encoding="utf-8")
+    monkeypatch.setattr(install_bootstrap, "_run_command", lambda _command, _cwd: None)
+    instance_root = tmp_path / "home-instance"
+
+    attempt = install_bootstrap.run_install_bootstrap(
+        tmp_path,
+        skip_frontend=True,
+        instance_root=instance_root,
+    )
+
+    assert attempt.status == "SUCCEEDED"
+    assert (instance_root / "octoagent.yaml").exists()
+    assert (instance_root / "litellm-config.yaml").exists()
+    assert (instance_root / "data" / "sqlite").exists()
+    assert (instance_root / "data" / "artifacts").exists()
+    assert (instance_root / "bin" / "octo").exists()
+    assert (instance_root / "bin" / "octo-start").exists()
+    assert (instance_root / "bin" / "octo-doctor").exists()
+    content = (instance_root / "octoagent.yaml").read_text(encoding="utf-8")
+    assert "llm_mode: echo" in content
+    assert any("prepare instance root" in item for item in attempt.actions_completed)
+    descriptor = UpdateStatusStore(tmp_path).load_runtime_descriptor()
+    assert descriptor is not None
+    assert descriptor.start_command == [
+        "/bin/bash",
+        str(tmp_path / "scripts" / "run-octo-home.sh"),
+    ]
+    assert descriptor.environment_overrides["OCTOAGENT_INSTANCE_ROOT"] == str(instance_root)
+    assert descriptor.environment_overrides["OCTOAGENT_PROJECT_ROOT"] == str(instance_root)
+    assert descriptor.environment_overrides["OCTOAGENT_DATA_DIR"] == str(instance_root / "data")
+
+
+def test_run_install_bootstrap_preserves_existing_home_instance_without_force(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='octoagent'\n", encoding="utf-8")
+    monkeypatch.setattr(install_bootstrap, "_run_command", lambda _command, _cwd: None)
+    instance_root = tmp_path / "home-instance"
+    instance_root.mkdir()
+    (instance_root / "octoagent.yaml").write_text(
+        "config_version: 1\nupdated_at: '2026-03-10'\nruntime:\n  llm_mode: litellm\n",
+        encoding="utf-8",
+    )
+
+    attempt = install_bootstrap.run_install_bootstrap(
+        tmp_path,
+        skip_frontend=True,
+        instance_root=instance_root,
+    )
+
+    assert attempt.status == "SUCCEEDED"
+    content = (instance_root / "octoagent.yaml").read_text(encoding="utf-8")
+    assert "llm_mode: litellm" in content
+    assert any("保留现有 octoagent.yaml" in item for item in attempt.warnings)

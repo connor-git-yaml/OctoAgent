@@ -90,8 +90,8 @@ export default function ChatWorkbench() {
       <section className="wb-hero wb-hero-compact">
         <div>
           <p className="wb-kicker">Chat</p>
-          <h1>在同一工作台里看对话、任务和工作</h1>
-          <p>这一步已经不再把聊天单独当成一个 demo 组件，而是开始接上 task/work 摘要。</p>
+          <h1>在这里直接和 OctoAgent 对话</h1>
+          <p>发送消息后，你可以同时看到回复、任务状态和相关工作进度。</p>
         </div>
       </section>
 
@@ -100,15 +100,16 @@ export default function ChatWorkbench() {
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">对话</p>
-              <h3>{taskId ? `当前 task: ${taskId}` : "还没有活动中的任务"}</h3>
+              <h3>{activeSession?.title ?? (taskId ? "对话进行中" : "还没有开始对话")}</h3>
+              {taskId ? <p className="wb-panel-copy">任务 ID：{taskId}</p> : null}
             </div>
           </div>
 
           <div className="wb-chat-messages">
             {messages.length === 0 ? (
               <div className="wb-empty-state">
-                <strong>从这里开始第一条消息</strong>
-                <span>后续这里会接入 033 的 context provenance 和 034 的压缩状态。</span>
+                <strong>从这里发出第一条消息</strong>
+                <span>比如告诉 OctoAgent 你要完成什么，它会开始创建任务并返回结果。</span>
               </div>
             ) : (
               messages.map((message) => <MessageBubble key={message.id} message={message} />)
@@ -153,7 +154,7 @@ export default function ChatWorkbench() {
                 <span>{taskDetail?.events.length ?? 0}</span>
               </div>
               <div className="wb-note">
-                <strong>Artifacts</strong>
+                <strong>结果附件</strong>
                 <span>{taskDetail?.artifacts.length ?? 0}</span>
               </div>
               {taskId ? (
@@ -173,11 +174,11 @@ export default function ChatWorkbench() {
             </div>
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>runtime</strong>
+                <strong>运行方式</strong>
                 <span>{activeSession?.runtime_kind ?? "未决"}</span>
               </div>
               <div className="wb-note">
-                <strong>child works</strong>
+                <strong>子任务</strong>
                 <span>{activeWork?.child_work_count ?? 0}</span>
               </div>
               <div className="wb-note">
@@ -191,29 +192,29 @@ export default function ChatWorkbench() {
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">记忆与上下文</p>
-                <h3>用真实 context frame 替代硬编码占位</h3>
+                <h3>当前对话的相关背景</h3>
               </div>
             </div>
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>current records</strong>
+                <strong>当前记录</strong>
                 <span>{memory.summary.sor_current_count}</span>
               </div>
               <div className="wb-note">
-                <strong>Context frames</strong>
+                <strong>上下文片段</strong>
                 <span>{context.frames.length}</span>
               </div>
               <div className="wb-note">
-                <strong>Context continuity</strong>
+                <strong>上下文状态</strong>
                 <span>
                   {context.degraded.is_degraded
-                    ? "033 仍有降级项，当前只显示基础 provenance。"
-                    : "当前作用域的 context continuity 已可查看。"}
+                    ? "当前只显示基础背景信息，但不影响继续对话。"
+                    : "当前对话的背景摘要可以正常查看。"}
                 </span>
               </div>
               <div className="wb-note">
-                <strong>Recent summary</strong>
-                <span>{activeContextFrame?.recent_summary ?? "当前还没有 recent summary。"}</span>
+                <strong>最近摘要</strong>
+                <span>{activeContextFrame?.recent_summary ?? "当前还没有生成摘要。"}</span>
               </div>
             </div>
           </section>

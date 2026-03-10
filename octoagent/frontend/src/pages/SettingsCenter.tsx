@@ -97,18 +97,18 @@ function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
     case "main-agent":
       return {
-        title: "Main Agent",
-        description: "模型、provider、默认运行方式和主入口相关配置。",
+        title: "主 Agent",
+        description: "主 Agent 的名称、模型别名和默认运行配置。",
       };
     case "channels":
       return {
-        title: "Channels",
-        description: "先把 Telegram 等渠道接入方式和可见范围说明白。",
+        title: "渠道接入",
+        description: "管理 Web、Telegram 等入口的连接方式和可见范围。",
       };
     default:
       return {
-        title: "Advanced Fields",
-        description: "这些字段已经暴露在 contract 中，但更偏高级设置。",
+        title: "更多设置",
+        description: "这里是进阶配置，通常在基础功能跑通后再调整。",
       };
   }
 }
@@ -270,11 +270,8 @@ export default function SettingsCenter() {
       <section className="wb-hero">
         <div>
           <p className="wb-kicker">Settings</p>
-          <h1>先审查 Setup，再真正应用配置</h1>
-          <p>
-            这里现在直接消费 `setup_governance / policy_profiles / skill_governance`，
-            主 Agent、安全等级和配置保存都走同一条 `setup.review -&gt; setup.apply` 主链。
-          </p>
+          <h1>先检查配置，再保存生效</h1>
+          <p>这里可以统一调整主 Agent、权限级别、技能状态和基础连接配置。</p>
         </div>
         <div className="wb-hero-actions">
           <button
@@ -298,15 +295,15 @@ export default function SettingsCenter() {
 
       <div className="wb-card-grid wb-card-grid-4">
         <article className={`wb-card wb-card-accent is-${summaryTone(review)}`}>
-          <p className="wb-card-label">Setup Readiness</p>
-          <strong>{review.ready ? "Ready" : "需要处理"}</strong>
-          <span>blocking {review.blocking_reasons.length}</span>
-          <span>warnings {review.warnings.length}</span>
+          <p className="wb-card-label">配置状态</p>
+          <strong>{review.ready ? "可以保存" : "需要处理"}</strong>
+          <span>阻塞项 {review.blocking_reasons.length}</span>
+          <span>提醒 {review.warnings.length}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">当前 Project</p>
           <strong>{selector.current_project_id}</strong>
-          <span>workspace {selector.current_workspace_id}</span>
+          <span>工作区 {selector.current_workspace_id}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">安全等级</p>
@@ -314,10 +311,10 @@ export default function SettingsCenter() {
           <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">Skills 就绪度</p>
+          <p className="wb-card-label">技能状态</p>
           <strong>{skillGovernance.items.length}</strong>
-          <span>blocked {blockedSkills.length}</span>
-          <span>degraded {unavailableSkills.length}</span>
+          <span>阻塞 {blockedSkills.length}</span>
+          <span>不可用 {unavailableSkills.length}</span>
         </article>
       </div>
 
@@ -325,8 +322,8 @@ export default function SettingsCenter() {
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">Setup Review</p>
-              <h3>先看清楚能不能用，再决定是否 apply</h3>
+              <p className="wb-card-label">保存前检查</p>
+              <h3>先确认是否可用，再决定是否保存</h3>
             </div>
           </div>
           <div className="wb-note-stack">
@@ -348,19 +345,19 @@ export default function SettingsCenter() {
                 </div>
               </div>
             ) : null}
-            {renderRiskList("Provider / Runtime", review.provider_runtime_risks)}
-            {renderRiskList("Channel Exposure", review.channel_exposure_risks)}
-            {renderRiskList("Agent Governance", review.agent_autonomy_risks)}
-            {renderRiskList("Tools / Skills", review.tool_skill_readiness_risks)}
-            {renderRiskList("Secret Bindings", review.secret_binding_risks)}
+            {renderRiskList("模型与运行连接", review.provider_runtime_risks)}
+            {renderRiskList("渠道暴露范围", review.channel_exposure_risks)}
+            {renderRiskList("Agent 自主性", review.agent_autonomy_risks)}
+            {renderRiskList("工具与技能", review.tool_skill_readiness_risks)}
+            {renderRiskList("密钥绑定", review.secret_binding_risks)}
           </div>
         </section>
 
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">Governance</p>
-              <h3>主 Agent、安全等级和可用 skills</h3>
+              <p className="wb-card-label">主 Agent</p>
+              <h3>名称、权限级别和默认能力</h3>
             </div>
           </div>
 
@@ -377,7 +374,7 @@ export default function SettingsCenter() {
             </label>
 
             <label className="wb-field">
-              <span>Main Alias</span>
+              <span>默认模型别名</span>
               <input
                 type="text"
                 value={agentDraft.model_alias}
@@ -388,7 +385,7 @@ export default function SettingsCenter() {
             </label>
 
             <label className="wb-field">
-              <span>Tool Profile</span>
+              <span>工具权限模板</span>
               <select
                 value={agentDraft.tool_profile}
                 onChange={(event) =>
@@ -416,7 +413,7 @@ export default function SettingsCenter() {
             </label>
 
             <label className="wb-field wb-field-span-2">
-              <span>Persona Summary</span>
+              <span>角色说明</span>
               <textarea
                 rows={4}
                 value={agentDraft.persona_summary}
@@ -457,17 +454,17 @@ export default function SettingsCenter() {
 
       <div className="wb-card-grid wb-card-grid-3">
         <article className="wb-card">
-          <p className="wb-card-label">Memory 状态</p>
+          <p className="wb-card-label">记忆状态</p>
           <strong>{memory.status}</strong>
-          <span>current {memory.summary.sor_current_count}</span>
+          <span>当前记录 {memory.summary.sor_current_count}</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">Work 运行态</p>
+          <p className="wb-card-label">工作状态</p>
           <strong>{delegation.works.length}</strong>
-          <span>delegated works visible in current project</span>
+          <span>当前项目可见工作数</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">Provider / Channel</p>
+          <p className="wb-card-label">连接状态</p>
           <strong>{setup.provider_runtime.status}</strong>
           <span>{setup.channel_access.status}</span>
         </article>

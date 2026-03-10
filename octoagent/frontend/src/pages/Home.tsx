@@ -13,36 +13,36 @@ function computeReadinessLabel(
 ): { label: string; tone: string; summary: string } {
   if (!setupReady) {
     return {
-      label: "先完成 Setup",
+      label: "先完成基础配置",
       tone: "danger",
-      summary: "Provider、权限或技能依赖仍有阻塞项，先到 Settings 完成 review/apply。",
+      summary: "模型连接、权限或技能依赖还没准备好，先去设置页补齐。",
     };
   }
   if (wizardStatus !== "ready") {
     return {
-      label: "继续完成设置",
+      label: "再检查一次设置",
       tone: "warning",
-      summary: "向导还没有结束，建议先把配置与诊断补完。",
+      summary: "还有一些初始化步骤没完成，建议先把配置和诊断补齐。",
     };
   }
   if (diagnosticsStatus !== "ready" && diagnosticsStatus !== "ok") {
     return {
       label: "系统需要检查",
       tone: "danger",
-      summary: "运行状态存在降级项，先处理诊断和渠道就绪度。",
+      summary: "当前运行状态有异常，建议先查看诊断结果。",
     };
   }
   if (pendingCount > 0) {
     return {
       label: "有待你确认的事项",
       tone: "warning",
-      summary: "系统已可用，但还有审批或 pairing 待处理。",
+      summary: "系统已经可以使用，但还有审批或协作请求待处理。",
     };
   }
   return {
-    label: "已经可以开始",
+    label: "可以开始使用",
     tone: "success",
-    summary: "可以直接进入聊天、查看工作和继续配置细节。",
+    summary: "你可以直接开始对话、查看工作进度，或继续完善配置。",
   };
 }
 
@@ -67,6 +67,16 @@ export default function Home() {
   const activeWorkCount = delegation.works.filter((item) =>
     ACTIVE_WORK_STATUSES.has(item.status)
   ).length;
+  const channelSummaryEntries = Object.entries(diagnostics.channel_summary ?? {}).filter(
+    ([, value]) => Boolean(value)
+  );
+  const latestContextSummary =
+    context.frames
+      .slice()
+      .sort((left, right) =>
+        (right.created_at ?? "").localeCompare(left.created_at ?? "")
+      )[0]
+      ?.recent_summary ?? "";
   const readiness = computeReadinessLabel(
     setup.review.ready,
     wizard.status,
@@ -108,20 +118,20 @@ export default function Home() {
         <article className={`wb-card wb-card-accent is-${readiness.tone}`}>
           <p className="wb-card-label">当前状态</p>
           <strong>{readiness.label}</strong>
-          <span>Setup: {setup.review.ready ? "ready" : "blocked"}</span>
-          <span>Wizard: {wizard.status}</span>
-          <span>Diagnostics: {diagnostics.overall_status}</span>
+          <span>配置检查：{setup.review.ready ? "已通过" : "仍有阻塞"}</span>
+          <span>初始化向导：{wizard.status}</span>
+          <span>运行诊断：{diagnostics.overall_status}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">待你确认</p>
           <strong>{sessions.operator_summary?.total_pending ?? 0}</strong>
-          <span>Approvals {sessions.operator_summary?.approvals ?? 0}</span>
-          <span>Pairing {sessions.operator_summary?.pairing_requests ?? 0}</span>
+          <span>审批 {sessions.operator_summary?.approvals ?? 0}</span>
+          <span>协作请求 {sessions.operator_summary?.pairing_requests ?? 0}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">当前工作</p>
           <strong>{delegation.works.length}</strong>
-          <span>活跃 works {activeWorkCount}</span>
+          <span>进行中 {activeWorkCount}</span>
           <span>最新更新时间 {formatDateTime(delegation.updated_at)}</span>
         </article>
         <article className="wb-card">
@@ -136,14 +146,14 @@ export default function Home() {
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">下一步</p>
-              <h3>先把常见入口走顺</h3>
+              <p className="wb-card-label">建议下一步</p>
+              <h3>先把常用入口走一遍</h3>
             </div>
           </div>
           {!setup.review.ready || setup.review.next_actions.length > 0 ? (
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>Setup Next Actions</strong>
+                <strong>当前最重要的一步</strong>
                 <span>{setup.review.next_actions[0] ?? "当前 setup 已通过。"}</span>
               </div>
               {setup.review.blocking_reasons.slice(0, 3).map((item) => (
@@ -165,16 +175,16 @@ export default function Home() {
               <span>重新检查当前配置和后续步骤。</span>
             </button>
             <Link className="wb-action-card" to="/settings">
-              <strong>图形化改配置</strong>
-              <span>先从主 Agent、Channels 和 Project 开始。</span>
+              <strong>打开设置</strong>
+              <span>先把主 Agent、模型连接和工作区确认好。</span>
             </Link>
             <Link className="wb-action-card" to="/chat">
               <strong>发第一条消息</strong>
-              <span>直接进入聊天工作台，观察任务和记忆摘要。</span>
+              <span>直接开始对话，观察任务和工作是否正常流转。</span>
             </Link>
             <Link className="wb-action-card" to="/advanced">
-              <strong>需要诊断时进 Advanced</strong>
-              <span>保留完整 control plane，不把高级能力删掉。</span>
+              <strong>查看详细诊断</strong>
+              <span>遇到异常时，这里可以看到更完整的运行信息。</span>
             </Link>
           </div>
         </section>
@@ -274,24 +284,31 @@ export default function Home() {
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">当前提醒</p>
-              <h3>先从这些地方理解系统状态</h3>
+              <h3>先看这三个状态</h3>
             </div>
           </div>
           <div className="wb-note-stack">
             <div className="wb-note">
-              <strong>Channels</strong>
+              <strong>渠道连接</strong>
               <span>
-                当前 channel summary:{" "}
-                {JSON.stringify(diagnostics.channel_summary ?? {}, null, 0)}
+                {channelSummaryEntries.length > 0
+                  ? channelSummaryEntries
+                      .map(([key, value]) => `${key}: ${String(value)}`)
+                      .join("；")
+                  : "当前还没有启用外部渠道，先用 Web 即可。"}
               </span>
             </div>
             <div className="wb-note">
-              <strong>连续上下文</strong>
-              <span>Feature 033 完成后会接入 profile/bootstrap/context provenance。</span>
+              <strong>上下文连续性</strong>
+              <span>
+                {context.degraded.is_degraded
+                  ? "上下文摘要目前不完整，但不影响基础使用。"
+                  : "当前工作区的上下文摘要可以正常使用。"}
+              </span>
             </div>
             <div className="wb-note">
-              <strong>上下文压缩</strong>
-              <span>Feature 034 已在运行链里，但这里后续会改成用户化可读提示。</span>
+              <strong>最近摘要</strong>
+              <span>{latestContextSummary || "还没有可用的对话摘要。发送一条消息后会逐步出现。"}</span>
             </div>
           </div>
         </section>
@@ -299,25 +316,25 @@ export default function Home() {
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">Context</p>
-              <h3>当前上下文连续性状态</h3>
+              <p className="wb-card-label">上下文</p>
+              <h3>当前工作区的记忆状态</h3>
             </div>
           </div>
           <div className="wb-note-stack">
             <div className="wb-note">
-              <strong>Frames</strong>
+              <strong>摘要片段</strong>
               <span>{context.frames.length}</span>
             </div>
             <div className="wb-note">
-              <strong>Sessions</strong>
+              <strong>会话数</strong>
               <span>{context.sessions.length}</span>
             </div>
             <div className="wb-note">
               <strong>状态</strong>
               <span>
                 {context.degraded.is_degraded
-                  ? "033 仍有降级项，当前只展示基础 context frame"
-                  : "context continuity 已接入当前作用域"}
+                  ? "当前只显示基础摘要，稍后会继续补齐。"
+                  : "上下文摘要已连接到当前工作区。"}
               </span>
             </div>
           </div>

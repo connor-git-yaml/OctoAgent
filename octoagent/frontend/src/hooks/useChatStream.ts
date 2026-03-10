@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildFrontDoorSseUrl, frontDoorRequest } from "../api/client";
+import type { SSEEventData } from "../types";
 
 /** 消息角色 */
 export type MessageRole = "user" | "agent";
@@ -34,6 +35,28 @@ export interface UseChatStreamReturn {
   sendMessage: (text: string) => Promise<void>;
   /** 当前 task ID */
   taskId: string | null;
+}
+
+function extractAgentMessage(
+  eventData: Pick<SSEEventData, "payload"> & { type: string }
+): string {
+  const payload = eventData.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "";
+  }
+  if (typeof payload.response === "string" && payload.response.trim()) {
+    return payload.response;
+  }
+  if (
+    typeof payload.response_summary === "string" &&
+    payload.response_summary.trim()
+  ) {
+    return payload.response_summary;
+  }
+  if (typeof payload.summary === "string" && payload.summary.trim()) {
+    return payload.summary;
+  }
+  return "";
 }
 
 export function useChatStream(): UseChatStreamReturn {
@@ -86,6 +109,8 @@ export function useChatStream(): UseChatStreamReturn {
         const newTaskId = data.task_id;
         setTaskId(newTaskId);
 
+        closeStream();
+
         // 创建 Agent 占位消息
         const agentMsgId = `agent-${Date.now()}`;
         const agentMsg: ChatMessage = {
@@ -98,7 +123,6 @@ export function useChatStream(): UseChatStreamReturn {
         setStreaming(true);
 
         // 连接 SSE 流
-        closeStream();
         const streamUrl = buildFrontDoorSseUrl(data.stream_url);
         const es = new EventSource(streamUrl);
         eventSourceRef.current = es;
@@ -106,19 +130,35 @@ export function useChatStream(): UseChatStreamReturn {
         // 监听消息事件
         const handleEvent = (e: MessageEvent) => {
           try {
-            const eventData = JSON.parse(e.data);
+            const eventData = JSON.parse(e.data) as Omit<SSEEventData, "type"> & {
+              type: string;
+            };
 
             // 检查是否是模型回复事件
-            if (
-              eventData.type === "MODEL_CALL_COMPLETED" &&
-              eventData.payload?.response
-            ) {
+            if (eventData.type === "MODEL_CALL_COMPLETED") {
+              const content = extractAgentMessage(eventData);
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === agentMsgId
                     ? {
                         ...msg,
-                        content: eventData.payload.response,
+                        content: content || "已收到回复，但没有可显示的正文。",
+                        isStreaming: false,
+                      }
+                    : msg
+                )
+              );
+              setStreaming(false);
+            }
+
+            if (eventData.type === "MODEL_CALL_FAILED" || eventData.type === "ERROR") {
+              setError("本次回复没有成功完成，请稍后重试。");
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === agentMsgId
+                    ? {
+                        ...msg,
+                        content: msg.content || "本次回复失败，请重试。",
                         isStreaming: false,
                       }
                     : msg
@@ -154,6 +194,7 @@ export function useChatStream(): UseChatStreamReturn {
         const eventTypes = [
           "MODEL_CALL_COMPLETED",
           "MODEL_CALL_STARTED",
+          "MODEL_CALL_FAILED",
           "STATE_TRANSITION",
           "APPROVAL_REQUESTED",
           "approval:requested",

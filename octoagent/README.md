@@ -29,6 +29,46 @@ Web UI (React 19)  ──HTTP/SSE──>  FastAPI Gateway  ──>  SQLite WAL
 - Node.js 20+
 - [uv](https://docs.astral.sh/uv/) 包管理器
 
+### 个人体验模式
+
+如果你还没有 clone 仓库，推荐直接执行仓库根目录的一键安装器：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/connor-git-yaml/OctoAgent/master/scripts/install-octo-user.sh | bash
+```
+
+它会自动把源码安装到 `~/.octoagent/app`，并把个人实例初始化到 `~/.octoagent/`。
+
+如果你已经在仓库内开发，直接执行：
+
+```bash
+cd octoagent
+./scripts/install-octo-home.sh
+```
+
+这条命令会完成依赖安装、前端构建，并初始化 `~/.octoagent/`：
+
+- `octoagent.yaml`
+- `litellm-config.yaml`
+- `data/sqlite`
+- `data/artifacts`
+
+默认会初始化为 `echo` 模式，方便先把 Web 流程跑通。启动实例：
+
+```bash
+cd octoagent
+./scripts/run-octo-home.sh
+```
+
+健康检查：
+
+```bash
+cd octoagent
+./scripts/doctor-octo-home.sh
+```
+
+如需切换到真实模型，在 `~/.octoagent` 下补齐 `.env.litellm` 后，执行 `uv run octo config init` 或 `uv run octo init` 即可。
+
 ### 后端
 
 ```bash

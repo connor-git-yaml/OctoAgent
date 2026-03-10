@@ -10,7 +10,10 @@ from octoagent.core.models import InstallAttempt, InstallStatus, ManagedRuntimeD
 from ulid import ULID
 
 from .backup_service import resolve_project_root
+from .config_bootstrap import bootstrap_config
+from .config_wizard import load_config
 from .console_output import create_console, render_panel
+from .litellm_generator import generate_litellm_config
 from .update_status_store import UpdateStatusStore
 
 console = create_console()
@@ -29,12 +32,24 @@ def _run_command(command: list[str], cwd: Path) -> None:
         raise RuntimeError(stderr or f"命令执行失败: {' '.join(command)}")
 
 
-def _build_runtime_descriptor(project_root: Path) -> ManagedRuntimeDescriptor:
+def _write_script(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _build_runtime_descriptor(
+    project_root: Path,
+    *,
+    instance_root: Path | None = None,
+) -> ManagedRuntimeDescriptor:
     now = utc_now()
     port = "8000"
-    return ManagedRuntimeDescriptor(
-        project_root=str(project_root),
-        start_command=[
+    environment_overrides: dict[str, str] = {}
+    start_command: list[str]
+    if instance_root is None:
+        environment_overrides["OCTOAGENT_PROJECT_ROOT"] = str(project_root)
+        start_command = [
             "uv",
             "run",
             "uvicorn",
@@ -43,16 +58,146 @@ def _build_runtime_descriptor(project_root: Path) -> ManagedRuntimeDescriptor:
             "0.0.0.0",
             "--port",
             port,
-        ],
+        ]
+    else:
+        resolved_instance_root = instance_root.expanduser().resolve()
+        environment_overrides.update(
+            {
+                "OCTOAGENT_INSTANCE_ROOT": str(resolved_instance_root),
+                "OCTOAGENT_PROJECT_ROOT": str(resolved_instance_root),
+                "OCTOAGENT_DATA_DIR": str(resolved_instance_root / "data"),
+                "OCTOAGENT_PORT": port,
+            }
+        )
+        start_command = [
+            "/bin/bash",
+            str(project_root / "scripts" / "run-octo-home.sh"),
+        ]
+    return ManagedRuntimeDescriptor(
+        project_root=str(project_root),
+        start_command=start_command,
         verify_url=f"http://127.0.0.1:{port}/ready?profile=core",
         workspace_sync_command=["uv", "sync"],
         frontend_build_command=["npm", "run", "build"],
-        environment_overrides={
-            "OCTOAGENT_PROJECT_ROOT": str(project_root),
-        },
+        environment_overrides=environment_overrides,
         created_at=now,
         updated_at=now,
     )
+
+
+def _build_env_loader(instance_root: Path) -> str:
+    return f"""INSTANCE_ROOT="{instance_root}"
+
+export OCTOAGENT_INSTANCE_ROOT="$INSTANCE_ROOT"
+export OCTOAGENT_PROJECT_ROOT="${{OCTOAGENT_PROJECT_ROOT:-$INSTANCE_ROOT}}"
+export OCTOAGENT_DATA_DIR="${{OCTOAGENT_DATA_DIR:-$INSTANCE_ROOT/data}}"
+
+if [[ -f "$INSTANCE_ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$INSTANCE_ROOT/.env"
+  set +a
+fi
+
+if [[ -f "$INSTANCE_ROOT/.env.litellm" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$INSTANCE_ROOT/.env.litellm"
+  set +a
+fi
+"""
+
+
+def _write_user_launchers(
+    source_root: Path,
+    instance_root: Path,
+) -> list[str]:
+    root = instance_root.expanduser().resolve()
+    bin_dir = root / "bin"
+    env_loader = _build_env_loader(root)
+    created: list[str] = []
+
+    launcher_specs = {
+        "octo": f"""#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_ROOT="{source_root}"
+{env_loader}
+cd "$SOURCE_ROOT"
+exec uv run octo "$@"
+""",
+        "octo-start": f"""#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_ROOT="{source_root}"
+{env_loader}
+cd "$SOURCE_ROOT"
+exec "$SOURCE_ROOT/scripts/run-octo-home.sh" "$@"
+""",
+        "octo-doctor": f"""#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_ROOT="{source_root}"
+{env_loader}
+cd "$SOURCE_ROOT"
+exec "$SOURCE_ROOT/scripts/doctor-octo-home.sh" "$@"
+""",
+    }
+
+    for name, content in launcher_specs.items():
+        launcher_path = bin_dir / name
+        _write_script(launcher_path, content)
+        created.append(str(launcher_path))
+
+    return created
+
+
+def _bootstrap_instance_root(
+    source_root: Path,
+    instance_root: Path,
+    *,
+    force: bool = False,
+) -> tuple[list[str], list[str], list[str]]:
+    root = instance_root.expanduser().resolve()
+    data_dir = root / "data"
+    warnings: list[str] = []
+    actions = [
+        f"prepare instance root: {root}",
+    ]
+    next_actions = [
+        f"运行 {root / 'bin' / 'octo-start'} 启动个人 Web 实例。",
+        f"运行 {root / 'bin' / 'octo-doctor'} 检查个人实例健康度。",
+        "如需真实模型，再执行 uv run octo config init 或 uv run octo init 完成 provider 配置。",
+        f"如需直接使用 CLI，可把 {root / 'bin'} 加入 PATH。",
+    ]
+
+    for path in (
+        root,
+        data_dir,
+        data_dir / "sqlite",
+        data_dir / "artifacts",
+        data_dir / "ops",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+    config_path = root / "octoagent.yaml"
+    if force or not config_path.exists():
+        bootstrap_config(root, echo=True)
+        actions.append(f"bootstrap echo config: {config_path}")
+    else:
+        warnings.append(f"检测到已有实例配置，保留现有 octoagent.yaml：{config_path}")
+        try:
+            config = load_config(root)
+            if config is not None:
+                generate_litellm_config(config, root)
+                actions.append(f"sync litellm-config.yaml: {root / 'litellm-config.yaml'}")
+        except Exception as exc:
+            warnings.append(f"现有实例配置未能自动同步 litellm-config.yaml：{exc}")
+
+    for launcher_path in _write_user_launchers(source_root, root):
+        actions.append(f"write launcher: {launcher_path}")
+
+    return actions, warnings, next_actions
 
 
 def run_install_bootstrap(
@@ -60,6 +205,7 @@ def run_install_bootstrap(
     *,
     force: bool = False,
     skip_frontend: bool = False,
+    instance_root: Path | None = None,
 ) -> InstallAttempt:
     root = resolve_project_root(project_root).resolve()
     started_at = utc_now()
@@ -90,44 +236,57 @@ def run_install_bootstrap(
         return attempt
 
     descriptor = status_store.load_runtime_descriptor()
-    if descriptor is not None and not force:
-        attempt.warnings.append("检测到已有 managed runtime descriptor，跳过重写。")
-        attempt.runtime_descriptor_path = str(status_store.descriptor_path)
-        attempt.next_actions.extend(
-            [
-                "运行 octo config init 或确认现有 octoagent.yaml。",
-                "运行 octo doctor 检查当前实例。",
-            ]
-        )
-        attempt.completed_at = utc_now()
-        return attempt
+    should_skip_runtime_bootstrap = descriptor is not None and not force
 
     try:
-        _run_command(["uv", "sync"], root)
-        attempt.actions_completed.append("uv sync")
-        frontend_root = root / "frontend"
-        has_frontend = frontend_root.exists() and (frontend_root / "package.json").exists()
-        if has_frontend and not skip_frontend:
-            _run_command(["npm", "install"], frontend_root)
-            _run_command(["npm", "run", "build"], frontend_root)
-            attempt.actions_completed.extend(["npm install", "npm run build"])
-        elif skip_frontend:
-            attempt.warnings.append("已跳过前端依赖安装与构建。")
+        if should_skip_runtime_bootstrap:
+            attempt.warnings.append("检测到已有 managed runtime descriptor，跳过重写。")
+            attempt.runtime_descriptor_path = str(status_store.descriptor_path)
+            attempt.next_actions.extend(
+                [
+                    "运行 octo config init 或确认现有 octoagent.yaml。",
+                    "运行 octo doctor 检查当前实例。",
+                ]
+            )
+        else:
+            _run_command(["uv", "sync"], root)
+            attempt.actions_completed.append("uv sync")
+            frontend_root = root / "frontend"
+            has_frontend = frontend_root.exists() and (frontend_root / "package.json").exists()
+            if has_frontend and not skip_frontend:
+                _run_command(["npm", "install"], frontend_root)
+                _run_command(["npm", "run", "build"], frontend_root)
+                attempt.actions_completed.extend(["npm install", "npm run build"])
+            elif skip_frontend:
+                attempt.warnings.append("已跳过前端依赖安装与构建。")
 
-        descriptor = _build_runtime_descriptor(root)
-        status_store.save_runtime_descriptor(descriptor)
-        attempt.runtime_descriptor_path = str(status_store.descriptor_path)
-        attempt.actions_completed.append("write managed runtime descriptor")
-        attempt.next_actions.extend(
-            [
-                "运行 octo config init 初始化统一配置。",
-                "运行 octo doctor 检查项目健康度。",
-                (
-                    "使用 uv run uvicorn octoagent.gateway.main:app "
-                    "--host 0.0.0.0 --port 8000 启动 gateway。"
-                ),
-            ]
-        )
+            descriptor = _build_runtime_descriptor(
+                root,
+                instance_root=instance_root,
+            )
+            status_store.save_runtime_descriptor(descriptor)
+            attempt.runtime_descriptor_path = str(status_store.descriptor_path)
+            attempt.actions_completed.append("write managed runtime descriptor")
+            attempt.next_actions.extend(
+                [
+                    "运行 octo config init 初始化统一配置。",
+                    "运行 octo doctor 检查项目健康度。",
+                    (
+                        "使用 uv run uvicorn octoagent.gateway.main:app "
+                        "--host 0.0.0.0 --port 8000 启动 gateway。"
+                    ),
+                ]
+            )
+
+        if instance_root is not None:
+            instance_actions, instance_warnings, instance_next_actions = _bootstrap_instance_root(
+                root,
+                instance_root,
+                force=force,
+            )
+            attempt.actions_completed.extend(instance_actions)
+            attempt.warnings.extend(instance_warnings)
+            attempt.next_actions.extend(instance_next_actions)
         attempt.completed_at = utc_now()
         return attempt
     except Exception as exc:
@@ -169,6 +328,11 @@ def main() -> None:
     parser.add_argument("--project-root", default=None)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip-frontend", action="store_true")
+    parser.add_argument(
+        "--instance-root",
+        default=None,
+        help="额外初始化个人实例根目录（如 ~/.octoagent）",
+    )
     args = parser.parse_args()
 
     root = resolve_project_root(Path(args.project_root) if args.project_root else None)
@@ -176,6 +340,7 @@ def main() -> None:
         root,
         force=args.force,
         skip_frontend=args.skip_frontend,
+        instance_root=Path(args.instance_root).expanduser() if args.instance_root else None,
     )
     _format_attempt(attempt)
     if attempt.status == InstallStatus.FAILED:

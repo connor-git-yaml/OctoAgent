@@ -13,75 +13,22 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const roleLabel = isUser ? "你" : "OctoAgent";
+  const content = message.content || (message.isStreaming ? "正在思考..." : "暂无回复内容");
 
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: isUser ? "flex-end" : "flex-start",
-        marginBottom: "12px",
-        padding: "0 16px",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "70%",
-          padding: "10px 14px",
-          borderRadius: isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-          backgroundColor: isUser ? "#1976d2" : "#f5f5f5",
-          color: isUser ? "white" : "#333",
-          fontSize: "14px",
-          lineHeight: "1.5",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-        }}
-      >
-        {/* 角色标签 */}
-        <div
-          style={{
-            fontSize: "11px",
-            color: isUser ? "rgba(255,255,255,0.7)" : "#999",
-            marginBottom: "4px",
-          }}
-        >
-          {isUser ? "You" : "Agent"}
+    <div className={`wb-message ${isUser ? "is-user" : "is-agent"}`}>
+      <div className={`wb-message-card ${isUser ? "is-user" : "is-agent"}`}>
+        <div className="wb-message-role">{roleLabel}</div>
+        <div className="wb-message-content">
+          {content}
+          {message.isStreaming ? <span className="wb-message-cursor" aria-hidden="true" /> : null}
         </div>
-
-        {/* 消息内容 */}
-        <div>
-          {message.content || (message.isStreaming ? "" : "(empty)")}
-          {message.isStreaming && (
-            <span
-              style={{
-                display: "inline-block",
-                width: "8px",
-                height: "16px",
-                backgroundColor: isUser ? "rgba(255,255,255,0.5)" : "#999",
-                marginLeft: "2px",
-                animation: "blink 1s infinite",
-                verticalAlign: "text-bottom",
-              }}
-            />
-          )}
-        </div>
-
-        {/* 审批提示 -- FR-025 */}
-        {message.hasApproval && (
-          <div
-            style={{
-              marginTop: "8px",
-              padding: "6px 10px",
-              backgroundColor: isUser
-                ? "rgba(255,255,255,0.15)"
-                : "#fff3e0",
-              borderRadius: "4px",
-              fontSize: "12px",
-              color: isUser ? "rgba(255,255,255,0.9)" : "#e65100",
-            }}
-          >
-            Waiting for approval... Check the Approvals panel.
+        {message.hasApproval ? (
+          <div className={`wb-message-approval ${isUser ? "is-user" : "is-agent"}`}>
+            这条回复需要确认，请到审批区处理。
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

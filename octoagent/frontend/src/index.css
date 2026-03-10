@@ -1140,8 +1140,8 @@ button {
 }
 
 .wb-sidebar-brand h1 {
-  font-size: 2.4rem;
-  line-height: 0.95;
+  font-size: clamp(2rem, 2.4vw, 2.35rem);
+  line-height: 1;
 }
 
 .wb-sidebar-brand p,
@@ -1259,8 +1259,8 @@ button {
 }
 
 .wb-topbar h2 {
-  font-size: clamp(1.8rem, 2.8vw, 3rem);
-  line-height: 1;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  line-height: 1.08;
 }
 
 .wb-topbar-actions,
@@ -1322,7 +1322,7 @@ button {
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--cp-space-4);
-  padding: 28px 30px;
+  padding: 24px 28px;
   border-radius: 32px;
   background:
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 28%),
@@ -1333,12 +1333,12 @@ button {
 }
 
 .wb-hero h1 {
-  font-size: clamp(2.2rem, 3.6vw, 4rem);
-  line-height: 0.95;
+  font-size: clamp(1.8rem, 2.8vw, 2.8rem);
+  line-height: 1.02;
 }
 
 .wb-hero-compact h1 {
-  font-size: clamp(1.8rem, 2.8vw, 3rem);
+  font-size: clamp(1.45rem, 2.1vw, 2.1rem);
 }
 
 .wb-split {
@@ -1355,8 +1355,8 @@ button {
 }
 
 .wb-panel h3 {
-  font-size: 1.45rem;
-  line-height: 1.05;
+  font-size: 1.22rem;
+  line-height: 1.15;
 }
 
 .wb-panel-copy {
@@ -1531,22 +1531,22 @@ button {
 
 .wb-chat-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) 360px;
+  grid-template-columns: minmax(0, 1.45fr) 320px;
   gap: var(--cp-space-4);
 }
 
 .wb-chat-panel {
-  min-height: 72vh;
+  min-height: 66vh;
 }
 
 .wb-chat-messages {
   display: grid;
   align-content: start;
-  gap: 4px;
-  min-height: 48vh;
-  max-height: 58vh;
+  gap: 10px;
+  min-height: 360px;
+  max-height: 56vh;
   overflow: auto;
-  padding: 8px 0;
+  padding: 8px 4px;
 }
 
 .wb-chat-form {
@@ -1589,6 +1589,83 @@ button {
 .wb-empty-state {
   place-items: start;
   min-height: 200px;
+}
+
+.wb-message {
+  display: flex;
+  margin-bottom: 2px;
+}
+
+.wb-message.is-user {
+  justify-content: flex-end;
+}
+
+.wb-message.is-agent {
+  justify-content: flex-start;
+}
+
+.wb-message-card {
+  display: grid;
+  gap: 8px;
+  max-width: min(720px, 78%);
+  padding: 14px 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  box-shadow: 0 10px 24px rgba(20, 32, 47, 0.06);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-message-card.is-user {
+  border-top-right-radius: 8px;
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #fff;
+}
+
+.wb-message-card.is-agent {
+  border-top-left-radius: 8px;
+  background: rgba(248, 250, 251, 0.96);
+  color: var(--cp-ink);
+}
+
+.wb-message-role {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.74;
+}
+
+.wb-message-content {
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+
+.wb-message-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 1.05em;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+  animation: blink 1s infinite;
+  vertical-align: text-bottom;
+}
+
+.wb-message-approval {
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 0.84rem;
+}
+
+.wb-message-approval.is-user {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.wb-message-approval.is-agent {
+  background: rgba(255, 243, 224, 0.92);
+  color: #9a3412;
 }
 
 .wb-topbar-menu {

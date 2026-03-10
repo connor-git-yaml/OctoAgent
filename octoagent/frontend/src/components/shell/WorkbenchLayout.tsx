@@ -23,13 +23,13 @@ function renderNavDescription(path: string): string {
     case "/":
       return "系统状态与下一步";
     case "/chat":
-      return "对话、审批与上下文";
+      return "对话、任务与回复";
     case "/work":
-      return "运行中的工作与 child works";
+      return "运行中的工作与子任务";
     case "/memory":
       return "系统记住了什么";
     case "/settings":
-      return "图形化配置与连接";
+      return "基础配置与连接";
     case "/advanced":
       return "完整控制面与诊断";
     default:
@@ -100,9 +100,9 @@ export default function WorkbenchLayout() {
       <div className="wb-shell">
         <aside className={`wb-sidebar ${navOpen ? "is-open" : ""}`}>
           <div className="wb-sidebar-card wb-sidebar-brand">
-            <p className="wb-kicker">Guided Workbench</p>
+            <p className="wb-kicker">你的工作台</p>
             <h1>OctoAgent</h1>
-            <p>默认入口先回答状态、配置、对话和工作，而不是资源名词。</p>
+            <p>先从状态、设置、对话和工作开始，常用入口都在这里。</p>
           </div>
 
           <nav className="wb-nav" aria-label="Workbench Navigation">
@@ -167,7 +167,7 @@ export default function WorkbenchLayout() {
                 {currentProject?.slug ?? selector.current_project_id} /{" "}
                 {currentWorkspace?.slug ?? selector.current_workspace_id}
               </p>
-              <h2>一个更适合普通用户的入口</h2>
+              <h2>欢迎回来</h2>
             </div>
             <div className="wb-topbar-actions">
               <span className={`wb-status-pill is-${diagnostics.overall_status}`}>
