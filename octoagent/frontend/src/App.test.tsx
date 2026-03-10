@@ -162,6 +162,122 @@ function buildSnapshot(proxyUrl = "http://localhost:4000") {
         },
         operator_items: [],
       },
+      agent_profiles: {
+        contract_version: "1.0.0",
+        resource_type: "agent_profiles",
+        resource_id: "agent-profiles:overview",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        profiles: [
+          {
+            profile_id: "agent-profile-default",
+            scope: "project",
+            project_id: "project-default",
+            name: "默认主 Agent",
+            persona_summary: "适合首次使用。",
+            model_alias: "main",
+            tool_profile: "standard",
+            updated_at: "2026-03-09T10:00:00Z",
+          },
+        ],
+      },
+      owner_profile: {
+        contract_version: "1.0.0",
+        resource_type: "owner_profile",
+        resource_id: "owner-profile:default",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        profile: {},
+        overlays: [],
+      },
+      bootstrap_session: {
+        contract_version: "1.0.0",
+        resource_type: "bootstrap_session",
+        resource_id: "bootstrap:current",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        session: {},
+        resumable: true,
+      },
+      context_continuity: {
+        contract_version: "1.0.0",
+        resource_type: "context_continuity",
+        resource_id: "context:overview",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: true, reasons: ["context_frames_empty"], unavailable_sections: [] },
+        warnings: ["当前作用域还没有 context frames。"],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        sessions: [],
+        frames: [],
+      },
+      policy_profiles: {
+        contract_version: "1.0.0",
+        resource_type: "policy_profiles",
+        resource_id: "policy:profiles",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        active_profile_id: "default",
+        profiles: [
+          {
+            profile_id: "strict",
+            label: "谨慎",
+            description: "更保守",
+            allowed_tool_profile: "minimal",
+            approval_policy: "可逆 / 不可逆操作都需要确认",
+            risk_level: "warning",
+            recommended_for: ["首次使用"],
+            is_active: false,
+          },
+          {
+            profile_id: "default",
+            label: "平衡",
+            description: "默认推荐",
+            allowed_tool_profile: "standard",
+            approval_policy: "仅不可逆操作需要确认",
+            risk_level: "info",
+            recommended_for: ["默认推荐"],
+            is_active: true,
+          },
+        ],
+      },
       capability_pack: {
         contract_version: "1.0.0",
         resource_type: "capability_pack",
@@ -186,6 +302,134 @@ function buildSnapshot(proxyUrl = "http://localhost:4000") {
           fallback_toolset: [],
           degraded_reason: "",
           generated_at: "2026-03-09T10:00:00Z",
+        },
+      },
+      skill_governance: {
+        contract_version: "1.0.0",
+        resource_type: "skill_governance",
+        resource_id: "skills:governance",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        items: [
+          {
+            item_id: "skill:workers.review",
+            label: "Worker Review",
+            source_kind: "builtin",
+            scope: "project",
+            enabled_by_default: true,
+            availability: "available",
+            trust_level: "trusted",
+            blocking: false,
+            required_secrets: [],
+            missing_requirements: [],
+            install_hint: "",
+            details: {},
+          },
+        ],
+        summary: {
+          builtin_skill_count: 1,
+          mcp_item_count: 0,
+        },
+      },
+      setup_governance: {
+        contract_version: "1.0.0",
+        resource_type: "setup_governance",
+        resource_id: "setup:governance",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        project_scope: {
+          section_id: "project_scope",
+          label: "Project Scope",
+          status: "ready",
+          summary: "Default Project / Primary",
+          warnings: [],
+          blocking_reasons: [],
+          details: {},
+          source_refs: [],
+        },
+        provider_runtime: {
+          section_id: "provider_runtime",
+          label: "Provider Runtime",
+          status: "ready",
+          summary: "已启用 1 个 provider，runtime=proxy",
+          warnings: [],
+          blocking_reasons: [],
+          details: {},
+          source_refs: [],
+        },
+        channel_access: {
+          section_id: "channel_access",
+          label: "Channel Access",
+          status: "ready",
+          summary: "web ready",
+          warnings: [],
+          blocking_reasons: [],
+          details: {},
+          source_refs: [],
+        },
+        agent_governance: {
+          section_id: "agent_governance",
+          label: "Agent Governance",
+          status: "ready",
+          summary: "默认主 Agent 已配置",
+          warnings: [],
+          blocking_reasons: [],
+          details: {
+            active_agent_profile: {
+              profile_id: "agent-profile-default",
+              scope: "project",
+              project_id: "project-default",
+              name: "默认主 Agent",
+              persona_summary: "适合首次使用。",
+              model_alias: "main",
+              tool_profile: "standard",
+              updated_at: "2026-03-09T10:00:00Z",
+            },
+          },
+          source_refs: [],
+        },
+        tools_skills: {
+          section_id: "tools_skills",
+          label: "Tools & Skills",
+          status: "ready",
+          summary: "skills=1，mcp=0",
+          warnings: [],
+          blocking_reasons: [],
+          details: {
+            skill_summary: {
+              builtin_skill_count: 1,
+              mcp_item_count: 0,
+            },
+          },
+          source_refs: [],
+        },
+        review: {
+          ready: true,
+          risk_level: "info",
+          warnings: [],
+          blocking_reasons: [],
+          next_actions: ["当前 setup review 已通过，可以继续执行 setup.apply。"],
+          provider_runtime_risks: [],
+          channel_exposure_risks: [],
+          agent_autonomy_risks: [],
+          tool_skill_readiness_risks: [],
+          secret_binding_risks: [],
         },
       },
       delegation: {
@@ -367,6 +611,7 @@ function buildWork(
   options?: {
     title?: string;
     capabilities?: Array<Record<string, unknown>>;
+    runtimeSummary?: Record<string, unknown>;
   }
 ) {
   return {
@@ -387,7 +632,7 @@ function buildWork(
     child_work_ids: [],
     child_work_count: 0,
     merge_ready: false,
-    runtime_summary: {},
+    runtime_summary: options?.runtimeSummary ?? {},
     updated_at: "2026-03-09T10:05:00Z",
     capabilities: options?.capabilities ?? [],
   };
@@ -436,31 +681,94 @@ describe("App workbench routing", () => {
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
-  it("设置页保存时通过 config.apply 提交并按 resource_refs 回刷", async () => {
+  it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
     window.history.pushState({}, "", "/settings");
 
     const nextSnapshot = buildSnapshot("http://localhost:4100");
+    nextSnapshot.resources.setup_governance.review = {
+      ...nextSnapshot.resources.setup_governance.review,
+      next_actions: ["当前 setup review 已通过，可以继续执行 setup.apply。"],
+    };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, _init) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(buildSnapshot()));
       }
       if (url.includes("/api/control/actions")) {
+        const body = String((_init as RequestInit | undefined)?.body ?? "");
+        if (body.includes('"action_id":"setup.review"')) {
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-setup-review",
+                correlation_id: "req-setup-review",
+                action_id: "setup.review",
+                status: "completed",
+                code: "SETUP_REVIEW_READY",
+                message: "Setup review 已生成。",
+                data: {
+                  review: nextSnapshot.resources.setup_governance.review,
+                },
+                resource_refs: [
+                  {
+                    resource_type: "setup_governance",
+                    resource_id: "setup:governance",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:01:00Z",
+              },
+            })
+          );
+        }
         return Promise.resolve(
           jsonResponse({
             contract_version: "1.0.0",
             result: {
               contract_version: "1.0.0",
-              request_id: "req-config-apply",
-              correlation_id: "req-config-apply",
-              action_id: "config.apply",
+              request_id: "req-setup-apply",
+              correlation_id: "req-setup-apply",
+              action_id: "setup.apply",
               status: "completed",
-              code: "CONFIG_APPLIED",
-              message: "配置已保存",
-              data: {},
+              code: "SETUP_APPLIED",
+              message: "Setup 已应用，主配置与治理设置已同步。",
+              data: {
+                review: nextSnapshot.resources.setup_governance.review,
+              },
               resource_refs: [
-                { resource_type: "config_schema", resource_id: "config:octoagent" },
-                { resource_type: "diagnostics_summary", resource_id: "diagnostics:runtime" },
+                {
+                  resource_type: "config_schema",
+                  resource_id: "config:octoagent",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "diagnostics_summary",
+                  resource_id: "diagnostics:runtime",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "setup_governance",
+                  resource_id: "setup:governance",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "policy_profiles",
+                  resource_id: "policy:profiles",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "skill_governance",
+                  resource_id: "skills:governance",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "agent_profiles",
+                  resource_id: "agent-profiles:overview",
+                  schema_version: 1,
+                },
               ],
               target_refs: [],
               handled_at: "2026-03-09T10:02:00Z",
@@ -474,6 +782,18 @@ describe("App workbench routing", () => {
       if (url.includes("/api/control/resources/diagnostics")) {
         return Promise.resolve(jsonResponse(nextSnapshot.resources.diagnostics));
       }
+      if (url.includes("/api/control/resources/setup-governance")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.setup_governance));
+      }
+      if (url.includes("/api/control/resources/policy-profiles")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.policy_profiles));
+      }
+      if (url.includes("/api/control/resources/skill-governance")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.skill_governance));
+      }
+      if (url.includes("/api/control/resources/agent-profiles")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.agent_profiles));
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -482,23 +802,281 @@ describe("App workbench routing", () => {
     const input = await screen.findByLabelText("LiteLLM Proxy URL");
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
-    await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    await userEvent.click(screen.getByRole("button", { name: "应用 Setup" }));
 
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some((call) =>
+        fetchMock.mock.calls.filter((call) =>
           String((call as FetchArgs)[0]).includes("/api/control/actions")
-        )
+        ).length >= 2
       ).toBe(true)
     );
 
-    const actionCall = fetchMock.mock.calls.find((call) =>
-      String((call as FetchArgs)[0]).includes("/api/control/actions")
-    ) as FetchArgs | undefined;
+    const actionBodies = fetchMock.mock.calls
+      .filter((call) => String((call as FetchArgs)[0]).includes("/api/control/actions"))
+      .map((call) => String((call as FetchArgs)[1]?.body ?? ""));
 
-    expect(String(actionCall?.[1]?.body)).toContain('"action_id":"config.apply"');
-    expect(String(actionCall?.[1]?.body)).toContain("http://localhost:4100");
-    expect(await screen.findByText(/配置已保存/)).toBeInTheDocument();
+    expect(
+      actionBodies.some((body) => body.includes('"action_id":"setup.review"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"action_id":"setup.apply"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes("http://localhost:4100"))
+    ).toBe(true);
+    expect(await screen.findByText(/主配置与治理设置已同步/)).toBeInTheDocument();
+  });
+
+  it("设置页执行 setup.review 时保留未提交的主 Agent 草稿", async () => {
+    window.history.pushState({}, "", "/settings");
+
+    const snapshot = buildSnapshot();
+    const refreshedSetup = {
+      ...snapshot.resources.setup_governance,
+      generated_at: "2026-03-09T10:01:00Z",
+      updated_at: "2026-03-09T10:01:00Z",
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-setup-review-only",
+              correlation_id: "req-setup-review-only",
+              action_id: "setup.review",
+              status: "completed",
+              code: "SETUP_REVIEW_READY",
+              message: "Setup review 已生成。",
+              data: {
+                review: refreshedSetup.review,
+              },
+              resource_refs: [
+                {
+                  resource_type: "setup_governance",
+                  resource_id: "setup:governance",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:01:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/setup-governance")) {
+        return Promise.resolve(jsonResponse(refreshedSetup));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    const nameInput = (await screen.findByLabelText("主 Agent 名称")) as HTMLInputElement;
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "新的主 Agent");
+    await userEvent.click(screen.getByRole("button", { name: "审查 Setup" }));
+
+    await screen.findByText(/Setup review 已生成/);
+    expect(nameInput.value).toBe("新的主 Agent");
+  });
+
+  it("Work 页面会先展示 worker.review 方案，再批准 worker.apply", async () => {
+    window.history.pushState({}, "", "/work");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.delegation.works = [
+      buildWork("work-review", "running", {
+        title: "拆分调研和开发",
+        runtimeSummary: {
+          requested_tool_profile: "standard",
+        },
+        capabilities: [
+          {
+            capability_id: "worker.review",
+            label: "评审 Worker 方案",
+            action_id: "worker.review",
+            enabled: true,
+            support_status: "supported",
+            reason: "",
+          },
+        ],
+      }),
+    ] as typeof snapshot.resources.delegation.works;
+
+    const refreshedDelegation = structuredClone(snapshot.resources.delegation);
+    refreshedDelegation.works = [
+      buildWork("work-review", "running", {
+        title: "拆分调研和开发",
+        capabilities: [
+          {
+            capability_id: "worker.review",
+            label: "评审 Worker 方案",
+            action_id: "worker.review",
+            enabled: true,
+            support_status: "supported",
+            reason: "",
+          },
+        ],
+      }),
+      buildWork("child-research", "assigned", { title: "Research Child" }),
+      buildWork("child-dev", "assigned", { title: "Dev Child" }),
+    ] as typeof snapshot.resources.delegation.works;
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        const body = String(init.body ?? "");
+        if (body.includes('"action_id":"worker.review"')) {
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-worker-review",
+                correlation_id: "req-worker-review",
+                action_id: "worker.review",
+                status: "completed",
+                code: "WORKER_REVIEW_READY",
+                message: "已生成 Worker 评审方案。",
+                data: {
+                  plan: {
+                    plan_id: "plan-1",
+                    work_id: "work-review",
+                    task_id: "task-work-review",
+                    proposal_kind: "split",
+                    objective: "拆分调研和开发",
+                    summary: "建议拆成 research 和 dev 两条 worker。",
+                    requires_user_confirmation: true,
+                    assignments: [
+                      {
+                        objective: "先调研 API",
+                        worker_type: "research",
+                        target_kind: "subagent",
+                        tool_profile: "minimal",
+                        title: "Research",
+                        reason: "先收集事实",
+                      },
+                      {
+                        objective: "再补代码和测试",
+                        worker_type: "dev",
+                        target_kind: "subagent",
+                        tool_profile: "standard",
+                        title: "Dev",
+                        reason: "需要实现和验证",
+                      },
+                    ],
+                    merge_candidate_ids: [],
+                    warnings: ["批准前请检查权限级别"],
+                  },
+                },
+                resource_refs: [
+                  {
+                    resource_type: "delegation_plane",
+                    resource_id: "delegation:overview",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:06:00Z",
+              },
+            })
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-worker-apply",
+              correlation_id: "req-worker-apply",
+              action_id: "worker.apply",
+              status: "completed",
+              code: "WORKER_PLAN_APPLIED",
+              message: "已按批准的 Worker 方案执行。",
+              data: {
+                child_tasks: ["child-research", "child-dev"],
+              },
+              resource_refs: [
+                {
+                  resource_type: "delegation_plane",
+                  resource_id: "delegation:overview",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:07:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/delegation")) {
+        return Promise.resolve(jsonResponse(refreshedDelegation));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("拆分调研和开发")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "评审 Worker 方案" }));
+
+    expect(await screen.findByText("建议拆成 research 和 dev 两条 worker。")).toBeInTheDocument();
+    expect(screen.getByText("Research · minimal")).toBeInTheDocument();
+    expect(screen.getByText("Dev · standard")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "批准并执行" }));
+
+    expect(await screen.findByText(/已按批准的 Worker 方案执行/)).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"worker.apply"')
+      )
+    ).toBe(true);
+  });
+
+  it("Work 页面会禁用 terminal work 的 worker.review 按钮", async () => {
+    window.history.pushState({}, "", "/work");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.delegation.works = [
+      buildWork("work-done", "succeeded", {
+        title: "Done Work",
+        capabilities: [
+          {
+            capability_id: "worker.review",
+            label: "评审 Worker 方案",
+            action_id: "worker.review",
+            enabled: false,
+            support_status: "supported",
+            reason: "",
+          },
+        ],
+      }),
+    ] as typeof snapshot.resources.delegation.works;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    const button = await screen.findByRole("button", { name: "评审 Worker 方案" });
+    expect(button).toBeDisabled();
   });
 
   it("project.select 后会全量回刷工作台并同步 Project 摘要", async () => {
@@ -686,7 +1264,7 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("workspace-analysis")).toBeInTheDocument();
   });
 
-  it("聊天发送后会回刷 sessions 和 delegation 摘要", async () => {
+  it("聊天发送后会回刷 sessions、delegation 和 context 摘要", async () => {
     window.history.pushState({}, "", "/chat");
 
     class FakeEventSource {
@@ -721,6 +1299,44 @@ describe("App workbench routing", () => {
       works: [buildWork("work-chat-1", "running", { title: "Chat Planner Work" })],
       summary: { by_status: { running: 1 } },
     };
+    const nextContext = {
+      ...snapshot.resources.context_continuity,
+      degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+      frames: [
+        {
+          context_frame_id: "context-other",
+          task_id: "task-other",
+          session_id: "thread-task-other",
+          project_id: "project-default",
+          workspace_id: "workspace-default",
+          agent_profile_id: "agent-profile-default",
+          recent_summary: "别的任务的摘要。",
+          memory_hit_count: 0,
+          memory_hits: [],
+          memory_recall: {},
+          budget: {},
+          source_refs: [],
+          degraded_reason: "",
+          created_at: "2026-03-09T10:08:00Z",
+        },
+        {
+          context_frame_id: "context-1",
+          task_id: "task-chat-1",
+          session_id: "thread-task-chat-1",
+          project_id: "project-default",
+          workspace_id: "workspace-default",
+          agent_profile_id: "agent-profile-default",
+          recent_summary: "当前 task 的上下文摘要。",
+          memory_hit_count: 1,
+          memory_hits: [],
+          memory_recall: {},
+          budget: {},
+          source_refs: [],
+          degraded_reason: "",
+          created_at: "2026-03-09T10:07:00Z",
+        },
+      ],
+    };
 
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
@@ -744,6 +1360,9 @@ describe("App workbench routing", () => {
       if (url.includes("/api/control/resources/delegation")) {
         return Promise.resolve(jsonResponse(nextDelegation));
       }
+      if (url.includes("/api/control/resources/context-frames")) {
+        return Promise.resolve(jsonResponse(nextContext));
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -755,6 +1374,8 @@ describe("App workbench routing", () => {
 
     expect(await screen.findByText("Chat Task")).toBeInTheDocument();
     expect(await screen.findByText("Chat Planner Work")).toBeInTheDocument();
+    expect(await screen.findByText("当前 task 的上下文摘要。")).toBeInTheDocument();
+    expect(screen.queryByText("别的任务的摘要。")).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some((call) =>
         String((call as FetchArgs)[0]).includes("/api/control/resources/sessions")
@@ -763,6 +1384,11 @@ describe("App workbench routing", () => {
     expect(
       fetchMock.mock.calls.some((call) =>
         String((call as FetchArgs)[0]).includes("/api/control/resources/delegation")
+      )
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/resources/context-frames")
       )
     ).toBe(true);
   });

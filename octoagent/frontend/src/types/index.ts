@@ -559,6 +559,97 @@ export interface ContextContinuityDocument extends ControlPlaneDocumentBase {
   frames: ContextFrameItem[];
 }
 
+export interface SetupRiskItem {
+  risk_id: string;
+  severity: string;
+  title: string;
+  summary: string;
+  blocking: boolean;
+  recommended_action: string;
+  source_ref: ControlPlaneResourceRef | null;
+}
+
+export interface SetupGovernanceSection {
+  section_id: string;
+  label: string;
+  status: string;
+  summary: string;
+  warnings: string[];
+  blocking_reasons: string[];
+  details: Record<string, unknown>;
+  source_refs: ControlPlaneResourceRef[];
+}
+
+export interface SetupReviewSummary {
+  ready: boolean;
+  risk_level: string;
+  warnings: string[];
+  blocking_reasons: string[];
+  next_actions: string[];
+  provider_runtime_risks: SetupRiskItem[];
+  channel_exposure_risks: SetupRiskItem[];
+  agent_autonomy_risks: SetupRiskItem[];
+  tool_skill_readiness_risks: SetupRiskItem[];
+  secret_binding_risks: SetupRiskItem[];
+}
+
+export interface PolicyProfileItem {
+  profile_id: string;
+  label: string;
+  description: string;
+  allowed_tool_profile: string;
+  approval_policy: string;
+  risk_level: string;
+  recommended_for: string[];
+  is_active: boolean;
+}
+
+export interface PolicyProfilesDocument extends ControlPlaneDocumentBase {
+  resource_type: "policy_profiles";
+  resource_id: "policy:profiles";
+  active_project_id: string;
+  active_workspace_id: string;
+  active_profile_id: string;
+  profiles: PolicyProfileItem[];
+}
+
+export interface SkillGovernanceItem {
+  item_id: string;
+  label: string;
+  source_kind: string;
+  scope: string;
+  enabled_by_default: boolean;
+  availability: string;
+  trust_level: string;
+  blocking: boolean;
+  required_secrets: string[];
+  missing_requirements: string[];
+  install_hint: string;
+  details: Record<string, unknown>;
+}
+
+export interface SkillGovernanceDocument extends ControlPlaneDocumentBase {
+  resource_type: "skill_governance";
+  resource_id: "skills:governance";
+  active_project_id: string;
+  active_workspace_id: string;
+  items: SkillGovernanceItem[];
+  summary: Record<string, unknown>;
+}
+
+export interface SetupGovernanceDocument extends ControlPlaneDocumentBase {
+  resource_type: "setup_governance";
+  resource_id: "setup:governance";
+  active_project_id: string;
+  active_workspace_id: string;
+  project_scope: SetupGovernanceSection;
+  provider_runtime: SetupGovernanceSection;
+  channel_access: SetupGovernanceSection;
+  agent_governance: SetupGovernanceSection;
+  tools_skills: SetupGovernanceSection;
+  review: SetupReviewSummary;
+}
+
 export type WorkerType = "general" | "ops" | "research" | "dev";
 
 export type RuntimeKind =
@@ -661,6 +752,28 @@ export interface WorkProjectionItem {
   runtime_summary: Record<string, unknown>;
   updated_at: string | null;
   capabilities: ControlPlaneCapability[];
+}
+
+export interface WorkerPlanAssignment {
+  objective: string;
+  worker_type: string;
+  target_kind: string;
+  tool_profile: string;
+  title: string;
+  reason: string;
+}
+
+export interface WorkerPlanProposal {
+  plan_id: string;
+  work_id: string;
+  task_id: string;
+  proposal_kind: string;
+  objective: string;
+  summary: string;
+  requires_user_confirmation: boolean;
+  assignments: WorkerPlanAssignment[];
+  merge_candidate_ids: string[];
+  warnings: string[];
 }
 
 export interface DelegationPlaneDocument extends ControlPlaneDocumentBase {
@@ -1139,7 +1252,10 @@ export interface ControlPlaneSnapshot {
     owner_profile: OwnerProfileDocument;
     bootstrap_session: BootstrapSessionDocument;
     context_continuity: ContextContinuityDocument;
+    policy_profiles: PolicyProfilesDocument;
     capability_pack: CapabilityPackDocument;
+    skill_governance: SkillGovernanceDocument;
+    setup_governance: SetupGovernanceDocument;
     delegation: DelegationPlaneDocument;
     pipelines: SkillPipelineDocument;
     automation: AutomationJobDocument;

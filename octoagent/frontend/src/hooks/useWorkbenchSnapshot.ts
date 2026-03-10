@@ -52,8 +52,16 @@ async function fetchSnapshotResource(
       return fetchControlResource("project-selector");
     case "sessions":
       return fetchControlResource("sessions");
+    case "context-frames":
+      return fetchControlResource("context-frames");
+    case "policy-profiles":
+      return fetchControlResource("policy-profiles");
     case "capability-pack":
       return fetchControlResource("capability-pack");
+    case "skill-governance":
+      return fetchControlResource("skill-governance");
+    case "setup-governance":
+      return fetchControlResource("setup-governance");
     case "delegation":
       return fetchControlResource("delegation");
     case "pipelines":

@@ -13,6 +13,7 @@ export default function ChatWorkbench() {
   const [input, setInput] = useState("");
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const sessions = snapshot!.resources.sessions.sessions;
+  const context = snapshot!.resources.context_continuity;
   const memory = snapshot!.resources.memory;
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
   const activeWorkId =
@@ -21,6 +22,11 @@ export default function ChatWorkbench() {
       : "";
   const activeWork =
     snapshot!.resources.delegation.works.find((item) => item.work_id === activeWorkId) ?? null;
+  const activeContextFrame =
+    context.frames.find((item) => item.task_id === taskId) ??
+    (activeSession
+      ? context.frames.find((item) => item.session_id === activeSession.session_id) ?? null
+      : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +66,11 @@ export default function ChatWorkbench() {
         resource_type: snapshot!.resources.delegation.resource_type,
         resource_id: snapshot!.resources.delegation.resource_id,
         schema_version: snapshot!.resources.delegation.schema_version,
+      },
+      {
+        resource_type: snapshot!.resources.context_continuity.resource_type,
+        resource_id: snapshot!.resources.context_continuity.resource_id,
+        schema_version: snapshot!.resources.context_continuity.schema_version,
       },
     ]);
   }, [taskId, streaming]);
@@ -180,7 +191,7 @@ export default function ChatWorkbench() {
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">记忆与上下文</p>
-                <h3>先接 Memory，再等待 033/034 接进来</h3>
+                <h3>用真实 context frame 替代硬编码占位</h3>
               </div>
             </div>
             <div className="wb-note-stack">
@@ -189,12 +200,20 @@ export default function ChatWorkbench() {
                 <span>{memory.summary.sor_current_count}</span>
               </div>
               <div className="wb-note">
-                <strong>Context continuity</strong>
-                <span>Feature 033 完成后会在这里显示 provenance。</span>
+                <strong>Context frames</strong>
+                <span>{context.frames.length}</span>
               </div>
               <div className="wb-note">
-                <strong>Context compaction</strong>
-                <span>Feature 034 完成后会在这里显示压缩状态和 evidence。</span>
+                <strong>Context continuity</strong>
+                <span>
+                  {context.degraded.is_degraded
+                    ? "033 仍有降级项，当前只显示基础 provenance。"
+                    : "当前作用域的 context continuity 已可查看。"}
+                </span>
+              </div>
+              <div className="wb-note">
+                <strong>Recent summary</strong>
+                <span>{activeContextFrame?.recent_summary ?? "当前还没有 recent summary。"}</span>
               </div>
             </div>
           </section>

@@ -447,6 +447,7 @@ class TestControlPlaneApi:
         assert payload["registry"]["resource_type"] == "action_registry"
         assert any(item["action_id"] == "project.select" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "setup.review" for item in payload["registry"]["actions"])
+        assert any(item["action_id"] == "setup.apply" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "memory.query" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "work.cancel" for item in payload["registry"]["actions"])
         assert any(
@@ -754,6 +755,185 @@ class TestControlPlaneApi:
             for risk in review["tool_skill_readiness_risks"]
             if risk["blocking"]
         )
+
+    async def test_setup_review_blocks_empty_agent_name_in_draft(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openai",
+                                    "name": "OpenAI",
+                                    "auth_type": "oauth",
+                                    "api_key_env": "OPENAI_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openai",
+                                    "model": "gpt-4o",
+                                },
+                                "cheap": {
+                                    "provider": "openai",
+                                    "model": "gpt-4.1-mini",
+                                },
+                            },
+                        },
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "",
+                            "persona_summary": "仍然需要明确命名。",
+                            "tool_profile": "standard",
+                            "model_alias": "main",
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        review = resp.json()["result"]["data"]["review"]
+        assert review["ready"] is False
+        assert "agent_profile_name_missing" in review["blocking_reasons"]
+        assert any(
+            item["risk_id"] == "agent_profile_name_missing"
+            for item in review["agent_autonomy_risks"]
+        )
+
+    async def test_setup_apply_persists_config_policy_and_agent_profile(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openai",
+                                    "name": "OpenAI",
+                                    "auth_type": "oauth",
+                                    "api_key_env": "OPENAI_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openai",
+                                    "model": "gpt-4o",
+                                },
+                                "cheap": {
+                                    "provider": "openai",
+                                    "model": "gpt-4.1-mini",
+                                },
+                            },
+                        },
+                        "policy_profile_id": "strict",
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "安全优先主 Agent",
+                            "persona_summary": "先审查风险，再安排 worker。",
+                            "tool_profile": "minimal",
+                            "model_alias": "main",
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_APPLIED"
+        assert result["data"]["review"]["ready"] is True
+        assert any(
+            item["resource_type"] == "policy_profiles" for item in result["resource_refs"]
+        )
+        assert any(
+            item["resource_type"] == "agent_profiles" for item in result["resource_refs"]
+        )
+
+        config_doc = await control_plane_app.state.control_plane_service.get_config_schema()
+        assert config_doc.current_value["providers"][0]["id"] == "openai"
+        assert config_doc.current_value["model_aliases"]["main"]["provider"] == "openai"
+
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        assert default_project.metadata["policy_profile_id"] == "strict"
+        assert default_project.default_agent_profile_id
+
+        saved_profile = await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
+            default_project.default_agent_profile_id
+        )
+        assert saved_profile is not None
+        assert saved_profile.name == "安全优先主 Agent"
+        assert saved_profile.tool_profile == "minimal"
+
+    async def test_setup_apply_rejects_blocking_review(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {},
+                        }
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 409
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_REVIEW_BLOCKED"
+        assert "main_alias_missing" in result["message"]
 
     async def test_policy_profile_select_updates_project_metadata_and_runtime(
         self,

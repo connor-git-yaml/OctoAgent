@@ -6,10 +6,18 @@ import { formatDateTime } from "../workbench/utils";
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
 
 function computeReadinessLabel(
+  setupReady: boolean,
   wizardStatus: string,
   diagnosticsStatus: string,
   pendingCount: number
 ): { label: string; tone: string; summary: string } {
+  if (!setupReady) {
+    return {
+      label: "先完成 Setup",
+      tone: "danger",
+      summary: "Provider、权限或技能依赖仍有阻塞项，先到 Settings 完成 review/apply。",
+    };
+  }
   if (wizardStatus !== "ready") {
     return {
       label: "继续完成设置",
@@ -45,6 +53,8 @@ export default function Home() {
   const diagnostics = snapshot!.resources.diagnostics;
   const sessions = snapshot!.resources.sessions;
   const memory = snapshot!.resources.memory;
+  const context = snapshot!.resources.context_continuity;
+  const setup = snapshot!.resources.setup_governance;
   const delegation = snapshot!.resources.delegation;
   const currentProject =
     selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
@@ -58,6 +68,7 @@ export default function Home() {
     ACTIVE_WORK_STATUSES.has(item.status)
   ).length;
   const readiness = computeReadinessLabel(
+    setup.review.ready,
     wizard.status,
     diagnostics.overall_status,
     sessions.operator_summary?.total_pending ?? 0
@@ -97,6 +108,7 @@ export default function Home() {
         <article className={`wb-card wb-card-accent is-${readiness.tone}`}>
           <p className="wb-card-label">当前状态</p>
           <strong>{readiness.label}</strong>
+          <span>Setup: {setup.review.ready ? "ready" : "blocked"}</span>
           <span>Wizard: {wizard.status}</span>
           <span>Diagnostics: {diagnostics.overall_status}</span>
         </article>
@@ -128,6 +140,20 @@ export default function Home() {
               <h3>先把常见入口走顺</h3>
             </div>
           </div>
+          {!setup.review.ready || setup.review.next_actions.length > 0 ? (
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>Setup Next Actions</strong>
+                <span>{setup.review.next_actions[0] ?? "当前 setup 已通过。"}</span>
+              </div>
+              {setup.review.blocking_reasons.slice(0, 3).map((item) => (
+                <div key={item} className="wb-note">
+                  <strong>阻塞项</strong>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="wb-action-list">
             <button
               type="button"
@@ -266,6 +292,33 @@ export default function Home() {
             <div className="wb-note">
               <strong>上下文压缩</strong>
               <span>Feature 034 已在运行链里，但这里后续会改成用户化可读提示。</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">Context</p>
+              <h3>当前上下文连续性状态</h3>
+            </div>
+          </div>
+          <div className="wb-note-stack">
+            <div className="wb-note">
+              <strong>Frames</strong>
+              <span>{context.frames.length}</span>
+            </div>
+            <div className="wb-note">
+              <strong>Sessions</strong>
+              <span>{context.sessions.length}</span>
+            </div>
+            <div className="wb-note">
+              <strong>状态</strong>
+              <span>
+                {context.degraded.is_degraded
+                  ? "033 仍有降级项，当前只展示基础 context frame"
+                  : "context continuity 已接入当前作用域"}
+              </span>
             </div>
           </div>
         </section>

@@ -20,11 +20,11 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 |---|---|---|
 | 032 | Implemented | Built-in tools、graph/subagent runtime、child work split/merge、runtime truth |
 | 034 | Implemented | 主 Agent / Worker 多轮上下文压缩与 memory flush 审计链 |
-| 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced` |
-| 036 | In Progress | Guided Setup Governance：`setup-governance / setup.review / agent_profile.save / policy_profile.select` |
+| 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced`，已接入 setup readiness、worker review/apply、context degraded |
+| 036 | In Progress | Guided Setup Governance：`setup-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select` |
 | 037 | Implemented | Runtime control context hardening，解决 selector drift 与 lineage 漂移 |
 | 039 | Implemented | Supervisor worker governance + internal A2A dispatch，补齐三层结构 |
-| 040 | Planned | M4 串联验收与用户旅程闭环（见 §4） |
+| 040 | In Progress | M4 串联验收与用户旅程闭环（见 §4） |
 
 ## 3. 各 Feature 边界
 
@@ -67,8 +67,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 仍缺：
 
-- 036 setup-governance 接线
-- 033 context provenance / 034 compaction evidence 可视化
+- memory / operator / export-recovery 的更完整串联
+- 033 context provenance / 034 compaction evidence 的更细粒度可视化
 - richer chat/work detail、memory 渐进展开与更完整测试矩阵
 
 ### Feature 036：Guided Setup Governance
@@ -79,16 +79,16 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 - `setup-governance / policy-profiles / skill-governance` canonical resources
 - `setup.review`
+- `setup.apply`
 - `agent_profile.save`
 - `policy_profile.select`
 - `config.ui_hints` 中的 `front_door.*` 与 Telegram 安全字段显式化
 
 仍缺：
 
-- `setup.apply`
 - `skills.selection.save`
 - CLI `octo init / octo onboard` 与 Web 同语义汇流
-- 035 Settings / Home 对 036 的正式消费
+- 更完整的 CLI/Web setup 状态机统一验收
 
 ### Feature 037：Runtime Context Hardening
 
@@ -127,13 +127,26 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 040：M4 Guided Experience Integration Acceptance
 
-状态：**Planned**
+状态：**In Progress**
 
 目标：
 
 - 验证 `setup.review/apply -> Home readiness -> Chat -> worker.review/apply -> approval/input -> Memory -> export/recovery` 是一条连续路径
 - 验证 035/036/039 之间没有平行 backend、没有权限漂移、没有 runtime truth 漂移
 - 为 M4 形成类似 031 的 release gate / acceptance report
+
+已落地：
+
+- `Home` 改用 `setup_governance.review` / `next_actions` 做 readiness
+- `SettingsCenter` 走 `setup.review -> setup.apply`
+- `Work` 页面支持 `worker.review / worker.apply`
+- `Chat` 页面显式展示 `context_continuity` degraded state
+- frontend/backend acceptance tests 覆盖 setup/work/chat 三条接缝
+
+仍缺：
+
+- `memory -> operator -> export/recovery` 的整条 acceptance path
+- 033/036 residual gaps 收口后的最终 M4 release gate 报告
 
 约束：
 

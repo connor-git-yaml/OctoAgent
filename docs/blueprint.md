@@ -2798,11 +2798,11 @@ M3 核心对象关系（2026-03-08 补充）：
 - 033 仍是 M3 carry-forward blocker，038 是已完成的 M3 carry-forward；它们服务 M4，但不改写当前 M4 feature 编号面
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
-- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地 shell 和主页面骨架；仍待 036 setup、033 provenance、034 evidence 继续接入）
-- [~] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / agent_profile.save / policy_profile.select` 已落地；仍待 `setup.apply`、`skills.selection.save`、CLI/Web 汇流）
+- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；本轮已接入 setup readiness、worker review/apply、context degraded 提示；仍待 memory/operator/export 串联与更细粒度 context evidence）
+- [~] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select` 已落地；仍待 `skills.selection.save`、CLI/Web setup 状态机汇流）
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（主 Agent 默认 supervisor only、`workers.review`、`worker.review/apply`、child work `requested_tool_profile`、live A2A roundtrip）
-- [ ] Feature 040：M4 Guided Experience Integration Acceptance（串联 `setup -> workbench -> chat -> worker review/apply -> memory -> operator path`，形成 M4 release gate）
+- [~] Feature 040：M4 Guided Experience Integration Acceptance（已打通 `setup -> workbench -> chat -> worker review/apply` 主链并补 acceptance tests；仍待 `memory -> operator -> export/recovery` 路径和最终 M4 release gate 报告）
 
 M4 约束：
 

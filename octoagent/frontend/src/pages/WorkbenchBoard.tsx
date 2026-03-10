@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
-import type { WorkProjectionItem } from "../types";
+import type { WorkProjectionItem, WorkerPlanProposal } from "../types";
 import { formatDateTime, formatSupportStatus } from "../workbench/utils";
 
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
@@ -15,11 +15,36 @@ function bucketWorks(works: WorkProjectionItem[]) {
   };
 }
 
+function getCapability(work: WorkProjectionItem, actionId: string) {
+  return work.capabilities.find((item) => item.action_id === actionId) ?? null;
+}
+
 export default function WorkbenchBoard() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const works = snapshot!.resources.delegation.works;
   const buckets = bucketWorks(works);
   const [splitDrafts, setSplitDrafts] = useState<Record<string, string>>({});
+  const [workerPlans, setWorkerPlans] = useState<Record<string, WorkerPlanProposal>>({});
+
+  useEffect(() => {
+    const reviewableWorkIds = new Set(
+      works
+        .filter((work) => Boolean(getCapability(work, "worker.review")?.enabled))
+        .map((work) => work.work_id)
+    );
+    setWorkerPlans((state) => {
+      const next: Record<string, WorkerPlanProposal> = {};
+      let changed = false;
+      Object.entries(state).forEach(([workId, plan]) => {
+        if (reviewableWorkIds.has(workId)) {
+          next[workId] = plan;
+          return;
+        }
+        changed = true;
+      });
+      return changed ? next : state;
+    });
+  }, [works]);
 
   async function handleWorkAction(work: WorkProjectionItem, actionId: string) {
     if (actionId === "work.split") {
@@ -34,6 +59,41 @@ export default function WorkbenchBoard() {
       const result = await submitAction(actionId, { work_id: work.work_id, objectives });
       if (result) {
         setSplitDrafts((state) => ({ ...state, [work.work_id]: "" }));
+      }
+      return;
+    }
+    if (actionId === "worker.review") {
+      if (!getCapability(work, "worker.review")?.enabled) {
+        return;
+      }
+      const result = await submitAction(actionId, {
+        work_id: work.work_id,
+        objective: work.title,
+      });
+      const plan = result?.data.plan;
+      if (plan && typeof plan === "object" && !Array.isArray(plan)) {
+        setWorkerPlans((state) => ({
+          ...state,
+          [work.work_id]: plan as WorkerPlanProposal,
+        }));
+      }
+      return;
+    }
+    if (actionId === "worker.apply") {
+      if (!getCapability(work, "worker.review")?.enabled) {
+        return;
+      }
+      const plan = workerPlans[work.work_id];
+      if (!plan) {
+        return;
+      }
+      const result = await submitAction(actionId, { work_id: work.work_id, plan });
+      if (result) {
+        setWorkerPlans((state) => {
+          const next = { ...state };
+          delete next[work.work_id];
+          return next;
+        });
       }
       return;
     }
@@ -74,74 +134,146 @@ export default function WorkbenchBoard() {
         </div>
 
         <div className="wb-work-list">
-          {works.map((work) => (
-            <article key={work.work_id} className="wb-work-card">
-              <div className="wb-work-head">
-                <div>
-                  <strong>{work.title}</strong>
-                  <p>
-                    {work.selected_worker_type} / {work.target_kind} / {work.route_reason}
-                  </p>
+          {works.map((work) => {
+            const workerReviewCapability = getCapability(work, "worker.review");
+            const workerPlan = workerPlans[work.work_id];
+
+            return (
+              <article key={work.work_id} className="wb-work-card">
+                <div className="wb-work-head">
+                  <div>
+                    <strong>{work.title}</strong>
+                    <p>
+                      {work.selected_worker_type} / {work.target_kind} / {work.route_reason}
+                    </p>
+                  </div>
+                  <span className={`wb-status-pill is-${work.status}`}>{work.status}</span>
                 </div>
-                <span className={`wb-status-pill is-${work.status}`}>{work.status}</span>
-              </div>
 
-              <div className="wb-work-metrics">
-                <span>child works {work.child_work_count}</span>
-                <span>merge ready {work.merge_ready ? "yes" : "no"}</span>
-                <span>updated {formatDateTime(work.updated_at)}</span>
-              </div>
+                <div className="wb-work-metrics">
+                  <span>child works {work.child_work_count}</span>
+                  <span>merge ready {work.merge_ready ? "yes" : "no"}</span>
+                  <span>
+                    requested tool {String(work.runtime_summary["requested_tool_profile"] || "n/a")}
+                  </span>
+                  <span>updated {formatDateTime(work.updated_at)}</span>
+                </div>
 
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                {work.capabilities.map((capability) => {
-                  if (capability.action_id === "work.split") {
-                    return null;
-                  }
-                  return (
+                <div className="wb-inline-actions wb-inline-actions-wrap">
+                  {work.capabilities.map((capability) => {
+                    if (
+                      capability.action_id === "work.split" ||
+                      capability.action_id === "worker.review"
+                    ) {
+                      return null;
+                    }
+                    return (
+                      <button
+                        key={capability.action_id}
+                        type="button"
+                        className="wb-button wb-button-secondary"
+                        disabled={!capability.enabled || busyActionId === capability.action_id}
+                        onClick={() => void handleWorkAction(work, capability.action_id)}
+                      >
+                        {capability.label} · {formatSupportStatus(capability.support_status)}
+                      </button>
+                    );
+                  })}
+                  {workerReviewCapability ? (
                     <button
-                      key={capability.action_id}
                       type="button"
                       className="wb-button wb-button-secondary"
-                      disabled={!capability.enabled || busyActionId === capability.action_id}
-                      onClick={() => void handleWorkAction(work, capability.action_id)}
+                      disabled={!workerReviewCapability.enabled || busyActionId === "worker.review"}
+                      onClick={() => void handleWorkAction(work, "worker.review")}
                     >
-                      {capability.label} · {formatSupportStatus(capability.support_status)}
+                      评审 Worker 方案
                     </button>
-                  );
-                })}
-              </div>
-
-              {work.capabilities.some((item) => item.action_id === "work.split") ? (
-                <div className="wb-split-form">
-                  <label className="wb-field">
-                    <span>拆分成子目标</span>
-                    <textarea
-                      rows={3}
-                      value={splitDrafts[work.work_id] ?? ""}
-                      placeholder={"每行一个 objective\n例如：整理依赖\n补测试\n输出摘要"}
-                      onChange={(event) =>
-                        setSplitDrafts((state) => ({
-                          ...state,
-                          [work.work_id]: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    disabled={
-                      busyActionId === "work.split" ||
-                      !(splitDrafts[work.work_id] ?? "").trim()
-                    }
-                    onClick={() => void handleWorkAction(work, "work.split")}
-                  >
-                    创建 child works
-                  </button>
+                  ) : null}
                 </div>
-              ) : null}
-            </article>
-          ))}
+
+                {work.capabilities.some((item) => item.action_id === "work.split") ? (
+                  <div className="wb-split-form">
+                    <label className="wb-field">
+                      <span>拆分成子目标</span>
+                      <textarea
+                        rows={3}
+                        value={splitDrafts[work.work_id] ?? ""}
+                        placeholder={"每行一个 objective\n例如：整理依赖\n补测试\n输出摘要"}
+                        onChange={(event) =>
+                          setSplitDrafts((state) => ({
+                            ...state,
+                            [work.work_id]: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="wb-button wb-button-primary"
+                      disabled={
+                        busyActionId === "work.split" ||
+                        !(splitDrafts[work.work_id] ?? "").trim()
+                      }
+                      onClick={() => void handleWorkAction(work, "work.split")}
+                    >
+                      创建 child works
+                    </button>
+                  </div>
+                ) : null}
+
+                {workerPlan && workerReviewCapability?.enabled ? (
+                  <div className="wb-panel">
+                    <div className="wb-panel-head">
+                      <div>
+                        <p className="wb-card-label">Worker Review</p>
+                        <h3>{workerPlan.summary || "已生成治理方案"}</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="wb-button wb-button-primary"
+                        disabled={busyActionId === "worker.apply"}
+                        onClick={() => void handleWorkAction(work, "worker.apply")}
+                      >
+                        批准并执行
+                      </button>
+                    </div>
+                    <div className="wb-note-stack">
+                      <div className="wb-note">
+                        <strong>proposal</strong>
+                        <span>{workerPlan.proposal_kind}</span>
+                      </div>
+                      {workerPlan.warnings.map((warning) => (
+                        <div key={warning} className="wb-note">
+                          <strong>warning</strong>
+                          <span>{warning}</span>
+                        </div>
+                      ))}
+                      {workerPlan.assignments.map((assignment) => (
+                        <div
+                          key={`${assignment.worker_type}-${assignment.title}-${assignment.objective}`}
+                          className="wb-note"
+                        >
+                          <strong>
+                            {assignment.title || assignment.worker_type} · {assignment.tool_profile}
+                          </strong>
+                          <span>
+                            {assignment.target_kind} / {assignment.objective}
+                          </span>
+                          {assignment.reason ? <small>{assignment.reason}</small> : null}
+                        </div>
+                      ))}
+                      {workerPlan.merge_candidate_ids.length > 0 ? (
+                        <div className="wb-note">
+                          <strong>merge candidates</strong>
+                          <span>{workerPlan.merge_candidate_ids.join(", ")}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       </section>
     </div>

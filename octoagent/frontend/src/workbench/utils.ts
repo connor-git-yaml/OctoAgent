@@ -9,7 +9,11 @@ export type SnapshotResourceRoute =
   | "config"
   | "project-selector"
   | "sessions"
+  | "context-frames"
+  | "policy-profiles"
   | "capability-pack"
+  | "skill-governance"
+  | "setup-governance"
   | "delegation"
   | "pipelines"
   | "automation"
@@ -22,7 +26,11 @@ export const RESOURCE_ROUTE_BY_TYPE: Record<string, SnapshotResourceRoute> = {
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
+  context_continuity: "context-frames",
+  policy_profiles: "policy-profiles",
   capability_pack: "capability-pack",
+  skill_governance: "skill-governance",
+  setup_governance: "setup-governance",
   delegation_plane: "delegation",
   skill_pipeline: "pipelines",
   automation_job: "automation",
@@ -39,7 +47,11 @@ export const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   config: "config",
   "project-selector": "project_selector",
   sessions: "sessions",
+  "context-frames": "context_continuity",
+  "policy-profiles": "policy_profiles",
   "capability-pack": "capability_pack",
+  "skill-governance": "skill_governance",
+  "setup-governance": "setup_governance",
   delegation: "delegation",
   pipelines: "pipelines",
   automation: "automation",
@@ -94,14 +106,26 @@ export function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function isIndexSegment(segment: string): boolean {
+  return /^\d+$/.test(segment);
+}
+
 export function getValueAtPath(
   source: Record<string, unknown>,
   path: string
 ): unknown {
-  const parts = path.split(".");
+  const parts = path.split(".").filter(Boolean);
   let current: unknown = source;
   for (const part of parts) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
+    if (Array.isArray(current)) {
+      const index = Number(part);
+      if (Number.isNaN(index)) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+    if (!current || typeof current !== "object") {
       return undefined;
     }
     current = (current as Record<string, unknown>)[part];
@@ -114,30 +138,70 @@ export function setValueAtPath(
   path: string,
   value: unknown
 ): void {
-  const parts = path.split(".");
-  let current: Record<string, unknown> = source;
-  for (const part of parts.slice(0, -1)) {
-    const next = current[part];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      current[part] = {};
-    }
-    current = current[part] as Record<string, unknown>;
+  const parts = path.split(".").filter(Boolean);
+  if (parts.length === 0) {
+    return;
   }
-  current[parts[parts.length - 1] ?? path] = value;
+  let current: unknown = source;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const part = parts[index]!;
+    const nextPart = parts[index + 1]!;
+    if (Array.isArray(current)) {
+      const slot = Number(part);
+      if (Number.isNaN(slot)) {
+        return;
+      }
+      const existing = current[slot];
+      if (!existing || typeof existing !== "object") {
+        current[slot] = isIndexSegment(nextPart) ? [] : {};
+      }
+      current = current[slot];
+      continue;
+    }
+    if (!current || typeof current !== "object") {
+      return;
+    }
+    const record = current as Record<string, unknown>;
+    const existing = record[part];
+    if (!existing || typeof existing !== "object") {
+      record[part] = isIndexSegment(nextPart) ? [] : {};
+    }
+    current = record[part];
+  }
+  const lastPart = parts[parts.length - 1] ?? path;
+  if (Array.isArray(current)) {
+    const slot = Number(lastPart);
+    if (!Number.isNaN(slot)) {
+      current[slot] = value;
+    }
+    return;
+  }
+  if (!current || typeof current !== "object") {
+    return;
+  }
+  (current as Record<string, unknown>)[lastPart] = value;
 }
 
 export function findSchemaNode(
   schema: Record<string, unknown>,
   path: string
 ): Record<string, unknown> | null {
-  const parts = path.split(".");
+  const parts = path.split(".").filter(Boolean);
   let current: Record<string, unknown> | null = schema;
   for (const part of parts) {
     if (!current) {
       return null;
     }
+    if (isIndexSegment(part)) {
+      const items = current.items;
+      if (!items || typeof items !== "object" || Array.isArray(items)) {
+        return null;
+      }
+      current = items as Record<string, unknown>;
+      continue;
+    }
     const properties = current.properties;
-    if (!properties || typeof properties !== "object") {
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
       return null;
     }
     const next = (properties as Record<string, unknown>)[part];

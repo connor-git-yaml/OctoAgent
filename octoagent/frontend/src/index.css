@@ -1480,6 +1480,10 @@ button {
   gap: 8px;
 }
 
+.wb-field-span-2 {
+  grid-column: 1 / -1;
+}
+
 .wb-field span {
   font-weight: 600;
   color: var(--cp-ink);

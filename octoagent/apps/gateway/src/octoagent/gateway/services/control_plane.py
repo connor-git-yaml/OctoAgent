@@ -2008,6 +2008,8 @@ class ControlPlaneService:
             return await self._handle_project_select(request)
         if action_id == "setup.review":
             return await self._handle_setup_review(request)
+        if action_id == "setup.apply":
+            return await self._handle_setup_apply(request)
         if action_id == "diagnostics.refresh":
             diagnostics = await self.get_diagnostics_summary()
             return self._completed_result(
@@ -2288,6 +2290,120 @@ class ControlPlaneService:
             message="Setup review 已生成。",
             data={"review": review.model_dump(mode="json")},
             resource_refs=[self._resource_ref("setup_governance", "setup:governance")],
+        )
+
+    async def _handle_setup_apply(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        draft = request.params.get("draft", {})
+        if draft is None:
+            draft = {}
+        if not isinstance(draft, dict):
+            raise ControlPlaneActionError("SETUP_DRAFT_REQUIRED", "draft 必须是对象")
+
+        review_result = await self._handle_setup_review(
+            request.model_copy(update={"action_id": "setup.review"})
+        )
+        review = SetupReviewSummary.model_validate(review_result.data.get("review", {}))
+        if not review.ready:
+            blocking = "、".join(review.blocking_reasons) or "存在未通过项"
+            raise ControlPlaneActionError(
+                "SETUP_REVIEW_BLOCKED",
+                f"setup.review 未通过，当前不能 apply：{blocking}",
+            )
+
+        current_config = load_config(self._project_root)
+        if current_config is None:
+            current_config = OctoAgentConfig(updated_at=date.today().isoformat())
+        config_patch = draft.get("config", {})
+        config_data = current_config.model_dump(mode="python")
+        if isinstance(config_patch, dict):
+            config_data = self._deep_merge_dicts(config_data, config_patch)
+        config_data.setdefault("updated_at", date.today().isoformat())
+        config = OctoAgentConfig.model_validate(config_data)
+
+        _, selected_project, _, _ = await self._resolve_selection()
+
+        policy_profile_id = str(draft.get("policy_profile_id", "")).strip().lower()
+        if policy_profile_id and self._policy_profile_by_id(policy_profile_id) is None:
+            raise ControlPlaneActionError("POLICY_PROFILE_INVALID", "不支持的 policy profile")
+
+        agent_request_payload: dict[str, Any] | None = None
+        agent_profile_patch = draft.get("agent_profile", {})
+        if isinstance(agent_profile_patch, dict) and agent_profile_patch:
+            agent_profiles = await self.get_agent_profiles_document()
+            active_agent_profile = self._resolve_active_agent_profile_payload(
+                agent_profiles=agent_profiles,
+                selected_project=selected_project,
+            )
+            merged_agent_profile = self._merge_agent_profile_payload(
+                active_agent_profile,
+                agent_profile_patch,
+                selected_project=selected_project,
+            )
+            merged_scope = str(merged_agent_profile.get("scope", "")).strip().lower()
+            if not merged_scope:
+                merged_scope = "project" if selected_project is not None else "system"
+                merged_agent_profile["scope"] = merged_scope
+            if merged_scope not in {"system", "project"}:
+                raise ControlPlaneActionError(
+                    "AGENT_PROFILE_SCOPE_INVALID", "scope 必须是 system/project"
+                )
+            if merged_scope == "project" and selected_project is not None:
+                merged_agent_profile.setdefault("project_id", selected_project.project_id)
+            if not str(merged_agent_profile.get("name", "")).strip():
+                raise ControlPlaneActionError("AGENT_PROFILE_NAME_REQUIRED", "name 不能为空")
+            agent_request_payload = merged_agent_profile
+
+        skill_selection = draft.get("skill_selection")
+        if skill_selection not in (None, {}, []):
+            raise ControlPlaneActionError(
+                "SKILL_SELECTION_NOT_IMPLEMENTED",
+                "skills.selection.save 尚未实现，当前 Setup 只能展示 skill governance。",
+            )
+
+        save_config(config, self._project_root)
+        litellm_path = generate_litellm_config(config, self._project_root)
+
+        resource_refs = [
+            self._resource_ref("config_schema", "config:octoagent"),
+            self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            self._resource_ref("setup_governance", "setup:governance"),
+            self._resource_ref("skill_governance", "skills:governance"),
+        ]
+        data: dict[str, Any] = {
+            "review": review.model_dump(mode="json"),
+            "litellm_config_path": str(litellm_path),
+        }
+
+        if policy_profile_id:
+            policy_result = await self._handle_policy_profile_select(
+                request.model_copy(
+                    update={
+                        "action_id": "policy_profile.select",
+                        "params": {"profile_id": policy_profile_id},
+                    }
+                )
+            )
+            data["policy_profile"] = dict(policy_result.data)
+            resource_refs.extend(policy_result.resource_refs)
+
+        if agent_request_payload is not None:
+            agent_result = await self._handle_agent_profile_save(
+                request.model_copy(
+                    update={
+                        "action_id": "agent_profile.save",
+                        "params": {"profile": agent_request_payload},
+                    }
+                )
+            )
+            data["agent_profile"] = dict(agent_result.data)
+            resource_refs.extend(agent_result.resource_refs)
+
+        return self._completed_result(
+            request=request,
+            code="SETUP_APPLIED",
+            message="Setup 已应用，主配置与治理设置已同步。",
+            data=data,
+            resource_refs=self._dedupe_resource_refs(resource_refs),
         )
 
     async def _resolve_memory_action_context(
@@ -4734,6 +4850,18 @@ class ControlPlaneService:
                     source_ref=agent_ref,
                 )
             )
+        elif not str(active_agent_profile.get("name", "")).strip():
+            agent_autonomy_risks.append(
+                SetupRiskItem(
+                    risk_id="agent_profile_name_missing",
+                    severity="high",
+                    title="主 Agent 名称不能为空",
+                    summary="当前草稿缺少主 Agent name，setup.apply 无法保存该 profile。",
+                    blocking=True,
+                    recommended_action="先填写主 Agent 名称，再重新执行 setup.review。",
+                    source_ref=agent_ref,
+                )
+            )
         policy_profile = self._policy_profile_by_id(policy_profile_id) or DEFAULT_PROFILE
         if policy_profile_id == "permissive":
             agent_autonomy_risks.append(
@@ -4880,7 +5008,7 @@ class ControlPlaneService:
         if any(item.blocking for item in provider_runtime_risks):
             next_actions.append("先修正 Provider / model alias 配置，确保主 Agent 可调用模型。")
         if any(item.blocking for item in agent_autonomy_risks):
-            next_actions.append("先保存主 Agent profile，再继续 apply。")
+            next_actions.append("先补齐主 Agent profile 的必填项并保存，再继续 apply。")
         if any(item.blocking for item in tool_skill_readiness_risks):
             next_actions.append("先处理 skills / MCP 缺失依赖，避免首用时能力不可用。")
         if not next_actions:
@@ -4910,6 +5038,20 @@ class ControlPlaneService:
             else:
                 merged[key] = value
         return merged
+
+    @staticmethod
+    def _dedupe_resource_refs(
+        refs: list[ControlPlaneResourceRef],
+    ) -> list[ControlPlaneResourceRef]:
+        seen: set[tuple[str, str, int]] = set()
+        deduped: list[ControlPlaneResourceRef] = []
+        for ref in refs:
+            key = (ref.resource_type, ref.resource_id, ref.schema_version)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(ref)
+        return deduped
 
     def _parse_memory_partition(self, raw: str | None) -> MemoryPartition | None:
         if not raw:
@@ -5263,6 +5405,14 @@ class ControlPlaneService:
                     "审查 Setup 风险",
                     category="setup",
                     description="聚合 Provider / Channel / Agent / Skills 的风险和阻塞项。",
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "setup.apply",
+                    "应用 Setup 配置",
+                    category="setup",
+                    description="在 review 通过后统一保存 Provider / Channel / Agent / Policy。",
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),

@@ -35,6 +35,9 @@ import type {
   WizardSessionDocument,
   ConfigSchemaDocument,
   AutomationJobDocument,
+  PolicyProfilesDocument,
+  SetupGovernanceDocument,
+  SkillGovernanceDocument,
 } from "../types";
 
 const BASE_URL = "";
@@ -60,7 +63,10 @@ type ControlResourceName =
   | "project-selector"
   | "sessions"
   | "context-frames"
+  | "policy-profiles"
   | "capability-pack"
+  | "skill-governance"
+  | "setup-governance"
   | "delegation"
   | "pipelines"
   | "automation"
@@ -343,8 +349,17 @@ export async function fetchControlResource(
   resource: "context-frames"
 ): Promise<ContextContinuityDocument>;
 export async function fetchControlResource(
+  resource: "policy-profiles"
+): Promise<PolicyProfilesDocument>;
+export async function fetchControlResource(
   resource: "capability-pack"
 ): Promise<CapabilityPackDocument>;
+export async function fetchControlResource(
+  resource: "skill-governance"
+): Promise<SkillGovernanceDocument>;
+export async function fetchControlResource(
+  resource: "setup-governance"
+): Promise<SetupGovernanceDocument>;
 export async function fetchControlResource(
   resource: "delegation"
 ): Promise<DelegationPlaneDocument>;
@@ -371,7 +386,10 @@ export async function fetchControlResource(
   | ProjectSelectorDocument
   | SessionProjectionDocument
   | ContextContinuityDocument
+  | PolicyProfilesDocument
   | CapabilityPackDocument
+  | SkillGovernanceDocument
+  | SetupGovernanceDocument
   | DelegationPlaneDocument
   | SkillPipelineDocument
   | AutomationJobDocument
