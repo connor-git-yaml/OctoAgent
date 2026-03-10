@@ -29,6 +29,7 @@ from octoagent.core.models import (
     Workspace,
     WorkspaceKind,
 )
+from octoagent.gateway.services.agent_context import build_scope_aware_session_id
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
@@ -1347,6 +1348,201 @@ class TestControlPlaneApi:
         beta_task_ids = {item["task_id"] for item in beta_sessions.json()["sessions"]}
         assert beta_task_id in beta_task_ids
         assert default_task_id not in beta_task_ids
+
+    async def test_session_projection_exposes_scope_aware_session_id_and_focus_supports_session_id(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        task_id = await _create_task(
+            control_plane_app,
+            text="session authority demo",
+            thread_id="thread-session-authority",
+            scope_id="scope-control",
+        )
+        task = await control_plane_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        workspace = (
+            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
+                task.scope_id
+            )
+        )
+        assert workspace is not None
+        expected_session_id = build_scope_aware_session_id(
+            task,
+            project_id=workspace.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        session_item = next(item for item in payload["sessions"] if item["task_id"] == task_id)
+        assert session_item["session_id"] == expected_session_id
+        assert session_item["thread_id"] == "thread-session-authority"
+        assert payload["focused_session_id"] == ""
+        assert payload["focused_thread_id"] == ""
+
+        focus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.focus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": expected_session_id,
+                },
+            },
+        )
+
+        assert focus_resp.status_code == 200
+        focus_result = focus_resp.json()["result"]
+        assert focus_result["status"] == "completed"
+        assert focus_result["data"] == {
+            "session_id": expected_session_id,
+            "thread_id": "thread-session-authority",
+        }
+
+        focused_sessions = await control_plane_client.get("/api/control/resources/sessions")
+        assert focused_sessions.status_code == 200
+        focused_payload = focused_sessions.json()
+        assert focused_payload["focused_session_id"] == expected_session_id
+        assert focused_payload["focused_thread_id"] == "thread-session-authority"
+
+        export_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.export",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": expected_session_id,
+                },
+            },
+        )
+
+        assert export_resp.status_code == 200
+        export_result = export_resp.json()["result"]
+        assert export_result["status"] == "completed"
+        exported_task_ids = {item["task_id"] for item in export_result["data"]["tasks"]}
+        assert task_id in exported_task_ids
+
+    async def test_session_focus_requires_session_id_when_thread_id_is_ambiguous(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+        await store_group.project_store.create_binding(
+            ProjectBinding(
+                binding_id=str(ULID()),
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                binding_type=ProjectBindingType.SCOPE,
+                binding_key="scope-control-alt",
+                binding_value="scope-control-alt",
+                source="tests",
+                migration_run_id="scope-control-alt",
+            )
+        )
+        await store_group.conn.commit()
+
+        first_task_id = await _create_task(
+            control_plane_app,
+            text="first ambiguous session",
+            thread_id="thread-ambiguous",
+            scope_id="scope-control",
+        )
+        second_task_id = await _create_task(
+            control_plane_app,
+            text="second ambiguous session",
+            thread_id="thread-ambiguous",
+            scope_id="scope-control-alt",
+        )
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        ambiguous_sessions = [
+            item for item in payload["sessions"] if item["thread_id"] == "thread-ambiguous"
+        ]
+        assert {item["task_id"] for item in ambiguous_sessions} == {first_task_id, second_task_id}
+        assert len({item["session_id"] for item in ambiguous_sessions}) == 2
+
+        focus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.focus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "thread_id": "thread-ambiguous",
+                },
+            },
+        )
+
+        assert focus_resp.status_code == 400
+        focus_result = focus_resp.json()["result"]
+        assert focus_result["status"] == "rejected"
+        assert focus_result["code"] == "SESSION_ID_REQUIRED"
+
+        explicit_focus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.focus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": ambiguous_sessions[0]["session_id"],
+                },
+            },
+        )
+
+        assert explicit_focus_resp.status_code == 200
+        assert explicit_focus_resp.json()["result"]["status"] == "completed"
+
+        export_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.export",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": ambiguous_sessions[0]["session_id"],
+                },
+            },
+        )
+
+        assert export_resp.status_code == 200
+        exported_task_ids = {
+            item["task_id"] for item in export_resp.json()["result"]["data"]["tasks"]
+        }
+        assert exported_task_ids == {ambiguous_sessions[0]["task_id"]}
 
     async def test_raw_task_routes_scope_items_to_selected_project(
         self,

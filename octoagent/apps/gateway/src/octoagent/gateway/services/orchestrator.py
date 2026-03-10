@@ -200,6 +200,7 @@ class SingleWorkerRouter:
             resume_from_node=request.resume_from_node,
             resume_state_snapshot=request.resume_state_snapshot,
             tool_profile=request.tool_profile,
+            runtime_context=request.runtime_context,
             metadata=request.metadata,
         )
 
@@ -340,6 +341,7 @@ class OrchestratorService:
             hop_count=envelope.hop_count,
             max_hops=envelope.max_hops,
             tool_profile=envelope.tool_profile,
+            runtime_context=envelope.runtime_context,
             risk_level=risk_level,
             metadata=dict(envelope.metadata),
         )
@@ -384,6 +386,7 @@ class OrchestratorService:
             hop_count=hop_count,
             max_hops=max_hops,
             tool_profile=tool_profile,
+            runtime_context=None,
             risk_level=risk_level,
             metadata=metadata or {},
         )

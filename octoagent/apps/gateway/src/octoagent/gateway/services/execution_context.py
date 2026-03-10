@@ -7,6 +7,8 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from octoagent.core.models import RuntimeControlContext
+
 if TYPE_CHECKING:
     from .execution_console import ExecutionConsoleService
 
@@ -29,6 +31,7 @@ class ExecutionRuntimeContext:
     console: ExecutionConsoleService
     work_id: str = ""
     runtime_kind: str = ""
+    runtime_context: RuntimeControlContext | None = None
     resume_state_snapshot: dict[str, Any] | None = None
     _resume_input_consumed: bool = field(default=False, init=False, repr=False)
 

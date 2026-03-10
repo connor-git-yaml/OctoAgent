@@ -234,6 +234,7 @@ function buildSnapshot(currentProjectId = "project-default") {
         warnings: [],
         capabilities: [],
         refs: {},
+        focused_session_id: "",
         focused_thread_id: "",
         sessions: [
           {

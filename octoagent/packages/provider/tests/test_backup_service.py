@@ -157,6 +157,83 @@ async def _append_follow_up(
     await store_group.conn.close()
 
 
+async def _seed_additional_chat_task(
+    project_root: Path,
+    *,
+    task_id: str,
+    thread_id: str,
+    text: str,
+    db_path: Path | None = None,
+    artifacts_dir: Path | None = None,
+) -> str:
+    resolved_db_path = db_path or project_root / "data" / "sqlite" / "octoagent.db"
+    resolved_artifacts_dir = artifacts_dir or project_root / "data" / "artifacts"
+    store_group = await create_store_group(str(resolved_db_path), resolved_artifacts_dir)
+    now = datetime.now(tz=UTC)
+    task = Task(
+        task_id=task_id,
+        created_at=now,
+        updated_at=now,
+        title=text,
+        thread_id=thread_id,
+        requester=RequesterInfo(channel="web", sender_id="owner"),
+        trace_id=f"trace-{task_id}",
+    )
+    events = [
+        Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=1,
+            ts=now,
+            type=EventType.TASK_CREATED,
+            actor=ActorType.USER,
+            payload=TaskCreatedPayload(
+                title=task.title,
+                thread_id=task.thread_id,
+                scope_id=task.scope_id,
+                channel=task.requester.channel,
+                sender_id=task.requester.sender_id,
+            ).model_dump(mode="json"),
+            trace_id=task.trace_id,
+            causality=EventCausality(idempotency_key=f"seed-task-created:{task_id}"),
+        ),
+        Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=2,
+            ts=now,
+            type=EventType.USER_MESSAGE,
+            actor=ActorType.USER,
+            payload=UserMessagePayload(
+                text_preview=text,
+                text_length=len(text),
+            ).model_dump(mode="json"),
+            trace_id=task.trace_id,
+            causality=EventCausality(idempotency_key=f"seed-user-message:{task_id}"),
+        ),
+    ]
+    await create_task_with_initial_events(
+        store_group.conn,
+        store_group.task_store,
+        store_group.event_store,
+        task,
+        events,
+    )
+    artifact = Artifact(
+        artifact_id=f"artifact-{task_id}",
+        task_id=task_id,
+        ts=now,
+        name=f"{task_id}-artifact",
+        parts=[ArtifactPart(type=PartType.TEXT, mime="text/plain", content=text)],
+        size=0,
+        hash="",
+    )
+    await store_group.artifact_store.put_artifact(artifact, content=text.encode("utf-8"))
+    await store_group.conn.commit()
+    await store_group.conn.close()
+    return task_id
+
+
 async def _seed_ops_chat_import_task(project_root: Path) -> str:
     resolved_db_path = project_root / "data" / "sqlite" / "octoagent.db"
     resolved_artifacts_dir = project_root / "data" / "artifacts"
@@ -411,6 +488,29 @@ async def test_export_chats_filters_events_and_artifacts_by_time_window(tmp_path
             "storage_ref": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_export_chats_supports_precise_task_id_list_filter(tmp_path: Path) -> None:
+    first_task_id = await _seed_project(tmp_path)
+    second_task_id = await _seed_additional_chat_task(
+        tmp_path,
+        task_id="task-022-002",
+        thread_id="thread-1",
+        text="second task",
+    )
+    service = BackupService(tmp_path)
+
+    manifest = await service.export_chats(task_ids=[second_task_id])
+
+    assert len(manifest.tasks) == 1
+    assert manifest.tasks[0].task_id == second_task_id
+    assert manifest.filters.task_ids == [second_task_id]
+    assert first_task_id not in {item.task_id for item in manifest.tasks}
+
+    payload = json.loads(Path(manifest.output_path).read_text(encoding="utf-8"))
+    assert set(payload["events_by_task"]) == {second_task_id}
+    assert set(payload["artifacts_by_task"]) == {second_task_id}
 
 
 @pytest.mark.asyncio

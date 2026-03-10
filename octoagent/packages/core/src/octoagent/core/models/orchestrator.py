@@ -30,6 +30,32 @@ class WorkerRuntimeState(StrEnum):
     TIMED_OUT = "TIMED_OUT"
 
 
+class RuntimeControlContext(BaseModel):
+    """一次运行链路的冻结控制上下文。"""
+
+    task_id: str = Field(description="任务 ID")
+    trace_id: str = Field(default="", description="链路追踪 ID")
+    contract_version: str = Field(default="1.0", description="协议版本")
+    surface: str = Field(default="chat", description="入口 surface")
+    scope_id: str = Field(default="", description="原始 scope_id")
+    thread_id: str = Field(default="", description="线程 ID")
+    session_id: str = Field(default="", description="冻结后的 durable session ID")
+    project_id: str = Field(default="", description="冻结后的 project ID")
+    workspace_id: str = Field(default="", description="冻结后的 workspace ID")
+    hop_count: int = Field(default=0, ge=0, description="当前 hop")
+    max_hops: int = Field(default=3, ge=1, description="最大 hop")
+    worker_capability: str = Field(default="", description="当前 worker capability")
+    route_reason: str = Field(default="", description="当前 route reason")
+    model_alias: str = Field(default="", description="模型别名")
+    tool_profile: str = Field(default="standard", description="工具权限级别")
+    work_id: str = Field(default="", description="work ID")
+    parent_work_id: str = Field(default="", description="父 work ID")
+    pipeline_run_id: str = Field(default="", description="pipeline run ID")
+    agent_profile_id: str = Field(default="", description="effective agent profile ID")
+    context_frame_id: str = Field(default="", description="继承/消费的 context frame ID")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="附加上下文")
+
+
 class OrchestratorRequest(BaseModel):
     """控制平面入口请求。"""
 
@@ -53,6 +79,10 @@ class OrchestratorRequest(BaseModel):
         description="恢复时注入的状态快照",
     )
     tool_profile: str = Field(default="standard", description="工具权限级别")
+    runtime_context: RuntimeControlContext | None = Field(
+        default=None,
+        description="冻结后的运行时控制上下文",
+    )
     metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
 
     @model_validator(mode="after")
@@ -85,6 +115,10 @@ class DispatchEnvelope(BaseModel):
         description="恢复时注入的状态快照",
     )
     tool_profile: str = Field(default="standard", description="工具权限级别")
+    runtime_context: RuntimeControlContext | None = Field(
+        default=None,
+        description="冻结后的运行时控制上下文",
+    )
     metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
 
     @model_validator(mode="after")

@@ -110,6 +110,7 @@ class RestorePlan(BaseModel):
 
 class ExportFilter(BaseModel):
     task_id: str | None = None
+    task_ids: list[str] = Field(default_factory=list)
     thread_id: str | None = None
     since: datetime | None = None
     until: datetime | None = None

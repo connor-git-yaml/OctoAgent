@@ -148,6 +148,7 @@ function buildSnapshot(proxyUrl = "http://localhost:4000") {
         warnings: [],
         capabilities: [],
         refs: {},
+        focused_session_id: "",
         focused_thread_id: "",
         sessions: [],
         operator_summary: {

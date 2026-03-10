@@ -3,7 +3,6 @@
 所有公共模型类型从此入口导入。
 """
 
-from .artifact import Artifact, ArtifactPart
 from .agent_context import (
     AgentProfile,
     AgentProfileScope,
@@ -19,6 +18,7 @@ from .agent_context import (
     OwnerProfileOverlay,
     SessionContextState,
 )
+from .artifact import Artifact, ArtifactPart
 from .backup import (
     BackupBundle,
     BackupFileEntry,
@@ -71,6 +71,7 @@ from .control_plane import (
     AutomationJobRun,
     AutomationJobStatus,
     AutomationScheduleKind,
+    BootstrapSessionDocument,
     CapabilityPackDocument,
     ConfigFieldHint,
     ConfigSchemaDocument,
@@ -112,7 +113,6 @@ from .control_plane import (
     VaultAccessRequestItem,
     VaultAuthorizationDocument,
     VaultRetrievalAuditItem,
-    BootstrapSessionDocument,
     WizardSessionDocument,
     WizardStepDocument,
     WorkProjectionItem,
@@ -166,6 +166,7 @@ from .operator_inbox import (
 from .orchestrator import (
     DispatchEnvelope,
     OrchestratorRequest,
+    RuntimeControlContext,
     WorkerExecutionStatus,
     WorkerResult,
     WorkerRuntimeState,
@@ -433,6 +434,7 @@ __all__ = [
     # Feature 008: Orchestrator Models
     "OrchestratorRequest",
     "DispatchEnvelope",
+    "RuntimeControlContext",
     "WorkerResult",
     "WorkerExecutionStatus",
     "WorkerRuntimeState",

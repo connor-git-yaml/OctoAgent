@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,11 +14,15 @@ from octoagent.core.models import (
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
+    ContextRequestKind,
+    ContextResolveRequest,
+    ContextResolveResult,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
     Project,
     ProjectBindingType,
+    RuntimeControlContext,
     SessionContextState,
     Task,
     Workspace,
@@ -103,6 +108,24 @@ def session_state_matches_scope(
     return not (workspace_id and state.workspace_id and state.workspace_id != workspace_id)
 
 
+@dataclass(slots=True)
+class ResolvedContextBundle:
+    """resolver 运行时内部结果。"""
+
+    request: ContextResolveRequest
+    project: Project | None
+    workspace: Workspace | None
+    agent_profile: AgentProfile
+    owner_profile: OwnerProfile
+    owner_overlay: OwnerProfileOverlay | None
+    bootstrap: BootstrapSession
+    session_state: SessionContextState
+    memory_hits: list[MemoryRecallHit]
+    memory_scope_ids: list[str]
+    degraded_reasons: list[str]
+    memory_recall: dict[str, Any]
+
+
 class AgentContextService:
     """统一装配 AgentProfile / bootstrap / recency / memory。"""
 
@@ -121,47 +144,32 @@ class AgentContextService:
         compiled: CompiledTaskContext,
         dispatch_metadata: dict[str, str] | None = None,
         worker_capability: str | None = None,
+        runtime_context: RuntimeControlContext | None = None,
     ) -> CompiledTaskContext:
         dispatch_metadata = dispatch_metadata or {}
-        project, workspace = await self._resolve_project_scope(
+        resolve_request = self._build_context_request(
             task=task,
-            surface=task.requester.channel,
+            trigger_text=compiled.latest_user_text or task.title,
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=worker_capability,
+            runtime_context=runtime_context,
         )
-        agent_profile = await self._ensure_agent_profile(project)
-        owner_profile = await self._ensure_owner_profile()
-        owner_overlay = await self._ensure_owner_overlay(
-            owner_profile=owner_profile,
-            project=project,
-            workspace=workspace,
-        )
-        bootstrap = await self._ensure_bootstrap_session(
-            project=project,
-            workspace=workspace,
-            owner_profile=owner_profile,
-            owner_overlay=owner_overlay,
-            agent_profile=agent_profile,
-            surface=task.requester.channel,
-        )
-        session_state = await self._ensure_session_context(
+        bundle = await self._resolve_context_bundle(
             task=task,
-            project=project,
-            workspace=workspace,
-        )
-        (
-            memory_hits,
-            memory_scope_ids,
-            degraded_reasons,
-            memory_recall,
-        ) = await self._search_memory_hits(
-            task=task,
-            project=project,
-            workspace=workspace,
-            agent_profile=agent_profile,
+            request=resolve_request,
             query=compiled.latest_user_text or task.title,
         )
-
-        if bootstrap.status is BootstrapSessionStatus.PENDING:
-            degraded_reasons.append("bootstrap_pending")
+        project = bundle.project
+        workspace = bundle.workspace
+        agent_profile = bundle.agent_profile
+        owner_profile = bundle.owner_profile
+        owner_overlay = bundle.owner_overlay
+        bootstrap = bundle.bootstrap
+        session_state = bundle.session_state
+        memory_hits = bundle.memory_hits
+        memory_scope_ids = bundle.memory_scope_ids
+        degraded_reasons = list(bundle.degraded_reasons)
+        memory_recall = dict(bundle.memory_recall)
 
         recent_summary = session_state.rolling_summary.strip() or compiled.summary_text.strip()
         (
@@ -185,6 +193,7 @@ class AgentContextService:
             memory_scope_ids=memory_scope_ids,
             worker_capability=worker_capability,
             dispatch_metadata=dispatch_metadata,
+            runtime_context=runtime_context,
         )
         degraded_reasons.extend(prompt_budget_reasons)
         degraded_reason = "; ".join(dict.fromkeys(item for item in degraded_reasons if item))
@@ -215,6 +224,7 @@ class AgentContextService:
             bootstrap=bootstrap,
             session_state=session_state,
             memory_hits=memory_hits,
+            runtime_context=runtime_context,
         )
         frame = ContextFrame(
             context_frame_id=str(ULID()),
@@ -233,6 +243,10 @@ class AgentContextService:
             delegation_context={
                 "worker_capability": worker_capability or "",
                 "dispatch_metadata": dispatch_metadata,
+                "context_request": resolve_request.model_dump(mode="json"),
+                "runtime_context": (
+                    runtime_context.model_dump(mode="json") if runtime_context is not None else {}
+                ),
             },
             budget={
                 "history_tokens": compiled.final_tokens,
@@ -270,6 +284,21 @@ class AgentContextService:
                 final_tokens=delivery_tokens,
                 compacted=compiled.compacted,
                 compaction_summary=compiled.summary_text,
+                resolve_request=resolve_request,
+                resolve_result=ContextResolveResult(
+                    context_frame_id=frame.context_frame_id,
+                    effective_agent_profile_id=agent_profile.profile_id,
+                    effective_owner_overlay_id=(
+                        owner_overlay.owner_overlay_id if owner_overlay is not None else None
+                    ),
+                    owner_profile_revision=owner_profile.version,
+                    bootstrap_session_id=bootstrap.bootstrap_id,
+                    system_blocks=system_blocks,
+                    recent_summary=recent_summary,
+                    memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
+                    degraded_reason=degraded_reason,
+                    source_refs=source_refs,
+                ),
             ),
             raw_tokens=compiled.raw_tokens,
             final_tokens=compiled.final_tokens,
@@ -290,6 +319,121 @@ class AgentContextService:
             source_refs=source_refs,
         )
 
+    def _build_context_request(
+        self,
+        *,
+        task: Task,
+        trigger_text: str,
+        dispatch_metadata: dict[str, str],
+        worker_capability: str | None,
+        runtime_context: RuntimeControlContext | None,
+    ) -> ContextResolveRequest:
+        request_kind = (
+            ContextRequestKind.WORK
+            if runtime_context is not None and runtime_context.work_id
+            else ContextRequestKind.CHAT
+        )
+        return ContextResolveRequest(
+            request_id=str(ULID()),
+            request_kind=request_kind,
+            surface=(
+                runtime_context.surface
+                if runtime_context is not None and runtime_context.surface
+                else task.requester.channel or "chat"
+            ),
+            project_id=runtime_context.project_id if runtime_context is not None else "",
+            workspace_id=runtime_context.workspace_id if runtime_context is not None else None,
+            task_id=task.task_id,
+            session_id=runtime_context.session_id if runtime_context is not None else None,
+            work_id=runtime_context.work_id if runtime_context is not None else None,
+            pipeline_run_id=(
+                runtime_context.pipeline_run_id if runtime_context is not None else None
+            ),
+            agent_profile_id=(
+                runtime_context.agent_profile_id
+                if runtime_context is not None and runtime_context.agent_profile_id
+                else dispatch_metadata.get("agent_profile_id") or None
+            ),
+            trigger_text=trigger_text,
+            thread_id=(
+                runtime_context.thread_id
+                if runtime_context is not None and runtime_context.thread_id
+                else task.thread_id or None
+            ),
+            requester_id=task.requester.sender_id or None,
+            delegation_metadata=dict(dispatch_metadata),
+            runtime_metadata=(
+                runtime_context.model_dump(mode="json") if runtime_context is not None else {}
+            ),
+        )
+
+    async def _resolve_context_bundle(
+        self,
+        *,
+        task: Task,
+        request: ContextResolveRequest,
+        query: str,
+    ) -> ResolvedContextBundle:
+        project, workspace = await self._resolve_project_scope(
+            task=task,
+            surface=request.surface,
+            project_id=request.project_id,
+            workspace_id=request.workspace_id or "",
+        )
+        agent_profile, degraded_reasons = await self._resolve_agent_profile(
+            project=project,
+            requested_profile_id=request.agent_profile_id or "",
+        )
+        owner_profile = await self._ensure_owner_profile()
+        owner_overlay = await self._ensure_owner_overlay(
+            owner_profile=owner_profile,
+            project=project,
+            workspace=workspace,
+        )
+        bootstrap = await self._ensure_bootstrap_session(
+            project=project,
+            workspace=workspace,
+            owner_profile=owner_profile,
+            owner_overlay=owner_overlay,
+            agent_profile=agent_profile,
+            surface=request.surface,
+        )
+        session_state = await self._ensure_session_context(
+            task=task,
+            project=project,
+            workspace=workspace,
+            session_id_hint=request.session_id or "",
+        )
+        (
+            memory_hits,
+            memory_scope_ids,
+            memory_reasons,
+            memory_recall,
+        ) = await self._search_memory_hits(
+            task=task,
+            project=project,
+            workspace=workspace,
+            agent_profile=agent_profile,
+            query=query,
+        )
+        degraded_reasons.extend(memory_reasons)
+        if bootstrap.status is BootstrapSessionStatus.PENDING:
+            degraded_reasons.append("bootstrap_pending")
+        return ResolvedContextBundle(
+            request=request,
+            project=project,
+            workspace=workspace,
+            agent_profile=agent_profile,
+            owner_profile=owner_profile,
+            owner_overlay=owner_overlay,
+            bootstrap=bootstrap,
+            session_state=session_state,
+            memory_hits=memory_hits,
+            memory_scope_ids=memory_scope_ids,
+            degraded_reasons=degraded_reasons,
+            memory_recall=memory_recall,
+        )
+
     async def record_response_context(
         self,
         *,
@@ -305,20 +449,43 @@ class AgentContextService:
         if task is None:
             return
 
-        project, workspace = await self._resolve_project_scope(
-            task=task,
-            surface=task.requester.channel,
-        )
-        state = await self._load_session_context(
-            task=task,
-            project=project,
-            workspace=workspace,
-        )
+        frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+        project = None
+        workspace = None
+        state = None
+        if frame is not None:
+            project = (
+                await self._stores.project_store.get_project(frame.project_id)
+                if frame.project_id
+                else None
+            )
+            workspace = (
+                await self._stores.project_store.get_workspace(frame.workspace_id)
+                if frame.workspace_id
+                else None
+            )
+            if frame.session_id:
+                state = await self._stores.agent_context_store.get_session_context(frame.session_id)
+
+        if state is None:
+            project, workspace = await self._resolve_project_scope(
+                task=task,
+                surface=task.requester.channel,
+                project_id=frame.project_id if frame is not None else "",
+                workspace_id=frame.workspace_id if frame is not None else "",
+            )
+            state = await self._load_session_context(
+                task=task,
+                project=project,
+                workspace=workspace,
+                session_id_hint=frame.session_id if frame is not None else "",
+            )
         if state is None:
             state = await self._ensure_session_context(
                 task=task,
                 project=project,
                 workspace=workspace,
+                session_id_hint=frame.session_id if frame is not None else "",
             )
 
         response_summary = self._summarize_turns(
@@ -455,13 +622,28 @@ class AgentContextService:
         *,
         task: Task,
         surface: str,
+        project_id: str = "",
+        workspace_id: str = "",
     ) -> tuple[Project | None, Workspace | None]:
-        workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-        project = (
-            await self._stores.project_store.get_project(workspace.project_id)
-            if workspace is not None
-            else None
+        project = await self._stores.project_store.get_project(project_id) if project_id else None
+        workspace = (
+            await self._stores.project_store.get_workspace(workspace_id) if workspace_id else None
         )
+        if workspace is not None and project is None and workspace.project_id:
+            project = await self._stores.project_store.get_project(workspace.project_id)
+        if (
+            workspace is not None
+            and project is not None
+            and workspace.project_id != project.project_id
+        ):
+            workspace = None
+        if project is None:
+            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
+            project = (
+                await self._stores.project_store.get_project(workspace.project_id)
+                if workspace is not None
+                else None
+            )
         selector = await self._stores.project_store.get_selector_state(surface)
         if project is None and selector is not None:
             project = await self._stores.project_store.get_project(selector.active_project_id)
@@ -477,6 +659,22 @@ class AgentContextService:
         if workspace is None or workspace.project_id != project.project_id:
             workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
         return project, workspace
+
+    async def _resolve_agent_profile(
+        self,
+        *,
+        project: Project | None,
+        requested_profile_id: str = "",
+    ) -> tuple[AgentProfile, list[str]]:
+        degraded_reasons: list[str] = []
+        if requested_profile_id:
+            existing = await self._stores.agent_context_store.get_agent_profile(
+                requested_profile_id
+            )
+            if existing is not None:
+                return existing, degraded_reasons
+            degraded_reasons.append("runtime_agent_profile_missing")
+        return await self._ensure_agent_profile(project), degraded_reasons
 
     async def _ensure_agent_profile(self, project: Project | None) -> AgentProfile:
         if project is not None and project.default_agent_profile_id:
@@ -636,15 +834,17 @@ class AgentContextService:
         task: Task,
         project: Project | None,
         workspace: Workspace | None,
+        session_id_hint: str = "",
     ) -> SessionContextState:
         existing = await self._load_session_context(
             task=task,
             project=project,
             workspace=workspace,
+            session_id_hint=session_id_hint,
         )
         if existing is not None:
             return existing
-        session_id = build_scope_aware_session_id(
+        session_id = session_id_hint or build_scope_aware_session_id(
             task,
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
@@ -669,9 +869,23 @@ class AgentContextService:
         task: Task,
         project: Project | None,
         workspace: Workspace | None,
+        session_id_hint: str = "",
     ) -> SessionContextState | None:
         project_id = project.project_id if project is not None else ""
         workspace_id = workspace.workspace_id if workspace is not None else ""
+        hinted_session_id = session_id_hint.strip()
+        if hinted_session_id:
+            hinted_state = await self._stores.agent_context_store.get_session_context(
+                hinted_session_id
+            )
+            if hinted_state is not None and session_state_matches_scope(
+                hinted_state,
+                task=task,
+                project_id=project_id,
+                workspace_id=workspace_id,
+            ):
+                return hinted_state
+
         session_id = build_scope_aware_session_id(
             task,
             project_id=project_id,
@@ -810,6 +1024,7 @@ class AgentContextService:
         memory_scope_ids: list[str],
         worker_capability: str | None,
         dispatch_metadata: dict[str, str],
+        runtime_context: RuntimeControlContext | None,
         include_runtime_context: bool = True,
     ) -> list[dict[str, str]]:
         blocks: list[dict[str, str]] = [
@@ -913,12 +1128,26 @@ class AgentContextService:
                     ),
                 }
             )
-        if include_runtime_context and (worker_capability or dispatch_metadata):
+        if include_runtime_context and (
+            worker_capability or dispatch_metadata or runtime_context is not None
+        ):
+            if runtime_context is not None:
+                runtime_summary = (
+                    f"session_id={runtime_context.session_id or 'N/A'}, "
+                    f"project_id={runtime_context.project_id or 'N/A'}, "
+                    f"workspace_id={runtime_context.workspace_id or 'N/A'}, "
+                    f"work_id={runtime_context.work_id or 'N/A'}, "
+                    f"context_frame_id={runtime_context.context_frame_id or 'N/A'}, "
+                    f"route_reason={runtime_context.route_reason or 'N/A'}"
+                )
+            else:
+                runtime_summary = "N/A"
             blocks.append(
                 {
                     "role": "system",
                     "content": (
                         f"RuntimeContext: worker_capability={worker_capability or 'main'}\n"
+                        f"runtime_snapshot={runtime_summary}\n"
                         f"dispatch_metadata={dispatch_metadata}"
                     ),
                 }
@@ -941,6 +1170,7 @@ class AgentContextService:
         memory_scope_ids: list[str],
         worker_capability: str | None,
         dispatch_metadata: dict[str, str],
+        runtime_context: RuntimeControlContext | None,
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]
         if recent_summary:
@@ -983,6 +1213,7 @@ class AgentContextService:
                         memory_scope_ids=memory_scope_ids,
                         worker_capability=worker_capability,
                         dispatch_metadata=dispatch_metadata,
+                        runtime_context=runtime_context,
                         include_runtime_context=include_runtime_context,
                     )
                     system_tokens = estimate_messages_tokens(blocks)
@@ -1038,6 +1269,7 @@ class AgentContextService:
         bootstrap: BootstrapSession,
         session_state: SessionContextState,
         memory_hits: list[MemoryRecallHit],
+        runtime_context: RuntimeControlContext | None,
     ) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = [
             {"ref_type": "task", "ref_id": task.task_id, "label": task.title},
@@ -1097,6 +1329,15 @@ class AgentContextService:
             }
             for item in memory_hits
         )
+        if runtime_context is not None:
+            refs.append(
+                {
+                    "ref_type": "runtime_context",
+                    "ref_id": runtime_context.work_id or runtime_context.task_id,
+                    "label": runtime_context.session_id or runtime_context.trace_id,
+                    "metadata": runtime_context.model_dump(mode="json"),
+                }
+            )
         return refs
 
     @staticmethod
@@ -1164,6 +1405,8 @@ class AgentContextService:
         final_tokens: int,
         compacted: bool,
         compaction_summary: str,
+        resolve_request: ContextResolveRequest,
+        resolve_result: ContextResolveResult,
     ) -> str:
         lines = [
             "# request-context",
@@ -1173,6 +1416,11 @@ class AgentContextService:
             f"workspace_id: {frame.workspace_id or 'N/A'}",
             f"agent_profile_id: {frame.agent_profile_id}",
             f"bootstrap_session_id: {frame.bootstrap_session_id or 'N/A'}",
+            f"resolve_request_kind: {resolve_request.request_kind.value}",
+            f"resolve_surface: {resolve_request.surface}",
+            f"resolve_work_id: {resolve_request.work_id or 'N/A'}",
+            f"resolve_pipeline_run_id: {resolve_request.pipeline_run_id or 'N/A'}",
+            f"effective_owner_overlay_id: {resolve_result.effective_owner_overlay_id or 'N/A'}",
             f"raw_tokens: {raw_tokens}",
             f"history_tokens: {history_tokens}",
             f"final_tokens: {final_tokens}",
