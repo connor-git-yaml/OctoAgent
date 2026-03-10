@@ -485,6 +485,79 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   operator_items: OperatorInboxItem[];
 }
 
+export interface AgentProfileItem {
+  profile_id: string;
+  scope: string;
+  project_id: string;
+  name: string;
+  persona_summary: string;
+  model_alias: string;
+  tool_profile: string;
+  updated_at: string | null;
+}
+
+export interface AgentProfilesDocument extends ControlPlaneDocumentBase {
+  resource_type: "agent_profiles";
+  resource_id: "agent-profiles:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  profiles: AgentProfileItem[];
+}
+
+export interface OwnerProfileDocument extends ControlPlaneDocumentBase {
+  resource_type: "owner_profile";
+  resource_id: "owner-profile:default";
+  active_project_id: string;
+  active_workspace_id: string;
+  profile: Record<string, unknown>;
+  overlays: Array<Record<string, unknown>>;
+}
+
+export interface BootstrapSessionDocument extends ControlPlaneDocumentBase {
+  resource_type: "bootstrap_session";
+  resource_id: "bootstrap:current";
+  active_project_id: string;
+  active_workspace_id: string;
+  session: Record<string, unknown>;
+  resumable: boolean;
+}
+
+export interface ContextSessionItem {
+  session_id: string;
+  thread_id: string;
+  project_id: string;
+  workspace_id: string;
+  rolling_summary: string;
+  last_context_frame_id: string;
+  updated_at: string | null;
+}
+
+export interface ContextFrameItem {
+  context_frame_id: string;
+  task_id: string;
+  session_id: string;
+  project_id: string;
+  workspace_id: string;
+  agent_profile_id: string;
+  recent_summary: string;
+  memory_hit_count: number;
+  memory_hits: Array<Record<string, unknown>>;
+  memory_recall: Record<string, unknown>;
+  budget: Record<string, unknown>;
+  source_refs: Array<Record<string, unknown>>;
+  degraded_reason: string;
+  created_at: string | null;
+}
+
+export interface ContextContinuityDocument extends ControlPlaneDocumentBase {
+  resource_type: "context_continuity";
+  resource_id: "context:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  sessions: ContextSessionItem[];
+  frames: ContextFrameItem[];
+}
+
 export type WorkerType = "general" | "ops" | "research" | "dev";
 
 export type RuntimeKind =
@@ -1061,6 +1134,10 @@ export interface ControlPlaneSnapshot {
     config: ConfigSchemaDocument;
     project_selector: ProjectSelectorDocument;
     sessions: SessionProjectionDocument;
+    agent_profiles: AgentProfilesDocument;
+    owner_profile: OwnerProfileDocument;
+    bootstrap_session: BootstrapSessionDocument;
+    context_continuity: ContextContinuityDocument;
     capability_pack: CapabilityPackDocument;
     delegation: DelegationPlaneDocument;
     pipelines: SkillPipelineDocument;

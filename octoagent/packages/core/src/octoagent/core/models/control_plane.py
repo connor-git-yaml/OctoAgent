@@ -254,9 +254,15 @@ class ContextFrameItem(BaseModel):
     context_frame_id: str = Field(min_length=1)
     task_id: str = Field(default="")
     session_id: str = Field(default="")
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
     recent_summary: str = Field(default="")
     memory_hit_count: int = Field(default=0, ge=0)
+    memory_hits: list[dict[str, Any]] = Field(default_factory=list)
+    memory_recall: dict[str, Any] = Field(default_factory=dict)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
     degraded_reason: str = Field(default="")
     created_at: datetime | None = None
 

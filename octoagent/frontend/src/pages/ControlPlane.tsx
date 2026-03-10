@@ -150,6 +150,7 @@ type ControlResourceRoute =
   | "config"
   | "project-selector"
   | "sessions"
+  | "context-frames"
   | "capability-pack"
   | "delegation"
   | "pipelines"
@@ -165,6 +166,7 @@ const RESOURCE_ROUTE_BY_TYPE: Record<string, ControlResourceRoute> = {
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
+  context_continuity: "context-frames",
   capability_pack: "capability-pack",
   delegation_plane: "delegation",
   skill_pipeline: "pipelines",
@@ -184,6 +186,7 @@ const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   config: "config",
   "project-selector": "project_selector",
   sessions: "sessions",
+  "context-frames": "context_continuity",
   "capability-pack": "capability_pack",
   delegation: "delegation",
   pipelines: "pipelines",
@@ -294,6 +297,8 @@ async function loadControlResource(
       return fetchControlResource("project-selector");
     case "sessions":
       return fetchControlResource("sessions");
+    case "context-frames":
+      return fetchControlResource("context-frames");
     case "capability-pack":
       return fetchControlResource("capability-pack");
     case "delegation":
@@ -950,6 +955,7 @@ export default function ControlPlane() {
     config,
     project_selector,
     sessions,
+    context_continuity,
     capability_pack,
     delegation,
     pipelines,
@@ -979,6 +985,9 @@ export default function ControlPlane() {
   const lastMemoryAction = memoryActionResult(lastAction);
   const selectedSubjectHistory =
     memorySubject?.subject_key === selectedMemorySubjectKey ? memorySubject : null;
+  const latestContextFrame = context_continuity.frames[0] ?? null;
+  const latestMemoryRecall = latestContextFrame?.memory_recall ?? {};
+  const latestMemoryCitations = latestContextFrame?.memory_hits.slice(0, 2) ?? [];
 
   return (
     <div className="control-shell">
@@ -1138,6 +1147,67 @@ export default function ControlPlane() {
                     <small>{session.status}</small>
                   </div>
                 ))}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Context Recall</p>
+                  <h3>{latestContextFrame?.memory_hit_count ?? 0}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  {String(latestMemoryRecall.backend_id ?? "pending")}
+                </span>
+              </div>
+              <p>{latestContextFrame?.recent_summary || "当前作用域还没有 recent summary。"}</p>
+              <p className="muted">
+                Query {String(latestMemoryRecall.search_query ?? "未记录")} / Scope{" "}
+                {Array.isArray(latestMemoryRecall.scope_ids)
+                  ? latestMemoryRecall.scope_ids.join(", ") || "-"
+                  : "-"}
+              </p>
+              <div className="event-list">
+                {latestMemoryCitations.length > 0 ? (
+                  latestMemoryCitations.map((hit, index) => (
+                    <div key={`${latestContextFrame?.context_frame_id}-${index}`} className="event-item">
+                      <div>
+                        <strong>
+                          {String(
+                            ((hit.citation as Record<string, unknown> | undefined)?.label as string | undefined) ||
+                              hit.record_id ||
+                              "memory-hit"
+                          )}
+                        </strong>
+                        <p>{String(hit.content_preview ?? hit.summary ?? "暂无 preview")}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="event-item">
+                    <div>
+                      <strong>Recall provenance</strong>
+                      <p>当前还没有可展示的 recall hit。</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    void refreshResources([
+                      {
+                        resource_type: "context_continuity",
+                        resource_id: "context:overview",
+                        schema_version: 1,
+                      },
+                    ])
+                  }
+                >
+                  刷新 Context
+                </button>
               </div>
             </article>
 

@@ -25,6 +25,7 @@ from octoagent.core.models import (
     BundledToolDefinition,
     DynamicToolSelection,
     NormalizedMessage,
+    ProjectBindingType,
     RuntimeKind,
     ToolIndexQuery,
     WorkerBootstrapFile,
@@ -32,9 +33,18 @@ from octoagent.core.models import (
     WorkerType,
     WorkStatus,
 )
-from octoagent.memory import MemoryLayer, MemoryPartition
+from octoagent.memory import (
+    MemoryAccessPolicy,
+    MemoryLayer,
+    MemoryPartition,
+    MemoryRecallHookOptions,
+    MemoryRecallPostFilterMode,
+    MemoryRecallRerankMode,
+    MemoryRecallResult,
+)
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.memory_console_service import MemoryConsoleService
+from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillManifest, SkillRegistry
 from octoagent.tooling import (
     SideEffectLevel,
@@ -47,6 +57,7 @@ from octoagent.tooling import (
 from pydantic import BaseModel, Field
 from ulid import ULID
 
+from .agent_context import build_default_memory_recall_hook_options
 from .execution_context import get_current_execution_context
 from .task_service import TaskService
 
@@ -74,6 +85,12 @@ _WORK_TERMINAL_VALUES = {
     WorkStatus.MERGED.value,
     WorkStatus.TIMED_OUT.value,
     WorkStatus.DELETED.value,
+}
+
+_MEMORY_BINDING_TYPES = {
+    ProjectBindingType.SCOPE,
+    ProjectBindingType.MEMORY_SCOPE,
+    ProjectBindingType.IMPORT_SCOPE,
 }
 
 
@@ -204,6 +221,10 @@ class CapabilityPackService:
         self._mcp_registry: McpRegistryService | None = None
         self._browser_sessions: dict[str, _BrowserSessionState] = {}
         self._memory_console_service = MemoryConsoleService(
+            project_root,
+            store_group=store_group,
+        )
+        self._memory_runtime_service = MemoryRuntimeService(
             project_root,
             store_group=store_group,
         )
@@ -409,6 +430,62 @@ class CapabilityPackService:
             if task is None:
                 raise RuntimeError("current task not found for builtin tool")
             return task_service, context, task
+
+        async def _resolve_runtime_project_context(
+            *,
+            project_id: str = "",
+            workspace_id: str = "",
+        ) -> tuple[Any, Any, Any | None]:
+            task = None
+            if project_id.strip() or workspace_id.strip():
+                project, workspace = await self._resolve_project_context(
+                    project_id=project_id.strip(),
+                    workspace_id=workspace_id.strip(),
+                )
+                return project, workspace, task
+            try:
+                _, _context, task = await _current_parent()
+            except Exception:
+                task = None
+            if task is not None:
+                project, workspace = await task_service._agent_context.resolve_project_scope(
+                    task=task,
+                    surface=task.requester.channel,
+                )
+                if project is not None or workspace is not None:
+                    return project, workspace, task
+            project, workspace = await self._resolve_project_context(
+                project_id="",
+                workspace_id="",
+            )
+            return project, workspace, task
+
+        async def _resolve_memory_scope_ids(
+            *,
+            task: Any | None,
+            project: Any,
+            workspace: Any,
+            explicit_scope_id: str = "",
+        ) -> list[str]:
+            scope_ids: list[str] = []
+            if explicit_scope_id.strip():
+                scope_ids.append(explicit_scope_id.strip())
+            elif task is not None and task.scope_id:
+                scope_ids.append(task.scope_id)
+
+            if project is not None:
+                bindings = await store_group.project_store.list_bindings(project.project_id)
+                for binding in bindings:
+                    if binding.binding_type not in _MEMORY_BINDING_TYPES:
+                        continue
+                    if workspace is not None and binding.workspace_id not in {
+                        None,
+                        workspace.workspace_id,
+                    }:
+                        continue
+                    if binding.binding_key:
+                        scope_ids.append(binding.binding_key)
+            return list(dict.fromkeys(item for item in scope_ids if item))
 
         async def _current_work_context() -> tuple[Any, Any]:
             _, context, task = await _current_parent()
@@ -983,9 +1060,7 @@ class CapabilityPackService:
             if not children:
                 raise RuntimeError("current work has no child works to merge")
             blocking = [
-                item.work_id
-                for item in children
-                if item.status.value not in _WORK_TERMINAL_VALUES
+                item.work_id for item in children if item.status.value not in _WORK_TERMINAL_VALUES
             ]
             if blocking:
                 raise RuntimeError(f"child works still active: {', '.join(blocking)}")
@@ -1421,8 +1496,7 @@ class CapabilityPackService:
                     "config_path": str(self._mcp_registry.config_path),
                     "config_error": self._mcp_registry.last_config_error,
                     "tools": [
-                        item.model_dump(mode="json")
-                        for item in tools[: max(1, min(limit, 200))]
+                        item.model_dump(mode="json") for item in tools[: max(1, min(limit, 200))]
                     ],
                 },
                 ensure_ascii=False,
@@ -1584,7 +1658,7 @@ class CapabilityPackService:
         ) -> str:
             """读取指定 subject 的 current/history。"""
 
-            project, workspace = await self._resolve_project_context(
+            project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
                 workspace_id=workspace_id,
             )
@@ -1620,7 +1694,7 @@ class CapabilityPackService:
         ) -> str:
             """按 query / scope / partition / layer 搜索 Memory。"""
 
-            project, workspace = await self._resolve_project_context(
+            project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
                 workspace_id=workspace_id,
             )
@@ -1658,7 +1732,7 @@ class CapabilityPackService:
         ) -> str:
             """读取 subject 的证据链引用。"""
 
-            project, workspace = await self._resolve_project_context(
+            project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
                 workspace_id=workspace_id,
             )
@@ -1681,6 +1755,82 @@ class CapabilityPackService:
                 },
                 ensure_ascii=False,
             )
+
+        @tool_contract(
+            name="memory.recall",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="memory",
+            tags=["memory", "recall", "context"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://memory.recall",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def memory_recall(
+            query: str,
+            scope_id: str = "",
+            project_id: str = "",
+            workspace_id: str = "",
+            limit: int = 4,
+            allow_vault: bool = False,
+            post_filter_mode: MemoryRecallPostFilterMode = (
+                MemoryRecallPostFilterMode.KEYWORD_OVERLAP
+            ),
+            rerank_mode: MemoryRecallRerankMode = MemoryRecallRerankMode.HEURISTIC,
+            subject_hint: str = "",
+            focus_terms: list[str] | None = None,
+        ) -> str:
+            """生成结构化 recall pack。
+
+            返回 query 扩展、命中、citation、backend truth 与 hook trace。
+            """
+
+            project, workspace, task = await _resolve_runtime_project_context(
+                project_id=project_id,
+                workspace_id=workspace_id,
+            )
+            memory_service = await self._memory_runtime_service.memory_service_for_scope(
+                project=project,
+                workspace=workspace,
+            )
+            scope_ids = await _resolve_memory_scope_ids(
+                task=task,
+                project=project,
+                workspace=workspace,
+                explicit_scope_id=scope_id,
+            )
+            if not scope_ids:
+                empty = MemoryRecallResult(
+                    query=query.strip(),
+                    expanded_queries=[],
+                    scope_ids=[],
+                    hits=[],
+                    backend_status=await memory_service.get_backend_status(),
+                    degraded_reasons=["memory_scope_unresolved"],
+                )
+                return json.dumps(empty.model_dump(mode="json"), ensure_ascii=False)
+            bounded_limit = max(1, min(limit, 8))
+            hook_options = build_default_memory_recall_hook_options(
+                subject_hint=subject_hint,
+            ).model_copy(
+                update={
+                    "post_filter_mode": post_filter_mode,
+                    "rerank_mode": rerank_mode,
+                    "focus_terms": list(focus_terms or []),
+                }
+            )
+            recall = await memory_service.recall_memory(
+                scope_ids=scope_ids[:4],
+                query=query,
+                policy=MemoryAccessPolicy(allow_vault=allow_vault),
+                per_scope_limit=min(4, bounded_limit),
+                max_hits=bounded_limit,
+                hook_options=MemoryRecallHookOptions.model_validate(hook_options),
+            )
+            return json.dumps(recall.model_dump(mode="json"), ensure_ascii=False)
 
         for handler in (
             project_inspect,
@@ -1719,6 +1869,7 @@ class CapabilityPackService:
             memory_read,
             memory_search,
             memory_citations,
+            memory_recall,
         ):
             await self._tool_broker.try_register(
                 reflect_tool_schema(handler),
@@ -2003,9 +2154,7 @@ class CapabilityPackService:
                 return "修复 MCP 配置文件格式后再刷新工具"
             if not self._mcp_registry.has_enabled_servers():
                 return (
-                    "在 "
-                    f"{self._mcp_registry.config_path} "
-                    "配置 enabled 的 stdio MCP server 后再刷新"
+                    f"在 {self._mcp_registry.config_path} 配置 enabled 的 stdio MCP server 后再刷新"
                 )
         if tool_name == "tts.speak" and not self._tts_binary():
             return "安装 macOS say 或 Linux espeak 后再使用 tts.speak"
@@ -2029,6 +2178,10 @@ class CapabilityPackService:
             "mcp.servers.list": ["agent_runtime", "web"],
             "mcp.tools.list": ["agent_runtime", "web"],
             "mcp.tools.refresh": ["agent_runtime", "web"],
+            "memory.read": ["agent_runtime", "web"],
+            "memory.search": ["agent_runtime", "web"],
+            "memory.citations": ["agent_runtime", "web"],
+            "memory.recall": ["agent_runtime", "web"],
         }
         if tool_name.startswith("mcp."):
             return ["agent_runtime", "web"]
@@ -2153,8 +2306,7 @@ class CapabilityPackService:
 
     def _close_browser_session(self, context) -> bool:
         return (
-            self._browser_sessions.pop(self._browser_session_scope_key(context), None)
-            is not None
+            self._browser_sessions.pop(self._browser_session_scope_key(context), None) is not None
         )
 
     @staticmethod

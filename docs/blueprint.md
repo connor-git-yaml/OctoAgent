@@ -2706,6 +2706,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
 - [ ] Feature 033：Agent Profile + Bootstrap + Context Continuity（主 Agent runtime 真实接入 profile / user basics / bootstrap / recent context / memory retrieval）
+- [x] Feature 038：Agent Memory Recall Optimization（runtime resolver 收口、structured recall pack、indexing -> recall 端到端接线）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
 2026-03-08 进展：
@@ -2719,6 +2720,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
 - Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；但最终签收仍待 033 关闭 context continuity gate。
 - 2026-03-09 设计复核新增 Feature 033：当前主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；这不是 M4 体验项，而是 M3 live cutover 前的主链补位。
+- 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
@@ -2780,6 +2782,14 @@ M3 核心对象关系（2026-03-08 补充）：
 - 这不是 M4 体验增强，而是当前主聊天“是否像长期助手而不是 stateless chat shell” 的基础门槛
 - 033 完成前，不应把 M3 对外描述成已经完全具备日常长期使用所需的上下文连续性
 - 031 的 release gate artifacts 已补记 `GATE-M3-CONTEXT-CONTINUITY`；在 033 完成前，该 gate 保持未通过状态
+
+### M3 Carry-Forward（Feature 038）：Agent Memory Recall Optimization
+
+- 目标：把 Agent Memory 从 `chat import / fragment & SoR 写入 / backend resolve / runtime recall / built-in tool` 收敛为同一条 project-scoped 主链
+- 已完成项：`MemoryService.recall_memory()`、`MemoryRecallHit/Result`、`ContextFrame.memory_recall provenance`、`memory.recall` built-in tool、`ChatImportService` runtime resolver 接线
+- 已完成项：delayed recall durable carrier、`MEMORY_RECALL_*` events/artifacts、Control Plane recall provenance 可视化、内建 `keyword_overlap post-filter + heuristic rerank` hooks
+- 吸收了 Agent Zero 的 recall 组装与 delayed recall 时机经验，也吸收 OpenClaw 的 deterministic expansion / rerank 思路，但没有回退到单一可变 index、进程内临时任务或无治理脚本落地
+- 038 的完成意味着 MemU / backend resolver 不再只是 console 侧可见能力，而是真实进入主 Agent / tool / import 的运行链，并且 recall 质量层具备可观测、可回退、可审计的默认 hook
 
 ### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
 

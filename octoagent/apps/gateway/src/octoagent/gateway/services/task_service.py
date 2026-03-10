@@ -10,6 +10,7 @@
 import asyncio
 import hashlib
 import inspect
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,6 +41,9 @@ from octoagent.core.models.payloads import (
     ArtifactCreatedPayload,
     CheckpointSavedPayload,
     ContextCompactionCompletedPayload,
+    MemoryRecallCompletedPayload,
+    MemoryRecallFailedPayload,
+    MemoryRecallScheduledPayload,
     ModelCallCompletedPayload,
     ModelCallFailedPayload,
     ModelCallStartedPayload,
@@ -57,15 +61,15 @@ from octoagent.core.store.transaction import (
 )
 from octoagent.memory import (
     EvidenceRef,
+    MemoryAccessPolicy,
     MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
     MemoryPartition,
-    MemoryService,
     init_memory_db,
 )
 from ulid import ULID
 
-from .agent_context import AgentContextService
+from .agent_context import AgentContextService, build_default_memory_recall_hook_options
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 
@@ -359,9 +363,13 @@ class TaskService:
             if resume_state_snapshot and resume_state_snapshot.get("request_artifact_id")
             else ""
         )
-        model_call_started_idempotency_key = (
-            f"{llm_call_idempotency_key}:model_call_started"
+        delayed_recall_request_artifact_id = (
+            str(resume_state_snapshot.get("delayed_recall_request_artifact_id"))
+            if resume_state_snapshot
+            and resume_state_snapshot.get("delayed_recall_request_artifact_id")
+            else ""
         )
+        model_call_started_idempotency_key = f"{llm_call_idempotency_key}:model_call_started"
         compaction_idempotency_key = f"{llm_call_idempotency_key}:context_compaction"
         compiled_context: CompiledTaskContext | None = None
         try:
@@ -408,9 +416,7 @@ class TaskService:
                     llm_call_idempotency_key=llm_call_idempotency_key,
                     trace_id=trace_id,
                     session_id=(
-                        execution_context.session_id
-                        if execution_context is not None
-                        else None
+                        execution_context.session_id if execution_context is not None else None
                     ),
                 )
                 if compiled_context.compacted:
@@ -422,12 +428,20 @@ class TaskService:
                         compaction_idempotency_key=compaction_idempotency_key,
                         request_artifact_id=request_artifact_id,
                         session_id=(
-                            execution_context.session_id
-                            if execution_context is not None
-                            else None
+                            execution_context.session_id if execution_context is not None else None
                         ),
                         worker_capability=worker_capability,
                     )
+                delayed_recall_request_artifact_id = await self._record_delayed_recall_once(
+                    task_id=task_id,
+                    trace_id=trace_id,
+                    context_frame_id=compiled_context.context_frame_id,
+                    llm_call_idempotency_key=llm_call_idempotency_key,
+                    request_artifact_id=request_artifact_id,
+                    session_id=(
+                        execution_context.session_id if execution_context is not None else None
+                    ),
+                )
                 started_event = await self._append_event_only_with_retry(
                     task_id=task_id,
                     event_builder=lambda seq: Event(
@@ -461,6 +475,7 @@ class TaskService:
                         "model_alias": effective_alias,
                         "llm_call_idempotency_key": llm_call_idempotency_key,
                         "request_artifact_id": request_artifact_id,
+                        "delayed_recall_request_artifact_id": (delayed_recall_request_artifact_id),
                     },
                 )
 
@@ -511,8 +526,8 @@ class TaskService:
                         session_id=(
                             execution_context.session_id if execution_context is not None else None
                         ),
-                            source="llm-response",
-                        )
+                        source="llm-response",
+                    )
                     if compiled_context is not None and compiled_context.context_frame_id:
                         try:
                             await self._agent_context.record_response_context(
@@ -531,6 +546,19 @@ class TaskService:
                                 error_type=type(exc).__name__,
                                 error=str(exc),
                             )
+                    if delayed_recall_request_artifact_id:
+                        await self._materialize_delayed_recall_once(
+                            task_id=task_id,
+                            trace_id=trace_id,
+                            context_frame_id=compiled_context.context_frame_id,
+                            llm_call_idempotency_key=llm_call_idempotency_key,
+                            request_artifact_id=delayed_recall_request_artifact_id,
+                            session_id=(
+                                execution_context.session_id
+                                if execution_context is not None
+                                else None
+                            ),
+                        )
                 else:
                     reused_artifact_id = await self._resolve_reused_artifact_id(
                         llm_call_idempotency_key
@@ -819,14 +847,360 @@ class TaskService:
                     reason=compiled.compaction_reason,
                 ).model_dump(),
                 trace_id=trace_id,
-                causality=EventCausality(
-                    idempotency_key=f"{compaction_idempotency_key}:event"
-                ),
+                causality=EventCausality(idempotency_key=f"{compaction_idempotency_key}:event"),
             ),
         )
         if self._sse_hub:
             await self._sse_hub.broadcast(task_id, event)
         return event
+
+    async def _record_delayed_recall_once(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        context_frame_id: str,
+        llm_call_idempotency_key: str,
+        request_artifact_id: str,
+        session_id: str | None,
+    ) -> str:
+        if not context_frame_id:
+            return ""
+
+        frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+        if frame is None:
+            return ""
+        plan = self._build_delayed_recall_plan(frame)
+        if not plan["enabled"]:
+            return ""
+
+        delayed_recall_idempotency_key = f"{llm_call_idempotency_key}:delayed_recall_schedule"
+        first_record = await self._stores.side_effect_ledger_store.try_record(
+            task_id=task_id,
+            step_key=f"delayed_recall_schedule:{llm_call_idempotency_key}",
+            idempotency_key=delayed_recall_idempotency_key,
+            effect_type="memory_recall",
+        )
+        if not first_record:
+            entry = await self._stores.side_effect_ledger_store.get_entry(
+                delayed_recall_idempotency_key
+            )
+            if entry is not None and entry.result_ref:
+                return entry.result_ref
+
+        delayed_recall_request_artifact_id = await self._store_delayed_recall_artifact(
+            task_id=task_id,
+            trace_id=trace_id,
+            artifact_id=self._derive_artifact_id(
+                "recallreq",
+                task_id,
+                llm_call_idempotency_key,
+            ),
+            name="delayed-recall-request",
+            description="Delayed recall durable request carrier",
+            content=json.dumps(
+                {
+                    "task_id": task_id,
+                    "context_frame_id": context_frame_id,
+                    "request_artifact_ref": request_artifact_id,
+                    "scheduled_at": datetime.now(UTC).isoformat(),
+                    **plan,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            session_id=session_id,
+            source="delayed-recall-request",
+        )
+        event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.MEMORY_RECALL_SCHEDULED,
+                actor=ActorType.SYSTEM,
+                payload=MemoryRecallScheduledPayload(
+                    context_frame_id=context_frame_id,
+                    query=str(plan["query"]),
+                    scope_ids=list(plan["scope_ids"]),
+                    request_artifact_ref=delayed_recall_request_artifact_id,
+                    initial_hit_count=int(plan["initial_hit_count"]),
+                    delivered_hit_count=int(plan["delivered_hit_count"]),
+                    schedule_reason=str(plan["schedule_reason"]),
+                    degraded_reasons=list(plan["degraded_reasons"]),
+                ).model_dump(),
+                trace_id=trace_id,
+                causality=EventCausality(idempotency_key=f"{delayed_recall_idempotency_key}:event"),
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+        await self._stores.side_effect_ledger_store.set_result_ref(
+            delayed_recall_idempotency_key,
+            delayed_recall_request_artifact_id,
+        )
+        await self._agent_context.record_delayed_recall_state(
+            context_frame_id=context_frame_id,
+            status="scheduled",
+            request_artifact_id=delayed_recall_request_artifact_id,
+            schedule_reason=str(plan["schedule_reason"]),
+        )
+        return delayed_recall_request_artifact_id
+
+    async def _materialize_delayed_recall_once(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        context_frame_id: str,
+        llm_call_idempotency_key: str,
+        request_artifact_id: str,
+        session_id: str | None,
+    ) -> str:
+        if not context_frame_id or not request_artifact_id:
+            return ""
+
+        delayed_recall_idempotency_key = f"{llm_call_idempotency_key}:delayed_recall_materialize"
+        first_record = await self._stores.side_effect_ledger_store.try_record(
+            task_id=task_id,
+            step_key=f"delayed_recall_materialize:{llm_call_idempotency_key}",
+            idempotency_key=delayed_recall_idempotency_key,
+            effect_type="memory_recall",
+        )
+        if not first_record:
+            entry = await self._stores.side_effect_ledger_store.get_entry(
+                delayed_recall_idempotency_key
+            )
+            if entry is not None and entry.result_ref:
+                return entry.result_ref
+
+        frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+        if frame is None:
+            return ""
+        plan = self._build_delayed_recall_plan(frame)
+        if not plan["query"] or not plan["scope_ids"]:
+            return ""
+
+        task = await self.get_task(task_id)
+        if task is None:
+            return ""
+
+        try:
+            await init_memory_db(self._stores.conn)
+            project, workspace = await self._agent_context.resolve_project_scope(
+                task=task,
+                surface=task.requester.channel,
+            )
+            memory_service = await self._agent_context.get_memory_service(
+                project=project,
+                workspace=workspace,
+            )
+            agent_profile = await self._stores.agent_context_store.get_agent_profile(
+                frame.agent_profile_id
+            )
+            policy = MemoryAccessPolicy.model_validate(
+                agent_profile.memory_access_policy if agent_profile is not None else {}
+            )
+            recall = await memory_service.recall_memory(
+                scope_ids=list(plan["scope_ids"]),
+                query=str(plan["query"]),
+                policy=policy,
+                per_scope_limit=max(4, int(plan["delivered_hit_count"]) or 0),
+                max_hits=max(8, int(plan["initial_hit_count"]) or 0),
+                hook_options=build_default_memory_recall_hook_options(),
+            )
+            result_artifact_id = await self._store_delayed_recall_artifact(
+                task_id=task_id,
+                trace_id=trace_id,
+                artifact_id=self._derive_artifact_id(
+                    "recallres",
+                    task_id,
+                    llm_call_idempotency_key,
+                ),
+                name="delayed-recall-result",
+                description="Delayed recall materialized result",
+                content=json.dumps(
+                    {
+                        "task_id": task_id,
+                        "context_frame_id": context_frame_id,
+                        "request_artifact_ref": request_artifact_id,
+                        "materialized_at": datetime.now(UTC).isoformat(),
+                        "schedule_reason": str(plan["schedule_reason"]),
+                        "recall": recall.model_dump(mode="json"),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                session_id=session_id,
+                source="delayed-recall-result",
+            )
+            event = await self._append_event_only_with_retry(
+                task_id=task_id,
+                event_builder=lambda seq: Event(
+                    event_id=str(ULID()),
+                    task_id=task_id,
+                    task_seq=seq,
+                    ts=datetime.now(UTC),
+                    type=EventType.MEMORY_RECALL_COMPLETED,
+                    actor=ActorType.SYSTEM,
+                    payload=MemoryRecallCompletedPayload(
+                        context_frame_id=context_frame_id,
+                        query=recall.query,
+                        scope_ids=list(recall.scope_ids),
+                        request_artifact_ref=request_artifact_id,
+                        result_artifact_ref=result_artifact_id,
+                        hit_count=len(recall.hits),
+                        backend=(
+                            recall.backend_status.active_backend
+                            if recall.backend_status is not None
+                            else ""
+                        ),
+                        backend_state=(
+                            recall.backend_status.state.value
+                            if recall.backend_status is not None
+                            else ""
+                        ),
+                        degraded_reasons=list(recall.degraded_reasons),
+                    ).model_dump(),
+                    trace_id=trace_id,
+                    causality=EventCausality(
+                        idempotency_key=f"{delayed_recall_idempotency_key}:event"
+                    ),
+                ),
+            )
+            if self._sse_hub:
+                await self._sse_hub.broadcast(task_id, event)
+            await self._stores.side_effect_ledger_store.set_result_ref(
+                delayed_recall_idempotency_key,
+                result_artifact_id,
+            )
+            await self._agent_context.record_delayed_recall_state(
+                context_frame_id=context_frame_id,
+                status="completed",
+                request_artifact_id=request_artifact_id,
+                result_artifact_id=result_artifact_id,
+                schedule_reason=str(plan["schedule_reason"]),
+                recall=recall,
+            )
+            return result_artifact_id
+        except Exception as exc:
+            error_type = type(exc).__name__
+            error_message = str(exc)
+            event = await self._append_event_only_with_retry(
+                task_id=task_id,
+                event_builder=lambda seq, error_type=error_type, error_message=error_message: Event(
+                    event_id=str(ULID()),
+                    task_id=task_id,
+                    task_seq=seq,
+                    ts=datetime.now(UTC),
+                    type=EventType.MEMORY_RECALL_FAILED,
+                    actor=ActorType.SYSTEM,
+                    payload=MemoryRecallFailedPayload(
+                        context_frame_id=context_frame_id,
+                        query=str(plan["query"]),
+                        scope_ids=list(plan["scope_ids"]),
+                        request_artifact_ref=request_artifact_id,
+                        error_type=error_type,
+                        error_message=error_message,
+                        degraded_reasons=list(plan["degraded_reasons"]),
+                    ).model_dump(),
+                    trace_id=trace_id,
+                    causality=EventCausality(
+                        idempotency_key=f"{delayed_recall_idempotency_key}:failed"
+                    ),
+                ),
+            )
+            if self._sse_hub:
+                await self._sse_hub.broadcast(task_id, event)
+            await self._agent_context.record_delayed_recall_state(
+                context_frame_id=context_frame_id,
+                status="failed",
+                request_artifact_id=request_artifact_id,
+                schedule_reason=str(plan["schedule_reason"]),
+                error_summary=str(exc),
+            )
+            log.warning(
+                "delayed_recall_materialize_degraded",
+                task_id=task_id,
+                context_frame_id=context_frame_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return ""
+
+    async def _store_delayed_recall_artifact(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        artifact_id: str,
+        name: str,
+        description: str,
+        content: str,
+        session_id: str | None,
+        source: str,
+    ) -> str:
+        artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name=name,
+            description=description,
+            content=content,
+            artifact_id=artifact_id,
+            allow_existing=True,
+            trace_id=trace_id,
+            emit_event=False,
+            session_id=session_id,
+            source=source,
+        )
+        return artifact.artifact_id
+
+    @staticmethod
+    def _build_delayed_recall_plan(frame) -> dict[str, Any]:
+        memory_recall = dict(frame.budget.get("memory_recall", {}))
+        query = str(memory_recall.get("query", "")).strip()
+        scope_ids = [
+            str(item).strip()
+            for item in memory_recall.get("scope_ids", frame.budget.get("memory_scope_ids", []))
+            if str(item).strip()
+        ]
+        initial_hit_count = max(
+            int(memory_recall.get("hit_count", 0) or 0),
+            len(frame.memory_hits),
+        )
+        delivered_hit_count = max(
+            int(memory_recall.get("delivered_hit_count", 0) or 0),
+            len(frame.memory_hits),
+        )
+        degraded_reasons = [
+            str(item).strip()
+            for item in memory_recall.get("degraded_reasons", [])
+            if str(item).strip()
+        ]
+        schedule_reasons: list[str] = []
+        if initial_hit_count > delivered_hit_count:
+            schedule_reasons.append("prompt_budget_trimmed")
+        backend_state = str(memory_recall.get("backend_state", "")).strip().lower()
+        if backend_state and backend_state != "healthy":
+            schedule_reasons.append(f"memory_backend_{backend_state}")
+        pending_replay_count = int(memory_recall.get("pending_replay_count", 0) or 0)
+        if pending_replay_count > 0:
+            schedule_reasons.append("memory_sync_backlog")
+        schedule_reasons.extend(degraded_reasons)
+        schedule_reason = "; ".join(dict.fromkeys(item for item in schedule_reasons if item))
+        return {
+            "enabled": bool(query and scope_ids and schedule_reason),
+            "query": query,
+            "scope_ids": scope_ids,
+            "initial_hit_count": initial_hit_count,
+            "delivered_hit_count": delivered_hit_count,
+            "degraded_reasons": degraded_reasons,
+            "schedule_reason": schedule_reason,
+            "backend": str(memory_recall.get("backend", "")),
+            "backend_state": backend_state,
+            "pending_replay_count": pending_replay_count,
+        }
 
     async def _persist_compaction_flush(
         self,
@@ -845,7 +1219,14 @@ class TaskService:
 
         try:
             await init_memory_db(self._stores.conn)
-            memory_service = MemoryService(self._stores.conn)
+            project, workspace = await self._agent_context.resolve_project_scope(
+                task=task,
+                surface=task.requester.channel,
+            )
+            memory_service = await self._agent_context.get_memory_service(
+                project=project,
+                workspace=workspace,
+            )
             run = await memory_service.run_memory_maintenance(
                 MemoryMaintenanceCommand(
                     command_id=str(ULID()),

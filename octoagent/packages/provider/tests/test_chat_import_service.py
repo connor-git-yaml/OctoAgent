@@ -13,6 +13,7 @@ from octoagent.memory import (
     init_memory_db,
 )
 from octoagent.provider.dx.chat_import_service import ChatImportService
+from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -132,6 +133,43 @@ async def test_chat_import_persists_artifact_fragment_and_fact_commit(tmp_path: 
         assert len(artifacts) == 1
     finally:
         await store_group.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_import_uses_project_scoped_memory_runtime_service(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    input_path = tmp_path / "messages.jsonl"
+    _write_jsonl(input_path, _build_rows(datetime.now(tz=UTC), include_hint=True))
+
+    calls: list[dict[str, str]] = []
+    original = MemoryRuntimeService.memory_service_for_scope
+
+    async def tracking_memory_service_for_scope(self, *, project, workspace=None):
+        calls.append(
+            {
+                "project_id": project.project_id if project is not None else "",
+                "workspace_id": workspace.workspace_id if workspace is not None else "",
+            }
+        )
+        return await original(self, project=project, workspace=workspace)
+
+    monkeypatch.setattr(
+        MemoryRuntimeService,
+        "memory_service_for_scope",
+        tracking_memory_service_for_scope,
+    )
+
+    service = ChatImportService(tmp_path)
+    report = await service.import_chats(input_path=input_path)
+
+    assert report.summary.imported_count == 2
+    assert calls
+    assert calls[0] == {
+        "project_id": "project-default",
+        "workspace_id": "workspace-default-primary",
+    }
 
 
 @pytest.mark.asyncio

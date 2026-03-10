@@ -7,6 +7,7 @@ import type {
   ActionResultEnvelope,
   BackupBundle,
   CapabilityPackDocument,
+  ContextContinuityDocument,
   ControlPlaneActionResponse,
   ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
@@ -58,6 +59,7 @@ type ControlResourceName =
   | "config"
   | "project-selector"
   | "sessions"
+  | "context-frames"
   | "capability-pack"
   | "delegation"
   | "pipelines"
@@ -338,6 +340,9 @@ export async function fetchControlResource(
   resource: "sessions"
 ): Promise<SessionProjectionDocument>;
 export async function fetchControlResource(
+  resource: "context-frames"
+): Promise<ContextContinuityDocument>;
+export async function fetchControlResource(
   resource: "capability-pack"
 ): Promise<CapabilityPackDocument>;
 export async function fetchControlResource(
@@ -365,6 +370,7 @@ export async function fetchControlResource(
   | ConfigSchemaDocument
   | ProjectSelectorDocument
   | SessionProjectionDocument
+  | ContextContinuityDocument
   | CapabilityPackDocument
   | DelegationPlaneDocument
   | SkillPipelineDocument

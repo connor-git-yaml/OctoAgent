@@ -10,6 +10,7 @@ from octoagent.core.models import (
     AgentProfileScope,
     BootstrapSession,
     BootstrapSessionStatus,
+    EventType,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
@@ -24,7 +25,18 @@ from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import build_scope_aware_session_id
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
-from octoagent.memory import MemoryLayer, MemoryPartition, MemorySearchHit, MemoryService
+from octoagent.memory import (
+    MemoryBackendState,
+    MemoryBackendStatus,
+    MemoryLayer,
+    MemoryPartition,
+    MemoryRecallHit,
+    MemoryRecallHookTrace,
+    MemoryRecallPostFilterMode,
+    MemoryRecallRerankMode,
+    MemoryRecallResult,
+    MemoryService,
+)
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
 
@@ -171,29 +183,63 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
 
     memory_calls: list[dict[str, object]] = []
 
-    async def fake_search_memory(self, *, scope_id, query=None, policy=None, limit=10):
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
         memory_calls.append(
             {
-                "scope_id": scope_id,
+                "scope_ids": list(scope_ids),
                 "query": query,
-                "limit": limit,
+                "per_scope_limit": per_scope_limit,
+                "max_hits": max_hits,
                 "policy": policy.model_dump() if policy is not None else {},
+                "hook_options": (
+                    hook_options.model_dump(mode="json") if hook_options is not None else {}
+                ),
             }
         )
-        return [
-            MemorySearchHit(
-                record_id="memory-1",
-                layer=MemoryLayer.SOR,
-                scope_id=scope_id,
-                partition=MemoryPartition.WORK,
-                summary="长期记忆指出 Alpha 项目必须保持需求上下文连续。",
-                subject_key="alpha-constraint",
-                metadata={"source": "test"},
-                created_at=datetime.now(tz=UTC),
-            )
-        ]
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query, "Alpha 方案拆解"],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="长期记忆指出 Alpha 项目必须保持需求上下文连续。",
+                    subject_key="alpha-constraint",
+                    search_query="Alpha 方案拆解",
+                    citation="memory://memory/project-alpha/sor/alpha-constraint",
+                    content_preview="Alpha 项目要求保持需求上下文连续。",
+                    metadata={"source": "test"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "方案拆解"],
+                candidate_count=1,
+                filtered_count=0,
+                delivered_count=1,
+            ),
+        )
 
-    monkeypatch.setattr(MemoryService, "search_memory", fake_search_memory)
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
     service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
@@ -213,11 +259,13 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         llm_service=llm_service,
     )
 
-    assert len(memory_calls) == 2
-    assert {item["scope_id"] for item in memory_calls} == {
+    assert len(memory_calls) == 1
+    assert set(memory_calls[0]["scope_ids"]) == {
         "chat:web:thread-alpha",
         "memory/project-alpha",
     }
+    assert memory_calls[0]["hook_options"]["post_filter_mode"] == "keyword_overlap"
+    assert memory_calls[0]["hook_options"]["rerank_mode"] == "heuristic"
 
     prompt = llm_service.calls[0]["prompt_or_messages"]
     assert isinstance(prompt, list)
@@ -226,6 +274,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "Alpha Agent" in joined
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in joined
     assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in joined
+    assert "memory://memory/project-alpha/sor/alpha-constraint" in joined
     assert "请继续推进 Alpha 的方案拆解" in joined
 
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
@@ -234,6 +283,15 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert frame.agent_profile_id == "agent-profile-alpha"
     assert frame.recent_summary == "之前已经确认 Alpha 的关键约束和当前里程碑。"
     assert frame.memory_hits[0]["record_id"] == "memory-1"
+    assert frame.memory_hits[0]["citation"] == "memory://memory/project-alpha/sor/alpha-constraint"
+    assert frame.budget["memory_recall"]["backend"] == "sqlite"
+    assert frame.budget["memory_recall"]["expanded_queries"] == [
+        "请继续推进 Alpha 的方案拆解",
+        "Alpha 方案拆解",
+    ]
+    assert frame.budget["memory_recall"]["hit_count"] == 1
+    assert frame.budget["memory_recall"]["delivered_hit_count"] == 1
+    assert frame.budget["memory_recall"]["hook_trace"]["post_filter_mode"] == "keyword_overlap"
 
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
     request_artifact = next(item for item in artifacts if item.name == "llm-request-context")
@@ -259,12 +317,185 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "agent_profile_id: agent-profile-alpha" in request_text
     assert (
         "session_id: surface:web|scope:chat:web:thread-alpha|"
-        "project:project-alpha|workspace:workspace-alpha|thread:thread-alpha"
-        in request_text
+        "project:project-alpha|workspace:workspace-alpha|thread:thread-alpha" in request_text
     )
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in request_text
     assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in request_text
     assert final_tokens > history_tokens
+
+    await store_group.conn.close()
+
+
+async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f038-delayed-recall.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    recall_calls: list[dict[str, object]] = []
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        recall_calls.append(
+            {
+                "scope_ids": list(scope_ids),
+                "query": query,
+                "per_scope_limit": per_scope_limit,
+                "max_hits": max_hits,
+                "hook_options": (
+                    hook_options.model_dump(mode="json") if hook_options is not None else {}
+                ),
+            }
+        )
+        if len(recall_calls) == 1:
+            return MemoryRecallResult(
+                query=query,
+                expanded_queries=[query],
+                scope_ids=list(scope_ids),
+                hits=[
+                    MemoryRecallHit(
+                        record_id="memory-initial-1",
+                        layer=MemoryLayer.SOR,
+                        scope_id="memory/project-alpha",
+                        partition=MemoryPartition.WORK,
+                        summary="初始 recall 命中了一条关键约束。",
+                        subject_key="alpha-initial",
+                        search_query=query,
+                        citation="memory://memory/project-alpha/sor/alpha-initial",
+                        content_preview="Alpha 约束需要 durable delayed recall。",
+                        metadata={"source": "delayed-initial"},
+                        created_at=datetime.now(tz=UTC),
+                    )
+                ],
+                backend_status=MemoryBackendStatus(
+                    backend_id="sqlite",
+                    active_backend="sqlite",
+                    state=MemoryBackendState.DEGRADED,
+                    pending_replay_count=2,
+                ),
+                degraded_reasons=["memory_sync_backlog"],
+                hook_trace=MemoryRecallHookTrace(
+                    post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                    rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                    focus_terms=["Alpha", "delayed", "recall"],
+                    candidate_count=1,
+                    filtered_count=0,
+                    delivered_count=1,
+                ),
+            )
+
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query, "Alpha delayed recall"],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-delayed-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="Delayed recall 返回了更完整的 Alpha 上下文。",
+                    subject_key="alpha-delayed-1",
+                    search_query="Alpha delayed recall",
+                    citation="memory://memory/project-alpha/sor/alpha-delayed-1",
+                    content_preview="Delayed recall hit 1",
+                    metadata={"source": "delayed-result"},
+                    created_at=datetime.now(tz=UTC),
+                ),
+                MemoryRecallHit(
+                    record_id="memory-delayed-2",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="Delayed recall 带回第二条补充事实。",
+                    subject_key="alpha-delayed-2",
+                    search_query="Alpha delayed recall",
+                    citation="memory://memory/project-alpha/sor/alpha-delayed-2",
+                    content_preview="Delayed recall hit 2",
+                    metadata={"source": "delayed-result"},
+                    created_at=datetime.now(tz=UTC),
+                ),
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+                pending_replay_count=0,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "delayed", "recall"],
+                candidate_count=2,
+                filtered_count=0,
+                delivered_count=2,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的 delayed recall 验证",
+        idempotency_key="f038-delayed-recall-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+    )
+
+    assert len(recall_calls) == 2
+    assert recall_calls[1]["max_hits"] >= 8
+    assert recall_calls[0]["hook_options"]["post_filter_mode"] == "keyword_overlap"
+    assert recall_calls[1]["hook_options"]["rerank_mode"] == "heuristic"
+
+    events = await store_group.event_store.get_events_for_task(task_id)
+    assert any(event.type is EventType.MEMORY_RECALL_SCHEDULED for event in events)
+    assert any(event.type is EventType.MEMORY_RECALL_COMPLETED for event in events)
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    delayed_request = next(item for item in artifacts if item.name == "delayed-recall-request")
+    delayed_result = next(item for item in artifacts if item.name == "delayed-recall-result")
+    delayed_request_text = await store_group.artifact_store.get_artifact_content(
+        delayed_request.artifact_id
+    )
+    delayed_result_text = await store_group.artifact_store.get_artifact_content(
+        delayed_result.artifact_id
+    )
+    assert delayed_request_text is not None
+    assert delayed_result_text is not None
+    assert "memory_sync_backlog" in delayed_request_text.decode("utf-8")
+    assert "memory-delayed-2" in delayed_result_text.decode("utf-8")
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    delayed_recall = frames[0].budget["delayed_recall"]
+    assert delayed_recall["status"] == "completed"
+    assert delayed_recall["request_artifact_ref"] == delayed_request.artifact_id
+    assert delayed_recall["result_artifact_ref"] == delayed_result.artifact_id
+    assert delayed_recall["hit_count"] == 2
+    assert delayed_recall["backend_state"] == "healthy"
 
     await store_group.conn.close()
 
@@ -295,22 +526,52 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     )
     await store_group.conn.commit()
 
-    async def fake_search_memory(self, *, scope_id, query=None, policy=None, limit=10):
-        return [
-            MemorySearchHit(
-                record_id=f"memory-{index}",
-                layer=MemoryLayer.SOR,
-                scope_id=scope_id,
-                partition=MemoryPartition.WORK,
-                summary=("记忆摘要。" * 120) + str(index),
-                subject_key=f"subject-{index}",
-                metadata={"source": "budget-test"},
-                created_at=datetime.now(tz=UTC),
-            )
-            for index in range(4)
-        ]
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query, "Alpha 预算裁剪"],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id=f"memory-{index}",
+                    layer=MemoryLayer.SOR,
+                    scope_id=scope_ids[0],
+                    partition=MemoryPartition.WORK,
+                    summary=("记忆摘要。" * 120) + str(index),
+                    subject_key=f"subject-{index}",
+                    search_query="Alpha 预算裁剪",
+                    citation=f"memory://{scope_ids[0]}/sor/subject-{index}",
+                    content_preview=("记忆正文。" * 60) + str(index),
+                    metadata={"source": "budget-test"},
+                    created_at=datetime.now(tz=UTC),
+                )
+                for index in range(4)
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "预算裁剪"],
+                candidate_count=4,
+                filtered_count=0,
+                delivered_count=4,
+            ),
+        )
 
-    monkeypatch.setattr(MemoryService, "search_memory", fake_search_memory)
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
     service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()

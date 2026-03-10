@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -21,7 +22,17 @@ from octoagent.core.models import (
     Task,
     Workspace,
 )
-from octoagent.memory import MemoryAccessPolicy, MemorySearchHit, MemoryService, init_memory_db
+from octoagent.memory import (
+    MemoryAccessPolicy,
+    MemoryRecallHit,
+    MemoryRecallHookOptions,
+    MemoryRecallPostFilterMode,
+    MemoryRecallRerankMode,
+    MemoryRecallResult,
+    MemoryService,
+    init_memory_db,
+)
+from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
 from .context_compaction import (
@@ -38,6 +49,17 @@ _MEMORY_BINDING_TYPES = {
     ProjectBindingType.MEMORY_SCOPE,
     ProjectBindingType.IMPORT_SCOPE,
 }
+
+
+def build_default_memory_recall_hook_options(
+    *,
+    subject_hint: str = "",
+) -> MemoryRecallHookOptions:
+    return MemoryRecallHookOptions(
+        post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+        rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+        subject_hint=subject_hint,
+    )
 
 
 def legacy_session_id_for_task(task: Task) -> str:
@@ -78,19 +100,19 @@ def session_state_matches_scope(
         return False
     if project_id and state.project_id and state.project_id != project_id:
         return False
-    return not (
-        workspace_id
-        and state.workspace_id
-        and state.workspace_id != workspace_id
-    )
+    return not (workspace_id and state.workspace_id and state.workspace_id != workspace_id)
 
 
 class AgentContextService:
     """统一装配 AgentProfile / bootstrap / recency / memory。"""
 
-    def __init__(self, store_group) -> None:
+    def __init__(self, store_group, *, project_root: Path | None = None) -> None:
         self._stores = store_group
         self._budget_config = ContextCompactionConfig.from_env()
+        self._memory_runtime = MemoryRuntimeService(
+            project_root or Path.cwd(),
+            store_group=store_group,
+        )
 
     async def build_task_context(
         self,
@@ -125,7 +147,12 @@ class AgentContextService:
             project=project,
             workspace=workspace,
         )
-        memory_hits, memory_scope_ids, degraded_reasons = await self._search_memory_hits(
+        (
+            memory_hits,
+            memory_scope_ids,
+            degraded_reasons,
+            memory_recall,
+        ) = await self._search_memory_hits(
             task=task,
             project=project,
             workspace=workspace,
@@ -136,10 +163,7 @@ class AgentContextService:
         if bootstrap.status is BootstrapSessionStatus.PENDING:
             degraded_reasons.append("bootstrap_pending")
 
-        recent_summary = (
-            session_state.rolling_summary.strip()
-            or compiled.summary_text.strip()
-        )
+        recent_summary = session_state.rolling_summary.strip() or compiled.summary_text.strip()
         (
             system_blocks,
             recent_summary,
@@ -164,6 +188,23 @@ class AgentContextService:
         )
         degraded_reasons.extend(prompt_budget_reasons)
         degraded_reason = "; ".join(dict.fromkeys(item for item in degraded_reasons if item))
+        memory_recall = {
+            **memory_recall,
+            "scope_ids": memory_scope_ids,
+            "hit_count": max(
+                int(memory_recall.get("hit_count", 0) or 0),
+                len(memory_hits),
+            ),
+            "delivered_hit_count": len(memory_hits),
+            "degraded_reasons": list(
+                dict.fromkeys(
+                    [
+                        *memory_recall.get("degraded_reasons", []),
+                        *degraded_reasons,
+                    ]
+                )
+            ),
+        }
         source_refs = self._build_source_refs(
             project=project,
             workspace=workspace,
@@ -199,6 +240,7 @@ class AgentContextService:
                 "final_prompt_tokens": delivery_tokens,
                 "max_prompt_tokens": self._budget_config.max_input_tokens,
                 "memory_scope_ids": memory_scope_ids,
+                "memory_recall": memory_recall,
                 "profile_scope": agent_profile.scope.value,
             },
             degraded_reason=degraded_reason,
@@ -312,6 +354,102 @@ class AgentContextService:
         await self._stores.agent_context_store.save_session_context(updated)
         await self._stores.conn.commit()
 
+    async def record_delayed_recall_state(
+        self,
+        *,
+        context_frame_id: str,
+        status: str,
+        request_artifact_id: str,
+        result_artifact_id: str = "",
+        schedule_reason: str = "",
+        recall: MemoryRecallResult | None = None,
+        error_summary: str = "",
+    ) -> None:
+        frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+        if frame is None:
+            return
+
+        budget = dict(frame.budget)
+        existing = dict(budget.get("delayed_recall", {}))
+        delayed_recall = {
+            **existing,
+            "status": status,
+            "request_artifact_ref": request_artifact_id,
+            "result_artifact_ref": result_artifact_id or existing.get("result_artifact_ref", ""),
+            "schedule_reason": schedule_reason or existing.get("schedule_reason", ""),
+            "error_summary": error_summary,
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+        }
+        if recall is not None:
+            delayed_recall.update(
+                {
+                    "query": recall.query,
+                    "scope_ids": list(recall.scope_ids),
+                    "hit_count": len(recall.hits),
+                    "backend": (
+                        recall.backend_status.active_backend
+                        if recall.backend_status is not None
+                        else ""
+                    ),
+                    "backend_state": (
+                        recall.backend_status.state.value
+                        if recall.backend_status is not None
+                        else ""
+                    ),
+                    "pending_replay_count": (
+                        recall.backend_status.pending_replay_count
+                        if recall.backend_status is not None
+                        else 0
+                    ),
+                    "degraded_reasons": list(recall.degraded_reasons),
+                }
+            )
+        budget["delayed_recall"] = delayed_recall
+
+        source_refs = self._append_source_refs(
+            frame.source_refs,
+            [
+                {
+                    "ref_type": "artifact",
+                    "ref_id": request_artifact_id,
+                    "label": "delayed-recall-request",
+                },
+                {
+                    "ref_type": "artifact",
+                    "ref_id": result_artifact_id,
+                    "label": "delayed-recall-result",
+                },
+            ],
+        )
+        await self._stores.agent_context_store.save_context_frame(
+            frame.model_copy(
+                update={
+                    "budget": budget,
+                    "source_refs": source_refs,
+                }
+            )
+        )
+        await self._stores.conn.commit()
+
+    async def resolve_project_scope(
+        self,
+        *,
+        task: Task,
+        surface: str,
+    ) -> tuple[Project | None, Workspace | None]:
+        return await self._resolve_project_scope(task=task, surface=surface)
+
+    async def get_memory_service(
+        self,
+        *,
+        project: Project | None,
+        workspace: Workspace | None,
+    ) -> MemoryService:
+        return await self._memory_runtime.memory_service_for_scope(
+            project=project,
+            workspace=workspace,
+        )
+
     async def _resolve_project_scope(
         self,
         *,
@@ -333,9 +471,7 @@ class AgentContextService:
             return None, None
 
         if workspace is None and selector is not None and selector.active_workspace_id:
-            candidate = await self._stores.project_store.get_workspace(
-                selector.active_workspace_id
-            )
+            candidate = await self._stores.project_store.get_workspace(selector.active_workspace_id)
             if candidate is not None and candidate.project_id == project.project_id:
                 workspace = candidate
         if workspace is None or workspace.project_id != project.project_id:
@@ -360,8 +496,7 @@ class AgentContextService:
                 scope=AgentProfileScope.SYSTEM,
                 name="OctoAgent",
                 persona_summary=(
-                    "你是 OctoAgent 主 Agent，保持连续上下文、"
-                    "优先说明事实并执行可落地的下一步。"
+                    "你是 OctoAgent 主 Agent，保持连续上下文、优先说明事实并执行可落地的下一步。"
                 ),
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
@@ -441,9 +576,7 @@ class AgentContextService:
             ),
             owner_profile_id=owner_profile.owner_profile_id,
             scope=(
-                OwnerOverlayScope.WORKSPACE
-                if workspace is not None
-                else OwnerOverlayScope.PROJECT
+                OwnerOverlayScope.WORKSPACE if workspace is not None else OwnerOverlayScope.PROJECT
             ),
             project_id=project.project_id,
             workspace_id=workspace.workspace_id if workspace is not None else "",
@@ -551,9 +684,7 @@ class AgentContextService:
         legacy_session_id = legacy_session_id_for_task(task)
         if legacy_session_id == session_id:
             return None
-        legacy_state = await self._stores.agent_context_store.get_session_context(
-            legacy_session_id
-        )
+        legacy_state = await self._stores.agent_context_store.get_session_context(legacy_session_id)
         if legacy_state is None or not session_state_matches_scope(
             legacy_state,
             task=task,
@@ -582,34 +713,56 @@ class AgentContextService:
         workspace: Workspace | None,
         agent_profile: AgentProfile,
         query: str,
-    ) -> tuple[list[MemorySearchHit], list[str], list[str]]:
+    ) -> tuple[list[MemoryRecallHit], list[str], list[str], dict[str, Any]]:
         scope_ids = await self._resolve_memory_scope_ids(
             task=task,
             project=project,
             workspace=workspace,
         )
         if not scope_ids or not query.strip():
-            return [], scope_ids, []
+            return [], scope_ids, [], {}
 
         try:
             await init_memory_db(self._stores.conn)
-            memory_service = MemoryService(self._stores.conn)
+            memory_service = await self.get_memory_service(
+                project=project,
+                workspace=workspace,
+            )
             policy = MemoryAccessPolicy.model_validate(agent_profile.memory_access_policy or {})
-            hits: list[MemorySearchHit] = []
-            seen: set[str] = set()
-            for scope_id in scope_ids[:2]:
-                current_hits = await memory_service.search_memory(
-                    scope_id=scope_id,
-                    query=query,
-                    policy=policy,
-                    limit=3,
-                )
-                for item in current_hits:
-                    if item.record_id in seen:
-                        continue
-                    hits.append(item)
-                    seen.add(item.record_id)
-            return hits[:4], scope_ids, []
+            recall = await memory_service.recall_memory(
+                scope_ids=scope_ids[:4],
+                query=query,
+                policy=policy,
+                per_scope_limit=3,
+                max_hits=4,
+                hook_options=build_default_memory_recall_hook_options(),
+            )
+            recall_meta = {
+                "query": recall.query,
+                "expanded_queries": recall.expanded_queries,
+                "scope_ids": list(recall.scope_ids),
+                "hit_count": len(recall.hits),
+                "degraded_reasons": list(recall.degraded_reasons),
+                "backend": (
+                    recall.backend_status.active_backend
+                    if recall.backend_status is not None
+                    else ""
+                ),
+                "backend_state": (
+                    recall.backend_status.state.value if recall.backend_status is not None else ""
+                ),
+                "pending_replay_count": (
+                    recall.backend_status.pending_replay_count
+                    if recall.backend_status is not None
+                    else 0
+                ),
+                "hook_trace": (
+                    recall.hook_trace.model_dump(mode="json")
+                    if recall.hook_trace is not None
+                    else {}
+                ),
+            }
+            return recall.hits, scope_ids, recall.degraded_reasons, recall_meta
         except Exception as exc:
             log.warning(
                 "agent_context_memory_degraded",
@@ -617,7 +770,7 @@ class AgentContextService:
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
-            return [], scope_ids, ["memory_unavailable"]
+            return [], scope_ids, ["memory_unavailable"], {}
 
     async def _resolve_memory_scope_ids(
         self,
@@ -653,7 +806,7 @@ class AgentContextService:
         owner_overlay: OwnerProfileOverlay | None,
         bootstrap: BootstrapSession,
         recent_summary: str,
-        memory_hits: list[MemorySearchHit],
+        memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
         dispatch_metadata: dict[str, str],
@@ -693,10 +846,12 @@ class AgentContextService:
                         "working_style_override: "
                         f"{truncate_chars(owner_overlay.working_style_override or 'N/A', 280)}\n"
                         "interaction_preferences_override: "
-                        f"{self._render_list(
-                            owner_overlay.interaction_preferences_override,
-                            max_chars=220,
-                        )}"
+                        f"{
+                            self._render_list(
+                                owner_overlay.interaction_preferences_override,
+                                max_chars=220,
+                            )
+                        }"
                     ),
                 }
             )
@@ -735,13 +890,23 @@ class AgentContextService:
                 {
                     "role": "system",
                     "content": (
-                        "MemoryHits:\n"
+                        "MemoryRecall:\n"
                         f"scopes: {', '.join(memory_scope_ids) or 'N/A'}\n"
                         + "\n".join(
                             (
                                 f"- [{item.partition.value}] "
                                 f"{truncate_chars(item.subject_key or item.record_id, 80)}: "
-                                f"{truncate_chars(item.summary, 220)}"
+                                f"{truncate_chars(item.summary, 180)}"
+                                + (
+                                    f"\n  citation: {truncate_chars(item.citation, 120)}"
+                                    if item.citation
+                                    else ""
+                                )
+                                + (
+                                    f"\n  preview: {truncate_chars(item.content_preview, 160)}"
+                                    if item.content_preview
+                                    else ""
+                                )
                             )
                             for item in memory_hits
                         )
@@ -772,11 +937,11 @@ class AgentContextService:
         owner_overlay: OwnerProfileOverlay | None,
         bootstrap: BootstrapSession,
         recent_summary: str,
-        memory_hits: list[MemorySearchHit],
+        memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
         dispatch_metadata: dict[str, str],
-    ) -> tuple[list[dict[str, str]], str, list[MemorySearchHit], list[str], int, int]:
+    ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]
         if recent_summary:
             summary_limits = list(
@@ -795,7 +960,7 @@ class AgentContextService:
         )
         include_runtime_options = [True, False]
 
-        best_result: tuple[list[dict[str, str]], str, list[MemorySearchHit], int, int] | None = None
+        best_result: tuple[list[dict[str, str]], str, list[MemoryRecallHit], int, int] | None = None
         best_tokens: int | None = None
 
         for include_runtime_context in include_runtime_options:
@@ -803,9 +968,7 @@ class AgentContextService:
                 trimmed_hits = memory_hits[:memory_limit]
                 for summary_limit in summary_limits:
                     trimmed_summary = (
-                        truncate_chars(recent_summary, summary_limit)
-                        if summary_limit > 0
-                        else ""
+                        truncate_chars(recent_summary, summary_limit) if summary_limit > 0 else ""
                     )
                     blocks = self._build_system_blocks(
                         project=project,
@@ -874,7 +1037,7 @@ class AgentContextService:
         owner_overlay: OwnerProfileOverlay | None,
         bootstrap: BootstrapSession,
         session_state: SessionContextState,
-        memory_hits: list[MemorySearchHit],
+        memory_hits: list[MemoryRecallHit],
     ) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = [
             {"ref_type": "task", "ref_id": task.task_id, "label": task.title},
@@ -924,14 +1087,20 @@ class AgentContextService:
                 "ref_type": "memory",
                 "ref_id": item.record_id,
                 "label": item.subject_key or item.partition.value,
-                "metadata": {"scope_id": item.scope_id},
+                "metadata": {
+                    "scope_id": item.scope_id,
+                    "citation": item.citation,
+                    "evidence_refs": [
+                        evidence.model_dump(mode="json") for evidence in item.evidence_refs
+                    ],
+                },
             }
             for item in memory_hits
         )
         return refs
 
     @staticmethod
-    def _memory_hit_payload(hit: MemorySearchHit) -> dict[str, Any]:
+    def _memory_hit_payload(hit: MemoryRecallHit) -> dict[str, Any]:
         return {
             "record_id": hit.record_id,
             "scope_id": hit.scope_id,
@@ -939,6 +1108,11 @@ class AgentContextService:
             "summary": hit.summary,
             "subject_key": hit.subject_key or "",
             "layer": hit.layer.value,
+            "search_query": hit.search_query,
+            "citation": hit.citation,
+            "content_preview": hit.content_preview,
+            "evidence_refs": [item.model_dump(mode="json") for item in hit.evidence_refs],
+            "derived_refs": list(hit.derived_refs),
             "metadata": dict(hit.metadata),
         }
 
@@ -949,6 +1123,25 @@ class AgentContextService:
             if item and item not in merged:
                 merged.append(item)
         return merged[-limit:]
+
+    @staticmethod
+    def _append_source_refs(
+        refs: list[dict[str, Any]],
+        new_refs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged = [dict(item) for item in refs if item.get("ref_id")]
+        seen = {(str(item.get("ref_type", "")), str(item.get("ref_id", ""))) for item in merged}
+        for item in new_refs:
+            ref_id = str(item.get("ref_id", "")).strip()
+            ref_type = str(item.get("ref_type", "")).strip()
+            if not ref_id or not ref_type:
+                continue
+            key = (ref_type, ref_id)
+            if key in seen:
+                continue
+            merged.append(dict(item))
+            seen.add(key)
+        return merged
 
     @staticmethod
     def _summarize_turns(*, latest_user_text: str, model_response: str) -> str:

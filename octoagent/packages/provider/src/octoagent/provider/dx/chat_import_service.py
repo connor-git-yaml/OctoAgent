@@ -51,6 +51,7 @@ from octoagent.memory import (
 from ulid import ULID
 
 from .backup_service import resolve_artifacts_dir, resolve_db_path, resolve_project_root
+from .memory_runtime_service import MemoryRuntimeService
 from .project_migration import ProjectWorkspaceMigrationService
 
 _AUDIT_TASK_ID = "ops-chat-import"
@@ -177,7 +178,10 @@ class ChatImportService:
             await init_chat_import_db(store_group.conn)
             import_store = SqliteChatImportStore(store_group.conn)
             memory_store = SqliteMemoryStore(store_group.conn)
-            memory_service = MemoryService(store_group.conn, store=memory_store)
+            memory_service = await self._resolve_memory_service(
+                store_group=store_group,
+                memory_store=memory_store,
+            )
 
             prepared = await self._processor.prepare_import(
                 store=import_store,
@@ -198,6 +202,28 @@ class ChatImportService:
                 raise_on_failure=raise_on_failure,
             )
             return report
+
+    async def _resolve_memory_service(
+        self,
+        *,
+        store_group: StoreGroup,
+        memory_store: SqliteMemoryStore,
+    ) -> MemoryService:
+        runtime = MemoryRuntimeService(
+            self._root,
+            store_group=store_group,
+            memory_store=memory_store,
+        )
+        project = await store_group.project_store.get_default_project()
+        workspace = (
+            await store_group.project_store.get_primary_workspace(project.project_id)
+            if project is not None
+            else None
+        )
+        return await runtime.memory_service_for_scope(
+            project=project,
+            workspace=workspace,
+        )
 
     async def _run_persistent_import(
         self,

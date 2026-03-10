@@ -34,6 +34,7 @@ from octoagent.gateway.services.mcp_registry import McpRegistryService, McpServe
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
+from octoagent.memory import EvidenceRef, MemoryPartition, WriteAction, init_memory_db
 from octoagent.tooling import ExecutionContext, ToolBroker, ToolProfile
 
 
@@ -184,6 +185,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "web.search",
             "browser.status",
             "memory.search",
+            "memory.recall",
         }.issubset(tool_names)
 
         spawn_tool = next(item for item in pack.tools if item.tool_name == "subagents.spawn")
@@ -379,6 +381,82 @@ async def test_web_search_tool_returns_parsed_results(
         await store_group.conn.close()
 
 
+async def test_memory_recall_tool_returns_structured_recall_pack(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        await init_memory_db(store_group.conn)
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        memory_service = await capability_pack._memory_runtime_service.memory_service_for_scope(
+            project=project,
+            workspace=workspace,
+        )
+        proposal = await memory_service.propose_write(
+            scope_id="chat:web:thread-memory",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.ADD,
+            subject_key="project.alpha.plan",
+            content="Alpha 拆解要先完成 memory resolver 接线。",
+            rationale="测试 recall tool",
+            confidence=0.91,
+            evidence_refs=[EvidenceRef(ref_id="artifact-alpha", ref_type="artifact")],
+        )
+        validation = await memory_service.validate_proposal(proposal.proposal_id)
+        assert validation.accepted is True
+        await memory_service.commit_memory(proposal.proposal_id)
+
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="执行 memory recall",
+                channel="web",
+                thread_id="thread-memory",
+                scope_id="chat:web:thread-memory",
+                idempotency_key="feature-032-memory-recall",
+            )
+        )
+        assert created is True
+
+        result = await tool_broker.execute(
+            "memory.recall",
+            {"query": "请继续推进 Alpha 拆解", "scope_id": "chat:web:thread-memory"},
+            ExecutionContext(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                caller="tests",
+                profile=ToolProfile.MINIMAL,
+            ),
+        )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["query"] == "请继续推进 Alpha 拆解"
+        assert payload["hits"]
+        assert payload["hits"][0]["record_id"]
+        assert payload["hits"][0]["citation"].startswith("memory://")
+        assert payload["hits"][0]["search_query"]
+        assert payload["hook_trace"]["post_filter_mode"] == "keyword_overlap"
+        assert payload["hook_trace"]["rerank_mode"] == "heuristic"
+        assert payload["hook_trace"]["delivered_count"] >= 1
+        assert payload["hits"][0]["metadata"]["recall_rerank_mode"] == "heuristic"
+        assert payload["backend_status"]["backend_id"] == memory_service.backend_id
+        assert payload["backend_status"]["active_backend"]
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
 async def test_browser_tools_persist_session_and_follow_clickable_refs(
     tmp_path: Path,
 ) -> None:
@@ -456,10 +534,13 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
         def client_factory(*args, **kwargs):
             return real_async_client(*args, transport=transport, **kwargs)
 
-        with patch(
-            "octoagent.gateway.services.capability_pack.httpx.AsyncClient",
-            new=client_factory,
-        ), bind_execution_context(runtime_context):
+        with (
+            patch(
+                "octoagent.gateway.services.capability_pack.httpx.AsyncClient",
+                new=client_factory,
+            ),
+            bind_execution_context(runtime_context),
+        ):
             opened = await tool_broker.execute(
                 "browser.open",
                 {"url": "https://example.com"},
@@ -499,6 +580,7 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
+
 
 async def test_subagent_management_tools_list_kill_and_steer_descendants(
     tmp_path: Path,

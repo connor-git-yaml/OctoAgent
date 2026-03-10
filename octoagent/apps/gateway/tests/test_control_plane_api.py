@@ -346,7 +346,49 @@ async def _seed_context_resources(app) -> None:
             owner_overlay_id="owner-overlay-default",
             bootstrap_session_id="bootstrap-default",
             recent_summary="控制面可以直接看到 recent summary。",
-            memory_hits=[{"record_id": "memory-1", "summary": "memory visible"}],
+            memory_hits=[
+                {
+                    "record_id": "memory-1",
+                    "summary": "memory visible",
+                    "search_query": "project alpha next step",
+                    "content_preview": "Owner confirmed project alpha still needs tests.",
+                    "citation": {
+                        "label": "project-alpha brief",
+                        "artifact_ref": "artifact-1",
+                    },
+                }
+            ],
+            budget={
+                "history_tokens": 128,
+                "system_tokens": 96,
+                "final_prompt_tokens": 256,
+                "memory_scope_ids": ["memory/project-alpha"],
+                "memory_recall": {
+                    "backend_id": "sqlite",
+                    "retrieval_backend": "sqlite",
+                    "search_query": "project alpha next step",
+                    "expanded_queries": [
+                        "project alpha next step",
+                        "project alpha brief",
+                    ],
+                    "scope_ids": ["memory/project-alpha"],
+                    "hit_count": 1,
+                },
+            },
+            source_refs=[
+                {
+                    "ref_type": "memory_scope",
+                    "ref_id": "memory/project-alpha",
+                    "label": "项目记忆 scope",
+                    "metadata": {"query": "project alpha next step"},
+                },
+                {
+                    "ref_type": "memory_record",
+                    "ref_id": "memory-1",
+                    "label": "project-alpha brief",
+                    "metadata": {"partition": "work"},
+                },
+            ],
         )
     )
     await store_group.conn.commit()
@@ -423,6 +465,18 @@ class TestControlPlaneApi:
         assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
             "context-frame-default"
         )
+        frame = payload["resources"]["context_continuity"]["frames"][0]
+        assert frame["project_id"]
+        assert frame["workspace_id"]
+        assert frame["memory_hit_count"] == 1
+        assert frame["memory_hits"][0]["search_query"] == "project alpha next step"
+        assert frame["memory_recall"]["backend_id"] == "sqlite"
+        assert frame["memory_recall"]["expanded_queries"] == [
+            "project alpha next step",
+            "project alpha brief",
+        ]
+        assert frame["budget"]["final_prompt_tokens"] == 256
+        assert frame["source_refs"][0]["ref_type"] == "memory_scope"
         sessions = payload["resources"]["sessions"]["sessions"]
         assert len(sessions) == 1
         assert sessions[0]["latest_message_summary"] == "control plane hello"
@@ -445,6 +499,10 @@ class TestControlPlaneApi:
         assert owner_resp.status_code == 200
         assert bootstrap_resp.status_code == 200
         assert context_resp.status_code == 200
+        context_payload = context_resp.json()
+        assert context_payload["resource_type"] == "context_continuity"
+        assert context_payload["frames"][0]["memory_recall"]["hit_count"] == 1
+        assert context_payload["frames"][0]["source_refs"][1]["ref_id"] == "memory-1"
 
     async def test_capability_refresh_action_invokes_refresh(
         self,

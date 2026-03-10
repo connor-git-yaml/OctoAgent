@@ -96,6 +96,45 @@ class ContextCompactionCompletedPayload(BaseModel):
     reason: str = Field(default="")
 
 
+class MemoryRecallScheduledPayload(BaseModel):
+    """delayed recall 已进入 durable carrier 的事件 payload。"""
+
+    context_frame_id: str = Field(default="")
+    query: str = Field(default="")
+    scope_ids: list[str] = Field(default_factory=list)
+    request_artifact_ref: str | None = Field(default=None)
+    initial_hit_count: int = Field(default=0, ge=0)
+    delivered_hit_count: int = Field(default=0, ge=0)
+    schedule_reason: str = Field(default="")
+    degraded_reasons: list[str] = Field(default_factory=list)
+
+
+class MemoryRecallCompletedPayload(BaseModel):
+    """delayed recall materialize 完成事件 payload。"""
+
+    context_frame_id: str = Field(default="")
+    query: str = Field(default="")
+    scope_ids: list[str] = Field(default_factory=list)
+    request_artifact_ref: str | None = Field(default=None)
+    result_artifact_ref: str | None = Field(default=None)
+    hit_count: int = Field(default=0, ge=0)
+    backend: str = Field(default="")
+    backend_state: str = Field(default="")
+    degraded_reasons: list[str] = Field(default_factory=list)
+
+
+class MemoryRecallFailedPayload(BaseModel):
+    """delayed recall materialize 失败事件 payload。"""
+
+    context_frame_id: str = Field(default="")
+    query: str = Field(default="")
+    scope_ids: list[str] = Field(default_factory=list)
+    request_artifact_ref: str | None = Field(default=None)
+    error_type: str = Field(default="")
+    error_message: str = Field(default="")
+    degraded_reasons: list[str] = Field(default_factory=list)
+
+
 class StateTransitionPayload(BaseModel):
     """STATE_TRANSITION 事件 payload"""
 

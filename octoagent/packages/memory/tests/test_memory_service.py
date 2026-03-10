@@ -1,11 +1,20 @@
 """MemoryService 测试。"""
 
+from datetime import UTC, datetime
+
 from octoagent.memory import (
     EvidenceRef,
     MemoryAccessDeniedError,
     MemoryAccessPolicy,
+    MemoryBackendState,
+    MemoryBackendStatus,
     MemoryLayer,
     MemoryPartition,
+    MemoryRecallHit,
+    MemoryRecallHookOptions,
+    MemoryRecallPostFilterMode,
+    MemoryRecallRerankMode,
+    MemorySearchHit,
     ProposalNotValidatedError,
     VaultAccessDecision,
     VaultAccessGrantStatus,
@@ -247,6 +256,198 @@ class TestMemoryService:
         assert flush.proposal is not None
         current = await memory_store.get_current_sor("work/project-x", "work.project-x.summary")
         assert current is None
+
+    async def test_recall_memory_expands_query_and_returns_citation(self, memory_service):
+        add = await memory_service.propose_write(
+            scope_id="work/project-x",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.ADD,
+            subject_key="project.alpha.plan",
+            content="Alpha 方案拆解要先完成 memory resolver 接线。",
+            rationale="记录长期执行约束",
+            confidence=0.92,
+            evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
+        )
+        validation = await memory_service.validate_proposal(add.proposal_id)
+        assert validation.accepted is True
+        await memory_service.commit_memory(add.proposal_id)
+
+        recall = await memory_service.recall_memory(
+            scope_ids=["work/project-x"],
+            query="请继续推进 Alpha 方案拆解",
+            policy=MemoryAccessPolicy(),
+            per_scope_limit=3,
+            max_hits=4,
+        )
+
+        assert recall.query == "请继续推进 Alpha 方案拆解"
+        assert recall.expanded_queries[:2] == [
+            "请继续推进 Alpha 方案拆解",
+            "Alpha 方案拆解",
+        ]
+        assert recall.backend_status is not None
+        assert recall.backend_status.active_backend == memory_service.backend_id
+        assert recall.hits
+        first = recall.hits[0]
+        assert first.record_id
+        assert first.search_query in recall.expanded_queries
+        assert first.citation == "memory://work/project-x/sor/project.alpha.plan"
+        assert "memory resolver" in first.content_preview
+
+    async def test_recall_memory_applies_post_filter_and_heuristic_rerank(
+        self,
+        memory_service,
+        monkeypatch,
+    ):
+        created_at = datetime(2026, 3, 10, tzinfo=UTC)
+
+        async def fake_search_memory(self, scope_id, *, query=None, policy=None, limit=20):
+            return [
+                MemorySearchHit(
+                    record_id="memory-beta",
+                    layer=MemoryLayer.FRAGMENT,
+                    scope_id=scope_id,
+                    partition=MemoryPartition.WORK,
+                    summary="Beta retrospective 关注缺陷收敛与发布回顾。",
+                    subject_key="project.beta.retrospective",
+                    created_at=created_at,
+                    metadata={},
+                ),
+                MemorySearchHit(
+                    record_id="memory-alpha",
+                    layer=MemoryLayer.SOR,
+                    scope_id=scope_id,
+                    partition=MemoryPartition.WORK,
+                    summary="Alpha 方案拆解要先完成 memory resolver 接线。",
+                    subject_key="project.alpha.plan",
+                    created_at=created_at,
+                    metadata={},
+                ),
+            ]
+
+        async def fake_get_backend_status(self):
+            return MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            )
+
+        async def fake_build_recall_hit(self, *, hit, policy):
+            citation = (
+                f"memory://{hit.scope_id}/{hit.layer.value}/"
+                f"{hit.subject_key or hit.record_id}"
+            )
+            return MemoryRecallHit(
+                record_id=hit.record_id,
+                layer=hit.layer,
+                scope_id=hit.scope_id,
+                partition=hit.partition,
+                summary=hit.summary,
+                subject_key=hit.subject_key or "",
+                search_query=str(hit.metadata.get("search_query", "")),
+                citation=citation,
+                content_preview=hit.summary,
+                metadata=dict(hit.metadata),
+                created_at=hit.created_at,
+            )
+
+        monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
+        monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
+        monkeypatch.setattr(type(memory_service), "_build_recall_hit", fake_build_recall_hit)
+
+        recall = await memory_service.recall_memory(
+            scope_ids=["work/project-x"],
+            query="请继续推进 Alpha 方案拆解",
+            policy=MemoryAccessPolicy(),
+            per_scope_limit=4,
+            max_hits=4,
+            hook_options=MemoryRecallHookOptions(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+            ),
+        )
+
+        assert [hit.record_id for hit in recall.hits] == ["memory-alpha"]
+        assert recall.hook_trace is not None
+        assert recall.hook_trace.post_filter_mode is MemoryRecallPostFilterMode.KEYWORD_OVERLAP
+        assert recall.hook_trace.rerank_mode is MemoryRecallRerankMode.HEURISTIC
+        assert recall.hook_trace.candidate_count == 2
+        assert recall.hook_trace.filtered_count == 1
+        assert recall.hook_trace.delivered_count == 1
+        assert recall.hook_trace.fallback_applied is False
+        assert "Alpha" in recall.hook_trace.focus_terms
+        assert recall.hits[0].metadata["recall_keyword_overlap"] >= 1
+        assert recall.hits[0].metadata["recall_rerank_mode"] == "heuristic"
+
+    async def test_recall_memory_post_filter_falls_back_when_all_candidates_are_filtered(
+        self,
+        memory_service,
+        monkeypatch,
+    ):
+        created_at = datetime(2026, 3, 10, tzinfo=UTC)
+
+        async def fake_search_memory(self, scope_id, *, query=None, policy=None, limit=20):
+            return [
+                MemorySearchHit(
+                    record_id="memory-beta",
+                    layer=MemoryLayer.FRAGMENT,
+                    scope_id=scope_id,
+                    partition=MemoryPartition.WORK,
+                    summary="Beta retrospective 关注缺陷收敛与发布回顾。",
+                    subject_key="project.beta.retrospective",
+                    created_at=created_at,
+                    metadata={},
+                )
+            ]
+
+        async def fake_get_backend_status(self):
+            return MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            )
+
+        async def fake_build_recall_hit(self, *, hit, policy):
+            citation = (
+                f"memory://{hit.scope_id}/{hit.layer.value}/"
+                f"{hit.subject_key or hit.record_id}"
+            )
+            return MemoryRecallHit(
+                record_id=hit.record_id,
+                layer=hit.layer,
+                scope_id=hit.scope_id,
+                partition=hit.partition,
+                summary=hit.summary,
+                subject_key=hit.subject_key or "",
+                search_query=str(hit.metadata.get("search_query", "")),
+                citation=citation,
+                content_preview=hit.summary,
+                metadata=dict(hit.metadata),
+                created_at=hit.created_at,
+            )
+
+        monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
+        monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
+        monkeypatch.setattr(type(memory_service), "_build_recall_hit", fake_build_recall_hit)
+
+        recall = await memory_service.recall_memory(
+            scope_ids=["work/project-x"],
+            query="请继续推进 Alpha 方案拆解",
+            policy=MemoryAccessPolicy(),
+            per_scope_limit=4,
+            max_hits=4,
+            hook_options=MemoryRecallHookOptions(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+            ),
+        )
+
+        assert [hit.record_id for hit in recall.hits] == ["memory-beta"]
+        assert "recall_post_filter_fallback" in recall.degraded_reasons
+        assert recall.hook_trace is not None
+        assert recall.hook_trace.candidate_count == 1
+        assert recall.hook_trace.filtered_count == 1
+        assert recall.hook_trace.fallback_applied is True
 
     async def test_vault_access_request_resolve_and_retrieval_audit(self, memory_service):
         request = await memory_service.create_vault_access_request(

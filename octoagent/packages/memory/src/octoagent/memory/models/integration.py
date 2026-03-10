@@ -20,6 +20,20 @@ class MemoryBackendState(StrEnum):
     RECOVERING = "recovering"
 
 
+class MemoryRecallPostFilterMode(StrEnum):
+    """Recall post-filter 模式。"""
+
+    NONE = "none"
+    KEYWORD_OVERLAP = "keyword_overlap"
+
+
+class MemoryRecallRerankMode(StrEnum):
+    """Recall rerank 模式。"""
+
+    NONE = "none"
+    HEURISTIC = "heuristic"
+
+
 class WriteProposalDraft(BaseModel):
     """由 ingest / maintenance / derived layer 产出的候选事实草案。"""
 
@@ -50,6 +64,59 @@ class MemoryBackendStatus(BaseModel):
     last_maintenance_at: datetime | None = None
     project_binding: str = Field(default="")
     index_health: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryRecallHit(BaseModel):
+    """面向 Agent/runtime 的 recall 命中结果。"""
+
+    record_id: str = Field(min_length=1)
+    layer: MemoryLayer
+    scope_id: str = Field(min_length=1)
+    partition: MemoryPartition
+    summary: str = Field(default="")
+    subject_key: str = Field(default="")
+    search_query: str = Field(default="")
+    citation: str = Field(default="")
+    content_preview: str = Field(default="")
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    derived_refs: list[str] = Field(default_factory=list)
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryRecallHookOptions(BaseModel):
+    """Recall hooks 输入。"""
+
+    post_filter_mode: MemoryRecallPostFilterMode = MemoryRecallPostFilterMode.NONE
+    rerank_mode: MemoryRecallRerankMode = MemoryRecallRerankMode.NONE
+    focus_terms: list[str] = Field(default_factory=list)
+    subject_hint: str = Field(default="")
+    min_keyword_overlap: int = Field(default=1, ge=1, le=8)
+
+
+class MemoryRecallHookTrace(BaseModel):
+    """Recall hooks 执行轨迹。"""
+
+    post_filter_mode: MemoryRecallPostFilterMode = MemoryRecallPostFilterMode.NONE
+    rerank_mode: MemoryRecallRerankMode = MemoryRecallRerankMode.NONE
+    focus_terms: list[str] = Field(default_factory=list)
+    subject_hint: str = Field(default="")
+    candidate_count: int = Field(default=0, ge=0)
+    filtered_count: int = Field(default=0, ge=0)
+    delivered_count: int = Field(default=0, ge=0)
+    fallback_applied: bool = Field(default=False)
+
+
+class MemoryRecallResult(BaseModel):
+    """一次 recall 的结构化结果。"""
+
+    query: str = Field(default="")
+    expanded_queries: list[str] = Field(default_factory=list)
+    scope_ids: list[str] = Field(default_factory=list)
+    hits: list[MemoryRecallHit] = Field(default_factory=list)
+    backend_status: MemoryBackendStatus | None = None
+    degraded_reasons: list[str] = Field(default_factory=list)
+    hook_trace: MemoryRecallHookTrace | None = None
 
 
 class MemorySyncBatch(BaseModel):

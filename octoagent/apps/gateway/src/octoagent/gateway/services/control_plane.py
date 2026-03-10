@@ -771,9 +771,15 @@ class ControlPlaneService:
                 context_frame_id=item.context_frame_id,
                 task_id=item.task_id,
                 session_id=item.session_id,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
                 agent_profile_id=item.agent_profile_id,
                 recent_summary=item.recent_summary,
                 memory_hit_count=len(item.memory_hits),
+                memory_hits=item.memory_hits,
+                memory_recall=dict(item.budget.get("memory_recall", {})),
+                budget=item.budget,
+                source_refs=item.source_refs,
                 degraded_reason=item.degraded_reason,
                 created_at=item.created_at,
             )
@@ -1065,7 +1071,10 @@ class ControlPlaneService:
                 reasons=["graph_runtime_projection_unavailable"],
             ),
             warnings=[
-                "当前视图仅展示 delegation preflight / skill pipeline runs，不代表 graph runtime 的真实执行步进。",
+                (
+                    "当前视图仅展示 delegation preflight / skill pipeline runs，"
+                    "不代表 graph runtime 的真实执行步进。"
+                ),
                 "graph runtime 细节目前仍需通过 execution console / session steps 查看。",
             ],
             capabilities=[

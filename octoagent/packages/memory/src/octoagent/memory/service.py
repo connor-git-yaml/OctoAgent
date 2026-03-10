@@ -1,6 +1,7 @@
 """Memory 领域服务。"""
 
 from datetime import UTC, datetime
+from typing import Any
 
 import aiosqlite
 import structlog
@@ -37,6 +38,12 @@ from .models import (
     MemoryMaintenanceCommandKind,
     MemoryMaintenanceRun,
     MemoryMaintenanceRunStatus,
+    MemoryRecallHit,
+    MemoryRecallHookOptions,
+    MemoryRecallHookTrace,
+    MemoryRecallPostFilterMode,
+    MemoryRecallRerankMode,
+    MemoryRecallResult,
     MemorySearchHit,
     MemorySyncBatch,
     ProposalNotValidatedError,
@@ -406,10 +413,7 @@ class MemoryService:
             self._pending_replay_count,
             persisted_pending,
         )
-        if (
-            persisted_pending > 0
-            and self._backend.backend_id != self._fallback_backend.backend_id
-        ):
+        if persisted_pending > 0 and self._backend.backend_id != self._fallback_backend.backend_id:
             updates["active_backend"] = self._fallback_backend.backend_id
             if status.state is MemoryBackendState.HEALTHY:
                 updates["state"] = MemoryBackendState.RECOVERING
@@ -441,6 +445,93 @@ class MemoryService:
             updates["active_backend"] = status.backend_id
 
         return status.model_copy(update=updates) if updates else status
+
+    async def recall_memory(
+        self,
+        *,
+        scope_ids: list[str],
+        query: str,
+        policy: MemoryAccessPolicy | None = None,
+        per_scope_limit: int = 3,
+        max_hits: int = 4,
+        hook_options: MemoryRecallHookOptions | None = None,
+    ) -> MemoryRecallResult:
+        """构建 recall pack，供 Agent/runtime 复用。"""
+
+        normalized_query = query.strip()
+        selected_scope_ids = [item.strip() for item in scope_ids if item and item.strip()]
+        normalized_hook_options = hook_options or MemoryRecallHookOptions()
+        hook_trace = self._initialize_recall_hook_trace(
+            query=normalized_query,
+            hook_options=normalized_hook_options,
+        )
+        if not normalized_query or not selected_scope_ids:
+            return MemoryRecallResult(
+                query=normalized_query,
+                expanded_queries=[],
+                scope_ids=selected_scope_ids,
+                hits=[],
+                backend_status=await self.get_backend_status(),
+                hook_trace=hook_trace,
+            )
+
+        policy = policy or MemoryAccessPolicy()
+        expanded_queries = self._expand_recall_queries(normalized_query)
+        backend_status = await self.get_backend_status()
+        degraded_reasons = self._recall_degraded_reasons(backend_status)
+        collected: list[tuple[int, int, int, MemorySearchHit]] = []
+        seen: set[str] = set()
+
+        for scope_index, scope_id in enumerate(selected_scope_ids):
+            for query_index, search_query in enumerate(expanded_queries):
+                hits = await self.search_memory(
+                    scope_id=scope_id,
+                    query=search_query,
+                    policy=policy,
+                    limit=max(1, per_scope_limit),
+                )
+                for ordinal, hit in enumerate(hits):
+                    if hit.record_id in seen:
+                        continue
+                    seen.add(hit.record_id)
+                    collected.append(
+                        (
+                            scope_index,
+                            query_index,
+                            ordinal,
+                            hit.model_copy(
+                                update={
+                                    "metadata": {
+                                        **hit.metadata,
+                                        "search_query": search_query,
+                                    }
+                                }
+                            ),
+                        )
+                    )
+
+        collected.sort(key=self._recall_sort_key)
+        selected_candidates, hook_trace = self._apply_recall_hooks(
+            collected=collected,
+            query=normalized_query,
+            max_hits=max_hits,
+            hook_options=normalized_hook_options,
+            degraded_reasons=degraded_reasons,
+        )
+        selected = [item[-1] for item in selected_candidates]
+        recall_hits: list[MemoryRecallHit] = []
+        for hit in selected:
+            recall_hits.append(await self._build_recall_hit(hit=hit, policy=policy))
+
+        return MemoryRecallResult(
+            query=normalized_query,
+            expanded_queries=expanded_queries,
+            scope_ids=selected_scope_ids,
+            hits=recall_hits,
+            backend_status=backend_status,
+            degraded_reasons=degraded_reasons,
+            hook_trace=hook_trace,
+        )
 
     async def list_derived_memory(
         self,
@@ -1236,8 +1327,7 @@ class MemoryService:
             if (
                 reconnect_run is not None
                 and reconnect_run.status is MemoryMaintenanceRunStatus.COMPLETED
-                and
-                status.state is MemoryBackendState.HEALTHY
+                and status.state is MemoryBackendState.HEALTHY
                 and pending_backlog == 0
             )
             else MemoryMaintenanceRunStatus.DEGRADED
@@ -1245,26 +1335,16 @@ class MemoryService:
         if run_status is MemoryMaintenanceRunStatus.COMPLETED:
             self._mark_backend_healthy()
         run = MemoryMaintenanceRun(
-            run_id=(
-                reconnect_run.run_id
-                if reconnect_run is not None
-                else str(ULID())
-            ),
+            run_id=(reconnect_run.run_id if reconnect_run is not None else str(ULID())),
             command_id=command.command_id,
             kind=command.kind,
             scope_id=command.scope_id,
             partition=command.partition,
             status=run_status,
             backend_used=self._backend.backend_id,
-            fragment_refs=(
-                reconnect_run.fragment_refs if reconnect_run is not None else []
-            ),
-            proposal_refs=(
-                reconnect_run.proposal_refs if reconnect_run is not None else []
-            ),
-            derived_refs=(
-                reconnect_run.derived_refs if reconnect_run is not None else []
-            ),
+            fragment_refs=(reconnect_run.fragment_refs if reconnect_run is not None else []),
+            proposal_refs=(reconnect_run.proposal_refs if reconnect_run is not None else []),
+            derived_refs=(reconnect_run.derived_refs if reconnect_run is not None else []),
             diagnostic_refs=[
                 *(reconnect_run.diagnostic_refs if reconnect_run is not None else []),
                 "memory:backend-status",
@@ -1424,6 +1504,360 @@ class MemoryService:
             limit=limit,
         )
 
+    async def _build_recall_hit(
+        self,
+        *,
+        hit: MemorySearchHit,
+        policy: MemoryAccessPolicy,
+    ) -> MemoryRecallHit:
+        preview = ""
+        evidence_refs: list[EvidenceRef] = []
+        derived_refs: list[str] = []
+        metadata = dict(hit.metadata)
+        try:
+            record = await self.get_memory(
+                hit.record_id,
+                layer=hit.layer,
+                policy=policy,
+            )
+            if record is not None:
+                if hasattr(record, "content"):
+                    preview = self._truncate_preview(str(getattr(record, "content", "")))
+                elif hasattr(record, "summary"):
+                    preview = self._truncate_preview(str(getattr(record, "summary", "")))
+        except MemoryAccessDeniedError:
+            preview = ""
+
+        try:
+            evidence = await self.resolve_memory_evidence(
+                MemoryEvidenceQuery(
+                    record_id=hit.record_id,
+                    layer=hit.layer,
+                    scope_id=hit.scope_id,
+                )
+            )
+            evidence_refs = [
+                EvidenceRef(ref_id=ref_id, ref_type="artifact")
+                for ref_id in evidence.artifact_refs[:6]
+            ]
+            evidence_refs.extend(
+                EvidenceRef(ref_id=ref_id, ref_type="fragment")
+                for ref_id in evidence.fragment_refs[:6]
+            )
+            derived_refs = evidence.derived_refs[:6]
+            metadata.setdefault("proposal_refs", evidence.proposal_refs[:6])
+            metadata.setdefault("maintenance_run_refs", evidence.maintenance_run_refs[:6])
+        except Exception as exc:
+            metadata.setdefault("evidence_error", str(exc))
+
+        citation = self._build_recall_citation(hit)
+        return MemoryRecallHit(
+            record_id=hit.record_id,
+            layer=hit.layer,
+            scope_id=hit.scope_id,
+            partition=hit.partition,
+            summary=hit.summary,
+            subject_key=hit.subject_key or "",
+            search_query=str(hit.metadata.get("search_query", "")),
+            citation=citation,
+            content_preview=preview,
+            evidence_refs=evidence_refs,
+            derived_refs=derived_refs,
+            created_at=hit.created_at,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def _initialize_recall_hook_trace(
+        cls,
+        *,
+        query: str,
+        hook_options: MemoryRecallHookOptions,
+    ) -> MemoryRecallHookTrace:
+        focus_terms, subject_hint = cls._resolve_recall_focus_terms(
+            query=query,
+            hook_options=hook_options,
+        )
+        return MemoryRecallHookTrace(
+            post_filter_mode=hook_options.post_filter_mode,
+            rerank_mode=hook_options.rerank_mode,
+            focus_terms=focus_terms,
+            subject_hint=subject_hint,
+        )
+
+    def _apply_recall_hooks(
+        self,
+        *,
+        collected: list[tuple[int, int, int, MemorySearchHit]],
+        query: str,
+        max_hits: int,
+        hook_options: MemoryRecallHookOptions,
+        degraded_reasons: list[str],
+    ) -> tuple[list[tuple[int, int, int, MemorySearchHit]], MemoryRecallHookTrace]:
+        candidates = list(collected)
+        trace = self._initialize_recall_hook_trace(query=query, hook_options=hook_options)
+        trace.candidate_count = len(candidates)
+        if not candidates:
+            return [], trace
+
+        annotated_candidates: list[tuple[int, int, int, MemorySearchHit]] = []
+        for candidate in candidates:
+            overlap = self._recall_keyword_overlap(candidate[-1], trace.focus_terms)
+            subject_score = self._recall_subject_match_score(candidate[-1], trace.subject_hint)
+            annotated_candidates.append(
+                self._annotate_recall_candidate(
+                    candidate,
+                    recall_keyword_overlap=overlap,
+                    recall_subject_match=subject_score,
+                )
+            )
+        candidates = annotated_candidates
+
+        if (
+            hook_options.post_filter_mode is MemoryRecallPostFilterMode.KEYWORD_OVERLAP
+            and trace.focus_terms
+        ):
+            filtered = [
+                candidate
+                for candidate in candidates
+                if int(candidate[-1].metadata.get("recall_keyword_overlap", 0) or 0)
+                >= hook_options.min_keyword_overlap
+            ]
+            trace.filtered_count = len(candidates) - len(filtered)
+            if filtered:
+                candidates = filtered
+            else:
+                trace.fallback_applied = True
+                if "recall_post_filter_fallback" not in degraded_reasons:
+                    degraded_reasons.append("recall_post_filter_fallback")
+
+        if hook_options.rerank_mode is MemoryRecallRerankMode.HEURISTIC and candidates:
+            candidates = self._rerank_recall_candidates(candidates)
+
+        bounded_max_hits = max(1, max_hits)
+        trace.delivered_count = min(len(candidates), bounded_max_hits)
+        return candidates[:bounded_max_hits], trace
+
+    @staticmethod
+    def _annotate_recall_candidate(
+        candidate: tuple[int, int, int, MemorySearchHit],
+        **metadata_updates: Any,
+    ) -> tuple[int, int, int, MemorySearchHit]:
+        scope_index, query_index, ordinal, hit = candidate
+        metadata = dict(hit.metadata)
+        metadata.update(metadata_updates)
+        return (
+            scope_index,
+            query_index,
+            ordinal,
+            hit.model_copy(update={"metadata": metadata}),
+        )
+
+    def _rerank_recall_candidates(
+        self,
+        candidates: list[tuple[int, int, int, MemorySearchHit]],
+    ) -> list[tuple[int, int, int, MemorySearchHit]]:
+        scored: list[tuple[float, tuple[int, int, int, MemorySearchHit]]] = []
+        for candidate in candidates:
+            score = self._recall_rerank_score(candidate)
+            scored.append(
+                (
+                    score,
+                    self._annotate_recall_candidate(
+                        candidate,
+                        recall_rerank_score=round(score, 4),
+                        recall_rerank_mode=MemoryRecallRerankMode.HEURISTIC.value,
+                    ),
+                )
+            )
+        scored.sort(
+            key=lambda item: (
+                -item[0],
+                *self._recall_sort_key(item[1]),
+            )
+        )
+        return [item[1] for item in scored]
+
+    @classmethod
+    def _resolve_recall_focus_terms(
+        cls,
+        *,
+        query: str,
+        hook_options: MemoryRecallHookOptions,
+    ) -> tuple[list[str], str]:
+        subject_hint = " ".join(hook_options.subject_hint.split()).strip()
+        focus_terms: list[str] = []
+        for value in [*hook_options.focus_terms, subject_hint, query]:
+            normalized = " ".join(str(value).split()).strip()
+            if not normalized:
+                continue
+            if normalized not in focus_terms:
+                focus_terms.append(normalized)
+            for keyword in cls._extract_recall_keywords(normalized):
+                if keyword not in focus_terms:
+                    focus_terms.append(keyword)
+        return focus_terms[:8], subject_hint
+
+    @classmethod
+    def _recall_keyword_overlap(cls, hit: MemorySearchHit, focus_terms: list[str]) -> int:
+        if not focus_terms:
+            return 0
+        parts = [
+            hit.summary,
+            hit.subject_key or "",
+        ]
+        normalized_text = " ".join(part.strip().lower() for part in parts if part.strip())
+        tokens = {
+            token.lower()
+            for token in cls._extract_recall_keywords(" ".join(parts))
+            if token.strip()
+        }
+        overlap = 0
+        for term in focus_terms:
+            normalized_term = term.strip().lower()
+            if not normalized_term:
+                continue
+            if normalized_term in tokens or normalized_term in normalized_text:
+                overlap += 1
+        return overlap
+
+    @classmethod
+    def _recall_subject_match_score(cls, hit: MemorySearchHit, subject_hint: str) -> int:
+        normalized_hint = subject_hint.strip().lower()
+        if not normalized_hint:
+            return 0
+        haystacks = [
+            (hit.subject_key or "").lower(),
+            hit.summary.lower(),
+        ]
+        if any(normalized_hint in value for value in haystacks if value):
+            return 2
+        hint_keywords = {
+            keyword.lower()
+            for keyword in cls._extract_recall_keywords(subject_hint)
+            if keyword.strip()
+        }
+        overlap = 0
+        for keyword in hint_keywords:
+            if any(keyword in value for value in haystacks if value):
+                overlap += 1
+        return 1 if overlap > 0 else 0
+
+    def _recall_rerank_score(
+        self,
+        candidate: tuple[int, int, int, MemorySearchHit],
+    ) -> float:
+        scope_index, query_index, ordinal, hit = candidate
+        overlap = int(hit.metadata.get("recall_keyword_overlap", 0) or 0)
+        subject_match = int(hit.metadata.get("recall_subject_match", 0) or 0)
+        layer_bonus = {
+            MemoryLayer.SOR: 24,
+            MemoryLayer.FRAGMENT: 16,
+            MemoryLayer.VAULT: 8,
+        }.get(hit.layer, 0)
+        scope_bonus = max(0, 8 - scope_index * 2)
+        query_bonus = max(0, 6 - query_index * 2)
+        ordinal_bonus = max(0, 4 - ordinal)
+        recency_bonus = max(
+            0.0,
+            min(
+                4.0,
+                (datetime.now(UTC) - hit.created_at).total_seconds() / -86400.0 + 4.0,
+            ),
+        )
+        return (
+            overlap * 100.0
+            + subject_match * 20.0
+            + layer_bonus
+            + scope_bonus
+            + query_bonus
+            + ordinal_bonus
+            + recency_bonus
+        )
+
+    @staticmethod
+    def _recall_sort_key(item: tuple[int, int, int, MemorySearchHit]) -> tuple[int, int, int, int]:
+        scope_index, query_index, ordinal, hit = item
+        layer_priority = {
+            MemoryLayer.SOR: 0,
+            MemoryLayer.FRAGMENT: 1,
+            MemoryLayer.VAULT: 2,
+        }.get(hit.layer, 9)
+        return scope_index, layer_priority, query_index, ordinal
+
+    @staticmethod
+    def _truncate_preview(text: str, limit: int = 240) -> str:
+        value = " ".join(text.split())
+        if len(value) <= limit:
+            return value
+        return value[:limit].rstrip() + "..."
+
+    @staticmethod
+    def _build_recall_citation(hit: MemorySearchHit) -> str:
+        subject = hit.subject_key or hit.record_id
+        return f"memory://{hit.scope_id}/{hit.layer.value}/{subject}"
+
+    @classmethod
+    def _expand_recall_queries(cls, query: str) -> list[str]:
+        normalized = " ".join(query.split()).strip()
+        if not normalized:
+            return []
+        keywords = cls._extract_recall_keywords(normalized)
+        candidates = [normalized]
+        if keywords:
+            candidates.append(" ".join(keywords[:3]))
+            candidates.extend(keywords[:3])
+        return list(dict.fromkeys(item for item in candidates if item))[:4]
+
+    @staticmethod
+    def _extract_recall_keywords(query: str) -> list[str]:
+        import re
+
+        candidates = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.:-]{1,}|[\u4e00-\u9fff]{2,12}", query)
+        stopwords = {
+            "请",
+            "继续",
+            "推进",
+            "一下",
+            "这个",
+            "那个",
+            "现在",
+            "当前",
+            "需要",
+            "帮我",
+            "我们",
+            "你们",
+            "问题",
+        }
+        cleaned: list[str] = []
+        for item in candidates:
+            token = re.sub(
+                r"^(?:请|继续|推进|一下|把|将|帮我|再|当前|这个|那个|关于|并且|需要|想要)+",
+                "",
+                item,
+            )
+            token = re.sub(
+                r"(?:请|继续|推进|一下|把|将|帮我|再|当前|这个|那个|关于|并且|需要|想要)+$",
+                "",
+                token,
+            )
+            token = token.strip()
+            if not token or token in stopwords or len(token) < 2:
+                continue
+            cleaned.append(token)
+        return list(dict.fromkeys(cleaned))
+
+    @staticmethod
+    def _recall_degraded_reasons(status: MemoryBackendStatus) -> list[str]:
+        reasons: list[str] = []
+        if status.state is not MemoryBackendState.HEALTHY:
+            reasons.append(f"memory_backend_{status.state.value}")
+        if status.pending_replay_count > 0:
+            reasons.append("memory_sync_backlog")
+        if status.failure_code:
+            reasons.append(status.failure_code.lower())
+        return reasons
+
     async def _probe_backend_recovery(self) -> bool:
         if self._backend.backend_id == self._fallback_backend.backend_id:
             self._mark_backend_healthy()
@@ -1459,12 +1893,8 @@ class MemoryService:
         return await self._store.count_pending_sync_backlog() > 0
 
     async def _should_force_fallback(self) -> bool:
-        return (
-            await self._has_pending_sync_backlog()
-            or (
-                self._backend_degraded
-                and not await self._probe_backend_recovery()
-            )
+        return await self._has_pending_sync_backlog() or (
+            self._backend_degraded and not await self._probe_backend_recovery()
         )
 
     def _mark_backend_healthy(self) -> None:
