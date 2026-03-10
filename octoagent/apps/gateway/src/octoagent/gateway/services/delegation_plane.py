@@ -155,6 +155,7 @@ class DelegationPlaneService:
                 "requested_worker_type": (
                     requested_worker_type.value if requested_worker_type is not None else ""
                 ),
+                "requested_tool_profile": request.tool_profile,
                 "parent_task_id": str(request.metadata.get("parent_task_id", "")),
                 "resume_from_node": request.resume_from_node or "",
                 "runtime_context": runtime_context.model_dump(mode="json"),
@@ -250,6 +251,7 @@ class DelegationPlaneService:
                     "tool_selection": selection.model_dump(mode="json"),
                     "pipeline_status": pipeline_run.status.value,
                     "pipeline_pause_reason": pipeline_run.pause_reason,
+                    "requested_tool_profile": request.tool_profile,
                 },
                 "updated_at": datetime.now(tz=UTC),
                 "completed_at": (

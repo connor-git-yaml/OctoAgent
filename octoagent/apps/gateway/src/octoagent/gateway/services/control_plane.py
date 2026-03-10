@@ -1438,6 +1438,7 @@ class ControlPlaneService:
                 runtime_summary={
                     "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
                     "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
+                    "requested_tool_profile": str(work.metadata.get("requested_tool_profile", "")),
                     "runtime_status": str(work.metadata.get("runtime_status", "")),
                 },
                 updated_at=work.updated_at,
@@ -1453,6 +1454,12 @@ class ControlPlaneService:
                         label="重试 Work",
                         action_id="work.retry",
                         enabled=work.status.value != "deleted",
+                    ),
+                    ControlPlaneCapability(
+                        capability_id="worker.review",
+                        label="评审 Worker 方案",
+                        action_id="worker.review",
+                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.split",
@@ -2151,6 +2158,10 @@ class ControlPlaneService:
             return await self._handle_work_cancel(request)
         if action_id == "work.retry":
             return await self._handle_work_retry(request)
+        if action_id == "worker.review":
+            return await self._handle_worker_review(request)
+        if action_id == "worker.apply":
+            return await self._handle_worker_apply(request)
         if action_id == "work.split":
             return await self._handle_work_split(request)
         if action_id == "work.merge":
@@ -2787,6 +2798,52 @@ class ControlPlaneService:
             target_refs=[ControlPlaneTargetRef(target_type="task", target_id=task_id)],
         )
 
+    async def _handle_worker_review(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if self._capability_pack_service is None:
+            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 不可用")
+        await self._get_work_in_scope(work_id)
+        plan = await self._capability_pack_service.review_worker_plan(
+            work_id=work_id,
+            objective=self._param_str(request.params, "objective"),
+        )
+        return self._completed_result(
+            request=request,
+            code="WORKER_REVIEW_READY",
+            message="已生成 Worker 评审方案。",
+            data={"plan": plan.model_dump(mode="json")},
+            resource_refs=[self._resource_ref("delegation_plane", "delegation:overview")],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_worker_apply(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        work_id = str(request.params.get("work_id", "")).strip()
+        raw_plan = request.params.get("plan")
+        if not work_id:
+            raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空")
+        if not isinstance(raw_plan, dict):
+            raise ControlPlaneActionError("WORKER_PLAN_REQUIRED", "plan 必须是 object")
+        if self._capability_pack_service is None:
+            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 不可用")
+        await self._get_work_in_scope(work_id)
+        result = await self._capability_pack_service.apply_worker_plan(
+            plan={**raw_plan, "work_id": work_id},
+            actor=request.actor.actor_id,
+        )
+        return self._completed_result(
+            request=request,
+            code="WORKER_PLAN_APPLIED",
+            message="已按批准的 Worker 方案执行。",
+            data=result,
+            resource_refs=[
+                self._resource_ref("delegation_plane", "delegation:overview"),
+                self._resource_ref("session_projection", "sessions:overview"),
+            ],
+            target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
     async def _handle_work_cancel(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
         work_id = str(request.params.get("work_id", "")).strip()
         if not work_id:
@@ -2857,6 +2914,7 @@ class ControlPlaneService:
 
         worker_type = self._param_str(request.params, "worker_type") or "general"
         target_kind = self._param_str(request.params, "target_kind") or "subagent"
+        tool_profile = self._param_str(request.params, "tool_profile") or "minimal"
         child_tasks: list[dict[str, Any]] = []
         for objective in parsed_objectives:
             message = NormalizedMessage(
@@ -2871,6 +2929,7 @@ class ControlPlaneService:
                     "parent_work_id": parent_work.work_id,
                     "requested_worker_type": worker_type,
                     "target_kind": target_kind,
+                    "tool_profile": tool_profile,
                     "spawned_by": "control_plane",
                 },
                 idempotency_key=f"control-plane-split:{parent_task.task_id}:{ULID()}",
@@ -2882,6 +2941,7 @@ class ControlPlaneService:
                     "created": created,
                     "thread_id": message.thread_id,
                     "objective": objective,
+                    "tool_profile": tool_profile,
                 }
             )
 
@@ -2894,6 +2954,7 @@ class ControlPlaneService:
                 "child_tasks": child_tasks,
                 "requested_worker_type": worker_type,
                 "target_kind": target_kind,
+                "tool_profile": tool_profile,
             },
             resource_refs=[
                 self._resource_ref("delegation_plane", "delegation:overview"),
@@ -5424,6 +5485,21 @@ class ControlPlaneService:
                     category="delegation",
                     telegram_aliases=["/work retry"],
                     telegram_supported=True,
+                ),
+                definition(
+                    "worker.review",
+                    "评审 Worker 方案",
+                    category="delegation",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["work_id"]},
+                ),
+                definition(
+                    "worker.apply",
+                    "应用 Worker 方案",
+                    category="delegation",
+                    risk_hint="high",
+                    approval_hint="operator",
+                    params_schema={"type": "object", "required": ["work_id", "plan"]},
                 ),
                 definition(
                     "work.split",

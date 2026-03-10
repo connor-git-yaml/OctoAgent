@@ -36,8 +36,13 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import StoreGroup
 from octoagent.policy.models import ApprovalDecision, ApprovalStatus
+from octoagent.protocol import (
+    build_task_message,
+    dispatch_envelope_from_task_message,
+)
 from ulid import ULID
 
+from .runtime_control import runtime_context_from_metadata
 from .task_service import TaskService
 from .worker_runtime import (
     WorkerCancellationRegistry,
@@ -480,6 +485,7 @@ class OrchestratorService:
             route_reason=envelope.route_reason,
             gate_decision=gate_decision,
         )
+        envelope = self._normalize_dispatch_via_a2a(envelope, work_id=work_id)
 
         worker = self._workers.get(envelope.worker_capability)
         if worker is None:
@@ -573,6 +579,34 @@ class OrchestratorService:
             await self._ensure_task_failed(task_id, trace_id, result.summary)
 
         return result
+
+    def _normalize_dispatch_via_a2a(
+        self,
+        envelope: DispatchEnvelope,
+        *,
+        work_id: str,
+    ) -> DispatchEnvelope:
+        context_id = work_id or envelope.task_id
+        message = build_task_message(
+            envelope,
+            context_id=context_id,
+            to_agent=f"agent://{envelope.worker_capability}",
+        )
+        restored = dispatch_envelope_from_task_message(message)
+        restored_runtime_context = envelope.runtime_context or runtime_context_from_metadata(
+            restored.metadata
+        )
+        return restored.model_copy(
+            update={
+                "runtime_context": restored_runtime_context,
+                "metadata": {
+                    **restored.metadata,
+                    "a2a_message_id": message.message_id,
+                    "a2a_context_id": message.context_id,
+                    "a2a_to_agent": message.to_agent,
+                },
+            }
+        )
 
     async def _write_orch_decision_event(
         self,

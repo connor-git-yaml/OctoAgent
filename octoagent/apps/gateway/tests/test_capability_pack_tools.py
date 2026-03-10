@@ -19,6 +19,7 @@ from octoagent.core.models import (
     OrchestratorRequest,
     Project,
     ProjectSelectorState,
+    WorkerType,
     Workspace,
 )
 from octoagent.core.store import create_store_group
@@ -171,6 +172,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert len(pack.tools) >= 20
         assert {
             "project.inspect",
+            "workers.review",
             "subagents.spawn",
             "subagents.list",
             "subagents.kill",
@@ -202,6 +204,9 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
 
         tts_tool = next(item for item in pack.tools if item.tool_name == "tts.speak")
         assert tts_tool.availability.value in {"available", "install_required"}
+
+        general_profile = capability_pack.get_worker_profile(WorkerType.GENERAL)
+        assert general_profile.default_tool_groups == ["project", "session", "supervision"]
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -842,6 +847,77 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
         assert {item.parent_work_id for item in child_works} == {plan.work.work_id}
         assert {item.selected_worker_type.value for item in child_works} == {"research"}
         assert {item.target_kind.value for item in child_works} == {"subagent"}
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请先调研 API，再补代码和测试",
+                idempotency_key="feature-039-workers-review",
+            )
+        )
+        assert created is True
+
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请先调研 API，再补代码和测试",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-039-review",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.MINIMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "workers.review",
+                {"objective": "先调研 API，再补代码和测试"},
+                broker_context,
+            )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["proposal_kind"] == "split"
+        assert len(payload["assignments"]) >= 2
+        assert {item["worker_type"] for item in payload["assignments"]} >= {"research", "dev"}
+        assert {item["tool_profile"] for item in payload["assignments"]} >= {
+            "minimal",
+            "standard",
+        }
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

@@ -2721,6 +2721,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；但最终签收仍待 033 关闭 context continuity gate。
 - 2026-03-09 设计复核新增 Feature 033：当前主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；这不是 M4 体验项，而是 M3 live cutover 前的主链补位。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
+- 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 live A2A dispatch 归一化。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
@@ -2791,26 +2792,39 @@ M3 核心对象关系（2026-03-08 补充）：
 - 吸收了 Agent Zero 的 recall 组装与 delayed recall 时机经验，也吸收 OpenClaw 的 deterministic expansion / rerank 思路，但没有回退到单一可变 index、进程内临时任务或无治理脚本落地
 - 038 的完成意味着 MemU / backend resolver 不再只是 console 侧可见能力，而是真实进入主 Agent / tool / import 的运行链，并且 recall 质量层具备可观测、可回退、可审计的默认 hook
 
-### M4（体验深化与多端增强）：工作台 / 语音 / 远程陪伴（后续）
+### M4（引导式工作台 / Setup Governance / Runtime Safety / Supervisor）
 
-- 本阶段聚焦“把已经 user-ready 的 M3 做得更丰富、更顺手、更有陪伴感”，而不是补 M3 主闭环缺口
-- [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
+- 本阶段聚焦 032 之后这一轮“可用性 / 串联 / 安全性 / 三层结构”升级，不再把语音、companion、通知中心混在当前里程碑里
+- 033 仍是 M3 carry-forward blocker，038 是已完成的 M3 carry-forward；它们服务 M4，但不改写当前 M4 feature 编号面
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
-- [ ] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced`，图形化配置主 Agent / Work / Memory / Channels，直接消费 015/017/025/026/027/030/033/034 contract）
-- [ ] Feature 036：Guided Setup Governance（把 `Provider / Channel / Agent Profile / 权限 / Tools / Skills` 的初始化配置与默认治理收口为 canonical setup flow，复用 015/025/026/030/035，不得新造平行 backend）
+- [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
+- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地 shell 和主页面骨架；仍待 036 setup、033 provenance、034 evidence 继续接入）
+- [~] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / agent_profile.save / policy_profile.select` 已落地；仍待 `setup.apply`、`skills.selection.save`、CLI/Web 汇流）
+- [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
+- [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（主 Agent 默认 supervisor only、`workers.review`、`worker.review/apply`、child work `requested_tool_profile`、live A2A roundtrip）
+- [ ] Feature 040：M4 Guided Experience Integration Acceptance（串联 `setup -> workbench -> chat -> worker review/apply -> memory -> operator path`，形成 M4 release gate）
+
+M4 约束：
+
+- M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
+- 上下文压缩与 runtime lineage 类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
+- 主 Agent 默认必须是 supervisor；具体执行面由 `research / dev / ops / subagent / graph` 承担，不再把 web/browser/code 等工具默认挂在主 Agent 身上
+- live dispatch 必须真的经过 A2A 归一化，并保留 runtime context / work lineage；不能只有 A2A adapter 或测试样例
+- 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
+- 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
+- 035/036/040 必须显式处理 033 未完成时的 degraded 状态；不能把缺失的 context continuity 静默隐藏
+
+### M5（文件工作台 / 语音多模态 / Companion / Attention）
+
 - [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
 - [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
 - [ ] Progressive Web App / companion surfaces / remote tunnel polish
 - [ ] 更完整的通知中心与 attention model（提醒、升级提示、后台任务完成通知、多端同步提示）
 
-M4 约束：
+M5 说明：
 
-- M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
-- 上下文压缩类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
-- 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
-- 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
-- 文件工作台优先服务 artifacts / configs / generated files / project workspace，不以“内建 IDE”作为第一目标
-- 语音、PWA、remote access 等增强能力不得破坏现有 secret / approval / audit / device trust 边界
+- 这些内容原先放在 M4，但在当前升级波次里不是阻塞用户可用、也不是阻塞三层结构成立的核心项
+- M5 建立在 035/036/039/040 收口完成之后推进，避免继续把“入口闭环”和“未来表面增强”混在同一阶段
 
 ---
 

@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from octoagent.core.models import RiskLevel, WorkerExecutionStatus
+from octoagent.core.models import (
+    DispatchEnvelope,
+    RiskLevel,
+    RuntimeControlContext,
+    WorkerExecutionStatus,
+    WorkerResult,
+)
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
@@ -57,6 +63,91 @@ class TestOrchestrator:
         assert "ORCH_DECISION" in event_types
         assert "WORKER_DISPATCHED" in event_types
         assert "WORKER_RETURNED" in event_types
+
+        await store_group.conn.close()
+
+    async def test_dispatch_prepared_roundtrips_through_a2a_and_restores_runtime_context(
+        self, tmp_path: Path
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "orchestrator-a2a.db"),
+            str(tmp_path / "artifacts-a2a"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+
+        seen: dict[str, DispatchEnvelope] = {}
+
+        class _CaptureWorker:
+            worker_id = "worker.capture"
+            capability = "llm_generation"
+
+            async def handle(self, envelope: DispatchEnvelope) -> WorkerResult:
+                seen["envelope"] = envelope
+                return WorkerResult(
+                    dispatch_id=envelope.dispatch_id,
+                    task_id=envelope.task_id,
+                    worker_id=self.worker_id,
+                    status=WorkerExecutionStatus.SUCCEEDED,
+                    retryable=False,
+                    summary="captured",
+                    tool_profile=envelope.tool_profile,
+                )
+
+        orchestrator = OrchestratorService(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=LLMService(),
+            workers={"llm_generation": _CaptureWorker()},
+        )
+
+        msg = NormalizedMessage(text="capture a2a", idempotency_key="f008-orch-a2a")
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+
+        envelope = DispatchEnvelope(
+            dispatch_id="dispatch-a2a",
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            contract_version="1.0",
+            route_reason="worker_type=general",
+            worker_capability="llm_generation",
+            hop_count=1,
+            max_hops=3,
+            user_text=msg.text,
+            model_alias="main",
+            tool_profile="minimal",
+            runtime_context=RuntimeControlContext(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                session_id="session-a2a",
+                project_id="project-default",
+                workspace_id="workspace-default",
+                tool_profile="minimal",
+                work_id="work-a2a",
+            ),
+            metadata={
+                "work_id": "work-a2a",
+                "runtime_context_json": RuntimeControlContext(
+                    task_id=task_id,
+                    trace_id=f"trace-{task_id}",
+                    session_id="session-a2a",
+                    project_id="project-default",
+                    workspace_id="workspace-default",
+                    tool_profile="minimal",
+                    work_id="work-a2a",
+                ).model_dump_json(),
+            },
+        )
+
+        result = await orchestrator.dispatch_prepared(envelope)
+        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        captured = seen["envelope"]
+        assert captured.metadata["a2a_message_id"] == "dispatch-a2a"
+        assert captured.metadata["a2a_context_id"] == "work-a2a"
+        assert captured.metadata["a2a_to_agent"] == "agent://llm_generation"
+        assert captured.runtime_context is not None
+        assert captured.runtime_context.session_id == "session-a2a"
 
         await store_group.conn.close()
 

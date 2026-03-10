@@ -2,9 +2,9 @@
 feature_id: "035"
 title: "Guided User Workbench + Visual Config Center"
 milestone: "M4"
-status: "Planned"
+status: "In Progress"
 created: "2026-03-09"
-updated: "2026-03-09"
+updated: "2026-03-10"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md §8.10 M4；docs/m4-feature-split.md；Feature 015 / 017 / 025 / 026 / 027 / 030 / 033 / 034；OpenClaw wizard / dashboard / Control UI；Agent Zero projects / settings / memory dashboard"
 predecessor: "Feature 015（Onboard + Doctor）、Feature 017（Operator Inbox）、Feature 025（Project / Workspace / Secret / Wizard）、Feature 026（Control Plane Contract）、Feature 027（Memory Console）、Feature 030（Capability Pack / Delegation Plane）、Feature 031（M3 Acceptance）"
@@ -15,8 +15,8 @@ parallel_dependency: "Feature 033 提供主 Agent profile/context provenance can
 
 **Feature Branch**: `codex/feat-035-guided-user-workbench`  
 **Created**: 2026-03-09  
-**Updated**: 2026-03-09  
-**Status**: Planned  
+**Updated**: 2026-03-10
+**Status**: In Progress
 **Input**: 把当前偏 operator/resource 的 Web 控制台，演进成真正面向小白用户的图形化工作台；支持图形化配置主 Agent / Work / Memory / Channels，并把聊天、任务、审批、记忆和高级控制面组织成连续的产品路径，而不是继续要求用户理解底层术语和 CLI 顺序。  
 **编号说明**: 用户口头要求“整理成 Feature 034”，但仓库中 `034-context-compression-main-worker` 已存在且已实现；为保持 traceability，本次按下一个可用编号 `035` 建档，并把 Feature 034 作为直接依赖输入，而不是覆盖。  
 **调研基础**: `research/product-research.md`、`research/tech-research.md`、`research/online-research.md`、`research/research-synthesis.md`

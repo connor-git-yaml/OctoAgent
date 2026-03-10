@@ -480,6 +480,7 @@ class TaskRunner:
                 model_alias=model_alias,
                 resume_from_node=resume_from_node,
                 resume_state_snapshot=resume_state_snapshot,
+                tool_profile=str(metadata.get("tool_profile", "standard")).strip() or "standard",
                 metadata=metadata,
             )
         else:

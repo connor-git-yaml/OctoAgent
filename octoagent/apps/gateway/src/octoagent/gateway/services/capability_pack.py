@@ -78,6 +78,28 @@ class _BuiltinSkillOutput(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class _WorkerPlanAssignment(BaseModel):
+    objective: str = Field(min_length=1)
+    worker_type: str = Field(default="research")
+    target_kind: str = Field(default="subagent")
+    tool_profile: str = Field(default="minimal")
+    title: str = Field(default="")
+    reason: str = Field(default="")
+
+
+class _WorkerPlanProposal(BaseModel):
+    plan_id: str = Field(min_length=1)
+    work_id: str = Field(default="")
+    task_id: str = Field(default="")
+    proposal_kind: str = Field(default="split")
+    objective: str = Field(default="")
+    summary: str = Field(default="")
+    requires_user_confirmation: bool = True
+    assignments: list[_WorkerPlanAssignment] = Field(default_factory=list)
+    merge_candidate_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 _WORK_TERMINAL_VALUES = {
     WorkStatus.SUCCEEDED.value,
     WorkStatus.FAILED.value,
@@ -415,6 +437,146 @@ class CapabilityPackService:
             },
         }
 
+    async def review_worker_plan(
+        self,
+        *,
+        work_id: str,
+        objective: str = "",
+    ) -> _WorkerPlanProposal:
+        if self._delegation_plane is None:
+            raise RuntimeError("delegation plane is not bound for worker review")
+        work = await self._stores.work_store.get_work(work_id)
+        if work is None:
+            raise RuntimeError(f"work not found: {work_id}")
+        task = await self._stores.task_store.get_task(work.task_id)
+        if task is None:
+            raise RuntimeError(f"task not found for work: {work.task_id}")
+        descendants = await self._delegation_plane.list_descendant_works(work_id)
+        proposal_objective = objective.strip() or work.title or task.title
+        fragments = self._split_worker_objectives(proposal_objective)
+        if not fragments:
+            fragments = [proposal_objective or "review current work and propose next action"]
+
+        active_descendants = [
+            item for item in descendants if item.status.value not in _WORK_TERMINAL_VALUES
+        ]
+        terminal_descendants = [
+            item for item in descendants if item.status.value in _WORK_TERMINAL_VALUES
+        ]
+        if (
+            descendants
+            and not objective.strip()
+            and terminal_descendants
+            and not active_descendants
+        ):
+            proposal_kind = "merge"
+        elif descendants and objective.strip():
+            proposal_kind = "repartition"
+        else:
+            proposal_kind = "split"
+
+        assignments = (
+            [
+                self._build_worker_assignment(item, index=index)
+                for index, item in enumerate(fragments, 1)
+            ]
+            if proposal_kind in {"split", "repartition"}
+            else []
+        )
+        warnings: list[str] = []
+        if proposal_kind == "merge" and active_descendants:
+            warnings.append("仍有 child works 在运行，当前不能直接 merge。")
+        if proposal_kind == "repartition" and active_descendants:
+            warnings.append("apply 时会先取消当前仍在运行的 child works，再按新计划重划分。")
+        if not descendants and proposal_kind == "merge":
+            warnings.append("当前 work 还没有 child works，merge 不会生效。")
+
+        summary = {
+            "merge": "建议合并已完成的 child works，并回收当前父 work。",
+            "repartition": "建议先收拢现有 child works，再按新计划重新划分 worker。",
+            "split": "建议按可执行子任务拆分给具体 worker，而不是让主 Agent 直接动手。",
+        }[proposal_kind]
+        return _WorkerPlanProposal(
+            plan_id=str(ULID()),
+            work_id=work.work_id,
+            task_id=work.task_id,
+            proposal_kind=proposal_kind,
+            objective=proposal_objective,
+            summary=summary,
+            assignments=assignments,
+            merge_candidate_ids=[item.work_id for item in terminal_descendants],
+            warnings=warnings,
+        )
+
+    async def apply_worker_plan(
+        self,
+        *,
+        plan: dict[str, Any] | _WorkerPlanProposal,
+        actor: str = "control_plane",
+    ) -> dict[str, Any]:
+        if self._delegation_plane is None:
+            raise RuntimeError("delegation plane is not bound for worker apply")
+        if self._task_runner is None:
+            raise RuntimeError("task runner is not bound for worker apply")
+        proposal = (
+            plan
+            if isinstance(plan, _WorkerPlanProposal)
+            else _WorkerPlanProposal.model_validate(plan)
+        )
+        work = await self._stores.work_store.get_work(proposal.work_id)
+        if work is None:
+            raise RuntimeError(f"work not found: {proposal.work_id}")
+        task = await self._stores.task_store.get_task(work.task_id)
+        if task is None:
+            raise RuntimeError(f"task not found for work: {work.task_id}")
+
+        descendants = await self._delegation_plane.list_descendant_works(work.work_id)
+        cancelled_work_ids: list[str] = []
+        if proposal.proposal_kind == "repartition":
+            for child in descendants:
+                if child.status.value in _WORK_TERMINAL_VALUES:
+                    continue
+                await self._task_runner.cancel_task(child.task_id)
+                await self._delegation_plane.cancel_work(
+                    child.work_id,
+                    reason=f"worker_review_repartition:{actor}",
+                )
+                cancelled_work_ids.append(child.work_id)
+        if proposal.proposal_kind == "merge":
+            merged = await self._delegation_plane.merge_work(
+                work.work_id,
+                summary=f"worker review approved by {actor}",
+            )
+            return {
+                "plan_id": proposal.plan_id,
+                "proposal_kind": proposal.proposal_kind,
+                "cancelled_work_ids": cancelled_work_ids,
+                "child_tasks": [],
+                "merged_work": None if merged is None else merged.model_dump(mode="json"),
+            }
+
+        child_tasks = [
+            await self._launch_child_task(
+                parent_task=task,
+                parent_work=work,
+                objective=item.objective,
+                worker_type=item.worker_type,
+                target_kind=item.target_kind,
+                tool_profile=item.tool_profile,
+                title=item.title,
+                spawned_by="worker_review_apply",
+                plan_id=proposal.plan_id,
+            )
+            for item in proposal.assignments
+        ]
+        return {
+            "plan_id": proposal.plan_id,
+            "proposal_kind": proposal.proposal_kind,
+            "cancelled_work_ids": cancelled_work_ids,
+            "child_tasks": child_tasks,
+            "merged_work": None,
+        }
+
     def build_skill_registry_document(self) -> list[BundledSkillDefinition]:
         if self._pack is None:
             return []
@@ -503,42 +665,23 @@ class CapabilityPackService:
             objective: str,
             worker_type: str,
             target_kind: str,
+            tool_profile: str = "minimal",
             title: str = "",
         ) -> dict[str, Any]:
-            if self._task_runner is None:
-                raise RuntimeError("task runner is not bound for child task launch")
-            _, context, parent_task = await _current_parent()
-            child_id = str(ULID())
-            child_thread_id = f"{parent_task.thread_id}:child:{child_id[:8]}"
-            child_message = NormalizedMessage(
-                channel=parent_task.requester.channel,
-                thread_id=child_thread_id,
-                scope_id=parent_task.scope_id,
-                sender_id=parent_task.requester.sender_id,
-                sender_name=parent_task.requester.sender_id or "owner",
-                text=objective,
-                metadata={
-                    "parent_task_id": parent_task.task_id,
-                    "parent_work_id": context.work_id,
-                    "requested_worker_type": worker_type,
-                    "target_kind": target_kind,
-                    "spawned_by": "builtin_tool",
-                    "child_title": title,
-                },
-                idempotency_key=f"builtin-child:{parent_task.task_id}:{child_id}",
+            context, parent_task = await _current_work_context()
+            parent_work = await store_group.work_store.get_work(context.work_id)
+            if parent_work is None:
+                raise RuntimeError(f"current work not found: {context.work_id}")
+            return await self._launch_child_task(
+                parent_task=parent_task,
+                parent_work=parent_work,
+                objective=objective,
+                worker_type=worker_type,
+                target_kind=target_kind,
+                tool_profile=tool_profile,
+                title=title,
+                spawned_by="builtin_tool",
             )
-            task_id, created = await self._task_runner.launch_child_task(child_message)
-            return {
-                "task_id": task_id,
-                "created": created,
-                "thread_id": child_thread_id,
-                "target_kind": target_kind,
-                "worker_type": worker_type,
-                "parent_task_id": parent_task.task_id,
-                "parent_work_id": context.work_id,
-                "title": title,
-                "objective": objective,
-            }
 
         async def _descendant_works_for_current_context() -> tuple[Any, list[Any]]:
             if self._delegation_plane is None:
@@ -692,7 +835,7 @@ class CapabilityPackService:
             name="work.inspect",
             side_effect_level=SideEffectLevel.NONE,
             tool_profile=ToolProfile.MINIMAL,
-            tool_group="delegation",
+            tool_group="supervision",
             tags=["work", "delegation", "ownership"],
             worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://work.inspect",
@@ -843,6 +986,9 @@ class CapabilityPackService:
                 objective=objective,
                 worker_type=worker_type,
                 target_kind=target_kind,
+                tool_profile=self._tool_profile_for_worker_type(
+                    self._coerce_worker_type_name(worker_type)
+                ),
                 title=title,
             )
             return json.dumps(payload, ensure_ascii=False)
@@ -851,7 +997,7 @@ class CapabilityPackService:
             name="subagents.list",
             side_effect_level=SideEffectLevel.NONE,
             tool_profile=ToolProfile.MINIMAL,
-            tool_group="delegation",
+            tool_group="supervision",
             tags=["subagent", "list", "delegation"],
             worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://subagents.list",
@@ -996,6 +1142,29 @@ class CapabilityPackService:
             )
 
         @tool_contract(
+            name="workers.review",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="supervision",
+            tags=["worker", "review", "governance"],
+            worker_types=["general", "ops"],
+            manifest_ref="builtin://workers.review",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def workers_review(objective: str = "") -> str:
+            """评审当前 work 的 worker 划分建议，但不直接执行。"""
+
+            context, _task = await _current_work_context()
+            plan = await self.review_worker_plan(
+                work_id=context.work_id,
+                objective=objective,
+            )
+            return json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
+
+        @tool_contract(
             name="work.split",
             side_effect_level=SideEffectLevel.REVERSIBLE,
             tool_profile=ToolProfile.STANDARD,
@@ -1023,6 +1192,9 @@ class CapabilityPackService:
                     objective=item,
                     worker_type=worker_type,
                     target_kind=target_kind,
+                    tool_profile=self._tool_profile_for_worker_type(
+                        self._coerce_worker_type_name(worker_type)
+                    ),
                 )
                 for item in items
             ]
@@ -1845,6 +2017,7 @@ class CapabilityPackService:
             subagents_list,
             subagents_kill,
             subagents_steer,
+            workers_review,
             work_split,
             work_merge,
             work_delete,
@@ -1926,7 +2099,7 @@ class CapabilityPackService:
                 capabilities=["llm_generation", "general"],
                 default_model_alias="main",
                 default_tool_profile="minimal",
-                default_tool_groups=["project", "session", "network", "browser", "memory", "mcp"],
+                default_tool_groups=["project", "session", "supervision"],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
             ),
@@ -2005,7 +2178,13 @@ class CapabilityPackService:
                 file_id="bootstrap:general",
                 path_hint="bootstrap/general.md",
                 applies_to_worker_types=[WorkerType.GENERAL],
-                content="你是 general worker，负责单 worker / fallback 路径。",
+                content=(
+                    "你是主 Agent / supervisor worker。\n"
+                    "你的职责是评审当前 work、提出 worker 拆分或重划分建议，"
+                    "并在用户同意后交给具体 worker。\n"
+                    "不要自己承担 web/browser/code 等具体执行工作；"
+                    "优先用 workers.review 形成计划，再让 research/dev/ops worker 落地。"
+                ),
                 metadata={"worker_type": "general"},
             ),
             "bootstrap:ops": WorkerBootstrapFile(
@@ -2029,6 +2208,123 @@ class CapabilityPackService:
                 content="你是 dev worker，优先改动方案、补丁和验证。",
                 metadata={"worker_type": "dev"},
             ),
+        }
+
+    @staticmethod
+    def _split_worker_objectives(objective: str) -> list[str]:
+        normalized = objective.strip()
+        if not normalized:
+            return []
+        for token in ["\r\n", "；", ";", "。", "，然后", "然后", "并且", "接着", "再"]:
+            normalized = normalized.replace(token, "\n")
+        items = [item.strip(" -\t") for item in normalized.splitlines() if item.strip(" -\t")]
+        if len(items) > 1:
+            return items[:4]
+        return [normalized]
+
+    @staticmethod
+    def _classify_worker_type(objective: str) -> WorkerType:
+        lowered = objective.lower()
+        if any(token in lowered for token in ("代码", "修复", "实现", "测试", "patch", "dev")):
+            return WorkerType.DEV
+        if any(
+            token in lowered
+            for token in ("部署", "运行", "恢复", "诊断", "日志", "监控", "重启", "ops")
+        ):
+            return WorkerType.OPS
+        if any(
+            token in lowered
+            for token in ("调研", "分析", "资料", "阅读", "总结", "research", "investigate")
+        ):
+            return WorkerType.RESEARCH
+        return WorkerType.RESEARCH
+
+    @staticmethod
+    def _coerce_worker_type_name(worker_type: str) -> WorkerType:
+        try:
+            return WorkerType(worker_type.strip().lower())
+        except Exception:
+            return WorkerType.RESEARCH
+
+    @staticmethod
+    def _target_kind_for_worker_type(worker_type: WorkerType) -> str:
+        if worker_type == WorkerType.DEV:
+            return RuntimeKind.GRAPH_AGENT.value
+        if worker_type == WorkerType.OPS:
+            return RuntimeKind.ACP_RUNTIME.value
+        return RuntimeKind.SUBAGENT.value
+
+    @staticmethod
+    def _tool_profile_for_worker_type(worker_type: WorkerType) -> str:
+        if worker_type == WorkerType.DEV:
+            return ToolProfile.STANDARD.value
+        return ToolProfile.MINIMAL.value
+
+    def _build_worker_assignment(
+        self,
+        objective: str,
+        *,
+        index: int,
+    ) -> _WorkerPlanAssignment:
+        worker_type = self._classify_worker_type(objective)
+        return _WorkerPlanAssignment(
+            objective=objective,
+            worker_type=worker_type.value,
+            target_kind=self._target_kind_for_worker_type(worker_type),
+            tool_profile=self._tool_profile_for_worker_type(worker_type),
+            title=f"{worker_type.value}-worker-{index}",
+            reason=f"该子任务更适合由 {worker_type.value} worker 处理。",
+        )
+
+    async def _launch_child_task(
+        self,
+        *,
+        parent_task,
+        parent_work,
+        objective: str,
+        worker_type: str,
+        target_kind: str,
+        tool_profile: str,
+        title: str = "",
+        spawned_by: str,
+        plan_id: str = "",
+    ) -> dict[str, Any]:
+        if self._task_runner is None:
+            raise RuntimeError("task runner is not bound for child task launch")
+        child_id = str(ULID())
+        child_thread_id = f"{parent_task.thread_id}:child:{child_id[:8]}"
+        child_message = NormalizedMessage(
+            channel=parent_task.requester.channel,
+            thread_id=child_thread_id,
+            scope_id=parent_task.scope_id,
+            sender_id=parent_task.requester.sender_id,
+            sender_name=parent_task.requester.sender_id or "owner",
+            text=objective,
+            metadata={
+                "parent_task_id": parent_task.task_id,
+                "parent_work_id": parent_work.work_id,
+                "requested_worker_type": worker_type,
+                "target_kind": target_kind,
+                "tool_profile": tool_profile,
+                "spawned_by": spawned_by,
+                "child_title": title,
+                "worker_plan_id": plan_id,
+            },
+            idempotency_key=f"{spawned_by}:{parent_task.task_id}:{child_id}",
+        )
+        task_id, created = await self._task_runner.launch_child_task(child_message)
+        return {
+            "task_id": task_id,
+            "created": created,
+            "thread_id": child_thread_id,
+            "target_kind": target_kind,
+            "worker_type": worker_type,
+            "tool_profile": tool_profile,
+            "parent_task_id": parent_task.task_id,
+            "parent_work_id": parent_work.work_id,
+            "title": title,
+            "objective": objective,
+            "worker_plan_id": plan_id,
         }
 
     async def _resolve_fallback_toolset(self, worker_type: WorkerType) -> list[str]:
@@ -2172,6 +2468,7 @@ class CapabilityPackService:
             "work.split": ["agent_runtime", "web"],
             "work.merge": ["agent_runtime", "web"],
             "work.delete": ["agent_runtime", "web"],
+            "workers.review": ["agent_runtime", "web"],
             "subagents.list": ["agent_runtime", "web"],
             "subagents.kill": ["agent_runtime", "web"],
             "subagents.steer": ["agent_runtime", "web"],
@@ -2191,7 +2488,7 @@ class CapabilityPackService:
     def _resolve_tool_runtime_kinds(tool_name: str) -> list[RuntimeKind]:
         if tool_name == "subagents.spawn":
             return [RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
-        if tool_name in {"subagents.list", "subagents.kill", "subagents.steer"}:
+        if tool_name in {"subagents.list", "subagents.kill", "subagents.steer", "workers.review"}:
             return [RuntimeKind.WORKER, RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
         if tool_name in {"gateway.inspect", "cron.list", "nodes.list", "runtime.inspect"}:
             return [RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME]

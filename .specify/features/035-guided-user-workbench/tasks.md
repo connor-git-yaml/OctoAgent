@@ -3,7 +3,7 @@
 **Input**: `.specify/features/035-guided-user-workbench/`
 **Prerequisites**: `spec.md`、`plan.md`、`checklists/requirements.md`、`contracts/*`
 **Created**: 2026-03-09
-**Status**: Planned
+**Status**: In Progress
 
 **Task Format**: `- [ ] T{三位数} [P0/P1] [USN?] 描述 -> 文件路径`
 
@@ -17,21 +17,21 @@
 
 ## Phase 1: Shell & Design System
 
-- [ ] T004 [P0] 建立新的 `WorkbenchShell`、一级路由与导航状态 -> `octoagent/frontend/src/App.tsx`、`octoagent/frontend/src/components/shell/*`
-- [ ] T005 [P0] 建立统一 design tokens、layout primitives、card/form/drawer/button 组件，逐步淘汰 root pages inline styles -> `octoagent/frontend/src/index.css`、`octoagent/frontend/src/components/*`
+- [x] T004 [P0] 建立新的 `WorkbenchShell`、一级路由与导航状态 -> `octoagent/frontend/src/App.tsx`、`octoagent/frontend/src/components/shell/*`
+- [x] T005 [P0] 建立统一 design tokens、layout primitives、card/form/drawer/button 组件，逐步淘汰 root pages inline styles -> `octoagent/frontend/src/index.css`、`octoagent/frontend/src/components/*`
 - [ ] T006 [P1] 实现桌面/移动端响应式 shell、顶部状态条与全局“待你确认”入口 -> `octoagent/frontend/src/components/shell/*`
 
 ## Phase 2: Guided Home & Settings
 
-- [ ] T007 [P0] 实现 `Home` 页面，基于 `snapshot` 组合 readiness、next actions、project、diagnostics、operator summary -> `octoagent/frontend/src/pages/Home.tsx`
-- [ ] T008 [P0] 实现图形化 `SettingsCenter`，按主 Agent / Work / Memory / Channels / Projects 分组消费 `ConfigSchemaDocument` -> `octoagent/frontend/src/pages/SettingsCenter.tsx`
+- [x] T007 [P0] 实现 `Home` 页面，基于 `snapshot` 组合 readiness、next actions、project、diagnostics、operator summary -> `octoagent/frontend/src/pages/Home.tsx`
+- [x] T008 [P0] 实现图形化 `SettingsCenter`，按主 Agent / Work / Memory / Channels / Projects 分组消费 `ConfigSchemaDocument` -> `octoagent/frontend/src/pages/SettingsCenter.tsx`
 - [ ] T009 [P0] 为设置页补字段分组、风险提示和后端 `ui_hints` 缺口 -> `octoagent/apps/gateway/src/octoagent/gateway/services/control_plane.py`
 - [ ] T010 [P0] 让设置保存、project 切换、wizard 刷新/恢复全部走 action registry，并补必要 action 缺口 -> `octoagent/apps/gateway/src/octoagent/gateway/services/control_plane.py`、`octoagent/frontend/src/api/client.ts`
 - [ ] T011 [P1] 在首页和设置页实现 channel readiness / pairing / degraded reason 的用户化表达 -> `octoagent/frontend/src/pages/Home.tsx`、`octoagent/frontend/src/pages/SettingsCenter.tsx`
 
 ## Phase 3: Chat Workbench
 
-- [ ] T012 [P0] 用真实 `chat.send + SSE + task detail` 链路实现 `ChatWorkbench` 主界面 -> `octoagent/frontend/src/pages/ChatWorkbench.tsx`、`octoagent/frontend/src/hooks/useChatWorkbench.ts`
+- [x] T012 [P0] 用真实 `chat.send + SSE + task detail` 链路实现 `ChatWorkbench` 主界面 -> `octoagent/frontend/src/pages/ChatWorkbench.tsx`、`octoagent/frontend/src/hooks/useChatStream.ts`
 - [ ] T013 [P0] 接入 `execution`、`sessions`、`delegation`，在右侧抽屉展示当前 task/work/runtime 状态 -> `octoagent/frontend/src/pages/ChatWorkbench.tsx`
 - [ ] T014 [P0] 在聊天工作台接入 approval / execution input / interrupt-resume / export / focus 等真实动作 -> `octoagent/frontend/src/pages/ChatWorkbench.tsx`、`octoagent/apps/gateway/src/octoagent/gateway/services/control_plane.py`
 - [ ] T015 [P1] 消费 Feature 033 的 profile/bootstrap/context provenance canonical resource，在聊天侧展示主 Agent 上下文来源；033 未就绪时显式 degraded -> `octoagent/frontend/src/pages/ChatWorkbench.tsx`、`octoagent/frontend/src/types/index.ts`
@@ -39,14 +39,14 @@
 
 ## Phase 4: Work & Memory Centers
 
-- [ ] T017 [P0] 实现 `WorkbenchBoard`，把 session/work 组织成可扫读的状态板和 detail drawer -> `octoagent/frontend/src/pages/WorkbenchBoard.tsx`
-- [ ] T018 [P0] 把 `work.cancel / retry / split / merge / escalate` 与 task/execution detail 统一收编进 Work 页面 -> `octoagent/frontend/src/pages/WorkbenchBoard.tsx`
-- [ ] T019 [P0] 实现 `MemoryCenter` 首页，以 `MemoryConsoleDocument` 为事实源展示摘要、主题和风险状态 -> `octoagent/frontend/src/pages/MemoryCenter.tsx`
+- [x] T017 [P0] 实现 `WorkbenchBoard`，把 session/work 组织成可扫读的状态板和基础细节卡 -> `octoagent/frontend/src/pages/WorkbenchBoard.tsx`
+- [x] T018 [P0] 把 `work.cancel / retry / split / merge / escalate` 与 task/execution detail 统一收编进 Work 页面 -> `octoagent/frontend/src/pages/WorkbenchBoard.tsx`
+- [x] T019 [P0] 实现 `MemoryCenter` 首页，以 `MemoryConsoleDocument` 为事实源展示摘要、主题和风险状态 -> `octoagent/frontend/src/pages/MemoryCenter.tsx`
 - [ ] T020 [P1] 增量接入 subject history / proposal audit / vault authorization，保持渐进展开 -> `octoagent/frontend/src/pages/MemoryCenter.tsx`
 
 ## Phase 5: Advanced Mode & Backward Compatibility
 
-- [ ] T021 [P0] 把现有 `ControlPlane` 收编为 `Advanced` 模式，保留深链接与完整能力 -> `octoagent/frontend/src/pages/AdvancedControlPlane.tsx`、`octoagent/frontend/src/pages/ControlPlane.tsx`
+- [x] T021 [P0] 把现有 `ControlPlane` 收编为 `Advanced` 模式，保留深链接与完整能力 -> `octoagent/frontend/src/pages/AdvancedControlPlane.tsx`、`octoagent/frontend/src/pages/ControlPlane.tsx`
 - [ ] T022 [P1] 处理旧 `/tasks/:taskId`、首页书签和 legacy links 的兼容跳转 -> `octoagent/frontend/src/App.tsx`
 
 ## Phase 6: Verification & Docs

@@ -2,26 +2,30 @@
 
 ## 状态
 
-- 阶段：设计完成，待实现
-- 日期：2026-03-09
+- 阶段：Phase 1 / 2 / 3 / 4（部分）已实现
+- 日期：2026-03-10
 
 ## 本次验证内容
 
-1. 已核对现有 feature 编号，确认 `034` 已被 `context-compression-main-worker` 占用，因此本轮按 `035` 建档。
-2. 已核对 Feature 015 / 017 / 025 / 026 / 027 / 030 / 033 / 034 与当前 frontend/api/control-plane 接缝。
-3. 已完成 OpenClaw / Agent Zero 的产品与技术对照调研。
-4. 已输出 035 的 spec / plan / tasks / contracts / research 制品，并回写到 M4 backlog。
+1. 已落地新的 `WorkbenchLayout` 与一级导航：`Home / Chat / Work / Memory / Settings / Advanced`。
+2. 已将 `/` 默认入口切换到 `Home`，并保留 `AdvancedControlPlane` 与旧 `TaskDetail` 深链接。
+3. 已实现 `Home`、`SettingsCenter`、`ChatWorkbench`、`WorkbenchBoard`、`MemoryCenter` 五个用户导向页面骨架，并直接消费既有 canonical resources/actions。
+4. 已验证设置保存仍走 `config.apply`，project 切换走 `project.select`，而不是前端私有接口。
+5. 已执行前端最小验证：
+   - `npm test -- --run src/App.test.tsx` -> `6 passed`
+   - `npm run build` -> `PASS`
 
-## 本次未执行
+## 当前未完成
 
-- 未执行代码级自动化测试。
-- 未执行 frontend build 或运行时 smoke。
-- 未提交任何运行时代码。
+- `SettingsCenter` 还没有切到 036 的 `setup.review -> setup.apply` 主链。
+- `ChatWorkbench` 还没有接入 033 的 context provenance 与 034 的 compaction evidence。
+- `WorkbenchBoard` 还没有做 detail drawer / richer execution 细节。
+- `MemoryCenter` 还没有接入 subject history / proposal audit / vault authorization 的渐进展开。
+- 还缺页面级 integration/e2e 测试矩阵。
 
-原因：本轮目标是把“小白可用工作台”冻结成正式 Feature 035，而不是提前做半实现。
+## 结论
 
-## 实施前硬门禁
+035 不再是“仅设计”；工作台壳子和五个主页面已经落地，但目前仍属于 **In Progress**：
 
-- 必须先建立 frontend contract tests，防止新增私有 workbench API。
-- 必须先建立 `settings -> config.apply` 与 `chat -> task/execution/context` 的 failing integration tests。
-- 033/034 的 canonical output 必须定义清楚；035 只能消费，不能重做。
+- 已完成：入口改造、shell、首页、设置、聊天基础链、Work 页面、Memory 首页、Advanced 收编
+- 待完成：036 setup governance 接线、033/034 上下文可视化、更多页面级验证与交互细化

@@ -2,7 +2,7 @@
 feature_id: "036"
 title: "Guided Setup Governance for Provider / Channel / Profile / Tools / Skills"
 milestone: "M4"
-status: "Planned"
+status: "In Progress"
 created: "2026-03-10"
 updated: "2026-03-10"
 research_mode: "full"
@@ -16,7 +16,7 @@ parallel_dependency: "Feature 033 提供主 Agent profile/context continuity 事
 **Feature Branch**: `codex/feat-036-guided-setup-governance`  
 **Created**: 2026-03-10  
 **Updated**: 2026-03-10  
-**Status**: Planned  
+**Status**: In Progress
 **Input**: 再次 review 当前项目在用户初始化配置 `Provider / Channel / Agent Profile / 权限 / Tools / Skills` 时的易用性与安全性；深读 OpenClaw 与 Agent Zero 的相关代码和产品模式，设计一个新的 Feature 036 来做优化，而且必须明确与既有系统接口的接线，避免“做了但是没有关联上”。  
 **调研基础**: `research/product-research.md`、`research/tech-research.md`、`research/online-research.md`、`research/research-synthesis.md`
 

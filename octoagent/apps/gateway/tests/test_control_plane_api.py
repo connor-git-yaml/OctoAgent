@@ -1113,6 +1113,96 @@ class TestControlPlaneApi:
         assert merged is not None
         assert merged.status.value == "merged"
 
+    async def test_worker_review_and_apply_actions_create_governed_child_plan(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        task_id = await _create_task(
+            control_plane_app,
+            text="请先调研 API，再补代码和测试",
+            thread_id="thread-worker-review",
+            scope_id="scope-control",
+        )
+        plan = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请先调研 API，再补代码和测试",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+
+        review_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "work_id": plan.work.work_id,
+                    "objective": "请先调研 API，再补代码和测试",
+                },
+            },
+        )
+
+        assert review_resp.status_code == 200
+        review_payload = review_resp.json()["result"]
+        assert review_payload["code"] == "WORKER_REVIEW_READY"
+        worker_plan = review_payload["data"]["plan"]
+        assert worker_plan["proposal_kind"] == "split"
+        assert {item["worker_type"] for item in worker_plan["assignments"]} >= {
+            "research",
+            "dev",
+        }
+        assert {item["tool_profile"] for item in worker_plan["assignments"]} >= {
+            "minimal",
+            "standard",
+        }
+
+        apply_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "work_id": plan.work.work_id,
+                    "plan": worker_plan,
+                },
+            },
+        )
+
+        assert apply_resp.status_code == 200
+        apply_payload = apply_resp.json()["result"]
+        assert apply_payload["code"] == "WORKER_PLAN_APPLIED"
+        assert len(apply_payload["data"]["child_tasks"]) >= 2
+
+        child_works = []
+        for _ in range(30):
+            child_works = await control_plane_app.state.store_group.work_store.list_works(
+                parent_work_id=plan.work.work_id
+            )
+            if len(child_works) >= 2:
+                break
+            await asyncio.sleep(0.05)
+
+        assert len(child_works) >= 2
+        assert {item.selected_worker_type.value for item in child_works} >= {"research", "dev"}
+        assert {str(item.metadata.get("requested_tool_profile", "")) for item in child_works} >= {
+            "minimal",
+            "standard",
+        }
+
     async def test_work_cancel_and_delete_actions_cascade_to_child_works(
         self,
         control_plane_client: AsyncClient,
