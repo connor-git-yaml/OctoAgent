@@ -195,6 +195,7 @@ class BackupService:
         self,
         *,
         task_id: str | None = None,
+        task_ids: list[str] | None = None,
         thread_id: str | None = None,
         since: str | datetime | None = None,
         until: str | datetime | None = None,
@@ -202,6 +203,7 @@ class BackupService:
     ) -> ExportManifest:
         filters = ExportFilter(
             task_id=task_id,
+            task_ids=list(task_ids or []),
             thread_id=thread_id,
             since=self._normalize_datetime(since),
             until=self._normalize_datetime(until),
@@ -661,8 +663,10 @@ class BackupService:
         return current
 
     def _match_export_task(self, task: Task, filters: ExportFilter) -> bool:
+        task_ids = set(filters.task_ids)
         explicitly_selected = (
             (filters.task_id is not None and task.task_id == filters.task_id)
+            or (bool(task_ids) and task.task_id in task_ids)
             or (filters.thread_id is not None and task.thread_id == filters.thread_id)
         )
         if (
@@ -672,6 +676,8 @@ class BackupService:
         ):
             return False
         if filters.task_id and task.task_id != filters.task_id:
+            return False
+        if task_ids and task.task_id not in task_ids:
             return False
         return not (filters.thread_id and task.thread_id != filters.thread_id)
 

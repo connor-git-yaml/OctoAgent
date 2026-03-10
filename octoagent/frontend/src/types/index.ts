@@ -479,6 +479,7 @@ export interface SessionProjectionItem {
 export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   resource_type: "session_projection";
   resource_id: "sessions:overview";
+  focused_session_id: string;
   focused_thread_id: string;
   sessions: SessionProjectionItem[];
   operator_summary: OperatorInboxSummary | null;

@@ -16,6 +16,8 @@ from octoagent.core.models import (
     Project,
     ProjectBinding,
     ProjectBindingType,
+    ProjectSelectorState,
+    RuntimeControlContext,
     SessionContextState,
     Workspace,
 )
@@ -257,6 +259,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         )
     )
     assert "agent_profile_id: agent-profile-alpha" in request_text
+    assert "resolve_request_kind: chat" in request_text
     assert (
         "session_id: surface:web|scope:chat:web:thread-alpha|"
         "project:project-alpha|workspace:workspace-alpha|thread:thread-alpha"
@@ -349,5 +352,109 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     assert frame.budget["history_tokens"] < frame.budget["final_prompt_tokens"]
     assert "context_budget_trimmed" in frame.degraded_reason
     assert len(frame.memory_hits) < 4 or len(frame.recent_summary) < len(long_summary)
+
+    await store_group.conn.close()
+
+
+async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f037-runtime-context.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    await store_group.project_store.save_project(
+        Project(
+            project_id="project-beta",
+            slug="beta",
+            name="Beta Project",
+            description="Beta 项目只关注临时实验。",
+        )
+    )
+    await store_group.project_store.create_workspace(
+        Workspace(
+            workspace_id="workspace-beta",
+            project_id="project-beta",
+            slug="lab",
+            name="Beta Workspace",
+            root_path="/tmp/beta",
+        )
+    )
+    await store_group.project_store.save_selector_state(
+        ProjectSelectorState(
+            selector_id="selector-web",
+            surface="web",
+            active_project_id="project-alpha",
+            active_workspace_id="workspace-alpha",
+            source="tests",
+        )
+    )
+    await store_group.conn.commit()
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-runtime-drift",
+        text="请继续推进默认 project 的方案拆解",
+        idempotency_key="f037-runtime-context-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+    task = await store_group.task_store.get_task(task_id)
+    assert task is not None
+
+    frozen_context = RuntimeControlContext(
+        task_id=task_id,
+        trace_id=f"trace-{task_id}",
+        contract_version="1.0",
+        surface="web",
+        scope_id=task.scope_id,
+        thread_id=task.thread_id,
+        session_id=build_scope_aware_session_id(
+            task,
+            project_id="project-alpha",
+            workspace_id="workspace-alpha",
+        ),
+        project_id="project-alpha",
+        workspace_id="workspace-alpha",
+        hop_count=1,
+        max_hops=3,
+        worker_capability="llm_generation",
+        route_reason="frozen_runtime_context_test",
+        model_alias="main",
+        tool_profile="standard",
+    )
+
+    await store_group.project_store.save_selector_state(
+        ProjectSelectorState(
+            selector_id="selector-web",
+            surface="web",
+            active_project_id="project-beta",
+            active_workspace_id="workspace-beta",
+            source="tests",
+        )
+    )
+    await store_group.conn.commit()
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        runtime_context=frozen_context,
+    )
+
+    prompt = llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "Alpha 项目要求保持严格的需求连续性" in joined
+    assert "Beta 项目只关注临时实验" not in joined
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    assert frames[0].project_id == "project-alpha"
+    assert frames[0].workspace_id == "workspace-alpha"
+    assert frames[0].source_refs[-1]["ref_type"] == "runtime_context"
 
     await store_group.conn.close()

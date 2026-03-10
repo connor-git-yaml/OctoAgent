@@ -1619,6 +1619,7 @@ export default function ControlPlane() {
                     className="secondary-button"
                     onClick={() =>
                       void submitAction("session.focus", {
+                        session_id: session.session_id,
                         thread_id: session.thread_id,
                       })
                     }
@@ -1631,6 +1632,7 @@ export default function ControlPlane() {
                     className="ghost-button"
                     onClick={() =>
                       void submitAction("session.export", {
+                        session_id: session.session_id,
                         thread_id: session.thread_id,
                         task_id: session.task_id,
                       })

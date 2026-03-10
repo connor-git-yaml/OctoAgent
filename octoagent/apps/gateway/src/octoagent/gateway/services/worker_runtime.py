@@ -199,6 +199,7 @@ class InlineRuntimeBackend:
             dispatch_metadata=envelope.metadata,
             worker_capability=envelope.worker_capability,
             tool_profile=envelope.tool_profile,
+            runtime_context=envelope.runtime_context,
         )
 
 
@@ -304,6 +305,7 @@ class GraphRuntimeBackend:
                     dispatch_metadata=ctx.deps.envelope.metadata,
                     worker_capability=ctx.deps.envelope.worker_capability,
                     tool_profile=ctx.deps.envelope.tool_profile,
+                    runtime_context=ctx.deps.envelope.runtime_context,
                 )
                 return GraphFinalizeNode()
 
@@ -470,6 +472,7 @@ class WorkerRuntime:
                     console=self._execution_console,
                     work_id=str(envelope.metadata.get("work_id", "")),
                     runtime_kind=runtime_kind,
+                    runtime_context=envelope.runtime_context,
                     resume_state_snapshot=envelope.resume_state_snapshot,
                 )
                 if self._execution_console is not None

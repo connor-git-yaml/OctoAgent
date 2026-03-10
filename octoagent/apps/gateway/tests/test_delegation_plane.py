@@ -166,6 +166,15 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     assert plan.dispatch_envelope is not None
     assert plan.dispatch_envelope.metadata["agent_profile_id"] == "agent-profile-default"
     assert plan.dispatch_envelope.metadata["context_frame_id"] == "context-frame-1"
+    assert plan.dispatch_envelope.runtime_context is not None
+    assert plan.dispatch_envelope.runtime_context.agent_profile_id == "agent-profile-default"
+    assert plan.dispatch_envelope.runtime_context.context_frame_id == "context-frame-1"
+    assert plan.dispatch_envelope.runtime_context.project_id == "project-default"
+    assert plan.dispatch_envelope.runtime_context.workspace_id == "workspace-default"
+    assert "runtime_context_json" in plan.dispatch_envelope.metadata
+    assert (
+        plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
+    )
 
     await store_group.conn.close()
 

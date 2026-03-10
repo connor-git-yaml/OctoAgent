@@ -17,6 +17,7 @@ from octoagent.core.models import (
     EventType,
     OrchestratorRequest,
     PipelineRunStatus,
+    RuntimeControlContext,
     ToolIndexQuery,
     Work,
     WorkerType,
@@ -34,6 +35,7 @@ from .agent_context import (
     session_state_matches_scope,
 )
 from .capability_pack import CapabilityPackService
+from .runtime_control import encode_runtime_context, runtime_context_from_metadata
 from .task_service import TaskService
 
 
@@ -97,6 +99,9 @@ class DelegationPlaneService:
         agent_profile_id, context_frame_id = await self._resolve_task_context_refs(
             request.task_id
         )
+        task = await self._stores.task_store.get_task(request.task_id)
+        if task is None:
+            raise RuntimeError(f"task not found for delegation: {request.task_id}")
         requested_target_kind = str(request.metadata.get("target_kind", "")).strip()
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
@@ -106,8 +111,32 @@ class DelegationPlaneService:
             if requested_target_kind in {item.value for item in DelegationTargetKind}
             else DelegationTargetKind.WORKER
         )
+        initial_route_reason = (
+            self._build_route_reason(
+                requested_worker_type or WorkerType.GENERAL,
+                request.worker_capability,
+                requested_target_kind,
+                explicit_worker_type=requested_worker_type is not None,
+            )
+            if requested_worker_type is not None or requested_target_kind
+            else ""
+        )
+        work_id = str(ULID())
+        runtime_context = self._build_runtime_context(
+            request=request,
+            task=task,
+            project_id=project.project_id if project is not None else "",
+            workspace_id=workspace.workspace_id if workspace is not None else "",
+            work_id=work_id,
+            parent_work_id=str(request.metadata.get("parent_work_id", "")),
+            pipeline_run_id="",
+            agent_profile_id=agent_profile_id,
+            context_frame_id=context_frame_id,
+            route_reason=initial_route_reason,
+            worker_capability=request.worker_capability,
+        )
         work = Work(
-            work_id=str(ULID()),
+            work_id=work_id,
             task_id=request.task_id,
             parent_work_id=request.metadata.get("parent_work_id") or None,
             title=request.user_text[:120],
@@ -116,16 +145,7 @@ class DelegationPlaneService:
             owner_id="orchestrator",
             requested_capability=request.worker_capability,
             selected_worker_type=requested_worker_type or WorkerType.GENERAL,
-            route_reason=(
-                self._build_route_reason(
-                    requested_worker_type or WorkerType.GENERAL,
-                    request.worker_capability,
-                    requested_target_kind,
-                    explicit_worker_type=requested_worker_type is not None,
-                )
-                if requested_worker_type is not None or requested_target_kind
-                else ""
-            ),
+            route_reason=initial_route_reason,
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
             agent_profile_id=agent_profile_id,
@@ -137,6 +157,7 @@ class DelegationPlaneService:
                 ),
                 "parent_task_id": str(request.metadata.get("parent_task_id", "")),
                 "resume_from_node": request.resume_from_node or "",
+                "runtime_context": runtime_context.model_dump(mode="json"),
                 "request_context": {
                     "trace_id": request.trace_id,
                     "contract_version": request.contract_version,
@@ -148,6 +169,7 @@ class DelegationPlaneService:
                     "tool_profile": request.tool_profile,
                     "agent_profile_id": agent_profile_id,
                     "context_frame_id": context_frame_id,
+                    "runtime_context": runtime_context.model_dump(mode="json"),
                     "metadata": dict(request.metadata),
                 },
             },
@@ -175,11 +197,26 @@ class DelegationPlaneService:
                 "tool_profile": request.tool_profile,
                 "agent_profile_id": agent_profile_id,
                 "context_frame_id": context_frame_id,
+                "runtime_context": runtime_context.model_dump(mode="json"),
                 "metadata": dict(request.metadata),
             },
         )
         selection = self._selection_from_run(pipeline_run)
         work_status = self._work_status_from_pipeline(pipeline_run.status)
+        resolved_runtime_context = runtime_context.model_copy(
+            update={
+                "pipeline_run_id": pipeline_run.run_id,
+                "worker_capability": str(
+                    pipeline_run.state_snapshot.get(
+                        "worker_capability",
+                        request.worker_capability,
+                    )
+                ),
+                "route_reason": str(pipeline_run.state_snapshot.get("route_reason", "")),
+                "agent_profile_id": agent_profile_id,
+                "context_frame_id": context_frame_id,
+            }
+        )
         updated_work = work.model_copy(
             update={
                 "status": work_status,
@@ -205,6 +242,7 @@ class DelegationPlaneService:
                 "pipeline_run_id": pipeline_run.run_id,
                 "metadata": {
                     **work.metadata,
+                    "runtime_context": resolved_runtime_context.model_dump(mode="json"),
                     "bootstrap_context": pipeline_run.state_snapshot.get(
                         "bootstrap_context",
                         [],
@@ -254,6 +292,7 @@ class DelegationPlaneService:
             resume_from_node=request.resume_from_node,
             resume_state_snapshot=request.resume_state_snapshot,
             tool_profile=request.tool_profile,
+            runtime_context=resolved_runtime_context,
             metadata={
                 **{key: str(value) for key, value in request.metadata.items()},
                 "work_id": updated_work.work_id,
@@ -264,6 +303,7 @@ class DelegationPlaneService:
                 "tool_selection_id": selection.selection_id,
                 "agent_profile_id": updated_work.agent_profile_id,
                 "context_frame_id": updated_work.context_frame_id,
+                "runtime_context_json": encode_runtime_context(resolved_runtime_context),
             },
         )
         return DelegationPlan(
@@ -515,6 +555,56 @@ class DelegationPlaneService:
 
     def _dispatch_from_run(self, work: Work, run) -> DispatchEnvelope:
         state = self._request_state(work, run)
+        runtime_context = runtime_context_from_metadata(work.metadata)
+        if runtime_context is None:
+            runtime_context = RuntimeControlContext(
+                task_id=work.task_id,
+                trace_id=str(state.get("trace_id", f"trace-{work.task_id}")),
+                contract_version=str(state.get("contract_version", "1.0")),
+                project_id=work.project_id,
+                workspace_id=work.workspace_id,
+                hop_count=max(int(state.get("hop_count", 0)) + 1, 0),
+                max_hops=max(int(state.get("max_hops", 3)), 1),
+                worker_capability=str(
+                    run.state_snapshot.get("worker_capability", work.requested_capability)
+                ),
+                route_reason=str(run.state_snapshot.get("route_reason", work.route_reason)),
+                model_alias=str(state.get("model_alias", "")),
+                tool_profile=str(state.get("tool_profile", "standard")),
+                work_id=work.work_id,
+                parent_work_id=work.parent_work_id or "",
+                pipeline_run_id=run.run_id,
+                agent_profile_id=work.agent_profile_id,
+                context_frame_id=work.context_frame_id,
+                metadata=dict(state.get("metadata", {})),
+            )
+        else:
+            runtime_context = runtime_context.model_copy(
+                update={
+                    "trace_id": str(state.get("trace_id", runtime_context.trace_id)),
+                    "contract_version": str(
+                        state.get("contract_version", runtime_context.contract_version)
+                    ),
+                    "hop_count": max(int(state.get("hop_count", 0)) + 1, 0),
+                    "max_hops": max(int(state.get("max_hops", runtime_context.max_hops)), 1),
+                    "worker_capability": str(
+                        run.state_snapshot.get("worker_capability", work.requested_capability)
+                    ),
+                    "route_reason": str(
+                        run.state_snapshot.get("route_reason", work.route_reason)
+                    ),
+                    "model_alias": str(state.get("model_alias", runtime_context.model_alias)),
+                    "tool_profile": str(
+                        state.get("tool_profile", runtime_context.tool_profile or "standard")
+                    ),
+                    "work_id": work.work_id,
+                    "parent_work_id": work.parent_work_id or "",
+                    "pipeline_run_id": run.run_id,
+                    "agent_profile_id": work.agent_profile_id,
+                    "context_frame_id": work.context_frame_id,
+                    "metadata": dict(state.get("metadata", runtime_context.metadata)),
+                }
+            )
         metadata = {
             **{key: str(value) for key, value in state.get("metadata", {}).items()},
             "work_id": work.work_id,
@@ -523,6 +613,9 @@ class DelegationPlaneService:
             "selected_tools_json": json.dumps(work.selected_tools, ensure_ascii=False),
             "target_kind": work.target_kind.value,
             "tool_selection_id": work.tool_selection_id,
+            "agent_profile_id": work.agent_profile_id,
+            "context_frame_id": work.context_frame_id,
+            "runtime_context_json": encode_runtime_context(runtime_context),
         }
         return DispatchEnvelope(
             dispatch_id=str(ULID()),
@@ -540,6 +633,7 @@ class DelegationPlaneService:
             resume_from_node=str(state.get("resume_from_node", "")).strip() or None,
             resume_state_snapshot=self._resume_state_snapshot(state),
             tool_profile=str(state.get("tool_profile", "standard")),
+            runtime_context=runtime_context,
             metadata=metadata,
         )
 
@@ -588,6 +682,49 @@ class DelegationPlaneService:
     def _resume_state_snapshot(state: dict[str, Any]) -> dict[str, Any] | None:
         value = state.get("resume_state_snapshot")
         return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _build_runtime_context(
+        *,
+        request: OrchestratorRequest,
+        task,
+        project_id: str,
+        workspace_id: str,
+        work_id: str,
+        parent_work_id: str,
+        pipeline_run_id: str,
+        agent_profile_id: str,
+        context_frame_id: str,
+        route_reason: str,
+        worker_capability: str,
+    ) -> RuntimeControlContext:
+        return RuntimeControlContext(
+            task_id=request.task_id,
+            trace_id=request.trace_id,
+            contract_version=request.contract_version,
+            surface=task.requester.channel or "chat",
+            scope_id=task.scope_id,
+            thread_id=task.thread_id,
+            session_id=build_scope_aware_session_id(
+                task,
+                project_id=project_id,
+                workspace_id=workspace_id,
+            ),
+            project_id=project_id,
+            workspace_id=workspace_id,
+            hop_count=request.hop_count + 1,
+            max_hops=request.max_hops,
+            worker_capability=worker_capability,
+            route_reason=route_reason,
+            model_alias=request.model_alias or "",
+            tool_profile=request.tool_profile,
+            work_id=work_id,
+            parent_work_id=parent_work_id,
+            pipeline_run_id=pipeline_run_id,
+            agent_profile_id=agent_profile_id,
+            context_frame_id=context_frame_id,
+            metadata=dict(request.metadata),
+        )
 
     def _build_definition(self):
         from octoagent.core.models import (

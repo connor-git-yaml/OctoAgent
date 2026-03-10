@@ -31,6 +31,7 @@ from octoagent.core.models import (
     EventType,
     PartType,
     RequesterInfo,
+    RuntimeControlContext,
     Task,
     TaskStatus,
     validate_transition,
@@ -68,6 +69,7 @@ from ulid import ULID
 from .agent_context import AgentContextService
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
+from .runtime_control import runtime_context_from_metadata
 
 log = structlog.get_logger()
 
@@ -325,6 +327,7 @@ class TaskService:
         dispatch_metadata: dict[str, str] | None = None,
         worker_capability: str | None = None,
         tool_profile: str | None = None,
+        runtime_context: RuntimeControlContext | None = None,
     ) -> None:
         """异步后台处理：LLM 调用 + 事件写入 + Artifact 存储 + Checkpoint
 
@@ -399,6 +402,7 @@ class TaskService:
                 dispatch_metadata=dispatch_metadata or {},
                 worker_capability=worker_capability,
                 tool_profile=tool_profile,
+                runtime_context=runtime_context,
             )
             request_summary = compiled_context.request_summary
             if self._should_execute_node("model_call_started", resume_from_node):
@@ -638,7 +642,11 @@ class TaskService:
         dispatch_metadata: dict[str, str],
         worker_capability: str | None,
         tool_profile: str | None,
+        runtime_context: RuntimeControlContext | None = None,
     ) -> CompiledTaskContext:
+        resolved_runtime_context = runtime_context or runtime_context_from_metadata(
+            dispatch_metadata
+        )
         compiled = await self._context_compaction.build_context(
             task_id=task_id,
             fallback_user_text=fallback_user_text,
@@ -656,6 +664,7 @@ class TaskService:
                 compiled=compiled,
                 dispatch_metadata=dispatch_metadata,
                 worker_capability=worker_capability,
+                runtime_context=resolved_runtime_context,
             )
         except Exception as exc:
             log.warning(

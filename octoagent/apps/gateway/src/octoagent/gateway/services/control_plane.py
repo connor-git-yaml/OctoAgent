@@ -109,6 +109,7 @@ from octoagent.provider.dx.memory_console_service import (
 from octoagent.provider.dx.onboarding_service import OnboardingService
 from ulid import ULID
 
+from .agent_context import build_scope_aware_session_id
 from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
@@ -539,17 +540,84 @@ class ControlPlaneService:
         )
 
     async def get_session_projection(self) -> SessionProjectionDocument:
+        state, selected_project, selected_workspace, _ = await self._resolve_selection()
+        session_items = await self._build_session_projection_items(
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        focused_session_id, focused_thread_id = self._resolve_projected_focus(
+            state=state,
+            session_items=session_items,
+        )
+        operator_summary = None
+        operator_items = []
+        if self._operator_inbox_service is not None:
+            try:
+                inbox = await self._operator_inbox_service.get_inbox()
+            except Exception:  # pragma: no cover - 防御性兜底
+                inbox = None
+            if inbox is not None:
+                operator_summary = inbox.summary
+                operator_items = inbox.items
+        return SessionProjectionDocument(
+            focused_session_id=focused_session_id,
+            focused_thread_id=focused_thread_id,
+            sessions=session_items,
+            operator_summary=operator_summary,
+            operator_items=operator_items,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="session.focus",
+                    label="聚焦会话",
+                    action_id="session.focus",
+                ),
+                ControlPlaneCapability(
+                    capability_id="session.export",
+                    label="导出会话",
+                    action_id="session.export",
+                ),
+            ],
+        )
+
+    async def _build_session_projection_items(
+        self,
+        *,
+        selected_project,
+        selected_workspace,
+    ) -> list[SessionProjectionItem]:
         tasks = await self._stores.task_store.list_tasks()
-        grouped: dict[str, list[Task]] = defaultdict(list)
+        session_states = await self._stores.agent_context_store.list_session_contexts(
+            project_id=selected_project.project_id if selected_project is not None else None,
+            workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else None
+            ),
+        )
+        session_state_by_id = {item.session_id: item for item in session_states}
+        grouped: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
         for task in tasks:
             if task.task_id == _AUDIT_TASK_ID:
                 continue
-            grouped[task.thread_id].append(task)
+            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
+            if workspace is None:
+                continue
+            if not self._matches_selected_scope(
+                item_project_id=workspace.project_id,
+                item_workspace_id=workspace.workspace_id,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            ):
+                continue
+            session_id = build_scope_aware_session_id(
+                task,
+                project_id=workspace.project_id,
+                workspace_id=workspace.workspace_id,
+            )
+            grouped[session_id].append((task, workspace))
 
-        state, selected_project, selected_workspace, _ = await self._resolve_selection()
         session_items: list[SessionProjectionItem] = []
-        for thread_id, task_items in grouped.items():
-            latest = max(task_items, key=lambda item: item.updated_at)
+        for session_id, entries in grouped.items():
+            latest, workspace = max(entries, key=lambda item: item[0].updated_at)
+            session_state = session_state_by_id.get(session_id)
             execution_summary: dict[str, Any] = {}
             latest_metadata = await self._extract_latest_user_metadata(latest.task_id)
             if self._task_runner is not None:
@@ -564,22 +632,11 @@ class ControlPlaneService:
                         "work_id": session.metadata.get("work_id", ""),
                     }
             latest_message = await self._extract_latest_user_message(latest.task_id)
-            workspace = await self._stores.project_store.resolve_workspace_for_scope(
-                latest.scope_id
-            )
-            if workspace is None:
-                continue
-            if not self._matches_selected_scope(
-                item_project_id=workspace.project_id,
-                item_workspace_id=workspace.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
-                continue
             session_items.append(
                 SessionProjectionItem(
-                    session_id=thread_id,
-                    thread_id=thread_id,
+                    session_id=session_id,
+                    thread_id=(session_state.thread_id if session_state is not None else "")
+                    or latest.thread_id,
                     task_id=latest.task_id,
                     parent_task_id=str(latest_metadata.get("parent_task_id", "")),
                     parent_work_id=str(latest_metadata.get("parent_work_id", "")),
@@ -606,38 +663,72 @@ class ControlPlaneService:
                     },
                 )
             )
-
         session_items.sort(
-            key=lambda item: item.latest_event_at or datetime.min.replace(tzinfo=UTC), reverse=True
+            key=lambda item: item.latest_event_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
         )
-        operator_summary = None
-        operator_items = []
-        if self._operator_inbox_service is not None:
-            try:
-                inbox = await self._operator_inbox_service.get_inbox()
-            except Exception:  # pragma: no cover - 防御性兜底
-                inbox = None
-            if inbox is not None:
-                operator_summary = inbox.summary
-                operator_items = inbox.items
-        return SessionProjectionDocument(
-            focused_thread_id=state.focused_thread_id,
-            sessions=session_items,
-            operator_summary=operator_summary,
-            operator_items=operator_items,
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="session.focus",
-                    label="聚焦会话",
-                    action_id="session.focus",
-                ),
-                ControlPlaneCapability(
-                    capability_id="session.export",
-                    label="导出会话",
-                    action_id="session.export",
-                ),
-            ],
-        )
+        return session_items
+
+    def _resolve_projected_focus(
+        self,
+        *,
+        state: ControlPlaneState,
+        session_items: list[SessionProjectionItem],
+    ) -> tuple[str, str]:
+        if not session_items:
+            return "", ""
+
+        focused_session_id = state.focused_session_id.strip()
+        if focused_session_id:
+            focused = next(
+                (item for item in session_items if item.session_id == focused_session_id),
+                None,
+            )
+            if focused is not None:
+                return focused.session_id, focused.thread_id
+            return "", ""
+
+        focused_thread_id = state.focused_thread_id.strip()
+        if not focused_thread_id:
+            return "", ""
+        matches = [item for item in session_items if item.thread_id == focused_thread_id]
+        if len(matches) != 1:
+            return "", ""
+        return matches[0].session_id, matches[0].thread_id
+
+    async def _list_tasks_for_projected_session(
+        self,
+        *,
+        session_id: str,
+        selected_project,
+        selected_workspace,
+    ) -> list[Task]:
+        tasks = await self._stores.task_store.list_tasks()
+        matched: list[Task] = []
+        for task in tasks:
+            if task.task_id == _AUDIT_TASK_ID:
+                continue
+            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
+            if workspace is None:
+                continue
+            if not self._matches_selected_scope(
+                item_project_id=workspace.project_id,
+                item_workspace_id=workspace.workspace_id,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            ):
+                continue
+            if (
+                build_scope_aware_session_id(
+                    task,
+                    project_id=workspace.project_id,
+                    workspace_id=workspace.workspace_id,
+                )
+                == session_id
+            ):
+                matched.append(task)
+        matched.sort(key=lambda item: item.created_at)
+        return matched
 
     async def get_agent_profiles_document(self) -> AgentProfilesDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
@@ -1065,7 +1156,10 @@ class ControlPlaneService:
                 reasons=["graph_runtime_projection_unavailable"],
             ),
             warnings=[
-                "当前视图仅展示 delegation preflight / skill pipeline runs，不代表 graph runtime 的真实执行步进。",
+                (
+                    "当前视图仅展示 delegation preflight / skill pipeline runs，"
+                    "不代表 graph runtime 的真实执行步进。"
+                ),
                 "graph runtime 细节目前仍需通过 execution console / session steps 查看。",
             ],
             capabilities=[
@@ -2046,12 +2140,11 @@ class ControlPlaneService:
         )
 
     async def _handle_session_focus(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
-        thread_id = str(request.params.get("thread_id", "")).strip()
-        if not thread_id:
-            raise ControlPlaneActionError("THREAD_ID_REQUIRED", "thread_id 不能为空")
+        session = await self._resolve_session_projection_target(request)
         state = self._state_store.load().model_copy(
             update={
-                "focused_thread_id": thread_id,
+                "focused_session_id": session.session_id,
+                "focused_thread_id": session.thread_id,
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -2060,21 +2153,41 @@ class ControlPlaneService:
             request=request,
             code="SESSION_FOCUSED",
             message="已更新当前聚焦会话",
-            data={"thread_id": thread_id},
+            data={
+                "session_id": session.session_id,
+                "thread_id": session.thread_id,
+            },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
-            target_refs=[ControlPlaneTargetRef(target_type="thread", target_id=thread_id)],
+            target_refs=[
+                ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
+                ControlPlaneTargetRef(target_type="thread", target_id=session.thread_id),
+            ],
         )
 
     async def _handle_session_export(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
         thread_id = str(request.params.get("thread_id", "")).strip()
+        session_id = str(request.params.get("session_id", "")).strip()
         task_id = str(request.params.get("task_id", "")).strip()
         since = request.params.get("since")
         until = request.params.get("until")
+        task_ids: list[str] | None = None
+        if session_id and not thread_id and not task_id:
+            session = await self._resolve_session_projection_target(request)
+            _, selected_project, selected_workspace, _ = await self._resolve_selection()
+            session_tasks = await self._list_tasks_for_projected_session(
+                session_id=session.session_id,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            )
+            task_ids = [item.task_id for item in session_tasks]
+            if not task_ids and session.task_id:
+                task_ids = [session.task_id]
         manifest = await BackupService(
             self._project_root,
             store_group=self._stores,
         ).export_chats(
             task_id=task_id or None,
+            task_ids=task_ids,
             thread_id=thread_id or None,
             since=since,
             until=until,
@@ -2086,6 +2199,48 @@ class ControlPlaneService:
             data=manifest.model_dump(mode="json"),
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
         )
+
+    async def _resolve_session_projection_target(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> SessionProjectionItem:
+        requested_session_id = self._param_str(request.params, "session_id")
+        requested_thread_id = self._param_str(request.params, "thread_id")
+        if not requested_session_id and not requested_thread_id:
+            raise ControlPlaneActionError(
+                "SESSION_ID_REQUIRED",
+                "session_id 或 thread_id 至少需要一个",
+            )
+
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        session_items = await self._build_session_projection_items(
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        if requested_session_id:
+            session = next(
+                (item for item in session_items if item.session_id == requested_session_id),
+                None,
+            )
+            if session is None:
+                raise ControlPlaneActionError(
+                    "SESSION_NOT_FOUND",
+                    "当前作用域找不到对应的 session_id",
+                )
+            return session
+
+        matches = [item for item in session_items if item.thread_id == requested_thread_id]
+        if not matches:
+            raise ControlPlaneActionError(
+                "THREAD_NOT_FOUND",
+                "当前作用域找不到对应的 thread_id",
+            )
+        if len(matches) > 1:
+            raise ControlPlaneActionError(
+                "SESSION_ID_REQUIRED",
+                "当前作用域存在多个同 thread_id 会话，请显式提供 session_id",
+            )
+        return matches[0]
 
     async def _handle_session_interrupt(
         self, request: ActionRequestEnvelope
