@@ -1393,6 +1393,10 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    expect(await screen.findByText("从这里发出第一条消息")).toBeInTheDocument();
+    expect(document.querySelector(".wb-chat-panel.is-empty")).not.toBeNull();
+    expect(document.querySelector(".wb-chat-form.is-empty")).not.toBeNull();
+
     const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
     await userEvent.type(input, "帮我整理发布计划");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -1419,6 +1423,13 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("Chat Planner Work")).toBeInTheDocument();
     expect(await screen.findByText("当前 task 的上下文摘要。")).toBeInTheDocument();
     expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "内部标识" })).toBeInTheDocument();
+    expect(screen.queryByText("任务 ID")).not.toBeInTheDocument();
+    await userEvent.hover(screen.getByRole("button", { name: "内部标识" }));
+    expect(await screen.findByText("任务 ID")).toBeInTheDocument();
+    expect(screen.getByText("task-chat-1")).toBeInTheDocument();
+    expect(screen.getByText("会话 ID")).toBeInTheDocument();
+    expect(screen.getByText("thread-task-chat-1")).toBeInTheDocument();
     expect(screen.queryByText("别的任务的摘要。")).not.toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some((call) =>

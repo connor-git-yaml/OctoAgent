@@ -1643,7 +1643,22 @@ button {
 }
 
 .wb-chat-panel {
+  display: grid;
+  gap: var(--cp-space-4);
   min-height: 66vh;
+}
+
+.wb-chat-panel.is-empty {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.wb-chat-empty-stage {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--cp-space-4);
+  min-height: clamp(360px, 54vh, 680px);
+  padding: clamp(16px, 4vw, 36px) 0;
 }
 
 .wb-chat-messages {
@@ -1660,6 +1675,11 @@ button {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.wb-chat-form.is-empty {
+  width: min(100%, 760px);
+  margin: 0 auto;
 }
 
 .wb-chat-form input {
@@ -1696,6 +1716,86 @@ button {
 .wb-empty-state {
   place-items: start;
   min-height: 200px;
+}
+
+.wb-chat-empty-card {
+  width: min(100%, 720px);
+  place-items: center;
+  text-align: center;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 249, 0.9));
+}
+
+.wb-hover-reveal {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.wb-hover-reveal-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px dashed rgba(20, 32, 47, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--cp-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.wb-hover-reveal-trigger:hover,
+.wb-hover-reveal-trigger:focus-visible,
+.wb-hover-reveal-trigger[aria-expanded="true"] {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--cp-secondary-ink);
+  transform: translateY(-1px);
+}
+
+.wb-hover-reveal-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 10px;
+  width: min(320px, 72vw);
+  padding: 14px;
+  border: 1px solid rgba(20, 32, 47, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 40px rgba(20, 32, 47, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.wb-hover-reveal-row {
+  display: grid;
+  gap: 4px;
+}
+
+.wb-hover-reveal-row span {
+  color: var(--cp-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-hover-reveal-row strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .wb-message {
@@ -1861,5 +1961,25 @@ button {
   .wb-chat-form button,
   .wb-inline-form .wb-button {
     width: 100%;
+  }
+
+  .wb-chat-empty-stage {
+    min-height: 0;
+    padding: 0;
+  }
+
+  .wb-hover-reveal {
+    width: 100%;
+  }
+
+  .wb-hover-reveal-trigger {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .wb-hover-reveal-card {
+    left: 0;
+    right: auto;
+    width: min(100%, 320px);
   }
 }

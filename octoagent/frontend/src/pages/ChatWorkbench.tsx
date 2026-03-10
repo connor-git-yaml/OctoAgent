@@ -11,6 +11,7 @@ export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
   const { messages, sendMessage, streaming, error, taskId } = useChatStream();
   const [input, setInput] = useState("");
+  const [showInternalRefs, setShowInternalRefs] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const sessions = snapshot!.resources.sessions.sessions;
   const context = snapshot!.resources.context_continuity;
@@ -27,6 +28,15 @@ export default function ChatWorkbench() {
     (activeSession
       ? context.frames.find((item) => item.session_id === activeSession.session_id) ?? null
       : null);
+  const isEmptyConversation = messages.length === 0;
+  const internalRefs = [
+    taskId ? { label: "任务 ID", value: taskId } : null,
+    activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
+    activeWork?.work_id ? { label: "Work ID", value: activeWork.work_id } : null,
+    activeContextFrame?.context_frame_id
+      ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id }
+      : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
 
   useEffect(() => {
     let cancelled = false;
@@ -96,44 +106,94 @@ export default function ChatWorkbench() {
       </section>
 
       <div className="wb-chat-layout">
-        <section className="wb-panel wb-chat-panel">
+        <section className={`wb-panel wb-chat-panel ${isEmptyConversation ? "is-empty" : ""}`}>
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">对话</p>
               <h3>{activeSession?.title ?? (taskId ? "对话进行中" : "还没有开始对话")}</h3>
-              {taskId ? <p className="wb-panel-copy">任务 ID：{taskId}</p> : null}
             </div>
+            {internalRefs.length > 0 ? (
+              <div
+                className="wb-hover-reveal"
+                onMouseEnter={() => setShowInternalRefs(true)}
+                onMouseLeave={() => setShowInternalRefs(false)}
+              >
+                <button
+                  type="button"
+                  className="wb-hover-reveal-trigger"
+                  aria-expanded={showInternalRefs}
+                  onClick={() => setShowInternalRefs((current) => !current)}
+                  onFocus={() => setShowInternalRefs(true)}
+                  onBlur={() => setShowInternalRefs(false)}
+                >
+                  内部标识
+                </button>
+                {showInternalRefs ? (
+                  <div className="wb-hover-reveal-card" role="note" aria-label="当前会话内部标识">
+                    {internalRefs.map((item) => (
+                      <div key={item.label} className="wb-hover-reveal-row">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          <div className="wb-chat-messages">
-            {messages.length === 0 ? (
-              <div className="wb-empty-state">
+          {isEmptyConversation ? (
+            <div className="wb-chat-empty-stage">
+              <div className="wb-empty-state wb-chat-empty-card">
                 <strong>从这里发出第一条消息</strong>
                 <span>比如告诉 OctoAgent 你要完成什么，它会开始创建任务并返回结果。</span>
               </div>
-            ) : (
-              messages.map((message) => <MessageBubble key={message.id} message={message} />)
-            )}
-          </div>
+              {error ? <div className="wb-inline-banner is-error">{error}</div> : null}
+              <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder="告诉 OctoAgent 你现在要做什么"
+                  disabled={streaming}
+                />
+                <button
+                  type="submit"
+                  className="wb-button wb-button-primary"
+                  disabled={streaming || !input.trim()}
+                >
+                  {streaming ? "发送中" : "发送"}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <>
+              <div className="wb-chat-messages">
+                {messages.map((message) => (
+                  <MessageBubble key={message.id} message={message} />
+                ))}
+              </div>
 
-          {error ? <div className="wb-inline-banner is-error">{error}</div> : null}
+              {error ? <div className="wb-inline-banner is-error">{error}</div> : null}
 
-          <form className="wb-chat-form" onSubmit={handleSubmit}>
-            <input
-              type="text"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="告诉 OctoAgent 你现在要做什么"
-              disabled={streaming}
-            />
-            <button
-              type="submit"
-              className="wb-button wb-button-primary"
-              disabled={streaming || !input.trim()}
-            >
-              {streaming ? "发送中" : "发送"}
-            </button>
-          </form>
+              <form className="wb-chat-form" onSubmit={handleSubmit}>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder="告诉 OctoAgent 你现在要做什么"
+                  disabled={streaming}
+                />
+                <button
+                  type="submit"
+                  className="wb-button wb-button-primary"
+                  disabled={streaming || !input.trim()}
+                >
+                  {streaming ? "发送中" : "发送"}
+                </button>
+              </form>
+            </>
+          )}
         </section>
 
         <aside className="wb-chat-sidebar">
