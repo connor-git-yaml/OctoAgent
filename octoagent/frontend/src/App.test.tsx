@@ -1831,7 +1831,8 @@ describe("App workbench routing", () => {
         session_id: focusedSession.session_id,
       },
     });
-    expect((exportRequestBody?.params as Record<string, unknown> | undefined)?.thread_id).toBeUndefined();
+    const exportParams = exportRequestBody?.["params"] as Record<string, unknown> | undefined;
+    expect(exportParams?.thread_id).toBeUndefined();
   });
 
   it("Work 页面会禁用 terminal work 的 worker.review 按钮", async () => {
