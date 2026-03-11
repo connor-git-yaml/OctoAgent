@@ -6,6 +6,7 @@ click CLI 框架：main group + init command + doctor command。
 from __future__ import annotations
 
 import asyncio
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,10 @@ def _build_setup_config_patch(config: Any) -> dict[str, Any]:
             for alias, model in config.model_aliases.items()
         },
     }
+
+
+def _generate_local_proxy_key() -> str:
+    return f"sk-local-{secrets.token_urlsafe(24)}"
 
 
 @click.group()
@@ -149,14 +154,11 @@ def setup(
                 raise click.ClickException("API Key 不能为空。")
             secret_values[provider_entry.api_key_env] = provider_api_key.strip()
 
-        proxy_master_key = master_key or click.prompt(
-            f"设置 {runtime.master_key_env}",
-            default="sk-octoagent-local",
-            hide_input=True,
-            show_default=False,
-        )
-        if not proxy_master_key.strip():
-            raise click.ClickException("LiteLLM Proxy Key 不能为空。")
+        proxy_master_key = master_key or _generate_local_proxy_key()
+        if master_key is None:
+            console.print(
+                f"[dim]未提供 {runtime.master_key_env}，已自动生成本地 LiteLLM Proxy Key。[/dim]"
+            )
         secret_values[runtime.master_key_env] = proxy_master_key.strip()
 
         adapter = LocalSetupGovernanceAdapter(project_root)

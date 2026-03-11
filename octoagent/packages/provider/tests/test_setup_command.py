@@ -8,6 +8,7 @@ from octoagent.provider.dx.cli import main
 
 
 def test_setup_command_runs_quick_connect_flow(tmp_path: Path, monkeypatch) -> None:
+    import octoagent.provider.dx.cli as cli_module
     import octoagent.provider.dx.setup_governance_adapter as adapter_module
 
     class FakeAdapter:
@@ -20,7 +21,7 @@ def test_setup_command_runs_quick_connect_flow(tmp_path: Path, monkeypatch) -> N
         async def quick_connect(self, draft):
             assert draft["config"]["providers"][0]["id"] == "openrouter"
             assert draft["secret_values"]["OPENROUTER_API_KEY"] == "sk-provider-value"
-            assert draft["secret_values"]["LITELLM_MASTER_KEY"] == "sk-master-value"
+            assert draft["secret_values"]["LITELLM_MASTER_KEY"] == "sk-local-test-key"
             return SimpleNamespace(
                 data={
                     "review": {
@@ -41,16 +42,18 @@ def test_setup_command_runs_quick_connect_flow(tmp_path: Path, monkeypatch) -> N
         async def connect_openai_codex_oauth(self, **_kwargs):
             raise AssertionError("openrouter flow 不应触发 OAuth")
 
+    monkeypatch.setattr(cli_module, "_generate_local_proxy_key", lambda: "sk-local-test-key")
     monkeypatch.setattr(adapter_module, "LocalSetupGovernanceAdapter", FakeAdapter)
 
     runner = CliRunner()
     result = runner.invoke(
         main,
         ["setup", "--provider", "openrouter", "--skip-live-verify"],
-        input="\n\nsk-provider-value\nsk-master-value\n",
+        input="\n\nsk-provider-value\n",
         env={"OCTOAGENT_PROJECT_ROOT": str(tmp_path)},
     )
 
     assert result.exit_code == 0
+    assert "已自动生成本地 LiteLLM Proxy Key" in result.output
     assert "Runtime Activation" in result.output
     assert "managed_restart_completed" in result.output
