@@ -152,6 +152,81 @@ class TestSSE:
         assert events_received[3]["type"] == "STATE_TRANSITION"
         assert events_received[3]["final"] is True
 
+    async def test_sse_after_event_id_skips_replayed_history(
+        self, client: AsyncClient, test_app
+    ):
+        """续聊游标：只回放指定事件之后的新历史，避免把旧回复重放给新一轮对话。"""
+        resp = await client.post(
+            "/api/message",
+            json={
+                "text": "SSE cursor 测试",
+                "idempotency_key": "sse-cursor-001",
+            },
+        )
+        task_id = resp.json()["task_id"]
+
+        store_group = test_app.state.store_group
+        from ulid import ULID
+
+        now = datetime.now(UTC)
+        event_3 = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=3,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.CREATED,
+                to_status=TaskStatus.RUNNING,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_and_update_task(
+            store_group.conn,
+            store_group.event_store,
+            store_group.task_store,
+            event_3,
+            "RUNNING",
+        )
+
+        event_4 = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=4,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.RUNNING,
+                to_status=TaskStatus.SUCCEEDED,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_and_update_task(
+            store_group.conn,
+            store_group.event_store,
+            store_group.task_store,
+            event_4,
+            "SUCCEEDED",
+        )
+
+        events_received = []
+        async with client.stream(
+            "GET",
+            f"/api/stream/task/{task_id}?after_event_id={event_3.event_id}",
+        ) as response:
+            assert response.status_code == 200
+            async for line in response.aiter_lines():
+                if line.startswith("data:"):
+                    data = json.loads(line[len("data:"):].strip())
+                    events_received.append(data)
+
+        assert len(events_received) == 1
+        assert events_received[0]["event_id"] == event_4.event_id
+        assert events_received[0]["type"] == "STATE_TRANSITION"
+        assert events_received[0]["final"] is True
+
     async def test_sse_realtime_push(self, client: AsyncClient, test_app):
         """实时推送：先连接 SSE，再写入新事件"""
         # 创建任务

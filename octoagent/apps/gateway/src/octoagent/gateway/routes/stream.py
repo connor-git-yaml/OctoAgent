@@ -106,8 +106,12 @@ async def stream_task_events(
     except TaskScopeGuardError as exc:
         return _task_scope_error(exc)
 
-    # 解析 Last-Event-ID（断线重连）
-    last_event_id = request.headers.get("last-event-id")
+    # 解析事件游标：query 参数优先，其次 Last-Event-ID（断线重连）
+    last_event_id = (
+        request.query_params.get("after_event_id", "").strip()
+        or request.headers.get("last-event-id", "").strip()
+        or None
+    )
 
     async def event_generator():
         # 获取历史事件

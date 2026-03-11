@@ -73,6 +73,7 @@ class TestChatSendRoute:
         assert first_detail.status_code == 200
         first_events = first_detail.json()["events"]
         first_user_count = len([e for e in first_events if e["type"] == "USER_MESSAGE"])
+        last_event_id = first_events[-1]["event_id"]
         assert first_user_count >= 1
 
         second = await client.post(
@@ -81,6 +82,10 @@ class TestChatSendRoute:
         )
         assert second.status_code == 200
         assert second.json()["task_id"] == task_id
+        assert (
+            second.json()["stream_url"]
+            == f"/api/stream/task/{task_id}?after_event_id={last_event_id}"
+        )
 
         await asyncio.sleep(0.6)
         second_detail = await client.get(f"/api/tasks/{task_id}")

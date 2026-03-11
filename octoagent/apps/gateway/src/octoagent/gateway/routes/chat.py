@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
@@ -63,6 +64,7 @@ async def send_chat_message(
     """
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
+    after_event_id = ""
     from ..services.task_service import TaskService
 
     service = TaskService(store_group, request.app.state.sse_hub)
@@ -90,8 +92,17 @@ async def send_chat_message(
             logger.warning("Task 创建失败，降级返回 task_id", exc_info=True)
     else:
         try:
+            existing_task = await store_group.task_store.get_task(task_id)
+            if existing_task is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Task not found: {task_id}",
+                )
+            after_event_id = existing_task.pointers.latest_event_id
             await service.append_user_message(task_id=task_id, text=body.message)
             await _enqueue_or_run(request, service, task_id, body.message)
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception:
@@ -100,6 +111,8 @@ async def send_chat_message(
 
     # 构造 stream URL
     stream_url = f"/api/stream/task/{task_id}"
+    if after_event_id:
+        stream_url = f"{stream_url}?{urlencode({'after_event_id': after_event_id})}"
 
     return ChatSendResponse(
         task_id=task_id,
