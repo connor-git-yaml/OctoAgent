@@ -73,7 +73,7 @@ interface WorkAgentDraft {
 }
 
 const WORKER_TYPE_LABELS: Record<string, string> = {
-  general: "通用处理",
+  general: "Butler",
   ops: "运行保障",
   research: "调研整理",
   dev: "开发实现",
@@ -137,7 +137,7 @@ const TOOL_PROFILE_LABELS: Record<string, string> = {
 
 const TOKEN_LABELS: Record<string, string> = {
   llm_generation: "内容生成",
-  general: "通用协作",
+  general: "Butler 协调",
   planner: "任务规划",
   handoff: "任务交接",
   memory: "记忆整理",
@@ -448,7 +448,7 @@ function buildTemplateSeeds(
       {
         id: "manual:template:default",
         kind: "template",
-        name: "通用 Worker 模板",
+        name: "Butler 模板",
         workerType: "general",
         projectId: selector.current_project_id,
         workspaceId: selector.current_workspace_id,

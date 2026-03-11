@@ -78,7 +78,35 @@ from .services.telegram import (
 from .sse.approval_events import SSEApprovalBroadcaster
 
 log = structlog.get_logger()
+
 _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S = 10
+
+
+class SpaStaticFiles(StaticFiles):
+    """为 BrowserRouter 提供 index.html fallback。"""
+
+    async def get_response(self, path: str, scope) -> Any:
+        method = str(scope.get("method", "GET")).upper()
+        normalized = path.strip("/")
+        try:
+            response = await super().get_response(path, scope)
+        except Exception as exc:
+            from starlette.exceptions import HTTPException as StarletteHTTPException
+
+            if not isinstance(exc, StarletteHTTPException) or exc.status_code != 404:
+                raise
+            if method not in {"GET", "HEAD"}:
+                raise
+            if Path(normalized).suffix:
+                raise
+            return await super().get_response("index.html", scope)
+        if (
+            response.status_code == 404
+            and method in {"GET", "HEAD"}
+            and not Path(normalized).suffix
+        ):
+            return await super().get_response("index.html", scope)
+        return response
 
 
 def _resolve_project_root() -> Path:
@@ -624,7 +652,7 @@ def create_app() -> FastAPI:
     gateway_root = Path(__file__).resolve().parent
     frontend_dist = gateway_root.parents[4] / "frontend" / "dist"
     if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+        app.mount("/", SpaStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
     return app
 

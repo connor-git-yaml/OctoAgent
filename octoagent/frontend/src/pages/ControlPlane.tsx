@@ -114,6 +114,17 @@ const EMPTY_PIPELINES: SkillPipelineDocument = {
   summary: {},
 };
 
+const WORKER_TYPE_LABELS: Record<string, string> = {
+  general: "Butler",
+  ops: "Ops Worker",
+  research: "Research Worker",
+  dev: "Dev Worker",
+};
+
+function formatWorkerType(workerType: string): string {
+  return WORKER_TYPE_LABELS[workerType] ?? workerType;
+}
+
 type SectionId =
   | "dashboard"
   | "projects"
@@ -1435,7 +1446,7 @@ export default function ControlPlane() {
                   <div key={item.work_id} className="event-item">
                     <div>
                       <strong>{item.title || item.work_id}</strong>
-                      <p>{item.route_reason || item.selected_worker_type}</p>
+                      <p>{item.route_reason || formatWorkerType(item.selected_worker_type)}</p>
                     </div>
                     <small>{item.status}</small>
                   </div>
@@ -1685,7 +1696,7 @@ export default function ControlPlane() {
                   </span>
                 </div>
                 <div className="meta-grid">
-                  <span>Worker {work.selected_worker_type || "-"}</span>
+                  <span>Worker {formatWorkerType(work.selected_worker_type || "-")}</span>
                   <span>Target {work.target_kind || "-"}</span>
                   <span>Runtime {work.runtime_id || "-"}</span>
                   <span>Pipeline {work.pipeline_run_id || "-"}</span>

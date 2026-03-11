@@ -7,8 +7,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildFrontDoorSseUrl, frontDoorRequest } from "../api/client";
-import type { SSEEventData } from "../types";
+import { buildFrontDoorSseUrl, fetchTaskDetail, frontDoorRequest } from "../api/client";
+import type { Artifact, SSEEventData, TaskDetailResponse, TaskEvent } from "../types";
 
 /** 消息角色 */
 export type MessageRole = "user" | "agent";
@@ -37,6 +37,31 @@ export interface UseChatStreamReturn {
   taskId: string | null;
 }
 
+export interface ChatRestoreTarget {
+  taskId: string;
+}
+
+const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
+
+function readStoredTaskId(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.sessionStorage.getItem(ACTIVE_CHAT_TASK_STORAGE_KEY);
+  return raw && raw.trim() ? raw.trim() : null;
+}
+
+function persistTaskId(taskId: string | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (taskId && taskId.trim()) {
+    window.sessionStorage.setItem(ACTIVE_CHAT_TASK_STORAGE_KEY, taskId);
+    return;
+  }
+  window.sessionStorage.removeItem(ACTIVE_CHAT_TASK_STORAGE_KEY);
+}
+
 function extractAgentMessage(
   eventData: Pick<SSEEventData, "payload"> & { type: string }
 ): string {
@@ -59,12 +84,87 @@ function extractAgentMessage(
   return "";
 }
 
-export function useChatStream(): UseChatStreamReturn {
+function extractUserMessage(event: TaskEvent): string {
+  const payload = event.payload;
+  if (typeof payload.text === "string" && payload.text.trim()) {
+    return payload.text;
+  }
+  if (typeof payload.text_preview === "string" && payload.text_preview.trim()) {
+    return payload.text_preview;
+  }
+  return "";
+}
+
+function extractArtifactText(artifact: Artifact | undefined): string {
+  if (!artifact) {
+    return "";
+  }
+  for (const part of artifact.parts) {
+    if (typeof part.content === "string" && part.content.trim()) {
+      return part.content;
+    }
+  }
+  return "";
+}
+
+function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] {
+  const llmArtifacts = detail.artifacts.filter((artifact) => artifact.name === "llm-response");
+  const orderedEvents = [...detail.events].sort((left, right) => left.task_seq - right.task_seq);
+  const restored: ChatMessage[] = [];
+  let artifactIndex = 0;
+
+  for (const event of orderedEvents) {
+    if (event.type === "USER_MESSAGE") {
+      const content = extractUserMessage(event);
+      if (!content) {
+        continue;
+      }
+      restored.push({
+        id: `restore-user-${event.event_id}`,
+        role: "user",
+        content,
+        isStreaming: false,
+      });
+      continue;
+    }
+
+    if (event.type === "MODEL_CALL_COMPLETED") {
+      const content =
+        extractAgentMessage(event as TaskEvent & { type: string }) ||
+        extractArtifactText(llmArtifacts[artifactIndex]);
+      artifactIndex += 1;
+      if (!content) {
+        continue;
+      }
+      restored.push({
+        id: `restore-agent-${event.event_id}`,
+        role: "agent",
+        content,
+        isStreaming: false,
+      });
+      continue;
+    }
+
+    if (event.type === "MODEL_CALL_FAILED") {
+      restored.push({
+        id: `restore-agent-${event.event_id}`,
+        role: "agent",
+        content: "本次回复失败，请重试。",
+        isStreaming: false,
+      });
+    }
+  }
+
+  return restored;
+}
+
+export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(() => readStoredTaskId());
   const eventSourceRef = useRef<EventSource | null>(null);
+  const restoredTaskIdRef = useRef<string | null>(null);
 
   /** 关闭 EventSource */
   const closeStream = useCallback(() => {
@@ -226,6 +326,46 @@ export function useChatStream(): UseChatStreamReturn {
   );
 
   // 组件卸载时清理
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreConversation() {
+      const candidateTaskId = taskId || restoreTarget?.taskId || "";
+      if (!candidateTaskId || messages.length > 0 || streaming) {
+        return;
+      }
+      if (restoredTaskIdRef.current === candidateTaskId) {
+        return;
+      }
+      restoredTaskIdRef.current = candidateTaskId;
+      try {
+        const detail = await fetchTaskDetail(candidateTaskId);
+        if (cancelled) {
+          return;
+        }
+        setTaskId(candidateTaskId);
+        setMessages(buildMessagesFromTaskDetail(detail));
+      } catch {
+        if (!cancelled) {
+          if (taskId === candidateTaskId) {
+            setTaskId(null);
+          }
+          persistTaskId(null);
+          setMessages([]);
+        }
+      }
+    }
+
+    void restoreConversation();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages.length, restoreTarget?.taskId, streaming, taskId]);
+
+  useEffect(() => {
+    persistTaskId(taskId);
+  }, [taskId]);
+
   useEffect(() => {
     return () => {
       closeStream();

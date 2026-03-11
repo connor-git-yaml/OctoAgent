@@ -4,16 +4,37 @@ import { fetchTaskDetail } from "../api/client";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import { useChatStream } from "../hooks/useChatStream";
-import type { TaskDetailResponse } from "../types";
+import type { SessionProjectionDocument, TaskDetailResponse } from "../types";
 import { formatDateTime } from "../workbench/utils";
+
+function resolveRestorableTaskId(sessions: SessionProjectionDocument): string | null {
+  const webSessions = sessions.sessions.filter((item) => item.channel === "web");
+  const candidates = webSessions.length > 0 ? webSessions : sessions.sessions;
+  if (sessions.focused_session_id) {
+    const focused = candidates.find((item) => item.session_id === sessions.focused_session_id);
+    if (focused) {
+      return focused.task_id;
+    }
+  }
+  if (sessions.focused_thread_id) {
+    const focused = candidates.find((item) => item.thread_id === sessions.focused_thread_id);
+    if (focused) {
+      return focused.task_id;
+    }
+  }
+  return candidates[0]?.task_id ?? null;
+}
 
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
-  const { messages, sendMessage, streaming, error, taskId } = useChatStream();
+  const sessions = snapshot!.resources.sessions.sessions;
+  const restoreTaskId = resolveRestorableTaskId(snapshot!.resources.sessions);
+  const { messages, sendMessage, streaming, error, taskId } = useChatStream(
+    restoreTaskId ? { taskId: restoreTaskId } : null
+  );
   const [input, setInput] = useState("");
   const [showInternalRefs, setShowInternalRefs] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
-  const sessions = snapshot!.resources.sessions.sessions;
   const context = snapshot!.resources.context_continuity;
   const memory = snapshot!.resources.memory;
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;

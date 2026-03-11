@@ -28,7 +28,7 @@ const WORK_STATUS_LABELS: Record<string, string> = {
 };
 
 const WORKER_TYPE_LABELS: Record<string, string> = {
-  general: "通用 Worker",
+  general: "Butler",
   ops: "Ops Worker",
   research: "Research Worker",
   dev: "Dev Worker",

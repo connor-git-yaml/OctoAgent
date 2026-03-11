@@ -6,6 +6,7 @@ import type {
   ControlPlaneCapability,
   ControlPlaneSnapshot,
   SessionProjectionItem,
+  TaskDetailResponse,
   WorkProjectionItem,
 } from "./types";
 
@@ -717,7 +718,7 @@ function buildWork(
   };
 }
 
-function buildTaskDetail(taskId: string, title: string) {
+function buildTaskDetail(taskId: string, title: string): TaskDetailResponse {
   return {
     task: {
       task_id: taskId,
@@ -2361,6 +2362,126 @@ describe("App workbench routing", () => {
         String((call as FetchArgs)[0]).includes("/api/control/resources/context-frames")
       )
     ).toBe(true);
+  });
+
+  it("重新进入 Chat 时会恢复当前聚焦会话的历史消息", async () => {
+    window.history.pushState({}, "", "/chat");
+
+    const snapshot = buildSnapshot();
+    const focusedSession = buildSession("task-chat-restore", "work-chat-restore");
+    snapshot.resources.sessions.sessions = [focusedSession];
+    snapshot.resources.sessions.focused_session_id = focusedSession.session_id;
+    snapshot.resources.sessions.focused_thread_id = focusedSession.thread_id;
+
+    const detail = buildTaskDetail("task-chat-restore", "历史对话");
+    detail.events = [
+      {
+        event_id: "evt-user-1",
+        task_seq: 1,
+        ts: "2026-03-09T10:01:00Z",
+        type: "USER_MESSAGE",
+        actor: "user",
+        payload: {
+          text: "帮我整理这周的发布安排",
+        },
+      },
+      {
+        event_id: "evt-agent-1",
+        task_seq: 2,
+        ts: "2026-03-09T10:02:00Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "这周先锁定范围，再排发布时间表。",
+        },
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/tasks/task-chat-restore")) {
+        return Promise.resolve(jsonResponse(detail));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("帮我整理这周的发布安排")).toBeInTheDocument();
+    expect(await screen.findByText("这周先锁定范围，再排发布时间表。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "历史对话" })).toBeInTheDocument();
+  });
+
+  it("重新进入 Chat 时会优先恢复最近的 Web 会话", async () => {
+    window.history.pushState({}, "", "/chat");
+
+    const snapshot = buildSnapshot();
+    const telegramSession = {
+      ...buildSession("task-telegram-1", "work-telegram-1"),
+      channel: "telegram",
+      title: "Telegram 会话",
+    };
+    const webSession = {
+      ...buildSession("task-chat-web", "work-chat-web"),
+      title: "Web 会话",
+      latest_event_at: "2026-03-09T10:09:00Z",
+    };
+    snapshot.resources.sessions.sessions = [telegramSession, webSession];
+    snapshot.resources.sessions.focused_session_id = "";
+    snapshot.resources.sessions.focused_thread_id = "";
+
+    const detail = buildTaskDetail("task-chat-web", "Web 会话");
+    detail.events = [
+      {
+        event_id: "evt-user-web",
+        task_seq: 1,
+        ts: "2026-03-09T10:08:00Z",
+        type: "USER_MESSAGE",
+        actor: "user",
+        payload: {
+          text: "帮我回顾今天的 Web 对话",
+        },
+      },
+      {
+        event_id: "evt-agent-web",
+        task_seq: 2,
+        ts: "2026-03-09T10:09:00Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "这里是最近一轮 Web 对话的摘要。",
+        },
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/tasks/task-chat-web")) {
+        return Promise.resolve(jsonResponse(detail));
+      }
+      if (url.includes("/api/control/resources/sessions")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.sessions));
+      }
+      if (url.includes("/api/control/resources/delegation")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.delegation));
+      }
+      if (url.includes("/api/control/resources/context-frames")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.context_continuity));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("帮我回顾今天的 Web 对话")).toBeInTheDocument();
+    expect(await screen.findByText("这里是最近一轮 Web 对话的摘要。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Web 会话" })).toBeInTheDocument();
   });
 
   it("Work 看板会覆盖完整状态并在 split 失败时保留草稿", async () => {

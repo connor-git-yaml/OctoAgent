@@ -44,8 +44,8 @@ class WizardSessionResult(BaseModel):
 
 DEFAULT_SETUP_AGENT_PROFILE: dict[str, str] = {
     "scope": "project",
-    "name": "OctoAgent",
-    "persona_summary": "通过 CLI setup 初始化的主 Agent。",
+    "name": "OctoAgent Butler",
+    "persona_summary": "通过 CLI setup 初始化的 Butler 主 Agent。",
     "tool_profile": "standard",
     "model_alias": "main",
 }

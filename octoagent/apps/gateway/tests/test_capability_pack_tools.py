@@ -206,7 +206,18 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert tts_tool.availability.value in {"available", "install_required"}
 
         general_profile = capability_pack.get_worker_profile(WorkerType.GENERAL)
-        assert general_profile.default_tool_groups == ["project", "session", "supervision"]
+        assert general_profile.default_tool_groups == [
+            "project",
+            "session",
+            "supervision",
+            "delegation",
+        ]
+        pack = await capability_pack.get_pack()
+        general_bootstrap = next(
+            item for item in pack.bootstrap_files if item.file_id == "bootstrap:general"
+        )
+        assert "Butler" in general_bootstrap.content
+        assert "不要把自己叫作 general worker" in general_bootstrap.content
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

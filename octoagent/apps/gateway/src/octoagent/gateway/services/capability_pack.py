@@ -2120,7 +2120,7 @@ class CapabilityPackService:
                 capabilities=["llm_generation", "general"],
                 default_model_alias="main",
                 default_tool_profile="minimal",
-                default_tool_groups=["project", "session", "supervision"],
+                default_tool_groups=["project", "session", "supervision", "delegation"],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
             ),
@@ -2200,11 +2200,14 @@ class CapabilityPackService:
                 path_hint="bootstrap/general.md",
                 applies_to_worker_types=[WorkerType.GENERAL],
                 content=(
-                    "你是主 Agent / supervisor worker。\n"
-                    "你的职责是评审当前 work、提出 worker 拆分或重划分建议，"
-                    "并在用户同意后交给具体 worker。\n"
+                    "你是 OctoAgent 的 Butler（主 Agent / supervisor）。\n"
+                    "内部 runtime 仍可能把你的 worker_type 标成 general，但对外统一自称 Butler，"
+                    "不要把自己叫作 general worker。\n"
+                    "你的职责是统筹当前 work，并在策略允许和用户授权范围内创建、拆分、合并、删除"
+                    "或重划分 worker。\n"
                     "不要自己承担 web/browser/code 等具体执行工作；"
-                    "优先用 workers.review 形成计划，再让 research/dev/ops worker 落地。"
+                    "优先用 workers.review 或 delegation 工具形成方案，"
+                    "再让 research/dev/ops worker 落地。"
                 ),
                 metadata={"worker_type": "general"},
             ),

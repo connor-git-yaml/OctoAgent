@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from octoagent.core.models import ManagedRuntimeDescriptor, RuntimeManagementMode, utc_now
 from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
@@ -88,6 +89,35 @@ def test_create_app_loads_dotenv_from_resolved_project_root(
     gateway_main.create_app()
 
     assert calls == [(tmp_path, False)]
+
+
+def test_spa_static_files_fallback_to_index_for_frontend_routes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "index.html").write_text("<html><body>chat app</body></html>", encoding="utf-8")
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "app.js").write_text("console.log('ok');\n", encoding="utf-8")
+
+    app = FastAPI()
+    app.mount("/", gateway_main.SpaStaticFiles(directory=str(dist_dir), html=True), name="frontend")
+    client = TestClient(app)
+
+    html_response = client.get("/chat")
+    assert html_response.status_code == 200
+    assert "chat app" in html_response.text
+
+    asset_response = client.get("/assets/app.js")
+    assert asset_response.status_code == 200
+    assert "console.log('ok');" in asset_response.text
+
+    missing_asset = client.get("/assets/missing.js")
+    assert missing_asset.status_code == 404
 
 
 def test_resolve_stream_model_aliases_from_oauth_provider(
@@ -239,6 +269,45 @@ def test_persist_runtime_state_marks_managed_when_descriptor_exists(
     assert gateway_main._persist_runtime_state(tmp_path, store=FakeStore()) is True
     assert captured
     assert captured[0].management_mode == RuntimeManagementMode.MANAGED
+
+
+def test_spa_static_files_falls_back_to_index_for_nested_frontend_route(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    dist = tmp_path / "frontend-dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html><body>chat shell</body></html>", encoding="utf-8")
+
+    app = FastAPI()
+    app.mount("/", gateway_main.SpaStaticFiles(directory=str(dist), html=True), name="frontend")
+    client = TestClient(app)
+
+    response = client.get("/chat")
+
+    assert response.status_code == 200
+    assert "chat shell" in response.text
+
+
+def test_spa_static_files_keeps_missing_asset_as_404(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    dist = tmp_path / "frontend-dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html><body>chat shell</body></html>", encoding="utf-8")
+
+    app = FastAPI()
+    app.mount("/", gateway_main.SpaStaticFiles(directory=str(dist), html=True), name="frontend")
+    client = TestClient(app)
+
+    response = client.get("/assets/missing.js")
+
+    assert response.status_code == 404
 
 
 async def test_lifespan_ensures_default_project_migration(
