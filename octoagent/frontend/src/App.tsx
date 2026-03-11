@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 import AdvancedControlPlane from "./pages/AdvancedControlPlane";
+import AgentCenter from "./pages/AgentCenter";
 import ChatWorkbench from "./pages/ChatWorkbench";
 import Home from "./pages/Home";
 import MemoryCenter from "./pages/MemoryCenter";
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/" element={<WorkbenchLayout />}>
           <Route index element={<Home />} />
           <Route path="chat" element={<ChatWorkbench />} />
+          <Route path="agents" element={<AgentCenter />} />
           <Route path="work" element={<WorkbenchBoard />} />
           <Route path="memory" element={<MemoryCenter />} />
           <Route path="settings" element={<SettingsCenter />} />

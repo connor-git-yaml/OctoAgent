@@ -108,6 +108,9 @@ export default function Home() {
           <Link className="wb-button wb-button-primary" to="/chat">
             进入聊天
           </Link>
+          <Link className="wb-button wb-button-secondary" to="/agents">
+            Agent 管理
+          </Link>
           <Link className="wb-button wb-button-secondary" to="/settings">
             打开设置
           </Link>
@@ -177,6 +180,10 @@ export default function Home() {
             <Link className="wb-action-card" to="/settings">
               <strong>打开设置</strong>
               <span>先把主 Agent、模型连接和工作区确认好。</span>
+            </Link>
+            <Link className="wb-action-card" to="/agents">
+              <strong>进入 Agent 管理</strong>
+              <span>集中查看主 Agent、Work Agent 和 Project 的当前分工。</span>
             </Link>
             <Link className="wb-action-card" to="/chat">
               <strong>发第一条消息</strong>

@@ -24,6 +24,8 @@ function renderNavDescription(path: string): string {
       return "系统状态与下一步";
     case "/chat":
       return "对话、任务与回复";
+    case "/agents":
+      return "主 Agent 与 Work Agent";
     case "/work":
       return "运行中的工作与子任务";
     case "/memory":
@@ -115,6 +117,7 @@ export default function WorkbenchLayout() {
             {[
               { to: "/", label: "Home" },
               { to: "/chat", label: "Chat" },
+              { to: "/agents", label: "Agents" },
               { to: "/work", label: "Work" },
               { to: "/memory", label: "Memory" },
               { to: "/settings", label: "Settings" },

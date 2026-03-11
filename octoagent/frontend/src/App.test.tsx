@@ -693,6 +693,49 @@ describe("App workbench routing", () => {
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
+  it("Agents 路由提供主 Agent 与 Work Agent 管理入口", async () => {
+    window.history.pushState({}, "", "/agents");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.delegation.works = [
+      buildWork("work-ui", "running", {
+        title: "UI Builder",
+        runtimeSummary: {
+          requested_tool_profile: "standard",
+          requested_model_alias: "main",
+        },
+      }),
+    ];
+    snapshot.resources.capability_pack.pack.worker_profiles = [
+      {
+        worker_type: "dev",
+        capabilities: ["frontend", "handoff"],
+        default_model_alias: "main",
+        default_tool_profile: "standard",
+        default_tool_groups: ["filesystem", "web"],
+        bootstrap_file_ids: [],
+        runtime_kinds: ["worker"],
+        metadata: {},
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "用一个页面看清主 Agent 与 Work Agent 的分工" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建 Work Agent 草案" })).toBeInTheDocument();
+    expect(screen.getByText("默认主 Agent")).toBeInTheDocument();
+  });
+
   it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
     window.history.pushState({}, "", "/settings");
 

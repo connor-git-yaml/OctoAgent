@@ -1634,6 +1634,26 @@ button {
   color: var(--cp-danger);
 }
 
+.wb-status-pill.is-active {
+  background: rgba(21, 128, 61, 0.12);
+  color: var(--cp-success);
+}
+
+.wb-status-pill.is-syncing {
+  background: rgba(15, 118, 110, 0.16);
+  color: var(--cp-secondary);
+}
+
+.wb-status-pill.is-attention {
+  background: rgba(221, 107, 32, 0.16);
+  color: var(--cp-primary-ink);
+}
+
+.wb-status-pill.is-draft {
+  background: rgba(20, 32, 47, 0.08);
+  color: var(--cp-muted);
+}
+
 .wb-chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -1659,6 +1679,34 @@ button {
 
 .wb-chip.is-warning {
   background: rgba(221, 107, 32, 0.14);
+  color: var(--cp-primary-ink);
+}
+
+.wb-chip-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 32, 47, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--cp-ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.wb-chip-button:hover {
+  transform: translateY(-1px);
+}
+
+.wb-chip-button.is-active {
+  border-color: rgba(221, 107, 32, 0.24);
+  background: rgba(221, 107, 32, 0.1);
   color: var(--cp-primary-ink);
 }
 
@@ -1703,6 +1751,113 @@ button {
   resize: vertical;
   font-family: "IBM Plex Mono", monospace;
   line-height: 1.5;
+}
+
+.wb-hero-agent {
+  background:
+    radial-gradient(circle at top right, rgba(221, 107, 32, 0.18), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 244, 238, 0.92));
+}
+
+.wb-agent-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: var(--cp-space-5);
+}
+
+.wb-agent-form-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-agent-option-stack {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-agent-choice-grid,
+.wb-agent-project-grid,
+.wb-agent-list {
+  display: grid;
+  gap: var(--cp-space-3);
+}
+
+.wb-agent-choice-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.wb-agent-choice-card,
+.wb-agent-project-card,
+.wb-agent-runtime-trigger {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: var(--cp-space-3);
+  border: 1px solid rgba(20, 32, 47, 0.1);
+  border-radius: var(--cp-radius-lg);
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.wb-agent-choice-card:hover,
+.wb-agent-project-card:hover,
+.wb-agent-runtime-trigger:hover {
+  transform: translateY(-1px);
+  border-color: rgba(221, 107, 32, 0.22);
+}
+
+.wb-agent-choice-card.is-active,
+.wb-agent-project-card.is-active,
+.wb-agent-runtime-card.is-active {
+  border-color: rgba(221, 107, 32, 0.24);
+  background: rgba(221, 107, 32, 0.1);
+}
+
+.wb-agent-choice-card strong,
+.wb-agent-project-card strong,
+.wb-agent-runtime-card strong {
+  font-size: 1rem;
+}
+
+.wb-agent-choice-card span,
+.wb-agent-project-card span,
+.wb-agent-runtime-card p,
+.wb-agent-runtime-meta {
+  color: var(--cp-muted);
+}
+
+.wb-agent-runtime-card {
+  display: grid;
+  gap: var(--cp-space-3);
+  padding: var(--cp-space-3);
+  border: 1px solid rgba(20, 32, 47, 0.1);
+  border-radius: var(--cp-radius-lg);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.wb-agent-runtime-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.86rem;
+}
+
+.wb-agent-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cp-muted);
+  font-size: 0.86rem;
+}
+
+.wb-agent-check input {
+  width: 16px;
+  height: 16px;
 }
 
 .wb-field-guide,
@@ -2154,8 +2309,11 @@ button {
   .wb-card-grid-4,
   .wb-card-grid-3,
   .wb-split,
+  .wb-agent-layout,
   .wb-chat-layout,
   .wb-form-grid,
+  .wb-agent-form-grid,
+  .wb-agent-choice-grid,
   .wb-hero-insights,
   .wb-work-detail-grid,
   .wb-stat-grid,
@@ -2204,6 +2362,11 @@ button {
   .wb-chat-empty-stage {
     min-height: 0;
     padding: 0;
+  }
+
+  .wb-agent-project-grid,
+  .wb-agent-list {
+    grid-template-columns: 1fr;
   }
 
   .wb-hover-reveal {
