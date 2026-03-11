@@ -134,12 +134,24 @@ def setup(
         )
         default_config = build_bootstrap_config_for_provider(provider_choice)
         default_provider = default_config.providers[0]
+        resolved_provider_name = provider_name
+        resolved_api_key_env = api_key_env
+        if provider_choice == "openai-codex":
+            resolved_provider_name = resolved_provider_name or default_provider.name
+            resolved_api_key_env = resolved_api_key_env or default_provider.api_key_env
+        else:
+            resolved_provider_name = resolved_provider_name or click.prompt(
+                "Provider 显示名称",
+                default=default_provider.name,
+            )
+            resolved_api_key_env = resolved_api_key_env or click.prompt(
+                "凭证环境变量名",
+                default=default_provider.api_key_env,
+            )
         config = build_bootstrap_config_for_provider(
             provider_choice,
-            provider_name=provider_name
-            or click.prompt("Provider 显示名称", default=default_provider.name),
-            api_key_env=api_key_env
-            or click.prompt("凭证环境变量名", default=default_provider.api_key_env),
+            provider_name=resolved_provider_name,
+            api_key_env=resolved_api_key_env,
         )
         provider_entry = config.providers[0]
         runtime = config.runtime
