@@ -487,6 +487,15 @@ class WizardSessionService:
                         "display_name": f"{provider.name} API Key",
                     }
                 )
+        if config.memory.backend_mode == "memu" and config.memory.bridge_api_key_env:
+            targets.append(
+                {
+                    "target_kind": "memory",
+                    "target_key": "memory.bridge_api_key_env",
+                    "env_name": config.memory.bridge_api_key_env,
+                    "display_name": "MemU Bridge API Key",
+                }
+            )
         telegram = config.channels.telegram
         if telegram.enabled and telegram.bot_token_env:
             targets.append(

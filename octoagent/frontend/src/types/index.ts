@@ -494,6 +494,8 @@ export interface AgentProfileItem {
   persona_summary: string;
   model_alias: string;
   tool_profile: string;
+  memory_access_policy?: Record<string, unknown>;
+  context_budget_policy?: Record<string, unknown>;
   updated_at: string | null;
 }
 

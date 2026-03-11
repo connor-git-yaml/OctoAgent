@@ -162,6 +162,83 @@ class RuntimeConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# MemoryConfig — Memory backend / recall 默认配置
+# ---------------------------------------------------------------------------
+
+
+class MemoryConfig(BaseModel):
+    """Memory 默认配置。
+
+    用于 Web / Gateway 的 Memory Settings 页面与 runtime fallback。
+    project binding 仍然优先；当未绑定时，允许使用 octoagent.yaml 中的配置作为兜底。
+    """
+
+    backend_mode: Literal["local_only", "memu"] = Field(
+        default="local_only",
+        description="Memory 后端模式：local_only 使用本地 SQLite 元数据；memu 连接远端 MemU bridge。",
+    )
+    bridge_url: str = Field(
+        default="",
+        description="MemU bridge 基础地址，例如 https://memory.example.com",
+    )
+    bridge_api_key_env: str = Field(
+        default="",
+        description="MemU bridge API Key 所在环境变量名（可选）",
+        pattern=_OPTIONAL_ENV_NAME_PATTERN,
+    )
+    bridge_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=60.0,
+        description="请求 MemU bridge 的超时时间（秒）",
+    )
+    bridge_api_key_header: str = Field(
+        default="Authorization",
+        min_length=1,
+        description="MemU bridge API Key 使用的请求头名称",
+    )
+    bridge_api_key_scheme: str = Field(
+        default="Bearer",
+        description="MemU bridge API Key 前缀；不需要前缀时可留空",
+    )
+    bridge_health_path: str = Field(
+        default="/health",
+        min_length=1,
+        description="健康检查路径",
+    )
+    bridge_search_path: str = Field(
+        default="/memory/search",
+        min_length=1,
+        description="检索路径",
+    )
+    bridge_sync_path: str = Field(
+        default="/memory/sync",
+        min_length=1,
+        description="同步路径",
+    )
+    bridge_ingest_path: str = Field(
+        default="/memory/ingest",
+        min_length=1,
+        description="写入 ingest 路径",
+    )
+    bridge_derivations_path: str = Field(
+        default="/memory/derivations/query",
+        min_length=1,
+        description="派生记忆查询路径",
+    )
+    bridge_evidence_path: str = Field(
+        default="/memory/evidence/resolve",
+        min_length=1,
+        description="证据链查询路径",
+    )
+    bridge_maintenance_path: str = Field(
+        default="/memory/maintenance",
+        min_length=1,
+        description="维护任务路径",
+    )
+
+
+# ---------------------------------------------------------------------------
 # FrontDoorConfig — 对外入口边界配置
 # ---------------------------------------------------------------------------
 
@@ -361,6 +438,10 @@ class OctoAgentConfig(BaseModel):
         default_factory=RuntimeConfig,
         description="运行时配置块",
     )
+    memory: MemoryConfig = Field(
+        default_factory=MemoryConfig,
+        description="Memory backend 与高级检索默认配置",
+    )
     front_door: FrontDoorConfig = Field(
         default_factory=FrontDoorConfig,
         description="owner-facing API 对外入口边界配置",
@@ -487,6 +568,7 @@ def build_config_schema_document(
 
     active_provider = config.providers[0] if config and config.providers else None
     active_telegram = config.channels.telegram if config else TelegramChannelConfig()
+    active_memory = config.memory if config else MemoryConfig()
     provider_target_key = (
         f"providers.{active_provider.id}.api_key_env"
         if active_provider is not None
@@ -528,6 +610,25 @@ def build_config_schema_document(
                     "runtime.llm_mode",
                     "runtime.litellm_proxy_url",
                     "runtime.master_key_env",
+                ],
+            },
+            "memory": {
+                "title": "Memory",
+                "description": "配置本地 Memory 模式或远端 MemU bridge。",
+                "fields": [
+                    "memory.backend_mode",
+                    "memory.bridge_url",
+                    "memory.bridge_api_key_env",
+                    "memory.bridge_timeout_seconds",
+                    "memory.bridge_api_key_header",
+                    "memory.bridge_api_key_scheme",
+                    "memory.bridge_health_path",
+                    "memory.bridge_search_path",
+                    "memory.bridge_sync_path",
+                    "memory.bridge_ingest_path",
+                    "memory.bridge_derivations_path",
+                    "memory.bridge_evidence_path",
+                    "memory.bridge_maintenance_path",
                 ],
             },
             "security": {
@@ -638,6 +739,102 @@ def build_config_schema_document(
                     "target_key": "runtime.master_key_env",
                 },
                 "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
+            },
+            "memory.backend_mode": {
+                "label": "Memory 后端模式",
+                "input": "choice",
+                "required": True,
+                "recommended": True,
+                "choices": ["local_only", "memu"],
+                "default": active_memory.backend_mode,
+            },
+            "memory.bridge_url": {
+                "label": "MemU Bridge 地址",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_url,
+            },
+            "memory.bridge_api_key_env": {
+                "label": "MemU API Key 环境变量名",
+                "input": "env_name",
+                "required": False,
+                "recommended": False,
+                "secret_target": {
+                    "target_kind": "memory",
+                    "target_key": "memory.bridge_api_key_env",
+                },
+                "default": active_memory.bridge_api_key_env,
+            },
+            "memory.bridge_timeout_seconds": {
+                "label": "Bridge 超时时间（秒）",
+                "input": "text",
+                "required": False,
+                "recommended": True,
+                "default": active_memory.bridge_timeout_seconds,
+            },
+            "memory.bridge_api_key_header": {
+                "label": "API Key Header",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_api_key_header,
+            },
+            "memory.bridge_api_key_scheme": {
+                "label": "API Key 前缀",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_api_key_scheme,
+            },
+            "memory.bridge_health_path": {
+                "label": "健康检查路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_health_path,
+            },
+            "memory.bridge_search_path": {
+                "label": "检索路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_search_path,
+            },
+            "memory.bridge_sync_path": {
+                "label": "同步路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_sync_path,
+            },
+            "memory.bridge_ingest_path": {
+                "label": "写入路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_ingest_path,
+            },
+            "memory.bridge_derivations_path": {
+                "label": "派生查询路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_derivations_path,
+            },
+            "memory.bridge_evidence_path": {
+                "label": "证据链路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_evidence_path,
+            },
+            "memory.bridge_maintenance_path": {
+                "label": "维护任务路径",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_maintenance_path,
             },
             "front_door.mode": {
                 "label": "Front-door 模式",

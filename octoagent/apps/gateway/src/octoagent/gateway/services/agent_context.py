@@ -56,15 +56,94 @@ _MEMORY_BINDING_TYPES = {
 }
 
 
+def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, Any]:
+    if agent_profile is None or not isinstance(agent_profile.context_budget_policy, dict):
+        return {}
+    raw = agent_profile.context_budget_policy.get("memory_recall", {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def _bounded_int(
+    value: Any,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
+def effective_memory_access_policy(agent_profile: AgentProfile | None) -> MemoryAccessPolicy:
+    raw = agent_profile.memory_access_policy if agent_profile is not None else {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return MemoryAccessPolicy.model_validate(raw)
+
+
 def build_default_memory_recall_hook_options(
     *,
     subject_hint: str = "",
+    agent_profile: AgentProfile | None = None,
 ) -> MemoryRecallHookOptions:
+    prefs = _memory_recall_preferences(agent_profile)
     return MemoryRecallHookOptions(
-        post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
-        rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+        post_filter_mode=MemoryRecallPostFilterMode(
+            str(
+                prefs.get(
+                    "post_filter_mode",
+                    MemoryRecallPostFilterMode.KEYWORD_OVERLAP.value,
+                )
+            ).strip()
+            or MemoryRecallPostFilterMode.KEYWORD_OVERLAP.value
+        ),
+        rerank_mode=MemoryRecallRerankMode(
+            str(
+                prefs.get(
+                    "rerank_mode",
+                    MemoryRecallRerankMode.HEURISTIC.value,
+                )
+            ).strip()
+            or MemoryRecallRerankMode.HEURISTIC.value
+        ),
         subject_hint=subject_hint,
+        min_keyword_overlap=_bounded_int(
+            prefs.get("min_keyword_overlap"),
+            default=1,
+            minimum=1,
+            maximum=8,
+        ),
     )
+
+
+def memory_recall_scope_limit(
+    agent_profile: AgentProfile | None,
+    *,
+    default: int,
+) -> int:
+    prefs = _memory_recall_preferences(agent_profile)
+    return _bounded_int(prefs.get("scope_limit"), default=default, minimum=1, maximum=8)
+
+
+def memory_recall_per_scope_limit(
+    agent_profile: AgentProfile | None,
+    *,
+    default: int,
+) -> int:
+    prefs = _memory_recall_preferences(agent_profile)
+    return _bounded_int(prefs.get("per_scope_limit"), default=default, minimum=1, maximum=12)
+
+
+def memory_recall_max_hits(
+    agent_profile: AgentProfile | None,
+    *,
+    default: int,
+) -> int:
+    prefs = _memory_recall_preferences(agent_profile)
+    return _bounded_int(prefs.get("max_hits"), default=default, minimum=1, maximum=20)
 
 
 def legacy_session_id_for_task(task: Task) -> str:
@@ -942,14 +1021,16 @@ class AgentContextService:
                 project=project,
                 workspace=workspace,
             )
-            policy = MemoryAccessPolicy.model_validate(agent_profile.memory_access_policy or {})
+            policy = effective_memory_access_policy(agent_profile)
             recall = await memory_service.recall_memory(
-                scope_ids=scope_ids[:4],
+                scope_ids=scope_ids[: memory_recall_scope_limit(agent_profile, default=4)],
                 query=query,
                 policy=policy,
-                per_scope_limit=3,
-                max_hits=4,
-                hook_options=build_default_memory_recall_hook_options(),
+                per_scope_limit=memory_recall_per_scope_limit(agent_profile, default=3),
+                max_hits=memory_recall_max_hits(agent_profile, default=4),
+                hook_options=build_default_memory_recall_hook_options(
+                    agent_profile=agent_profile
+                ),
             )
             recall_meta = {
                 "query": recall.query,

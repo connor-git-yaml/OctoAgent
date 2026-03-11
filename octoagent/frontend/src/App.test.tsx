@@ -1028,6 +1028,201 @@ describe("App workbench routing", () => {
     expect(screen.getByDisplayValue(/"cheap"/)).toBeInTheDocument();
   });
 
+  it("设置页会把 Memory 预设、召回策略和 bridge 配置一起提交到 setup.review", async () => {
+    window.history.pushState({}, "", "/settings");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.config.schema = {
+      type: "object",
+      properties: {
+        memory: {
+          type: "object",
+          properties: {
+            backend_mode: {
+              type: "string",
+              enum: ["local_only", "memu"],
+            },
+            bridge_url: { type: "string" },
+            bridge_api_key_env: { type: "string" },
+            bridge_timeout_seconds: { type: "number" },
+            bridge_search_path: { type: "string" },
+          },
+        },
+      },
+    };
+    snapshot.resources.config.ui_hints = {
+      "memory.backend_mode": {
+        field_path: "memory.backend_mode",
+        section: "memory-basic",
+        label: "Memory 后端模式",
+        description: "",
+        widget: "select",
+        placeholder: "",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 10,
+      },
+      "memory.bridge_url": {
+        field_path: "memory.bridge_url",
+        section: "memory-basic",
+        label: "MemU Bridge 地址",
+        description: "",
+        widget: "text",
+        placeholder: "https://memory.example.com",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 20,
+      },
+      "memory.bridge_api_key_env": {
+        field_path: "memory.bridge_api_key_env",
+        section: "memory-basic",
+        label: "MemU API Key 环境变量名",
+        description: "",
+        widget: "env-ref",
+        placeholder: "MEMU_API_KEY",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 30,
+      },
+      "memory.bridge_timeout_seconds": {
+        field_path: "memory.bridge_timeout_seconds",
+        section: "memory-basic",
+        label: "Bridge 超时时间（秒）",
+        description: "",
+        widget: "text",
+        placeholder: "5",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 40,
+      },
+      "memory.bridge_search_path": {
+        field_path: "memory.bridge_search_path",
+        section: "memory-advanced",
+        label: "检索路径",
+        description: "",
+        widget: "text",
+        placeholder: "/memory/search",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 50,
+      },
+    };
+    snapshot.resources.config.current_value = {
+      memory: {
+        backend_mode: "local_only",
+        bridge_url: "",
+        bridge_api_key_env: "",
+        bridge_timeout_seconds: 5,
+        bridge_search_path: "/memory/search",
+      },
+    };
+    snapshot.resources.setup_governance.agent_governance.details = {
+      active_agent_profile: {
+        profile_id: "agent-profile-default",
+        scope: "project",
+        project_id: "project-default",
+        name: "默认主 Agent",
+        persona_summary: "适合首次使用。",
+        model_alias: "main",
+        tool_profile: "standard",
+        memory_access_policy: {
+          allow_vault: false,
+          include_history: false,
+        },
+        context_budget_policy: {
+          memory_recall: {
+            post_filter_mode: "keyword_overlap",
+            rerank_mode: "heuristic",
+            min_keyword_overlap: 1,
+            scope_limit: 4,
+            per_scope_limit: 3,
+            max_hits: 4,
+          },
+        },
+        updated_at: "2026-03-09T10:00:00Z",
+      },
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-memory-settings-review",
+              correlation_id: "req-memory-settings-review",
+              action_id: "setup.review",
+              status: "completed",
+              code: "SETUP_REVIEW_READY",
+              message: "配置检查已完成。",
+              data: {
+                review: snapshot.resources.setup_governance.review,
+              },
+              resource_refs: [],
+              target_refs: [],
+              handled_at: "2026-03-09T10:01:00Z",
+            },
+          })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("快速预设")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保守召回" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "广覆盖" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "广覆盖" }));
+    await userEvent.click(screen.getByLabelText(/允许带回 Vault 引用/));
+    await userEvent.click(screen.getByLabelText(/默认包含历史版本/));
+    await userEvent.selectOptions(screen.getByLabelText(/Memory 后端模式/), "memu");
+
+    const bridgeUrlInput = screen.getByLabelText(/MemU Bridge 地址/);
+    await userEvent.clear(bridgeUrlInput);
+    await userEvent.type(bridgeUrlInput, "https://memory.example.com");
+
+    const bridgeEnvInput = screen.getByLabelText(/MemU API Key 环境变量名/);
+    await userEvent.clear(bridgeEnvInput);
+    await userEvent.type(bridgeEnvInput, "MEMU_API_KEY");
+
+    await userEvent.click(screen.getByRole("button", { name: "改成 8 秒" }));
+
+    const searchPathInput = screen.getByLabelText(/检索路径/);
+    await userEvent.clear(searchPathInput);
+    await userEvent.type(searchPathInput, "/memory/query");
+
+    await userEvent.click(screen.getByRole("button", { name: "检查配置" }));
+
+    await screen.findByText(/配置检查已完成/);
+
+    const actionBody = fetchMock.mock.calls
+      .filter((call) => String((call as FetchArgs)[0]).includes("/api/control/actions"))
+      .map((call) => String((call as FetchArgs)[1]?.body ?? ""))
+      .find((body) => body.includes('"action_id":"setup.review"'));
+
+    expect(actionBody).toContain('"backend_mode":"memu"');
+    expect(actionBody).toContain('"bridge_url":"https://memory.example.com"');
+    expect(actionBody).toContain('"bridge_api_key_env":"MEMU_API_KEY"');
+    expect(actionBody).toContain('"bridge_timeout_seconds":"8"');
+    expect(actionBody).toContain('"bridge_search_path":"/memory/query"');
+    expect(actionBody).toContain('"memory_access_policy":{"allow_vault":true,"include_history":true}');
+    expect(actionBody).toContain(
+      '"context_budget_policy":{"memory_recall":{"post_filter_mode":"none","rerank_mode":"heuristic","min_keyword_overlap":1,"scope_limit":6,"per_scope_limit":4,"max_hits":8}}'
+    );
+  });
+
   it("Work 页面会先展示 worker.review 方案，再批准 worker.apply", async () => {
     window.history.pushState({}, "", "/work");
 

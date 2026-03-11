@@ -449,10 +449,20 @@ class SecretService:
                         target_kind=SecretTargetKind.PROVIDER,
                         target_key=f"providers.{provider.id}.api_key_env",
                         env_name=provider.api_key_env,
-                        display_name=f"{provider.name} API Key",
-                        provider_id=provider.id,
-                    )
+                    display_name=f"{provider.name} API Key",
+                    provider_id=provider.id,
                 )
+            )
+        if config.memory.backend_mode == "memu" and config.memory.bridge_api_key_env:
+            targets.append(
+                _TargetSpec(
+                    target_kind=SecretTargetKind.MEMORY,
+                    target_key="memory.bridge_api_key_env",
+                    env_name=config.memory.bridge_api_key_env,
+                    display_name="MemU Bridge API Key",
+                    required=False,
+                )
+            )
         telegram = config.channels.telegram
         if telegram.enabled and telegram.bot_token_env:
             targets.append(

@@ -272,6 +272,9 @@ export function categoryForHint(hint: ConfigFieldHint): string {
   if (hint.section === "channels") {
     return "channels";
   }
+  if (hint.section.startsWith("memory")) {
+    return "memory";
+  }
   if (hint.section === "providers" || hint.section === "models" || hint.section === "runtime") {
     return "main-agent";
   }

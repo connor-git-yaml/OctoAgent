@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import httpx
+from pydantic import SecretStr
 from octoagent.core.models import (
     Project,
     ProjectBinding,
@@ -35,10 +36,13 @@ from octoagent.memory import (
 )
 
 from .backup_service import resolve_project_root
+from .config_wizard import load_config
 from .secret_models import SecretRef
 from .secret_refs import SecretResolutionError, resolve_secret_ref
 
 _DEFAULT_BRIDGE_KEY = "memu.primary"
+
+
 class MemoryBackendResolver:
     """按 project/workspace 解析 Memory backend。"""
 
@@ -62,7 +66,16 @@ class MemoryBackendResolver:
         workspace: Workspace | None = None,
     ) -> MemoryBackend:
         binding = await self._resolve_bridge_binding(project=project, workspace=workspace)
+        yaml_config = load_config(self._project_root)
         if binding is None:
+            if yaml_config is not None:
+                fallback = self._resolve_yaml_backend_status(
+                    project=project,
+                    workspace=workspace,
+                    config=yaml_config,
+                )
+                if fallback is not None:
+                    return fallback
             return MemUBackend(
                 _StaticMemUBridge(
                     self._unavailable_status(
@@ -139,6 +152,104 @@ class MemoryBackendResolver:
                 api_key_scheme=api_key_scheme,
                 client_factory=self._client_factory,
             )
+        )
+
+    def _resolve_yaml_backend_status(
+        self,
+        *,
+        project: Project,
+        workspace: Workspace | None,
+        config,
+    ) -> MemoryBackend | None:
+        memory = getattr(config, "memory", None)
+        if memory is None:
+            return None
+
+        binding_ref = self._binding_ref(
+            project=project,
+            workspace=workspace,
+            binding_key="octoagent.yaml",
+        )
+
+        if memory.backend_mode == "local_only":
+            return MemUBackend(
+                _StaticMemUBridge(
+                    MemoryBackendStatus(
+                        backend_id="memu",
+                        memory_engine_contract_version="1.0.0",
+                        state=MemoryBackendState.HEALTHY,
+                        active_backend="sqlite-metadata",
+                        message="当前使用本地 Memory 模式，未连接远端 MemU bridge。",
+                        project_binding=binding_ref,
+                    )
+                )
+            )
+
+        base_url = str(memory.bridge_url or "").strip()
+        if not base_url:
+            return MemUBackend(
+                _StaticMemUBridge(
+                    self._unavailable_status(
+                        project=project,
+                        workspace=workspace,
+                        binding_key="octoagent.yaml",
+                        code="MEMU_BRIDGE_URL_MISSING",
+                        message="octoagent.yaml.memory.bridge_url 为空，无法连接 MemU bridge。",
+                    )
+                )
+            )
+
+        api_key = self._resolve_yaml_api_key(
+            project=project,
+            workspace=workspace,
+            env_name=str(memory.bridge_api_key_env or "").strip(),
+        )
+        if isinstance(api_key, MemoryBackendStatus):
+            return MemUBackend(_StaticMemUBridge(api_key))
+
+        return MemUBackend(
+            HttpMemUBridge(
+                base_url=base_url,
+                api_key=api_key,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id if workspace is not None else "",
+                project_binding=binding_ref,
+                timeout_seconds=float(memory.bridge_timeout_seconds or 5.0),
+                health_path=str(memory.bridge_health_path or "/health"),
+                search_path=str(memory.bridge_search_path or "/memory/search"),
+                sync_path=str(memory.bridge_sync_path or "/memory/sync"),
+                ingest_path=str(memory.bridge_ingest_path or "/memory/ingest"),
+                derivations_path=str(
+                    memory.bridge_derivations_path or "/memory/derivations/query"
+                ),
+                evidence_path=str(memory.bridge_evidence_path or "/memory/evidence/resolve"),
+                maintenance_path=str(
+                    memory.bridge_maintenance_path or "/memory/maintenance"
+                ),
+                api_key_header=str(memory.bridge_api_key_header or "Authorization"),
+                api_key_scheme=str(memory.bridge_api_key_scheme or "Bearer"),
+                client_factory=self._client_factory,
+            )
+        )
+
+    def _resolve_yaml_api_key(
+        self,
+        *,
+        project: Project,
+        workspace: Workspace | None,
+        env_name: str,
+    ) -> SecretStr | None | MemoryBackendStatus:
+        if not env_name:
+            return None
+        value = str(self._environ.get(env_name, "")).strip()
+        if value:
+            return SecretStr(value)
+        return self._unavailable_status(
+            project=project,
+            workspace=workspace,
+            binding_key="octoagent.yaml",
+            code="MEMU_SECRET_ENV_MISSING",
+            message=f"未找到 Memory bridge API Key 环境变量：{env_name}",
         )
 
     async def _resolve_bridge_binding(

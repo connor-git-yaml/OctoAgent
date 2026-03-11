@@ -70,7 +70,13 @@ from octoagent.memory import (
 )
 from ulid import ULID
 
-from .agent_context import AgentContextService, build_default_memory_recall_hook_options
+from .agent_context import (
+    AgentContextService,
+    build_default_memory_recall_hook_options,
+    effective_memory_access_policy,
+    memory_recall_max_hits,
+    memory_recall_per_scope_limit,
+)
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 from .runtime_control import runtime_context_from_metadata
@@ -1009,16 +1015,22 @@ class TaskService:
             agent_profile = await self._stores.agent_context_store.get_agent_profile(
                 frame.agent_profile_id
             )
-            policy = MemoryAccessPolicy.model_validate(
-                agent_profile.memory_access_policy if agent_profile is not None else {}
-            )
+            policy = effective_memory_access_policy(agent_profile)
             recall = await memory_service.recall_memory(
                 scope_ids=list(plan["scope_ids"]),
                 query=str(plan["query"]),
                 policy=policy,
-                per_scope_limit=max(4, int(plan["delivered_hit_count"]) or 0),
-                max_hits=max(8, int(plan["initial_hit_count"]) or 0),
-                hook_options=build_default_memory_recall_hook_options(),
+                per_scope_limit=max(
+                    memory_recall_per_scope_limit(agent_profile, default=4),
+                    int(plan["delivered_hit_count"]) or 0,
+                ),
+                max_hits=max(
+                    memory_recall_max_hits(agent_profile, default=8),
+                    int(plan["initial_hit_count"]) or 0,
+                ),
+                hook_options=build_default_memory_recall_hook_options(
+                    agent_profile=agent_profile
+                ),
             )
             result_artifact_id = await self._store_delayed_recall_artifact(
                 task_id=task_id,

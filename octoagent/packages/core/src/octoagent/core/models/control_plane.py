@@ -212,6 +212,8 @@ class AgentProfileItem(BaseModel):
     persona_summary: str = Field(default="")
     model_alias: str = Field(default="main")
     tool_profile: str = Field(default="standard")
+    memory_access_policy: dict[str, Any] = Field(default_factory=dict)
+    context_budget_policy: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
 
 

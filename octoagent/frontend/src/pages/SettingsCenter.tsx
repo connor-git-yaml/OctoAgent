@@ -23,6 +23,71 @@ const DEFAULT_AGENT_NAME = "OctoAgent";
 const DEFAULT_AGENT_PERSONA =
   "通用个人助手，优先帮助用户完成当前任务，并在需要时给出下一步建议。";
 const DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32\n::1/128";
+const DEFAULT_MEMORY_TIMEOUT = "5";
+const DEFAULT_MEMORY_SCOPE_LIMIT = "4";
+const DEFAULT_MEMORY_PER_SCOPE_LIMIT = "3";
+const DEFAULT_MEMORY_MAX_HITS = "4";
+
+interface MemoryAccessPolicyDraft {
+  allow_vault: boolean;
+  include_history: boolean;
+}
+
+interface MemoryRecallDraft {
+  post_filter_mode: string;
+  rerank_mode: string;
+  min_keyword_overlap: string;
+  scope_limit: string;
+  per_scope_limit: string;
+  max_hits: string;
+}
+
+const MEMORY_RECALL_PRESETS: Array<{
+  id: string;
+  label: string;
+  description: string;
+  values: MemoryRecallDraft;
+}> = [
+  {
+    id: "conservative",
+    label: "保守召回",
+    description: "更少噪声，优先只带回最贴近当前话题的少量记录。",
+    values: {
+      post_filter_mode: "keyword_overlap",
+      rerank_mode: "heuristic",
+      min_keyword_overlap: "2",
+      scope_limit: "2",
+      per_scope_limit: "2",
+      max_hits: "3",
+    },
+  },
+  {
+    id: "balanced",
+    label: "平衡默认",
+    description: "适合大多数日常对话和任务，先用这组值通常最稳妥。",
+    values: {
+      post_filter_mode: "keyword_overlap",
+      rerank_mode: "heuristic",
+      min_keyword_overlap: "1",
+      scope_limit: DEFAULT_MEMORY_SCOPE_LIMIT,
+      per_scope_limit: DEFAULT_MEMORY_PER_SCOPE_LIMIT,
+      max_hits: DEFAULT_MEMORY_MAX_HITS,
+    },
+  },
+  {
+    id: "wide",
+    label: "广覆盖",
+    description: "适合追踪长链路任务，会带回更多候选，但噪声也会更高。",
+    values: {
+      post_filter_mode: "none",
+      rerank_mode: "heuristic",
+      min_keyword_overlap: "1",
+      scope_limit: "6",
+      per_scope_limit: "4",
+      max_hits: "8",
+    },
+  },
+];
 
 interface AgentDraft {
   scope: string;
@@ -30,6 +95,10 @@ interface AgentDraft {
   persona_summary: string;
   model_alias: string;
   tool_profile: string;
+  memory_access_policy: MemoryAccessPolicyDraft;
+  context_budget_policy: {
+    memory_recall: MemoryRecallDraft;
+  };
 }
 
 interface BlockingGuide {
@@ -79,6 +148,54 @@ function buildConfigPayload(
   return { config: nextConfig, errors };
 }
 
+function parsePositiveInt(
+  value: string,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (Number.isNaN(parsed)) {
+    return fallback;
+  }
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function memoryAccessPolicyFromProfile(profile: AgentProfileItem | null): MemoryAccessPolicyDraft {
+  const raw =
+    profile?.memory_access_policy &&
+    typeof profile.memory_access_policy === "object" &&
+    !Array.isArray(profile.memory_access_policy)
+      ? profile.memory_access_policy
+      : {};
+  return {
+    allow_vault: Boolean(raw.allow_vault),
+    include_history: Boolean(raw.include_history),
+  };
+}
+
+function memoryRecallDraftFromProfile(profile: AgentProfileItem | null): MemoryRecallDraft {
+  const budget =
+    profile?.context_budget_policy &&
+    typeof profile.context_budget_policy === "object" &&
+    !Array.isArray(profile.context_budget_policy)
+      ? profile.context_budget_policy
+      : {};
+  const raw =
+    budget.memory_recall && typeof budget.memory_recall === "object" && !Array.isArray(budget.memory_recall)
+      ? (budget.memory_recall as Record<string, unknown>)
+      : {};
+  return {
+    post_filter_mode: String(raw.post_filter_mode ?? "keyword_overlap") || "keyword_overlap",
+    rerank_mode: String(raw.rerank_mode ?? "heuristic") || "heuristic",
+    min_keyword_overlap: String(raw.min_keyword_overlap ?? "1") || "1",
+    scope_limit: String(raw.scope_limit ?? DEFAULT_MEMORY_SCOPE_LIMIT) || DEFAULT_MEMORY_SCOPE_LIMIT,
+    per_scope_limit:
+      String(raw.per_scope_limit ?? DEFAULT_MEMORY_PER_SCOPE_LIMIT) || DEFAULT_MEMORY_PER_SCOPE_LIMIT,
+    max_hits: String(raw.max_hits ?? DEFAULT_MEMORY_MAX_HITS) || DEFAULT_MEMORY_MAX_HITS,
+  };
+}
+
 function buildAgentDraft(profile: AgentProfileItem | null): AgentDraft {
   return {
     scope: profile?.scope ?? "project",
@@ -87,6 +204,10 @@ function buildAgentDraft(profile: AgentProfileItem | null): AgentDraft {
       profile?.persona_summary?.trim() ? profile.persona_summary : DEFAULT_AGENT_PERSONA,
     model_alias: profile?.model_alias ?? "main",
     tool_profile: profile?.tool_profile ?? "standard",
+    memory_access_policy: memoryAccessPolicyFromProfile(profile),
+    context_budget_policy: {
+      memory_recall: memoryRecallDraftFromProfile(profile),
+    },
   };
 }
 
@@ -107,6 +228,18 @@ function readActiveAgentProfile(source: unknown): AgentProfileItem | null {
     persona_summary: String(payload.persona_summary ?? ""),
     model_alias: String(payload.model_alias ?? "main"),
     tool_profile: String(payload.tool_profile ?? "standard"),
+    memory_access_policy:
+      payload.memory_access_policy &&
+      typeof payload.memory_access_policy === "object" &&
+      !Array.isArray(payload.memory_access_policy)
+        ? (payload.memory_access_policy as Record<string, unknown>)
+        : {},
+    context_budget_policy:
+      payload.context_budget_policy &&
+      typeof payload.context_budget_policy === "object" &&
+      !Array.isArray(payload.context_budget_policy)
+        ? (payload.context_budget_policy as Record<string, unknown>)
+        : {},
     updated_at:
       typeof payload.updated_at === "string" || payload.updated_at === null
         ? payload.updated_at
@@ -125,6 +258,11 @@ function groupLabel(groupId: string): { title: string; description: string } {
       return {
         title: "渠道接入",
         description: "管理 Web、Telegram 等入口的连接方式和可见范围。",
+      };
+    case "memory":
+      return {
+        title: "Memory",
+        description: "先选记忆的连接方式，再决定默认检索范围和高级召回策略。",
       };
     default:
       return {
@@ -240,11 +378,80 @@ function modelAliasesExampleJson(providerId: string): string {
   );
 }
 
+function buildAgentProfilePayload(agentDraft: AgentDraft): Record<string, unknown> {
+  return {
+    ...agentDraft,
+    memory_access_policy: {
+      allow_vault: agentDraft.memory_access_policy.allow_vault,
+      include_history: agentDraft.memory_access_policy.include_history,
+    },
+    context_budget_policy: {
+      memory_recall: {
+        post_filter_mode:
+          agentDraft.context_budget_policy.memory_recall.post_filter_mode || "keyword_overlap",
+        rerank_mode:
+          agentDraft.context_budget_policy.memory_recall.rerank_mode || "heuristic",
+        min_keyword_overlap: parsePositiveInt(
+          agentDraft.context_budget_policy.memory_recall.min_keyword_overlap,
+          1,
+          1,
+          8
+        ),
+        scope_limit: parsePositiveInt(
+          agentDraft.context_budget_policy.memory_recall.scope_limit,
+          4,
+          1,
+          8
+        ),
+        per_scope_limit: parsePositiveInt(
+          agentDraft.context_budget_policy.memory_recall.per_scope_limit,
+          3,
+          1,
+          12
+        ),
+        max_hits: parsePositiveInt(
+          agentDraft.context_budget_policy.memory_recall.max_hits,
+          4,
+          1,
+          20
+        ),
+      },
+    },
+  };
+}
+
+function optionLabelForHint(hint: ConfigFieldHint, option: string): string {
+  if (hint.field_path === "runtime.llm_mode") {
+    if (option === "echo") {
+      return "echo · 体验模式";
+    }
+    if (option === "litellm") {
+      return "litellm · 连接真实模型";
+    }
+  }
+  if (hint.field_path === "memory.backend_mode") {
+    if (option === "local_only") {
+      return "local_only · 只用本地记忆";
+    }
+    if (option === "memu") {
+      return "memu · 连接远端 MemU bridge";
+    }
+  }
+  return option;
+}
+
 function buildFieldGuide(
   hint: ConfigFieldHint,
   fieldState: FieldState,
   usingEchoMode: boolean
 ): FieldGuide | null {
+  if (hint.field_path === "memory.bridge_api_key_env") {
+    return {
+      title: "安全建议",
+      description:
+        "这里仍然只填环境变量名。如果你的 bridge 暂时不需要鉴权，可以先留空。",
+    };
+  }
   if (hint.widget === "env-ref") {
     return {
       title: "怎么填",
@@ -258,6 +465,31 @@ function buildFieldGuide(
       description: usingEchoMode
         ? "首次体验建议先保持 echo，这样不需要额外配置模型，也能跑通 Web 和任务流。"
         : "当你准备接入真实模型时，再切换到 litellm 并补齐 Provider 与模型别名。",
+    };
+  }
+  if (hint.field_path === "memory.backend_mode") {
+    return {
+      title: "怎么选",
+      description:
+        "如果你只是想让系统先能记住聊天和工作过程，保持 local_only 就够了。只有明确要接远端 MemU bridge 时，再切到 memu。",
+    };
+  }
+  if (hint.field_path === "memory.bridge_url") {
+    return {
+      title: "这里填什么",
+      description:
+        "这里只填 bridge 的基础地址，不要自己拼 `/memory/search` 之类的接口路径。常见写法是 https://memory.example.com。",
+    };
+  }
+  if (hint.field_path === "memory.bridge_timeout_seconds") {
+    return {
+      title: "推荐范围",
+      description:
+        "一般 5 秒足够；如果 bridge 在异地或经常冷启动，可以调到 8-10 秒。不是越大越好，过大只会让失败反馈更慢。",
+      actions: [
+        { label: "恢复 5 秒", value: DEFAULT_MEMORY_TIMEOUT },
+        { label: "改成 8 秒", value: "8" },
+      ],
     };
   }
   if (hint.field_path === "providers") {
@@ -305,6 +537,13 @@ function buildFieldGuide(
     return {
       title: "填写格式",
       description: "每行一项。可以填 Telegram 用户 ID、群组 ID 或用户名，按字段含义分别填写。",
+    };
+  }
+  if (hint.field_path.startsWith("memory.bridge_")) {
+    return {
+      title: "什么时候才需要改",
+      description:
+        "只有当你的 bridge API 路径或鉴权方式跟默认约定不一致时才需要调整。大多数情况下保留默认值即可。",
     };
   }
   return null;
@@ -399,6 +638,12 @@ export default function SettingsCenter() {
       groups[key] = [...(groups[key] ?? []), hint];
       return groups;
     }, {});
+  const memoryHints = groupedHints.memory ?? [];
+  const memoryBasicHints = memoryHints.filter((hint) => hint.section === "memory-basic");
+  const memoryAdvancedHints = memoryHints.filter((hint) => hint.section === "memory-advanced");
+  const otherGroupIds = ["main-agent", "channels", "advanced"].filter(
+    (groupId) => (groupedHints[groupId] ?? []).length > 0
+  );
 
   function buildSetupDraft() {
     const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
@@ -409,10 +654,10 @@ export default function SettingsCenter() {
     return {
       config: result.config,
       policy_profile_id: policyProfileId,
-      agent_profile: {
+      agent_profile: buildAgentProfilePayload({
         ...agentDraft,
         scope: agentDraft.scope || "project",
-      },
+      }),
     };
   }
 
@@ -466,6 +711,14 @@ export default function SettingsCenter() {
       .trim()
       .toLowerCase() || "echo";
   const usingEchoMode = runtimeMode === "echo";
+  const memoryMode =
+    String(
+      fieldState["memory.backend_mode"] ??
+        getValueAtPath(config.current_value, "memory.backend_mode") ??
+        "local_only"
+    )
+      .trim()
+      .toLowerCase() || "local_only";
   const blockingGuides = collectBlockingGuides(review);
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
@@ -481,13 +734,141 @@ export default function SettingsCenter() {
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function updateMemoryAccessPolicy(
+    key: keyof MemoryAccessPolicyDraft,
+    value: boolean
+  ) {
+    setAgentDraft((state) => ({
+      ...state,
+      memory_access_policy: {
+        ...state.memory_access_policy,
+        [key]: value,
+      },
+    }));
+  }
+
+  function updateMemoryRecallDraft(
+    key: keyof MemoryRecallDraft,
+    value: string
+  ) {
+    setAgentDraft((state) => ({
+      ...state,
+      context_budget_policy: {
+        ...state.context_budget_policy,
+        memory_recall: {
+          ...state.context_budget_policy.memory_recall,
+          [key]: value,
+        },
+      },
+    }));
+  }
+
+  function applyMemoryRecallPreset(presetId: string) {
+    const preset = MEMORY_RECALL_PRESETS.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+    setAgentDraft((state) => ({
+      ...state,
+      context_budget_policy: {
+        ...state.context_budget_policy,
+        memory_recall: { ...preset.values },
+      },
+    }));
+  }
+
+  function renderHintFields(hints: ConfigFieldHint[]) {
+    return (
+      <div className="wb-form-grid">
+        {hints.map((hint) => {
+          const currentValue = fieldState[hint.field_path] ?? "";
+          const options = selectOptions(config.schema, hint);
+          const error = fieldErrors[hint.field_path];
+          const fieldGuide = buildFieldGuide(hint, fieldState, usingEchoMode);
+          return (
+            <label
+              key={hint.field_path}
+              className={`wb-field ${hint.multiline ? "wb-field-span-2" : ""}`}
+            >
+              <span>{hint.label}</span>
+              {hint.help_text ? <small>{hint.help_text}</small> : null}
+              {fieldGuide ? (
+                <div className="wb-field-guide">
+                  <strong>{fieldGuide.title}</strong>
+                  <p>{fieldGuide.description}</p>
+                  {fieldGuide.actions?.length ? (
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
+                      {fieldGuide.actions.map((action) => (
+                        <button
+                          key={action.label}
+                          type="button"
+                          aria-label={action.label}
+                          className="wb-button wb-button-tertiary wb-button-inline"
+                          onClick={() => updateFieldValue(hint.field_path, action.value)}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {fieldGuide.example ? (
+                    <div className="wb-field-guide-sample">
+                      <small>{fieldGuide.exampleLabel ?? "示例"}</small>
+                      <pre>{fieldGuide.example}</pre>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {hint.widget === "toggle" ? (
+                <input
+                  type="checkbox"
+                  checked={Boolean(currentValue)}
+                  onChange={(event) => updateFieldValue(hint.field_path, event.target.checked)}
+                />
+              ) : hint.widget === "select" && options.length > 0 ? (
+                <select
+                  value={String(currentValue)}
+                  onChange={(event) => updateFieldValue(hint.field_path, event.target.value)}
+                >
+                  {options.map((option) => (
+                    <option key={option} value={option}>
+                      {optionLabelForHint(hint, option)}
+                    </option>
+                  ))}
+                </select>
+              ) : hint.widget === "string-list" ||
+                hint.widget === "provider-list" ||
+                hint.widget === "alias-map" ? (
+                <textarea
+                  rows={hint.widget === "string-list" ? 4 : 8}
+                  value={String(currentValue)}
+                  placeholder={hint.placeholder}
+                  onChange={(event) => updateFieldValue(hint.field_path, event.target.value)}
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={String(currentValue)}
+                  placeholder={hint.placeholder}
+                  onChange={(event) => updateFieldValue(hint.field_path, event.target.value)}
+                />
+              )}
+              {hint.description ? <small>{hint.description}</small> : null}
+              {error ? <small className="wb-field-error">{error}</small> : null}
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="wb-page">
       <section className="wb-hero">
         <div>
           <p className="wb-kicker">Settings</p>
           <h1>先检查配置，再保存生效</h1>
-          <p>这里可以统一调整主 Agent、权限级别、技能状态和基础连接配置。</p>
+          <p>这里可以统一调整主 Agent、Memory、权限级别、技能状态和基础连接配置。</p>
         </div>
         <div className="wb-hero-actions">
           <button
@@ -694,7 +1075,7 @@ export default function SettingsCenter() {
         <article className="wb-card">
           <p className="wb-card-label">记忆状态</p>
           <strong>{memory.status}</strong>
-          <span>当前记录 {memory.summary.sor_current_count}</span>
+          <span>当前结论 {memory.summary.sor_current_count}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">工作状态</p>
@@ -708,7 +1089,219 @@ export default function SettingsCenter() {
         </article>
       </div>
 
-      {Object.entries(groupedHints).map(([groupId, hints]) => {
+      <section id="settings-group-memory" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">Memory</p>
+            <h3>先决定系统记什么、怎么找，再决定要不要接远端 bridge</h3>
+          </div>
+        </div>
+
+        <div className="wb-card-grid wb-card-grid-4">
+          <article className="wb-card">
+            <p className="wb-card-label">当前模式</p>
+            <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
+            <span>
+              {memoryMode === "memu"
+                ? "适合需要跨会话检索和高级回放"
+                : "先把基础记忆链路跑通"}
+            </span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">后端健康</p>
+            <strong>{memory.backend_state || memory.status}</strong>
+            <span>{memory.backend_id || "未标记"}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">当前结论</p>
+            <strong>{memory.summary.sor_current_count}</strong>
+            <span>片段 {memory.summary.fragment_count}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">待处理积压</p>
+            <strong>{memory.summary.pending_replay_count}</strong>
+            <span>Vault refs {memory.summary.vault_ref_count}</span>
+          </article>
+        </div>
+
+        {memory.warnings.length > 0 ? (
+          <div className="wb-inline-banner is-error">
+            <strong>Memory 当前有提醒</strong>
+            <span>{memory.warnings.join("；")}</span>
+          </div>
+        ) : (
+          <div className="wb-inline-banner is-muted">
+            <strong>推荐做法</strong>
+            <span>
+              首次体验先保持本地记忆 + 保守召回；只有在你明确需要远端检索后端时，再切到
+              MemU bridge。
+            </span>
+          </div>
+        )}
+
+        <div className="wb-note-stack">
+          <div className="wb-note">
+            <strong>记忆权限</strong>
+            <span>
+              这里决定主 Agent 默认能不能读取历史版本、能不能把 Vault 引用一起带回上下文。
+            </span>
+          </div>
+          <div className="wb-note">
+            <strong>检索策略</strong>
+            <span>
+              后过滤与重排会影响 recall 的精度和保守程度；建议先用默认值，只有明确发现命中过多或过少时再调。
+            </span>
+          </div>
+          <div className="wb-note">
+            <strong>快速预设</strong>
+            <span>如果你现在还不确定这些参数，先选一个预设，再按需要微调会更省事。</span>
+            <div className="wb-inline-actions wb-inline-actions-wrap">
+              {MEMORY_RECALL_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="wb-button wb-button-tertiary wb-button-inline"
+                  onClick={() => applyMemoryRecallPreset(preset.id)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <div className="wb-note-stack">
+              {MEMORY_RECALL_PRESETS.map((preset) => (
+                <small key={`${preset.id}-copy`}>
+                  {preset.label}：{preset.description}
+                </small>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="wb-form-grid">
+          <label className="wb-field">
+            <span>允许带回 Vault 引用</span>
+            <small>打开后，主 Agent 在 recall 时可以把受控 Vault 引用也纳入候选。</small>
+            <input
+              type="checkbox"
+              checked={agentDraft.memory_access_policy.allow_vault}
+              onChange={(event) =>
+                updateMemoryAccessPolicy("allow_vault", event.target.checked)
+              }
+            />
+          </label>
+
+          <label className="wb-field">
+            <span>默认包含历史版本</span>
+            <small>打开后，会把旧版本 SoR 一起纳入 recall，适合需要看演变过程的场景。</small>
+            <input
+              type="checkbox"
+              checked={agentDraft.memory_access_policy.include_history}
+              onChange={(event) =>
+                updateMemoryAccessPolicy("include_history", event.target.checked)
+              }
+            />
+          </label>
+
+          <label className="wb-field">
+            <span>后过滤策略</span>
+            <small>默认用关键词重叠做一道保守过滤；命中太少时再改成 none。</small>
+            <select
+              value={agentDraft.context_budget_policy.memory_recall.post_filter_mode}
+              onChange={(event) =>
+                updateMemoryRecallDraft("post_filter_mode", event.target.value)
+              }
+            >
+              <option value="keyword_overlap">keyword_overlap · 保守过滤</option>
+              <option value="none">none · 不额外过滤</option>
+            </select>
+          </label>
+
+          <label className="wb-field">
+            <span>重排策略</span>
+            <small>默认启用 heuristic；如果你只想保留原始搜索顺序，可以改成 none。</small>
+            <select
+              value={agentDraft.context_budget_policy.memory_recall.rerank_mode}
+              onChange={(event) =>
+                updateMemoryRecallDraft("rerank_mode", event.target.value)
+              }
+            >
+              <option value="heuristic">heuristic · 优先更贴近当前主题</option>
+              <option value="none">none · 保留原始顺序</option>
+            </select>
+          </label>
+
+          <label className="wb-field">
+            <span>最低关键词重叠</span>
+            <small>数字越大越严格。默认 1；只有误命中明显偏多时再调高。</small>
+            <input
+              type="text"
+              value={agentDraft.context_budget_policy.memory_recall.min_keyword_overlap}
+              onChange={(event) =>
+                updateMemoryRecallDraft("min_keyword_overlap", event.target.value)
+              }
+            />
+          </label>
+
+          <label className="wb-field">
+            <span>最多查几个 Scope</span>
+            <small>默认 4。范围越大越全，但也更容易把上下文拉散。</small>
+            <input
+              type="text"
+              value={agentDraft.context_budget_policy.memory_recall.scope_limit}
+              onChange={(event) => updateMemoryRecallDraft("scope_limit", event.target.value)}
+            />
+          </label>
+
+          <label className="wb-field">
+            <span>每个 Scope 最多带回几条</span>
+            <small>默认 3。太大容易噪声多，太小可能漏掉关键上下文。</small>
+            <input
+              type="text"
+              value={agentDraft.context_budget_policy.memory_recall.per_scope_limit}
+              onChange={(event) =>
+                updateMemoryRecallDraft("per_scope_limit", event.target.value)
+              }
+            />
+          </label>
+
+          <label className="wb-field">
+            <span>总命中上限</span>
+            <small>默认 4。这个值越大，主上下文越容易变重。</small>
+            <input
+              type="text"
+              value={agentDraft.context_budget_policy.memory_recall.max_hits}
+              onChange={(event) => updateMemoryRecallDraft("max_hits", event.target.value)}
+            />
+          </label>
+        </div>
+
+        {memoryBasicHints.length > 0 ? (
+          <>
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">连接配置</p>
+                <h3>先选本地模式还是远端 MemU bridge</h3>
+              </div>
+            </div>
+            {renderHintFields(memoryBasicHints)}
+          </>
+        ) : null}
+
+        {memoryAdvancedHints.length > 0 ? (
+          <>
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">高阶连接</p>
+                <h3>只有 bridge API 约定不一致时才需要改这些路径</h3>
+              </div>
+            </div>
+            {renderHintFields(memoryAdvancedHints)}
+          </>
+        ) : null}
+      </section>
+
+      {otherGroupIds.map((groupId) => {
+        const hints = groupedHints[groupId] ?? [];
         const group = groupLabel(groupId);
         return (
           <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
@@ -718,94 +1311,7 @@ export default function SettingsCenter() {
                 <h3>{group.description}</h3>
               </div>
             </div>
-            <div className="wb-form-grid">
-              {hints.map((hint) => {
-                const currentValue = fieldState[hint.field_path] ?? "";
-                const options = selectOptions(config.schema, hint);
-                const error = fieldErrors[hint.field_path];
-                const fieldGuide = buildFieldGuide(hint, fieldState, usingEchoMode);
-                return (
-                  <label
-                    key={hint.field_path}
-                    className={`wb-field ${hint.multiline ? "wb-field-span-2" : ""}`}
-                  >
-                    <span>{hint.label}</span>
-                    {hint.help_text ? <small>{hint.help_text}</small> : null}
-                    {fieldGuide ? (
-                      <div className="wb-field-guide">
-                        <strong>{fieldGuide.title}</strong>
-                        <p>{fieldGuide.description}</p>
-                        {fieldGuide.actions?.length ? (
-                          <div className="wb-inline-actions wb-inline-actions-wrap">
-                            {fieldGuide.actions.map((action) => (
-                              <button
-                                key={action.label}
-                                type="button"
-                                aria-label={action.label}
-                                className="wb-button wb-button-tertiary wb-button-inline"
-                                onClick={() => updateFieldValue(hint.field_path, action.value)}
-                              >
-                                {action.label}
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
-                        {fieldGuide.example ? (
-                          <div className="wb-field-guide-sample">
-                            <small>{fieldGuide.exampleLabel ?? "示例"}</small>
-                            <pre>{fieldGuide.example}</pre>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {hint.widget === "toggle" ? (
-                      <input
-                        type="checkbox"
-                        checked={Boolean(currentValue)}
-                        onChange={(event) =>
-                          updateFieldValue(hint.field_path, event.target.checked)
-                        }
-                      />
-                    ) : hint.widget === "select" && options.length > 0 ? (
-                      <select
-                        value={String(currentValue)}
-                        onChange={(event) =>
-                          updateFieldValue(hint.field_path, event.target.value)
-                        }
-                      >
-                        {options.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : hint.widget === "string-list" ||
-                      hint.widget === "provider-list" ||
-                      hint.widget === "alias-map" ? (
-                      <textarea
-                        rows={hint.widget === "string-list" ? 4 : 8}
-                        value={String(currentValue)}
-                        placeholder={hint.placeholder}
-                        onChange={(event) =>
-                          updateFieldValue(hint.field_path, event.target.value)
-                        }
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={String(currentValue)}
-                        placeholder={hint.placeholder}
-                        onChange={(event) =>
-                          updateFieldValue(hint.field_path, event.target.value)
-                        }
-                      />
-                    )}
-                    {hint.description ? <small>{hint.description}</small> : null}
-                    {error ? <small className="wb-field-error">{error}</small> : null}
-                  </label>
-                );
-              })}
-            </div>
+            {renderHintFields(hints)}
           </section>
         );
       })}
