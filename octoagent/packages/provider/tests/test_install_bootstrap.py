@@ -74,6 +74,8 @@ def test_run_install_bootstrap_bootstraps_home_instance(
     content = (instance_root / "octoagent.yaml").read_text(encoding="utf-8")
     assert "llm_mode: echo" in content
     assert any("prepare instance root" in item for item in attempt.actions_completed)
+    assert any("octo-start" in item for item in attempt.next_actions)
+    assert not any("uvicorn octoagent.gateway.main:app" in item for item in attempt.next_actions)
     descriptor = UpdateStatusStore(tmp_path).load_runtime_descriptor()
     assert descriptor is not None
     assert descriptor.start_command == [

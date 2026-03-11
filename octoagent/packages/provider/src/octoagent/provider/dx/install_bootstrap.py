@@ -267,16 +267,17 @@ def run_install_bootstrap(
             status_store.save_runtime_descriptor(descriptor)
             attempt.runtime_descriptor_path = str(status_store.descriptor_path)
             attempt.actions_completed.append("write managed runtime descriptor")
-            attempt.next_actions.extend(
-                [
-                    "运行 octo config init 初始化统一配置。",
-                    "运行 octo doctor 检查项目健康度。",
-                    (
-                        "使用 uv run uvicorn octoagent.gateway.main:app "
-                        "--host 0.0.0.0 --port 8000 启动 gateway。"
-                    ),
-                ]
-            )
+            if instance_root is None:
+                attempt.next_actions.extend(
+                    [
+                        "运行 octo config init 初始化统一配置。",
+                        "运行 octo doctor 检查项目健康度。",
+                        (
+                            "使用 uv run uvicorn octoagent.gateway.main:app "
+                            "--host 0.0.0.0 --port 8000 启动 gateway。"
+                        ),
+                    ]
+                )
 
         if instance_root is not None:
             instance_actions, instance_warnings, instance_next_actions = _bootstrap_instance_root(

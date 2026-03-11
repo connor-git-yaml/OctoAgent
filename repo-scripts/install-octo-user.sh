@@ -6,8 +6,8 @@ set -euo pipefail
 # - 个人实例初始化到 ~/.octoagent
 # - 默认生成 echo 模式配置，方便先验证 Web 流程
 
-SCRIPT_SOURCE="${BASH_SOURCE[0]-}"
-if [[ -n "${SCRIPT_SOURCE}" && "${SCRIPT_SOURCE}" != "bash" ]]; then
+SCRIPT_SOURCE="${0:-}"
+if [[ -n "${SCRIPT_SOURCE}" && "${SCRIPT_SOURCE}" != "bash" && "${SCRIPT_SOURCE}" != "-bash" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
 else
   SCRIPT_DIR="$(pwd)"
