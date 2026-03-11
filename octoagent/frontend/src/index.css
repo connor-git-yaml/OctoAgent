@@ -1764,9 +1764,35 @@ button {
     linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 244, 238, 0.92));
 }
 
+.wb-agent-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.wb-agent-rule-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 244, 238, 0.9));
+  box-shadow: var(--cp-shadow);
+}
+
+.wb-agent-rule-card strong {
+  font-size: 1.02rem;
+  color: var(--cp-ink);
+}
+
+.wb-agent-rule-card span {
+  color: var(--cp-muted);
+}
+
 .wb-agent-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
   gap: var(--cp-space-5);
 }
 
@@ -1785,6 +1811,12 @@ button {
 .wb-agent-project-grid,
 .wb-agent-list {
   display: grid;
+  gap: var(--cp-space-3);
+}
+
+.wb-agent-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--cp-space-3);
 }
 
@@ -1843,6 +1875,132 @@ button {
   border: 1px solid rgba(20, 32, 47, 0.1);
   border-radius: var(--cp-radius-lg);
   background: rgba(255, 255, 255, 0.78);
+}
+
+.wb-worker-hub {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-agent-tablist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.wb-agent-tab {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 18px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  border-radius: 22px;
+  background: rgba(246, 248, 250, 0.88);
+  text-align: left;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.wb-agent-tab strong {
+  font-size: 1rem;
+  color: var(--cp-ink);
+}
+
+.wb-agent-tab span {
+  color: var(--cp-muted);
+}
+
+.wb-agent-tab:hover,
+.wb-agent-tab.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
+.wb-worker-toolbar,
+.wb-worker-hub-layout {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-worker-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.wb-worker-hub-layout {
+  grid-template-columns: minmax(0, 1.04fr) minmax(320px, 0.96fr);
+  align-items: start;
+}
+
+.wb-worker-browser,
+.wb-worker-editor {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-worker-card-head,
+.wb-worker-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wb-worker-card-leading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wb-worker-card-body {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-worker-card-body strong {
+  font-size: 1.08rem;
+  color: var(--cp-ink);
+}
+
+.wb-worker-card-body p,
+.wb-inline-note {
+  margin: 0;
+  color: var(--cp-muted);
+}
+
+.wb-agent-details {
+  display: grid;
+  gap: var(--cp-space-3);
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(248, 250, 251, 0.88);
+}
+
+.wb-agent-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--cp-ink);
+  list-style: none;
+}
+
+.wb-agent-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-agent-details[open] {
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 32%),
+    rgba(248, 250, 251, 0.96);
 }
 
 .wb-agent-runtime-meta {
@@ -2395,7 +2553,12 @@ button {
   .wb-card-grid-4,
   .wb-card-grid-3,
   .wb-split,
+  .wb-agent-rule-grid,
   .wb-agent-layout,
+  .wb-agent-advanced-grid,
+  .wb-agent-tablist,
+  .wb-worker-toolbar,
+  .wb-worker-hub-layout,
   .wb-provider-mode-grid,
   .wb-provider-layout,
   .wb-chat-layout,
@@ -2436,7 +2599,8 @@ button {
   .wb-topbar-actions,
   .wb-hero-actions,
   .wb-inline-form,
-  .wb-inline-actions {
+  .wb-inline-actions,
+  .wb-worker-card-actions {
     width: 100%;
     flex-wrap: wrap;
   }
@@ -2460,6 +2624,11 @@ button {
   .wb-agent-project-grid,
   .wb-agent-list {
     grid-template-columns: 1fr;
+  }
+
+  .wb-agent-tab,
+  .wb-worker-card-actions .wb-button {
+    width: 100%;
   }
 
   .wb-hover-reveal {

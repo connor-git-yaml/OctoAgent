@@ -797,10 +797,10 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "用一个页面看清主 Agent 与 Work Agent 的分工" })
+      await screen.findByRole("heading", { name: "把总控、实例和模板分开看" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建 Work Agent 草案" })).toBeInTheDocument();
-    expect(screen.getByText("默认主 Agent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Worker 模板/ })).toBeInTheDocument();
   });
 
   it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
