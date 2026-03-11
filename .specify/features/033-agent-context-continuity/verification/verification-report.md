@@ -3,7 +3,7 @@
 ## 状态
 
 - 阶段：主链实现完成，review 阻塞项已修复
-- 日期：2026-03-09
+- 日期：2026-03-11
 
 ## 本次验证内容
 
@@ -68,11 +68,11 @@ uv run --group dev pytest packages/core/tests/test_agent_context_store.py apps/g
 - bootstrap 仍是 durable object + fail-soft guidance，尚未补齐完整的问答驱动 runtime、跨 surface resume/action 语义
 - control plane 目前提供只读 projection，尚未补齐 `profile switch / bootstrap resume / context refresh` 操作
 - frontend 还未接入 033 新资源的专用展示
-- `docs/blueprint.md` / milestone split / 031 gate 文档尚未同步回写本次实现状态
+- 当前剩余项已经不再阻塞 M3/M4 gate，同步文档仅用于持续保持事实一致
 
 ## 结论
 
 - 033 的核心验收门禁已经关闭：主 Agent 现在真实消费 canonical context chain，而不再只看当前一句话
 - review 阶段指出的 session 串用、prompt token 低估、workspace frame 误过滤问题已全部修复并有回归覆盖
 - delegation 与 control plane 已具备最小继承与可观测能力
-- 若要宣称 033 全量收口，仍需补完 bootstrap operator UX、frontend 暴露与文档同步
+- 若要继续做体验增强，后续重点应放在 bootstrap operator UX、frontend 暴露与更细粒度 context evidence 展示，而不是再补运行时主链

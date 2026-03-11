@@ -1,33 +1,97 @@
-# Verification Report: Feature 040 M4 Guided Experience Integration Acceptance
+# Verification Report: Feature 040 — M4 Guided Experience Integration Acceptance
 
-## 状态
+**Feature ID**: `040`
+**Date**: 2026-03-10
+**Updated**: 2026-03-11
+**Branch**: `codex/040-guided-experience-acceptance`
+**Status**: Passed
 
-- 阶段：进行中
-- 日期：2026-03-10
+## Verification Scope
 
-## 已完成验证
+- guided workbench 是否真实消费 canonical control-plane resources / actions
+- `setup.review/apply -> Home readiness -> Work worker.review/apply -> Chat context status` 联合验收
+- `Memory -> Operator -> Export/Recovery` 是否已从 guided 主入口串成单条路径
+- M4 是否已经具备正式 release gate artifact
 
-1. backend `setup.apply`
-   - `uv run --group dev pytest apps/gateway/tests/test_control_plane_api.py -q`
-   - 结果：`34 passed`
-   - 覆盖：`setup.apply` action registry、成功保存 config/policy/agent profile、blocking review 拒绝
-2. frontend workbench integration
-   - `npm test -- --run src/App.test.tsx`
-   - 结果：`7 passed`
-   - 覆盖：`SettingsCenter` 的 `setup.review -> setup.apply`、`Work` 的 `worker.review / worker.apply`、`Chat` 的 `context_continuity` 刷新
-3. frontend production build
-   - `npm run build`
-   - 结果：通过
+## Executed Checks
 
-## 本轮交付结论
+### Backend
 
-1. `Home` 已切到 setup readiness 事实源，并显式展示 blocking reasons / next actions。
-2. `SettingsCenter` 已改为 `setup.review -> setup.apply`，且直接消费 `setup_governance / policy_profiles / skill_governance`。
-3. `WorkbenchBoard` 已把 `worker.review / worker.apply` 变成可读、可批准的用户链路。
-4. `ChatWorkbench` 已接入 `context_continuity`，在 033 未完成时显示 degraded state，而不是继续使用硬编码占位文案。
+```bash
+cd octoagent && uv run --group dev pytest apps/gateway/tests/test_control_plane_api.py -q
+```
 
-## 仍待后续 Phase 完成的验收点
+结果：`40 passed`
 
-1. `memory -> operator -> export/recovery` 的整条 M4 acceptance path 尚未串联进 040。
-2. `skills.selection.save`、CLI/Web setup 状态机完全汇流仍属于 036 residual scope。
-3. 033 的完整 context continuity 领域逻辑仍未收口，040 当前只做了显式 degraded 展示。
+覆盖：
+
+- `setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save`
+- `session.export`
+- `backup.create / restore.plan`
+- `memory.export.inspect / memory.restore.verify`
+
+### Frontend
+
+```bash
+cd octoagent/frontend && npm test -- --run src/App.test.tsx
+```
+
+结果：`15 passed`
+
+覆盖：
+
+- `SettingsCenter` 的 `setup.review -> setup.apply` 与 `skill_selection`
+- `WorkbenchBoard` 的 `worker.review / worker.apply`
+- `ChatWorkbench` 的 context refresh / status surface
+- `MemoryCenter` 的 `operator.approval.resolve / backup.create / session.export / diagnostics.refresh`
+
+### CLI / Provider
+
+```bash
+cd octoagent && uv run --group dev pytest \
+  packages/provider/tests/test_onboard.py \
+  packages/provider/tests/dx/test_project_commands.py \
+  packages/provider/tests/dx/test_wizard_session.py \
+  packages/provider/tests/test_init_wizard.py -q
+```
+
+结果：`32 passed`
+
+### Frontend Build
+
+```bash
+cd octoagent/frontend && npm run build
+```
+
+结果：通过
+
+## Gate Results
+
+| Gate | 结论 | 证据 |
+|---|---|---|
+| `GATE-M4-GUIDED-WORKBENCH` | PASS | `App.test.tsx::设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷` + `test_control_plane_api.py::test_setup_apply_persists_config_policy_and_agent_profile` |
+| `GATE-M4-SUPERVISOR-WORKFLOW` | PASS | `App.test.tsx::Work 页面会先展示 worker.review 方案，再批准 worker.apply` + Feature 039 verification |
+| `GATE-M4-MEMORY-OPERATOR-RECOVERY` | PASS | `App.test.tsx::Memory 页面会串起 operator 动作和 export/recovery 入口` + `test_control_plane_api.py::test_backup_create_and_restore_plan_actions_refresh_diagnostics` |
+| `GATE-M4-SETUP-CONVERGENCE` | PASS | Feature 036 verification report + provider CLI tests + `App.test.tsx` skills selection 保存回归 |
+| `GATE-M4-CONTEXT-CONTINUITY` | PASS | Feature 033 verification report + `test_task_service_context_integration.py` + `test_f033_agent_context_continuity.py` |
+| `GATE-M4-RELEASE-REPORT` | PASS | 本报告 + `contracts/m4-acceptance-matrix.md` + `docs/blueprint.md` / `docs/m4-feature-split.md` |
+
+## Release Decision
+
+**结论**：Feature 040 已完成，且 M4 当前升级波次的 acceptance gates 已闭合。
+
+当前 release 口径应为：
+
+- **040 feature**：已完成
+- **M4 milestone**：可签收
+
+## Key Release Notes
+
+- `Home` / `Settings` / `Work` / `Chat` / `Memory` 都直接消费 control-plane canonical resources/actions，而不是扩散一套 workbench 私有 backend。
+- `skill_selection` 已进入统一 setup 主路径，CLI 与 Web 都复用 canonical `setup.review / setup.apply` 语义。
+- `MemoryCenter` 已把 operator、backup、session export、recovery summary 收进同一条 guided 路径。
+- M4 已具备正式 acceptance matrix 与 gate report，不再依赖口头同步 blocker 状态。
+
+## Residual Risks
+
+- 035/036 仍可继续补更细的 detail drawer、bootstrap/operator UX 与独立 e2e，但这些都属于后续体验增强，不再阻塞 M4 签收。

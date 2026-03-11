@@ -2,7 +2,7 @@
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1.3 — 024-031 已交付；2026-03-09 新增 Feature 033 作为 Agent context continuity 补位设计
+> **状态**: v1.4 — 024-033 已交付；Feature 033 context continuity gate 已关闭
 > **日期**: 2026-03-09
 
 ---
@@ -21,20 +21,20 @@
 - 029 已交付 WeChat Import + Multi-source Import Workbench
 - 030 已交付 capability pack、ToolIndex、Delegation Plane、Skill Pipeline
 
-031 完成后，原本判断当前剩余工作主要是发布后的持续硬化项；但 2026-03-09 的 live-usage 复核暴露出一个新的结构性缺口：
+031 完成后，曾通过 033 补齐一条主 Agent context continuity 主链；当前剩余工作主要转入发布后的持续硬化与 UX 细化：
 
 - Feature 031 已补齐 acceptance 制品、release report 和 remaining risks 清单
 - control-plane 的 front-door 部署边界已经写入正式验收门禁，并对 `loopback` 模式补了代理转发 header 的 fail-closed 拒绝
 - OpenClaw -> OctoAgent 迁移演练已经完成，后续差距主要转入 live cutover 与长期运维阶段
-- 新增发现：主 Agent 运行时仍未真正消费 `AgentProfile`、owner basics、bootstrap guidance、recent session summary 与 long-term memory retrieval；当前 `TaskService -> LLMService` 仍基本以原始 `user_text` 驱动
+- 已关闭的缺口：主 Agent 运行时现已真实消费 `AgentProfile`、owner basics、bootstrap guidance、recent session summary 与 long-term memory retrieval；`TaskService -> LLMService` 不再只以原始 `user_text` 驱动
 
 ### 1.2 本轮复核后的结论
 
 M3 的功能建设已经足够完整，但复核结论需修正为：
 
 1. **M3 主功能线 024-031 已交付**：Project、Control Plane、Memory Console、MemU、Import Workbench、Delegation Plane 和 acceptance harness 都已存在。
-2. **031 原范围已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告；但 M3 最终签收仍受 033 的 context continuity gate 阻塞。
-3. **033 成为新增 cutover-blocking 补位 Feature**：因为当前主 Agent 的上下文连续性没有真正落到运行链，M3 仍缺一条“日常可用”的主链闭环。
+2. **031 原范围已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告，且 follow-up `GATE-M3-CONTEXT-CONTINUITY` 已由 033 关闭。
+3. **033 已完成主 Agent 上下文连续性补位**：主 Agent 已真实消费 `AgentProfile / bootstrap / recent summary / memory retrieval`，M3 的“日常可用”主链闭环现已成立。
 4. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
 5. **OpenClaw 迁移演练已纳入 M3 签收**：但正式 live cutover 前，应优先完成 033，而不是先开启 M4 体验增强。
 
@@ -515,7 +515,7 @@ Feature 025 + 027 + 030 + 031
 
 **一句话目标**：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进主 Agent 的运行链，让 OctoAgent 从“有 Memory 的系统”变成“有连续上下文的长期助手”。
 
-**实现状态**：规划中（2026-03-09 新增）
+**实现状态**：已交付（2026-03-11，core gate 已关闭）
 
 **为什么不是 M4**：
 
@@ -631,13 +631,13 @@ Feature 025 + 027 + 030 + 031
 
 ## 6. 本轮结论
 
-截至 2026-03-09，M3 的主功能建设与 release harness 已完成 024-031，但 live-usage 复核新增了一个必须优先处理的补位结论：
+截至 2026-03-11，M3 的主功能建设与 release harness 已完成 024-033，之前通过 live-usage 复核发现的补位结论已经关闭：
 
 1. 031 已证明 install / project / control plane / memory / import / delegation / migration drill 可以联合成立。
-2. 但 031 没有真正证明“主 Agent 拥有连续上下文”，因为当前运行链尚未正式消费 `AgentProfile`、owner basics、bootstrap 与 memory retrieval。
-3. 因此，当前最重要的不是直接转入 M4，而是先完成 Feature 033。
+2. Feature 033 已证明“主 Agent 拥有连续上下文”，当前运行链已正式消费 `AgentProfile`、owner basics、bootstrap 与 memory retrieval。
+3. 因此，M3 的 user-ready 主闭环已经成立，后续重点转入 M4 的引导式工作台与 setup governance 收口。
 
-只有当 033 把主 Agent 的 context continuity 主链补齐后，OctoAgent 才能从“能力齐全的系统”真正推进到“日常可长期使用的助手”。
+现在，OctoAgent 已经从“能力齐全的系统”推进到“具备长期上下文主链的日常助手”；后续工作主要是 setup / workbench / supervisor 体验继续收口。
 
 ---
 

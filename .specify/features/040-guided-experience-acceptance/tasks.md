@@ -12,7 +12,7 @@
 - [x] T005 [P0] 在 `Home` 接入 setup readiness / blocking reasons / next actions
 - [x] T006 [P0] 在 `SettingsCenter` 接入 `setup.review -> setup.apply` 保存流，并纳入主 Agent / policy / skills readiness
 - [x] T007 [P0] 在 `WorkbenchBoard` 接入 `worker.review / worker.apply` 的 plan 展示与批准流
-- [x] T008 [P1] 在 `Home / Chat` 显式展示 033 未完成时的 degraded 提示
+- [x] T008 [P1] 在 `Home / Chat` 显式展示 `context_continuity` 状态，并在 degraded 时给出提示
 
 ## Phase 3: Acceptance Tests
 
@@ -27,5 +27,5 @@
 
 ## Phase 5: Remaining Release Gate
 
-- [ ] T014 [P1] 串联 `memory -> operator -> export/recovery` 的 M4 acceptance path
-- [ ] T015 [P1] 在 033/036 residual gaps 收口后输出完整 M4 release gate 报告
+- [x] T014 [P1] 串联 `memory -> operator -> export/recovery` 的 M4 acceptance path
+- [x] T015 [P1] 输出完整 M4 release gate 报告，并明确记录 033/036 blocker 已关闭后的 release 结论

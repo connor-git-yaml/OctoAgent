@@ -2686,11 +2686,11 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 拆解文档：`docs/m3-feature-split.md`（2026-03-09 已同步到“033 context continuity 补位”版本）
 - 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可迁移**的状态
 - 参考复核（2026-03-08）：OpenClaw 的 wizard / onboarding protocol / Control UI / updating / export session / subagents；Agent Zero 的 projects / backup / memory / settings / tunnel
-- 当前里程碑判断：Feature 024-031 已交付并合入 `master`；但 2026-03-09 的 live-usage 复核发现主 Agent 缺少 context continuity 主链，新增 Feature 033 作为 cutover 前补位
+- 当前里程碑判断：Feature 024-031 已交付并合入 `master`；2026-03-09 的 live-usage 复核曾发现主 Agent 缺少 context continuity 主链，后续以 Feature 033 完成补位并关闭该 gate
 - [x] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
 - [x] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
 - [x] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
-- [~] WorkerProfile / capability pack 已交付；主 Agent Profile + Bootstrap + Context Continuity 待 Feature 033 收口
+- [x] WorkerProfile / capability pack 与主 Agent Profile + Context Continuity 主链均已交付；bootstrap/operator UX 仍可继续增强
 - [x] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
 - [x] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
 - [x] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
@@ -2705,7 +2705,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] ToolIndex（向量检索）+ 动态工具注入
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
-- [ ] Feature 033：Agent Profile + Bootstrap + Context Continuity（主 Agent runtime 真实接入 profile / user basics / bootstrap / recent context / memory retrieval）
+- [x] Feature 033：Agent Profile + Bootstrap + Context Continuity（主 Agent runtime 已真实接入 profile / context frame / recent context / memory retrieval；剩余 bootstrap/operator UX 不再阻塞 gate）
 - [x] Feature 038：Agent Memory Recall Optimization（runtime resolver 收口、structured recall pack、indexing -> recall 端到端接线）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
@@ -2718,8 +2718,8 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 028 已交付 MemU integration point、检索/索引/降级路径与 evidence-aligned ingest。
 - Feature 029 已交付 WeChat adapter、Import Workbench、mapping/dry-run/dedupe/resume 与 memory effect 链路。
 - Feature 030 已交付 built-in capability pack、ToolIndex、Delegation Plane、Skill Pipeline Engine 与多 Worker 路由增强，并把 tool hit、route reason、work ownership、pipeline replay 接入现有 control plane。
-- Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；但最终签收仍待 033 关闭 context continuity gate。
-- 2026-03-09 设计复核新增 Feature 033：当前主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；这不是 M4 体验项，而是 M3 live cutover 前的主链补位。
+- Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；随后由 Feature 033 关闭 context continuity gate，M3 现已完成最终签收。
+- 2026-03-09 设计复核新增 Feature 033：当时主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；该补位已完成，不再作为当前 blocker。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 live A2A dispatch 归一化。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
@@ -2775,14 +2775,14 @@ M3 核心对象关系（2026-03-08 补充）：
 - 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
 - automation 触发的 work 必须保留其继承来源（project / agent profile / budget / target），并能在控制台与事件链中解释“为什么使用这套配置”
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
-- Feature 031 已补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report；但在完成 Feature 033 前，M3 只能视为“主能力已交付、context continuity 待补位”
+- Feature 031 已补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report；结合 Feature 033 关闭 `GATE-M3-CONTEXT-CONTINUITY` 后，M3 现已按 user-ready 版本签收
 
 ### M3 Carry-Forward（Feature 033）：Agent Profile + Bootstrap + Context Continuity
 
 - 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进主 Agent 的运行链
 - 这不是 M4 体验增强，而是当前主聊天“是否像长期助手而不是 stateless chat shell” 的基础门槛
-- 033 完成前，不应把 M3 对外描述成已经完全具备日常长期使用所需的上下文连续性
-- 031 的 release gate artifacts 已补记 `GATE-M3-CONTEXT-CONTINUITY`；在 033 完成前，该 gate 保持未通过状态
+- 033 已完成主 Agent 的 context continuity 主链，M3 现在可以按“具备长期上下文连续性”的 user-ready 版本对外描述
+- 031 的 release gate artifacts 已同步关闭 `GATE-M3-CONTEXT-CONTINUITY`
 
 ### M3 Carry-Forward（Feature 038）：Agent Memory Recall Optimization
 
@@ -2795,14 +2795,14 @@ M3 核心对象关系（2026-03-08 补充）：
 ### M4（引导式工作台 / Setup Governance / Runtime Safety / Supervisor）
 
 - 本阶段聚焦 032 之后这一轮“可用性 / 串联 / 安全性 / 三层结构”升级，不再把语音、companion、通知中心混在当前里程碑里
-- 033 仍是 M3 carry-forward blocker，038 是已完成的 M3 carry-forward；它们服务 M4，但不改写当前 M4 feature 编号面
+- 033 与 038 均已作为 M3 carry-forward 完成；它们服务 M4，但不改写当前 M4 feature 编号面
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
-- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；本轮已接入 setup readiness、worker review/apply、context degraded 提示；仍待 memory/operator/export 串联与更细粒度 context evidence）
-- [~] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select` 已落地；仍待 `skills.selection.save`、CLI/Web setup 状态机汇流）
+- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；已接入 setup readiness、worker review/apply、context degraded 提示，以及 `memory -> operator -> export/recovery` guided 主路径；仍待更细粒度 context evidence）
+- [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义）
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（主 Agent 默认 supervisor only、`workers.review`、`worker.review/apply`、child work `requested_tool_profile`、live A2A roundtrip）
-- [~] Feature 040：M4 Guided Experience Integration Acceptance（已打通 `setup -> workbench -> chat -> worker review/apply` 主链并补 acceptance tests；仍待 `memory -> operator -> export/recovery` 路径和最终 M4 release gate 报告）
+- [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
 
 M4 约束：
 
@@ -2812,7 +2812,7 @@ M4 约束：
 - live dispatch 必须真的经过 A2A 归一化，并保留 runtime context / work lineage；不能只有 A2A adapter 或测试样例
 - 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
 - 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
-- 035/036/040 必须显式处理 033 未完成时的 degraded 状态；不能把缺失的 context continuity 静默隐藏
+- 035/036/040 必须显式处理 `context_continuity` 的实际运行状态；若未来再次 degraded，不能把缺失的上下文连续性静默隐藏
 
 ### M5（文件工作台 / 语音多模态 / Companion / Attention）
 

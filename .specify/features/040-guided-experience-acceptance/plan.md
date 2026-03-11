@@ -10,11 +10,11 @@
    - 只消费现有 `snapshot / resources / actions`
 2. 不替代 036
    - `setup.review / setup.apply` 进入 workbench
-   - `skills.selection.save` 与 CLI/Web setup 状态机完全汇流仍留给 036 后续实现
+   - 040 只验收 036 是否已经把 `skills.selection.save` 与 CLI/Web setup 汇流做实
 3. 不替代 039
    - `worker.review / worker.apply` 只做 UI 集成与验收
-4. 033 缺口显式 degraded
-   - 040 不隐藏 context continuity 未完成状态
+4. 033 状态显式可见
+   - 040 保留 `context_continuity` 的显式状态展示，而不是回退到隐式魔法
 
 ## 实施阶段
 
@@ -38,7 +38,8 @@
 ### Phase 4: Release Gate Follow-up
 
 - `memory -> operator -> export/recovery` acceptance path
-- 033 degraded gate 与更完整 release report
+- 040 acceptance matrix / release report
+- 033/036 block 已关闭后的最终 release 结论
 
 ## 验收路径
 
