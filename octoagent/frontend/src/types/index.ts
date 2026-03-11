@@ -621,6 +621,8 @@ export interface SkillGovernanceItem {
   source_kind: string;
   scope: string;
   enabled_by_default: boolean;
+  selected: boolean;
+  selection_source: string;
   availability: string;
   trust_level: string;
   blocking: boolean;

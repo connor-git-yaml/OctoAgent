@@ -11,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import webbrowser
+from collections.abc import Mapping
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -343,11 +344,22 @@ class CapabilityPackService:
         )
         return self._pack
 
-    async def get_pack(self) -> BundledCapabilityPack:
+    async def get_pack(
+        self,
+        *,
+        project_id: str = "",
+        workspace_id: str = "",
+    ) -> BundledCapabilityPack:
         await self.startup()
         if self._pack is None:
-            return await self.refresh()
-        return self._pack
+            self._pack = await self.refresh()
+        if not project_id and not workspace_id:
+            return self._pack
+        return await self._filter_pack_for_scope(
+            self._pack,
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
 
     def get_worker_profile(self, worker_type: WorkerType) -> WorkerCapabilityProfile:
         return self._profile_map.get(worker_type, self._profile_map[WorkerType.GENERAL])
@@ -360,7 +372,6 @@ class CapabilityPackService:
     ) -> DynamicToolSelection:
         await self.startup()
         profile = self.get_worker_profile(worker_type)
-        fallback = await self._resolve_fallback_toolset(worker_type)
         effective_request = request.model_copy(
             update={
                 "tool_groups": request.tool_groups or profile.default_tool_groups,
@@ -368,9 +379,19 @@ class CapabilityPackService:
                 "tool_profile": request.tool_profile or profile.default_tool_profile,
             }
         )
-        return await self._tool_index.select_tools(
+        pack = await self.get_pack(
+            project_id=effective_request.project_id,
+            workspace_id=effective_request.workspace_id,
+        )
+        fallback = self._resolve_fallback_toolset_from_pack(pack, worker_type)
+        raw_selection = await self._tool_index.select_tools(
             effective_request,
             static_fallback=fallback,
+        )
+        return self._restrict_selection_to_pack(
+            raw_selection,
+            pack=pack,
+            fallback=fallback,
         )
 
     async def render_bootstrap_context(
@@ -2339,6 +2360,185 @@ class CapabilityPackService:
             return result
         return [meta.name for meta in metas][:5]
 
+    def _resolve_fallback_toolset_from_pack(
+        self,
+        pack: BundledCapabilityPack,
+        worker_type: WorkerType,
+    ) -> list[str]:
+        profile = self.get_worker_profile(worker_type)
+        result = [
+            tool.tool_name
+            for tool in pack.tools
+            if tool.tool_group in profile.default_tool_groups
+            and tool.availability
+            in {
+                BuiltinToolAvailabilityStatus.AVAILABLE,
+                BuiltinToolAvailabilityStatus.DEGRADED,
+            }
+        ]
+        if result:
+            return result[:5]
+        if pack.fallback_toolset:
+            return list(pack.fallback_toolset)[:5]
+        return [tool.tool_name for tool in pack.tools[:5]]
+
+    async def _resolve_scope_skill_selection(
+        self,
+        *,
+        project_id: str = "",
+        workspace_id: str = "",
+    ) -> tuple[set[str], set[str]]:
+        if not project_id and not workspace_id:
+            return set(), set()
+        project, _workspace = await self._resolve_project_context(
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
+        if project is None:
+            return set(), set()
+        metadata = (
+            dict(project.metadata)
+            if isinstance(getattr(project, "metadata", None), dict)
+            else {}
+        )
+        raw_selection = metadata.get("skill_selection")
+        if not isinstance(raw_selection, Mapping):
+            return set(), set()
+        selected_item_ids = {
+            str(item).strip()
+            for item in raw_selection.get("selected_item_ids", [])
+            if str(item).strip()
+        }
+        disabled_item_ids = {
+            str(item).strip()
+            for item in raw_selection.get("disabled_item_ids", [])
+            if str(item).strip()
+        }
+        return selected_item_ids, disabled_item_ids
+
+    @staticmethod
+    def _skill_item_selected(
+        *,
+        item_id: str,
+        enabled_by_default: bool,
+        selected_item_ids: set[str],
+        disabled_item_ids: set[str],
+    ) -> bool:
+        if item_id in selected_item_ids:
+            return True
+        if item_id in disabled_item_ids:
+            return False
+        return enabled_by_default
+
+    async def _filter_pack_for_scope(
+        self,
+        pack: BundledCapabilityPack,
+        *,
+        project_id: str = "",
+        workspace_id: str = "",
+    ) -> BundledCapabilityPack:
+        selected_item_ids, disabled_item_ids = await self._resolve_scope_skill_selection(
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
+        if not selected_item_ids and not disabled_item_ids:
+            return pack
+
+        skills = [
+            skill
+            for skill in pack.skills
+            if self._skill_item_selected(
+                item_id=f"skill:{skill.skill_id}",
+                enabled_by_default=True,
+                selected_item_ids=selected_item_ids,
+                disabled_item_ids=disabled_item_ids,
+            )
+        ]
+        governed_skill_tool_names = {
+            tool_name
+            for skill in pack.skills
+            for tool_name in skill.tools_allowed
+            if tool_name
+        }
+        enabled_skill_tool_names = {
+            tool_name
+            for skill in skills
+            for tool_name in skill.tools_allowed
+            if tool_name
+        }
+
+        tools: list[BundledToolDefinition] = []
+        for tool in pack.tools:
+            if tool.tool_group == "mcp":
+                server_name = str(tool.metadata.get("mcp_server_name", "")).strip() or "mcp"
+                include = self._skill_item_selected(
+                    item_id=f"mcp:{server_name}",
+                    enabled_by_default=False,
+                    selected_item_ids=selected_item_ids,
+                    disabled_item_ids=disabled_item_ids,
+                )
+            else:
+                include = True
+                if tool.tool_name in governed_skill_tool_names:
+                    include = tool.tool_name in enabled_skill_tool_names
+                include = self._skill_item_selected(
+                    item_id=f"skill:{tool.tool_name}",
+                    enabled_by_default=include,
+                    selected_item_ids=selected_item_ids,
+                    disabled_item_ids=disabled_item_ids,
+                )
+            if include:
+                tools.append(tool)
+
+        allowed_tool_names = {tool.tool_name for tool in tools}
+        fallback_toolset = [
+            tool_name for tool_name in pack.fallback_toolset if tool_name in allowed_tool_names
+        ]
+        return pack.model_copy(
+            update={
+                "skills": skills,
+                "tools": tools,
+                "fallback_toolset": fallback_toolset,
+            }
+        )
+
+    def _restrict_selection_to_pack(
+        self,
+        selection: DynamicToolSelection,
+        *,
+        pack: BundledCapabilityPack,
+        fallback: list[str],
+    ) -> DynamicToolSelection:
+        allowed_tool_names = {tool.tool_name for tool in pack.tools}
+        filtered_hits = [hit for hit in selection.hits if hit.tool_name in allowed_tool_names]
+        filtered_selected_tools = [
+            tool_name for tool_name in selection.selected_tools if tool_name in allowed_tool_names
+        ]
+        warnings = list(selection.warnings)
+        is_fallback = selection.is_fallback
+
+        if len(filtered_hits) != len(selection.hits):
+            warnings.append("tool_selection_filtered_by_skill_governance")
+        if not filtered_selected_tools and selection.selected_tools and fallback:
+            filtered_selected_tools = list(fallback)[: selection.query.limit]
+            warnings.append("tool_selection_empty_after_skill_governance_fallback")
+            is_fallback = True
+        elif not filtered_selected_tools and selection.selected_tools:
+            warnings.append("tool_selection_empty_after_skill_governance")
+
+        deduped_warnings: list[str] = []
+        for warning in warnings:
+            if warning not in deduped_warnings:
+                deduped_warnings.append(warning)
+        return selection.model_copy(
+            update={
+                "selected_tools": filtered_selected_tools,
+                "hits": filtered_hits,
+                "warnings": deduped_warnings,
+                "is_fallback": is_fallback,
+            }
+        )
+
     async def _resolve_project_context(
         self,
         *,
@@ -2351,6 +2551,8 @@ class CapabilityPackService:
             project = await self._stores.project_store.get_project(project_id)
         if workspace_id:
             workspace = await self._stores.project_store.get_workspace(workspace_id)
+            if workspace is not None and project is None:
+                project = await self._stores.project_store.get_project(workspace.project_id)
         if project is None:
             selector = await self._stores.project_store.get_selector_state("web")
             if selector is not None:

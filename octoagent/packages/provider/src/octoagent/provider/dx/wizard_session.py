@@ -42,6 +42,15 @@ class WizardSessionResult(BaseModel):
     schema_document: ConfigSchemaDocument
 
 
+DEFAULT_SETUP_AGENT_PROFILE: dict[str, str] = {
+    "scope": "project",
+    "name": "OctoAgent",
+    "persona_summary": "通过 CLI setup 初始化的主 Agent。",
+    "tool_profile": "standard",
+    "model_alias": "main",
+}
+
+
 class WizardSessionService:
     """将 026-A wizard contract 落到 CLI。"""
 
@@ -88,45 +97,31 @@ class WizardSessionService:
         record = result.record
         next_actions = [
             {
-                "title": "配置 secrets",
-                "description": "生成或更新当前 project 的 secret bindings。",
-                "command": "octo secrets configure",
-                "blocking": True,
+                "title": "查看 setup 状态",
+                "description": "确认 canonical setup 状态已经进入 ready。",
+                "command": "octo onboard --status-only",
+                "blocking": False,
             },
             {
-                "title": "应用 secrets",
-                "description": "把 binding 计划写入 canonical store。",
-                "command": "octo secrets apply",
-                "blocking": True,
-            },
-            {
-                "title": "reload runtime",
-                "description": "把当前 project secrets 注入 runtime。",
-                "command": "octo secrets reload",
-                "blocking": True,
+                "title": "执行 doctor",
+                "description": "保存后继续做一次环境诊断。",
+                "command": "octo doctor",
+                "blocking": False,
             },
         ]
         document = record.document.model_copy(
             update={
-                "status": "action_required",
-                "current_step": "secrets",
-                "blocking_reason": "配置已写入，等待 secrets configure/apply/reload。",
+                "status": "completed",
+                "current_step": "completed",
+                "blocking_reason": "",
                 "updated_at": _utc_now(),
                 "step_states": [
-                    step.model_copy(
-                        update={
-                            "status": (
-                                "in_progress"
-                                if step.step_id == "secrets"
-                                else "completed"
-                            ),
-                        }
-                    )
+                    step.model_copy(update={"status": "completed"})
                     for step in record.document.step_states
                 ],
                 "next_actions": [
                     WizardNextAction(
-                        action_id=f"wizard-secrets-{index}",
+                        action_id=f"wizard-next-{index}",
                         title=item["title"],
                         description=item["description"],
                         command=item["command"],
@@ -138,9 +133,9 @@ class WizardSessionService:
         )
         updated = record.model_copy(
             update={
-                "current_step_id": "secrets",
-                "status": "action_required",
-                "blocking_reason": "配置已写入，等待 secrets configure/apply/reload。",
+                "current_step_id": "completed",
+                "status": "completed",
+                "blocking_reason": "",
                 "document": document,
                 "next_actions": next_actions,
             }
@@ -151,6 +146,14 @@ class WizardSessionService:
             resumed=False,
             schema_document=result.schema_document,
         )
+
+    def build_setup_draft(self, project_id: str) -> dict[str, Any]:
+        result = self.load_status(project_id)
+        if result is None:
+            raise ValueError("当前 project 没有可应用的 wizard draft。")
+        return {
+            "config": dict(result.record.draft_config),
+        }
 
     def start_or_resume(
         self,
@@ -311,15 +314,15 @@ class WizardSessionService:
         draft_secret_bindings = self._build_draft_secret_bindings(config)
         next_actions = [
             {
-                "title": "应用配置",
-                "description": "确认 draft config 后写入 octoagent.yaml。",
+                "title": "执行 canonical setup.apply",
+                "description": "确认 setup review 后，走统一 setup.apply 保存配置。",
                 "command": "octo project edit --apply-wizard",
                 "blocking": False,
             },
             {
-                "title": "配置 secrets",
-                "description": "根据 draft secret 计划生成或更新 project secret bindings。",
-                "command": "octo secrets configure",
+                "title": "查看 setup 状态",
+                "description": "保存前可以先看一次 canonical setup.review 摘要。",
+                "command": "octo onboard --status-only",
                 "blocking": True,
             },
         ]
@@ -327,7 +330,7 @@ class WizardSessionService:
             update={
                 "status": "ready_for_apply",
                 "current_step": "review",
-                "blocking_reason": "配置草案已生成，等待 apply + secrets lifecycle。",
+                "blocking_reason": "配置草案已生成，等待 canonical setup.review / setup.apply。",
                 "step_states": [
                     WizardStepState(step_id="project", title="Project", status="completed"),
                     WizardStepState(step_id="provider", title="Provider", status="completed"),
@@ -341,16 +344,16 @@ class WizardSessionService:
                         else "未启用 Telegram。",
                     ),
                     WizardStepState(
-                        step_id="secrets",
-                        title="Secrets",
+                        step_id="setup",
+                        title="Setup",
                         status="pending",
-                        summary="等待 octo secrets configure/apply/reload。",
+                        summary="等待 canonical setup.review / setup.apply。",
                     ),
                     WizardStepState(
                         step_id="review",
                         title="Review",
                         status="in_progress",
-                        summary="当前展示的是 redacted draft config。",
+                        summary="当前展示的是 canonical setup draft。",
                     ),
                 ],
                 "next_actions": [
@@ -370,7 +373,7 @@ class WizardSessionService:
             update={
                 "current_step_id": "review",
                 "status": "ready_for_apply",
-                "blocking_reason": "配置草案已生成，等待 apply + secrets lifecycle。",
+                "blocking_reason": "配置草案已生成，等待 canonical setup.review / setup.apply。",
                 "draft_config": config.model_dump(mode="json"),
                 "draft_secret_bindings": draft_secret_bindings,
                 "next_actions": next_actions,

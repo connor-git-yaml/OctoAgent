@@ -12,12 +12,14 @@ import {
 import type {
   AgentProfileItem,
   ConfigFieldHint,
+  SkillGovernanceItem,
   SetupReviewSummary,
   SetupRiskItem,
 } from "../types";
 
 type FieldState = Record<string, string | boolean>;
 type FieldErrors = Record<string, string>;
+type SkillSelectionState = Record<string, boolean>;
 
 const DEFAULT_AGENT_NAME = "OctoAgent";
 const DEFAULT_AGENT_PERSONA =
@@ -663,6 +665,41 @@ function readProviderRuntimeDetails(source: unknown): ProviderRuntimeDetails {
   return source as ProviderRuntimeDetails;
 }
 
+function buildSkillSelectionState(items: SkillGovernanceItem[]): SkillSelectionState {
+  return Object.fromEntries(items.map((item) => [item.item_id, item.selected]));
+}
+
+function buildSkillSelectionSyncKey(items: SkillGovernanceItem[]): string {
+  return JSON.stringify(
+    items.map((item) => ({
+      item_id: item.item_id,
+      selected: item.selected,
+      enabled_by_default: item.enabled_by_default,
+    }))
+  );
+}
+
+function buildSkillSelectionPayload(
+  items: SkillGovernanceItem[],
+  selectionState: SkillSelectionState
+): Record<string, string[]> {
+  const selected_item_ids: string[] = [];
+  const disabled_item_ids: string[] = [];
+  items.forEach((item) => {
+    const selected = selectionState[item.item_id] ?? item.selected;
+    if (selected && !item.enabled_by_default) {
+      selected_item_ids.push(item.item_id);
+    }
+    if (!selected && item.enabled_by_default) {
+      disabled_item_ids.push(item.item_id);
+    }
+  });
+  return {
+    selected_item_ids,
+    disabled_item_ids,
+  };
+}
+
 function parseProviderDrafts(rawValue: string | boolean | undefined): ProviderDraftItem[] {
   const providers = parseJsonFieldValue(rawValue, []) as Array<Record<string, unknown>>;
   return providers
@@ -820,6 +857,7 @@ export default function SettingsCenter() {
     setup.agent_governance.details["active_agent_profile"]
   );
   const activeAgentProfileSyncKey = buildAgentDraftSyncKey(activeAgentProfile);
+  const skillSelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
   );
@@ -827,6 +865,9 @@ export default function SettingsCenter() {
   const [policyProfileId, setPolicyProfileId] = useState(policyProfiles.active_profile_id);
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() =>
     buildAgentDraft(activeAgentProfile)
+  );
+  const [skillSelection, setSkillSelection] = useState<SkillSelectionState>(() =>
+    buildSkillSelectionState(skillGovernance.items)
   );
   const [review, setReview] = useState<SetupReviewSummary>(setup.review);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
@@ -843,6 +884,10 @@ export default function SettingsCenter() {
   useEffect(() => {
     setAgentDraft(buildAgentDraft(activeAgentProfile));
   }, [activeAgentProfileSyncKey]);
+
+  useEffect(() => {
+    setSkillSelection(buildSkillSelectionState(skillGovernance.items));
+  }, [skillSelectionSyncKey]);
 
   useEffect(() => {
     setReview(setup.review);
@@ -896,6 +941,7 @@ export default function SettingsCenter() {
         ...agentDraft,
         scope: agentDraft.scope || "project",
       }),
+      skill_selection: buildSkillSelectionPayload(skillGovernance.items, skillSelection),
       secret_values: Object.fromEntries(
         Object.entries(secretValues).filter(([, value]) => value.trim())
       ),
@@ -939,7 +985,10 @@ export default function SettingsCenter() {
 
   const currentPolicy =
     policyProfiles.profiles.find((item) => item.profile_id === policyProfileId) ?? null;
-  const blockedSkills = skillGovernance.items.filter((item) => item.blocking);
+  const selectedSkills = skillGovernance.items.filter(
+    (item) => skillSelection[item.item_id] ?? item.selected
+  );
+  const blockedSkills = selectedSkills.filter((item) => item.blocking);
   const unavailableSkills = skillGovernance.items.filter(
     (item) => item.availability !== "available"
   );
@@ -980,6 +1029,13 @@ export default function SettingsCenter() {
     setSecretValues((state) => ({
       ...state,
       [envName]: value,
+    }));
+  }
+
+  function updateSkillSelection(itemId: string, selected: boolean) {
+    setSkillSelection((state) => ({
+      ...state,
+      [itemId]: selected,
     }));
   }
 
@@ -1268,6 +1324,7 @@ export default function SettingsCenter() {
         <article className="wb-card">
           <p className="wb-card-label">技能状态</p>
           <strong>{skillGovernance.items.length}</strong>
+          <span>已选 {selectedSkills.length}</span>
           <span>阻塞 {blockedSkills.length}</span>
           <span>不可用 {unavailableSkills.length}</span>
         </article>
@@ -1429,18 +1486,35 @@ export default function SettingsCenter() {
               <strong>{setup.tools_skills.label}</strong>
               <span>{setup.tools_skills.summary}</span>
             </div>
-            {skillGovernance.items.slice(0, 4).map((item) => (
-              <div key={item.item_id} className="wb-note">
-                <strong>
-                  {item.label} · {item.availability}
-                </strong>
-                <span>
-                  {item.missing_requirements.length > 0
-                    ? item.missing_requirements.join("；")
-                    : "当前 capability pack 可用"}
-                </span>
-              </div>
-            ))}
+            <div className="wb-note">
+              <strong>Skills 默认范围</strong>
+              <span>先选中你希望默认暴露给 setup/workbench 的能力，再保存配置。</span>
+            </div>
+            {skillGovernance.items.map((item) => {
+              const selected = skillSelection[item.item_id] ?? item.selected;
+              return (
+                <label key={item.item_id} className="wb-note">
+                  <strong>
+                    {item.label} · {selected ? "已启用" : "未启用"}
+                  </strong>
+                  <span>
+                    {item.missing_requirements.length > 0
+                      ? item.missing_requirements.join("；")
+                      : "当前 capability pack 可用"}
+                  </span>
+                  <small>
+                    {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} ·
+                    当前 {item.availability}
+                  </small>
+                  <input
+                    type="checkbox"
+                    aria-label={`启用 ${item.label}`}
+                    checked={selected}
+                    onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
+                  />
+                </label>
+              );
+            })}
           </div>
         </section>
       </div>

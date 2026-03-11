@@ -339,6 +339,8 @@ class SkillGovernanceItem(BaseModel):
     source_kind: str = Field(default="builtin")
     scope: str = Field(default="project")
     enabled_by_default: bool = False
+    selected: bool = False
+    selection_source: str = Field(default="default")
     availability: str = Field(default="available")
     trust_level: str = Field(default="trusted")
     blocking: bool = False

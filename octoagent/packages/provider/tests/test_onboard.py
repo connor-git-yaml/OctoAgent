@@ -277,6 +277,7 @@ def test_onboard_status_only_without_session(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "尚未开始 onboarding" in result.output
+    assert "Setup Review" in result.output
 
 
 def test_onboarding_service_registers_builtin_telegram_verifier(tmp_path: Path) -> None:

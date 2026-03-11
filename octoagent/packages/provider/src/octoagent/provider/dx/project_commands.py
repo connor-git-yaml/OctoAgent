@@ -8,10 +8,7 @@ from pathlib import Path
 import click
 
 from .config_commands import _resolve_project_root
-from .config_schema import OctoAgentConfig
-from .config_wizard import save_config
 from .console_output import create_console, render_panel
-from .litellm_generator import generate_litellm_config
 from .project_selector import ProjectInspectSummary, ProjectSelectorError, ProjectSelectorService
 from .wizard_session import WizardSessionService
 
@@ -142,10 +139,42 @@ def edit_project(
             result = wizard_service.load_status(project.project_id)
             if result is None:
                 raise ProjectSelectorError("当前没有可应用的 wizard draft。")
-            config = OctoAgentConfig.model_validate(result.record.draft_config)
-            save_config(config, root)
-            generate_litellm_config(config, root)
+            from .setup_governance_adapter import LocalSetupGovernanceAdapter
+
+            setup_adapter = LocalSetupGovernanceAdapter(root)
+            draft = await setup_adapter.prepare_wizard_draft(
+                wizard_service.build_setup_draft(project.project_id)
+            )
+            review_result = await setup_adapter.review(draft)
+            review = review_result.data.get("review", {})
+            if not bool(review.get("ready", False)):
+                console.print(
+                    render_panel(
+                        "Setup Review",
+                        [
+                            f"ready={review.get('ready', False)}",
+                            f"blocking={','.join(review.get('blocking_reasons', [])) or '-'}",
+                            *[
+                                f"next_action={item}"
+                                for item in review.get("next_actions", [])[:3]
+                            ],
+                        ],
+                        border_style="yellow",
+                    )
+                )
+                raise ProjectSelectorError("当前 wizard draft 尚未通过 canonical setup.review。")
+            applied_result = await setup_adapter.apply(draft)
             applied = wizard_service.apply_current_session(project.project_id)
+            console.print(
+                render_panel(
+                    "Setup Apply",
+                    [
+                        f"code={applied_result.code}",
+                        f"message={applied_result.message}",
+                    ],
+                    border_style="green",
+                )
+            )
             console.print(_render_wizard_summary(applied.record))
             return
         if wizard:

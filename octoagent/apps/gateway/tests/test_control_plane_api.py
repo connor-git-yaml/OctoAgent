@@ -26,6 +26,8 @@ from octoagent.core.models import (
     SecretRefSourceType,
     SecretTargetKind,
     SessionContextState,
+    ToolIndexQuery,
+    WorkerType,
     Workspace,
     WorkspaceKind,
 )
@@ -869,6 +871,10 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
+        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        target_skill = next(
+            item for item in skill_doc.items if item.source_kind == "builtin"
+        )
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -903,6 +909,9 @@ class TestControlPlaneApi:
                             },
                         },
                         "policy_profile_id": "strict",
+                        "skill_selection": {
+                            "disabled_item_ids": [target_skill.item_id],
+                        },
                         "agent_profile": {
                             "scope": "project",
                             "name": "安全优先主 Agent",
@@ -935,6 +944,9 @@ class TestControlPlaneApi:
         )
         assert default_project is not None
         assert default_project.metadata["policy_profile_id"] == "strict"
+        assert target_skill.item_id in default_project.metadata["skill_selection"][
+            "disabled_item_ids"
+        ]
         assert default_project.default_agent_profile_id
 
         saved_profile = await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
@@ -943,6 +955,182 @@ class TestControlPlaneApi:
         assert saved_profile is not None
         assert saved_profile.name == "安全优先主 Agent"
         assert saved_profile.tool_profile == "minimal"
+
+        refreshed_skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        )
+        refreshed_skill = next(
+            item for item in refreshed_skill_doc.items if item.item_id == target_skill.item_id
+        )
+        assert refreshed_skill.selected is False
+        assert refreshed_skill.selection_source == "project_override"
+
+        capability_doc = (
+            await control_plane_app.state.control_plane_service.get_capability_pack_document()
+        )
+        assert target_skill.item_id.removeprefix("skill:") not in {
+            item.skill_id for item in capability_doc.pack.skills
+        }
+
+    async def test_skills_selection_save_persists_project_metadata(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        target_skill = next(
+            item for item in skill_doc.items if item.source_kind == "builtin"
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "skills.selection.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "selection": {
+                        "disabled_item_ids": [target_skill.item_id],
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SKILL_SELECTION_SAVED"
+        assert result["data"]["selection"]["disabled_item_ids"] == [target_skill.item_id]
+
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        assert target_skill.item_id in default_project.metadata["skill_selection"][
+            "disabled_item_ids"
+        ]
+
+    async def test_skills_selection_filters_runtime_tool_selection(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        target_skill = next(
+            item for item in skill_doc.items if item.item_id == "skill:ops_triage"
+        )
+
+        save_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "skills.selection.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "selection": {
+                        "disabled_item_ids": [target_skill.item_id],
+                    }
+                },
+            },
+        )
+
+        assert save_resp.status_code == 200
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        workspace = await control_plane_app.state.store_group.project_store.get_primary_workspace(
+            default_project.project_id
+        )
+        assert workspace is not None
+
+        selection = await control_plane_app.state.capability_pack_service.select_tools(
+            ToolIndexQuery(
+                query="inspect runtime health and status",
+                limit=5,
+                worker_type=WorkerType.OPS,
+                project_id=default_project.project_id,
+                workspace_id=workspace.workspace_id,
+            ),
+            worker_type=WorkerType.OPS,
+        )
+
+        assert selection.selected_tools
+        assert "runtime.inspect" not in selection.selected_tools
+        assert "tool_selection_filtered_by_skill_governance" in selection.warnings
+
+    async def test_setup_apply_rejects_invalid_skill_selection_before_writing_config(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        target_skill = next(
+            item for item in skill_doc.items if item.source_kind == "builtin"
+        )
+        config_path = control_plane_app.state.project_root / "octoagent.yaml"
+        assert config_path.exists() is False
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openai",
+                                    "name": "OpenAI",
+                                    "auth_type": "oauth",
+                                    "api_key_env": "OPENAI_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openai",
+                                    "model": "gpt-4o",
+                                }
+                            },
+                        },
+                        "policy_profile_id": "strict",
+                        "skill_selection": {
+                            "selected_item_ids": [target_skill.item_id],
+                            "disabled_item_ids": [target_skill.item_id],
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 409
+        result = resp.json()["result"]
+        assert result["code"] == "SKILL_SELECTION_CONFLICT"
+        assert config_path.exists() is False
+
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        assert "policy_profile_id" not in default_project.metadata
+        assert "skill_selection" not in default_project.metadata
 
     async def test_setup_apply_persists_litellm_secret_values_and_api_key_profile(
         self,
@@ -2364,6 +2552,75 @@ class TestControlPlaneApi:
             item["task_id"] for item in export_resp.json()["result"]["data"]["tasks"]
         }
         assert exported_task_ids == {ambiguous_sessions[0]["task_id"]}
+
+    async def test_backup_create_and_restore_plan_actions_refresh_diagnostics(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        backup_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "backup.create",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "label": "memory-center",
+                },
+            },
+        )
+
+        assert backup_resp.status_code == 200
+        backup_result = backup_resp.json()["result"]
+        assert backup_result["status"] == "completed"
+        assert backup_result["code"] == "BACKUP_CREATED"
+        assert backup_result["data"]["output_path"]
+        assert any(
+            item["resource_type"] == "diagnostics_summary"
+            for item in backup_result["resource_refs"]
+        )
+
+        bundle_path = Path(backup_result["data"]["output_path"])
+        assert bundle_path.exists()
+
+        diagnostics_resp = await control_plane_client.get("/api/control/resources/diagnostics")
+        assert diagnostics_resp.status_code == 200
+        diagnostics_payload = diagnostics_resp.json()
+        assert diagnostics_payload["recovery_summary"]["latest_backup"]["output_path"] == str(
+            bundle_path
+        )
+
+        restore_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "restore.plan",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "bundle": str(bundle_path),
+                    "target_root": str(control_plane_app.state.project_root / "restore-preview"),
+                },
+            },
+        )
+
+        assert restore_resp.status_code == 200
+        restore_result = restore_resp.json()["result"]
+        assert restore_result["status"] == "completed"
+        assert restore_result["code"] == "RESTORE_PLAN_READY"
+        assert restore_result["data"]["bundle_path"] == str(bundle_path)
+        assert restore_result["data"]["compatible"] is True
+        assert any(
+            item["resource_type"] == "diagnostics_summary"
+            for item in restore_result["resource_refs"]
+        )
 
     async def test_raw_task_routes_scope_items_to_selected_project(
         self,

@@ -22,6 +22,20 @@ from .update_commands import restart, update, verify
 console = create_console()
 
 
+def _render_setup_review_panel(review: dict[str, object]) -> RenderableType:
+    lines = [
+        f"ready={bool(review.get('ready', False))}",
+        f"risk_level={review.get('risk_level', 'unknown')}",
+        f"blocking={','.join(review.get('blocking_reasons', [])) or '-'}",
+    ]
+    next_actions = review.get("next_actions", [])
+    if isinstance(next_actions, list) and next_actions:
+        lines.append("")
+        lines.append("next_actions:")
+        lines.extend([f"  - {item}" for item in next_actions[:3]])
+    return render_panel("Setup Review", lines, border_style="cyan")
+
+
 @click.group()
 def main() -> None:
     """OctoAgent CLI 工具"""
@@ -71,6 +85,18 @@ def init(manual_oauth: bool) -> None:
                 f"draft_secret_targets={len(result.record.draft_secret_bindings)}",
             ]
             console.print(render_panel("Init Wizard", lines, border_style="cyan"))
+            if result.record.draft_config:
+                from .setup_governance_adapter import LocalSetupGovernanceAdapter
+
+                setup_adapter = LocalSetupGovernanceAdapter(root)
+                review_result = await setup_adapter.review(
+                    await setup_adapter.prepare_wizard_draft(
+                        wizard.build_setup_draft(project.project_id)
+                    )
+                )
+                review = review_result.data.get("review", {})
+                if isinstance(review, dict):
+                    console.print(_render_setup_review_panel(review))
 
         asyncio.run(_run())
     except KeyboardInterrupt:
@@ -177,6 +203,12 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
         if result.resumed and not status_only:
             console.print(f"[dim]继续上次 onboarding：channel={channel}[/dim]")
         console.print(_render_summary(result))
+        from .setup_governance_adapter import LocalSetupGovernanceAdapter
+
+        review_result = await LocalSetupGovernanceAdapter(Path(project_root)).review()
+        review = review_result.data.get("review", {})
+        if isinstance(review, dict):
+            console.print(_render_setup_review_panel(review))
         if result.doctor_guidance is not None:
             panel = format_guidance_panel(result.doctor_guidance)
             if panel is not None:

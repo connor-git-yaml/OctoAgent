@@ -1,0 +1,105 @@
+"""本地 CLI 适配 canonical setup.review / setup.apply。"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from octoagent.core.models import (
+    ActionRequestEnvelope,
+    ActionResultEnvelope,
+    ControlPlaneActor,
+    ControlPlaneSurface,
+)
+from octoagent.core.store import create_store_group
+from octoagent.gateway.services.capability_pack import CapabilityPackService
+from octoagent.gateway.services.control_plane import ControlPlaneService
+from octoagent.tooling import ToolBroker
+from ulid import ULID
+
+from .wizard_session import DEFAULT_SETUP_AGENT_PROFILE
+
+
+class LocalSetupGovernanceAdapter:
+    """在 CLI 里复用 gateway control-plane 的 setup 语义。"""
+
+    def __init__(self, project_root: Path) -> None:
+        self._project_root = project_root.resolve()
+
+    @asynccontextmanager
+    async def _open_control_plane(self) -> AsyncIterator[ControlPlaneService]:
+        db_path = self._project_root / "data" / "sqlite" / "octoagent.db"
+        artifacts_dir = self._project_root / "data" / "artifacts"
+        store_group = await create_store_group(db_path, artifacts_dir)
+        tool_broker = ToolBroker(
+            event_store=store_group.event_store,
+            artifact_store=store_group.artifact_store,
+        )
+        capability_pack = CapabilityPackService(
+            project_root=self._project_root,
+            store_group=store_group,
+            tool_broker=tool_broker,
+        )
+        await capability_pack.startup()
+        await capability_pack.refresh()
+        control_plane = ControlPlaneService(
+            project_root=self._project_root,
+            store_group=store_group,
+            capability_pack_service=capability_pack,
+        )
+        try:
+            yield control_plane
+        finally:
+            await store_group.conn.close()
+
+    async def review(self, draft: Mapping[str, Any] | None = None) -> ActionResultEnvelope:
+        async with self._open_control_plane() as control_plane:
+            return await control_plane.execute_action(
+                ActionRequestEnvelope(
+                    request_id=str(ULID()),
+                    action_id="setup.review",
+                    params={"draft": dict(draft or {})},
+                    surface=ControlPlaneSurface.CLI,
+                    actor=ControlPlaneActor(
+                        actor_id="user:cli",
+                        actor_label="CLI",
+                    ),
+                )
+            )
+
+    async def prepare_wizard_draft(self, draft: Mapping[str, Any]) -> dict[str, Any]:
+        prepared = dict(draft)
+        if isinstance(prepared.get("agent_profile"), Mapping) and prepared["agent_profile"]:
+            return prepared
+
+        async with self._open_control_plane() as control_plane:
+            _, selected_project, _, _ = await control_plane._resolve_selection()
+            agent_profiles = await control_plane.get_agent_profiles_document()
+            active_agent_profile = control_plane._resolve_active_agent_profile_payload(
+                agent_profiles=agent_profiles,
+                selected_project=selected_project,
+            )
+        if isinstance(active_agent_profile, Mapping) and str(
+            active_agent_profile.get("name", "")
+        ).strip():
+            return prepared
+
+        prepared["agent_profile"] = dict(DEFAULT_SETUP_AGENT_PROFILE)
+        return prepared
+
+    async def apply(self, draft: Mapping[str, Any]) -> ActionResultEnvelope:
+        async with self._open_control_plane() as control_plane:
+            return await control_plane.execute_action(
+                ActionRequestEnvelope(
+                    request_id=str(ULID()),
+                    action_id="setup.apply",
+                    params={"draft": dict(draft)},
+                    surface=ControlPlaneSurface.CLI,
+                    actor=ControlPlaneActor(
+                        actor_id="user:cli",
+                        actor_label="CLI",
+                    ),
+                )
+            )

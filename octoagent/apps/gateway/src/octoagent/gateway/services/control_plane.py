@@ -957,6 +957,126 @@ class ControlPlaneService:
             ],
         )
 
+    def _resolve_project_skill_selection(
+        self,
+        selected_project: Any | None,
+        *,
+        draft_selection: Mapping[str, Any] | None = None,
+    ) -> tuple[set[str], set[str]]:
+        selection = draft_selection
+        if selection is None and selected_project is not None:
+            metadata = (
+                dict(selected_project.metadata)
+                if isinstance(getattr(selected_project, "metadata", None), dict)
+                else {}
+            )
+            raw = metadata.get("skill_selection")
+            if isinstance(raw, Mapping):
+                selection = raw
+        if selection is None:
+            return set(), set()
+        selected_item_ids = {
+            str(item).strip()
+            for item in selection.get("selected_item_ids", [])
+            if str(item).strip()
+        }
+        disabled_item_ids = {
+            str(item).strip()
+            for item in selection.get("disabled_item_ids", [])
+            if str(item).strip()
+        }
+        return selected_item_ids, disabled_item_ids
+
+    def _skill_item_selected(
+        self,
+        *,
+        item_id: str,
+        enabled_by_default: bool,
+        selected_item_ids: set[str],
+        disabled_item_ids: set[str],
+    ) -> tuple[bool, str]:
+        if item_id in selected_item_ids:
+            return True, "project_override"
+        if item_id in disabled_item_ids:
+            return False, "project_override"
+        return enabled_by_default, "default"
+
+    def _apply_skill_selection_to_items(
+        self,
+        *,
+        items: list[SkillGovernanceItem],
+        selected_project: Any | None,
+        draft_selection: Mapping[str, Any] | None = None,
+    ) -> list[SkillGovernanceItem]:
+        selected_item_ids, disabled_item_ids = self._resolve_project_skill_selection(
+            selected_project,
+            draft_selection=draft_selection,
+        )
+        projected: list[SkillGovernanceItem] = []
+        for item in items:
+            selected, selection_source = self._skill_item_selected(
+                item_id=item.item_id,
+                enabled_by_default=item.enabled_by_default,
+                selected_item_ids=selected_item_ids,
+                disabled_item_ids=disabled_item_ids,
+            )
+            projected.append(
+                item.model_copy(
+                    update={
+                        "selected": selected,
+                        "selection_source": selection_source,
+                    }
+                )
+            )
+        return projected
+
+    def _filter_capability_pack_for_project(
+        self,
+        pack,
+        *,
+        selected_project: Any | None,
+    ):
+        selected_item_ids, disabled_item_ids = self._resolve_project_skill_selection(
+            selected_project
+        )
+        if not selected_item_ids and not disabled_item_ids:
+            return pack
+
+        skills = [
+            skill
+            for skill in pack.skills
+            if self._skill_item_selected(
+                item_id=f"skill:{skill.skill_id}",
+                enabled_by_default=True,
+                selected_item_ids=selected_item_ids,
+                disabled_item_ids=disabled_item_ids,
+            )[0]
+        ]
+        tools = [
+            tool
+            for tool in pack.tools
+            if (
+                tool.tool_group != "mcp"
+                or self._skill_item_selected(
+                    item_id=(
+                        "mcp:"
+                        + (str(tool.metadata.get("mcp_server_name", "")).strip() or "mcp")
+                    ),
+                    enabled_by_default=False,
+                    selected_item_ids=selected_item_ids,
+                    disabled_item_ids=disabled_item_ids,
+                )[0]
+            )
+        ]
+        fallback_toolset = [tool for tool in pack.fallback_toolset if tool in {item.tool_name for item in tools}]
+        return pack.model_copy(
+            update={
+                "skills": skills,
+                "tools": tools,
+                "fallback_toolset": fallback_toolset,
+            }
+        )
+
     async def get_skill_governance_document(
         self,
         *,
@@ -964,6 +1084,7 @@ class ControlPlaneService:
         policy_profile_id: str | None = None,
         selected_project: Any | None = None,
         selected_workspace: Any | None = None,
+        draft_selection: Mapping[str, Any] | None = None,
     ) -> SkillGovernanceDocument:
         if selected_project is None and selected_workspace is None:
             _, selected_project, selected_workspace, _ = await self._resolve_selection()
@@ -973,7 +1094,25 @@ class ControlPlaneService:
             effective_policy = self._policy_profile_by_id(policy_profile_id) or DEFAULT_PROFILE
         else:
             _, effective_policy = self._resolve_effective_policy_profile(selected_project)
-        capability_pack = await self.get_capability_pack_document()
+        if self._capability_pack_service is None:
+            capability_pack = CapabilityPackDocument(
+                selected_project_id=(
+                    selected_project.project_id if selected_project is not None else ""
+                ),
+                selected_workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
+            )
+        else:
+            capability_pack = CapabilityPackDocument(
+                pack=await self._capability_pack_service.get_pack(),
+                selected_project_id=(
+                    selected_project.project_id if selected_project is not None else ""
+                ),
+                selected_workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
+            )
         capability_snapshot = (
             self._capability_pack_service.capability_snapshot()
             if self._capability_pack_service is not None
@@ -1012,6 +1151,7 @@ class ControlPlaneService:
                     source_kind="builtin",
                     scope="project",
                     enabled_by_default=True,
+                    selected=True,
                     availability=availability,
                     trust_level="trusted",
                     blocking=blocking,
@@ -1049,6 +1189,7 @@ class ControlPlaneService:
                     source_kind="mcp",
                     scope="project",
                     enabled_by_default=False,
+                    selected=False,
                     availability=availability,
                     trust_level="external",
                     missing_requirements=missing_requirements,
@@ -1069,6 +1210,7 @@ class ControlPlaneService:
                     source_kind="mcp",
                     scope="project",
                     enabled_by_default=False,
+                    selected=False,
                     availability=(
                         "degraded" if mcp_summary.get("configured_server_count", 0) else "disabled"
                     ),
@@ -1079,7 +1221,13 @@ class ControlPlaneService:
                     details=dict(mcp_summary),
                 )
             )
-        blocked_items = len([item for item in items if item.blocking])
+        items = self._apply_skill_selection_to_items(
+            items=items,
+            selected_project=selected_project,
+            draft_selection=draft_selection,
+        )
+        blocked_items = len([item for item in items if item.selected and item.blocking])
+        selected_items = len([item for item in items if item.selected])
         warnings = [] if items else ["当前没有可治理的 skills / MCP readiness 条目。"]
         return SkillGovernanceDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
@@ -1089,6 +1237,8 @@ class ControlPlaneService:
             items=items,
             summary={
                 "item_count": len(items),
+                "selected_count": selected_items,
+                "disabled_count": len(items) - selected_items,
                 "blocked_count": blocked_items,
                 "builtin_skill_count": len(
                     [item for item in items if item.source_kind == "builtin"]
@@ -1383,22 +1533,35 @@ class ControlPlaneService:
         )
 
     async def get_capability_pack_document(self) -> CapabilityPackDocument:
-        state = self._state_store.load()
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
         if self._capability_pack_service is None:
             return CapabilityPackDocument(
-                selected_project_id=state.selected_project_id,
-                selected_workspace_id=state.selected_workspace_id,
+                selected_project_id=(
+                    selected_project.project_id if selected_project is not None else ""
+                ),
+                selected_workspace_id=(
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
                 degraded=ControlPlaneDegradedState(
                     is_degraded=True,
                     reasons=["capability_pack_unavailable"],
                 ),
                 warnings=["capability pack service unavailable"],
             )
-        pack = await self._capability_pack_service.get_pack()
+        pack = await self._capability_pack_service.get_pack(
+            project_id=selected_project.project_id if selected_project is not None else "",
+            workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+        )
         return CapabilityPackDocument(
             pack=pack,
-            selected_project_id=state.selected_project_id,
-            selected_workspace_id=state.selected_workspace_id,
+            selected_project_id=(
+                selected_project.project_id if selected_project is not None else ""
+            ),
+            selected_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="capability.refresh",
@@ -2133,6 +2296,8 @@ class ControlPlaneService:
             return await self._handle_agent_profile_save(request)
         if action_id == "policy_profile.select":
             return await self._handle_policy_profile_select(request)
+        if action_id == "skills.selection.save":
+            return await self._handle_skills_selection_save(request)
         if action_id == "config.apply":
             return await self._handle_config_apply(request)
         if action_id == "backup.create":
@@ -2258,6 +2423,21 @@ class ControlPlaneService:
             validation_errors.append(str(exc))
 
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        draft_skill_selection = (
+            draft.get("skill_selection")
+            if isinstance(draft.get("skill_selection"), Mapping)
+            else None
+        )
+        normalized_skill_selection: dict[str, Any] | None = None
+        if draft_skill_selection is not None:
+            try:
+                normalized_skill_selection = await self._normalize_skill_selection_for_scope(
+                    draft_skill_selection,
+                    selected_project=selected_project,
+                    selected_workspace=selected_workspace,
+                )
+            except ControlPlaneActionError as exc:
+                validation_errors.append(str(exc))
         agent_profiles = await self.get_agent_profiles_document()
         active_agent_profile = self._resolve_active_agent_profile_payload(
             agent_profiles=agent_profiles,
@@ -2280,6 +2460,7 @@ class ControlPlaneService:
             policy_profile_id=policy_profile_id,
             selected_project=selected_project,
             selected_workspace=selected_workspace,
+            draft_selection=normalized_skill_selection,
         )
         diagnostics = await self.get_diagnostics_summary()
         secret_audit = await self._safe_secret_audit(
@@ -2312,6 +2493,16 @@ class ControlPlaneService:
         if not isinstance(draft, dict):
             raise ControlPlaneActionError("SETUP_DRAFT_REQUIRED", "draft 必须是对象")
 
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        skill_selection = draft.get("skill_selection")
+        normalized_skill_selection: dict[str, Any] | None = None
+        if isinstance(skill_selection, Mapping):
+            normalized_skill_selection = await self._normalize_skill_selection_for_scope(
+                skill_selection,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            )
+
         review_result = await self._handle_setup_review(
             request.model_copy(update={"action_id": "setup.review"})
         )
@@ -2332,8 +2523,6 @@ class ControlPlaneService:
             config_data = self._deep_merge_dicts(config_data, config_patch)
         config_data.setdefault("updated_at", date.today().isoformat())
         config = OctoAgentConfig.model_validate(config_data)
-
-        _, selected_project, _, _ = await self._resolve_selection()
 
         policy_profile_id = str(draft.get("policy_profile_id", "")).strip().lower()
         if policy_profile_id and self._policy_profile_by_id(policy_profile_id) is None:
@@ -2365,13 +2554,6 @@ class ControlPlaneService:
             if not str(merged_agent_profile.get("name", "")).strip():
                 raise ControlPlaneActionError("AGENT_PROFILE_NAME_REQUIRED", "name 不能为空")
             agent_request_payload = merged_agent_profile
-
-        skill_selection = draft.get("skill_selection")
-        if skill_selection not in (None, {}, []):
-            raise ControlPlaneActionError(
-                "SKILL_SELECTION_NOT_IMPLEMENTED",
-                "skills.selection.save 尚未实现，当前 Setup 只能展示 skill governance。",
-            )
 
         save_config(config, self._project_root)
         litellm_path = generate_litellm_config(config, self._project_root)
@@ -2423,12 +2605,140 @@ class ControlPlaneService:
             data["agent_profile"] = dict(agent_result.data)
             resource_refs.extend(agent_result.resource_refs)
 
+        if normalized_skill_selection is not None:
+            skill_result = await self._handle_skills_selection_save(
+                request.model_copy(
+                    update={
+                        "action_id": "skills.selection.save",
+                        "params": {"selection": dict(normalized_skill_selection)},
+                    }
+                )
+            )
+            data["skill_selection"] = dict(skill_result.data)
+            resource_refs.extend(skill_result.resource_refs)
+
         return self._completed_result(
             request=request,
             code="SETUP_APPLIED",
             message="配置已保存，主 Agent 与系统设置已同步。",
             data=data,
             resource_refs=self._dedupe_resource_refs(resource_refs),
+        )
+
+    def _normalize_skill_selection_payload(
+        self,
+        selection: Mapping[str, Any],
+        *,
+        allowed_item_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
+        selected_item_ids = {
+            str(item).strip()
+            for item in selection.get("selected_item_ids", [])
+            if str(item).strip()
+        }
+        disabled_item_ids = {
+            str(item).strip()
+            for item in selection.get("disabled_item_ids", [])
+            if str(item).strip()
+        }
+        overlap = sorted(selected_item_ids & disabled_item_ids)
+        if overlap:
+            raise ControlPlaneActionError(
+                "SKILL_SELECTION_CONFLICT",
+                f"skill selection 同时出现在 enabled/disabled 列表：{overlap[0]}",
+            )
+        if allowed_item_ids is not None:
+            unknown = sorted((selected_item_ids | disabled_item_ids) - allowed_item_ids)
+            if unknown:
+                raise ControlPlaneActionError(
+                    "SKILL_SELECTION_UNKNOWN_ITEM",
+                    f"未知的 skill governance item: {unknown[0]}",
+                )
+        return {
+            "selected_item_ids": sorted(selected_item_ids),
+            "disabled_item_ids": sorted(disabled_item_ids),
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+        }
+
+    async def _normalize_skill_selection_for_scope(
+        self,
+        selection: Mapping[str, Any],
+        *,
+        selected_project: Any | None,
+        selected_workspace: Any | None,
+    ) -> dict[str, Any]:
+        if selected_project is None:
+            raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
+        document = await self.get_skill_governance_document(
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        allowed_item_ids = {item.item_id for item in document.items}
+        return self._normalize_skill_selection_payload(
+            selection,
+            allowed_item_ids=allowed_item_ids,
+        )
+
+    async def _handle_skills_selection_save(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        raw_selection = request.params.get("selection")
+        if raw_selection is None:
+            raw_selection = {}
+        if not isinstance(raw_selection, Mapping):
+            raise ControlPlaneActionError(
+                "SKILL_SELECTION_REQUIRED",
+                "selection 必须是对象",
+            )
+
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        if selected_project is None:
+            raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
+
+        normalized = await self._normalize_skill_selection_for_scope(
+            raw_selection,
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+
+        metadata = dict(selected_project.metadata)
+        metadata["skill_selection"] = normalized
+        await self._stores.project_store.save_project(
+            selected_project.model_copy(
+                update={
+                    "metadata": metadata,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        await self._stores.conn.commit()
+
+        refreshed = await self.get_skill_governance_document(
+            selected_project=selected_project.model_copy(update={"metadata": metadata}),
+            selected_workspace=selected_workspace,
+        )
+        return self._completed_result(
+            request=request,
+            code="SKILL_SELECTION_SAVED",
+            message="Skills 默认启用范围已保存。",
+            data={
+                "selection": normalized,
+                "selected_count": refreshed.summary.get("selected_count", 0),
+                "disabled_count": refreshed.summary.get("disabled_count", 0),
+            },
+            resource_refs=[
+                self._resource_ref("skill_governance", "skills:governance"),
+                self._resource_ref("setup_governance", "setup:governance"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="project",
+                    target_id=selected_project.project_id,
+                    label=selected_project.name,
+                )
+            ],
         )
 
     async def _handle_provider_oauth_openai_codex(
@@ -5329,6 +5639,8 @@ class ControlPlaneService:
                     )
                 )
         for item in skill_governance.items:
+            if not item.selected:
+                continue
             if item.availability == "available":
                 continue
             is_blocking = item.blocking and requires_real_model
@@ -5859,6 +6171,14 @@ class ControlPlaneService:
                     "保存配置",
                     category="setup",
                     description="把当前主 Agent、模型和渠道设置一起保存。",
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "skills.selection.save",
+                    "保存技能默认范围",
+                    category="setup",
+                    description="保存当前 project 的 skills / MCP 默认启用范围。",
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),

@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
-import type { MemoryRecordProjection } from "../types";
+import type {
+  MemoryRecordProjection,
+  OperatorActionKind,
+  OperatorInboxItem,
+  RecoverySummary,
+} from "../types";
 import { formatDateTime } from "../workbench/utils";
 
 const LAYER_LABELS: Record<string, string> = {
@@ -76,9 +81,86 @@ function metadataPreviewEntries(record: MemoryRecordProjection): Array<[string, 
     .map(([key, value]) => [key, String(value)]);
 }
 
+function formatRecoveryTime(value: string | null | undefined): string {
+  if (!value) {
+    return "未记录";
+  }
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function renderOperatorMeta(item: OperatorInboxItem): string {
+  if (item.kind === "approval") {
+    return item.metadata.tool_name || item.source_ref;
+  }
+  if (item.kind === "pairing_request") {
+    return item.metadata.username || item.metadata.user_id || item.source_ref;
+  }
+  if (item.kind === "retryable_failure") {
+    return item.metadata.error_type || item.source_ref;
+  }
+  return item.metadata.journal_state || item.source_ref;
+}
+
+function mapQuickAction(
+  item: OperatorInboxItem,
+  kind: OperatorActionKind
+): { actionId: string; params: Record<string, unknown> } | null {
+  if (kind === "approve_once") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: item.item_id.split(":")[1] ?? "",
+        mode: "once",
+      },
+    };
+  }
+  if (kind === "approve_always") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: item.item_id.split(":")[1] ?? "",
+        mode: "always",
+      },
+    };
+  }
+  if (kind === "deny") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: item.item_id.split(":")[1] ?? "",
+        mode: "deny",
+      },
+    };
+  }
+  if (kind === "cancel_task") {
+    return { actionId: "operator.task.cancel", params: { item_id: item.item_id } };
+  }
+  if (kind === "retry_task") {
+    return { actionId: "operator.task.retry", params: { item_id: item.item_id } };
+  }
+  if (kind === "ack_alert") {
+    return { actionId: "operator.alert.ack", params: { item_id: item.item_id } };
+  }
+  if (kind === "approve_pairing") {
+    return { actionId: "channel.pairing.approve", params: { item_id: item.item_id } };
+  }
+  if (kind === "reject_pairing") {
+    return { actionId: "channel.pairing.reject", params: { item_id: item.item_id } };
+  }
+  return null;
+}
+
 export default function MemoryCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const memory = snapshot!.resources.memory;
+  const diagnostics = snapshot!.resources.diagnostics;
+  const sessions = snapshot!.resources.sessions;
   const [queryDraft, setQueryDraft] = useState(memory.filters.query);
   const [layerDraft, setLayerDraft] = useState(memory.filters.layer);
   const [partitionDraft, setPartitionDraft] = useState(memory.filters.partition);
@@ -123,6 +205,42 @@ export default function MemoryCenter() {
     memory.records.length > 0
       ? "先看系统现在记得什么，再看它来自哪个 layer、有没有证据、是否需要授权。"
       : "没有记录时，通常是因为还没发生聊天/导入，或当前筛选条件太窄。";
+  const operatorItems = sessions.operator_items ?? [];
+  const operatorSummary = sessions.operator_summary;
+  const recoverySummary = diagnostics.recovery_summary as Partial<RecoverySummary>;
+  const focusedSession =
+    sessions.sessions.find((item) => item.session_id === sessions.focused_session_id) ?? null;
+  const canExportFocusedSession = Boolean(sessions.focused_session_id || sessions.focused_thread_id);
+  const exportTargetLabel =
+    focusedSession?.title || sessions.focused_thread_id || sessions.focused_session_id || "未选中会话";
+
+  async function handleOperatorAction(item: OperatorInboxItem, kind: OperatorActionKind) {
+    const mapped = mapQuickAction(item, kind);
+    if (!mapped) {
+      return;
+    }
+    await submitAction(mapped.actionId, mapped.params);
+  }
+
+  async function refreshRecoverySummary() {
+    await submitAction("diagnostics.refresh", {});
+  }
+
+  async function handleBackupCreate() {
+    await submitAction("backup.create", { label: "memory-center" });
+  }
+
+  async function handleExportChats() {
+    if (!canExportFocusedSession) {
+      return;
+    }
+    const exportParams = sessions.focused_session_id
+      ? { session_id: sessions.focused_session_id }
+      : { thread_id: sessions.focused_thread_id || undefined };
+    await submitAction("session.export", {
+      ...exportParams,
+    });
+  }
 
   async function refreshMemory() {
     await submitAction("memory.query", {
@@ -497,6 +615,123 @@ export default function MemoryCenter() {
             </div>
           </section>
         </div>
+      </div>
+
+      <div className="wb-split">
+        <section className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">Operator</p>
+              <h3>处理会影响记忆与上下文的待确认事项</h3>
+            </div>
+            <div className="wb-chip-row">
+              <span className="wb-chip">Pending {operatorSummary?.total_pending ?? 0}</span>
+              <span className="wb-chip">Approvals {operatorSummary?.approvals ?? 0}</span>
+              <span className="wb-chip">Pairings {operatorSummary?.pairing_requests ?? 0}</span>
+            </div>
+          </div>
+
+          {operatorItems.length === 0 ? (
+            <div className="wb-empty-state">
+              <strong>当前没有待处理的 operator 工作项</strong>
+              <span>如果后续出现 Vault 授权、审批或配对请求，这里会直接显示。</span>
+            </div>
+          ) : (
+            <div className="wb-note-stack">
+              {operatorItems.slice(0, 6).map((item) => (
+                <div key={item.item_id} className="wb-note">
+                  <strong>{item.title}</strong>
+                  <span>{item.summary}</span>
+                  <small>
+                    {item.kind} · {renderOperatorMeta(item)} · {formatRecoveryTime(item.created_at)}
+                  </small>
+                  <div className="wb-inline-actions wb-inline-actions-wrap">
+                    {item.quick_actions.map((action) => (
+                      <button
+                        key={`${item.item_id}-${action.kind}`}
+                        type="button"
+                        className={
+                          action.style === "primary"
+                            ? "wb-button wb-button-primary"
+                            : "wb-button wb-button-secondary"
+                        }
+                        disabled={!action.enabled || busyActionId === mapQuickAction(item, action.kind)?.actionId}
+                        onClick={() => void handleOperatorAction(item, action.kind)}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">Export & Recovery</p>
+              <h3>把当前成果导出，并确认恢复准备度</h3>
+            </div>
+            <div className="wb-inline-actions">
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={() => void refreshRecoverySummary()}
+                disabled={busyActionId === "diagnostics.refresh"}
+              >
+                刷新恢复状态
+              </button>
+            </div>
+          </div>
+
+          <div className="wb-note-stack">
+            <div className="wb-note">
+              <strong>最近备份</strong>
+              <span>{recoverySummary?.latest_backup?.output_path ?? "尚未创建备份"}</span>
+              <small>{formatRecoveryTime(recoverySummary?.latest_backup?.created_at)}</small>
+            </div>
+            <div className="wb-note">
+              <strong>恢复准备度</strong>
+              <span>{recoverySummary?.ready_for_restore ? "READY" : "NOT READY"}</span>
+              <small>
+                {recoverySummary?.latest_recovery_drill?.summary ?? "尚未执行恢复演练。"}
+              </small>
+            </div>
+            <div className="wb-note">
+              <strong>导出当前会话</strong>
+              <span>{exportTargetLabel}</span>
+              <small>
+                {canExportFocusedSession
+                  ? "使用 control-plane 的 session.export 导出当前聚焦会话。"
+                  : "先在 Chat 或 Work 中聚焦一个会话，这里才会启用导出。"}
+              </small>
+            </div>
+          </div>
+
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <button
+              type="button"
+              className="wb-button wb-button-primary"
+              onClick={() => void handleBackupCreate()}
+              disabled={busyActionId === "backup.create"}
+            >
+              {busyActionId === "backup.create" ? "创建中..." : "创建备份"}
+            </button>
+            <button
+              type="button"
+              className="wb-button wb-button-secondary"
+              onClick={() => void handleExportChats()}
+              disabled={!canExportFocusedSession || busyActionId === "session.export"}
+            >
+              {busyActionId === "session.export" ? "导出中..." : "导出当前会话"}
+            </button>
+            <Link className="wb-button wb-button-tertiary" to="/advanced">
+              打开 Advanced Recovery
+            </Link>
+          </div>
+        </section>
       </div>
     </div>
   );

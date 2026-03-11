@@ -387,6 +387,8 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             source_kind: "builtin",
             scope: "project",
             enabled_by_default: true,
+            selected: true,
+            selection_source: "default",
             availability: "available",
             trust_level: "trusted",
             blocking: false,
@@ -397,6 +399,8 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
           },
         ],
         summary: {
+          selected_count: 1,
+          disabled_count: 0,
           builtin_skill_count: 1,
           mcp_item_count: 0,
         },
@@ -803,6 +807,16 @@ describe("App workbench routing", () => {
     window.history.pushState({}, "", "/settings");
 
     const nextSnapshot = buildSnapshot("http://localhost:4100");
+    nextSnapshot.resources.skill_governance.items[0] = {
+      ...nextSnapshot.resources.skill_governance.items[0],
+      selected: false,
+      selection_source: "project_override",
+    };
+    nextSnapshot.resources.skill_governance.summary = {
+      ...nextSnapshot.resources.skill_governance.summary,
+      selected_count: 0,
+      disabled_count: 1,
+    };
     nextSnapshot.resources.setup_governance.review = {
       ...nextSnapshot.resources.setup_governance.review,
       next_actions: ['检查已通过，可以点击“保存配置”。'],
@@ -921,6 +935,7 @@ describe("App workbench routing", () => {
     const input = (await screen.findAllByDisplayValue("http://localhost:4000"))[0];
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
+    await userEvent.click(screen.getByLabelText("启用 Worker Review"));
     await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
     await waitFor(() =>
@@ -943,6 +958,9 @@ describe("App workbench routing", () => {
     ).toBe(true);
     expect(
       actionBodies.some((body) => body.includes("http://localhost:4100"))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"disabled_item_ids":["skill:workers.review"]'))
     ).toBe(true);
     expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
@@ -1518,6 +1536,302 @@ describe("App workbench routing", () => {
         String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"worker.apply"')
       )
     ).toBe(true);
+  });
+
+  it("Memory 页面会串起 operator 动作和 export/recovery 入口", async () => {
+    window.history.pushState({}, "", "/memory");
+
+    const snapshot = buildSnapshot();
+    const focusedSession = buildSession("task-memory-1", "work-memory-1");
+    snapshot.resources.sessions.sessions = [focusedSession];
+    snapshot.resources.sessions.focused_session_id = focusedSession.session_id;
+    snapshot.resources.sessions.focused_thread_id = focusedSession.thread_id;
+    const initialOperatorSummary = snapshot.resources.sessions.operator_summary!;
+    snapshot.resources.sessions.operator_summary = {
+      ...initialOperatorSummary,
+      total_pending: 1,
+      approvals: 1,
+      alerts: initialOperatorSummary.alerts,
+      retryable_failures: initialOperatorSummary.retryable_failures,
+      pairing_requests: initialOperatorSummary.pairing_requests,
+      degraded_sources: initialOperatorSummary.degraded_sources,
+      generated_at: initialOperatorSummary.generated_at,
+    };
+    snapshot.resources.sessions.operator_items = [
+      {
+        item_id: "approval:ap-1",
+        kind: "approval",
+        state: "pending",
+        title: "允许读取受限记忆",
+        summary: "主 Agent 想读取一条受限的 Vault 引用。",
+        task_id: "task-memory-1",
+        thread_id: "thread-memory-1",
+        source_ref: "vault:subject-1",
+        created_at: "2026-03-09T10:08:00Z",
+        expires_at: null,
+        pending_age_seconds: 30,
+        suggested_actions: ["approve_once"],
+        quick_actions: [
+          {
+            kind: "approve_once",
+            label: "允许一次",
+            style: "primary",
+            enabled: true,
+          },
+        ],
+        recent_action_result: null,
+        metadata: {
+          tool_name: "vault.retrieve",
+        },
+      },
+    ];
+    snapshot.resources.diagnostics.recovery_summary = {
+      latest_backup: null,
+      latest_recovery_drill: null,
+      ready_for_restore: false,
+    };
+
+    let operatorResolved = false;
+    let backupCreated = false;
+    let sessionExported = false;
+    let exportRequestBody: Record<string, unknown> | null = null;
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        const body = String(init.body ?? "");
+        if (body.includes('"action_id":"operator.approval.resolve"')) {
+          operatorResolved = true;
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-operator-approve",
+                correlation_id: "req-operator-approve",
+                action_id: "operator.approval.resolve",
+                status: "completed",
+                code: "OPERATOR_APPROVAL_RESOLVED",
+                message: "已处理审批。",
+                data: {},
+                resource_refs: [
+                  {
+                    resource_type: "session_projection",
+                    resource_id: "sessions:overview",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:09:00Z",
+              },
+            })
+          );
+        }
+        if (body.includes('"action_id":"backup.create"')) {
+          backupCreated = true;
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-backup-create",
+                correlation_id: "req-backup-create",
+                action_id: "backup.create",
+                status: "completed",
+                code: "BACKUP_CREATED",
+                message: "已创建 backup bundle",
+                data: {
+                  output_path: "/tmp/backup.zip",
+                },
+                resource_refs: [
+                  {
+                    resource_type: "diagnostics_summary",
+                    resource_id: "diagnostics:runtime",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:10:00Z",
+              },
+            })
+          );
+        }
+        if (body.includes('"action_id":"session.export"')) {
+          sessionExported = true;
+          exportRequestBody = JSON.parse(body) as Record<string, unknown>;
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-session-export",
+                correlation_id: "req-session-export",
+                action_id: "session.export",
+                status: "completed",
+                code: "SESSION_EXPORTED",
+                message: "已导出会话数据",
+                data: {
+                  output_path: "/tmp/chats.jsonl",
+                  tasks: [{ task_id: focusedSession.task_id }],
+                },
+                resource_refs: [
+                  {
+                    resource_type: "session_projection",
+                    resource_id: "sessions:overview",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:11:00Z",
+              },
+            })
+          );
+        }
+        if (body.includes('"action_id":"diagnostics.refresh"')) {
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-diagnostics-refresh",
+                correlation_id: "req-diagnostics-refresh",
+                action_id: "diagnostics.refresh",
+                status: "completed",
+                code: "DIAGNOSTICS_REFRESHED",
+                message: "已刷新 diagnostics",
+                data: {},
+                resource_refs: [
+                  {
+                    resource_type: "diagnostics_summary",
+                    resource_id: "diagnostics:runtime",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:12:00Z",
+              },
+            })
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-operator-approve",
+              correlation_id: "req-operator-approve",
+              action_id: "operator.approval.resolve",
+              status: "completed",
+              code: "OPERATOR_APPROVAL_RESOLVED",
+              message: "已处理审批。",
+              data: {},
+              resource_refs: [
+                {
+                  resource_type: "session_projection",
+                  resource_id: "sessions:overview",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:09:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/sessions")) {
+        const nextSessions = structuredClone(snapshot.resources.sessions);
+        if (operatorResolved) {
+          const nextOperatorSummary = nextSessions.operator_summary!;
+          nextSessions.operator_summary = {
+            ...nextOperatorSummary,
+            total_pending: 0,
+            approvals: 0,
+            alerts: nextOperatorSummary.alerts,
+            retryable_failures: nextOperatorSummary.retryable_failures,
+            pairing_requests: nextOperatorSummary.pairing_requests,
+            degraded_sources: nextOperatorSummary.degraded_sources,
+            generated_at: nextOperatorSummary.generated_at,
+          };
+          nextSessions.operator_items = [];
+        }
+        return Promise.resolve(jsonResponse(nextSessions));
+      }
+      if (url.includes("/api/control/resources/diagnostics")) {
+        const nextDiagnostics = structuredClone(snapshot.resources.diagnostics);
+        if (backupCreated) {
+          nextDiagnostics.recovery_summary = {
+            latest_backup: {
+              bundle_id: "bundle-1",
+              output_path: "/tmp/backup.zip",
+              created_at: "2026-03-09T10:10:00Z",
+              size_bytes: 1024,
+              manifest: {
+                manifest_version: 1,
+                bundle_id: "bundle-1",
+                created_at: "2026-03-09T10:10:00Z",
+                source_project_root: "/tmp/project",
+                scopes: ["all"],
+                files: [],
+                warnings: [],
+                excluded_paths: [],
+                sensitivity_level: "metadata_only",
+                notes: [],
+              },
+            },
+            latest_recovery_drill: null,
+            ready_for_restore: false,
+          };
+        }
+        return Promise.resolve(
+          jsonResponse(nextDiagnostics)
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("允许读取受限记忆")).toBeInTheDocument();
+    expect(await screen.findByText("创建备份")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    expect(await screen.findByText(/已处理审批/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "创建备份" }));
+    expect(await screen.findByText(/已创建 backup bundle/)).toBeInTheDocument();
+    expect(await screen.findByText("/tmp/backup.zip")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "导出当前会话" }));
+    expect(await screen.findByText(/已导出会话数据/)).toBeInTheDocument();
+
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes(
+          '"action_id":"operator.approval.resolve"'
+        )
+      )
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"backup.create"')
+      )
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"session.export"')
+      )
+    ).toBe(true);
+    expect(sessionExported).toBe(true);
+    expect(exportRequestBody).toMatchObject({
+      action_id: "session.export",
+      params: {
+        session_id: focusedSession.session_id,
+      },
+    });
+    expect((exportRequestBody?.params as Record<string, unknown> | undefined)?.thread_id).toBeUndefined();
   });
 
   it("Work 页面会禁用 terminal work 的 worker.review 按钮", async () => {
