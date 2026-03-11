@@ -1,6 +1,11 @@
-# OctoAgent M0 -- 基础底座
+# OctoAgent
 
-OctoAgent 个人智能操作系统的 M0 基础底座层：基于 Event Sourcing 的持久化任务账本，支持 REST API、SSE 实时事件推送和最小 Web UI。
+OctoAgent 是一个面向个人使用的 AI OS：提供持久化任务账本、Web / Telegram 双入口、统一配置与健康检查、聊天导入/导出、备份恢复，以及带治理面的 Agent 运行时。
+
+当前仓库同时提供两种使用方式：
+
+- 普通用户路径：一键安装到 `~/.octoagent`，先用 `echo` 模式跑通 Web，再切真实模型
+- 开发者路径：在仓库里直接运行、调试和测试
 
 ## 架构
 
@@ -29,15 +34,120 @@ Web UI (React 19)  ──HTTP/SSE──>  FastAPI Gateway  ──>  SQLite WAL
 - Node.js 20+
 - [uv](https://docs.astral.sh/uv/) 包管理器
 
-### 个人体验模式
+### 脚本分层约定
 
-如果你还没有 clone 仓库，推荐直接执行仓库根目录的一键安装器：
+仓库里现在保留两层脚本目录，职责明确分开：
+
+- `repo-scripts/`
+  - 仓库级脚本
+  - 负责远程一键安装、agent-config 同步、仓库级验证
+- `octoagent/scripts/`
+  - 产品级脚本
+  - 负责个人实例初始化、启动 Web runtime、执行实例 doctor
+
+如果你是普通用户，优先使用 `repo-scripts/install-octo-user.sh` 作为远程入口；如果你已经在仓库里开发，再使用 `octoagent/scripts/` 下的脚本。
+
+### 个人体验模式（推荐）
+
+如果你只是想“像普通用户一样用起来”，不要先手动 clone 仓库，直接执行一键安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/connor-git-yaml/OctoAgent/master/scripts/install-octo-user.sh | bash
+curl -fsSL https://raw.githubusercontent.com/connor-git-yaml/OctoAgent/master/repo-scripts/install-octo-user.sh | bash
 ```
 
-它会自动把源码安装到 `~/.octoagent/app`，并把个人实例初始化到 `~/.octoagent/`。
+这条命令会：
+
+- 把源码拉到 `~/.octoagent/app`
+- 把个人实例初始化到 `~/.octoagent/`
+- 默认生成 `echo` 模式配置，方便先验证 Web 流程
+- 生成 3 个可直接使用的入口：
+  - `~/.octoagent/bin/octo-start`
+  - `~/.octoagent/bin/octo-doctor`
+  - `~/.octoagent/bin/octo`
+
+安装完成后，先启动实例：
+
+```bash
+~/.octoagent/bin/octo-start
+```
+
+另开一个终端做健康检查：
+
+```bash
+~/.octoagent/bin/octo-doctor
+curl 'http://127.0.0.1:8000/ready?profile=core'
+```
+
+看到 `/ready` 返回 `"status": "ready"` 后，就可以打开：
+
+- Web UI: `http://127.0.0.1:8000`
+- Swagger: `http://127.0.0.1:8000/docs`
+
+如需把 CLI 加进 PATH：
+
+```bash
+export PATH="$HOME/.octoagent/bin:$PATH"
+```
+
+安装后的实例目录结构大致如下：
+
+- `~/.octoagent/octoagent.yaml`
+- `~/.octoagent/litellm-config.yaml`
+- `~/.octoagent/data/sqlite`
+- `~/.octoagent/data/artifacts`
+- `~/.octoagent/app`
+
+### 切换到真实模型
+
+个人体验模式默认是 `echo`，这样可以先确认系统本身能跑。要切真实模型，推荐先从 OpenRouter 开始：
+
+1. 先准备 provider 凭证文件：
+
+```bash
+cp ~/.octoagent/app/octoagent/.env.litellm.example ~/.octoagent/.env.litellm
+```
+
+2. 编辑 `~/.octoagent/.env.litellm`，至少填入：
+
+```dotenv
+OPENROUTER_API_KEY=你的真实密钥
+LITELLM_MASTER_KEY=你自己设置的一串值
+```
+
+3. 重新生成统一配置：
+
+```bash
+~/.octoagent/bin/octo config init
+```
+
+推荐在交互里先选 `openrouter`。如果你要走 ChatGPT Pro OAuth / Codex，也可以选 `openai-codex`，默认模型 preset 已经是 `gpt-5.4`。
+
+4. 启动 LiteLLM Proxy：
+
+```bash
+docker compose -f ~/.octoagent/app/octoagent/docker-compose.litellm.yml up -d
+```
+
+5. 做一次真实连通性检查：
+
+```bash
+~/.octoagent/bin/octo doctor --live
+curl 'http://127.0.0.1:8000/ready?profile=llm'
+```
+
+### 可选：接入 Telegram
+
+如果只想先用 Web，可以跳过。要接 Telegram，最简单的是 `polling`：
+
+```bash
+~/.octoagent/bin/octo config init --force --enable-telegram --telegram-mode polling
+export TELEGRAM_BOT_TOKEN=你的_bot_token
+~/.octoagent/bin/octo onboard --channel telegram
+```
+
+普通用户第一次接 Telegram 时，建议先用 `polling`；只有当你已经有公网 HTTPS 地址时，再切 `webhook`。
+
+### 开发者模式
 
 如果你已经在仓库内开发，直接执行：
 

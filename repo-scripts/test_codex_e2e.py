@@ -5,9 +5,9 @@
 验证 JWT OAuth 全链路：CredentialStore → HandlerChain → API 调用。
 
 用法（从 repo 根目录执行）:
-    cd octoagent && uv run python ../scripts/test_codex_e2e.py
-    cd octoagent && uv run python ../scripts/test_codex_e2e.py --prompt "用 Python 写一个快排"
-    cd octoagent && uv run python ../scripts/test_codex_e2e.py --stream
+    cd octoagent && uv run python ../repo-scripts/test_codex_e2e.py
+    cd octoagent && uv run python ../repo-scripts/test_codex_e2e.py --prompt "用 Python 写一个快排"
+    cd octoagent && uv run python ../repo-scripts/test_codex_e2e.py --stream
 """
 
 from __future__ import annotations

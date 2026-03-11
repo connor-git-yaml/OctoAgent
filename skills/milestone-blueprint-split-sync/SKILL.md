@@ -127,7 +127,7 @@ rg -n "contract_version|hop_count|max_hops|幂等|watchdog|trace_id|span_id" doc
 1. 所有流程规范写在仓库内 Skill 文件，避免平台私有漂移。
 2. 通过文件路径显式引用 Skill：
    - `[$milestone-blueprint-split-sync](skills/milestone-blueprint-split-sync/SKILL.md)`
-3. 仅在 `.agent-config/shared.md` 维护索引入口，再用 `./scripts/sync-agent-config.sh` 同步到 `AGENTS.md` 与 `CLAUDE.md`。
+3. 仅在 `.agent-config/shared.md` 维护索引入口，再用 `./repo-scripts/sync-agent-config.sh` 同步到 `AGENTS.md` 与 `CLAUDE.md`。
 4. 不直接手改 `AGENTS.md` / `CLAUDE.md` 生成文件。
 
 ## 5. 质量红线

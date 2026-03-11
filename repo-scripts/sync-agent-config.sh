@@ -17,9 +17,9 @@ SYNC_LOCAL="false"
 usage() {
   cat <<'EOF'
 用法:
-  ./scripts/sync-agent-config.sh              # 生成/覆盖 CLAUDE.md 与 AGENTS.md
-  ./scripts/sync-agent-config.sh --check      # 仅检查是否已同步
-  ./scripts/sync-agent-config.sh --sync-local # 额外同步 CLAUDE.local.md -> AGENTS.local.md
+  ./repo-scripts/sync-agent-config.sh              # 生成/覆盖 CLAUDE.md 与 AGENTS.md
+  ./repo-scripts/sync-agent-config.sh --check      # 仅检查是否已同步
+  ./repo-scripts/sync-agent-config.sh --sync-local # 额外同步 CLAUDE.local.md -> AGENTS.local.md
 EOF
 }
 

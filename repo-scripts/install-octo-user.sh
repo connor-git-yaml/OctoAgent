@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 普通用户一键安装入口：
+# - 源码安装到 ~/.octoagent/app
+# - 个人实例初始化到 ~/.octoagent
+# - 默认生成 echo 模式配置，方便先验证 Web 流程
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF_REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INSTALL_ROOT="${OCTOAGENT_HOME:-$HOME/.octoagent}"
@@ -92,11 +97,13 @@ cat <<EOF
 [install-octo-user] 安装完成。
   实例根目录: $INSTALL_ROOT
   源码目录:   $APP_ROOT
+  默认模式:   echo
 
 下一步:
   1. 启动 Web:     $INSTALL_ROOT/bin/octo-start
   2. 健康检查:     $INSTALL_ROOT/bin/octo-doctor
   3. 命令行入口:   $INSTALL_ROOT/bin/octo
+  4. 切真实模型:   $INSTALL_ROOT/bin/octo config init
 
 如需把 CLI 加入 PATH:
   export PATH="$INSTALL_ROOT/bin:\$PATH"
