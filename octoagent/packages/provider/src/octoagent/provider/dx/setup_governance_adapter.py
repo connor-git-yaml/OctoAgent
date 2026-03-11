@@ -19,6 +19,8 @@ from octoagent.gateway.services.control_plane import ControlPlaneService
 from octoagent.tooling import ToolBroker
 from ulid import ULID
 
+from .update_service import UpdateService
+from .update_status_store import UpdateStatusStore
 from .wizard_session import DEFAULT_SETUP_AGENT_PROFILE
 
 
@@ -48,6 +50,8 @@ class LocalSetupGovernanceAdapter:
             project_root=self._project_root,
             store_group=store_group,
             capability_pack_service=capability_pack,
+            update_status_store=UpdateStatusStore(self._project_root),
+            update_service=UpdateService(self._project_root),
         )
         try:
             yield control_plane
@@ -96,6 +100,44 @@ class LocalSetupGovernanceAdapter:
                     request_id=str(ULID()),
                     action_id="setup.apply",
                     params={"draft": dict(draft)},
+                    surface=ControlPlaneSurface.CLI,
+                    actor=ControlPlaneActor(
+                        actor_id="user:cli",
+                        actor_label="CLI",
+                    ),
+                )
+            )
+
+    async def quick_connect(self, draft: Mapping[str, Any]) -> ActionResultEnvelope:
+        async with self._open_control_plane() as control_plane:
+            return await control_plane.execute_action(
+                ActionRequestEnvelope(
+                    request_id=str(ULID()),
+                    action_id="setup.quick_connect",
+                    params={"draft": dict(draft)},
+                    surface=ControlPlaneSurface.CLI,
+                    actor=ControlPlaneActor(
+                        actor_id="user:cli",
+                        actor_label="CLI",
+                    ),
+                )
+            )
+
+    async def connect_openai_codex_oauth(
+        self,
+        *,
+        env_name: str = "OPENAI_API_KEY",
+        profile_name: str = "openai-codex-default",
+    ) -> ActionResultEnvelope:
+        async with self._open_control_plane() as control_plane:
+            return await control_plane.execute_action(
+                ActionRequestEnvelope(
+                    request_id=str(ULID()),
+                    action_id="provider.oauth.openai_codex",
+                    params={
+                        "env_name": env_name,
+                        "profile_name": profile_name,
+                    },
                     surface=ControlPlaneSurface.CLI,
                     actor=ControlPlaneActor(
                         actor_id="user:cli",

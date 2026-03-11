@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import SecretStr
-
+import structlog
 from octoagent.core.models import (
     ActionDefinition,
     ActionRegistryDocument,
@@ -126,7 +126,12 @@ from octoagent.provider.dx.memory_console_service import (
     MemoryConsoleService,
 )
 from octoagent.provider.dx.onboarding_service import OnboardingService
+from octoagent.provider.dx.runtime_activation import (
+    RuntimeActivationError,
+    RuntimeActivationService,
+)
 from octoagent.provider.dx.secret_service import SecretService
+from pydantic import SecretStr
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
@@ -137,6 +142,7 @@ _AUDIT_TRACE_ID = "trace-ops-control-plane"
 _POLICY_TASK_ID = "system"
 _POLICY_TRACE_ID = "trace-policy-engine"
 _TERMINAL_WORK_STATUSES = {"succeeded", "failed", "cancelled", "merged", "timed_out", "deleted"}
+log = structlog.get_logger()
 
 
 class ControlPlaneActionError(RuntimeError):
@@ -1068,7 +1074,8 @@ class ControlPlaneService:
                 )[0]
             )
         ]
-        fallback_toolset = [tool for tool in pack.fallback_toolset if tool in {item.tool_name for item in tools}]
+        tool_names = {item.tool_name for item in tools}
+        fallback_toolset = [tool for tool in pack.fallback_toolset if tool in tool_names]
         return pack.model_copy(
             update={
                 "skills": skills,
@@ -2184,6 +2191,8 @@ class ControlPlaneService:
             return await self._handle_setup_review(request)
         if action_id == "setup.apply":
             return await self._handle_setup_apply(request)
+        if action_id == "setup.quick_connect":
+            return await self._handle_setup_quick_connect(request)
         if action_id == "provider.oauth.openai_codex":
             return await self._handle_provider_oauth_openai_codex(request)
         if action_id == "diagnostics.refresh":
@@ -2624,6 +2633,102 @@ class ControlPlaneService:
             data=data,
             resource_refs=self._dedupe_resource_refs(resource_refs),
         )
+
+    async def _handle_setup_quick_connect(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        apply_result = await self._handle_setup_apply(
+            request.model_copy(update={"action_id": "setup.apply"})
+        )
+        activation_service = RuntimeActivationService(self._project_root)
+        try:
+            activation = await activation_service.start_proxy()
+        except RuntimeActivationError as exc:
+            raise ControlPlaneActionError(
+                "SETUP_ACTIVATION_FAILED",
+                f"配置已保存，但 LiteLLM Proxy 启动失败：{exc}",
+            ) from exc
+
+        activation_data = {
+            "project_root": activation.project_root,
+            "source_root": activation.source_root,
+            "compose_file": activation.compose_file,
+            "proxy_url": activation.proxy_url,
+            "managed_runtime": activation.managed_runtime,
+            "warnings": list(activation.warnings),
+            "runtime_reload_mode": "none",
+            "runtime_reload_message": "真实模型连接已准备完成。",
+        }
+
+        if activation.managed_runtime and self._update_service is not None:
+            if request.surface == ControlPlaneSurface.CLI:
+                await self._update_service.restart(
+                    trigger_source=self._map_update_source(request.surface)
+                )
+                activation_data["runtime_reload_mode"] = "managed_restart_completed"
+                activation_data["runtime_reload_message"] = (
+                    "已自动重启托管实例，真实模型会在新进程里生效。"
+                )
+            else:
+                asyncio.create_task(
+                    self._restart_runtime_after_delay(
+                        delay_seconds=2.0,
+                        trigger_source=self._map_update_source(request.surface),
+                    )
+                )
+                activation_data["runtime_reload_mode"] = "managed_restart_scheduled"
+                activation_data["runtime_reload_message"] = (
+                    "已启动 LiteLLM Proxy，当前实例会在几秒内自动重启并切到真实模型。"
+                )
+        else:
+            activation_data["runtime_reload_mode"] = "manual_restart_required"
+            activation_data["runtime_reload_message"] = (
+                "LiteLLM Proxy 已启动；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
+            )
+
+        review_result = await self._handle_setup_review(
+            request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})
+        )
+        refreshed_review = review_result.data.get("review", {})
+        data = dict(apply_result.data)
+        if isinstance(refreshed_review, dict) and refreshed_review:
+            data["review"] = refreshed_review
+        data["activation"] = activation_data
+
+        message = str(activation_data["runtime_reload_message"])
+        return self._completed_result(
+            request=request,
+            code="SETUP_QUICK_CONNECTED",
+            message=message,
+            data=data,
+            resource_refs=self._dedupe_resource_refs(
+                list(apply_result.resource_refs)
+                + [
+                    self._resource_ref("config_schema", "config:octoagent"),
+                    self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+                    self._resource_ref("setup_governance", "setup:governance"),
+                ]
+            ),
+        )
+
+    async def _restart_runtime_after_delay(
+        self,
+        *,
+        delay_seconds: float,
+        trigger_source: UpdateTriggerSource,
+    ) -> None:
+        if self._update_service is None:
+            return
+        await asyncio.sleep(delay_seconds)
+        try:
+            await self._update_service.restart(trigger_source=trigger_source)
+        except Exception as exc:  # pragma: no cover - 后台 restart 失败仅记录日志
+            log.warning(
+                "setup_quick_connect_restart_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
 
     def _normalize_skill_selection_payload(
         self,
@@ -4833,7 +4938,9 @@ class ControlPlaneService:
                 },
             }
         else:
-            default_model = "openrouter/auto" if provider_id == "openrouter" else f"{provider_id}/auto"
+            default_model = (
+                "openrouter/auto" if provider_id == "openrouter" else f"{provider_id}/auto"
+            )
             aliases = {
                 "main": {
                     "provider": provider_id,
@@ -4907,7 +5014,11 @@ class ControlPlaneService:
                     provider=provider.id,
                     key=SecretStr(secret_value),
                 ),
-                is_default=existing.is_default if existing is not None else store.get_default_profile() is None,
+                is_default=(
+                    existing.is_default
+                    if existing is not None
+                    else store.get_default_profile() is None
+                ),
                 created_at=existing.created_at if existing is not None else datetime.now(tz=UTC),
                 updated_at=datetime.now(tz=UTC),
             )
@@ -5471,13 +5582,19 @@ class ControlPlaneService:
                     summary=(
                         "当前没有任何启用中的 provider，主 Agent 不能调用真实模型。"
                         if requires_real_model
-                        else "当前处于体验模式，还没有接入真实模型；你仍然可以先用 Web 跑通基础流程。"
+                        else (
+                            "当前处于体验模式，还没有接入真实模型；"
+                            "你仍然可以先用 Web 跑通基础流程。"
+                        )
                     ),
                     blocking=requires_real_model,
                     recommended_action=(
                         "至少配置 1 个 provider，并补齐对应 secret 引用。"
                         if requires_real_model
-                        else "如果你只是先体验本地 Web，可暂时保留为空；接 OpenRouter / OpenAI 时再补齐。"
+                        else (
+                            "如果你只是先体验本地 Web，可暂时保留为空；"
+                            "接 OpenRouter / OpenAI 时再补齐。"
+                        )
                     ),
                     source_ref=config_ref,
                 )
@@ -6175,6 +6292,17 @@ class ControlPlaneService:
                     risk_hint="medium",
                 ),
                 definition(
+                    "setup.quick_connect",
+                    "连接并启用真实模型",
+                    category="setup",
+                    description=(
+                        "保存 Provider 配置、启动 LiteLLM Proxy，"
+                        "并在托管实例上自动切到真实模型。"
+                    ),
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
                     "skills.selection.save",
                     "保存技能默认范围",
                     category="setup",
@@ -6186,7 +6314,10 @@ class ControlPlaneService:
                     "provider.oauth.openai_codex",
                     "连接 OpenAI Auth",
                     category="setup",
-                    description="通过浏览器 OAuth 连接 ChatGPT Pro / OpenAI Codex，并写入本地凭证。",
+                    description=(
+                        "通过浏览器 OAuth 连接 ChatGPT Pro / OpenAI Codex，"
+                        "并写入本地凭证。"
+                    ),
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),

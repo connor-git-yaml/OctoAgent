@@ -110,6 +110,73 @@ _BOOTSTRAP_PRESETS: dict[str, _ProviderBootstrapPreset] = {
 }
 
 
+def list_bootstrap_provider_choices() -> list[str]:
+    """返回首次使用支持的 provider 预设列表。"""
+    return list(_BOOTSTRAP_PRESETS.keys())
+
+
+def build_bootstrap_config_for_provider(
+    provider_choice: str,
+    *,
+    provider_name: str | None = None,
+    api_key_env: str | None = None,
+    enable_telegram: bool = False,
+    telegram_mode: Literal["webhook", "polling"] = "polling",
+    telegram_webhook_url: str = "",
+    telegram_bot_token_env: str = "TELEGRAM_BOT_TOKEN",
+    telegram_webhook_secret_env: str = "",
+) -> OctoAgentConfig:
+    """按指定 provider 预设构建最小可用配置。"""
+    preset = _BOOTSTRAP_PRESETS.get(provider_choice)
+    if preset is None:
+        raise ConfigBootstrapError(f"不支持的 provider 预设：{provider_choice}")
+
+    final_provider_name = provider_name or preset.provider_name
+    final_api_key_env = api_key_env or preset.api_key_env
+
+    try:
+        provider_entry = ProviderEntry(
+            id=preset.provider_id,
+            name=final_provider_name,
+            auth_type=preset.auth_type,
+            api_key_env=final_api_key_env,
+        )
+    except Exception as exc:
+        raise ConfigBootstrapError(f"Provider 配置无效：{exc}") from exc
+
+    default_aliases = {
+        "main": ModelAlias(
+            provider=preset.provider_id,
+            model=preset.main_model,
+            description=preset.main_description,
+            thinking_level=preset.main_thinking,
+        ),
+        "cheap": ModelAlias(
+            provider=preset.provider_id,
+            model=preset.cheap_model,
+            description=preset.cheap_description,
+            thinking_level=preset.cheap_thinking,
+        ),
+    }
+
+    config = OctoAgentConfig(
+        updated_at=date.today().isoformat(),
+        providers=[provider_entry],
+        model_aliases=default_aliases,
+        runtime=RuntimeConfig(llm_mode="litellm"),
+    )
+    if enable_telegram:
+        return apply_telegram_channel_config(
+            config,
+            enabled=True,
+            mode=telegram_mode,
+            bot_token_env=telegram_bot_token_env,
+            webhook_url=telegram_webhook_url,
+            webhook_secret_env=telegram_webhook_secret_env,
+        )
+    return config
+
+
 def apply_telegram_channel_config(
     config: OctoAgentConfig,
     *,
@@ -165,62 +232,33 @@ def build_bootstrap_config(
 
     prompt_func = prompt or (lambda text, default: _default_prompt(text, default=default))
     choice_func = choice_prompt or (
-        lambda text, choices, default: _default_choice_prompt(text, choices=choices, default=default)
+        lambda text, choices, default: _default_choice_prompt(
+            text,
+            choices=choices,
+            default=default,
+        )
     )
     provider_choice = choice_func(
         "Provider 预设（openrouter / openai / openai-codex / anthropic）",
-        list(_BOOTSTRAP_PRESETS.keys()),
+        list_bootstrap_provider_choices(),
         "openrouter",
     )
     preset = _BOOTSTRAP_PRESETS[provider_choice]
-    provider_id = preset.provider_id
     provider_name = prompt_func("Provider 显示名称", preset.provider_name)
     api_key_env = prompt_func(
         f"凭证环境变量名（如 {preset.api_key_env}）",
         preset.api_key_env,
     )
-
-    try:
-        provider_entry = ProviderEntry(
-            id=provider_id,
-            name=provider_name,
-            auth_type=preset.auth_type,
-            api_key_env=api_key_env,
-        )
-    except Exception as exc:
-        raise ConfigBootstrapError(f"Provider 配置无效：{exc}") from exc
-
-    default_aliases = {
-        "main": ModelAlias(
-            provider=provider_id,
-            model=preset.main_model,
-            description=preset.main_description,
-            thinking_level=preset.main_thinking,
-        ),
-        "cheap": ModelAlias(
-            provider=provider_id,
-            model=preset.cheap_model,
-            description=preset.cheap_description,
-            thinking_level=preset.cheap_thinking,
-        ),
-    }
-
-    config = OctoAgentConfig(
-        updated_at=date.today().isoformat(),
-        providers=[provider_entry],
-        model_aliases=default_aliases,
-        runtime=RuntimeConfig(llm_mode="litellm"),
+    return build_bootstrap_config_for_provider(
+        provider_choice,
+        provider_name=provider_name,
+        api_key_env=api_key_env,
+        enable_telegram=enable_telegram,
+        telegram_mode=telegram_mode,
+        telegram_webhook_url=telegram_webhook_url,
+        telegram_bot_token_env=telegram_bot_token_env,
+        telegram_webhook_secret_env=telegram_webhook_secret_env,
     )
-    if enable_telegram:
-        return apply_telegram_channel_config(
-            config,
-            enabled=True,
-            mode=telegram_mode,
-            bot_token_env=telegram_bot_token_env,
-            webhook_url=telegram_webhook_url,
-            webhook_secret_env=telegram_webhook_secret_env,
-        )
-    return config
 
 
 def bootstrap_config(

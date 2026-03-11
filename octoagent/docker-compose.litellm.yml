@@ -16,10 +16,10 @@ services:
     ports:
       - "${LITELLM_PORT:-4000}:4000"
     volumes:
-      - ./litellm-config.yaml:/app/config.yaml:ro
+      - ${OCTOAGENT_INSTANCE_ROOT:-.}/litellm-config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     env_file:
-      - .env.litellm
+      - ${OCTOAGENT_INSTANCE_ROOT:-.}/.env.litellm
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-octoagent-dev}
     healthcheck:

@@ -928,7 +928,7 @@ export default function SettingsCenter() {
     .map((item) => item.alias.trim())
     .filter(Boolean);
 
-  function buildSetupDraft() {
+  function buildSetupDraft(secretStateOverride?: Record<string, string>) {
     const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
     setFieldErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
@@ -943,7 +943,7 @@ export default function SettingsCenter() {
       }),
       skill_selection: buildSkillSelectionPayload(skillGovernance.items, skillSelection),
       secret_values: Object.fromEntries(
-        Object.entries(secretValues).filter(([, value]) => value.trim())
+        Object.entries(secretStateOverride ?? secretValues).filter(([, value]) => value.trim())
       ),
     };
   }
@@ -983,6 +983,49 @@ export default function SettingsCenter() {
     }
   }
 
+  async function handleQuickConnect() {
+    const masterKeyEnv = String(
+      fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"
+    );
+    const nextSecretValues = { ...secretValues };
+    if (
+      !nextSecretValues[masterKeyEnv]?.trim() &&
+      !savedEnvNames.has(masterKeyEnv)
+    ) {
+      nextSecretValues[masterKeyEnv] = generateSecretValue();
+      setSecretValues((state) => ({
+        ...state,
+        [masterKeyEnv]: nextSecretValues[masterKeyEnv],
+      }));
+    }
+    const draft = buildSetupDraft(nextSecretValues);
+    if (!draft) {
+      return;
+    }
+    if (providerMode === "openai-auth" && !providerRuntimeDetails.openai_oauth_connected) {
+      const connected = await handleOpenAIOAuthConnect();
+      if (!connected) {
+        return;
+      }
+    }
+    const reviewResult = await submitAction("setup.review", { draft });
+    const nextReview = reviewResult?.data.review;
+    if (nextReview && typeof nextReview === "object" && !Array.isArray(nextReview)) {
+      const parsedReview = nextReview as SetupReviewSummary;
+      setReview(parsedReview);
+      if (!parsedReview.ready) {
+        return;
+      }
+    } else if (!review.ready) {
+      return;
+    }
+    const result = await submitAction("setup.quick_connect", { draft });
+    const appliedReview = result?.data.review;
+    if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
+      setReview(appliedReview as SetupReviewSummary);
+    }
+  }
+
   const currentPolicy =
     policyProfiles.profiles.find((item) => item.profile_id === policyProfileId) ?? null;
   const selectedSkills = skillGovernance.items.filter(
@@ -1001,6 +1044,11 @@ export default function SettingsCenter() {
       .trim()
       .toLowerCase() || "echo";
   const usingEchoMode = runtimeMode === "echo";
+  const connectBusy =
+    busyActionId === "setup.review" ||
+    busyActionId === "setup.apply" ||
+    busyActionId === "setup.quick_connect" ||
+    busyActionId === "provider.oauth.openai_codex";
   const memoryMode =
     String(
       fieldState["memory.backend_mode"] ??
@@ -1140,6 +1188,7 @@ export default function SettingsCenter() {
         return next;
       });
     }
+    return result !== null;
   }
 
   function scrollToSection(sectionId: string) {
@@ -1287,17 +1336,25 @@ export default function SettingsCenter() {
         <div className="wb-hero-actions">
           <button
             type="button"
+            className="wb-button wb-button-primary"
+            onClick={() => void handleQuickConnect()}
+            disabled={connectBusy}
+          >
+            {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
+          </button>
+          <button
+            type="button"
             className="wb-button wb-button-secondary"
             onClick={() => void handleReview()}
-            disabled={busyActionId === "setup.review" || busyActionId === "setup.apply"}
+            disabled={connectBusy}
           >
             检查配置
           </button>
           <button
             type="button"
-            className="wb-button wb-button-primary"
+            className="wb-button wb-button-secondary"
             onClick={() => void handleApply()}
-            disabled={busyActionId === "setup.review" || busyActionId === "setup.apply"}
+            disabled={connectBusy}
           >
             保存配置
           </button>
@@ -1571,7 +1628,7 @@ export default function SettingsCenter() {
               <span>
                 {runtimeMode === "echo"
                   ? "现在还是体验模式。你可以先体验页面，也可以继续完成下面的真实模型配置。"
-                  : "当前会通过 LiteLLM 代理接入真实模型。配置完成后请点击“保存配置”。"}
+                  : "当前会通过 LiteLLM 代理接入真实模型。改完配置后请点击“保存并重新连接”。"}
               </span>
             </div>
 
@@ -1604,12 +1661,12 @@ export default function SettingsCenter() {
                   <button
                     type="button"
                     className="wb-button wb-button-primary"
-                    onClick={() => void handleOpenAIOAuthConnect()}
-                    disabled={busyActionId === "provider.oauth.openai_codex"}
+                    onClick={() => void handleQuickConnect()}
+                    disabled={connectBusy}
                   >
                     {providerRuntimeDetails.openai_oauth_connected
-                      ? "重新连接 OpenAI Auth"
-                      : "连接 OpenAI Auth"}
+                      ? "启用 OpenAI Auth"
+                      : "连接并启用 OpenAI Auth"}
                   </button>
                   <button
                     type="button"
@@ -1620,9 +1677,9 @@ export default function SettingsCenter() {
                   </button>
                 </div>
                 <div className="wb-note">
-                  <strong>保存前还要做什么</strong>
+                  <strong>完成后会发生什么</strong>
                   <span>
-                    连接授权后，别忘了点击右上角“保存配置”，把 `openai-codex` provider 和模型别名一并写入配置。
+                    按下按钮后会先完成浏览器授权，再把 `openai-codex` 写入配置、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
                   </span>
                 </div>
               </div>
@@ -1725,7 +1782,7 @@ export default function SettingsCenter() {
                     <small>
                       {savedEnvNames.has(primaryProvider.api_key_env)
                         ? "本地已保存过这个变量。留空不会覆盖，重新输入才会更新。"
-                        : "点击“保存配置”后会写入 ~/.octoagent/.env.litellm。"}
+                        : "点击“连接并启用真实模型”后会写入 ~/.octoagent/.env.litellm。"}
                     </small>
                   </label>
 
@@ -1781,6 +1838,29 @@ export default function SettingsCenter() {
                       </span>
                     </div>
                   </label>
+                </div>
+                <div className="wb-inline-actions wb-inline-actions-wrap">
+                  <button
+                    type="button"
+                    className="wb-button wb-button-primary"
+                    onClick={() => void handleQuickConnect()}
+                    disabled={connectBusy}
+                  >
+                    连接并启用真实模型
+                  </button>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-tertiary wb-button-inline"
+                    onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
+                  >
+                    恢复推荐别名
+                  </button>
+                </div>
+                <div className="wb-note">
+                  <strong>一步完成</strong>
+                  <span>
+                    这个按钮会同时保存 Provider、写入密钥、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
+                  </span>
                 </div>
               </div>
             )}

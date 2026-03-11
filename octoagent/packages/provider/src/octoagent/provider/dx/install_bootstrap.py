@@ -167,7 +167,7 @@ def _bootstrap_instance_root(
     next_actions = [
         f"运行 {root / 'bin' / 'octo-start'} 启动个人 Web 实例。",
         f"运行 {root / 'bin' / 'octo-doctor'} 检查个人实例健康度。",
-        "如需真实模型，再执行 uv run octo config init 或 uv run octo init 完成 provider 配置。",
+        f"如需真实模型，再执行 {root / 'bin' / 'octo'} setup 完成 provider 配置与启用。",
         f"如需直接使用 CLI，可把 {root / 'bin'} 加入 PATH。",
     ]
 
@@ -244,7 +244,7 @@ def run_install_bootstrap(
             attempt.runtime_descriptor_path = str(status_store.descriptor_path)
             attempt.next_actions.extend(
                 [
-                    "运行 octo config init 或确认现有 octoagent.yaml。",
+                    "运行 octo setup 或确认现有 octoagent.yaml。",
                     "运行 octo doctor 检查当前实例。",
                 ]
             )
@@ -265,12 +265,16 @@ def run_install_bootstrap(
                 instance_root=instance_root,
             )
             status_store.save_runtime_descriptor(descriptor)
+            if instance_root is not None:
+                UpdateStatusStore(instance_root.expanduser().resolve()).save_runtime_descriptor(
+                    descriptor
+                )
             attempt.runtime_descriptor_path = str(status_store.descriptor_path)
             attempt.actions_completed.append("write managed runtime descriptor")
             if instance_root is None:
                 attempt.next_actions.extend(
                     [
-                        "运行 octo config init 初始化统一配置。",
+                        "运行 octo setup 初始化统一配置。",
                         "运行 octo doctor 检查项目健康度。",
                         (
                             "使用 uv run uvicorn octoagent.gateway.main:app "

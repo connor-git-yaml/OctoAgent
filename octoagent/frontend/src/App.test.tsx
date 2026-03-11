@@ -965,6 +965,128 @@ describe("App workbench routing", () => {
     expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
 
+  it("设置页可以一键连接并启用真实模型", async () => {
+    window.history.pushState({}, "", "/settings");
+
+    const nextSnapshot = buildSnapshot("http://localhost:4000");
+    nextSnapshot.resources.setup_governance.review = {
+      ...nextSnapshot.resources.setup_governance.review,
+      next_actions: ["真实模型已就绪。"],
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(buildSnapshot()));
+      }
+      if (url.includes("/api/control/actions")) {
+        const body = String((init as RequestInit | undefined)?.body ?? "");
+        if (body.includes('"action_id":"setup.review"')) {
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-setup-review",
+                correlation_id: "req-setup-review",
+                action_id: "setup.review",
+                status: "completed",
+                code: "SETUP_REVIEW_READY",
+                message: "配置检查已完成。",
+                data: {
+                  review: {
+                    ...nextSnapshot.resources.setup_governance.review,
+                    ready: true,
+                  },
+                },
+                resource_refs: [
+                  {
+                    resource_type: "setup_governance",
+                    resource_id: "setup:governance",
+                    schema_version: 1,
+                  },
+                ],
+                target_refs: [],
+                handled_at: "2026-03-09T10:01:00Z",
+              },
+            })
+          );
+        }
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-quick-connect",
+              correlation_id: "req-quick-connect",
+              action_id: "setup.quick_connect",
+              status: "completed",
+              code: "SETUP_QUICK_CONNECTED",
+              message: "已启动 LiteLLM Proxy，当前实例会在几秒内自动重启并切到真实模型。",
+              data: {
+                review: {
+                  ...nextSnapshot.resources.setup_governance.review,
+                  ready: true,
+                },
+                activation: {
+                  proxy_url: "http://localhost:4000",
+                  runtime_reload_mode: "managed_restart_scheduled",
+                  runtime_reload_message:
+                    "已启动 LiteLLM Proxy，当前实例会在几秒内自动重启并切到真实模型。",
+                },
+              },
+              resource_refs: [
+                {
+                  resource_type: "config_schema",
+                  resource_id: "config:octoagent",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "diagnostics_summary",
+                  resource_id: "diagnostics:runtime",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "setup_governance",
+                  resource_id: "setup:governance",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:02:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/config")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.config));
+      }
+      if (url.includes("/api/control/resources/diagnostics")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.diagnostics));
+      }
+      if (url.includes("/api/control/resources/setup-governance")) {
+        return Promise.resolve(jsonResponse(nextSnapshot.resources.setup_governance));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
+    await userEvent.click(screen.getAllByRole("button", { name: "连接并启用真实模型" })[0]);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"setup.quick_connect"')
+        )
+      ).toBe(true)
+    );
+    expect(
+      await screen.findByText(/当前实例会在几秒内自动重启并切到真实模型/)
+    ).toBeInTheDocument();
+  });
+
   it("设置页执行 setup.review 时保留未提交的主 Agent 草稿", async () => {
     window.history.pushState({}, "", "/settings");
 
@@ -1173,7 +1295,7 @@ describe("App workbench routing", () => {
 
     await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
     await userEvent.click(screen.getByText("浏览器登录 ChatGPT Pro / Codex").closest("button")!);
-    await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
+    await userEvent.click(screen.getByRole("button", { name: "连接并启用 OpenAI Auth" }));
 
     await waitFor(() =>
       expect(

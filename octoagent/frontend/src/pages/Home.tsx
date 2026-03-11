@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
-import { formatDateTime } from "../workbench/utils";
+import { formatDateTime, getValueAtPath } from "../workbench/utils";
 
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
 
@@ -55,6 +55,7 @@ export default function Home() {
   const memory = snapshot!.resources.memory;
   const context = snapshot!.resources.context_continuity;
   const setup = snapshot!.resources.setup_governance;
+  const config = snapshot!.resources.config;
   const delegation = snapshot!.resources.delegation;
   const currentProject =
     selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
@@ -77,6 +78,11 @@ export default function Home() {
         (right.created_at ?? "").localeCompare(left.created_at ?? "")
       )[0]
       ?.recent_summary ?? "";
+  const runtimeMode =
+    String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
+      .trim()
+      .toLowerCase() || "echo";
+  const usingEchoMode = runtimeMode === "echo";
   const readiness = computeReadinessLabel(
     setup.review.ready,
     wizard.status,
@@ -105,9 +111,15 @@ export default function Home() {
           <p>{readiness.summary}</p>
         </div>
         <div className="wb-hero-actions">
-          <Link className="wb-button wb-button-primary" to="/chat">
-            进入聊天
-          </Link>
+          {usingEchoMode || !setup.review.ready ? (
+            <Link className="wb-button wb-button-primary" to="/settings">
+              连接真实模型
+            </Link>
+          ) : (
+            <Link className="wb-button wb-button-primary" to="/chat">
+              进入聊天
+            </Link>
+          )}
           <Link className="wb-button wb-button-secondary" to="/agents">
             Agent 管理
           </Link>
@@ -178,8 +190,12 @@ export default function Home() {
               <span>重新检查当前配置和后续步骤。</span>
             </button>
             <Link className="wb-action-card" to="/settings">
-              <strong>打开设置</strong>
-              <span>先把主 Agent、模型连接和工作区确认好。</span>
+              <strong>{usingEchoMode ? "连接真实模型" : "打开设置"}</strong>
+              <span>
+                {usingEchoMode
+                  ? "当前还是 echo 模式，先去把 Provider、密钥和运行连接一次接好。"
+                  : "先把主 Agent、模型连接和工作区确认好。"}
+              </span>
             </Link>
             <Link className="wb-action-card" to="/agents">
               <strong>进入 Agent 管理</strong>

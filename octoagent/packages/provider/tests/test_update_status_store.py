@@ -104,3 +104,15 @@ def test_corrupted_descriptor_falls_back_to_none(tmp_path: Path) -> None:
 
     assert store.load_runtime_descriptor() is None
     assert store.descriptor_path.with_suffix(".json.corrupted").exists()
+
+
+def test_home_instance_can_read_legacy_source_root_descriptor(tmp_path: Path) -> None:
+    store = UpdateStatusStore(tmp_path)
+    legacy_store = UpdateStatusStore(tmp_path / "app" / "octoagent")
+    descriptor = _build_descriptor(tmp_path / "app" / "octoagent")
+
+    legacy_store.save_runtime_descriptor(descriptor)
+
+    restored = store.load_runtime_descriptor()
+    assert restored is not None
+    assert restored.project_root == str(tmp_path / "app" / "octoagent")

@@ -85,6 +85,9 @@ def test_run_install_bootstrap_bootstraps_home_instance(
     assert descriptor.environment_overrides["OCTOAGENT_INSTANCE_ROOT"] == str(instance_root)
     assert descriptor.environment_overrides["OCTOAGENT_PROJECT_ROOT"] == str(instance_root)
     assert descriptor.environment_overrides["OCTOAGENT_DATA_DIR"] == str(instance_root / "data")
+    instance_descriptor = UpdateStatusStore(instance_root).load_runtime_descriptor()
+    assert instance_descriptor is not None
+    assert instance_descriptor.start_command == descriptor.start_command
 
 
 def test_run_install_bootstrap_preserves_existing_home_instance_without_force(

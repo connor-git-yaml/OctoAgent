@@ -62,9 +62,21 @@ class UpdateStatusStore:
         return self._active_attempt_path
 
     def load_runtime_descriptor(self) -> ManagedRuntimeDescriptor | None:
-        return self._load_model(
+        descriptor = self._load_model(
             path=self._descriptor_path,
             lock=self._descriptor_lock,
+            model_type=ManagedRuntimeDescriptor,
+            default=None,
+        )
+        if descriptor is not None:
+            return descriptor
+        legacy_path = self._root / "app" / "octoagent" / "data" / "ops" / "managed-runtime.json"
+        if legacy_path == self._descriptor_path or not legacy_path.exists():
+            return None
+        legacy_lock = FileLock(str(legacy_path) + ".lock")
+        return self._load_model(
+            path=legacy_path,
+            lock=legacy_lock,
             model_type=ManagedRuntimeDescriptor,
             default=None,
         )

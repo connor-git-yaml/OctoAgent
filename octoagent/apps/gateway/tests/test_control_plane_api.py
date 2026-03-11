@@ -1212,6 +1212,98 @@ class TestControlPlaneApi:
         assert profile.auth_mode == "api_key"
         assert profile.credential.key.get_secret_value() == "sk-openrouter-value"
 
+    async def test_setup_quick_connect_starts_proxy_and_returns_activation_summary(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+        monkeypatch,
+    ) -> None:
+        from octoagent.gateway.services import control_plane as control_plane_module
+
+        class FakeActivationService:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            async def start_proxy(self):
+                return type(
+                    "Activation",
+                    (),
+                    {
+                        "project_root": str(self.project_root),
+                        "source_root": str(self.project_root / "app" / "octoagent"),
+                        "compose_file": str(
+                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
+                        ),
+                        "proxy_url": "http://localhost:4000",
+                        "managed_runtime": False,
+                        "warnings": [],
+                    },
+                )()
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "RuntimeActivationService",
+            FakeActivationService,
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.quick_connect",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "runtime": {
+                                "llm_mode": "litellm",
+                                "litellm_proxy_url": "http://localhost:4000",
+                                "master_key_env": "LITELLM_MASTER_KEY",
+                            },
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/auto",
+                                }
+                            },
+                        },
+                        "secret_values": {
+                            "OPENROUTER_API_KEY": "sk-openrouter-value",
+                            "LITELLM_MASTER_KEY": "sk-master-value",
+                        },
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "快速接入主 Agent",
+                            "persona_summary": "用于验证一键连接。",
+                            "tool_profile": "standard",
+                            "model_alias": "main",
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_QUICK_CONNECTED"
+        assert result["data"]["activation"]["proxy_url"] == "http://localhost:4000"
+        assert result["data"]["activation"]["runtime_reload_mode"] == "manual_restart_required"
+        assert result["data"]["review"]["ready"] is True
+
     async def test_provider_oauth_openai_codex_persists_profile_and_env(
         self,
         control_plane_app,

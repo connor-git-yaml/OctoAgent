@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import RenderableType
@@ -36,6 +37,30 @@ def _render_setup_review_panel(review: dict[str, object]) -> RenderableType:
     return render_panel("Setup Review", lines, border_style="cyan")
 
 
+def _render_activation_panel(activation: dict[str, object]) -> RenderableType:
+    lines = [
+        f"proxy_url={activation.get('proxy_url', '-')}",
+        f"source_root={activation.get('source_root', '-')}",
+        f"runtime_reload_mode={activation.get('runtime_reload_mode', '-')}",
+    ]
+    message = str(activation.get("runtime_reload_message", "")).strip()
+    if message:
+        lines.append("")
+        lines.append(message)
+    return render_panel("Runtime Activation", lines, border_style="green")
+
+
+def _build_setup_config_patch(config: Any) -> dict[str, Any]:
+    return {
+        "runtime": config.runtime.model_dump(mode="python"),
+        "providers": [item.model_dump(mode="python") for item in config.providers],
+        "model_aliases": {
+            alias: model.model_dump(mode="python")
+            for alias, model in config.model_aliases.items()
+        },
+    }
+
+
 @click.group()
 def main() -> None:
     """OctoAgent CLI 工具"""
@@ -51,6 +76,132 @@ main.add_command(restart)
 main.add_command(verify)
 main.add_command(project_group)
 main.add_command(secrets_group)
+
+
+@main.command()
+@click.option(
+    "--provider",
+    type=click.Choice(["openrouter", "openai", "openai-codex", "anthropic"]),
+    default=None,
+    help="直接指定 provider 预设，省略时交互选择",
+)
+@click.option("--provider-name", default=None, help="Provider 显示名称")
+@click.option("--api-key-env", default=None, help="Provider API Key 环境变量名")
+@click.option(
+    "--api-key",
+    default=None,
+    help="Provider API Key；省略时交互输入",
+)
+@click.option(
+    "--master-key",
+    default=None,
+    help="LiteLLM Proxy Key；省略时交互输入",
+)
+@click.option(
+    "--skip-live-verify",
+    is_flag=True,
+    default=False,
+    help="保存并激活后跳过 octo doctor --live",
+)
+def setup(
+    provider: str | None,
+    provider_name: str | None,
+    api_key_env: str | None,
+    api_key: str | None,
+    master_key: str | None,
+    skip_live_verify: bool,
+) -> None:
+    """新手一键接入真实模型。"""
+    from .config_bootstrap import (
+        build_bootstrap_config_for_provider,
+        list_bootstrap_provider_choices,
+    )
+    from .doctor import DoctorRunner, build_guidance, format_report
+    from .doctor_remediation import format_guidance_panel
+    from .setup_governance_adapter import LocalSetupGovernanceAdapter
+
+    async def _run() -> None:
+        project_root = Path(_resolve_project_root())
+        provider_choice = provider or click.prompt(
+            "Provider 预设",
+            type=click.Choice(list_bootstrap_provider_choices()),
+            default="openrouter",
+        )
+        default_config = build_bootstrap_config_for_provider(provider_choice)
+        default_provider = default_config.providers[0]
+        config = build_bootstrap_config_for_provider(
+            provider_choice,
+            provider_name=provider_name
+            or click.prompt("Provider 显示名称", default=default_provider.name),
+            api_key_env=api_key_env
+            or click.prompt("凭证环境变量名", default=default_provider.api_key_env),
+        )
+        provider_entry = config.providers[0]
+        runtime = config.runtime
+
+        secret_values: dict[str, str] = {}
+        if provider_entry.auth_type == "api_key":
+            provider_api_key = api_key or click.prompt(
+                f"请输入 {provider_entry.api_key_env}",
+                hide_input=True,
+            )
+            if not provider_api_key.strip():
+                raise click.ClickException("API Key 不能为空。")
+            secret_values[provider_entry.api_key_env] = provider_api_key.strip()
+
+        proxy_master_key = master_key or click.prompt(
+            f"设置 {runtime.master_key_env}",
+            default="sk-octoagent-local",
+            hide_input=True,
+            show_default=False,
+        )
+        if not proxy_master_key.strip():
+            raise click.ClickException("LiteLLM Proxy Key 不能为空。")
+        secret_values[runtime.master_key_env] = proxy_master_key.strip()
+
+        adapter = LocalSetupGovernanceAdapter(project_root)
+        if provider_entry.id == "openai-codex":
+            console.print("[dim]正在连接 OpenAI Auth ...[/dim]")
+            await adapter.connect_openai_codex_oauth(
+                env_name=provider_entry.api_key_env,
+                profile_name="openai-codex-default",
+            )
+
+        draft = await adapter.prepare_wizard_draft(
+            {
+                "config": _build_setup_config_patch(config),
+                "secret_values": secret_values,
+            }
+        )
+        result = await adapter.quick_connect(draft)
+        review = result.data.get("review", {})
+        activation = result.data.get("activation", {})
+        if isinstance(review, dict) and review:
+            console.print(_render_setup_review_panel(review))
+        if isinstance(activation, dict) and activation:
+            console.print(_render_activation_panel(activation))
+
+        if skip_live_verify:
+            return
+
+        report = await DoctorRunner(project_root=project_root).run_all_checks(live=True)
+        console.print(format_report(report))
+        guidance = build_guidance(report)
+        guidance_panel = format_guidance_panel(guidance)
+        if guidance_panel is not None:
+            console.print(guidance_panel)
+        if guidance.overall_status == "blocked":
+            raise SystemExit(1)
+
+    try:
+        asyncio.run(_run())
+    except click.ClickException:
+        raise
+    except KeyboardInterrupt:
+        console.print("\n[yellow]setup 已取消。[/yellow]")
+    except Exception as exc:
+        console.print(f"[red]setup 失败: {exc}[/red]")
+        raise SystemExit(1) from exc
 
 
 @main.command()

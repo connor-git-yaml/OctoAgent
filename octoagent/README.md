@@ -99,41 +99,22 @@ export PATH="$HOME/.octoagent/bin:$PATH"
 
 ### 切换到真实模型
 
-个人体验模式默认是 `echo`，这样可以先确认系统本身能跑。要切真实模型，推荐先从 OpenRouter 开始：
-
-1. 先准备 provider 凭证文件：
+个人体验模式默认是 `echo`，这样可以先确认系统本身能跑。要切真实模型，现在推荐直接用一条交互式命令：
 
 ```bash
-cp ~/.octoagent/app/octoagent/.env.litellm.example ~/.octoagent/.env.litellm
+~/.octoagent/bin/octo setup
 ```
 
-2. 编辑 `~/.octoagent/.env.litellm`，至少填入：
+这条命令会一次完成：
 
-```dotenv
-OPENROUTER_API_KEY=你的真实密钥
-LITELLM_MASTER_KEY=你自己设置的一串值
-```
+- 选择 provider 预设（推荐先选 `openrouter`）
+- 输入 API Key 或走 `openai-codex` 浏览器 OAuth
+- 写入 `octoagent.yaml` 与 `~/.octoagent/.env.litellm`
+- 启动 LiteLLM Proxy
+- 在托管实例中自动切到真实模型
+- 最后跑一次 `octo doctor --live`
 
-3. 重新生成统一配置：
-
-```bash
-~/.octoagent/bin/octo config init
-```
-
-推荐在交互里先选 `openrouter`。如果你要走 ChatGPT Pro OAuth / Codex，也可以选 `openai-codex`，默认模型 preset 已经是 `gpt-5.4`。
-
-4. 启动 LiteLLM Proxy：
-
-```bash
-docker compose -f ~/.octoagent/app/octoagent/docker-compose.litellm.yml up -d
-```
-
-5. 做一次真实连通性检查：
-
-```bash
-~/.octoagent/bin/octo doctor --live
-curl 'http://127.0.0.1:8000/ready?profile=llm'
-```
+如果你要走 ChatGPT Pro OAuth / Codex，也可以直接选 `openai-codex`，默认模型 preset 已经是 `gpt-5.4`。
 
 ### 可选：接入 Telegram
 
@@ -177,7 +158,7 @@ cd octoagent
 ./scripts/doctor-octo-home.sh
 ```
 
-如需切换到真实模型，在 `~/.octoagent` 下补齐 `.env.litellm` 后，执行 `uv run octo config init` 或 `uv run octo init` 即可。
+如需切换到真实模型，直接执行 `uv run octo setup` 即可；如果你需要更细粒度地调试 provider/runtime，再退回 `uv run octo config init`。
 
 ### 后端
 
