@@ -29,3 +29,11 @@ def test_readme_references_existing_remote_installer() -> None:
         "https://raw.githubusercontent.com/connor-git-yaml/OctoAgent/master/repo-scripts/install-octo-user.sh"
         in content
     )
+
+
+def test_remote_user_installer_points_to_octo_setup() -> None:
+    script_path = _repo_root() / "repo-scripts" / "install-octo-user.sh"
+    content = script_path.read_text(encoding="utf-8")
+
+    assert "octo setup" in content
+    assert "octo config init" not in content

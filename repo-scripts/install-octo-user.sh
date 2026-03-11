@@ -41,6 +41,20 @@ install_uv_if_needed() {
   need_cmd uv "uv 安装失败，请手动执行 https://docs.astral.sh/uv/getting-started/installation/"
 }
 
+sync_managed_checkout() {
+  echo "[install-octo-user] 检测到已有源码，尝试更新..."
+  if \
+    git -C "$APP_ROOT" fetch --depth=1 origin "$BRANCH" && \
+    git -C "$APP_ROOT" checkout -B "$BRANCH" FETCH_HEAD
+  then
+    return 0
+  fi
+
+  echo "[install-octo-user] 托管源码目录无法直接更新，重新拉取最新版本..."
+  rm -rf "$APP_ROOT"
+  git clone --depth=1 --branch "$BRANCH" "$REPO_URL" "$APP_ROOT"
+}
+
 resolve_local_source() {
   if [[ -z "${OCTOAGENT_REPO_URL:-}" ]] && [[ -x "$SELF_REPO_ROOT/octoagent/scripts/install-octo-home.sh" ]]; then
     LOCAL_SOURCE="$SELF_REPO_ROOT"
@@ -79,10 +93,7 @@ if [[ -n "$LOCAL_SOURCE" ]]; then
     tar -xf -
   )
 elif [[ -d "$APP_ROOT/.git" ]]; then
-  echo "[install-octo-user] 检测到已有源码，尝试更新..."
-  git -C "$APP_ROOT" fetch --depth=1 origin "$BRANCH"
-  git -C "$APP_ROOT" checkout "$BRANCH"
-  git -C "$APP_ROOT" pull --ff-only origin "$BRANCH"
+  sync_managed_checkout
 else
   rm -rf "$APP_ROOT"
   echo "[install-octo-user] 正在拉取源码到 $APP_ROOT ..."
@@ -108,7 +119,7 @@ cat <<EOF
   1. 启动 Web:     $INSTALL_ROOT/bin/octo-start
   2. 健康检查:     $INSTALL_ROOT/bin/octo-doctor
   3. 命令行入口:   $INSTALL_ROOT/bin/octo
-  4. 切真实模型:   $INSTALL_ROOT/bin/octo config init
+  4. 切真实模型:   $INSTALL_ROOT/bin/octo setup
 
 如需把 CLI 加入 PATH:
   export PATH="$INSTALL_ROOT/bin:\$PATH"
