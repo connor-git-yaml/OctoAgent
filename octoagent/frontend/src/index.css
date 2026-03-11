@@ -1735,6 +1735,7 @@ button {
 }
 
 .wb-field input[type="text"],
+.wb-field input[type="password"],
 .wb-field textarea,
 .wb-field select {
   width: 100%;
@@ -1751,6 +1752,10 @@ button {
   resize: vertical;
   font-family: "IBM Plex Mono", monospace;
   line-height: 1.5;
+}
+
+.wb-textarea-prose {
+  font-family: inherit;
 }
 
 .wb-hero-agent {
@@ -1908,6 +1913,87 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--cp-space-4);
+}
+
+.wb-provider-mode-grid,
+.wb-provider-layout,
+.wb-alias-editor {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-provider-mode-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-provider-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.wb-mode-card,
+.wb-provider-card,
+.wb-alias-row {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(247, 250, 251, 0.88);
+  text-align: left;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.wb-mode-card strong,
+.wb-provider-card strong,
+.wb-provider-card-head strong {
+  font-size: 1rem;
+  color: var(--cp-ink);
+}
+
+.wb-mode-card:hover,
+.wb-mode-card.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
+.wb-provider-card-head,
+.wb-provider-meta,
+.wb-inline-meta,
+.wb-alias-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.wb-provider-card-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.wb-provider-meta,
+.wb-inline-meta {
+  flex-wrap: wrap;
+  color: var(--cp-muted);
+  font-size: 0.88rem;
+}
+
+.wb-alias-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.wb-alias-actions {
+  justify-content: flex-end;
+  align-self: end;
 }
 
 .wb-chat-layout {
@@ -2310,6 +2396,8 @@ button {
   .wb-card-grid-3,
   .wb-split,
   .wb-agent-layout,
+  .wb-provider-mode-grid,
+  .wb-provider-layout,
   .wb-chat-layout,
   .wb-form-grid,
   .wb-agent-form-grid,
@@ -2333,6 +2421,7 @@ button {
   .wb-topbar,
   .wb-topbar-leading,
   .wb-panel-head,
+  .wb-provider-card-head,
   .wb-list-row,
   .wb-work-head,
   .wb-priority-card,
@@ -2357,6 +2446,10 @@ button {
   .wb-chat-form button,
   .wb-inline-form .wb-button {
     width: 100%;
+  }
+
+  .wb-alias-row {
+    grid-template-columns: 1fr;
   }
 
   .wb-chat-empty-stage {

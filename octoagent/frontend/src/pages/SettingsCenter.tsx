@@ -116,6 +116,71 @@ interface FieldGuide {
   actions?: Array<{ label: string; value: string }>;
 }
 
+type ProviderMode = "openai-auth" | "api-key";
+
+interface ProviderDraftItem {
+  id: string;
+  name: string;
+  auth_type: "api_key" | "oauth";
+  api_key_env: string;
+  enabled: boolean;
+}
+
+interface ModelAliasDraftItem {
+  alias: string;
+  provider: string;
+  model: string;
+  description: string;
+  thinking_level: "" | "xhigh" | "high" | "medium" | "low";
+}
+
+interface ProviderRuntimeDetails {
+  provider_entries?: Array<Record<string, unknown>>;
+  litellm_env_names?: string[];
+  runtime_env_names?: string[];
+  credential_profiles?: Array<Record<string, unknown>>;
+  openai_oauth_connected?: boolean;
+  openai_oauth_profile?: string;
+}
+
+const PROVIDER_PRESETS: Record<
+  string,
+  Omit<ProviderDraftItem, "enabled">
+> = {
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    auth_type: "api_key",
+    api_key_env: "OPENROUTER_API_KEY",
+  },
+  openai: {
+    id: "openai",
+    name: "OpenAI",
+    auth_type: "api_key",
+    api_key_env: "OPENAI_API_KEY",
+  },
+  anthropic: {
+    id: "anthropic",
+    name: "Anthropic",
+    auth_type: "api_key",
+    api_key_env: "ANTHROPIC_API_KEY",
+  },
+  "openai-codex": {
+    id: "openai-codex",
+    name: "OpenAI Codex (ChatGPT Pro OAuth)",
+    auth_type: "oauth",
+    api_key_env: "OPENAI_API_KEY",
+  },
+};
+
+const CUSTOM_PROVIDER_FIELD_PATHS = new Set([
+  "runtime.llm_mode",
+  "runtime.litellm_proxy_url",
+  "runtime.master_key_env",
+  "providers",
+  "model_aliases",
+]);
+
 function buildFieldState(
   hints: Record<string, ConfigFieldHint>,
   currentValue: Record<string, unknown>
@@ -591,6 +656,157 @@ function guideButtonLabel(guide: BlockingGuide): string {
   return `去“${guide.section_label}”处理`;
 }
 
+function readProviderRuntimeDetails(source: unknown): ProviderRuntimeDetails {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return {};
+  }
+  return source as ProviderRuntimeDetails;
+}
+
+function parseProviderDrafts(rawValue: string | boolean | undefined): ProviderDraftItem[] {
+  const providers = parseJsonFieldValue(rawValue, []) as Array<Record<string, unknown>>;
+  return providers
+    .filter((item) => item && typeof item === "object")
+    .map((item): ProviderDraftItem => ({
+      id: String(item.id ?? ""),
+      name: String(item.name ?? ""),
+      auth_type: item.auth_type === "oauth" ? "oauth" : "api_key",
+      api_key_env: String(item.api_key_env ?? ""),
+      enabled: item.enabled !== false,
+    }))
+    .filter((item) => item.id.trim());
+}
+
+function stringifyProviderDrafts(items: ProviderDraftItem[]): string {
+  return JSON.stringify(
+    items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      auth_type: item.auth_type,
+      api_key_env: item.api_key_env,
+      enabled: item.enabled,
+    })),
+    null,
+    2
+  );
+}
+
+function parseAliasDrafts(rawValue: string | boolean | undefined): ModelAliasDraftItem[] {
+  const aliases = parseJsonFieldValue(rawValue, {}) as Record<string, Record<string, unknown>>;
+  return Object.entries(aliases)
+    .filter(([, item]) => item && typeof item === "object" && !Array.isArray(item))
+    .map(([alias, item]) => ({
+      alias,
+      provider: String(item.provider ?? ""),
+      model: String(item.model ?? ""),
+      description: String(item.description ?? ""),
+      thinking_level:
+        item.thinking_level === "xhigh" ||
+        item.thinking_level === "high" ||
+        item.thinking_level === "medium" ||
+        item.thinking_level === "low"
+          ? item.thinking_level
+          : "",
+    }));
+}
+
+function stringifyAliasDrafts(items: ModelAliasDraftItem[]): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      items
+        .filter((item) => item.alias.trim())
+        .map((item) => [
+          item.alias.trim(),
+          {
+            provider: item.provider,
+            model: item.model,
+            description: item.description,
+            ...(item.thinking_level ? { thinking_level: item.thinking_level } : {}),
+          },
+        ])
+    ),
+    null,
+    2
+  );
+}
+
+function buildProviderPreset(providerId: string): ProviderDraftItem {
+  const preset = PROVIDER_PRESETS[providerId] ?? {
+    id: providerId,
+    name: providerId.replace("-", " ").trim() || "Custom Provider",
+    auth_type: "api_key",
+    api_key_env: `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`,
+  };
+  return {
+    ...preset,
+    enabled: true,
+  };
+}
+
+function buildDefaultAliasDrafts(providerId: string): ModelAliasDraftItem[] {
+  if (providerId === "openai-codex") {
+    return [
+      {
+        alias: "main",
+        provider: providerId,
+        model: "gpt-5.4",
+        description: "主力模型",
+        thinking_level: "xhigh",
+      },
+      {
+        alias: "cheap",
+        provider: providerId,
+        model: "gpt-5.4",
+        description: "低成本模型",
+        thinking_level: "low",
+      },
+    ];
+  }
+  const model = providerId === "openrouter" ? "openrouter/auto" : `${providerId}/auto`;
+  return [
+    {
+      alias: "main",
+      provider: providerId,
+      model,
+      description: "主力模型",
+      thinking_level: "",
+    },
+    {
+      alias: "cheap",
+      provider: providerId,
+      model,
+      description: "低成本模型",
+      thinking_level: "",
+    },
+  ];
+}
+
+function guessProviderMode(providers: ProviderDraftItem[]): ProviderMode {
+  const firstEnabled = providers.find((item) => item.enabled) ?? providers[0];
+  if (firstEnabled?.id === "openai-codex" && firstEnabled.auth_type === "oauth") {
+    return "openai-auth";
+  }
+  return "api-key";
+}
+
+function envPresence(details: ProviderRuntimeDetails): Set<string> {
+  return new Set([
+    ...(Array.isArray(details.litellm_env_names) ? details.litellm_env_names : []),
+    ...(Array.isArray(details.runtime_env_names) ? details.runtime_env_names : []),
+  ]);
+}
+
+function generateSecretValue(): string {
+  if (typeof globalThis.crypto !== "undefined" && "getRandomValues" in globalThis.crypto) {
+    const bytes = new Uint8Array(24);
+    globalThis.crypto.getRandomValues(bytes);
+    return `sk-${Array.from(bytes, (item) => item.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return `sk-${Math.random().toString(16).slice(2)}${Math.random()
+    .toString(16)
+    .slice(2)}`;
+}
+
 export default function SettingsCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const config = snapshot!.resources.config;
@@ -613,6 +829,7 @@ export default function SettingsCenter() {
     buildAgentDraft(activeAgentProfile)
   );
   const [review, setReview] = useState<SetupReviewSummary>(setup.review);
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setFieldState(buildFieldState(config.ui_hints, config.current_value));
@@ -631,6 +848,10 @@ export default function SettingsCenter() {
     setReview(setup.review);
   }, [setup.generated_at]);
 
+  useEffect(() => {
+    setSecretValues({});
+  }, [setup.generated_at, config.generated_at]);
+
   const groupedHints = Object.values(config.ui_hints)
     .sort((left, right) => left.order - right.order)
     .reduce<Record<string, ConfigFieldHint[]>>((groups, hint) => {
@@ -641,9 +862,26 @@ export default function SettingsCenter() {
   const memoryHints = groupedHints.memory ?? [];
   const memoryBasicHints = memoryHints.filter((hint) => hint.section === "memory-basic");
   const memoryAdvancedHints = memoryHints.filter((hint) => hint.section === "memory-advanced");
-  const otherGroupIds = ["main-agent", "channels", "advanced"].filter(
+  const otherGroupIds = ["channels", "advanced"].filter(
     (groupId) => (groupedHints[groupId] ?? []).length > 0
   );
+  const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
+  const providerDrafts = parseProviderDrafts(fieldState.providers);
+  const aliasDrafts = parseAliasDrafts(fieldState.model_aliases);
+  const providerMode = guessProviderMode(providerDrafts);
+  const activeProviders = providerDrafts.filter((item) => item.enabled);
+  const primaryProvider = activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
+  const availableProviderOptions = Array.from(
+    new Set(
+      providerDrafts.map((item) => item.id).filter(Boolean).concat(Object.keys(PROVIDER_PRESETS))
+    )
+  );
+  const savedEnvNames = envPresence(providerRuntimeDetails);
+  const masterKeyHint = config.ui_hints["runtime.master_key_env"];
+  const proxyUrlHint = config.ui_hints["runtime.litellm_proxy_url"];
+  const aliasOptions = aliasDrafts
+    .map((item) => item.alias.trim())
+    .filter(Boolean);
 
   function buildSetupDraft() {
     const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
@@ -658,6 +896,9 @@ export default function SettingsCenter() {
         ...agentDraft,
         scope: agentDraft.scope || "project",
       }),
+      secret_values: Object.fromEntries(
+        Object.entries(secretValues).filter(([, value]) => value.trim())
+      ),
     };
   }
 
@@ -726,6 +967,123 @@ export default function SettingsCenter() {
       ...state,
       [fieldPath]: value,
     }));
+  }
+
+  function updateFieldValues(nextValues: Record<string, string | boolean>) {
+    setFieldState((state) => ({
+      ...state,
+      ...nextValues,
+    }));
+  }
+
+  function updateSecretValue(envName: string, value: string) {
+    setSecretValues((state) => ({
+      ...state,
+      [envName]: value,
+    }));
+  }
+
+  function updateProviders(nextProviders: ProviderDraftItem[]) {
+    updateFieldValue("providers", stringifyProviderDrafts(nextProviders));
+  }
+
+  function updateAliases(nextAliases: ModelAliasDraftItem[]) {
+    updateFieldValue("model_aliases", stringifyAliasDrafts(nextAliases));
+  }
+
+  function updatePrimaryProvider(patch: Partial<ProviderDraftItem>) {
+    const current = activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
+    const nextProvider: ProviderDraftItem = {
+      ...current,
+      ...patch,
+      enabled: patch.enabled ?? true,
+    };
+    if (providerDrafts.length === 0) {
+      updateProviders([nextProvider]);
+      return;
+    }
+    const nextProviders = [...providerDrafts];
+    const enabledIndex = nextProviders.findIndex((item) => item.enabled);
+    nextProviders[enabledIndex >= 0 ? enabledIndex : 0] = nextProvider;
+    updateProviders(nextProviders);
+  }
+
+  function updateAliasAt(index: number, patch: Partial<ModelAliasDraftItem>) {
+    const nextAliases = [...aliasDrafts];
+    nextAliases[index] = {
+      ...nextAliases[index],
+      ...patch,
+    };
+    updateAliases(nextAliases);
+  }
+
+  function addAliasDraft() {
+    updateAliases([
+      ...aliasDrafts,
+      {
+        alias: `alias_${aliasDrafts.length + 1}`,
+        provider: primaryProvider.id,
+        model: "",
+        description: "",
+        thinking_level: "",
+      },
+    ]);
+  }
+
+  function removeAliasDraft(index: number) {
+    updateAliases(aliasDrafts.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function applyProviderMode(mode: ProviderMode) {
+    if (mode === "openai-auth") {
+      updateFieldValues({
+        "runtime.llm_mode": "litellm",
+        providers: stringifyProviderDrafts([buildProviderPreset("openai-codex")]),
+        model_aliases: stringifyAliasDrafts(buildDefaultAliasDrafts("openai-codex")),
+      });
+      return;
+    }
+    const currentApiKeyProvider =
+      activeProviders.find((item) => item.auth_type === "api_key") ??
+      providerDrafts.find((item) => item.auth_type === "api_key") ??
+      buildProviderPreset("openrouter");
+    updateFieldValues({
+      "runtime.llm_mode": "litellm",
+      providers: stringifyProviderDrafts([currentApiKeyProvider]),
+      model_aliases: stringifyAliasDrafts(buildDefaultAliasDrafts(currentApiKeyProvider.id)),
+    });
+  }
+
+  function changePrimaryProvider(providerId: string) {
+    const nextProvider = buildProviderPreset(providerId);
+    updatePrimaryProvider(nextProvider);
+    const currentAliases = aliasDrafts.filter((item) => item.alias.trim());
+    if (currentAliases.length === 0) {
+      updateAliases(buildDefaultAliasDrafts(providerId));
+      return;
+    }
+    updateAliases(
+      currentAliases.map((item) => ({
+        ...item,
+        provider: providerId,
+      }))
+    );
+  }
+
+  async function handleOpenAIOAuthConnect() {
+    applyProviderMode("openai-auth");
+    const envName = primaryProvider.id === "openai-codex" ? primaryProvider.api_key_env : "OPENAI_API_KEY";
+    const result = await submitAction("provider.oauth.openai_codex", {
+      env_name: envName,
+      profile_name: "openai-codex-default",
+    });
+    if (result) {
+      setSecretValues((state) => {
+        const next = { ...state };
+        delete next[envName];
+        return next;
+      });
+    }
   }
 
   function scrollToSection(sectionId: string) {
@@ -992,13 +1350,28 @@ export default function SettingsCenter() {
 
             <label className="wb-field">
               <span>默认模型别名</span>
-              <input
-                type="text"
-                value={agentDraft.model_alias}
-                onChange={(event) =>
-                  setAgentDraft((state) => ({ ...state, model_alias: event.target.value }))
-                }
-              />
+              {aliasOptions.length > 0 ? (
+                <select
+                  value={aliasOptions.includes(agentDraft.model_alias) ? agentDraft.model_alias : aliasOptions[0]}
+                  onChange={(event) =>
+                    setAgentDraft((state) => ({ ...state, model_alias: event.target.value }))
+                  }
+                >
+                  {aliasOptions.map((alias) => (
+                    <option key={alias} value={alias}>
+                      {alias}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={agentDraft.model_alias}
+                  onChange={(event) =>
+                    setAgentDraft((state) => ({ ...state, model_alias: event.target.value }))
+                  }
+                />
+              )}
             </label>
 
             <label className="wb-field">
@@ -1033,6 +1406,7 @@ export default function SettingsCenter() {
               <span>Persona（角色说明）</span>
               <small>这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。</small>
               <textarea
+                className="wb-textarea-prose"
                 rows={4}
                 value={agentDraft.persona_summary}
                 placeholder="例如：通用个人助手，优先帮助我处理当前任务，并在需要时提醒风险。"
@@ -1070,6 +1444,389 @@ export default function SettingsCenter() {
           </div>
         </section>
       </div>
+
+      <section id="settings-group-main-agent" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">模型与连接</p>
+            <h3>选择接入方式，并用表单完成 Provider 与模型别名配置</h3>
+          </div>
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <button
+              type="button"
+              className="wb-button wb-button-tertiary wb-button-inline"
+              onClick={() => updateFieldValue("runtime.llm_mode", "echo")}
+            >
+              保持体验模式
+            </button>
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-inline"
+              onClick={() => applyProviderMode("api-key")}
+            >
+              改为 LiteLLM / API Key
+            </button>
+          </div>
+        </div>
+
+        <div className="wb-provider-mode-grid">
+          <button
+            type="button"
+            className={`wb-mode-card ${providerMode === "openai-auth" ? "is-active" : ""}`}
+            onClick={() => applyProviderMode("openai-auth")}
+          >
+            <span className="wb-card-label">OpenAI Auth</span>
+            <strong>浏览器登录 ChatGPT Pro / Codex</strong>
+            <p>适合已经有 ChatGPT Pro / Codex 账号的用户，不需要手贴 API Key。</p>
+          </button>
+          <button
+            type="button"
+            className={`wb-mode-card ${providerMode === "api-key" ? "is-active" : ""}`}
+            onClick={() => applyProviderMode("api-key")}
+          >
+            <span className="wb-card-label">LiteLLM / API Key</span>
+            <strong>手动填写 Provider Key 与 LiteLLM 运行参数</strong>
+            <p>适合 OpenRouter / OpenAI / Anthropic 等标准 API Key 场景。</p>
+          </button>
+        </div>
+
+        <div className="wb-provider-layout">
+          <div className="wb-section-stack">
+            <div className="wb-note">
+              <strong>当前运行模式</strong>
+              <span>
+                {runtimeMode === "echo"
+                  ? "现在还是体验模式。你可以先体验页面，也可以继续完成下面的真实模型配置。"
+                  : "当前会通过 LiteLLM 代理接入真实模型。配置完成后请点击“保存配置”。"}
+              </span>
+            </div>
+
+            {providerMode === "openai-auth" ? (
+              <div className="wb-provider-card">
+                <div className="wb-provider-card-head">
+                  <div>
+                    <p className="wb-card-label">连接 OpenAI Auth</p>
+                    <strong>通过浏览器授权，把凭证写入本地</strong>
+                  </div>
+                  <span
+                    className={`wb-status-pill ${
+                      providerRuntimeDetails.openai_oauth_connected ? "is-ready" : "is-warning"
+                    }`}
+                  >
+                    {providerRuntimeDetails.openai_oauth_connected ? "已连接" : "未连接"}
+                  </span>
+                </div>
+                <div className="wb-provider-meta">
+                  <span>Provider: `openai-codex`</span>
+                  <span>环境变量: `OPENAI_API_KEY`</span>
+                  <span>
+                    当前凭证:
+                    {providerRuntimeDetails.openai_oauth_profile
+                      ? ` ${providerRuntimeDetails.openai_oauth_profile}`
+                      : " 还没有连接"}
+                  </span>
+                </div>
+                <div className="wb-inline-actions wb-inline-actions-wrap">
+                  <button
+                    type="button"
+                    className="wb-button wb-button-primary"
+                    onClick={() => void handleOpenAIOAuthConnect()}
+                    disabled={busyActionId === "provider.oauth.openai_codex"}
+                  >
+                    {providerRuntimeDetails.openai_oauth_connected
+                      ? "重新连接 OpenAI Auth"
+                      : "连接 OpenAI Auth"}
+                  </button>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-tertiary wb-button-inline"
+                    onClick={() => updateAliases(buildDefaultAliasDrafts("openai-codex"))}
+                  >
+                    恢复推荐别名
+                  </button>
+                </div>
+                <div className="wb-note">
+                  <strong>保存前还要做什么</strong>
+                  <span>
+                    连接授权后，别忘了点击右上角“保存配置”，把 `openai-codex` provider 和模型别名一并写入配置。
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="wb-provider-card">
+                <div className="wb-provider-card-head">
+                  <div>
+                    <p className="wb-card-label">LiteLLM / API Key</p>
+                    <strong>先选主 Provider，再填写真实密钥</strong>
+                  </div>
+                  <span className={`wb-status-pill ${savedEnvNames.has(primaryProvider.api_key_env) ? "is-ready" : ""}`}>
+                    {savedEnvNames.has(primaryProvider.api_key_env) ? "已写入密钥" : "待填写密钥"}
+                  </span>
+                </div>
+
+                {providerDrafts.length > 1 ? (
+                  <div className="wb-note">
+                    <strong>当前已存在多个 Provider</strong>
+                    <span>这块表单会优先编辑第一个启用的 Provider。其余项会保留，但建议你先把主 Provider 跑通。</span>
+                  </div>
+                ) : null}
+
+                <div className="wb-form-grid">
+                  <label className="wb-field">
+                    <span>Provider 预设</span>
+                    <select
+                      value={availableProviderOptions.includes(primaryProvider.id) ? primaryProvider.id : "openrouter"}
+                      onChange={(event) => changePrimaryProvider(event.target.value)}
+                    >
+                      {availableProviderOptions.map((providerId) => (
+                        <option key={providerId} value={providerId}>
+                          {PROVIDER_PRESETS[providerId]?.name ?? providerId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="wb-field">
+                    <span>LiteLLM 代理地址</span>
+                    <input
+                      type="text"
+                      value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
+                      placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
+                      onChange={(event) =>
+                        updateFieldValue("runtime.litellm_proxy_url", event.target.value)
+                      }
+                    />
+                    <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
+                  </label>
+
+                  <label className="wb-field">
+                    <span>Provider ID</span>
+                    <input
+                      type="text"
+                      value={primaryProvider.id}
+                      onChange={(event) =>
+                        updatePrimaryProvider({
+                          id: event.target.value,
+                          auth_type: "api_key",
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label className="wb-field">
+                    <span>Provider 显示名称</span>
+                    <input
+                      type="text"
+                      value={primaryProvider.name}
+                      onChange={(event) => updatePrimaryProvider({ name: event.target.value })}
+                    />
+                  </label>
+
+                  <label className="wb-field">
+                    <span>API Key 环境变量名</span>
+                    <input
+                      type="text"
+                      value={primaryProvider.api_key_env}
+                      onChange={(event) =>
+                        updatePrimaryProvider({ api_key_env: event.target.value })
+                      }
+                    />
+                    <small>这里只写变量名，例如 `OPENROUTER_API_KEY`。</small>
+                  </label>
+
+                  <label className="wb-field">
+                    <span>API Key / Token</span>
+                    <input
+                      type="password"
+                      value={secretValues[primaryProvider.api_key_env] ?? ""}
+                      placeholder={
+                        savedEnvNames.has(primaryProvider.api_key_env)
+                          ? "已存在本地值；如需替换请重新输入"
+                          : "粘贴真实 API Key"
+                      }
+                      onChange={(event) =>
+                        updateSecretValue(primaryProvider.api_key_env, event.target.value)
+                      }
+                    />
+                    <small>
+                      {savedEnvNames.has(primaryProvider.api_key_env)
+                        ? "本地已保存过这个变量。留空不会覆盖，重新输入才会更新。"
+                        : "点击“保存配置”后会写入 ~/.octoagent/.env.litellm。"}
+                    </small>
+                  </label>
+
+                  <label className="wb-field">
+                    <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
+                    <input
+                      type="text"
+                      value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
+                      onChange={(event) =>
+                        updateFieldValue("runtime.master_key_env", event.target.value)
+                      }
+                    />
+                  </label>
+
+                  <label className="wb-field">
+                    <span>LiteLLM Master Key 值</span>
+                    <input
+                      type="password"
+                      value={
+                        secretValues[String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")] ?? ""
+                      }
+                      placeholder={
+                        savedEnvNames.has(String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"))
+                          ? "已存在本地值；如需替换请重新输入"
+                          : "生成或输入一串随机长字符串"
+                      }
+                      onChange={(event) =>
+                        updateSecretValue(
+                          String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                          event.target.value
+                        )
+                      }
+                    />
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
+                      <button
+                        type="button"
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() =>
+                          updateSecretValue(
+                            String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                            generateSecretValue()
+                          )
+                        }
+                      >
+                        生成随机 Master Key
+                      </button>
+                      <span className="wb-inline-meta">
+                        {savedEnvNames.has(
+                          String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                        )
+                          ? "当前本地已存在旧值"
+                          : "首次接入建议先生成一条"}
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="wb-section-stack">
+            <div className="wb-provider-card">
+              <div className="wb-provider-card-head">
+                <div>
+                  <p className="wb-card-label">模型别名</p>
+                  <strong>用易记的别名映射到真实模型</strong>
+                </div>
+                <div className="wb-inline-actions wb-inline-actions-wrap">
+                  <button
+                    type="button"
+                    className="wb-button wb-button-tertiary wb-button-inline"
+                    onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
+                  >
+                    恢复 main / cheap
+                  </button>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-secondary wb-button-inline"
+                    onClick={() => addAliasDraft()}
+                  >
+                    新增别名
+                  </button>
+                </div>
+              </div>
+              <div className="wb-note">
+                <strong>怎么理解</strong>
+                <span>
+                  主 Agent 会引用别名，例如 `main`。这样以后你换模型时，只改这里，不用全局改代码或配置。
+                </span>
+              </div>
+              <div className="wb-alias-editor">
+                {aliasDrafts.length === 0 ? (
+                  <div className="wb-empty-state">
+                    <strong>还没有模型别名</strong>
+                    <span>建议至少保留 `main`，需要便宜模型时再补一个 `cheap`。</span>
+                  </div>
+                ) : null}
+                {aliasDrafts.map((item, index) => (
+                  <div key={`${item.alias}-${index}`} className="wb-alias-row">
+                    <label className="wb-field">
+                      <span>别名</span>
+                      <input
+                        type="text"
+                        value={item.alias}
+                        onChange={(event) =>
+                          updateAliasAt(index, { alias: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="wb-field">
+                      <span>Provider</span>
+                      <input
+                        type="text"
+                        value={item.provider}
+                        onChange={(event) =>
+                          updateAliasAt(index, { provider: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="wb-field wb-field-span-2">
+                      <span>模型名</span>
+                      <input
+                        type="text"
+                        value={item.model}
+                        placeholder={primaryProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"}
+                        onChange={(event) =>
+                          updateAliasAt(index, { model: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="wb-field wb-field-span-2">
+                      <span>说明</span>
+                      <input
+                        type="text"
+                        value={item.description}
+                        placeholder="例如：主力模型 / 低成本模型"
+                        onChange={(event) =>
+                          updateAliasAt(index, { description: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="wb-field">
+                      <span>推理强度</span>
+                      <select
+                        value={item.thinking_level}
+                        onChange={(event) =>
+                          updateAliasAt(index, {
+                            thinking_level: event.target.value as ModelAliasDraftItem["thinking_level"],
+                          })
+                        }
+                      >
+                        <option value="">默认</option>
+                        <option value="xhigh">xhigh</option>
+                        <option value="high">high</option>
+                        <option value="medium">medium</option>
+                        <option value="low">low</option>
+                      </select>
+                    </label>
+                    <div className="wb-alias-actions">
+                      <button
+                        type="button"
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() => removeAliasDraft(index)}
+                        disabled={aliasDrafts.length <= 1}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="wb-card-grid wb-card-grid-3">
         <article className="wb-card">
@@ -1301,7 +2058,12 @@ export default function SettingsCenter() {
       </section>
 
       {otherGroupIds.map((groupId) => {
-        const hints = groupedHints[groupId] ?? [];
+        const hints = (groupedHints[groupId] ?? []).filter(
+          (hint) => !CUSTOM_PROVIDER_FIELD_PATHS.has(hint.field_path)
+        );
+        if (hints.length === 0) {
+          return null;
+        }
         const group = groupLabel(groupId);
         return (
           <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">

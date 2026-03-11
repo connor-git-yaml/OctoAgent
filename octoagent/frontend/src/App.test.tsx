@@ -75,17 +75,33 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             runtime: {
               type: "object",
               properties: {
+                llm_mode: { type: "string", enum: ["echo", "litellm"] },
                 litellm_proxy_url: { type: "string" },
+                master_key_env: { type: "string" },
               },
             },
+            providers: { type: "array", items: { type: "object" } },
+            model_aliases: { type: "object" },
           },
         },
         ui_hints: {
+          "runtime.llm_mode": {
+            field_path: "runtime.llm_mode",
+            section: "runtime",
+            label: "LLM 模式",
+            description: "Gateway 当前运行模式",
+            widget: "select",
+            placeholder: "",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 5,
+          },
           "runtime.litellm_proxy_url": {
             field_path: "runtime.litellm_proxy_url",
             section: "runtime",
             label: "LiteLLM Proxy URL",
-            description: "",
+            description: "通常保持本地默认地址即可。",
             widget: "text",
             placeholder: "http://localhost:4000",
             help_text: "",
@@ -93,11 +109,51 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             multiline: false,
             order: 10,
           },
+          "runtime.master_key_env": {
+            field_path: "runtime.master_key_env",
+            section: "runtime",
+            label: "LiteLLM Master Key 环境变量名",
+            description: "通常保持默认值 LITELLM_MASTER_KEY。",
+            widget: "env-ref",
+            placeholder: "LITELLM_MASTER_KEY",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 20,
+          },
+          providers: {
+            field_path: "providers",
+            section: "providers",
+            label: "模型提供方列表",
+            description: "",
+            widget: "provider-list",
+            placeholder: "[]",
+            help_text: "",
+            sensitive: false,
+            multiline: true,
+            order: 30,
+          },
+          model_aliases: {
+            field_path: "model_aliases",
+            section: "models",
+            label: "模型别名",
+            description: "",
+            widget: "alias-map",
+            placeholder: "{}",
+            help_text: "",
+            sensitive: false,
+            multiline: true,
+            order: 40,
+          },
         },
         current_value: {
           runtime: {
+            llm_mode: "echo",
             litellm_proxy_url: proxyUrl,
+            master_key_env: "LITELLM_MASTER_KEY",
           },
+          providers: [],
+          model_aliases: {},
         },
         validation_rules: [],
         bridge_refs: [],
@@ -376,7 +432,14 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
           summary: "已启用 1 个 provider，runtime=proxy",
           warnings: [],
           blocking_reasons: [],
-          details: {},
+          details: {
+            provider_entries: [],
+            litellm_env_names: [],
+            runtime_env_names: [],
+            credential_profiles: [],
+            openai_oauth_connected: false,
+            openai_oauth_profile: "",
+          },
           source_refs: [],
         },
         channel_access: {
@@ -854,7 +917,8 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    const input = await screen.findByLabelText("LiteLLM Proxy URL");
+    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
+    const input = (await screen.findAllByDisplayValue("http://localhost:4000"))[0];
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
     await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -943,70 +1007,10 @@ describe("App workbench routing", () => {
     expect(nameInput.value).toBe("新的主 Agent");
   });
 
-  it("设置页会为体验模式展示可执行的说明和 JSON 示例", async () => {
+  it("设置页会为体验模式展示双模式 Provider 配置和模型别名编辑器", async () => {
     window.history.pushState({}, "", "/settings");
 
     const snapshot = buildSnapshot() as any;
-    snapshot.resources.config.schema = {
-      type: "object",
-      properties: {
-        runtime: {
-          type: "object",
-          properties: {
-            llm_mode: { type: "string", enum: ["echo", "litellm"] },
-            litellm_proxy_url: { type: "string" },
-          },
-        },
-        providers: { type: "array", items: { type: "object" } },
-        model_aliases: { type: "object" },
-      },
-    };
-    snapshot.resources.config.ui_hints = {
-      "runtime.llm_mode": {
-        field_path: "runtime.llm_mode",
-        section: "runtime",
-        label: "LLM 模式",
-        description: "",
-        widget: "select",
-        placeholder: "",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 10,
-      },
-      providers: {
-        field_path: "providers",
-        section: "providers",
-        label: "模型提供方列表",
-        description: "",
-        widget: "provider-list",
-        placeholder: "[]",
-        help_text: "",
-        sensitive: false,
-        multiline: true,
-        order: 20,
-      },
-      model_aliases: {
-        field_path: "model_aliases",
-        section: "models",
-        label: "模型别名",
-        description: "",
-        widget: "alias-map",
-        placeholder: "{}",
-        help_text: "",
-        sensitive: false,
-        multiline: true,
-        order: 30,
-      },
-    };
-    snapshot.resources.config.current_value = {
-      runtime: {
-        llm_mode: "echo",
-        litellm_proxy_url: "http://localhost:4000",
-      },
-      providers: [],
-      model_aliases: {},
-    };
     snapshot.resources.setup_governance.review = {
       ready: false,
       risk_level: "warning",
@@ -1050,25 +1054,118 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
     expect(
-      await screen.findByText("你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。")
+      screen.getByText("你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。")
     ).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.getByText("Persona（角色说明）")).toBeInTheDocument();
     expect(
       screen.getByText("这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。")
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保持体验模式" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Provider 预设")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("OPENROUTER_API_KEY")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /填入 OpenRouter 示例/ }));
-    await waitFor(() =>
-      expect(screen.getByDisplayValue(/OPENROUTER_API_KEY/)).toBeInTheDocument()
-    );
+    await userEvent.click(screen.getByRole("button", { name: "恢复 main / cheap" }));
+    await waitFor(() => expect(screen.getAllByDisplayValue("main").length).toBeGreaterThan(0));
+    expect(screen.getByDisplayValue("cheap")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /填入 main \/ cheap 示例/ }));
+    await userEvent.click(screen.getByRole("button", { name: "新增别名" }));
+    await waitFor(() => expect(screen.getByDisplayValue("alias_3")).toBeInTheDocument());
+  });
+
+  it("设置页支持触发 OpenAI Auth 连接动作", async () => {
+    window.history.pushState({}, "", "/settings");
+
+    const snapshot = buildSnapshot();
+    const refreshedSetup = {
+      ...snapshot.resources.setup_governance,
+      generated_at: "2026-03-09T10:01:00Z",
+      updated_at: "2026-03-09T10:01:00Z",
+      provider_runtime: {
+        ...snapshot.resources.setup_governance.provider_runtime,
+        details: {
+          provider_entries: [
+            {
+              id: "openai-codex",
+              name: "OpenAI Codex (ChatGPT Pro OAuth)",
+              auth_type: "oauth",
+              api_key_env: "OPENAI_API_KEY",
+              enabled: true,
+            },
+          ],
+          litellm_env_names: ["OPENAI_API_KEY"],
+          runtime_env_names: [],
+          credential_profiles: [
+            {
+              name: "openai-codex-default",
+              provider: "openai-codex",
+              auth_mode: "oauth",
+            },
+          ],
+          openai_oauth_connected: true,
+          openai_oauth_profile: "openai-codex-default",
+        },
+      },
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-oauth",
+              correlation_id: "req-oauth",
+              action_id: "provider.oauth.openai_codex",
+              status: "completed",
+              code: "OPENAI_OAUTH_CONNECTED",
+              message: "OpenAI Auth 已连接，已写入本地凭证。",
+              data: {
+                provider_id: "openai-codex",
+                profile_name: "openai-codex-default",
+                env_name: "OPENAI_API_KEY",
+              },
+              resource_refs: [
+                {
+                  resource_type: "setup_governance",
+                  resource_id: "setup:governance",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:01:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/setup-governance")) {
+        return Promise.resolve(jsonResponse(refreshedSetup));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
+    await userEvent.click(screen.getByText("浏览器登录 ChatGPT Pro / Codex").closest("button")!);
+    await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
+
     await waitFor(() =>
-      expect(screen.getByDisplayValue(/"main"/)).toBeInTheDocument()
+      expect(
+        fetchMock.mock.calls.some((call) => {
+          const body = String((call as FetchArgs)[1]?.body ?? "");
+          return body.includes('"action_id":"provider.oauth.openai_codex"');
+        })
+      ).toBe(true)
     );
-    expect(screen.getByDisplayValue(/"cheap"/)).toBeInTheDocument();
+    expect(await screen.findByText("已连接")).toBeInTheDocument();
   });
 
   it("设置页会把 Memory 预设、召回策略和 bridge 配置一起提交到 setup.review", async () => {

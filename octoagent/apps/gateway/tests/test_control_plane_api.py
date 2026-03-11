@@ -40,7 +40,11 @@ from octoagent.memory import (
     SqliteMemoryStore,
     WriteAction,
 )
+from octoagent.provider.auth.credentials import OAuthCredential
+from octoagent.provider.auth.environment import EnvironmentContext
+from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.project_selector import ProjectSelectorService
+from pydantic import SecretStr
 from ulid import ULID
 
 
@@ -939,6 +943,160 @@ class TestControlPlaneApi:
         assert saved_profile is not None
         assert saved_profile.name == "安全优先主 Agent"
         assert saved_profile.tool_profile == "minimal"
+
+    async def test_setup_apply_persists_litellm_secret_values_and_api_key_profile(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "runtime": {
+                                "llm_mode": "litellm",
+                                "litellm_proxy_url": "http://localhost:4000",
+                                "master_key_env": "LITELLM_MASTER_KEY",
+                            },
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/auto",
+                                }
+                            },
+                        },
+                        "secret_values": {
+                            "OPENROUTER_API_KEY": "sk-openrouter-value",
+                            "LITELLM_MASTER_KEY": "sk-master-value",
+                        },
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "LiteLLM 主 Agent",
+                            "persona_summary": "用于验证密钥落盘。",
+                            "tool_profile": "standard",
+                            "model_alias": "main",
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_APPLIED"
+        assert result["data"]["saved_secrets"]["litellm_env_names"] == [
+            "LITELLM_MASTER_KEY",
+            "LITELLM_PROXY_KEY",
+            "OPENROUTER_API_KEY",
+        ]
+        assert result["data"]["saved_secrets"]["profile_names"] == ["openrouter-default"]
+
+        env_path = control_plane_app.state.project_root / ".env.litellm"
+        assert env_path.exists()
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "OPENROUTER_API_KEY=sk-openrouter-value" in env_text
+        assert "LITELLM_MASTER_KEY=sk-master-value" in env_text
+        assert "LITELLM_PROXY_KEY=sk-master-value" in env_text
+
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
+        profile = store.get_profile("openrouter-default")
+        assert profile is not None
+        assert profile.provider == "openrouter"
+        assert profile.auth_mode == "api_key"
+        assert profile.credential.key.get_secret_value() == "sk-openrouter-value"
+
+    async def test_provider_oauth_openai_codex_persists_profile_and_env(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        monkeypatch,
+    ) -> None:
+        from octoagent.gateway.services import control_plane as control_plane_module
+
+        async def fake_run_auth_code_pkce_flow(**_kwargs):
+            return OAuthCredential(
+                provider="openai-codex",
+                access_token=SecretStr("oauth-access-token"),
+                refresh_token=SecretStr("oauth-refresh-token"),
+                expires_at=datetime(2026, 3, 20, tzinfo=UTC),
+                account_id="acct-openai",
+            )
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "detect_environment",
+            lambda: EnvironmentContext(
+                is_remote=False,
+                can_open_browser=True,
+                force_manual=False,
+                detection_details="test",
+            ),
+        )
+        monkeypatch.setattr(
+            control_plane_module,
+            "run_auth_code_pkce_flow",
+            fake_run_auth_code_pkce_flow,
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "provider.oauth.openai_codex",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "env_name": "OPENAI_API_KEY",
+                    "profile_name": "openai-codex-default",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "OPENAI_OAUTH_CONNECTED"
+        assert result["data"]["account_id"] == "acct-openai"
+        assert result["data"]["env_name"] == "OPENAI_API_KEY"
+
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
+        profile = store.get_profile("openai-codex-default")
+        assert profile is not None
+        assert profile.provider == "openai-codex"
+        assert profile.auth_mode == "oauth"
+        assert profile.credential.access_token.get_secret_value() == "oauth-access-token"
+
+        env_path = control_plane_app.state.project_root / ".env.litellm"
+        assert env_path.exists()
+        assert "OPENAI_API_KEY=oauth-access-token" in env_path.read_text(encoding="utf-8")
+
+        setup_doc = await control_plane_app.state.control_plane_service.get_setup_governance_document()
+        assert setup_doc.provider_runtime.details["openai_oauth_connected"] is True
+        assert (
+            setup_doc.provider_runtime.details["openai_oauth_profile"]
+            == "openai-codex-default"
+        )
 
     async def test_setup_apply_rejects_blocking_review(
         self,

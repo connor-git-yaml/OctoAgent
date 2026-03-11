@@ -8,6 +8,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import SecretStr
+
 from octoagent.core.models import (
     ActionDefinition,
     ActionRegistryDocument,
@@ -94,6 +96,12 @@ from octoagent.memory import (
     VaultAccessDecision,
 )
 from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE, PolicyProfile
+from octoagent.provider.auth.credentials import ApiKeyCredential
+from octoagent.provider.auth.environment import detect_environment
+from octoagent.provider.auth.oauth_flows import run_auth_code_pkce_flow
+from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
+from octoagent.provider.auth.profile import ProviderProfile
+from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.provider.dx.chat_import_service import ChatImportService
@@ -1158,23 +1166,19 @@ class ControlPlaneService:
             else ("action_required" if review.provider_runtime_risks else "ready"),
             summary=(
                 f"已启用 {len(config.current_value.get('providers', []))} 个 provider，"
-                f"runtime={config.current_value.get('runtime', {}).get('llm_mode', '')}"
+                f"runtime={config.current_value.get('runtime', {}).get('llm_mode', '')}，"
+                f"凭证={len(self._credential_store().list_profiles())}"
             ),
             warnings=list(config.warnings),
             blocking_reasons=[
                 item.risk_id for item in review.provider_runtime_risks if item.blocking
             ],
-            details={
-                "enabled_provider_ids": [
-                    item.get("id", "")
-                    for item in config.current_value.get("providers", [])
-                    if item.get("enabled", True)
-                ],
-                "model_aliases": sorted(config.current_value.get("model_aliases", {}).keys()),
-                "litellm_sync_ok": not config.degraded.is_degraded,
-                "bridge_ref_count": len(config.bridge_refs),
-                "secret_audit_status": secret_audit.overall_status if secret_audit else "unknown",
-            },
+            details=self._collect_provider_runtime_details(
+                config.current_value,
+                secret_audit=secret_audit,
+                bridge_refs=config.bridge_refs,
+                litellm_sync_ok=not config.degraded.is_degraded,
+            ),
             source_refs=[
                 self._resource_ref("config_schema", "config:octoagent"),
                 self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
@@ -1302,6 +1306,11 @@ class ControlPlaneService:
                     capability_id="setup.review",
                     label="检查配置",
                     action_id="setup.review",
+                ),
+                ControlPlaneCapability(
+                    capability_id="provider.oauth.openai_codex",
+                    label="连接 OpenAI Auth",
+                    action_id="provider.oauth.openai_codex",
                 ),
                 ControlPlaneCapability(
                     capability_id="agent_profile.save",
@@ -2012,6 +2021,8 @@ class ControlPlaneService:
             return await self._handle_setup_review(request)
         if action_id == "setup.apply":
             return await self._handle_setup_apply(request)
+        if action_id == "provider.oauth.openai_codex":
+            return await self._handle_provider_oauth_openai_codex(request)
         if action_id == "diagnostics.refresh":
             diagnostics = await self.get_diagnostics_summary()
             return self._completed_result(
@@ -2375,6 +2386,18 @@ class ControlPlaneService:
             "review": review.model_dump(mode="json"),
             "litellm_config_path": str(litellm_path),
         }
+        secret_values = draft.get("secret_values", {})
+        if isinstance(secret_values, Mapping):
+            secret_result = self._save_runtime_secret_values(
+                config=config,
+                secret_values=secret_values,
+            )
+            if (
+                secret_result["litellm_env_names"]
+                or secret_result["runtime_env_names"]
+                or secret_result["profile_names"]
+            ):
+                data["saved_secrets"] = secret_result
 
         if policy_profile_id:
             policy_result = await self._handle_policy_profile_select(
@@ -2406,6 +2429,79 @@ class ControlPlaneService:
             message="配置已保存，主 Agent 与系统设置已同步。",
             data=data,
             resource_refs=self._dedupe_resource_refs(resource_refs),
+        )
+
+    async def _handle_provider_oauth_openai_codex(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        env_name = self._param_str(request.params, "env_name", default="OPENAI_API_KEY")
+        profile_name = self._param_str(
+            request.params,
+            "profile_name",
+            default="openai-codex-default",
+        )
+        registry = OAuthProviderRegistry()
+        provider_config = registry.get("openai-codex")
+        if provider_config is None:
+            raise ControlPlaneActionError("OAUTH_PROVIDER_UNAVAILABLE", "未找到 OpenAI OAuth 配置")
+
+        environment = detect_environment()
+        if environment.use_manual_mode:
+            raise ControlPlaneActionError(
+                "OAUTH_BROWSER_UNAVAILABLE",
+                "当前环境无法直接打开浏览器，请先在本地桌面环境完成 OpenAI OAuth。",
+            )
+
+        credential = await run_auth_code_pkce_flow(
+            config=provider_config,
+            registry=registry,
+            env=environment,
+        )
+        store = self._credential_store()
+        existing = store.get_profile(profile_name)
+        now = datetime.now(tz=UTC)
+        profile = ProviderProfile(
+            name=profile_name,
+            provider="openai-codex",
+            auth_mode="oauth",
+            credential=credential,
+            is_default=(
+                existing.is_default
+                if existing is not None
+                else store.get_default_profile() is None
+            ),
+            created_at=existing.created_at if existing is not None else now,
+            updated_at=now,
+        )
+        store.set_profile(profile)
+        self._write_env_values(
+            self._project_root / ".env.litellm",
+            {
+                env_name: credential.access_token.get_secret_value(),
+            },
+        )
+        return self._completed_result(
+            request=request,
+            code="OPENAI_OAUTH_CONNECTED",
+            message="OpenAI Auth 已连接，已写入本地凭证。",
+            data={
+                "provider_id": "openai-codex",
+                "profile_name": profile_name,
+                "env_name": env_name,
+                "expires_at": credential.expires_at.isoformat(),
+                "account_id": credential.account_id or "",
+            },
+            resource_refs=[
+                self._resource_ref("setup_governance", "setup:governance"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="provider",
+                    target_id="openai-codex",
+                    label="OpenAI Codex",
+                )
+            ],
         )
 
     async def _resolve_memory_action_context(
@@ -4291,6 +4387,229 @@ class ControlPlaneService:
             results.append(binding.model_dump(mode="json"))
         return results
 
+    def _credential_store(self) -> CredentialStore:
+        return CredentialStore(store_path=self._project_root / "auth-profiles.json")
+
+    def _env_file_values(self, path: Path) -> dict[str, str]:
+        if not path.exists():
+            return {}
+        values: dict[str, str] = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key:
+                values[key] = value
+        return values
+
+    def _write_env_values(self, path: Path, updates: Mapping[str, str]) -> None:
+        normalized = {
+            str(key).strip(): str(value)
+            for key, value in updates.items()
+            if str(key).strip() and str(value).strip()
+        }
+        if not normalized:
+            return
+        existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+        rendered: list[str] = []
+        seen_keys: set[str] = set()
+        for line in existing_lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in line:
+                rendered.append(line)
+                continue
+            key, _ = line.split("=", 1)
+            env_name = key.strip()
+            if env_name in normalized:
+                rendered.append(f"{env_name}={normalized[env_name]}")
+                seen_keys.add(env_name)
+            else:
+                rendered.append(line)
+        for env_name, value in normalized.items():
+            if env_name not in seen_keys:
+                rendered.append(f"{env_name}={value}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = "\n".join(rendered).rstrip()
+        path.write_text(f"{content}\n" if content else "", encoding="utf-8")
+        path.chmod(0o600)
+
+    def _collect_provider_runtime_details(
+        self,
+        config_value: Mapping[str, Any],
+        *,
+        secret_audit,
+        bridge_refs: list[dict[str, Any]],
+        litellm_sync_ok: bool,
+    ) -> dict[str, Any]:
+        providers = [
+            item for item in config_value.get("providers", []) if isinstance(item, dict)
+        ]
+        env_litellm = self._env_file_values(self._project_root / ".env.litellm")
+        env_runtime = self._env_file_values(self._project_root / ".env")
+        profiles = self._credential_store().list_profiles()
+        oauth_profile = next(
+            (profile for profile in profiles if profile.provider == "openai-codex"),
+            None,
+        )
+        return {
+            "enabled_provider_ids": [
+                item.get("id", "") for item in providers if item.get("enabled", True)
+            ],
+            "provider_entries": providers,
+            "model_aliases": sorted(config_value.get("model_aliases", {}).keys()),
+            "litellm_sync_ok": litellm_sync_ok,
+            "bridge_ref_count": len(bridge_refs),
+            "secret_audit_status": secret_audit.overall_status if secret_audit else "unknown",
+            "litellm_env_names": sorted(env_litellm.keys()),
+            "runtime_env_names": sorted(env_runtime.keys()),
+            "credential_profiles": [
+                {
+                    "name": profile.name,
+                    "provider": profile.provider,
+                    "auth_mode": profile.auth_mode,
+                    "is_default": profile.is_default,
+                    "expires_at": (
+                        profile.credential.expires_at.isoformat()
+                        if hasattr(profile.credential, "expires_at")
+                        and getattr(profile.credential, "expires_at", None) is not None
+                        else ""
+                    ),
+                    "account_id": (
+                        str(getattr(profile.credential, "account_id", "") or "")
+                    ),
+                }
+                for profile in profiles
+            ],
+            "openai_oauth_connected": oauth_profile is not None,
+            "openai_oauth_profile": oauth_profile.name if oauth_profile is not None else "",
+        }
+
+    def _provider_alias_defaults(
+        self,
+        provider_id: str,
+        *,
+        auth_type: str,
+        api_key_env: str,
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+        provider_name = (
+            "OpenAI Codex (ChatGPT Pro OAuth)"
+            if provider_id == "openai-codex"
+            else provider_id.replace("-", " ").title()
+        )
+        providers = [
+            {
+                "id": provider_id,
+                "name": provider_name,
+                "auth_type": auth_type,
+                "api_key_env": api_key_env,
+                "enabled": True,
+            }
+        ]
+        if provider_id == "openai-codex":
+            aliases = {
+                "main": {
+                    "provider": provider_id,
+                    "model": "gpt-5.4",
+                    "description": "主力模型",
+                    "thinking_level": "xhigh",
+                },
+                "cheap": {
+                    "provider": provider_id,
+                    "model": "gpt-5.4",
+                    "description": "轻量模型",
+                    "thinking_level": "low",
+                },
+            }
+        else:
+            default_model = "openrouter/auto" if provider_id == "openrouter" else f"{provider_id}/auto"
+            aliases = {
+                "main": {
+                    "provider": provider_id,
+                    "model": default_model,
+                    "description": "主力模型",
+                },
+                "cheap": {
+                    "provider": provider_id,
+                    "model": default_model,
+                    "description": "低成本模型",
+                },
+            }
+        return providers, aliases
+
+    def _save_runtime_secret_values(
+        self,
+        *,
+        config: OctoAgentConfig,
+        secret_values: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        normalized = {
+            str(key).strip(): str(value).strip()
+            for key, value in secret_values.items()
+            if str(key).strip() and str(value).strip()
+        }
+        if not normalized:
+            return {"litellm_env_names": [], "runtime_env_names": [], "profile_names": []}
+
+        litellm_targets = {config.runtime.master_key_env}
+        runtime_targets: set[str] = set()
+        for provider in config.providers:
+            litellm_targets.add(provider.api_key_env)
+        if config.front_door.bearer_token_env:
+            runtime_targets.add(config.front_door.bearer_token_env)
+        if config.front_door.trusted_proxy_token_env:
+            runtime_targets.add(config.front_door.trusted_proxy_token_env)
+        telegram = config.channels.telegram
+        if telegram.bot_token_env:
+            runtime_targets.add(telegram.bot_token_env)
+        if telegram.webhook_secret_env:
+            runtime_targets.add(telegram.webhook_secret_env)
+
+        litellm_updates = {
+            env_name: value for env_name, value in normalized.items() if env_name in litellm_targets
+        }
+        runtime_updates = {
+            env_name: value for env_name, value in normalized.items() if env_name in runtime_targets
+        }
+        if config.runtime.master_key_env in litellm_updates:
+            master_key = litellm_updates[config.runtime.master_key_env]
+            if config.runtime.master_key_env == "LITELLM_MASTER_KEY":
+                litellm_updates.setdefault("LITELLM_PROXY_KEY", master_key)
+
+        self._write_env_values(self._project_root / ".env.litellm", litellm_updates)
+        self._write_env_values(self._project_root / ".env", runtime_updates)
+
+        store = self._credential_store()
+        saved_profiles: list[str] = []
+        for provider in config.providers:
+            if provider.auth_type != "api_key":
+                continue
+            secret_value = litellm_updates.get(provider.api_key_env)
+            if not secret_value:
+                continue
+            existing = store.get_profile(f"{provider.id}-default")
+            profile = ProviderProfile(
+                name=f"{provider.id}-default",
+                provider=provider.id,
+                auth_mode="api_key",
+                credential=ApiKeyCredential(
+                    provider=provider.id,
+                    key=SecretStr(secret_value),
+                ),
+                is_default=existing.is_default if existing is not None else store.get_default_profile() is None,
+                created_at=existing.created_at if existing is not None else datetime.now(tz=UTC),
+                updated_at=datetime.now(tz=UTC),
+            )
+            store.set_profile(profile)
+            saved_profiles.append(profile.name)
+
+        return {
+            "litellm_env_names": sorted(litellm_updates.keys()),
+            "runtime_env_names": sorted(runtime_updates.keys()),
+            "profile_names": saved_profiles,
+        }
+
     def _build_config_ui_hints(self) -> dict[str, ConfigFieldHint]:
         hints = {
             "runtime.llm_mode": ConfigFieldHint(
@@ -5540,6 +5859,14 @@ class ControlPlaneService:
                     "保存配置",
                     category="setup",
                     description="把当前主 Agent、模型和渠道设置一起保存。",
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "provider.oauth.openai_codex",
+                    "连接 OpenAI Auth",
+                    category="setup",
+                    description="通过浏览器 OAuth 连接 ChatGPT Pro / OpenAI Codex，并写入本地凭证。",
                     params_schema={"type": "object"},
                     risk_hint="medium",
                 ),
