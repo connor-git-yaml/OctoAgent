@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from octoagent.core.models import (
@@ -55,6 +56,26 @@ _MEMORY_BINDING_TYPES = {
     ProjectBindingType.IMPORT_SCOPE,
 }
 
+_WEEKDAY_NAMES_ZH = {
+    0: "星期一",
+    1: "星期二",
+    2: "星期三",
+    3: "星期四",
+    4: "星期五",
+    5: "星期六",
+    6: "星期日",
+}
+
+_WEEKDAY_NAMES_EN = {
+    0: "Monday",
+    1: "Tuesday",
+    2: "Wednesday",
+    3: "Thursday",
+    4: "Friday",
+    5: "Saturday",
+    6: "Sunday",
+}
+
 
 def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, Any]:
     if agent_profile is None or not isinstance(agent_profile.context_budget_policy, dict):
@@ -75,6 +96,59 @@ def _bounded_int(
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, parsed))
+
+
+def build_ambient_runtime_facts(
+    *,
+    owner_profile: OwnerProfile | None,
+    surface: str = "",
+    now: datetime | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """构建主 Agent / child worker 可复用的当前环境事实。"""
+
+    degraded_reasons: list[str] = []
+    resolved_now = now or datetime.now(tz=UTC)
+    timezone = (
+        owner_profile.timezone.strip()
+        if owner_profile is not None and owner_profile.timezone.strip()
+        else "UTC"
+    )
+    if owner_profile is None or not owner_profile.timezone.strip():
+        degraded_reasons.append("owner_timezone_missing")
+    try:
+        zone = ZoneInfo(timezone)
+    except ZoneInfoNotFoundError:
+        degraded_reasons.append("owner_timezone_invalid")
+        timezone = "UTC"
+        zone = ZoneInfo("UTC")
+
+    locale = (
+        owner_profile.locale.strip()
+        if owner_profile is not None and owner_profile.locale.strip()
+        else "zh-CN"
+    )
+    if owner_profile is None or not owner_profile.locale.strip():
+        degraded_reasons.append("owner_locale_missing")
+
+    localized = resolved_now.astimezone(zone)
+    weekday_map = _WEEKDAY_NAMES_ZH if locale.lower().startswith("zh") else _WEEKDAY_NAMES_EN
+    weekday = weekday_map.get(localized.weekday(), str(localized.weekday()))
+    offset = localized.strftime("%z")
+    if len(offset) == 5:
+        offset = f"{offset[:3]}:{offset[3:]}"
+
+    payload = {
+        "current_datetime_local": localized.strftime("%Y-%m-%d %H:%M:%S"),
+        "current_date_local": localized.strftime("%Y-%m-%d"),
+        "current_time_local": localized.strftime("%H:%M:%S"),
+        "current_weekday_local": weekday,
+        "timezone": timezone,
+        "utc_offset": offset or "+00:00",
+        "locale": locale,
+        "surface": surface.strip() or "chat",
+        "source": "system_clock",
+    }
+    return payload, list(dict.fromkeys(degraded_reasons))
 
 
 def effective_memory_access_policy(agent_profile: AgentProfile | None) -> MemoryAccessPolicy:
@@ -779,6 +853,9 @@ class AgentContextService:
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
                     "在上下文不足时显式说明 degraded reason，但继续给出可执行帮助。",
+                    "遇到今天、最新、天气、官网、网页资料等依赖实时外部事实的问题时，"
+                    "先判断是否缺城市、对象名等关键参数；若系统具备受治理 worker/web/browser 路径，"
+                    "不要直接把自己表述成没有实时能力。",
                 ],
                 tool_profile="standard",
                 model_alias="main",
@@ -793,11 +870,16 @@ class AgentContextService:
             name=f"{project.name} Butler",
             persona_summary=(
                 project.description.strip()
-                or f"你是 {project.name} project 的 Butler，负责像管家一样维护目标、上下文、worker 协同与交付节奏。"
+                or (
+                    f"你是 {project.name} project 的 Butler，"
+                    "负责像管家一样维护目标、上下文、worker 协同与交付节奏。"
+                )
             ),
             instruction_overlays=[
                 "默认继承当前 project/workspace 绑定与 owner 偏好。",
                 "回复前先利用 recent summary 与 memory hits 保持上下文连续性。",
+                "遇到今天、最新、天气、官网、网页资料等依赖实时外部事实的问题时，"
+                "先判断是否缺关键参数，并优先通过受治理 worker/tool 路径完成查询。",
             ],
             tool_profile="standard",
             model_alias="main",
@@ -1108,7 +1190,11 @@ class AgentContextService:
         dispatch_metadata: dict[str, str],
         runtime_context: RuntimeControlContext | None,
         include_runtime_context: bool = True,
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], list[str]]:
+        ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
+            owner_profile=owner_profile,
+            surface=task.requester.channel or "chat",
+        )
         blocks: list[dict[str, str]] = [
             {
                 "role": "system",
@@ -1129,6 +1215,21 @@ class AgentContextService:
                     f"{self._render_list(owner_profile.interaction_preferences, max_chars=220)}\n"
                     "boundary_notes: "
                     f"{self._render_list(owner_profile.boundary_notes, max_chars=220)}"
+                ),
+            },
+            {
+                "role": "system",
+                "content": (
+                    "AmbientRuntime:\n"
+                    f"current_datetime_local: {ambient_runtime['current_datetime_local']}\n"
+                    f"current_date_local: {ambient_runtime['current_date_local']}\n"
+                    f"current_time_local: {ambient_runtime['current_time_local']}\n"
+                    f"current_weekday_local: {ambient_runtime['current_weekday_local']}\n"
+                    f"timezone: {ambient_runtime['timezone']}\n"
+                    f"utc_offset: {ambient_runtime['utc_offset']}\n"
+                    f"locale: {ambient_runtime['locale']}\n"
+                    f"surface: {ambient_runtime['surface']}\n"
+                    f"source: {ambient_runtime['source']}"
                 ),
             },
         ]
@@ -1234,7 +1335,7 @@ class AgentContextService:
                     ),
                 }
             )
-        return blocks
+        return blocks, ambient_reasons
 
     def _fit_prompt_budget(
         self,
@@ -1272,7 +1373,14 @@ class AgentContextService:
         )
         include_runtime_options = [True, False]
 
-        best_result: tuple[list[dict[str, str]], str, list[MemoryRecallHit], int, int] | None = None
+        best_result: tuple[
+            list[dict[str, str]],
+            str,
+            list[MemoryRecallHit],
+            list[str],
+            int,
+            int,
+        ] | None = None
         best_tokens: int | None = None
 
         for include_runtime_context in include_runtime_options:
@@ -1282,7 +1390,7 @@ class AgentContextService:
                     trimmed_summary = (
                         truncate_chars(recent_summary, summary_limit) if summary_limit > 0 else ""
                     )
-                    blocks = self._build_system_blocks(
+                    blocks, block_reasons = self._build_system_blocks(
                         project=project,
                         workspace=workspace,
                         task=task,
@@ -1305,6 +1413,7 @@ class AgentContextService:
                             blocks,
                             trimmed_summary,
                             trimmed_hits,
+                            list(block_reasons),
                             system_tokens,
                             delivery_tokens,
                         )
@@ -1317,11 +1426,12 @@ class AgentContextService:
                             or not include_runtime_context
                         ):
                             reasons.append("context_budget_trimmed")
+                        reasons.extend(block_reasons)
                         return (
                             blocks,
                             trimmed_summary,
                             trimmed_hits,
-                            reasons,
+                            list(dict.fromkeys(reasons)),
                             system_tokens,
                             delivery_tokens,
                         )
@@ -1329,12 +1439,22 @@ class AgentContextService:
         if best_result is None:
             return [], "", [], ["context_budget_trimmed"], 0, compiled.delivery_tokens
 
-        blocks, trimmed_summary, trimmed_hits, system_tokens, delivery_tokens = best_result
+        blocks, trimmed_summary, trimmed_hits, block_reasons, system_tokens, delivery_tokens = (
+            best_result
+        )
         return (
             blocks,
             trimmed_summary,
             trimmed_hits,
-            ["context_budget_trimmed", "context_budget_exceeded"],
+            list(
+                dict.fromkeys(
+                    [
+                        *block_reasons,
+                        "context_budget_trimmed",
+                        "context_budget_exceeded",
+                    ]
+                )
+            ),
             system_tokens,
             delivery_tokens,
         )

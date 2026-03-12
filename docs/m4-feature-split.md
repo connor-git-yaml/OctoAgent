@@ -13,6 +13,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 - `032 / 034 / 035 / 036 / 037 / 039`
 - `033` 与 `038` 都是已完成的 M3 carry-forward；它们服务 M4，但不并入 M4 编号面
+- `040` 已闭合 guided experience release gate；随后由 `041` 收口 live usage 暴露的 runtime readiness / freshness query 缺口
 
 ## 2. 当前 Feature 队列
 
@@ -25,6 +26,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 037 | Implemented | Runtime control context hardening，解决 selector drift 与 lineage 漂移 |
 | 039 | Implemented | Supervisor worker governance + internal A2A dispatch，补齐三层结构 |
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
+| 041 | Passed | Butler / Worker runtime readiness：ambient current time、freshness query delegation、worker web/tool readiness（见 §5） |
 
 ## 3. 各 Feature 边界
 
@@ -155,7 +157,47 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - 必须在 UI/acceptance 中显式展示 `context_continuity` 的运行状态；若未来退化，不能假装 continuity 已闭环
 - 不新增新的产品对象，只做集成、验证、缺口补齐
 
-## 5. 非伪实现门禁
+## 5. Live Usage 暴露的后续缺口：Feature 041
+
+040 通过之后，当前升级波次又暴露出一个不应再留到“以后再说”的缺口：
+
+- Butler 已经具备创建 child worker 的系统能力，但在“今天几号 / 今天天气 / 查一下最新官网”这类日常问题上，仍可能像 stateless chat shell 一样回答
+- child worker 也已经具备 `web.search / web.fetch / browser.*` 等受治理工具，但 bootstrap 和默认 runtime context 没有把这些能力组织成“显然可用”的默认运行面
+- 当前 system/bootstrap context 里也缺少“当前本地时间 / 日期 / timezone / locale”这层 ambient facts
+
+因此需要新增：
+
+### Feature 041：Butler / Worker Runtime Readiness + Ambient Context
+
+状态：**Passed**
+
+目标：
+
+- 把当前本地时间、日期、timezone/locale 作为 ambient runtime context 正式接入主 Agent 与 child worker
+- 让 Butler 在“实时 / 外部世界 / 最新资料”问题上优先考虑 delegation，而不是直接宣称没有实时能力
+- 让 research / ops worker 的 governed web/browser 执行面和 tool_profile 更可解释、更可验收
+- 把“今天 / 天气 / 官网 / 最新资料”纳入正式 acceptance matrix
+
+已落地：
+
+- `AgentContextService` 已加入 ambient runtime facts（日期 / 时间 / 星期 / timezone / locale / surface / source）
+- `CapabilityPackService` 已新增 `runtime.now`，并把 freshness delegation 写入 `bootstrap:shared / general / research / ops`
+- `workers.review / subagents.spawn / work.split` 已按 objective 选择更可解释的 `worker_type / tool_profile`
+- Workbench / Control Plane 已能展示 freshness runtime truth 与 degraded reason
+- 已形成 `contracts/freshness-query-acceptance-matrix.md` 与 041 release verification report
+
+当前结论：
+
+- 041 已通过 targeted release gates
+- 当前 M4 升级波次现在可以按“默认具备真实世界 freshness query readiness，但仍遵守 supervisor-only 与 governed tools 边界”的口径对外描述
+
+约束：
+
+- 041 不是给主 Agent 重新挂 web/browser/code 执行面；Butler 仍是 supervisor-only
+- 041 不以专用天气 API 为前提；优先复用现有 `web.search / web.fetch / browser.*`
+- 041 必须保留 runtime truth：谁去查、拿到什么 tool profile、为何降级，都要可解释
+
+## 6. 非伪实现门禁
 
 当前 M4 波次必须满足以下门禁，否则不能视为完成：
 
@@ -165,8 +207,9 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 4. Workbench / Settings / Setup 必须直接复用 canonical resources/actions，不得造 `settings/*`、`setup/*` 私有 backend。
 5. setup 必须存在统一的 review/apply 语义，CLI 与 Web 不得各讲一套。
 6. 035/040 必须显式展示 `context_continuity` 运行状态；若未来出现 degraded，不能把“缺上下文连续性”隐藏在默认行为里。
+7. 若系统已经具备 delegated web/browser path，则 Butler/Worker 不得把“自己不直接上网”误表述成“系统整体不能处理实时/外部事实问题”。
 
-## 6. 移入 M5 的内容
+## 7. 移入 M5 的内容
 
 以下内容不再属于当前 M4 升级波次，统一后移到 M5：
 

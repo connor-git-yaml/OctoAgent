@@ -26,6 +26,7 @@ from octoagent.core.models import (
     BundledToolDefinition,
     DynamicToolSelection,
     NormalizedMessage,
+    OwnerProfile,
     ProjectBindingType,
     RuntimeKind,
     ToolIndexQuery,
@@ -58,7 +59,7 @@ from octoagent.tooling import (
 from pydantic import BaseModel, Field
 from ulid import ULID
 
-from .agent_context import build_default_memory_recall_hook_options
+from .agent_context import build_ambient_runtime_facts, build_default_memory_recall_hook_options
 from .execution_context import get_current_execution_context
 from .task_service import TaskService
 
@@ -400,11 +401,18 @@ class CapabilityPackService:
         worker_type: WorkerType,
         project_id: str = "",
         workspace_id: str = "",
+        surface: str = "",
     ) -> list[dict[str, Any]]:
         await self.startup()
         project, workspace = await self._resolve_project_context(
             project_id=project_id,
             workspace_id=workspace_id,
+        )
+        owner_profile = await self._resolve_owner_profile()
+        worker_profile = self.get_worker_profile(worker_type)
+        ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
+            owner_profile=owner_profile,
+            surface=surface or "chat",
         )
         replacements = {
             "{{project_id}}": project.project_id if project is not None else "",
@@ -413,6 +421,22 @@ class CapabilityPackService:
             "{{workspace_id}}": workspace.workspace_id if workspace is not None else "",
             "{{workspace_slug}}": workspace.slug if workspace is not None else "primary",
             "{{workspace_root}}": workspace.root_path if workspace is not None else "",
+            "{{current_datetime_local}}": ambient_runtime["current_datetime_local"],
+            "{{current_date_local}}": ambient_runtime["current_date_local"],
+            "{{current_time_local}}": ambient_runtime["current_time_local"],
+            "{{current_weekday_local}}": ambient_runtime["current_weekday_local"],
+            "{{owner_timezone}}": ambient_runtime["timezone"],
+            "{{owner_utc_offset}}": ambient_runtime["utc_offset"],
+            "{{owner_locale}}": ambient_runtime["locale"],
+            "{{surface}}": ambient_runtime["surface"],
+            "{{ambient_source}}": ambient_runtime["source"],
+            "{{ambient_degraded_reasons}}": ", ".join(ambient_reasons) or "none",
+            "{{worker_type}}": worker_type.value,
+            "{{worker_capabilities}}": ", ".join(worker_profile.capabilities) or "none",
+            "{{default_tool_profile}}": worker_profile.default_tool_profile,
+            "{{default_tool_groups}}": ", ".join(worker_profile.default_tool_groups) or "none",
+            "{{runtime_kinds}}": ", ".join(item.value for item in worker_profile.runtime_kinds)
+            or "none",
         }
         rendered: list[dict[str, Any]] = []
         for file in self._bootstrap_templates.values():
@@ -433,6 +457,9 @@ class CapabilityPackService:
                 }
             )
         return rendered
+
+    async def _resolve_owner_profile(self) -> OwnerProfile | None:
+        return await self._stores.agent_context_store.get_owner_profile("owner-profile-default")
 
     def capability_snapshot(self) -> dict[str, Any]:
         pack = self._pack or BundledCapabilityPack()
@@ -853,6 +880,52 @@ class CapabilityPackService:
             )
 
         @tool_contract(
+            name="runtime.now",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="session",
+            tags=["runtime", "time", "clock"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://runtime.now",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
+            },
+        )
+        async def runtime_now(timezone: str = "", locale: str = "") -> str:
+            """读取当前本地时间、日期和时区摘要。"""
+
+            context = get_current_execution_context()
+            owner_profile = await self._resolve_owner_profile()
+            if timezone.strip() or locale.strip():
+                base_profile = owner_profile or OwnerProfile(
+                    owner_profile_id="owner-profile-default",
+                    timezone="",
+                    locale="",
+                )
+                owner_profile = base_profile.model_copy(
+                    update={
+                        "timezone": timezone.strip() or base_profile.timezone,
+                        "locale": locale.strip() or base_profile.locale,
+                    }
+                )
+            facts, degraded_reasons = build_ambient_runtime_facts(
+                owner_profile=owner_profile,
+                surface=(
+                    context.runtime_context.surface
+                    if context.runtime_context is not None
+                    else "chat"
+                ),
+            )
+            return json.dumps(
+                {
+                    **facts,
+                    "degraded_reasons": degraded_reasons,
+                },
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
             name="work.inspect",
             side_effect_level=SideEffectLevel.NONE,
             tool_profile=ToolProfile.MINIMAL,
@@ -1007,8 +1080,9 @@ class CapabilityPackService:
                 objective=objective,
                 worker_type=worker_type,
                 target_kind=target_kind,
-                tool_profile=self._tool_profile_for_worker_type(
-                    self._coerce_worker_type_name(worker_type)
+                tool_profile=self._effective_tool_profile_for_objective(
+                    self._coerce_worker_type_name(worker_type),
+                    objective=objective,
                 ),
                 title=title,
             )
@@ -1213,8 +1287,9 @@ class CapabilityPackService:
                     objective=item,
                     worker_type=worker_type,
                     target_kind=target_kind,
-                    tool_profile=self._tool_profile_for_worker_type(
-                        self._coerce_worker_type_name(worker_type)
+                    tool_profile=self._effective_tool_profile_for_objective(
+                        self._coerce_worker_type_name(worker_type),
+                        objective=item,
                     ),
                 )
                 for item in items
@@ -2030,6 +2105,7 @@ class CapabilityPackService:
             task_inspect,
             artifact_list,
             runtime_inspect,
+            runtime_now,
             work_inspect,
             agents_list,
             sessions_list,
@@ -2191,6 +2267,17 @@ class CapabilityPackService:
                     "Project: {{project_name}} ({{project_slug}} / {{project_id}})\n"
                     "Workspace: {{workspace_slug}} ({{workspace_id}})\n"
                     "Workspace Root: {{workspace_root}}\n"
+                    "Current Datetime Local: {{current_datetime_local}}\n"
+                    "Current Weekday Local: {{current_weekday_local}}\n"
+                    "Owner Timezone: {{owner_timezone}} (UTC {{owner_utc_offset}})\n"
+                    "Owner Locale: {{owner_locale}}\n"
+                    "Surface: {{surface}}\n"
+                    "Worker Type: {{worker_type}}\n"
+                    "Capabilities: {{worker_capabilities}}\n"
+                    "Default Tool Profile: {{default_tool_profile}}\n"
+                    "Default Tool Groups: {{default_tool_groups}}\n"
+                    "Runtime Kinds: {{runtime_kinds}}\n"
+                    "Ambient Degraded Reasons: {{ambient_degraded_reasons}}\n"
                     "必须继续走 ToolBroker / Policy / audit，不得绕过治理面。"
                 ),
                 metadata={"scope": "shared"},
@@ -2200,14 +2287,19 @@ class CapabilityPackService:
                 path_hint="bootstrap/general.md",
                 applies_to_worker_types=[WorkerType.GENERAL],
                 content=(
-                    "你是 OctoAgent 的 Butler（主 Agent / supervisor），也是负责长期协作节奏的 Agent 管家。\n"
+                    "你是 OctoAgent 的 Butler（主 Agent / supervisor），"
+                    "也是负责长期协作节奏的 Agent 管家。\n"
                     "内部 runtime 仍可能把你的 worker_type 标成 general，但对外统一自称 Butler，"
                     "不要把自己叫作 general worker。\n"
                     "你的职责是先梳理目标、上下文和下一步，再在策略允许和用户授权范围内创建、拆分、合并、删除"
                     "或重划分 worker。\n"
                     "不要自己承担 web/browser/code 等具体执行工作；"
                     "优先用 workers.review 或 delegation 工具形成方案，"
-                    "再让 research/dev/ops worker 落地。"
+                    "再让 research/dev/ops worker 落地。\n"
+                    "遇到今天、天气、最新资料、官网、网页信息这类依赖实时外部事实的问题时，"
+                    "先判断是否缺城市、对象名等关键参数；"
+                    "如果系统已有受治理 worker/web/browser 路径，"
+                    "不要直接把自己表述成没有实时能力。"
                 ),
                 metadata={"worker_type": "general"},
             ),
@@ -2215,14 +2307,22 @@ class CapabilityPackService:
                 file_id="bootstrap:ops",
                 path_hint="bootstrap/ops.md",
                 applies_to_worker_types=[WorkerType.OPS],
-                content="你是 ops worker，优先 runtime / diagnostics / recovery。",
+                content=(
+                    "你是 ops worker，优先 runtime / diagnostics / recovery。\n"
+                    "如果任务涉及状态页、控制台、网页健康检查或最新运行事实，可使用受治理 "
+                    "runtime/web 工具，并明确记录来源与限制。"
+                ),
                 metadata={"worker_type": "ops"},
             ),
             "bootstrap:research": WorkerBootstrapFile(
                 file_id="bootstrap:research",
                 path_hint="bootstrap/research.md",
                 applies_to_worker_types=[WorkerType.RESEARCH],
-                content="你是 research worker，优先分析上下文、产物和证据。",
+                content=(
+                    "你是 research worker，优先分析上下文、产物和证据。\n"
+                    "如果问题依赖今天、最新公开信息、官网、网页资料或外部文档，优先使用受治理 "
+                    "web.search / web.fetch / browser.* 收集证据，并在结果中说明来源与不确定性。"
+                ),
                 metadata={"worker_type": "research"},
             ),
             "bootstrap:dev": WorkerBootstrapFile(
@@ -2279,8 +2379,44 @@ class CapabilityPackService:
         return RuntimeKind.SUBAGENT.value
 
     @staticmethod
-    def _tool_profile_for_worker_type(worker_type: WorkerType) -> str:
+    def _requires_standard_web_access(objective: str, worker_type: WorkerType) -> bool:
+        lowered = objective.lower()
+        common_tokens = (
+            "天气",
+            "今天",
+            "最新",
+            "官网",
+            "官方",
+            "网页",
+            "网站",
+            "站点",
+            "搜索",
+            "查一下",
+            "查找",
+            "browser",
+            "navigate",
+            "search",
+            "latest",
+            "today",
+            "weather",
+            "website",
+            "official",
+        )
+        ops_tokens = ("状态页", "status page", "console", "health", "incident", "控制台", "健康")
+        if any(token in lowered for token in common_tokens):
+            return worker_type in {WorkerType.RESEARCH, WorkerType.OPS}
+        return worker_type == WorkerType.OPS and any(token in lowered for token in ops_tokens)
+
+    @classmethod
+    def _effective_tool_profile_for_objective(
+        cls,
+        worker_type: WorkerType,
+        *,
+        objective: str,
+    ) -> str:
         if worker_type == WorkerType.DEV:
+            return ToolProfile.STANDARD.value
+        if cls._requires_standard_web_access(objective, worker_type):
             return ToolProfile.STANDARD.value
         return ToolProfile.MINIMAL.value
 
@@ -2291,13 +2427,28 @@ class CapabilityPackService:
         index: int,
     ) -> _WorkerPlanAssignment:
         worker_type = self._classify_worker_type(objective)
+        tool_profile = self._effective_tool_profile_for_objective(
+            worker_type,
+            objective=objective,
+        )
+        reason = f"该子任务更适合由 {worker_type.value} worker 处理。"
+        if worker_type == WorkerType.RESEARCH and tool_profile == ToolProfile.STANDARD.value:
+            reason = (
+                "该子任务涉及最新公开信息或网页资料，"
+                "适合由 research worker 使用受治理 web/browser 工具处理。"
+            )
+        elif worker_type == WorkerType.OPS and tool_profile == ToolProfile.STANDARD.value:
+            reason = (
+                "该子任务涉及外部状态或网页检查，"
+                "适合由 ops worker 使用受治理 runtime/web 工具处理。"
+            )
         return _WorkerPlanAssignment(
             objective=objective,
             worker_type=worker_type.value,
             target_kind=self._target_kind_for_worker_type(worker_type),
-            tool_profile=self._tool_profile_for_worker_type(worker_type),
+            tool_profile=tool_profile,
             title=f"{worker_type.value}-worker-{index}",
-            reason=f"该子任务更适合由 {worker_type.value} worker 处理。",
+            reason=reason,
         )
 
     async def _launch_child_task(

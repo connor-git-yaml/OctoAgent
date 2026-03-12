@@ -17,6 +17,7 @@ from octoagent.core.models import (
     HumanInputPolicy,
     NormalizedMessage,
     OrchestratorRequest,
+    OwnerProfile,
     Project,
     ProjectSelectorState,
     WorkerType,
@@ -186,6 +187,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "mcp.tools.list",
             "web.search",
             "browser.status",
+            "runtime.now",
             "memory.search",
             "memory.recall",
         }.issubset(tool_names)
@@ -218,6 +220,84 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         )
         assert "Butler" in general_bootstrap.content
         assert "不要把自己叫作 general worker" in general_bootstrap.content
+        assert "今天、天气、最新资料、官网、网页信息" in general_bootstrap.content
+
+        shared_bootstrap = next(
+            item for item in pack.bootstrap_files if item.file_id == "bootstrap:shared"
+        )
+        assert "Current Datetime Local" in shared_bootstrap.content
+        assert "Default Tool Profile" in shared_bootstrap.content
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_summary(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        await store_group.agent_context_store.save_owner_profile(
+            OwnerProfile(
+                owner_profile_id="owner-profile-default",
+                timezone="Asia/Shanghai",
+                locale="zh-CN",
+            )
+        )
+        rendered = await capability_pack.render_bootstrap_context(
+            worker_type=WorkerType.RESEARCH,
+            project_id="project-default",
+            workspace_id="workspace-default",
+            surface="web",
+        )
+        joined = "\n".join(item["content"] for item in rendered)
+        assert "Project: Default Project (default / project-default)" in joined
+        assert "Current Datetime Local:" in joined
+        assert "Owner Timezone: Asia/Shanghai" in joined
+        assert "Surface: web" in joined
+        assert "Worker Type: research" in joined
+        assert (
+            "Default Tool Groups: project, artifact, session, network, browser, memory, "
+            "document, media, mcp" in joined
+        )
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        rendered = await capability_pack.render_bootstrap_context(
+            worker_type=WorkerType.RESEARCH,
+            project_id="project-default",
+            workspace_id="workspace-default",
+            surface="web",
+        )
+        joined = "\n".join(item["content"] for item in rendered)
+        assert "Owner Timezone: UTC" in joined
+        assert "Owner Locale: zh-CN" in joined
+        assert "Ambient Degraded Reasons: owner_timezone_missing, owner_locale_missing" in joined
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -929,6 +1009,378 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
             "minimal",
             "standard",
         }
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_workers_review_uses_standard_profile_for_freshness_queries(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请查一下北京今天的天气和官网公告",
+                idempotency_key="feature-041-workers-review-freshness",
+            )
+        )
+        assert created is True
+
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请查一下北京今天的天气和官网公告",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-041-review",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.MINIMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "workers.review",
+                {"objective": "请查一下北京今天的天气和官网公告"},
+                broker_context,
+            )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["proposal_kind"] == "split"
+        assert len(payload["assignments"]) == 1
+        assignment = payload["assignments"][0]
+        assert assignment["worker_type"] == "research"
+        assert assignment["tool_profile"] == "standard"
+        assert "web/browser" in assignment["reason"]
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_runtime_now_tool_returns_owner_local_time_payload(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        await store_group.agent_context_store.save_owner_profile(
+            OwnerProfile(
+                owner_profile_id="owner-profile-default",
+                timezone="Asia/Shanghai",
+                locale="zh-CN",
+            )
+        )
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="现在几点",
+                idempotency_key="feature-041-runtime-now",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="现在几点",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-041-runtime-now",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.MINIMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute("runtime.now", {}, broker_context)
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["timezone"] == "Asia/Shanghai"
+        assert payload["locale"] == "zh-CN"
+        assert payload["surface"] == "web"
+        assert payload["source"] == "system_clock"
+        assert payload["degraded_reasons"] == []
+        assert payload["current_datetime_local"]
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="现在几点",
+                idempotency_key="feature-041-runtime-now-missing-owner",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="现在几点",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-041-runtime-now-missing-owner",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.MINIMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute("runtime.now", {}, broker_context)
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["timezone"] == "UTC"
+        assert payload["locale"] == "zh-CN"
+        assert payload["surface"] == "web"
+        assert "owner_timezone_missing" in payload["degraded_reasons"]
+        assert "owner_locale_missing" in payload["degraded_reasons"]
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请处理实时查询",
+                idempotency_key="feature-041-subagents-spawn-freshness",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请处理实时查询",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-041-subagent-spawn",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.STANDARD,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "subagents.spawn",
+                {
+                    "objective": "请查一下北京今天的天气和官网公告",
+                    "worker_type": "research",
+                    "target_kind": "subagent",
+                    "title": "freshness-worker",
+                },
+                broker_context,
+            )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["tool_profile"] == "standard"
+        assert payload["worker_type"] == "research"
+        assert payload["parent_work_id"] == plan.work.work_id
+
+        child_works = []
+        for _ in range(30):
+            child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
+            if child_works:
+                break
+            await asyncio.sleep(0.05)
+
+        assert len(child_works) == 1
+        child = child_works[0]
+        assert child.project_id == "project-default"
+        assert child.workspace_id == "workspace-default"
+        assert child.metadata["requested_tool_profile"] == "standard"
+        assert child.metadata["requested_worker_type"] == "research"
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请总结 API 文档的关键约束",
+                idempotency_key="feature-041-subagents-spawn-local-docs",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请总结 API 文档的关键约束",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-041-subagent-spawn-local-docs",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.STANDARD,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "subagents.spawn",
+                {
+                    "objective": "请总结 API 文档的关键约束",
+                    "worker_type": "research",
+                    "target_kind": "subagent",
+                    "title": "local-doc-worker",
+                },
+                broker_context,
+            )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["tool_profile"] == "minimal"
+        assert payload["worker_type"] == "research"
+
+        child_works = []
+        for _ in range(30):
+            child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
+            if child_works:
+                break
+            await asyncio.sleep(0.05)
+
+        assert len(child_works) == 1
+        child = child_works[0]
+        assert child.metadata["requested_tool_profile"] == "minimal"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

@@ -42,6 +42,11 @@ import type {
   SkillPipelineDocument,
   VaultAuthorizationDocument,
 } from "../types";
+import {
+  buildFreshnessReadiness,
+  describeFreshnessWorkPath,
+  formatFreshnessLimitations,
+} from "../workbench/freshness";
 
 const EMPTY_CAPABILITY_PACK: CapabilityPackDocument = {
   contract_version: "1.0.0",
@@ -1127,6 +1132,11 @@ export default function ControlPlane() {
   ]);
   const selectedMemoryRecord =
     memory.records.find((record) => record.subject_key === selectedMemorySubjectKey) ?? null;
+  const freshnessReadiness = buildFreshnessReadiness({
+    context: context_continuity,
+    capabilityPack,
+    works: delegationPlane.works,
+  });
 
   function focusMemoryRecord(record: MemoryRecordProjection) {
     if (record.subject_key) {
@@ -1412,6 +1422,43 @@ export default function ControlPlane() {
               </div>
             </article>
 
+            <article className="panel wide">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">实时问题能力</p>
+                  <h3>{freshnessReadiness.label}</h3>
+                </div>
+                <span className={`tone-chip ${freshnessReadiness.tone}`}>
+                  {freshnessReadiness.badge}
+                </span>
+              </div>
+              <p>{freshnessReadiness.summary}</p>
+              <div className="wb-stat-grid">
+                {freshnessReadiness.tools.map((tool) => (
+                  <article key={tool.label} className="wb-note">
+                    <strong>{tool.label}</strong>
+                    <span>{tool.summary}</span>
+                    <span className={`tone-chip ${tool.tone}`}>{tool.statusLabel}</span>
+                  </article>
+                ))}
+                <article className="wb-note">
+                  <strong>可委派角色</strong>
+                  <span>{freshnessReadiness.workerSummary}</span>
+                </article>
+                <article className="wb-note">
+                  <strong>最近一次相关 Work</strong>
+                  <span>{freshnessReadiness.relevantWorkSummary}</span>
+                </article>
+              </div>
+              {freshnessReadiness.limitations.length > 0 ? (
+                <p className="warning-text">
+                  当前限制：{formatFreshnessLimitations(freshnessReadiness.limitations)}
+                </p>
+              ) : (
+                <p className="muted">当前没有 freshness 相关降级原因。</p>
+              )}
+            </article>
+
             <article className="panel">
               <div className="panel-head">
                 <div>
@@ -1684,8 +1731,10 @@ export default function ControlPlane() {
               </div>
               <pre className="json-preview">{formatJson(delegationPlane.summary)}</pre>
             </article>
-            {delegationPlane.works.map((work) => (
-              <article key={work.work_id} className="panel">
+            {delegationPlane.works.map((work) => {
+              const freshnessPath = describeFreshnessWorkPath(work);
+              return (
+                <article key={work.work_id} className="panel">
                 <div className="panel-head">
                   <div>
                     <p className="eyebrow">{work.work_id}</p>
@@ -1707,6 +1756,7 @@ export default function ControlPlane() {
                 <p className="muted">
                   Selected Tools: {work.selected_tools.join(", ") || "none"}
                 </p>
+                {freshnessPath ? <p className="muted">{freshnessPath}</p> : null}
                 {work.runtime_summary &&
                 Object.keys(work.runtime_summary).length > 0 ? (
                   <pre className="json-preview">{formatJson(work.runtime_summary)}</pre>
@@ -1771,8 +1821,9 @@ export default function ControlPlane() {
                     升级
                   </button>
                 </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </section>
         ) : null}
 

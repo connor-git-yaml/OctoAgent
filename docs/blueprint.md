@@ -2722,6 +2722,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 2026-03-09 设计复核新增 Feature 033：当时主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；该补位已完成，不再作为当前 blocker。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 live A2A dispatch 归一化。
+- 2026-03-12 live usage 复核新增并完成 Feature 041：当前系统已把 ambient current time、freshness query delegation、worker governed web/tool readiness 与 runtime truth/workbench 可视化收口为正式主链，Butler / Worker / Project / Tool 现在可以按默认 ready for real-world freshness queries 的口径对外描述。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
 
 M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
@@ -2803,12 +2804,14 @@ M3 核心对象关系（2026-03-08 补充）：
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（主 Agent 默认 supervisor only、`workers.review`、`worker.review/apply`、child work `requested_tool_profile`、live A2A roundtrip）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
+- [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、freshness query delegation、worker governed web/tool readiness，并把“今天/天气/官网/最新资料”纳入正式 acceptance；workbench/control plane 已能展示相关 runtime truth 与 degraded reason）
 
 M4 约束：
 
 - M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
 - 上下文压缩与 runtime lineage 类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
 - 主 Agent 默认必须是 supervisor；具体执行面由 `research / dev / ops / subagent / graph` 承担，不再把 web/browser/code 等工具默认挂在主 Agent 身上
+- 若系统已经具备 delegated `web.search / web.fetch / browser.*` 路径，则 Butler/Worker 必须把“实时/外部事实问题”优先解释为可治理 delegation，而不是直接退回“没有实时能力”的静态回答
 - live dispatch 必须真的经过 A2A 归一化，并保留 runtime context / work lineage；不能只有 A2A adapter 或测试样例
 - 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
 - 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义

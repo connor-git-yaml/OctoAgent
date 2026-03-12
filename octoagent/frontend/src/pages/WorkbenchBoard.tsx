@@ -6,6 +6,11 @@ import type {
   WorkProjectionItem,
   WorkerPlanProposal,
 } from "../types";
+import {
+  buildFreshnessReadiness,
+  describeFreshnessWorkPath,
+  formatFreshnessLimitations,
+} from "../workbench/freshness";
 import { formatDateTime, formatSupportStatus } from "../workbench/utils";
 
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
@@ -248,6 +253,7 @@ function WorkSection({
             const requestedToolProfile = String(
               work.runtime_summary.requested_tool_profile ?? ""
             ).trim();
+            const freshnessPath = describeFreshnessWorkPath(work);
 
             return (
               <article key={work.work_id} className="wb-work-card">
@@ -317,6 +323,13 @@ function WorkSection({
                   <div className="wb-inline-banner is-muted">
                     <strong>当前限制</strong>
                     <span>{disabledReasons.join("；")}</span>
+                  </div>
+                ) : null}
+
+                {freshnessPath ? (
+                  <div className="wb-inline-banner is-muted">
+                    <strong>实时资料路径</strong>
+                    <span>{freshnessPath}</span>
                   </div>
                 ) : null}
 
@@ -393,6 +406,11 @@ function WorkSection({
 export default function WorkbenchBoard() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const works = snapshot!.resources.delegation.works;
+  const freshnessReadiness = buildFreshnessReadiness({
+    context: snapshot!.resources.context_continuity,
+    capabilityPack: snapshot!.resources.capability_pack,
+    works,
+  });
   const pendingTotal = snapshot!.resources.sessions.operator_summary?.total_pending ?? 0;
   const buckets = bucketWorks(works);
   const sortedWorks = sortWorks(works);
@@ -595,41 +613,63 @@ export default function WorkbenchBoard() {
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">分布概览</p>
-              <h3>先按角色理解当前负载</h3>
+              <p className="wb-card-label">实时问题能力</p>
+              <h3>{freshnessReadiness.label}</h3>
             </div>
+            <span className={`wb-status-pill is-${freshnessReadiness.tone}`}>
+              {freshnessReadiness.badge}
+            </span>
           </div>
+          <p>{freshnessReadiness.summary}</p>
 
           <div className="wb-stat-grid">
+            {freshnessReadiness.tools.map((tool) => (
+              <article key={tool.label} className="wb-note">
+                <strong>{tool.label}</strong>
+                <span>{tool.summary}</span>
+                <div className="wb-chip-row">
+                  <span className={`wb-status-pill is-${tool.tone}`}>{tool.statusLabel}</span>
+                </div>
+              </article>
+            ))}
+
             <article className="wb-note">
-              <strong>Worker 类型</strong>
-              <div className="wb-chip-row">
-                {workerTypeEntries.length > 0 ? (
-                  workerTypeEntries.map(([workerType, count]) => (
-                    <span key={workerType} className="wb-chip">
-                      {formatWorkerType(workerType)} {count}
-                    </span>
-                  ))
-                ) : (
-                  <span>当前没有 work。</span>
-                )}
-              </div>
+              <strong>可委派角色</strong>
+              <span>{freshnessReadiness.workerSummary}</span>
             </article>
 
             <article className="wb-note">
-              <strong>子工作与合并</strong>
-              <span>
-                共 {works.reduce((sum, work) => sum + work.child_work_count, 0)} 个 child work，
-                其中 {mergeReadyCount} 条已满足合并条件。
-              </span>
+              <strong>最近一次相关 Work</strong>
+              <span>{freshnessReadiness.relevantWorkSummary}</span>
             </article>
+          </div>
 
-            <article className="wb-note">
-              <strong>阅读建议</strong>
-              <span>
-                先看等待区，再看运行区；如果某条 work 支持 Worker Review，优先先看治理方案再执行。
-              </span>
-            </article>
+          {freshnessReadiness.limitations.length > 0 ? (
+            <div className="wb-inline-banner is-muted">
+              <strong>当前限制</strong>
+              <span>{formatFreshnessLimitations(freshnessReadiness.limitations)}</span>
+            </div>
+          ) : (
+            <div className="wb-inline-banner is-muted">
+              <strong>当前限制</strong>
+              <span>没有发现 freshness 相关降级原因。</span>
+            </div>
+          )}
+
+          <div className="wb-chip-row">
+            {workerTypeEntries.length > 0 ? (
+              workerTypeEntries.map(([workerType, count]) => (
+                <span key={workerType} className="wb-chip">
+                  {formatWorkerType(workerType)} {count}
+                </span>
+              ))
+            ) : (
+              <span className="wb-chip">当前没有 work</span>
+            )}
+            <span className="wb-chip">
+              Child {works.reduce((sum, work) => sum + work.child_work_count, 0)}
+            </span>
+            <span className="wb-chip">可合并 {mergeReadyCount}</span>
           </div>
         </section>
       </div>

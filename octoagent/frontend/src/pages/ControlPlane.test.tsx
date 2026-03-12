@@ -1112,6 +1112,117 @@ describe("ControlPlane", () => {
     expect(screen.getByText("TaskRunner / Execution runtime")).toBeInTheDocument();
   });
 
+  it("Dashboard 和 Delegation 会显示实时问题能力与对应 work 路径", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.context_continuity.degraded = {
+      is_degraded: true,
+      reasons: ["owner_timezone_invalid"] as never[],
+      unavailable_sections: [] as never[],
+    };
+    snapshot.resources.context_continuity.frames[0] = {
+      ...snapshot.resources.context_continuity.frames[0],
+      degraded_reason: "owner_timezone_invalid",
+    };
+    snapshot.resources.capability_pack.pack.worker_profiles.push({
+      worker_type: "research",
+      capabilities: ["research", "web"],
+      default_model_alias: "main",
+      default_tool_profile: "standard",
+      default_tool_groups: ["network", "browser", "session"],
+      bootstrap_file_ids: ["bootstrap:shared", "bootstrap:research"],
+      runtime_kinds: ["worker", "subagent"],
+      metadata: {},
+    });
+    snapshot.resources.capability_pack.pack.tools.push(
+      {
+        tool_name: "runtime.now",
+        label: "Runtime Now",
+        description: "return local datetime",
+        tool_group: "session",
+        tool_profile: "minimal",
+        tags: ["time"],
+        worker_types: ["general", "research", "ops"],
+        manifest_ref: "builtin://runtime.now",
+        availability: "available",
+        availability_reason: "",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+      {
+        tool_name: "web.search",
+        label: "Web Search",
+        description: "search web",
+        tool_group: "network",
+        tool_profile: "standard",
+        tags: ["web"],
+        worker_types: ["research", "ops"],
+        manifest_ref: "builtin://web.search",
+        availability: "available",
+        availability_reason: "",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+      {
+        tool_name: "browser.status",
+        label: "Browser Status",
+        description: "inspect browser session",
+        tool_group: "browser",
+        tool_profile: "standard",
+        tags: ["browser"],
+        worker_types: ["research", "ops"],
+        manifest_ref: "builtin://browser.status",
+        availability: "degraded",
+        availability_reason: "browser_controller_missing",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      }
+    );
+    snapshot.resources.delegation.works[0] = {
+      ...snapshot.resources.delegation.works[0],
+      title: "检查官网最新公告",
+      selected_worker_type: "research",
+      route_reason: "worker_type=research | fallback=single_worker",
+      selected_tools: ["runtime.now", "web.search"],
+      runtime_summary: {
+        ...snapshot.resources.delegation.works[0].runtime_summary,
+        requested_worker_type: "research",
+        requested_tool_profile: "standard",
+      },
+    } as (typeof snapshot.resources.delegation.works)[number];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("实时问题能力已经部分可用")).toBeInTheDocument();
+    expect(screen.getAllByText(/owner timezone 配置无效/).length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
+
+    expect(
+      await screen.findByText(/Research Worker 会按标准工具面处理这条工作/)
+    ).toBeInTheDocument();
+  });
+
   it("project.select 会提交统一 action 并按 resource_refs 回刷 project selector", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const beforeSnapshot = buildSnapshot("project-default");

@@ -2509,6 +2509,131 @@ describe("App workbench routing", () => {
     expect(textarea).toHaveValue("整理依赖\n补测试");
   });
 
+  it("Work 看板会把实时问题能力和相关运行真相翻译成可读摘要", async () => {
+    window.history.pushState({}, "", "/work");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.context_continuity.degraded = {
+      is_degraded: true,
+      reasons: ["owner_timezone_missing"],
+      unavailable_sections: [],
+    };
+    snapshot.resources.context_continuity.frames = [
+      {
+        context_frame_id: "frame-freshness-1",
+        task_id: "task-work-weather",
+        session_id: "session-work-weather",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        agent_profile_id: "agent-profile-default",
+        recent_summary: "围绕天气查询更新了当前运行事实。",
+        memory_hit_count: 0,
+        memory_hits: [],
+        memory_recall: {},
+        budget: {},
+        source_refs: [],
+        degraded_reason: "owner_timezone_missing",
+        created_at: "2026-03-12T08:00:00Z",
+      },
+    ];
+    snapshot.resources.capability_pack.pack.worker_profiles = [
+      {
+        worker_type: "research",
+        capabilities: ["research", "web"],
+        default_model_alias: "main",
+        default_tool_profile: "standard",
+        default_tool_groups: ["network", "browser", "session"],
+        bootstrap_file_ids: ["bootstrap:shared", "bootstrap:research"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+    ];
+    snapshot.resources.capability_pack.pack.tools = [
+      {
+        tool_name: "runtime.now",
+        label: "Runtime Now",
+        description: "return local datetime",
+        tool_group: "session",
+        tool_profile: "minimal",
+        tags: ["time"],
+        worker_types: ["general", "research", "ops"],
+        manifest_ref: "builtin://runtime.now",
+        availability: "available",
+        availability_reason: "",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+      {
+        tool_name: "web.search",
+        label: "Web Search",
+        description: "search web",
+        tool_group: "network",
+        tool_profile: "standard",
+        tags: ["web"],
+        worker_types: ["research", "ops"],
+        manifest_ref: "builtin://web.search",
+        availability: "available",
+        availability_reason: "",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+      {
+        tool_name: "browser.status",
+        label: "Browser Status",
+        description: "inspect browser session",
+        tool_group: "browser",
+        tool_profile: "standard",
+        tags: ["browser"],
+        worker_types: ["research", "ops"],
+        manifest_ref: "builtin://browser.status",
+        availability: "degraded",
+        availability_reason: "browser_controller_missing",
+        install_hint: "",
+        entrypoints: ["agent_runtime", "web"],
+        runtime_kinds: ["worker", "subagent"],
+        metadata: {},
+      },
+    ];
+    snapshot.resources.delegation.works = [
+      buildWork("work-weather", "running", {
+        title: "查询北京今天会不会下雨",
+        runtimeSummary: {
+          requested_tool_profile: "standard",
+          requested_worker_type: "research",
+        },
+      }),
+    ];
+    snapshot.resources.delegation.works[0]!.selected_worker_type = "research";
+    snapshot.resources.delegation.works[0]!.route_reason =
+      "worker_type=research | fallback=single_worker";
+    snapshot.resources.delegation.works[0]!.selected_tools = ["runtime.now", "web.search"];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && input) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("实时问题能力已经部分可用")).toBeInTheDocument();
+    expect(
+      screen.getByText(/主链已经存在，但当前还有降级或环境限制/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Research Worker · 标准工具面 · network \/ browser \/ session/)).toBeInTheDocument();
+    expect(screen.getAllByText(/owner timezone 未配置/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Research Worker 会按标准工具面处理这条工作/).length).toBeGreaterThan(0);
+  });
+
   it("Memory 页面会按当前筛选条件提交查询并展示可读摘要", async () => {
     window.history.pushState({}, "", "/memory");
 

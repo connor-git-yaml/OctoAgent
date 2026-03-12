@@ -24,7 +24,10 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
-from octoagent.gateway.services.agent_context import build_scope_aware_session_id
+from octoagent.gateway.services.agent_context import (
+    build_ambient_runtime_facts,
+    build_scope_aware_session_id,
+)
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
@@ -68,6 +71,37 @@ class RecordingLLMService:
             is_fallback=False,
             fallback_reason="",
         )
+
+
+def test_build_ambient_runtime_facts_formats_local_datetime_and_fallbacks() -> None:
+    facts, degraded_reasons = build_ambient_runtime_facts(
+        owner_profile=OwnerProfile(
+            owner_profile_id="owner-profile-test",
+            timezone="Asia/Shanghai",
+            locale="zh-CN",
+        ),
+        surface="web",
+        now=datetime(2026, 3, 12, 1, 2, 3, tzinfo=UTC),
+    )
+    assert facts["current_datetime_local"] == "2026-03-12 09:02:03"
+    assert facts["current_weekday_local"] == "星期四"
+    assert facts["timezone"] == "Asia/Shanghai"
+    assert facts["surface"] == "web"
+    assert degraded_reasons == []
+
+    fallback_facts, fallback_reasons = build_ambient_runtime_facts(
+        owner_profile=OwnerProfile(
+            owner_profile_id="owner-profile-fallback",
+            timezone="Invalid/Timezone",
+            locale="",
+        ),
+        surface="chat",
+        now=datetime(2026, 3, 12, 1, 2, 3, tzinfo=UTC),
+    )
+    assert fallback_facts["timezone"] == "UTC"
+    assert fallback_facts["locale"] == "zh-CN"
+    assert "owner_timezone_invalid" in fallback_reasons
+    assert "owner_locale_missing" in fallback_reasons
 
 
 async def _seed_project_context(store_group) -> None:
@@ -274,6 +308,9 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     joined = "\n".join(str(item.get("content", "")) for item in prompt)
     assert "你负责 Alpha 项目的需求连续性与交付推进" in joined
     assert "Alpha Agent" in joined
+    assert "AmbientRuntime:" in joined
+    assert "timezone: UTC" in joined
+    assert "current_weekday_local:" in joined
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in joined
     assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in joined
     assert "memory://memory/project-alpha/sor/alpha-constraint" in joined
@@ -322,6 +359,8 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         "session_id: surface:web|scope:chat:web:thread-alpha|"
         "project:project-alpha|workspace:workspace-alpha|thread:thread-alpha" in request_text
     )
+    assert "AmbientRuntime:" in request_text
+    assert "timezone: UTC" in request_text
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in request_text
     assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in request_text
     assert final_tokens > history_tokens

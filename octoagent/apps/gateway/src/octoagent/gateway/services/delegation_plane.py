@@ -820,10 +820,12 @@ class DelegationPlaneService:
 
     async def _handle_bootstrap_prepare(self, *, run, node, state):
         worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
+        runtime_context = state.get("runtime_context", {})
         bootstrap = await self._capability_pack.render_bootstrap_context(
             worker_type=worker_type,
             project_id=str(state.get("project_id", "")),
             workspace_id=str(state.get("workspace_id", "")),
+            surface=str(runtime_context.get("surface", state.get("surface", "chat"))),
         )
         return PipelineNodeOutcome(
             summary=f"bootstrap prepared for {worker_type.value}",
