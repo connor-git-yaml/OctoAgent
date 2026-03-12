@@ -743,6 +743,8 @@ describe("App workbench routing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+    window.localStorage.clear();
     window.history.pushState({}, "", "/");
   });
 
@@ -2373,6 +2375,73 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("帮我回顾今天的 Web 对话")).toBeInTheDocument();
     expect(await screen.findByText("这里是最近一轮 Web 对话的摘要。")).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { name: "Web 会话" }).length).toBeGreaterThan(0);
+  });
+
+  it("刷新 Chat 时会在失效的 active task 之后回退到最近的 Web 会话", async () => {
+    window.history.pushState({}, "", "/chat");
+    window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-missing");
+
+    const snapshot = buildSnapshot();
+    const webSession = {
+      ...buildSession("task-chat-fallback", "work-chat-fallback"),
+      title: "回退会话",
+      latest_event_at: "2026-03-09T10:12:00Z",
+    };
+    snapshot.resources.sessions.sessions = [webSession];
+
+    const detail = buildTaskDetail("task-chat-fallback", "回退会话");
+    detail.events = [
+      {
+        event_id: "evt-user-fallback",
+        task_seq: 1,
+        ts: "2026-03-09T10:11:00Z",
+        type: "USER_MESSAGE",
+        actor: "user",
+        payload: {
+          text: "帮我恢复最近的聊天",
+        },
+      },
+      {
+        event_id: "evt-agent-fallback",
+        task_seq: 2,
+        ts: "2026-03-09T10:11:30Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "已经按最近的 Web 会话恢复。",
+        },
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/tasks/task-missing")) {
+        return Promise.resolve(
+          jsonResponse(
+            {
+              error: {
+                code: "TASK_NOT_FOUND",
+                message: "task-missing 不存在",
+              },
+            },
+            404
+          )
+        );
+      }
+      if (url.includes("/api/tasks/task-chat-fallback")) {
+        return Promise.resolve(jsonResponse(detail));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("帮我恢复最近的聊天")).toBeInTheDocument();
+    expect(await screen.findByText("已经按最近的 Web 会话恢复。")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("octoagent.chat.activeTaskId")).toBe("task-chat-fallback");
   });
 
   it("Work 看板会覆盖完整状态并在 split 失败时保留草稿", async () => {

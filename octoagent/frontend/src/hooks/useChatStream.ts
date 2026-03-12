@@ -29,6 +29,8 @@ export interface UseChatStreamReturn {
   messages: ChatMessage[];
   /** 是否正在流式接收 */
   streaming: boolean;
+  /** 是否正在恢复历史对话 */
+  restoring: boolean;
   /** 错误信息 */
   error: string | null;
   /** 发送消息 */
@@ -38,7 +40,7 @@ export interface UseChatStreamReturn {
 }
 
 export interface ChatRestoreTarget {
-  taskId: string;
+  taskIds: string[];
 }
 
 const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
@@ -60,6 +62,33 @@ function persistTaskId(taskId: string | null): void {
     return;
   }
   window.sessionStorage.removeItem(ACTIVE_CHAT_TASK_STORAGE_KEY);
+}
+
+function normalizeTaskId(taskId: string | null | undefined): string | null {
+  if (!taskId) {
+    return null;
+  }
+  const normalized = taskId.trim();
+  return normalized ? normalized : null;
+}
+
+function buildRestoreCandidateTaskIds(
+  currentTaskId: string | null,
+  restoreTarget: ChatRestoreTarget | null
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of [currentTaskId, ...(restoreTarget?.taskIds ?? [])]) {
+    const normalized = normalizeTaskId(value);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    candidates.push(normalized);
+  }
+
+  return candidates;
 }
 
 function extractAgentMessage(
@@ -161,10 +190,12 @@ function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] 
 export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(() => readStoredTaskId());
   const eventSourceRef = useRef<EventSource | null>(null);
-  const restoredTaskIdRef = useRef<string | null>(null);
+  const attemptedRestoreSignatureRef = useRef<string | null>(null);
+  const restoreTaskIdSignature = (restoreTarget?.taskIds ?? []).join("|");
 
   /** 关闭 EventSource */
   const closeStream = useCallback(() => {
@@ -192,6 +223,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
       // 发送到后端
       try {
         setError(null);
+        setRestoring(false);
         const resp = await frontDoorRequest("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -330,28 +362,50 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     let cancelled = false;
 
     async function restoreConversation() {
-      const candidateTaskId = taskId || restoreTarget?.taskId || "";
-      if (!candidateTaskId || messages.length > 0 || streaming) {
+      const candidateTaskIds = buildRestoreCandidateTaskIds(taskId, restoreTarget);
+      if (candidateTaskIds.length === 0 || messages.length > 0 || streaming) {
+        setRestoring(false);
         return;
       }
-      if (restoredTaskIdRef.current === candidateTaskId) {
+      const restoreSignature = candidateTaskIds.join("|");
+      if (attemptedRestoreSignatureRef.current === restoreSignature) {
         return;
       }
-      restoredTaskIdRef.current = candidateTaskId;
+      attemptedRestoreSignatureRef.current = restoreSignature;
+      setRestoring(true);
       try {
-        const detail = await fetchTaskDetail(candidateTaskId);
-        if (cancelled) {
-          return;
+        for (const candidateTaskId of candidateTaskIds) {
+          try {
+            const detail = await fetchTaskDetail(candidateTaskId);
+            if (cancelled) {
+              return;
+            }
+            const restoredMessages = buildMessagesFromTaskDetail(detail);
+            if (restoredMessages.length === 0) {
+              continue;
+            }
+            setTaskId(candidateTaskId);
+            setMessages(restoredMessages);
+            setError(null);
+            return;
+          } catch {
+            if (cancelled) {
+              return;
+            }
+          }
         }
-        setTaskId(candidateTaskId);
-        setMessages(buildMessagesFromTaskDetail(detail));
-      } catch {
+
         if (!cancelled) {
-          if (taskId === candidateTaskId) {
+          const primaryCandidateTaskId = candidateTaskIds[0] ?? null;
+          if (taskId === primaryCandidateTaskId) {
             setTaskId(null);
           }
           persistTaskId(null);
           setMessages([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setRestoring(false);
         }
       }
     }
@@ -360,7 +414,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     return () => {
       cancelled = true;
     };
-  }, [messages.length, restoreTarget?.taskId, streaming, taskId]);
+  }, [messages.length, restoreTaskIdSignature, streaming, taskId]);
 
   useEffect(() => {
     persistTaskId(taskId);
@@ -375,6 +429,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
   return {
     messages,
     streaming,
+    restoring,
     error,
     sendMessage,
     taskId,

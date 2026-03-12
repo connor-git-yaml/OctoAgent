@@ -7,30 +7,46 @@ import { useChatStream } from "../hooks/useChatStream";
 import type { SessionProjectionDocument, TaskDetailResponse } from "../types";
 import { formatDateTime } from "../workbench/utils";
 
-function resolveRestorableTaskId(sessions: SessionProjectionDocument): string | null {
+function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void {
+  if (!taskId || taskIds.includes(taskId)) {
+    return;
+  }
+  taskIds.push(taskId);
+}
+
+function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[] {
   const webSessions = sessions.sessions.filter((item) => item.channel === "web");
   const candidates = webSessions.length > 0 ? webSessions : sessions.sessions;
+  const taskIds: string[] = [];
   if (sessions.focused_session_id) {
     const focused = candidates.find((item) => item.session_id === sessions.focused_session_id);
     if (focused) {
-      return focused.task_id;
+      pushRestoreTaskId(taskIds, focused.task_id);
     }
   }
   if (sessions.focused_thread_id) {
     const focused = candidates.find((item) => item.thread_id === sessions.focused_thread_id);
     if (focused) {
-      return focused.task_id;
+      pushRestoreTaskId(taskIds, focused.task_id);
     }
   }
-  return candidates[0]?.task_id ?? null;
+
+  for (const item of candidates) {
+    pushRestoreTaskId(taskIds, item.task_id);
+  }
+  for (const item of sessions.sessions) {
+    pushRestoreTaskId(taskIds, item.task_id);
+  }
+
+  return taskIds;
 }
 
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
   const sessions = snapshot!.resources.sessions.sessions;
-  const restoreTaskId = resolveRestorableTaskId(snapshot!.resources.sessions);
-  const { messages, sendMessage, streaming, error, taskId } = useChatStream(
-    restoreTaskId ? { taskId: restoreTaskId } : null
+  const restoreTaskIds = resolveRestorableTaskIds(snapshot!.resources.sessions);
+  const { messages, sendMessage, streaming, restoring, error, taskId } = useChatStream(
+    restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
   );
   const [input, setInput] = useState("");
   const [showInternalRefs, setShowInternalRefs] = useState(false);
@@ -49,7 +65,8 @@ export default function ChatWorkbench() {
     (activeSession
       ? context.frames.find((item) => item.session_id === activeSession.session_id) ?? null
       : null);
-  const isEmptyConversation = messages.length === 0;
+  const isRestoringConversation = restoring && messages.length === 0;
+  const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
   const internalRefs = [
     taskId ? { label: "任务 ID", value: taskId } : null,
     activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
@@ -163,7 +180,14 @@ export default function ChatWorkbench() {
             ) : null}
           </div>
 
-          {isEmptyConversation ? (
+          {isRestoringConversation ? (
+            <div className="wb-chat-empty-stage is-restoring">
+              <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-card">
+                <strong>正在恢复最近对话</strong>
+                <span>稍等，我们正在读取历史消息、任务状态和相关上下文。</span>
+              </div>
+            </div>
+          ) : isEmptyConversation ? (
             <div className="wb-chat-empty-stage">
               <div className="wb-empty-state wb-chat-empty-card">
                 <strong>从这里发出第一条消息</strong>

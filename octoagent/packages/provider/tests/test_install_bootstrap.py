@@ -32,14 +32,26 @@ def test_run_install_bootstrap_existing_descriptor_without_force(
     monkeypatch,
 ) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname='octoagent'\n", encoding="utf-8")
-    monkeypatch.setattr(install_bootstrap, "_run_command", lambda _command, _cwd: None)
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text('{"name":"frontend"}\n', encoding="utf-8")
+    commands: list[tuple[list[str], Path]] = []
 
-    first = install_bootstrap.run_install_bootstrap(tmp_path, skip_frontend=True)
-    second = install_bootstrap.run_install_bootstrap(tmp_path, skip_frontend=True)
+    def fake_run_command(command: list[str], cwd: Path) -> None:
+        commands.append((command, cwd))
+
+    monkeypatch.setattr(install_bootstrap, "_run_command", fake_run_command)
+
+    first = install_bootstrap.run_install_bootstrap(tmp_path, skip_frontend=False)
+    commands.clear()
+    second = install_bootstrap.run_install_bootstrap(tmp_path, skip_frontend=False)
 
     assert first.status == "SUCCEEDED"
     assert second.status == "SUCCEEDED"
     assert second.warnings
+    assert any(command == ["uv", "sync"] for command, _ in commands)
+    assert any(command == ["npm", "install"] for command, _ in commands)
+    assert any(command == ["npm", "run", "build"] for command, _ in commands)
 
 
 def test_run_install_bootstrap_missing_pyproject_fails(tmp_path: Path) -> None:

@@ -239,8 +239,19 @@ def run_install_bootstrap(
     should_skip_runtime_bootstrap = descriptor is not None and not force
 
     try:
+        _run_command(["uv", "sync"], root)
+        attempt.actions_completed.append("uv sync")
+        frontend_root = root / "frontend"
+        has_frontend = frontend_root.exists() and (frontend_root / "package.json").exists()
+        if has_frontend and not skip_frontend:
+            _run_command(["npm", "install"], frontend_root)
+            _run_command(["npm", "run", "build"], frontend_root)
+            attempt.actions_completed.extend(["npm install", "npm run build"])
+        elif skip_frontend:
+            attempt.warnings.append("已跳过前端依赖安装与构建。")
+
         if should_skip_runtime_bootstrap:
-            attempt.warnings.append("检测到已有 managed runtime descriptor，跳过重写。")
+            attempt.warnings.append("检测到已有 managed runtime descriptor，保留现有描述符。")
             attempt.runtime_descriptor_path = str(status_store.descriptor_path)
             attempt.next_actions.extend(
                 [
@@ -249,17 +260,6 @@ def run_install_bootstrap(
                 ]
             )
         else:
-            _run_command(["uv", "sync"], root)
-            attempt.actions_completed.append("uv sync")
-            frontend_root = root / "frontend"
-            has_frontend = frontend_root.exists() and (frontend_root / "package.json").exists()
-            if has_frontend and not skip_frontend:
-                _run_command(["npm", "install"], frontend_root)
-                _run_command(["npm", "run", "build"], frontend_root)
-                attempt.actions_completed.extend(["npm install", "npm run build"])
-            elif skip_frontend:
-                attempt.warnings.append("已跳过前端依赖安装与构建。")
-
             descriptor = _build_runtime_descriptor(
                 root,
                 instance_root=instance_root,
