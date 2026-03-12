@@ -798,8 +798,9 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "把总控、实例和模板分开看" })
+      await screen.findByRole("heading", { name: "让 Butler 管全局，把 Worker 留给具体工作" })
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存 Butler 配置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Worker 模板/ })).toBeInTheDocument();
   });
@@ -1088,8 +1089,8 @@ describe("App workbench routing", () => {
     ).toBeInTheDocument();
   });
 
-  it("设置页执行 setup.review 时保留未提交的主 Agent 草稿", async () => {
-    window.history.pushState({}, "", "/settings");
+  it("Agents 页执行 setup.review 时保留未提交的 Butler 草稿", async () => {
+    window.history.pushState({}, "", "/agents");
 
     const snapshot = buildSnapshot();
     const refreshedSetup = {
@@ -1139,13 +1140,13 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    const nameInput = (await screen.findByLabelText("主 Agent 名称")) as HTMLInputElement;
+    const nameInput = (await screen.findByLabelText("Butler 名称")) as HTMLInputElement;
     await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, "新的主 Agent");
-    await userEvent.click(screen.getByRole("button", { name: "检查配置" }));
+    await userEvent.type(nameInput, "新的 Butler");
+    await userEvent.click(screen.getByRole("button", { name: "检查 Butler 变更" }));
 
     await screen.findByText(/配置检查已完成/);
-    expect(nameInput.value).toBe("新的主 Agent");
+    expect(nameInput.value).toBe("新的 Butler");
   });
 
   it("设置页会为体验模式展示双模式 Provider 配置和模型别名编辑器", async () => {
@@ -1200,10 +1201,10 @@ describe("App workbench routing", () => {
       screen.getByText("你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。")
     ).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
-    expect(screen.getByText("Persona（角色说明）")).toBeInTheDocument();
     expect(
-      screen.getByText("这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。")
+      screen.getByText(/主 Agent 的身份与边界只在 Agents 维护/)
     ).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "去 Agents 调 Butler" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "保持体验模式" })).toBeInTheDocument();
     expect(screen.getByLabelText("Provider 预设")).toBeInTheDocument();
     expect(screen.getByDisplayValue("OPENROUTER_API_KEY")).toBeInTheDocument();
@@ -1309,99 +1310,10 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("已连接")).toBeInTheDocument();
   });
 
-  it("设置页会把 Memory 预设、召回策略和 bridge 配置一起提交到 setup.review", async () => {
-    window.history.pushState({}, "", "/settings");
+  it("Agents 页会把 Butler 记忆边界和召回策略提交到 setup.review", async () => {
+    window.history.pushState({}, "", "/agents");
 
     const snapshot = buildSnapshot();
-    snapshot.resources.config.schema = {
-      type: "object",
-      properties: {
-        memory: {
-          type: "object",
-          properties: {
-            backend_mode: {
-              type: "string",
-              enum: ["local_only", "memu"],
-            },
-            bridge_url: { type: "string" },
-            bridge_api_key_env: { type: "string" },
-            bridge_timeout_seconds: { type: "number" },
-            bridge_search_path: { type: "string" },
-          },
-        },
-      },
-    };
-    snapshot.resources.config.ui_hints = {
-      "memory.backend_mode": {
-        field_path: "memory.backend_mode",
-        section: "memory-basic",
-        label: "Memory 后端模式",
-        description: "",
-        widget: "select",
-        placeholder: "",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 10,
-      },
-      "memory.bridge_url": {
-        field_path: "memory.bridge_url",
-        section: "memory-basic",
-        label: "MemU Bridge 地址",
-        description: "",
-        widget: "text",
-        placeholder: "https://memory.example.com",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 20,
-      },
-      "memory.bridge_api_key_env": {
-        field_path: "memory.bridge_api_key_env",
-        section: "memory-basic",
-        label: "MemU API Key 环境变量名",
-        description: "",
-        widget: "env-ref",
-        placeholder: "MEMU_API_KEY",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 30,
-      },
-      "memory.bridge_timeout_seconds": {
-        field_path: "memory.bridge_timeout_seconds",
-        section: "memory-basic",
-        label: "Bridge 超时时间（秒）",
-        description: "",
-        widget: "text",
-        placeholder: "5",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 40,
-      },
-      "memory.bridge_search_path": {
-        field_path: "memory.bridge_search_path",
-        section: "memory-advanced",
-        label: "检索路径",
-        description: "",
-        widget: "text",
-        placeholder: "/memory/search",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 50,
-      },
-    };
-    snapshot.resources.config.current_value = {
-      memory: {
-        backend_mode: "local_only",
-        bridge_url: "",
-        bridge_api_key_env: "",
-        bridge_timeout_seconds: 5,
-        bridge_search_path: "/memory/search",
-      },
-    };
     snapshot.resources.setup_governance.agent_governance.details = {
       active_agent_profile: {
         profile_id: "agent-profile-default",
@@ -1461,30 +1373,14 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("快速预设")).toBeInTheDocument();
+    expect(await screen.findByText("记忆召回预设")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保守召回" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "广覆盖" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "广覆盖" }));
     await userEvent.click(screen.getByLabelText(/允许带回 Vault 引用/));
     await userEvent.click(screen.getByLabelText(/默认包含历史版本/));
-    await userEvent.selectOptions(screen.getByLabelText(/Memory 后端模式/), "memu");
-
-    const bridgeUrlInput = screen.getByLabelText(/MemU Bridge 地址/);
-    await userEvent.clear(bridgeUrlInput);
-    await userEvent.type(bridgeUrlInput, "https://memory.example.com");
-
-    const bridgeEnvInput = screen.getByLabelText(/MemU API Key 环境变量名/);
-    await userEvent.clear(bridgeEnvInput);
-    await userEvent.type(bridgeEnvInput, "MEMU_API_KEY");
-
-    await userEvent.click(screen.getByRole("button", { name: "改成 8 秒" }));
-
-    const searchPathInput = screen.getByLabelText(/检索路径/);
-    await userEvent.clear(searchPathInput);
-    await userEvent.type(searchPathInput, "/memory/query");
-
-    await userEvent.click(screen.getByRole("button", { name: "检查配置" }));
+    await userEvent.click(screen.getByRole("button", { name: "检查 Butler 变更" }));
 
     await screen.findByText(/配置检查已完成/);
 
@@ -1493,11 +1389,6 @@ describe("App workbench routing", () => {
       .map((call) => String((call as FetchArgs)[1]?.body ?? ""))
       .find((body) => body.includes('"action_id":"setup.review"'));
 
-    expect(actionBody).toContain('"backend_mode":"memu"');
-    expect(actionBody).toContain('"bridge_url":"https://memory.example.com"');
-    expect(actionBody).toContain('"bridge_api_key_env":"MEMU_API_KEY"');
-    expect(actionBody).toContain('"bridge_timeout_seconds":"8"');
-    expect(actionBody).toContain('"bridge_search_path":"/memory/query"');
     expect(actionBody).toContain('"memory_access_policy":{"allow_vault":true,"include_history":true}');
     expect(actionBody).toContain(
       '"context_budget_policy":{"memory_recall":{"post_filter_mode":"none","rerank_mode":"heuristic","min_keyword_overlap":1,"scope_limit":6,"per_scope_limit":4,"max_hits":8}}'
@@ -2481,7 +2372,7 @@ describe("App workbench routing", () => {
 
     expect(await screen.findByText("帮我回顾今天的 Web 对话")).toBeInTheDocument();
     expect(await screen.findByText("这里是最近一轮 Web 对话的摘要。")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Web 会话" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Web 会话" }).length).toBeGreaterThan(0);
   });
 
   it("Work 看板会覆盖完整状态并在 split 失败时保留草稿", async () => {

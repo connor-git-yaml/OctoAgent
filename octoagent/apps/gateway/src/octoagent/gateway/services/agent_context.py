@@ -773,8 +773,8 @@ class AgentContextService:
                 scope=AgentProfileScope.SYSTEM,
                 name="OctoAgent Butler",
                 persona_summary=(
-                    "你是 OctoAgent Butler，负责保持连续上下文、统筹 worker 分工，"
-                    "并优先说明事实与下一步。"
+                    "你是 OctoAgent Butler，也是负责长期协作节奏的 Agent 管家；"
+                    "你要维护连续上下文、统筹 worker 分工，并优先说明事实与下一步。"
                 ),
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
@@ -793,7 +793,7 @@ class AgentContextService:
             name=f"{project.name} Butler",
             persona_summary=(
                 project.description.strip()
-                or f"你是 {project.name} project 的 Butler，负责持续协作、worker 统筹与交付推进。"
+                or f"你是 {project.name} project 的 Butler，负责像管家一样维护目标、上下文、worker 协同与交付节奏。"
             ),
             instruction_overlays=[
                 "默认继承当前 project/workspace 绑定与 owner 偏好。",

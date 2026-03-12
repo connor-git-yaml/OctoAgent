@@ -6,6 +6,8 @@ import type {
   ControlPlaneSnapshot,
   PolicyProfileItem,
   ProjectOption,
+  SetupReviewSummary,
+  SkillGovernanceItem,
   WorkerCapabilityProfile,
   WorkProjectionItem,
   WorkspaceOption,
@@ -16,6 +18,20 @@ type WorkerCatalogView = "instances" | "templates";
 type WorkUnitKind = "instance" | "template";
 type WorkAgentStatus = "active" | "syncing" | "attention" | "paused" | "draft";
 type WorkAgentSource = "runtime" | "capability" | "manual";
+
+interface PrimaryMemoryAccessDraft {
+  allowVault: boolean;
+  includeHistory: boolean;
+}
+
+interface PrimaryMemoryRecallDraft {
+  postFilterMode: string;
+  rerankMode: string;
+  minKeywordOverlap: string;
+  scopeLimit: string;
+  perScopeLimit: string;
+  maxHits: string;
+}
 
 interface PrimaryAgentDraft {
   name: string;
@@ -29,6 +45,8 @@ interface PrimaryAgentDraft {
   proxyUrl: string;
   primaryProvider: string;
   policyProfileId: string;
+  memoryAccessPolicy: PrimaryMemoryAccessDraft;
+  memoryRecall: PrimaryMemoryRecallDraft;
 }
 
 interface WorkAgentItem {
@@ -166,6 +184,57 @@ const MODEL_ALIAS_HINTS: Record<string, string> = {
   reasoning: "优先深度推理，适合复杂判断。",
 };
 
+const DEFAULT_MEMORY_SCOPE_LIMIT = "4";
+const DEFAULT_MEMORY_PER_SCOPE_LIMIT = "3";
+const DEFAULT_MEMORY_MAX_HITS = "4";
+
+const MEMORY_RECALL_PRESETS: Array<{
+  id: string;
+  label: string;
+  description: string;
+  values: PrimaryMemoryRecallDraft;
+}> = [
+  {
+    id: "conservative",
+    label: "保守召回",
+    description: "尽量少带无关记忆，适合刚起步或上下文很敏感的 Butler。",
+    values: {
+      postFilterMode: "keyword_overlap",
+      rerankMode: "heuristic",
+      minKeywordOverlap: "2",
+      scopeLimit: "2",
+      perScopeLimit: "2",
+      maxHits: "3",
+    },
+  },
+  {
+    id: "balanced",
+    label: "平衡默认",
+    description: "适合大多数日常协作，先维持连续性，再避免上下文过载。",
+    values: {
+      postFilterMode: "keyword_overlap",
+      rerankMode: "heuristic",
+      minKeywordOverlap: "1",
+      scopeLimit: DEFAULT_MEMORY_SCOPE_LIMIT,
+      perScopeLimit: DEFAULT_MEMORY_PER_SCOPE_LIMIT,
+      maxHits: DEFAULT_MEMORY_MAX_HITS,
+    },
+  },
+  {
+    id: "wide",
+    label: "广覆盖",
+    description: "更适合长链路任务或复盘，会带回更多记忆候选。",
+    values: {
+      postFilterMode: "none",
+      rerankMode: "heuristic",
+      minKeywordOverlap: "1",
+      scopeLimit: "6",
+      perScopeLimit: "4",
+      maxHits: "8",
+    },
+  },
+];
+
 const CATALOG_COPY = {
   instances: {
     label: "运行中的 Worker",
@@ -180,7 +249,7 @@ const CATALOG_COPY = {
 } as const;
 
 const DEFAULT_PERSONA =
-  "通用个人助手，优先帮助用户完成当前目标，并在必要时安排下一步。";
+  "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
 
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -208,6 +277,138 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean)
     .filter((item, index, all) => all.indexOf(item) === index);
+}
+
+function parsePositiveInt(
+  value: string,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (Number.isNaN(parsed)) {
+    return fallback;
+  }
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function primaryMemoryAccessFromProfile(profile: AgentProfileItem | null): PrimaryMemoryAccessDraft {
+  const raw =
+    profile?.memory_access_policy &&
+    typeof profile.memory_access_policy === "object" &&
+    !Array.isArray(profile.memory_access_policy)
+      ? profile.memory_access_policy
+      : {};
+  return {
+    allowVault: Boolean(raw.allow_vault),
+    includeHistory: Boolean(raw.include_history),
+  };
+}
+
+function primaryMemoryRecallFromProfile(profile: AgentProfileItem | null): PrimaryMemoryRecallDraft {
+  const budget =
+    profile?.context_budget_policy &&
+    typeof profile.context_budget_policy === "object" &&
+    !Array.isArray(profile.context_budget_policy)
+      ? profile.context_budget_policy
+      : {};
+  const raw =
+    budget.memory_recall && typeof budget.memory_recall === "object" && !Array.isArray(budget.memory_recall)
+      ? (budget.memory_recall as Record<string, unknown>)
+      : {};
+  return {
+    postFilterMode: String(raw.post_filter_mode ?? "keyword_overlap") || "keyword_overlap",
+    rerankMode: String(raw.rerank_mode ?? "heuristic") || "heuristic",
+    minKeywordOverlap: String(raw.min_keyword_overlap ?? "1") || "1",
+    scopeLimit: String(raw.scope_limit ?? DEFAULT_MEMORY_SCOPE_LIMIT) || DEFAULT_MEMORY_SCOPE_LIMIT,
+    perScopeLimit:
+      String(raw.per_scope_limit ?? DEFAULT_MEMORY_PER_SCOPE_LIMIT) || DEFAULT_MEMORY_PER_SCOPE_LIMIT,
+    maxHits: String(raw.max_hits ?? DEFAULT_MEMORY_MAX_HITS) || DEFAULT_MEMORY_MAX_HITS,
+  };
+}
+
+function buildSkillSelectionPayload(items: SkillGovernanceItem[]): Record<string, string[]> {
+  const selected_item_ids: string[] = [];
+  const disabled_item_ids: string[] = [];
+  items.forEach((item) => {
+    if (item.selected && !item.enabled_by_default) {
+      selected_item_ids.push(item.item_id);
+    }
+    if (!item.selected && item.enabled_by_default) {
+      disabled_item_ids.push(item.item_id);
+    }
+  });
+  return {
+    selected_item_ids,
+    disabled_item_ids,
+  };
+}
+
+function reviewTone(review: SetupReviewSummary): "success" | "warning" | "danger" {
+  if (review.blocking_reasons.length > 0) {
+    return "danger";
+  }
+  if (review.warnings.length > 0) {
+    return "warning";
+  }
+  return "success";
+}
+
+function reviewHeadline(review: SetupReviewSummary): string {
+  if (review.blocking_reasons.length > 0) {
+    return `还有 ${review.blocking_reasons.length} 个问题要先处理`;
+  }
+  if (review.warnings.length > 0) {
+    return `配置可保存，但还有 ${review.warnings.length} 条提醒`;
+  }
+  return "Butler 配置已经可以直接保存";
+}
+
+function reviewSummary(review: SetupReviewSummary): string {
+  if (review.next_actions.length > 0) {
+    return review.next_actions[0];
+  }
+  if (review.warnings.length > 0) {
+    return review.warnings[0];
+  }
+  return "当前没有额外的处理动作。";
+}
+
+function detectRecallPreset(recall: PrimaryMemoryRecallDraft): string | null {
+  const matched = MEMORY_RECALL_PRESETS.find(
+    (preset) =>
+      preset.values.postFilterMode === recall.postFilterMode &&
+      preset.values.rerankMode === recall.rerankMode &&
+      preset.values.minKeywordOverlap === recall.minKeywordOverlap &&
+      preset.values.scopeLimit === recall.scopeLimit &&
+      preset.values.perScopeLimit === recall.perScopeLimit &&
+      preset.values.maxHits === recall.maxHits
+  );
+  return matched?.label ?? null;
+}
+
+function buildPrimaryAgentPayload(primaryDraft: PrimaryAgentDraft): Record<string, unknown> {
+  return {
+    scope: primaryDraft.scope,
+    name: primaryDraft.name,
+    persona_summary: primaryDraft.personaSummary,
+    model_alias: primaryDraft.modelAlias,
+    tool_profile: primaryDraft.toolProfile,
+    memory_access_policy: {
+      allow_vault: primaryDraft.memoryAccessPolicy.allowVault,
+      include_history: primaryDraft.memoryAccessPolicy.includeHistory,
+    },
+    context_budget_policy: {
+      memory_recall: {
+        post_filter_mode: primaryDraft.memoryRecall.postFilterMode || "keyword_overlap",
+        rerank_mode: primaryDraft.memoryRecall.rerankMode || "heuristic",
+        min_keyword_overlap: parsePositiveInt(primaryDraft.memoryRecall.minKeywordOverlap, 1, 1, 8),
+        scope_limit: parsePositiveInt(primaryDraft.memoryRecall.scopeLimit, 4, 1, 8),
+        per_scope_limit: parsePositiveInt(primaryDraft.memoryRecall.perScopeLimit, 3, 1, 12),
+        max_hits: parsePositiveInt(primaryDraft.memoryRecall.maxHits, 4, 1, 20),
+      },
+    },
+  };
 }
 
 function findProjectName(projects: ProjectOption[], projectId: string): string {
@@ -323,6 +524,18 @@ function primaryProfileFromSnapshot(snapshot: ControlPlaneSnapshot): AgentProfil
       persona_summary: String(activeProfile.persona_summary ?? DEFAULT_PERSONA),
       model_alias: String(activeProfile.model_alias ?? "main"),
       tool_profile: String(activeProfile.tool_profile ?? "standard"),
+      memory_access_policy:
+        activeProfile.memory_access_policy &&
+        typeof activeProfile.memory_access_policy === "object" &&
+        !Array.isArray(activeProfile.memory_access_policy)
+          ? (activeProfile.memory_access_policy as Record<string, unknown>)
+          : {},
+      context_budget_policy:
+        activeProfile.context_budget_policy &&
+        typeof activeProfile.context_budget_policy === "object" &&
+        !Array.isArray(activeProfile.context_budget_policy)
+          ? (activeProfile.context_budget_policy as Record<string, unknown>)
+          : {},
       updated_at: typeof activeProfile.updated_at === "string" ? activeProfile.updated_at : null,
     };
   }
@@ -360,6 +573,8 @@ function buildPrimaryAgentSeed(snapshot: ControlPlaneSnapshot): PrimaryAgentDraf
     proxyUrl: readNestedString(runtime, ["litellm_proxy_url"], "http://localhost:4000"),
     primaryProvider: String(primaryProvider),
     policyProfileId: activePolicy,
+    memoryAccessPolicy: primaryMemoryAccessFromProfile(activeProfile),
+    memoryRecall: primaryMemoryRecallFromProfile(activeProfile),
   };
 }
 
@@ -647,6 +862,8 @@ export default function AgentCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const selector = snapshot!.resources.project_selector;
   const configValue = toRecord(snapshot!.resources.config.current_value);
+  const setup = snapshot!.resources.setup_governance;
+  const skillGovernance = snapshot!.resources.skill_governance;
   const policyProfiles = snapshot!.resources.policy_profiles.profiles;
   const workerProfiles = snapshot!.resources.capability_pack.pack.worker_profiles;
   const toolLabelByName = Object.fromEntries(
@@ -669,14 +886,19 @@ export default function AgentCenter() {
   ]);
   const availableProjects = selector.available_projects;
   const availableWorkspaces = selector.available_workspaces;
-  const initialPrimary = buildPrimaryAgentSeed(snapshot!);
-  const initialAgents = buildWorkAgentSeeds(snapshot!);
+  const primarySeed = buildPrimaryAgentSeed(snapshot!);
+  const primarySeedSyncKey = JSON.stringify(primarySeed);
+  const workAgentSeeds = buildWorkAgentSeeds(snapshot!);
+  const workAgentSeedSyncKey = JSON.stringify(workAgentSeeds);
+  const initialPrimary = primarySeed;
+  const initialAgents = workAgentSeeds;
   const initialSelection =
     initialAgents.find((agent) => agent.kind === "instance") ??
     initialAgents.find((agent) => agent.kind === "template") ??
     null;
   const [savedPrimary, setSavedPrimary] = useState(initialPrimary);
   const [primaryDraft, setPrimaryDraft] = useState(initialPrimary);
+  const [primaryReview, setPrimaryReview] = useState<SetupReviewSummary>(setup.review);
   const [workAgents, setWorkAgents] = useState<WorkAgentItem[]>(initialAgents);
   const [selectedWorkAgentId, setSelectedWorkAgentId] = useState(initialSelection?.id ?? "");
   const [selectedWorkAgentIds, setSelectedWorkAgentIds] = useState<string[]>(
@@ -696,20 +918,23 @@ export default function AgentCenter() {
   const [contextWorkspaceId, setContextWorkspaceId] = useState(selector.current_workspace_id);
   const [searchQuery, setSearchQuery] = useState("");
   const [flashMessage, setFlashMessage] = useState(
-    "先分清三件事：主 Agent 决定默认上下文，Worker 实例反映当前分工，Worker 模板决定以后怎么新建。"
+    "先把 Butler 的身份、边界和默认落点定稳，再把具体任务交给合适的 Worker。"
   );
   const deferredSearch = useDeferredValue(searchQuery);
-  const syncKey = snapshot!.generated_at;
 
   useEffect(() => {
     const nextPrimary = buildPrimaryAgentSeed(snapshot!);
+    setSavedPrimary(nextPrimary);
+    setPrimaryDraft(nextPrimary);
+  }, [primarySeedSyncKey]);
+
+  useEffect(() => {
     const nextAgents = buildWorkAgentSeeds(snapshot!);
+    const nextPrimary = buildPrimaryAgentSeed(snapshot!);
     const nextSelection =
       nextAgents.find((agent) => agent.kind === "instance") ??
       nextAgents.find((agent) => agent.kind === "template") ??
       null;
-    setSavedPrimary(nextPrimary);
-    setPrimaryDraft(nextPrimary);
     setWorkAgents(nextAgents);
     setSelectedWorkAgentId(nextSelection?.id ?? "");
     setSelectedWorkAgentIds(nextSelection?.kind === "instance" ? [nextSelection.id] : []);
@@ -720,7 +945,11 @@ export default function AgentCenter() {
     );
     setContextProjectId(selector.current_project_id);
     setContextWorkspaceId(selector.current_workspace_id);
-  }, [selector.current_project_id, selector.current_workspace_id, snapshot, syncKey]);
+  }, [primarySeedSyncKey, selector.current_project_id, selector.current_workspace_id, workAgentSeedSyncKey]);
+
+  useEffect(() => {
+    setPrimaryReview(setup.review);
+  }, [setup.generated_at]);
 
   const currentProject =
     availableProjects.find((project) => project.project_id === selector.current_project_id) ?? null;
@@ -792,8 +1021,6 @@ export default function AgentCenter() {
   const visibleCatalogItems = activeCatalog === "instances" ? visibleInstances : visibleTemplates;
   const activeWorkAgents = workInstances.filter((agent) => agent.status === "active").length;
   const attentionWorkAgents = workInstances.filter((agent) => agent.status === "attention").length;
-  const templateDraftCount = workTemplates.filter((agent) => agent.source === "manual").length;
-  const totalTasks = workInstances.reduce((sum, agent) => sum + agent.taskCount, 0);
   const primaryDirty = JSON.stringify(savedPrimary) !== JSON.stringify(primaryDraft);
   const workDirty =
     editorMode === "create" ||
@@ -809,9 +1036,11 @@ export default function AgentCenter() {
     instanceCount: workInstances.filter((agent) => agent.projectId === projectId).length,
     templateCount: workTemplates.filter((agent) => agent.projectId === projectId).length,
   }));
-  const policyLabel =
-    policyProfiles.find((profile) => profile.profile_id === savedPrimary.policyProfileId)?.label ??
-    savedPrimary.policyProfileId;
+  const currentPolicy =
+    policyProfiles.find((profile) => profile.profile_id === primaryDraft.policyProfileId) ?? null;
+  const butlerBusy =
+    busyActionId === "setup.review" || busyActionId === "setup.apply";
+  const recallPresetLabel = detectRecallPreset(primaryDraft.memoryRecall);
   const selectedTemplateUsageCount =
     selectedWorkAgent?.kind === "template"
       ? workInstances.filter((agent) => agent.workerType === selectedWorkAgent.workerType).length
@@ -849,6 +1078,85 @@ export default function AgentCenter() {
         current.workspaceId
       ),
     }));
+  }
+
+  function updatePrimaryMemoryAccess(
+    key: keyof PrimaryMemoryAccessDraft,
+    value: boolean
+  ) {
+    setPrimaryDraft((current) => ({
+      ...current,
+      memoryAccessPolicy: {
+        ...current.memoryAccessPolicy,
+        [key]: value,
+      },
+    }));
+  }
+
+  function applyPrimaryMemoryPreset(presetId: string) {
+    const preset = MEMORY_RECALL_PRESETS.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+    setPrimaryDraft((current) => ({
+      ...current,
+      memoryRecall: { ...preset.values },
+    }));
+  }
+
+  function buildPrimarySetupDraft() {
+    return {
+      config: snapshot!.resources.config.current_value,
+      policy_profile_id: primaryDraft.policyProfileId,
+      agent_profile: buildPrimaryAgentPayload({
+        ...primaryDraft,
+        scope: primaryDraft.scope || "project",
+      }),
+      skill_selection: buildSkillSelectionPayload(skillGovernance.items),
+      secret_values: {},
+    };
+  }
+
+  async function handleReviewPrimary() {
+    const result = await submitAction("setup.review", {
+      draft: buildPrimarySetupDraft(),
+    });
+    const nextReview = result?.data.review;
+    if (nextReview && typeof nextReview === "object" && !Array.isArray(nextReview)) {
+      const parsedReview = nextReview as SetupReviewSummary;
+      setPrimaryReview(parsedReview);
+      setFlashMessage(
+        parsedReview.ready
+          ? "Butler 配置检查通过，可以直接保存。"
+          : `Butler 配置还需要处理 ${parsedReview.blocking_reasons.length} 个问题。`
+      );
+    }
+  }
+
+  async function handleApplyPrimary() {
+    const draft = buildPrimarySetupDraft();
+    const reviewResult = await submitAction("setup.review", { draft });
+    const nextReview = reviewResult?.data.review;
+    if (nextReview && typeof nextReview === "object" && !Array.isArray(nextReview)) {
+      const parsedReview = nextReview as SetupReviewSummary;
+      setPrimaryReview(parsedReview);
+      if (!parsedReview.ready) {
+        setFlashMessage("Butler 配置还没准备好，先处理提示里的阻塞项。");
+        return;
+      }
+    } else if (!primaryReview.ready) {
+      setFlashMessage("Butler 配置还没准备好，先执行一次检查。");
+      return;
+    }
+
+    const result = await submitAction("setup.apply", { draft });
+    const appliedReview = result?.data.review;
+    if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
+      setPrimaryReview(appliedReview as SetupReviewSummary);
+    }
+    if (result) {
+      setFlashMessage("Butler 配置已保存，当前实例会按新的默认行为继续工作。");
+    }
   }
 
   function updateWorkDraft<Key extends keyof WorkAgentDraft>(
@@ -961,14 +1269,9 @@ export default function AgentCenter() {
     );
   }
 
-  function handleSavePrimary() {
-    setSavedPrimary(primaryDraft);
-    setFlashMessage("主 Agent 草案已暂存。真正写入底层配置时，请继续到设置页保存。");
-  }
-
   function handleResetPrimary() {
     setPrimaryDraft(savedPrimary);
-    setFlashMessage("主 Agent 草案已恢复到上一次同步状态。");
+    setFlashMessage("Butler 草案已恢复到上一次保存状态。");
   }
 
   function handleSaveWorkAgent() {
@@ -1187,29 +1490,36 @@ export default function AgentCenter() {
   }
 
   return (
-    <div className="wb-page">
-      <section className="wb-hero wb-hero-agent">
+    <div className="wb-page wb-butler-page">
+      <section className="wb-hero wb-hero-agent wb-butler-hero">
         <div className="wb-hero-copy">
           <p className="wb-kicker">Agents</p>
-          <h1>把总控、实例和模板分开看</h1>
+          <h1>让 Butler 管全局，把 Worker 留给具体工作</h1>
           <p>
-            主 Agent 决定默认项目、工作区和审批方式；Worker 实例反映当前谁在工作；Worker
-            模板则负责以后新建时的默认起点。
+            Butler 负责理解你的目标、维护上下文连续性、安排合适的 Worker，并在关键风险点先请你确认；
+            Worker 实例只处理具体执行，模板只定义以后怎么创建。
           </p>
           <div className="wb-chip-row">
             <span className="wb-chip">当前项目 {currentProject?.name ?? selector.current_project_id}</span>
             <span className="wb-chip">当前工作区 {currentWorkspace?.name ?? selector.current_workspace_id}</span>
+            <span className={`wb-chip ${reviewTone(primaryReview) === "danger" ? "is-warning" : "is-success"}`}>
+              {reviewTone(primaryReview) === "danger"
+                ? `阻塞 ${primaryReview.blocking_reasons.length}`
+                : primaryReview.ready
+                  ? "配置检查通过"
+                  : `提醒 ${primaryReview.warnings.length}`}
+            </span>
             <span className={`wb-chip ${pendingChanges > 0 ? "is-warning" : "is-success"}`}>
-              {pendingChanges > 0 ? `待确认改动 ${pendingChanges}` : "当前无待确认改动"}
+              {pendingChanges > 0 ? `待确认改动 ${pendingChanges}` : "当前已同步"}
             </span>
           </div>
         </div>
 
         <div className="wb-hero-insights">
           <article className="wb-hero-metric">
-            <p className="wb-card-label">主 Agent</p>
+            <p className="wb-card-label">Butler</p>
             <strong>{savedPrimary.name}</strong>
-            <span>{findProjectName(availableProjects, savedPrimary.projectId)}</span>
+            <span>{formatToolProfile(savedPrimary.toolProfile)}</span>
           </article>
           <article className="wb-hero-metric">
             <p className="wb-card-label">运行中的 Worker</p>
@@ -1217,28 +1527,38 @@ export default function AgentCenter() {
             <span>活跃 {activeWorkAgents} / 待处理 {attentionWorkAgents}</span>
           </article>
           <article className="wb-hero-metric">
-            <p className="wb-card-label">可复用模板</p>
-            <strong>{workTemplates.length}</strong>
-            <span>自定义 {templateDraftCount} / 总工作量 {totalTasks}</span>
+            <p className="wb-card-label">记忆边界</p>
+            <strong>{recallPresetLabel ?? "自定义"}</strong>
+            <span>
+              Vault {primaryDraft.memoryAccessPolicy.allowVault ? "已允许" : "关闭"} / 历史
+              {primaryDraft.memoryAccessPolicy.includeHistory ? "已纳入" : "未纳入"}
+            </span>
           </article>
         </div>
       </section>
 
-      <div className="wb-agent-rule-grid">
-        <article className="wb-agent-rule-card">
-          <p className="wb-card-label">主 Agent</p>
-          <strong>决定默认上下文与审批强度</strong>
-          <span>常改的是名称、默认 Project / Workspace、审批方式和 persona。</span>
+      <div className="wb-butler-summary-grid">
+        <article className="wb-butler-summary-card is-accent">
+          <p className="wb-card-label">Butler 定位</p>
+          <strong>总控、调度、护栏都在这里</strong>
+          <span>这里定义 Butler 的身份、默认落点、审批边界和默认记忆边界。</span>
         </article>
-        <article className="wb-agent-rule-card">
-          <p className="wb-card-label">Worker 实例</p>
-          <strong>代表当前谁在负责什么</strong>
-          <span>这里适合看负载、改归属、合并相近实例，或把一个实例拆小。</span>
+        <article className="wb-butler-summary-card">
+          <p className="wb-card-label">默认落点</p>
+          <strong>{findProjectName(availableProjects, savedPrimary.projectId)}</strong>
+          <span>{findWorkspaceName(availableWorkspaces, savedPrimary.workspaceId)}</span>
         </article>
-        <article className="wb-agent-rule-card">
-          <p className="wb-card-label">Worker 模板</p>
-          <strong>只影响以后怎么创建</strong>
-          <span>模板是起点，不会直接改动已经在运行中的 Worker。</span>
+        <article className="wb-butler-summary-card">
+          <p className="wb-card-label">模型与治理</p>
+          <strong>
+            {savedPrimary.modelAlias} · {formatToolProfile(savedPrimary.toolProfile)}
+          </strong>
+          <span>{currentPolicy?.label ?? savedPrimary.policyProfileId}</span>
+        </article>
+        <article className={`wb-butler-summary-card ${pendingChanges > 0 ? "is-warning" : ""}`}>
+          <p className="wb-card-label">待确认改动</p>
+          <strong>{pendingChanges > 0 ? `${pendingChanges} 处` : "已同步"}</strong>
+          <span>{primaryDirty ? "Butler 草案未保存" : "Butler 已同步到底层配置"}</span>
         </article>
       </div>
 
@@ -1247,38 +1567,14 @@ export default function AgentCenter() {
         <span>{flashMessage}</span>
       </div>
 
-      <div className="wb-card-grid wb-card-grid-4">
-        <article className="wb-card">
-          <p className="wb-card-label">默认落点</p>
-          <strong>{findProjectName(availableProjects, savedPrimary.projectId)}</strong>
-          <span>{findWorkspaceName(availableWorkspaces, savedPrimary.workspaceId)}</span>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">审批与工具</p>
-          <strong>{policyLabel}</strong>
-          <span>{formatToolProfile(savedPrimary.toolProfile)}</span>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">当前视角</p>
-          <strong>{currentProject?.name ?? selector.current_project_id}</strong>
-          <span>{currentWorkspace?.name ?? selector.current_workspace_id}</span>
-        </article>
-        <article className={`wb-card ${pendingChanges > 0 ? "wb-card-accent is-warning" : ""}`}>
-          <p className="wb-card-label">待确认改动</p>
-          <strong>{pendingChanges > 0 ? "有" : "无"}</strong>
-          <span>{primaryDirty ? "主 Agent 待确认" : "主 Agent 已同步"}</span>
-          <span>{workDirty ? "Worker 编辑器待确认" : "Worker 编辑器已同步"}</span>
-        </article>
-      </div>
-
       <div className="wb-agent-layout">
-        <section className="wb-panel">
+        <section className="wb-panel wb-butler-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">主 Agent</p>
-              <h3>先确认默认项目、工作区和审批方式</h3>
+              <p className="wb-card-label">Butler（主 Agent）</p>
+              <h3>先定义 Butler 的身份、边界和默认落点</h3>
               <p className="wb-panel-copy">
-                日常只需要改这里最常用的几项；模型路由和工具范围收在高级配置里。
+                `Agents` 现在就是 Butler 的唯一入口。名称、Persona、审批强度、默认模型和工具权限都在这里统一保存。
               </p>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
@@ -1286,40 +1582,70 @@ export default function AgentCenter() {
                 type="button"
                 className="wb-button wb-button-secondary"
                 onClick={handleResetPrimary}
-                disabled={!primaryDirty}
+                disabled={!primaryDirty || butlerBusy}
               >
                 撤回改动
               </button>
               <button
                 type="button"
-                className="wb-button wb-button-primary"
-                onClick={handleSavePrimary}
-                disabled={!primaryDirty}
+                className="wb-button wb-button-secondary"
+                onClick={() => void handleReviewPrimary()}
+                disabled={butlerBusy}
               >
-                暂存主 Agent 草案
+                检查 Butler 变更
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-primary"
+                onClick={() => void handleApplyPrimary()}
+                disabled={!primaryDirty || butlerBusy}
+              >
+                保存 Butler 配置
               </button>
               <Link className="wb-button wb-button-tertiary" to="/settings">
-                去设置页保存
+                去 Settings 调连接
               </Link>
             </div>
+          </div>
+
+          <div
+            className={`wb-inline-banner ${
+              reviewTone(primaryReview) === "danger" ? "is-error" : "is-muted"
+            }`}
+          >
+            <strong>{reviewHeadline(primaryReview)}</strong>
+            <span>{reviewSummary(primaryReview)}</span>
           </div>
 
           <div className="wb-stat-grid">
             <div className="wb-detail-block">
               <span className="wb-card-label">当前默认 Project</span>
-              <strong>{findProjectName(availableProjects, savedPrimary.projectId)}</strong>
-              <p>{findWorkspaceName(availableWorkspaces, savedPrimary.workspaceId)}</p>
+              <strong>{findProjectName(availableProjects, primaryDraft.projectId)}</strong>
+              <p>{findWorkspaceName(availableWorkspaces, primaryDraft.workspaceId)}</p>
             </div>
             <div className="wb-detail-block">
               <span className="wb-card-label">审批强度</span>
-              <strong>{policyLabel}</strong>
-              <p>{formatToolProfile(savedPrimary.toolProfile)}</p>
+              <strong>{currentPolicy?.label ?? primaryDraft.policyProfileId}</strong>
+              <p>{formatToolProfile(primaryDraft.toolProfile)}</p>
+            </div>
+            <div className="wb-detail-block">
+              <span className="wb-card-label">默认模型</span>
+              <strong>{primaryDraft.modelAlias}</strong>
+              <p>{MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "控制 Butler 默认思考档位。"}</p>
+            </div>
+            <div className="wb-detail-block">
+              <span className="wb-card-label">记忆策略</span>
+              <strong>{recallPresetLabel ?? "自定义"}</strong>
+              <p>
+                Vault {primaryDraft.memoryAccessPolicy.allowVault ? "可引用" : "关闭"} / 历史
+                {primaryDraft.memoryAccessPolicy.includeHistory ? "已纳入" : "未纳入"}
+              </p>
             </div>
           </div>
 
           <div className="wb-agent-form-grid">
             <label className="wb-field">
-              <span>主 Agent 名称</span>
+              <span>Butler 名称</span>
               <input
                 type="text"
                 value={primaryDraft.name}
@@ -1366,29 +1692,66 @@ export default function AgentCenter() {
               </select>
             </label>
             <label className="wb-field wb-field-span-2">
-              <span>主 Agent 说明</span>
+              <span>Persona（角色说明）</span>
+              <small>
+                这会决定 Butler 对外的语气、优先级和调度方式。建议强调“统筹、护栏、分派 Worker”。
+              </small>
               <textarea
                 rows={4}
                 className="wb-textarea-prose"
                 value={primaryDraft.personaSummary}
+                placeholder="例如：你是我的 Butler，也是负责长期协作节奏的 Agent 管家。请先梳理现状与下一步，再安排合适的 Worker。"
                 onChange={(event) => updatePrimary("personaSummary", event.target.value)}
               />
             </label>
           </div>
 
-          <div className="wb-agent-option-stack">
+          <div className="wb-butler-stack">
             <div>
-              <p className="wb-card-label">审批方式</p>
+              <p className="wb-card-label">审批与治理</p>
               <div className="wb-agent-choice-grid">
                 {policyProfiles.map(renderPolicyCard)}
               </div>
             </div>
 
+            <div>
+              <p className="wb-card-label">记忆边界</p>
+              <div className="wb-butler-memory-grid">
+                <label className="wb-butler-toggle-card">
+                  <div>
+                    <strong>允许带回 Vault 引用</strong>
+                    <span>Butler 在 recall 时可以把受控 Vault 引用纳入候选，但仍受权限与审批约束。</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={primaryDraft.memoryAccessPolicy.allowVault}
+                    onChange={(event) =>
+                      updatePrimaryMemoryAccess("allowVault", event.target.checked)
+                    }
+                  />
+                </label>
+
+                <label className="wb-butler-toggle-card">
+                  <div>
+                    <strong>默认包含历史版本</strong>
+                    <span>适合需要看演变过程的项目；如果你更看重简洁上下文，可以先关闭。</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={primaryDraft.memoryAccessPolicy.includeHistory}
+                    onChange={(event) =>
+                      updatePrimaryMemoryAccess("includeHistory", event.target.checked)
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+
             <details className="wb-agent-details">
-              <summary>展开高级配置</summary>
+              <summary>展开 Butler 高级配置</summary>
               <div className="wb-agent-option-stack">
                 <div>
-                  <p className="wb-card-label">思考档位</p>
+                  <p className="wb-card-label">默认模型档位</p>
                   <div className="wb-chip-row">
                     {modelAliasOptions.map((alias) => (
                       <button
@@ -1420,6 +1783,135 @@ export default function AgentCenter() {
                       </button>
                     ))}
                   </div>
+                  <p className="wb-inline-note">
+                    `standard` 适合大多数 Butler；只有明确需要更宽的工具面时再切 `privileged`。
+                  </p>
+                </div>
+
+                <div>
+                  <p className="wb-card-label">记忆召回预设</p>
+                  <div className="wb-chip-row">
+                    {MEMORY_RECALL_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`wb-chip-button ${
+                          detectRecallPreset(primaryDraft.memoryRecall) === preset.label
+                            ? "is-active"
+                            : ""
+                        }`}
+                        onClick={() => applyPrimaryMemoryPreset(preset.id)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="wb-inline-note">
+                    当前 {recallPresetLabel ?? "自定义"}：{MEMORY_RECALL_PRESETS.find((preset) => preset.label === recallPresetLabel)?.description ?? "已按当前项目做细化。"}
+                  </p>
+                </div>
+
+                <div className="wb-agent-form-grid">
+                  <label className="wb-field">
+                    <span>后过滤策略</span>
+                    <select
+                      value={primaryDraft.memoryRecall.postFilterMode}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            postFilterMode: event.target.value,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="keyword_overlap">keyword_overlap · 保守过滤</option>
+                      <option value="none">none · 不额外过滤</option>
+                    </select>
+                  </label>
+                  <label className="wb-field">
+                    <span>重排策略</span>
+                    <select
+                      value={primaryDraft.memoryRecall.rerankMode}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            rerankMode: event.target.value,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="heuristic">heuristic · 主题优先</option>
+                      <option value="none">none · 保留原始顺序</option>
+                    </select>
+                  </label>
+                  <label className="wb-field">
+                    <span>最低关键词重叠</span>
+                    <input
+                      type="text"
+                      value={primaryDraft.memoryRecall.minKeywordOverlap}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            minKeywordOverlap: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="wb-field">
+                    <span>最多查几个 Scope</span>
+                    <input
+                      type="text"
+                      value={primaryDraft.memoryRecall.scopeLimit}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            scopeLimit: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="wb-field">
+                    <span>每个 Scope 最多带回几条</span>
+                    <input
+                      type="text"
+                      value={primaryDraft.memoryRecall.perScopeLimit}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            perScopeLimit: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="wb-field">
+                    <span>总命中上限</span>
+                    <input
+                      type="text"
+                      value={primaryDraft.memoryRecall.maxHits}
+                      onChange={(event) =>
+                        setPrimaryDraft((current) => ({
+                          ...current,
+                          memoryRecall: {
+                            ...current.memoryRecall,
+                            maxHits: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </label>
                 </div>
 
                 <div className="wb-agent-advanced-grid">
@@ -1439,97 +1931,162 @@ export default function AgentCenter() {
           </div>
         </section>
 
-        <section className="wb-panel">
+        <section className="wb-panel wb-butler-side">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">当前视角</p>
-              <h3>切换你现在正在查看的 Project / Workspace</h3>
+              <p className="wb-card-label">Butler 视角</p>
+              <h3>把当前观察视角、运行提示和工作原则分开管理</h3>
               <p className="wb-panel-copy">
-                这里控制页面“看哪里”，不会直接改主 Agent 和 Worker 的配置。
+                `Agents` 负责 Butler 与 Worker；模型连接、渠道接入和平台级设置继续放在 `Settings`。
               </p>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                disabled={
-                  busyActionId === "project.select" ||
-                  (contextProjectId === selector.current_project_id &&
-                    contextWorkspaceId === selector.current_workspace_id)
-                }
-                onClick={() => void handleSwitchProjectContext()}
-              >
-                切到这个视角
-              </button>
+              <Link className="wb-button wb-button-secondary" to="/settings">
+                去 Settings
+              </Link>
               <Link className="wb-button wb-button-tertiary" to="/work">
                 去看 Work
               </Link>
             </div>
           </div>
 
-          <div className="wb-inline-form">
-            <label className="wb-field">
-              <span>查看哪个 Project</span>
-              <select
-                value={contextProjectId}
-                onChange={(event) => {
-                  setContextProjectId(event.target.value);
-                  setContextWorkspaceId(
-                    normalizeWorkspaceForProject(
-                      availableWorkspaces,
-                      event.target.value,
-                      contextWorkspaceId
-                    )
-                  );
-                }}
-              >
-                {availableProjects.map((project) => (
-                  <option key={project.project_id} value={project.project_id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="wb-butler-side-stack">
+            <article className="wb-butler-brief-card">
+              <div className="wb-butler-brief-head">
+                <div>
+                  <p className="wb-card-label">当前视角</p>
+                  <strong>切换你正在观察的 Project / Workspace</strong>
+                </div>
+                <span className="wb-chip">不会改 Butler 默认配置</span>
+              </div>
+              <div className="wb-inline-form">
+                <label className="wb-field">
+                  <span>查看哪个 Project</span>
+                  <select
+                    value={contextProjectId}
+                    onChange={(event) => {
+                      setContextProjectId(event.target.value);
+                      setContextWorkspaceId(
+                        normalizeWorkspaceForProject(
+                          availableWorkspaces,
+                          event.target.value,
+                          contextWorkspaceId
+                        )
+                      );
+                    }}
+                  >
+                    {availableProjects.map((project) => (
+                      <option key={project.project_id} value={project.project_id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-            <label className="wb-field">
-              <span>查看哪个 Workspace</span>
-              <select
-                value={contextWorkspaceId}
-                onChange={(event) => setContextWorkspaceId(event.target.value)}
-              >
-                {availableContextWorkspaces.map((workspace) => (
-                  <option key={workspace.workspace_id} value={workspace.workspace_id}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+                <label className="wb-field">
+                  <span>查看哪个 Workspace</span>
+                  <select
+                    value={contextWorkspaceId}
+                    onChange={(event) => setContextWorkspaceId(event.target.value)}
+                  >
+                    {availableContextWorkspaces.map((workspace) => (
+                      <option key={workspace.workspace_id} value={workspace.workspace_id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="wb-inline-actions wb-inline-actions-wrap">
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary"
+                  disabled={
+                    busyActionId === "project.select" ||
+                    (contextProjectId === selector.current_project_id &&
+                      contextWorkspaceId === selector.current_workspace_id)
+                  }
+                  onClick={() => void handleSwitchProjectContext()}
+                >
+                  切到这个视角
+                </button>
+              </div>
+            </article>
 
-          <div className="wb-agent-project-grid">
-            <button
-              type="button"
-              className={`wb-agent-project-card ${projectFilter === "all" ? "is-active" : ""}`}
-              onClick={() => setProjectFilter("all")}
-            >
-              <strong>全部 Project</strong>
-              <span>
-                实例 {workInstances.length} / 模板 {workTemplates.length}
-              </span>
-            </button>
-            {projectFilterStats.map((project) => (
+            <article className="wb-butler-brief-card">
+              <div className="wb-butler-brief-head">
+                <div>
+                  <p className="wb-card-label">Butler 守则</p>
+                  <strong>把目标澄清、分派、护栏和收口分开做</strong>
+                </div>
+              </div>
+              <div className="wb-note-stack">
+                <div className="wb-note">
+                  <strong>先澄清目标</strong>
+                  <span>Butler 先判断目标、上下文和风险，再决定要不要分派 Worker。</span>
+                </div>
+                <div className="wb-note">
+                  <strong>再委派 Worker</strong>
+                  <span>Research / Dev / Ops 只负责具体执行，Butler 负责拆分、合并、删除和交接。</span>
+                </div>
+                <div className="wb-note">
+                  <strong>关键动作先确认</strong>
+                  <span>高风险动作由 Butler 先拦住，再请你确认，不让具体 Worker 越过护栏。</span>
+                </div>
+              </div>
+            </article>
+
+            <article className="wb-butler-brief-card">
+              <div className="wb-butler-brief-head">
+                <div>
+                  <p className="wb-card-label">保存前提醒</p>
+                  <strong>{reviewHeadline(primaryReview)}</strong>
+                </div>
+                <span className={`wb-status-pill is-${reviewTone(primaryReview)}`}>
+                  {reviewTone(primaryReview)}
+                </span>
+              </div>
+              <div className="wb-note-stack">
+                {primaryReview.next_actions.slice(0, 3).map((item) => (
+                  <div key={item} className="wb-note">
+                    <strong>下一步</strong>
+                    <span>{item}</span>
+                  </div>
+                ))}
+                {primaryReview.next_actions.length === 0 ? (
+                  <div className="wb-note">
+                    <strong>当前状态</strong>
+                    <span>没有额外提示，可以继续维护 Worker，或去 Settings 调整平台连接。</span>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+
+            <div className="wb-agent-project-grid">
               <button
-                key={project.projectId}
                 type="button"
-                className={`wb-agent-project-card ${projectFilter === project.projectId ? "is-active" : ""}`}
-                onClick={() => setProjectFilter(project.projectId)}
+                className={`wb-agent-project-card ${projectFilter === "all" ? "is-active" : ""}`}
+                onClick={() => setProjectFilter("all")}
               >
-                <strong>{project.name}</strong>
+                <strong>全部 Project</strong>
                 <span>
-                  实例 {project.instanceCount} / 模板 {project.templateCount}
+                  实例 {workInstances.length} / 模板 {workTemplates.length}
                 </span>
               </button>
-            ))}
+              {projectFilterStats.map((project) => (
+                <button
+                  key={project.projectId}
+                  type="button"
+                  className={`wb-agent-project-card ${projectFilter === project.projectId ? "is-active" : ""}`}
+                  onClick={() => setProjectFilter(project.projectId)}
+                >
+                  <strong>{project.name}</strong>
+                  <span>
+                    实例 {project.instanceCount} / 模板 {project.templateCount}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </section>
       </div>

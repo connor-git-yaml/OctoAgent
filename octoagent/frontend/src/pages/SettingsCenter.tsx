@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
   categoryForHint,
@@ -23,7 +24,7 @@ type SkillSelectionState = Record<string, boolean>;
 
 const DEFAULT_AGENT_NAME = "OctoAgent";
 const DEFAULT_AGENT_PERSONA =
-  "通用个人助手，优先帮助用户完成当前任务，并在需要时给出下一步建议。";
+  "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
 const DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32\n::1/128";
 const DEFAULT_MEMORY_TIMEOUT = "5";
 const DEFAULT_MEMORY_SCOPE_LIMIT = "4";
@@ -43,53 +44,6 @@ interface MemoryRecallDraft {
   per_scope_limit: string;
   max_hits: string;
 }
-
-const MEMORY_RECALL_PRESETS: Array<{
-  id: string;
-  label: string;
-  description: string;
-  values: MemoryRecallDraft;
-}> = [
-  {
-    id: "conservative",
-    label: "保守召回",
-    description: "更少噪声，优先只带回最贴近当前话题的少量记录。",
-    values: {
-      post_filter_mode: "keyword_overlap",
-      rerank_mode: "heuristic",
-      min_keyword_overlap: "2",
-      scope_limit: "2",
-      per_scope_limit: "2",
-      max_hits: "3",
-    },
-  },
-  {
-    id: "balanced",
-    label: "平衡默认",
-    description: "适合大多数日常对话和任务，先用这组值通常最稳妥。",
-    values: {
-      post_filter_mode: "keyword_overlap",
-      rerank_mode: "heuristic",
-      min_keyword_overlap: "1",
-      scope_limit: DEFAULT_MEMORY_SCOPE_LIMIT,
-      per_scope_limit: DEFAULT_MEMORY_PER_SCOPE_LIMIT,
-      max_hits: DEFAULT_MEMORY_MAX_HITS,
-    },
-  },
-  {
-    id: "wide",
-    label: "广覆盖",
-    description: "适合追踪长链路任务，会带回更多候选，但噪声也会更高。",
-    values: {
-      post_filter_mode: "none",
-      rerank_mode: "heuristic",
-      min_keyword_overlap: "1",
-      scope_limit: "6",
-      per_scope_limit: "4",
-      max_hits: "8",
-    },
-  },
-];
 
 interface AgentDraft {
   scope: string;
@@ -215,19 +169,6 @@ function buildConfigPayload(
   return { config: nextConfig, errors };
 }
 
-function parsePositiveInt(
-  value: string,
-  fallback: number,
-  minimum: number,
-  maximum: number
-): number {
-  const parsed = Number.parseInt(value.trim(), 10);
-  if (Number.isNaN(parsed)) {
-    return fallback;
-  }
-  return Math.max(minimum, Math.min(maximum, parsed));
-}
-
 function memoryAccessPolicyFromProfile(profile: AgentProfileItem | null): MemoryAccessPolicyDraft {
   const raw =
     profile?.memory_access_policy &&
@@ -278,10 +219,6 @@ function buildAgentDraft(profile: AgentProfileItem | null): AgentDraft {
   };
 }
 
-function buildAgentDraftSyncKey(profile: AgentProfileItem | null): string {
-  return JSON.stringify(profile ?? null);
-}
-
 function readActiveAgentProfile(source: unknown): AgentProfileItem | null {
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     return null;
@@ -318,8 +255,8 @@ function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
     case "main-agent":
       return {
-        title: "主 Agent",
-        description: "主 Agent 的名称、模型别名和默认运行配置。",
+        title: "Butler",
+        description: "Butler 的身份和默认行为已经迁到 Agents 页面。",
       };
     case "channels":
       return {
@@ -445,46 +382,17 @@ function modelAliasesExampleJson(providerId: string): string {
   );
 }
 
-function buildAgentProfilePayload(agentDraft: AgentDraft): Record<string, unknown> {
-  return {
-    ...agentDraft,
-    memory_access_policy: {
-      allow_vault: agentDraft.memory_access_policy.allow_vault,
-      include_history: agentDraft.memory_access_policy.include_history,
-    },
-    context_budget_policy: {
-      memory_recall: {
-        post_filter_mode:
-          agentDraft.context_budget_policy.memory_recall.post_filter_mode || "keyword_overlap",
-        rerank_mode:
-          agentDraft.context_budget_policy.memory_recall.rerank_mode || "heuristic",
-        min_keyword_overlap: parsePositiveInt(
-          agentDraft.context_budget_policy.memory_recall.min_keyword_overlap,
-          1,
-          1,
-          8
-        ),
-        scope_limit: parsePositiveInt(
-          agentDraft.context_budget_policy.memory_recall.scope_limit,
-          4,
-          1,
-          8
-        ),
-        per_scope_limit: parsePositiveInt(
-          agentDraft.context_budget_policy.memory_recall.per_scope_limit,
-          3,
-          1,
-          12
-        ),
-        max_hits: parsePositiveInt(
-          agentDraft.context_budget_policy.memory_recall.max_hits,
-          4,
-          1,
-          20
-        ),
-      },
-    },
-  };
+function formatToolProfile(value: string): string {
+  switch (value) {
+    case "minimal":
+      return "仅基础工具";
+    case "standard":
+      return "常用工具";
+    case "privileged":
+      return "扩展工具";
+    default:
+      return value;
+  }
 }
 
 function optionLabelForHint(hint: ConfigFieldHint, option: string): string {
@@ -621,7 +529,7 @@ function collectBlockingGuides(review: SetupReviewSummary): BlockingGuide[] {
     ...review.provider_runtime_risks.map((risk) => ({
       guide_id: `provider-${risk.risk_id}`,
       section_id: "main-agent",
-      section_label: "主 Agent 与模型",
+      section_label: "模型与连接",
       risk,
     })),
     ...review.channel_exposure_risks.map((risk) => ({
@@ -632,14 +540,14 @@ function collectBlockingGuides(review: SetupReviewSummary): BlockingGuide[] {
     })),
     ...review.agent_autonomy_risks.map((risk) => ({
       guide_id: `agent-${risk.risk_id}`,
-      section_id: "governance",
-      section_label: "主 Agent",
+      section_id: "butler",
+      section_label: "Butler",
       risk,
     })),
     ...review.tool_skill_readiness_risks.map((risk) => ({
       guide_id: `skill-${risk.risk_id}`,
       section_id: "governance",
-      section_label: "主 Agent",
+      section_label: "Skills",
       risk,
     })),
     ...review.secret_binding_risks.map((risk) => ({
@@ -652,8 +560,11 @@ function collectBlockingGuides(review: SetupReviewSummary): BlockingGuide[] {
 }
 
 function guideButtonLabel(guide: BlockingGuide): string {
+  if (guide.section_id === "butler") {
+    return "去 Agents 调 Butler";
+  }
   if (guide.section_id === "governance") {
-    return "去填写主 Agent 信息";
+    return "去 Skills 处理";
   }
   return `去“${guide.section_label}”处理`;
 }
@@ -849,23 +760,19 @@ export default function SettingsCenter() {
   const config = snapshot!.resources.config;
   const selector = snapshot!.resources.project_selector;
   const memory = snapshot!.resources.memory;
-  const delegation = snapshot!.resources.delegation;
   const setup = snapshot!.resources.setup_governance;
   const policyProfiles = snapshot!.resources.policy_profiles;
   const skillGovernance = snapshot!.resources.skill_governance;
   const activeAgentProfile = readActiveAgentProfile(
     setup.agent_governance.details["active_agent_profile"]
   );
-  const activeAgentProfileSyncKey = buildAgentDraftSyncKey(activeAgentProfile);
+  const activeButlerDraft = buildAgentDraft(activeAgentProfile);
   const skillSelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [policyProfileId, setPolicyProfileId] = useState(policyProfiles.active_profile_id);
-  const [agentDraft, setAgentDraft] = useState<AgentDraft>(() =>
-    buildAgentDraft(activeAgentProfile)
-  );
   const [skillSelection, setSkillSelection] = useState<SkillSelectionState>(() =>
     buildSkillSelectionState(skillGovernance.items)
   );
@@ -880,10 +787,6 @@ export default function SettingsCenter() {
   useEffect(() => {
     setPolicyProfileId(policyProfiles.active_profile_id);
   }, [policyProfiles.generated_at, policyProfiles.active_profile_id]);
-
-  useEffect(() => {
-    setAgentDraft(buildAgentDraft(activeAgentProfile));
-  }, [activeAgentProfileSyncKey]);
 
   useEffect(() => {
     setSkillSelection(buildSkillSelectionState(skillGovernance.items));
@@ -924,10 +827,6 @@ export default function SettingsCenter() {
   const savedEnvNames = envPresence(providerRuntimeDetails);
   const masterKeyHint = config.ui_hints["runtime.master_key_env"];
   const proxyUrlHint = config.ui_hints["runtime.litellm_proxy_url"];
-  const aliasOptions = aliasDrafts
-    .map((item) => item.alias.trim())
-    .filter(Boolean);
-
   function buildSetupDraft(secretStateOverride?: Record<string, string>) {
     const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
     setFieldErrors(result.errors);
@@ -936,11 +835,6 @@ export default function SettingsCenter() {
     }
     return {
       config: result.config,
-      policy_profile_id: policyProfileId,
-      agent_profile: buildAgentProfilePayload({
-        ...agentDraft,
-        scope: agentDraft.scope || "project",
-      }),
       skill_selection: buildSkillSelectionPayload(skillGovernance.items, skillSelection),
       secret_values: Object.fromEntries(
         Object.entries(secretStateOverride ?? secretValues).filter(([, value]) => value.trim())
@@ -1058,6 +952,10 @@ export default function SettingsCenter() {
       .trim()
       .toLowerCase() || "local_only";
   const blockingGuides = collectBlockingGuides(review);
+  const activeButlerName = activeButlerDraft.name.trim() || DEFAULT_AGENT_NAME;
+  const activeButlerPersona = activeButlerDraft.persona_summary.trim() || DEFAULT_AGENT_PERSONA;
+  const activeButlerModel = activeButlerDraft.model_alias.trim() || "main";
+  const activeButlerToolProfile = activeButlerDraft.tool_profile.trim() || "standard";
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
     setFieldState((state) => ({
@@ -1197,49 +1095,6 @@ export default function SettingsCenter() {
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function updateMemoryAccessPolicy(
-    key: keyof MemoryAccessPolicyDraft,
-    value: boolean
-  ) {
-    setAgentDraft((state) => ({
-      ...state,
-      memory_access_policy: {
-        ...state.memory_access_policy,
-        [key]: value,
-      },
-    }));
-  }
-
-  function updateMemoryRecallDraft(
-    key: keyof MemoryRecallDraft,
-    value: string
-  ) {
-    setAgentDraft((state) => ({
-      ...state,
-      context_budget_policy: {
-        ...state.context_budget_policy,
-        memory_recall: {
-          ...state.context_budget_policy.memory_recall,
-          [key]: value,
-        },
-      },
-    }));
-  }
-
-  function applyMemoryRecallPreset(presetId: string) {
-    const preset = MEMORY_RECALL_PRESETS.find((item) => item.id === presetId);
-    if (!preset) {
-      return;
-    }
-    setAgentDraft((state) => ({
-      ...state,
-      context_budget_policy: {
-        ...state.context_budget_policy,
-        memory_recall: { ...preset.values },
-      },
-    }));
-  }
-
   function renderHintFields(hints: ConfigFieldHint[]) {
     return (
       <div className="wb-form-grid">
@@ -1326,38 +1181,41 @@ export default function SettingsCenter() {
   }
 
   return (
-    <div className="wb-page">
-      <section className="wb-hero">
-        <div>
+    <div className="wb-page wb-settings-page">
+      <section className="wb-hero wb-settings-hero">
+        <div className="wb-hero-copy">
           <p className="wb-kicker">Settings</p>
-          <h1>先检查配置，再保存生效</h1>
-          <p>这里可以统一调整主 Agent、Memory、权限级别、技能状态和基础连接配置。</p>
+          <h1>把平台连接留在这里，把 Butler 放回 Agents</h1>
+          <p>
+            `Settings` 现在只处理 Provider / LiteLLM、渠道接入、Memory 后端和 Skills 默认范围；
+            Butler 的身份、审批和记忆边界统一放回 `Agents`。
+          </p>
+          <div className="wb-chip-row">
+            <span className="wb-chip">{usingEchoMode ? "体验模式" : "真实模型模式"}</span>
+            <span className="wb-chip">
+              当前 Project {selector.current_project_id} / {selector.current_workspace_id}
+            </span>
+            <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`}>
+              {review.ready ? "检查通过" : `待处理 ${review.blocking_reasons.length}`}
+            </span>
+          </div>
         </div>
-        <div className="wb-hero-actions">
-          <button
-            type="button"
-            className="wb-button wb-button-primary"
-            onClick={() => void handleQuickConnect()}
-            disabled={connectBusy}
-          >
-            {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
-          </button>
-          <button
-            type="button"
-            className="wb-button wb-button-secondary"
-            onClick={() => void handleReview()}
-            disabled={connectBusy}
-          >
-            检查配置
-          </button>
-          <button
-            type="button"
-            className="wb-button wb-button-secondary"
-            onClick={() => void handleApply()}
-            disabled={connectBusy}
-          >
-            保存配置
-          </button>
+        <div className="wb-hero-insights">
+          <article className="wb-hero-metric">
+            <p className="wb-card-label">当前 Butler</p>
+            <strong>{activeButlerName}</strong>
+            <span>{formatToolProfile(activeButlerToolProfile)} · {activeButlerModel}</span>
+          </article>
+          <article className="wb-hero-metric">
+            <p className="wb-card-label">连接状态</p>
+            <strong>{usingEchoMode ? "Echo" : "LiteLLM"}</strong>
+            <span>{setup.provider_runtime.status}</span>
+          </article>
+          <article className="wb-hero-metric">
+            <p className="wb-card-label">Skills</p>
+            <strong>{selectedSkills.length}</strong>
+            <span>阻塞 {blockedSkills.length} / 不可用 {unavailableSkills.length}</span>
+          </article>
         </div>
       </section>
 
@@ -1369,868 +1227,758 @@ export default function SettingsCenter() {
           <span>提醒 {review.warnings.length}</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">当前 Project</p>
-          <strong>{selector.current_project_id}</strong>
-          <span>工作区 {selector.current_workspace_id}</span>
+          <p className="wb-card-label">模型接入</p>
+          <strong>{primaryProvider.name}</strong>
+          <span>{runtimeMode === "echo" ? "先体验再接模型" : "准备连真实模型"}</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">Memory</p>
+          <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
+          <span>{memory.backend_state || memory.status}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">安全等级</p>
           <strong>{currentPolicy?.label ?? policyProfiles.active_profile_id}</strong>
           <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
         </article>
-        <article className="wb-card">
-          <p className="wb-card-label">技能状态</p>
-          <strong>{skillGovernance.items.length}</strong>
-          <span>已选 {selectedSkills.length}</span>
-          <span>阻塞 {blockedSkills.length}</span>
-          <span>不可用 {unavailableSkills.length}</span>
-        </article>
       </div>
 
-      <div className="wb-split">
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">保存前检查</p>
-              <h3>先确认是否可用，再决定是否保存</h3>
-            </div>
-          </div>
-          <div className="wb-note-stack">
-            <div className="wb-note">
-              <strong>下一步</strong>
-              <div className="wb-note-stack">
-                {review.next_actions.map((item) => (
-                  <span key={item}>{item}</span>
-                ))}
+      <div className="wb-settings-layout">
+        <div className="wb-settings-main">
+          <section id="settings-group-main-agent" className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">模型与连接</p>
+                <h3>选择接入方式，并用表单完成 Provider 与模型别名配置</h3>
+                <p className="wb-panel-copy">
+                  这里是平台连接层：先决定体验模式还是 LiteLLM，再补齐 Provider、密钥和模型别名。
+                </p>
+              </div>
+              <div className="wb-inline-actions wb-inline-actions-wrap">
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary wb-button-inline"
+                  onClick={() => updateFieldValue("runtime.llm_mode", "echo")}
+                >
+                  保持体验模式
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary wb-button-inline"
+                  onClick={() => applyProviderMode("api-key")}
+                >
+                  改为 LiteLLM / API Key
+                </button>
               </div>
             </div>
-            <div className="wb-note">
-              <strong>当前模式</strong>
+
+            <div className="wb-inline-banner is-muted">
+              <strong>平台连接层</strong>
               <span>
-                {usingEchoMode
-                  ? "你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。"
-                  : "你正在准备接入真实模型，请优先完成 Provider 和模型别名配置。"}
+                主 Butler 只引用 `main` / `cheap` 这类别名，不直接在这里定义 Persona、审批或记忆边界。
               </span>
             </div>
-            {blockingGuides.length > 0 ? (
-              <div className="wb-note">
-                <strong>需要先处理的问题</strong>
-                <div className="wb-note-stack">
-                  {blockingGuides.map((guide) => (
-                    <div key={guide.guide_id} className="wb-guide-card">
-                      <strong>{guide.risk.title}</strong>
-                      <span>{guide.risk.summary}</span>
-                      {guide.risk.recommended_action ? <small>{guide.risk.recommended_action}</small> : null}
+
+            <div className="wb-provider-mode-grid">
+              <button
+                type="button"
+                className={`wb-mode-card ${providerMode === "openai-auth" ? "is-active" : ""}`}
+                onClick={() => applyProviderMode("openai-auth")}
+              >
+                <span className="wb-card-label">OpenAI Auth</span>
+                <strong>浏览器登录 ChatGPT Pro / Codex</strong>
+                <p>适合已经有 ChatGPT Pro / Codex 账号的用户，不需要手贴 API Key。</p>
+              </button>
+              <button
+                type="button"
+                className={`wb-mode-card ${providerMode === "api-key" ? "is-active" : ""}`}
+                onClick={() => applyProviderMode("api-key")}
+              >
+                <span className="wb-card-label">LiteLLM / API Key</span>
+                <strong>手动填写 Provider Key 与 LiteLLM 运行参数</strong>
+                <p>适合 OpenRouter / OpenAI / Anthropic 等标准 API Key 场景。</p>
+              </button>
+            </div>
+
+            <div className="wb-provider-layout">
+              <div className="wb-section-stack">
+                <div className="wb-note">
+                  <strong>当前运行模式</strong>
+                  <span>
+                    {runtimeMode === "echo"
+                      ? "现在还是体验模式。你可以先体验页面，也可以继续完成下面的真实模型配置。"
+                      : "当前会通过 LiteLLM 代理接入真实模型。改完配置后请点击“保存并重新连接”。"}
+                  </span>
+                </div>
+
+                {providerMode === "openai-auth" ? (
+                  <div className="wb-provider-card">
+                    <div className="wb-provider-card-head">
+                      <div>
+                        <p className="wb-card-label">连接 OpenAI Auth</p>
+                        <strong>通过浏览器授权，把凭证写入本地</strong>
+                      </div>
+                      <span
+                        className={`wb-status-pill ${
+                          providerRuntimeDetails.openai_oauth_connected ? "is-ready" : "is-warning"
+                        }`}
+                      >
+                        {providerRuntimeDetails.openai_oauth_connected ? "已连接" : "未连接"}
+                      </span>
+                    </div>
+                    <div className="wb-provider-meta">
+                      <span>Provider: `openai-codex`</span>
+                      <span>环境变量: `OPENAI_API_KEY`</span>
+                      <span>
+                        当前凭证:
+                        {providerRuntimeDetails.openai_oauth_profile
+                          ? ` ${providerRuntimeDetails.openai_oauth_profile}`
+                          : " 还没有连接"}
+                      </span>
+                    </div>
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
                       <button
                         type="button"
-                        aria-label={guideButtonLabel(guide)}
-                        className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() => scrollToSection(guide.section_id)}
+                        className="wb-button wb-button-primary"
+                        onClick={() => void handleQuickConnect()}
+                        disabled={connectBusy}
                       >
-                        {guideButtonLabel(guide)}
+                        {providerRuntimeDetails.openai_oauth_connected
+                          ? "启用 OpenAI Auth"
+                          : "连接并启用 OpenAI Auth"}
+                      </button>
+                      <button
+                        type="button"
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() => updateAliases(buildDefaultAliasDrafts("openai-codex"))}
+                      >
+                        恢复推荐别名
                       </button>
                     </div>
-                  ))}
-                </div>
+                    <div className="wb-note">
+                      <strong>完成后会发生什么</strong>
+                      <span>
+                        按下按钮后会先完成浏览器授权，再把 `openai-codex` 写入配置、启动 LiteLLM
+                        Proxy，并在托管实例里自动切到真实模型。
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="wb-provider-card">
+                    <div className="wb-provider-card-head">
+                      <div>
+                        <p className="wb-card-label">LiteLLM / API Key</p>
+                        <strong>先选主 Provider，再填写真实密钥</strong>
+                      </div>
+                      <span
+                        className={`wb-status-pill ${
+                          savedEnvNames.has(primaryProvider.api_key_env) ? "is-ready" : ""
+                        }`}
+                      >
+                        {savedEnvNames.has(primaryProvider.api_key_env) ? "已写入密钥" : "待填写密钥"}
+                      </span>
+                    </div>
+
+                    {providerDrafts.length > 1 ? (
+                      <div className="wb-note">
+                        <strong>当前已存在多个 Provider</strong>
+                        <span>
+                          这块表单会优先编辑第一个启用的 Provider。其余项会保留，但建议你先把主
+                          Provider 跑通。
+                        </span>
+                      </div>
+                    ) : null}
+
+                    <div className="wb-form-grid">
+                      <label className="wb-field">
+                        <span>Provider 预设</span>
+                        <select
+                          value={
+                            availableProviderOptions.includes(primaryProvider.id)
+                              ? primaryProvider.id
+                              : "openrouter"
+                          }
+                          onChange={(event) => changePrimaryProvider(event.target.value)}
+                        >
+                          {availableProviderOptions.map((providerId) => (
+                            <option key={providerId} value={providerId}>
+                              {PROVIDER_PRESETS[providerId]?.name ?? providerId}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="wb-field">
+                        <span>LiteLLM 代理地址</span>
+                        <input
+                          type="text"
+                          value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
+                          placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
+                          onChange={(event) =>
+                            updateFieldValue("runtime.litellm_proxy_url", event.target.value)
+                          }
+                        />
+                        <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
+                      </label>
+
+                      <label className="wb-field">
+                        <span>Provider ID</span>
+                        <input
+                          type="text"
+                          value={primaryProvider.id}
+                          onChange={(event) =>
+                            updatePrimaryProvider({
+                              id: event.target.value,
+                              auth_type: "api_key",
+                            })
+                          }
+                        />
+                      </label>
+
+                      <label className="wb-field">
+                        <span>Provider 显示名称</span>
+                        <input
+                          type="text"
+                          value={primaryProvider.name}
+                          onChange={(event) => updatePrimaryProvider({ name: event.target.value })}
+                        />
+                      </label>
+
+                      <label className="wb-field">
+                        <span>API Key 环境变量名</span>
+                        <input
+                          type="text"
+                          value={primaryProvider.api_key_env}
+                          onChange={(event) =>
+                            updatePrimaryProvider({ api_key_env: event.target.value })
+                          }
+                        />
+                        <small>这里只写变量名，例如 `OPENROUTER_API_KEY`。</small>
+                      </label>
+
+                      <label className="wb-field">
+                        <span>API Key / Token</span>
+                        <input
+                          type="password"
+                          value={secretValues[primaryProvider.api_key_env] ?? ""}
+                          placeholder={
+                            savedEnvNames.has(primaryProvider.api_key_env)
+                              ? "已存在本地值；如需替换请重新输入"
+                              : "粘贴真实 API Key"
+                          }
+                          onChange={(event) =>
+                            updateSecretValue(primaryProvider.api_key_env, event.target.value)
+                          }
+                        />
+                        <small>
+                          {savedEnvNames.has(primaryProvider.api_key_env)
+                            ? "本地已保存过这个变量。留空不会覆盖，重新输入才会更新。"
+                            : "点击“连接并启用真实模型”后会写入 ~/.octoagent/.env.litellm。"}
+                        </small>
+                      </label>
+
+                      <label className="wb-field">
+                        <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
+                        <input
+                          type="text"
+                          value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
+                          onChange={(event) =>
+                            updateFieldValue("runtime.master_key_env", event.target.value)
+                          }
+                        />
+                      </label>
+
+                      <label className="wb-field">
+                        <span>LiteLLM Master Key 值</span>
+                        <input
+                          type="password"
+                          value={
+                            secretValues[
+                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                            ] ?? ""
+                          }
+                          placeholder={
+                            savedEnvNames.has(
+                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                            )
+                              ? "已存在本地值；如需替换请重新输入"
+                              : "生成或输入一串随机长字符串"
+                          }
+                          onChange={(event) =>
+                            updateSecretValue(
+                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                              event.target.value
+                            )
+                          }
+                        />
+                        <div className="wb-inline-actions wb-inline-actions-wrap">
+                          <button
+                            type="button"
+                            className="wb-button wb-button-tertiary wb-button-inline"
+                            onClick={() =>
+                              updateSecretValue(
+                                String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                                generateSecretValue()
+                              )
+                            }
+                          >
+                            生成随机 Master Key
+                          </button>
+                          <span className="wb-inline-meta">
+                            {savedEnvNames.has(
+                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                            )
+                              ? "当前本地已存在旧值"
+                              : "首次接入建议先生成一条"}
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
+                      <button
+                        type="button"
+                        className="wb-button wb-button-primary"
+                        onClick={() => void handleQuickConnect()}
+                        disabled={connectBusy}
+                      >
+                        连接并启用真实模型
+                      </button>
+                      <button
+                        type="button"
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
+                      >
+                        恢复推荐别名
+                      </button>
+                    </div>
+                    <div className="wb-note">
+                      <strong>一步完成</strong>
+                      <span>
+                        这个按钮会同时保存 Provider、写入密钥、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : null}
-            {renderRiskList("模型与运行连接", review.provider_runtime_risks)}
-            {renderRiskList("渠道暴露范围", review.channel_exposure_risks)}
-            {renderRiskList("Agent 自主性", review.agent_autonomy_risks)}
-            {renderRiskList("工具与技能", review.tool_skill_readiness_risks)}
-            {renderRiskList("密钥绑定", review.secret_binding_risks)}
-          </div>
-        </section>
 
-        <section id="settings-group-governance" className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">主 Agent</p>
-              <h3>名称、Persona 和默认能力</h3>
-            </div>
-          </div>
-
-          <div className="wb-form-grid">
-            <label className="wb-field">
-              <span>主 Agent 名称</span>
-              <input
-                type="text"
-                value={agentDraft.name}
-                onChange={(event) =>
-                  setAgentDraft((state) => ({ ...state, name: event.target.value }))
-                }
-              />
-            </label>
-
-            <label className="wb-field">
-              <span>默认模型别名</span>
-              {aliasOptions.length > 0 ? (
-                <select
-                  value={aliasOptions.includes(agentDraft.model_alias) ? agentDraft.model_alias : aliasOptions[0]}
-                  onChange={(event) =>
-                    setAgentDraft((state) => ({ ...state, model_alias: event.target.value }))
-                  }
-                >
-                  {aliasOptions.map((alias) => (
-                    <option key={alias} value={alias}>
-                      {alias}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={agentDraft.model_alias}
-                  onChange={(event) =>
-                    setAgentDraft((state) => ({ ...state, model_alias: event.target.value }))
-                  }
-                />
-              )}
-            </label>
-
-            <label className="wb-field">
-              <span>工具权限模板</span>
-              <select
-                value={agentDraft.tool_profile}
-                onChange={(event) =>
-                  setAgentDraft((state) => ({ ...state, tool_profile: event.target.value }))
-                }
-              >
-                <option value="minimal">minimal</option>
-                <option value="standard">standard</option>
-                <option value="privileged">privileged</option>
-              </select>
-            </label>
-
-            <label className="wb-field">
-              <span>安全等级</span>
-              <select
-                value={policyProfileId}
-                onChange={(event) => setPolicyProfileId(event.target.value)}
-              >
-                {policyProfiles.profiles.map((profile) => (
-                  <option key={profile.profile_id} value={profile.profile_id}>
-                    {profile.label} · {profile.approval_policy}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="wb-field wb-field-span-2">
-              <span>Persona（角色说明）</span>
-              <small>这就是主 Agent 的 Persona，会影响它默认的语气、侧重点和处理方式。</small>
-              <textarea
-                className="wb-textarea-prose"
-                rows={4}
-                value={agentDraft.persona_summary}
-                placeholder="例如：通用个人助手，优先帮助我处理当前任务，并在需要时提醒风险。"
-                onChange={(event) =>
-                  setAgentDraft((state) => ({
-                    ...state,
-                    persona_summary: event.target.value,
-                  }))
-                }
-              />
-            </label>
-          </div>
-
-          <div className="wb-note-stack">
-            <div className="wb-note">
-              <strong>{setup.agent_governance.label}</strong>
-              <span>{setup.agent_governance.summary}</span>
-            </div>
-            <div className="wb-note">
-              <strong>{setup.tools_skills.label}</strong>
-              <span>{setup.tools_skills.summary}</span>
-            </div>
-            <div className="wb-note">
-              <strong>Skills 默认范围</strong>
-              <span>先选中你希望默认暴露给 setup/workbench 的能力，再保存配置。</span>
-            </div>
-            {skillGovernance.items.map((item) => {
-              const selected = skillSelection[item.item_id] ?? item.selected;
-              return (
-                <label key={item.item_id} className="wb-note">
-                  <strong>
-                    {item.label} · {selected ? "已启用" : "未启用"}
-                  </strong>
-                  <span>
-                    {item.missing_requirements.length > 0
-                      ? item.missing_requirements.join("；")
-                      : "当前 capability pack 可用"}
-                  </span>
-                  <small>
-                    {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} ·
-                    当前 {item.availability}
-                  </small>
-                  <input
-                    type="checkbox"
-                    aria-label={`启用 ${item.label}`}
-                    checked={selected}
-                    onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
-                  />
-                </label>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      <section id="settings-group-main-agent" className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">模型与连接</p>
-            <h3>选择接入方式，并用表单完成 Provider 与模型别名配置</h3>
-          </div>
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <button
-              type="button"
-              className="wb-button wb-button-tertiary wb-button-inline"
-              onClick={() => updateFieldValue("runtime.llm_mode", "echo")}
-            >
-              保持体验模式
-            </button>
-            <button
-              type="button"
-              className="wb-button wb-button-secondary wb-button-inline"
-              onClick={() => applyProviderMode("api-key")}
-            >
-              改为 LiteLLM / API Key
-            </button>
-          </div>
-        </div>
-
-        <div className="wb-provider-mode-grid">
-          <button
-            type="button"
-            className={`wb-mode-card ${providerMode === "openai-auth" ? "is-active" : ""}`}
-            onClick={() => applyProviderMode("openai-auth")}
-          >
-            <span className="wb-card-label">OpenAI Auth</span>
-            <strong>浏览器登录 ChatGPT Pro / Codex</strong>
-            <p>适合已经有 ChatGPT Pro / Codex 账号的用户，不需要手贴 API Key。</p>
-          </button>
-          <button
-            type="button"
-            className={`wb-mode-card ${providerMode === "api-key" ? "is-active" : ""}`}
-            onClick={() => applyProviderMode("api-key")}
-          >
-            <span className="wb-card-label">LiteLLM / API Key</span>
-            <strong>手动填写 Provider Key 与 LiteLLM 运行参数</strong>
-            <p>适合 OpenRouter / OpenAI / Anthropic 等标准 API Key 场景。</p>
-          </button>
-        </div>
-
-        <div className="wb-provider-layout">
-          <div className="wb-section-stack">
-            <div className="wb-note">
-              <strong>当前运行模式</strong>
-              <span>
-                {runtimeMode === "echo"
-                  ? "现在还是体验模式。你可以先体验页面，也可以继续完成下面的真实模型配置。"
-                  : "当前会通过 LiteLLM 代理接入真实模型。改完配置后请点击“保存并重新连接”。"}
-              </span>
-            </div>
-
-            {providerMode === "openai-auth" ? (
-              <div className="wb-provider-card">
-                <div className="wb-provider-card-head">
-                  <div>
-                    <p className="wb-card-label">连接 OpenAI Auth</p>
-                    <strong>通过浏览器授权，把凭证写入本地</strong>
-                  </div>
-                  <span
-                    className={`wb-status-pill ${
-                      providerRuntimeDetails.openai_oauth_connected ? "is-ready" : "is-warning"
-                    }`}
-                  >
-                    {providerRuntimeDetails.openai_oauth_connected ? "已连接" : "未连接"}
-                  </span>
-                </div>
-                <div className="wb-provider-meta">
-                  <span>Provider: `openai-codex`</span>
-                  <span>环境变量: `OPENAI_API_KEY`</span>
-                  <span>
-                    当前凭证:
-                    {providerRuntimeDetails.openai_oauth_profile
-                      ? ` ${providerRuntimeDetails.openai_oauth_profile}`
-                      : " 还没有连接"}
-                  </span>
-                </div>
-                <div className="wb-inline-actions wb-inline-actions-wrap">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    onClick={() => void handleQuickConnect()}
-                    disabled={connectBusy}
-                  >
-                    {providerRuntimeDetails.openai_oauth_connected
-                      ? "启用 OpenAI Auth"
-                      : "连接并启用 OpenAI Auth"}
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary wb-button-inline"
-                    onClick={() => updateAliases(buildDefaultAliasDrafts("openai-codex"))}
-                  >
-                    恢复推荐别名
-                  </button>
-                </div>
-                <div className="wb-note">
-                  <strong>完成后会发生什么</strong>
-                  <span>
-                    按下按钮后会先完成浏览器授权，再把 `openai-codex` 写入配置、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="wb-provider-card">
-                <div className="wb-provider-card-head">
-                  <div>
-                    <p className="wb-card-label">LiteLLM / API Key</p>
-                    <strong>先选主 Provider，再填写真实密钥</strong>
-                  </div>
-                  <span className={`wb-status-pill ${savedEnvNames.has(primaryProvider.api_key_env) ? "is-ready" : ""}`}>
-                    {savedEnvNames.has(primaryProvider.api_key_env) ? "已写入密钥" : "待填写密钥"}
-                  </span>
-                </div>
-
-                {providerDrafts.length > 1 ? (
-                  <div className="wb-note">
-                    <strong>当前已存在多个 Provider</strong>
-                    <span>这块表单会优先编辑第一个启用的 Provider。其余项会保留，但建议你先把主 Provider 跑通。</span>
-                  </div>
-                ) : null}
-
-                <div className="wb-form-grid">
-                  <label className="wb-field">
-                    <span>Provider 预设</span>
-                    <select
-                      value={availableProviderOptions.includes(primaryProvider.id) ? primaryProvider.id : "openrouter"}
-                      onChange={(event) => changePrimaryProvider(event.target.value)}
-                    >
-                      {availableProviderOptions.map((providerId) => (
-                        <option key={providerId} value={providerId}>
-                          {PROVIDER_PRESETS[providerId]?.name ?? providerId}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="wb-field">
-                    <span>LiteLLM 代理地址</span>
-                    <input
-                      type="text"
-                      value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
-                      placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
-                      onChange={(event) =>
-                        updateFieldValue("runtime.litellm_proxy_url", event.target.value)
-                      }
-                    />
-                    <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
-                  </label>
-
-                  <label className="wb-field">
-                    <span>Provider ID</span>
-                    <input
-                      type="text"
-                      value={primaryProvider.id}
-                      onChange={(event) =>
-                        updatePrimaryProvider({
-                          id: event.target.value,
-                          auth_type: "api_key",
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label className="wb-field">
-                    <span>Provider 显示名称</span>
-                    <input
-                      type="text"
-                      value={primaryProvider.name}
-                      onChange={(event) => updatePrimaryProvider({ name: event.target.value })}
-                    />
-                  </label>
-
-                  <label className="wb-field">
-                    <span>API Key 环境变量名</span>
-                    <input
-                      type="text"
-                      value={primaryProvider.api_key_env}
-                      onChange={(event) =>
-                        updatePrimaryProvider({ api_key_env: event.target.value })
-                      }
-                    />
-                    <small>这里只写变量名，例如 `OPENROUTER_API_KEY`。</small>
-                  </label>
-
-                  <label className="wb-field">
-                    <span>API Key / Token</span>
-                    <input
-                      type="password"
-                      value={secretValues[primaryProvider.api_key_env] ?? ""}
-                      placeholder={
-                        savedEnvNames.has(primaryProvider.api_key_env)
-                          ? "已存在本地值；如需替换请重新输入"
-                          : "粘贴真实 API Key"
-                      }
-                      onChange={(event) =>
-                        updateSecretValue(primaryProvider.api_key_env, event.target.value)
-                      }
-                    />
-                    <small>
-                      {savedEnvNames.has(primaryProvider.api_key_env)
-                        ? "本地已保存过这个变量。留空不会覆盖，重新输入才会更新。"
-                        : "点击“连接并启用真实模型”后会写入 ~/.octoagent/.env.litellm。"}
-                    </small>
-                  </label>
-
-                  <label className="wb-field">
-                    <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
-                    <input
-                      type="text"
-                      value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
-                      onChange={(event) =>
-                        updateFieldValue("runtime.master_key_env", event.target.value)
-                      }
-                    />
-                  </label>
-
-                  <label className="wb-field">
-                    <span>LiteLLM Master Key 值</span>
-                    <input
-                      type="password"
-                      value={
-                        secretValues[String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")] ?? ""
-                      }
-                      placeholder={
-                        savedEnvNames.has(String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"))
-                          ? "已存在本地值；如需替换请重新输入"
-                          : "生成或输入一串随机长字符串"
-                      }
-                      onChange={(event) =>
-                        updateSecretValue(
-                          String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                          event.target.value
-                        )
-                      }
-                    />
+              <div className="wb-section-stack">
+                <div className="wb-provider-card">
+                  <div className="wb-provider-card-head">
+                    <div>
+                      <p className="wb-card-label">模型别名</p>
+                      <strong>用易记的别名映射到真实模型</strong>
+                    </div>
                     <div className="wb-inline-actions wb-inline-actions-wrap">
                       <button
                         type="button"
                         className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() =>
-                          updateSecretValue(
-                            String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                            generateSecretValue()
-                          )
-                        }
+                        onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
                       >
-                        生成随机 Master Key
+                        恢复 main / cheap
                       </button>
-                      <span className="wb-inline-meta">
-                        {savedEnvNames.has(
-                          String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                        )
-                          ? "当前本地已存在旧值"
-                          : "首次接入建议先生成一条"}
-                      </span>
+                      <button
+                        type="button"
+                        className="wb-button wb-button-secondary wb-button-inline"
+                        onClick={() => addAliasDraft()}
+                      >
+                        新增别名
+                      </button>
                     </div>
-                  </label>
-                </div>
-                <div className="wb-inline-actions wb-inline-actions-wrap">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    onClick={() => void handleQuickConnect()}
-                    disabled={connectBusy}
-                  >
-                    连接并启用真实模型
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary wb-button-inline"
-                    onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
-                  >
-                    恢复推荐别名
-                  </button>
-                </div>
-                <div className="wb-note">
-                  <strong>一步完成</strong>
-                  <span>
-                    这个按钮会同时保存 Provider、写入密钥、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
-                  </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>怎么理解</strong>
+                    <span>
+                      Butler 和 Worker 只会引用别名，例如 `main`。以后要换底层模型，只改这里，不用全局改配置。
+                    </span>
+                  </div>
+                  <div className="wb-alias-editor">
+                    {aliasDrafts.length === 0 ? (
+                      <div className="wb-empty-state">
+                        <strong>还没有模型别名</strong>
+                        <span>建议至少保留 `main`，需要便宜模型时再补一个 `cheap`。</span>
+                      </div>
+                    ) : null}
+                    {aliasDrafts.map((item, index) => (
+                      <div key={`${item.alias}-${index}`} className="wb-alias-row">
+                        <label className="wb-field">
+                          <span>别名</span>
+                          <input
+                            type="text"
+                            value={item.alias}
+                            onChange={(event) => updateAliasAt(index, { alias: event.target.value })}
+                          />
+                        </label>
+                        <label className="wb-field">
+                          <span>Provider</span>
+                          <input
+                            type="text"
+                            value={item.provider}
+                            onChange={(event) =>
+                              updateAliasAt(index, { provider: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="wb-field wb-field-span-2">
+                          <span>模型名</span>
+                          <input
+                            type="text"
+                            value={item.model}
+                            placeholder={
+                              primaryProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"
+                            }
+                            onChange={(event) => updateAliasAt(index, { model: event.target.value })}
+                          />
+                        </label>
+                        <label className="wb-field wb-field-span-2">
+                          <span>说明</span>
+                          <input
+                            type="text"
+                            value={item.description}
+                            placeholder="例如：主力模型 / 低成本模型"
+                            onChange={(event) =>
+                              updateAliasAt(index, { description: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="wb-field">
+                          <span>推理强度</span>
+                          <select
+                            value={item.thinking_level}
+                            onChange={(event) =>
+                              updateAliasAt(index, {
+                                thinking_level: event.target
+                                  .value as ModelAliasDraftItem["thinking_level"],
+                              })
+                            }
+                          >
+                            <option value="">默认</option>
+                            <option value="xhigh">xhigh</option>
+                            <option value="high">high</option>
+                            <option value="medium">medium</option>
+                            <option value="low">low</option>
+                          </select>
+                        </label>
+                        <div className="wb-alias-actions">
+                          <button
+                            type="button"
+                            className="wb-button wb-button-tertiary wb-button-inline"
+                            onClick={() => removeAliasDraft(index)}
+                            disabled={aliasDrafts.length <= 1}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          </section>
 
-          <div className="wb-section-stack">
-            <div className="wb-provider-card">
-              <div className="wb-provider-card-head">
-                <div>
-                  <p className="wb-card-label">模型别名</p>
-                  <strong>用易记的别名映射到真实模型</strong>
+          <section id="settings-group-governance" className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">Skills</p>
+                <h3>保留默认能力范围与平台级治理开关</h3>
+              </div>
+            </div>
+
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>{setup.tools_skills.label}</strong>
+                <span>{setup.tools_skills.summary}</span>
+              </div>
+              <div className="wb-note">
+                <strong>{setup.agent_governance.label}</strong>
+                <span>{setup.agent_governance.summary}</span>
+              </div>
+              <div className="wb-note">
+                <strong>Skills 默认范围</strong>
+                <span>
+                  这里控制默认暴露给 setup / workbench 的能力集合，不直接改 Butler 的身份或 Persona。
+                </span>
+              </div>
+              {skillGovernance.items.map((item) => {
+                const selected = skillSelection[item.item_id] ?? item.selected;
+                return (
+                  <label key={item.item_id} className="wb-note">
+                    <strong>
+                      {item.label} · {selected ? "已启用" : "未启用"}
+                    </strong>
+                    <span>
+                      {item.missing_requirements.length > 0
+                        ? item.missing_requirements.join("；")
+                        : "当前 capability pack 可用"}
+                    </span>
+                    <small>
+                      {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
+                      {item.availability}
+                    </small>
+                    <input
+                      type="checkbox"
+                      aria-label={`启用 ${item.label}`}
+                      checked={selected}
+                      onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+
+          <section id="settings-group-memory" className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">Memory</p>
+                <h3>先决定系统记什么、怎么找，再决定要不要接远端 bridge</h3>
+              </div>
+            </div>
+
+            <div className="wb-card-grid wb-card-grid-4">
+              <article className="wb-card">
+                <p className="wb-card-label">当前模式</p>
+                <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
+                <span>
+                  {memoryMode === "memu"
+                    ? "适合需要跨会话检索和高级回放"
+                    : "先把基础记忆链路跑通"}
+                </span>
+              </article>
+              <article className="wb-card">
+                <p className="wb-card-label">后端健康</p>
+                <strong>{memory.backend_state || memory.status}</strong>
+                <span>{memory.backend_id || "未标记"}</span>
+              </article>
+              <article className="wb-card">
+                <p className="wb-card-label">当前结论</p>
+                <strong>{memory.summary.sor_current_count}</strong>
+                <span>片段 {memory.summary.fragment_count}</span>
+              </article>
+              <article className="wb-card">
+                <p className="wb-card-label">待处理积压</p>
+                <strong>{memory.summary.pending_replay_count}</strong>
+                <span>Vault refs {memory.summary.vault_ref_count}</span>
+              </article>
+            </div>
+
+            {memory.warnings.length > 0 ? (
+              <div className="wb-inline-banner is-error">
+                <strong>Memory 当前有提醒</strong>
+                <span>{memory.warnings.join("；")}</span>
+              </div>
+            ) : (
+              <div className="wb-inline-banner is-muted">
+                <strong>推荐做法</strong>
+                <span>
+                  首次体验先保持本地记忆 + 保守召回；只有在你明确需要远端检索后端时，再切到 MemU bridge。
+                </span>
+              </div>
+            )}
+
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>Butler 记忆边界已迁到 Agents</strong>
+                <span>
+                  Butler 的 Persona、默认模型、工具权限、Vault / 历史版本读取范围，以及 recall 细调，现在统一放在 `Agents` 页面维护。
+                </span>
+                <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents">
+                  去 Agents 调 Butler
+                </Link>
+              </div>
+              <div className="wb-note">
+                <strong>这里保留平台级 Memory 设置</strong>
+                <span>
+                  `Settings` 只保留 Memory 后端模式、MemU bridge 地址、鉴权变量名和连接超时这些平台级开关。
+                </span>
+              </div>
+            </div>
+
+            {memoryBasicHints.length > 0 ? (
+              <>
+                <div className="wb-panel-head">
+                  <div>
+                    <p className="wb-card-label">连接配置</p>
+                    <h3>先选本地模式还是远端 MemU bridge</h3>
+                  </div>
                 </div>
-                <div className="wb-inline-actions wb-inline-actions-wrap">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary wb-button-inline"
-                    onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
-                  >
-                    恢复 main / cheap
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-secondary wb-button-inline"
-                    onClick={() => addAliasDraft()}
-                  >
-                    新增别名
-                  </button>
+                {renderHintFields(memoryBasicHints)}
+              </>
+            ) : null}
+
+            {memoryAdvancedHints.length > 0 ? (
+              <>
+                <div className="wb-panel-head">
+                  <div>
+                    <p className="wb-card-label">高阶连接</p>
+                    <h3>只有 bridge API 约定不一致时才需要改这些路径</h3>
+                  </div>
+                </div>
+                {renderHintFields(memoryAdvancedHints)}
+              </>
+            ) : null}
+          </section>
+
+          {otherGroupIds.map((groupId) => {
+            const hints = (groupedHints[groupId] ?? []).filter(
+              (hint) => !CUSTOM_PROVIDER_FIELD_PATHS.has(hint.field_path)
+            );
+            if (hints.length === 0) {
+              return null;
+            }
+            const group = groupLabel(groupId);
+            return (
+              <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
+                <div className="wb-panel-head">
+                  <div>
+                    <p className="wb-card-label">{group.title}</p>
+                    <h3>{group.description}</h3>
+                  </div>
+                </div>
+                {renderHintFields(hints)}
+              </section>
+            );
+          })}
+        </div>
+
+        <aside className="wb-settings-rail">
+          <section id="settings-group-butler" className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">Butler 已迁出</p>
+                <h3>主 Agent 的身份与边界只在 Agents 维护</h3>
+              </div>
+              <Link className="wb-button wb-button-secondary" to="/agents">
+                去 Agents
+              </Link>
+            </div>
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>{activeButlerName}</strong>
+                <span>{activeButlerPersona}</span>
+              </div>
+              <div className="wb-note">
+                <strong>当前默认能力</strong>
+                <span>
+                  {formatToolProfile(activeButlerToolProfile)} · 模型别名 {activeButlerModel}
+                </span>
+              </div>
+              <div className="wb-note">
+                <strong>为什么迁出</strong>
+                <span>
+                  这样 `Settings` 只做平台级配置，`Agents` 只做 Butler / Worker 的角色与治理，信息边界更清晰。
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">保存前检查</p>
+                <h3>先确认是否可用，再决定是否保存</h3>
+              </div>
+            </div>
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>下一步</strong>
+                <div className="wb-note-stack">
+                  {review.next_actions.map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
                 </div>
               </div>
               <div className="wb-note">
-                <strong>怎么理解</strong>
+                <strong>当前模式</strong>
                 <span>
-                  主 Agent 会引用别名，例如 `main`。这样以后你换模型时，只改这里，不用全局改代码或配置。
+                  {usingEchoMode
+                    ? "你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。"
+                    : "你正在准备接入真实模型，请优先完成 Provider 和模型别名配置。"}
                 </span>
               </div>
-              <div className="wb-alias-editor">
-                {aliasDrafts.length === 0 ? (
-                  <div className="wb-empty-state">
-                    <strong>还没有模型别名</strong>
-                    <span>建议至少保留 `main`，需要便宜模型时再补一个 `cheap`。</span>
+              {blockingGuides.length > 0 ? (
+                <div className="wb-note">
+                  <strong>需要先处理的问题</strong>
+                  <div className="wb-note-stack">
+                    {blockingGuides.map((guide) => (
+                      <div key={guide.guide_id} className="wb-guide-card">
+                        <strong>{guide.risk.title}</strong>
+                        <span>{guide.risk.summary}</span>
+                        {guide.risk.recommended_action ? (
+                          <small>{guide.risk.recommended_action}</small>
+                        ) : null}
+                        {guide.section_id === "butler" ? (
+                          <Link
+                            className="wb-button wb-button-tertiary wb-button-inline"
+                            to="/agents"
+                          >
+                            {guideButtonLabel(guide)}
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={guideButtonLabel(guide)}
+                            className="wb-button wb-button-tertiary wb-button-inline"
+                            onClick={() => scrollToSection(guide.section_id)}
+                          >
+                            {guideButtonLabel(guide)}
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ) : null}
-                {aliasDrafts.map((item, index) => (
-                  <div key={`${item.alias}-${index}`} className="wb-alias-row">
-                    <label className="wb-field">
-                      <span>别名</span>
-                      <input
-                        type="text"
-                        value={item.alias}
-                        onChange={(event) =>
-                          updateAliasAt(index, { alias: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="wb-field">
-                      <span>Provider</span>
-                      <input
-                        type="text"
-                        value={item.provider}
-                        onChange={(event) =>
-                          updateAliasAt(index, { provider: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="wb-field wb-field-span-2">
-                      <span>模型名</span>
-                      <input
-                        type="text"
-                        value={item.model}
-                        placeholder={primaryProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"}
-                        onChange={(event) =>
-                          updateAliasAt(index, { model: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="wb-field wb-field-span-2">
-                      <span>说明</span>
-                      <input
-                        type="text"
-                        value={item.description}
-                        placeholder="例如：主力模型 / 低成本模型"
-                        onChange={(event) =>
-                          updateAliasAt(index, { description: event.target.value })
-                        }
-                      />
-                    </label>
-                    <label className="wb-field">
-                      <span>推理强度</span>
-                      <select
-                        value={item.thinking_level}
-                        onChange={(event) =>
-                          updateAliasAt(index, {
-                            thinking_level: event.target.value as ModelAliasDraftItem["thinking_level"],
-                          })
-                        }
-                      >
-                        <option value="">默认</option>
-                        <option value="xhigh">xhigh</option>
-                        <option value="high">high</option>
-                        <option value="medium">medium</option>
-                        <option value="low">low</option>
-                      </select>
-                    </label>
-                    <div className="wb-alias-actions">
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() => removeAliasDraft(index)}
-                        disabled={aliasDrafts.length <= 1}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                </div>
+              ) : null}
+              {renderRiskList("模型与运行连接", review.provider_runtime_risks)}
+              {renderRiskList("渠道暴露范围", review.channel_exposure_risks)}
+              {renderRiskList("Butler 与治理", review.agent_autonomy_risks)}
+              {renderRiskList("工具与技能", review.tool_skill_readiness_risks)}
+              {renderRiskList("密钥绑定", review.secret_binding_risks)}
             </div>
-          </div>
-        </div>
-      </section>
+          </section>
 
-      <div className="wb-card-grid wb-card-grid-3">
-        <article className="wb-card">
-          <p className="wb-card-label">记忆状态</p>
-          <strong>{memory.status}</strong>
-          <span>当前结论 {memory.summary.sor_current_count}</span>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">工作状态</p>
-          <strong>{delegation.works.length}</strong>
-          <span>当前项目可见工作数</span>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">连接状态</p>
-          <strong>{setup.provider_runtime.status}</strong>
-          <span>{setup.channel_access.status}</span>
-        </article>
-      </div>
-
-      <section id="settings-group-memory" className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">Memory</p>
-            <h3>先决定系统记什么、怎么找，再决定要不要接远端 bridge</h3>
-          </div>
-        </div>
-
-        <div className="wb-card-grid wb-card-grid-4">
-          <article className="wb-card">
-            <p className="wb-card-label">当前模式</p>
-            <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
-            <span>
-              {memoryMode === "memu"
-                ? "适合需要跨会话检索和高级回放"
-                : "先把基础记忆链路跑通"}
-            </span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">后端健康</p>
-            <strong>{memory.backend_state || memory.status}</strong>
-            <span>{memory.backend_id || "未标记"}</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">当前结论</p>
-            <strong>{memory.summary.sor_current_count}</strong>
-            <span>片段 {memory.summary.fragment_count}</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">待处理积压</p>
-            <strong>{memory.summary.pending_replay_count}</strong>
-            <span>Vault refs {memory.summary.vault_ref_count}</span>
-          </article>
-        </div>
-
-        {memory.warnings.length > 0 ? (
-          <div className="wb-inline-banner is-error">
-            <strong>Memory 当前有提醒</strong>
-            <span>{memory.warnings.join("；")}</span>
-          </div>
-        ) : (
-          <div className="wb-inline-banner is-muted">
-            <strong>推荐做法</strong>
-            <span>
-              首次体验先保持本地记忆 + 保守召回；只有在你明确需要远端检索后端时，再切到
-              MemU bridge。
-            </span>
-          </div>
-        )}
-
-        <div className="wb-note-stack">
-          <div className="wb-note">
-            <strong>记忆权限</strong>
-            <span>
-              这里决定主 Agent 默认能不能读取历史版本、能不能把 Vault 引用一起带回上下文。
-            </span>
-          </div>
-          <div className="wb-note">
-            <strong>检索策略</strong>
-            <span>
-              后过滤与重排会影响 recall 的精度和保守程度；建议先用默认值，只有明确发现命中过多或过少时再调。
-            </span>
-          </div>
-          <div className="wb-note">
-            <strong>快速预设</strong>
-            <span>如果你现在还不确定这些参数，先选一个预设，再按需要微调会更省事。</span>
-            <div className="wb-inline-actions wb-inline-actions-wrap">
-              {MEMORY_RECALL_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className="wb-button wb-button-tertiary wb-button-inline"
-                  onClick={() => applyMemoryRecallPreset(preset.id)}
-                >
-                  {preset.label}
-                </button>
-              ))}
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">本页动作</p>
+                <h3>先检查，再保存或一键接入</h3>
+              </div>
             </div>
             <div className="wb-note-stack">
-              {MEMORY_RECALL_PRESETS.map((preset) => (
-                <small key={`${preset.id}-copy`}>
-                  {preset.label}：{preset.description}
-                </small>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="wb-form-grid">
-          <label className="wb-field">
-            <span>允许带回 Vault 引用</span>
-            <small>打开后，主 Agent 在 recall 时可以把受控 Vault 引用也纳入候选。</small>
-            <input
-              type="checkbox"
-              checked={agentDraft.memory_access_policy.allow_vault}
-              onChange={(event) =>
-                updateMemoryAccessPolicy("allow_vault", event.target.checked)
-              }
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>默认包含历史版本</span>
-            <small>打开后，会把旧版本 SoR 一起纳入 recall，适合需要看演变过程的场景。</small>
-            <input
-              type="checkbox"
-              checked={agentDraft.memory_access_policy.include_history}
-              onChange={(event) =>
-                updateMemoryAccessPolicy("include_history", event.target.checked)
-              }
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>后过滤策略</span>
-            <small>默认用关键词重叠做一道保守过滤；命中太少时再改成 none。</small>
-            <select
-              value={agentDraft.context_budget_policy.memory_recall.post_filter_mode}
-              onChange={(event) =>
-                updateMemoryRecallDraft("post_filter_mode", event.target.value)
-              }
-            >
-              <option value="keyword_overlap">keyword_overlap · 保守过滤</option>
-              <option value="none">none · 不额外过滤</option>
-            </select>
-          </label>
-
-          <label className="wb-field">
-            <span>重排策略</span>
-            <small>默认启用 heuristic；如果你只想保留原始搜索顺序，可以改成 none。</small>
-            <select
-              value={agentDraft.context_budget_policy.memory_recall.rerank_mode}
-              onChange={(event) =>
-                updateMemoryRecallDraft("rerank_mode", event.target.value)
-              }
-            >
-              <option value="heuristic">heuristic · 优先更贴近当前主题</option>
-              <option value="none">none · 保留原始顺序</option>
-            </select>
-          </label>
-
-          <label className="wb-field">
-            <span>最低关键词重叠</span>
-            <small>数字越大越严格。默认 1；只有误命中明显偏多时再调高。</small>
-            <input
-              type="text"
-              value={agentDraft.context_budget_policy.memory_recall.min_keyword_overlap}
-              onChange={(event) =>
-                updateMemoryRecallDraft("min_keyword_overlap", event.target.value)
-              }
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>最多查几个 Scope</span>
-            <small>默认 4。范围越大越全，但也更容易把上下文拉散。</small>
-            <input
-              type="text"
-              value={agentDraft.context_budget_policy.memory_recall.scope_limit}
-              onChange={(event) => updateMemoryRecallDraft("scope_limit", event.target.value)}
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>每个 Scope 最多带回几条</span>
-            <small>默认 3。太大容易噪声多，太小可能漏掉关键上下文。</small>
-            <input
-              type="text"
-              value={agentDraft.context_budget_policy.memory_recall.per_scope_limit}
-              onChange={(event) =>
-                updateMemoryRecallDraft("per_scope_limit", event.target.value)
-              }
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>总命中上限</span>
-            <small>默认 4。这个值越大，主上下文越容易变重。</small>
-            <input
-              type="text"
-              value={agentDraft.context_budget_policy.memory_recall.max_hits}
-              onChange={(event) => updateMemoryRecallDraft("max_hits", event.target.value)}
-            />
-          </label>
-        </div>
-
-        {memoryBasicHints.length > 0 ? (
-          <>
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">连接配置</p>
-                <h3>先选本地模式还是远端 MemU bridge</h3>
+              <div className="wb-note">
+                <strong>检查配置</strong>
+                <span>先用 `setup.review` 看阻塞项，再决定是否保存或一键连接。</span>
+              </div>
+              <div className="wb-inline-actions wb-inline-actions-wrap">
+                <button
+                  type="button"
+                  className="wb-button wb-button-primary"
+                  onClick={() => void handleQuickConnect()}
+                  disabled={connectBusy}
+                >
+                  {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary"
+                  onClick={() => void handleReview()}
+                  disabled={connectBusy}
+                >
+                  检查配置
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary"
+                  onClick={() => void handleApply()}
+                  disabled={connectBusy}
+                >
+                  保存配置
+                </button>
               </div>
             </div>
-            {renderHintFields(memoryBasicHints)}
-          </>
-        ) : null}
-
-        {memoryAdvancedHints.length > 0 ? (
-          <>
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">高阶连接</p>
-                <h3>只有 bridge API 约定不一致时才需要改这些路径</h3>
-              </div>
-            </div>
-            {renderHintFields(memoryAdvancedHints)}
-          </>
-        ) : null}
-      </section>
-
-      {otherGroupIds.map((groupId) => {
-        const hints = (groupedHints[groupId] ?? []).filter(
-          (hint) => !CUSTOM_PROVIDER_FIELD_PATHS.has(hint.field_path)
-        );
-        if (hints.length === 0) {
-          return null;
-        }
-        const group = groupLabel(groupId);
-        return (
-          <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">{group.title}</p>
-                <h3>{group.description}</h3>
-              </div>
-            </div>
-            {renderHintFields(hints)}
           </section>
-        );
-      })}
+        </aside>
+      </div>
     </div>
   );
 }

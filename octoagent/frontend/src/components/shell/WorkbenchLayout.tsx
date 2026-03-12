@@ -25,13 +25,13 @@ function renderNavDescription(path: string): string {
     case "/chat":
       return "对话、任务与回复";
     case "/agents":
-      return "主 Agent 与 Work Agent";
+      return "Butler 与 Worker 编排";
     case "/work":
       return "运行中的工作与子任务";
     case "/memory":
       return "系统记住了什么";
     case "/settings":
-      return "基础配置与连接";
+      return "模型、渠道与 Memory 连接";
     case "/advanced":
       return "完整控制面与诊断";
     default:
@@ -107,11 +107,11 @@ export default function WorkbenchLayout() {
     <WorkbenchContext.Provider value={workbench}>
       <div className="wb-shell">
         <aside className={`wb-sidebar ${navOpen ? "is-open" : ""}`}>
-          <div className="wb-sidebar-card wb-sidebar-brand">
-            <p className="wb-kicker">你的工作台</p>
-            <h1>OctoAgent</h1>
-            <p>先从状态、设置、对话和工作开始，常用入口都在这里。</p>
-          </div>
+            <div className="wb-sidebar-card wb-sidebar-brand">
+              <p className="wb-kicker">你的工作台</p>
+              <h1>OctoAgent</h1>
+              <p>把 Butler、平台连接、对话和运行视图分开管理，常用入口都在这里。</p>
+            </div>
 
           <nav className="wb-nav" aria-label="Workbench Navigation">
             {[
