@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   CapabilityPackDocument,
+  ControlPlaneDocumentBase,
   ContextContinuityDocument,
   WorkProjectionItem,
 } from "../types";
@@ -10,7 +11,10 @@ import {
   isFreshnessRelevantWork,
 } from "./freshness";
 
-const BASE_DOCUMENT = {
+const BASE_DOCUMENT: Omit<
+  ControlPlaneDocumentBase,
+  "resource_type" | "resource_id"
+> = {
   contract_version: "1.0.0",
   schema_version: 1,
   generated_at: "2026-03-12T08:00:00Z",
@@ -20,7 +24,7 @@ const BASE_DOCUMENT = {
   warnings: [],
   capabilities: [],
   refs: {},
-} as const;
+};
 
 function buildContext(): ContextContinuityDocument {
   return {
@@ -74,6 +78,9 @@ function buildWork(
     runtime_id: "",
     project_id: "project-default",
     workspace_id: "workspace-default",
+    requested_worker_profile_id: "",
+    requested_worker_profile_version: 0,
+    effective_worker_snapshot_id: "",
     child_work_ids: [],
     child_work_count: 0,
     merge_ready: false,
