@@ -18,6 +18,19 @@ class AgentProfileScope(StrEnum):
     PROJECT = "project"
 
 
+class WorkerProfileStatus(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class WorkerProfileOriginKind(StrEnum):
+    BUILTIN = "builtin"
+    CUSTOM = "custom"
+    CLONED = "cloned"
+    EXTRACTED = "extracted"
+
+
 class OwnerOverlayScope(StrEnum):
     PROJECT = "project"
     WORKSPACE = "workspace"
@@ -56,6 +69,45 @@ class AgentProfile(BaseModel):
     version: int = Field(default=1, ge=1)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
+
+
+class WorkerProfile(BaseModel):
+    """Root Agent 的正式静态配置对象。"""
+
+    profile_id: str = Field(min_length=1)
+    scope: AgentProfileScope = AgentProfileScope.PROJECT
+    project_id: str = Field(default="")
+    name: str = Field(min_length=1)
+    summary: str = Field(default="")
+    base_archetype: str = Field(default="general")
+    instruction_overlays: list[str] = Field(default_factory=list)
+    model_alias: str = Field(default="main")
+    tool_profile: str = Field(default="minimal")
+    default_tool_groups: list[str] = Field(default_factory=list)
+    selected_tools: list[str] = Field(default_factory=list)
+    runtime_kinds: list[str] = Field(default_factory=list)
+    policy_refs: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    status: WorkerProfileStatus = WorkerProfileStatus.DRAFT
+    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.CUSTOM
+    draft_revision: int = Field(default=0, ge=0)
+    active_revision: int = Field(default=0, ge=0)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    archived_at: datetime | None = None
+
+
+class WorkerProfileRevision(BaseModel):
+    """Root Agent 已发布 revision。"""
+
+    revision_id: str = Field(min_length=1)
+    profile_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    change_summary: str = Field(default="")
+    snapshot_payload: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utc_now)
 
 
 class OwnerProfile(BaseModel):

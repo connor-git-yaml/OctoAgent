@@ -13,6 +13,7 @@ from octoagent.core.models import (
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
+    DelegationTargetKind,
     NormalizedMessage,
     OrchestratorRequest,
     OwnerOverlayScope,
@@ -27,7 +28,14 @@ from octoagent.core.models import (
     SecretTargetKind,
     SessionContextState,
     ToolIndexQuery,
+    Work,
+    WorkKind,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileRevision,
+    WorkerProfileStatus,
     WorkerType,
+    WorkStatus,
     Workspace,
     WorkspaceKind,
 )
@@ -436,6 +444,7 @@ class TestControlPlaneApi:
             "project_selector",
             "sessions",
             "agent_profiles",
+            "worker_profiles",
             "owner_profile",
             "bootstrap_session",
             "context_continuity",
@@ -472,6 +481,11 @@ class TestControlPlaneApi:
         assert payload["resources"]["agent_profiles"]["profiles"][0]["profile_id"] == (
             "agent-profile-default"
         )
+        worker_profile = payload["resources"]["worker_profiles"]["profiles"][0]
+        assert worker_profile["profile_id"] == "singleton:general"
+        assert worker_profile["mode"] == "singleton"
+        assert worker_profile["static_config"]["base_archetype"] == "general"
+        assert "active_work_count" in worker_profile["dynamic_context"]
         assert payload["resources"]["owner_profile"]["profile"]["owner_profile_id"] == (
             "owner-profile-default"
         )
@@ -511,6 +525,7 @@ class TestControlPlaneApi:
         assert "schema_payload" not in config_payload
 
         profiles_resp = await control_plane_client.get("/api/control/resources/agent-profiles")
+        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
         owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
         bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
         context_resp = await control_plane_client.get("/api/control/resources/context-frames")
@@ -518,6 +533,7 @@ class TestControlPlaneApi:
         skill_resp = await control_plane_client.get("/api/control/resources/skill-governance")
         setup_resp = await control_plane_client.get("/api/control/resources/setup-governance")
         assert profiles_resp.status_code == 200
+        assert worker_profiles_resp.status_code == 200
         assert owner_resp.status_code == 200
         assert bootstrap_resp.status_code == 200
         assert context_resp.status_code == 200
@@ -528,6 +544,9 @@ class TestControlPlaneApi:
         assert policy_resp.status_code == 200
         assert skill_resp.status_code == 200
         assert setup_resp.status_code == 200
+        worker_profiles_payload = worker_profiles_resp.json()
+        assert worker_profiles_payload["resource_type"] == "worker_profiles"
+        assert worker_profiles_payload["profiles"][0]["dynamic_context"]["active_project_id"]
 
     async def test_capability_refresh_action_invokes_refresh(
         self,
@@ -3194,3 +3213,361 @@ class TestControlPlaneApi:
         assert create_resp.status_code == 400
         payload = create_resp.json()["result"]
         assert payload["code"] == "SCHEDULE_KIND_INVALID"
+
+    async def test_worker_profile_create_publish_and_revision_resource(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        project = await control_plane_app.state.store_group.project_store.get_default_project()
+        assert project is not None
+        draft = {
+            "scope": "project",
+            "project_id": project.project_id,
+            "name": "NAS Root Agent",
+            "summary": "负责 NAS 巡检与文件归档。",
+            "base_archetype": "ops",
+            "tool_profile": "standard",
+            "default_tool_groups": ["project", "artifact"],
+            "runtime_kinds": ["worker", "acp_runtime"],
+            "policy_refs": ["default"],
+            "tags": ["nas", "storage"],
+        }
+
+        review_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": draft,
+                },
+            },
+        )
+        assert review_resp.status_code == 200
+        review_payload = review_resp.json()["result"]["data"]["review"]
+        assert review_payload["can_save"] is True
+        assert review_payload["ready"] is True
+
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.create",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": draft,
+                },
+            },
+        )
+        assert create_resp.status_code == 200
+        create_payload = create_resp.json()["result"]["data"]
+        profile_id = create_payload["profile_id"]
+        assert create_payload["status"] == "draft"
+        assert create_payload["draft_revision"] == 1
+
+        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        assert worker_profiles_resp.status_code == 200
+        profiles_payload = worker_profiles_resp.json()
+        created_profile = next(
+            item for item in profiles_payload["profiles"] if item["profile_id"] == profile_id
+        )
+        assert created_profile["status"] == "draft"
+        assert created_profile["active_revision"] == 0
+        assert created_profile["origin_kind"] == "custom"
+
+        publish_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.publish",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile_id": profile_id,
+                    "change_summary": "首次发布 NAS Root Agent",
+                },
+            },
+        )
+        assert publish_resp.status_code == 200
+        publish_payload = publish_resp.json()["result"]["data"]
+        assert publish_payload["revision"] == 1
+
+        revisions_resp = await control_plane_client.get(
+            f"/api/control/resources/worker-profile-revisions/{profile_id}"
+        )
+        assert revisions_resp.status_code == 200
+        revisions_payload = revisions_resp.json()
+        assert revisions_payload["summary"]["revision_count"] == 1
+        assert revisions_payload["revisions"][0]["change_summary"] == "首次发布 NAS Root Agent"
+        assert revisions_payload["revisions"][0]["snapshot_payload"]["name"] == "NAS Root Agent"
+
+    async def test_worker_profile_spawn_and_extract_actions(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+
+        profile = WorkerProfile(
+            profile_id="worker-profile-runtime-alpha",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id,
+            name="Runtime Alpha",
+            summary="用于 runtime lineage 测试。",
+            base_archetype="research",
+            model_alias="main",
+            tool_profile="minimal",
+            default_tool_groups=["project", "network"],
+            selected_tools=["web.search"],
+            runtime_kinds=["worker", "subagent"],
+            policy_refs=["default"],
+            tags=["runtime", "search"],
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            draft_revision=1,
+            active_revision=1,
+        )
+        await store_group.agent_context_store.save_worker_profile(profile)
+        await store_group.agent_context_store.save_worker_profile_revision(
+            WorkerProfileRevision(
+                revision_id="worker-snapshot:worker-profile-runtime-alpha:1",
+                profile_id=profile.profile_id,
+                revision=1,
+                change_summary="seeded runtime profile",
+                snapshot_payload={
+                    "profile_id": profile.profile_id,
+                    "name": profile.name,
+                    "selected_tools": profile.selected_tools,
+                },
+                created_by="tests",
+            )
+        )
+        await store_group.conn.commit()
+
+        spawn_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker.spawn_from_profile",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile_id": profile.profile_id,
+                    "objective": "请根据这个 Root Agent 的职责检查今天的 NAS 状态。",
+                },
+            },
+        )
+        assert spawn_resp.status_code == 200
+        spawn_payload = spawn_resp.json()["result"]["data"]
+        task_id = spawn_payload["task_id"]
+        assert spawn_payload["requested_worker_profile_version"] == 1
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        user_event = next(item for item in events if item.type.value == "USER_MESSAGE")
+        assert user_event.payload["metadata"]["requested_worker_profile_id"] == profile.profile_id
+        assert user_event.payload["metadata"]["effective_worker_snapshot_id"] == (
+            "worker-snapshot:worker-profile-runtime-alpha:1"
+        )
+
+        runtime_task_id = await _create_task(
+            control_plane_app,
+            text="runtime extract source",
+            thread_id="thread-runtime-profile",
+            scope_id=project.project_id,
+        )
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-runtime-profile",
+                task_id=runtime_task_id,
+                title="调研 NAS 今日同步状态",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.RUNNING,
+                target_kind=DelegationTargetKind.SUBAGENT,
+                selected_worker_type=WorkerType.RESEARCH,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                requested_worker_profile_id=profile.profile_id,
+                requested_worker_profile_version=1,
+                effective_worker_snapshot_id="worker-snapshot:worker-profile-runtime-alpha:1",
+                selected_tools=["web.search"],
+                metadata={"requested_tool_profile": "minimal"},
+            )
+        )
+        await store_group.conn.commit()
+
+        extract_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker.extract_profile_from_runtime",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "work_id": "work-runtime-profile",
+                    "name": "Runtime Extracted Agent",
+                },
+            },
+        )
+        assert extract_resp.status_code == 200
+        extract_payload = extract_resp.json()["result"]["data"]
+        extracted_id = extract_payload["profile_id"]
+
+        extracted = await store_group.agent_context_store.get_worker_profile(extracted_id)
+        assert extracted is not None
+        assert extracted.origin_kind == WorkerProfileOriginKind.EXTRACTED
+        assert extracted.selected_tools == ["web.search"]
+        assert extracted.metadata["source_work_id"] == "work-runtime-profile"
+
+    async def test_worker_profiles_document_uses_latest_project_work_context(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        primary_workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert primary_workspace is not None
+
+        secondary_workspace = Workspace(
+            workspace_id="workspace-root-agent-ops",
+            project_id=project.project_id,
+            slug="root-agent-ops",
+            name="Root Agent Ops",
+            kind=WorkspaceKind.OPS,
+            root_path="/tmp/root-agent-ops",
+        )
+        await store_group.project_store.create_workspace(secondary_workspace)
+
+        profile = WorkerProfile(
+            profile_id="worker-profile-root-agent-project",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id,
+            name="Project Root Agent",
+            summary="跨 workspace 聚合 runtime 状态。",
+            base_archetype="ops",
+            model_alias="main",
+            tool_profile="standard",
+            default_tool_groups=["runtime", "project"],
+            selected_tools=["runtime.inspect"],
+            runtime_kinds=["worker", "acp_runtime"],
+            policy_refs=["default"],
+            tags=["runtime", "ops"],
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            draft_revision=1,
+            active_revision=1,
+        )
+        await store_group.agent_context_store.save_worker_profile(profile)
+        await store_group.agent_context_store.save_worker_profile_revision(
+            WorkerProfileRevision(
+                revision_id="worker-snapshot:worker-profile-root-agent-project:1",
+                profile_id=profile.profile_id,
+                revision=1,
+                change_summary="seeded root agent profile",
+                snapshot_payload={
+                    "profile_id": profile.profile_id,
+                    "name": profile.name,
+                },
+                created_by="tests",
+            )
+        )
+
+        running_task_id = await _create_task(
+            control_plane_app,
+            text="root agent running work",
+            thread_id="thread-root-running",
+            scope_id=project.project_id,
+        )
+        failed_task_id = await _create_task(
+            control_plane_app,
+            text="root agent failed work",
+            thread_id="thread-root-failed",
+            scope_id=project.project_id,
+        )
+        running_ts = datetime(2026, 3, 12, 9, 10, tzinfo=UTC)
+        failed_ts = datetime(2026, 3, 12, 9, 20, tzinfo=UTC)
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-root-running",
+                task_id=running_task_id,
+                title="主工作区巡检",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.RUNNING,
+                target_kind=DelegationTargetKind.WORKER,
+                selected_worker_type=WorkerType.OPS,
+                project_id=project.project_id,
+                workspace_id=primary_workspace.workspace_id,
+                requested_worker_profile_id=profile.profile_id,
+                requested_worker_profile_version=1,
+                effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
+                selected_tools=["runtime.inspect"],
+                created_at=running_ts,
+                updated_at=running_ts,
+            )
+        )
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-root-failed",
+                task_id=failed_task_id,
+                title="运维工作区巡检",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.FAILED,
+                target_kind=DelegationTargetKind.ACP_RUNTIME,
+                selected_worker_type=WorkerType.OPS,
+                project_id=project.project_id,
+                workspace_id=secondary_workspace.workspace_id,
+                requested_worker_profile_id=profile.profile_id,
+                requested_worker_profile_version=1,
+                effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
+                selected_tools=["runtime.inspect"],
+                created_at=failed_ts,
+                updated_at=failed_ts,
+                completed_at=failed_ts,
+            )
+        )
+        await store_group.conn.commit()
+
+        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        assert worker_profiles_resp.status_code == 200
+        payload = worker_profiles_resp.json()
+        target = next(
+            item for item in payload["profiles"] if item["profile_id"] == profile.profile_id
+        )
+
+        assert target["dynamic_context"]["active_project_id"] == project.project_id
+        assert (
+            target["dynamic_context"]["active_workspace_id"]
+            == secondary_workspace.workspace_id
+        )
+        assert target["dynamic_context"]["active_work_count"] == 1
+        assert target["dynamic_context"]["running_work_count"] == 1
+        assert target["dynamic_context"]["attention_work_count"] == 1
+        assert target["dynamic_context"]["latest_work_id"] == "work-root-failed"
+        assert target["dynamic_context"]["latest_work_status"] == "failed"

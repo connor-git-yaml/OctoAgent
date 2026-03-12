@@ -510,6 +510,9 @@ function buildSnapshot(currentProjectId = "project-default") {
               currentProjectId === "project-ops"
                 ? "workspace-ops"
                 : "workspace-default",
+            requested_worker_profile_id: "project-default:ops-root",
+            requested_worker_profile_version: 3,
+            effective_worker_snapshot_id: "worker-profile:project-default:ops-root:v3",
             child_work_ids: ["work-1-child-1", "work-1-child-2"],
             child_work_count: 2,
             merge_ready: true,
@@ -1631,6 +1634,138 @@ describe("ControlPlane", () => {
     await userEvent.click(screen.getByRole("button", { name: /Pipelines/i }));
     expect(await screen.findByText("delegation:preflight")).toBeInTheDocument();
     expect(screen.getByText("tool index selected tools")).toBeInTheDocument();
+  });
+
+  it("Delegation section 会显示 Root Agent lineage 并允许从运行态提炼 profile", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const snapshot = buildSnapshot();
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      if (url.includes("/api/control/actions")) {
+        return Promise.resolve(
+          jsonResponse({
+            result: {
+              action_id: "worker.extract_profile_from_runtime",
+              status: "completed",
+              message: "已提炼 Root Agent",
+              code: "WORKER_PROFILE_EXTRACTED",
+              handled_at: "2026-03-08T09:12:30Z",
+              resource_refs: [
+                {
+                  resource_type: "worker_profiles",
+                  resource_id: "worker-profiles:overview",
+                },
+              ],
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/worker-profiles")) {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            resource_type: "worker_profiles",
+            resource_id: "worker-profiles:overview",
+            schema_version: 1,
+            generated_at: "2026-03-08T09:12:31Z",
+            updated_at: "2026-03-08T09:12:31Z",
+            status: "ready",
+            degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+            warnings: [],
+            capabilities: [],
+            refs: {},
+            active_project_id: "project-default",
+            active_workspace_id: "workspace-default",
+            profiles: [
+              {
+                profile_id: "project-default:ops-root",
+                name: "Ops Root",
+                scope: "project",
+                project_id: "project-default",
+                mode: "singleton",
+                origin_kind: "custom",
+                status: "active",
+                active_revision: 3,
+                draft_revision: 3,
+                effective_snapshot_id: "worker-profile:project-default:ops-root:v3",
+                editable: true,
+                summary: "已从运行态同步出的 Root Agent。",
+                static_config: {
+                  base_archetype: "ops",
+                  summary: "已从运行态同步出的 Root Agent。",
+                  model_alias: "main",
+                  tool_profile: "minimal",
+                  default_tool_groups: ["runtime", "project"],
+                  selected_tools: ["runtime.inspect"],
+                  runtime_kinds: ["worker", "acp_runtime"],
+                  policy_refs: [],
+                  instruction_overlays: [],
+                  tags: ["ops"],
+                  capabilities: ["ops", "runtime"],
+                },
+                dynamic_context: {
+                  active_project_id: "project-default",
+                  active_workspace_id: "workspace-default",
+                  active_work_count: 1,
+                  running_work_count: 0,
+                  attention_work_count: 0,
+                  latest_work_id: "work-1",
+                  latest_task_id: "task-1",
+                  latest_work_title: "诊断运行态",
+                  latest_work_status: "assigned",
+                  latest_target_kind: "acp_runtime",
+                  current_selected_tools: ["runtime.inspect", "task.inspect"],
+                  updated_at: "2026-03-08T09:12:00Z",
+                },
+                warnings: [],
+                capabilities: [],
+              },
+            ],
+            summary: {},
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
+
+    expect(await screen.findByText(/Requested Profile project-default:ops-root/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Revision 3 \/ Snapshot worker-profile:project-default:ops-root:v3/)
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "提炼 Root Agent" }));
+
+    await waitFor(() => {
+      const extractCall = fetchMock.mock.calls.find((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/actions") &&
+        String((call as FetchArgs)[1]?.body).includes("worker.extract_profile_from_runtime")
+      );
+      expect(extractCall).toBeTruthy();
+      expect(String((extractCall as FetchArgs)[1]?.body)).toContain("\"work_id\":\"work-1\"");
+    });
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String((call as FetchArgs)[0]).includes("/api/control/resources/worker-profiles")
+        )
+      ).toBe(true);
+    });
   });
 
   it("Imports section 会加载 workbench/source/run 明细", async () => {

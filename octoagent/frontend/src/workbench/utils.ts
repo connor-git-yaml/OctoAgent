@@ -9,6 +9,7 @@ export type SnapshotResourceRoute =
   | "config"
   | "project-selector"
   | "sessions"
+  | "worker-profiles"
   | "context-frames"
   | "policy-profiles"
   | "capability-pack"
@@ -26,6 +27,7 @@ export const RESOURCE_ROUTE_BY_TYPE: Record<string, SnapshotResourceRoute> = {
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
+  worker_profiles: "worker-profiles",
   context_continuity: "context-frames",
   policy_profiles: "policy-profiles",
   capability_pack: "capability-pack",
@@ -47,6 +49,7 @@ export const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   config: "config",
   "project-selector": "project_selector",
   sessions: "sessions",
+  "worker-profiles": "worker_profiles",
   "context-frames": "context_continuity",
   "policy-profiles": "policy_profiles",
   "capability-pack": "capability_pack",

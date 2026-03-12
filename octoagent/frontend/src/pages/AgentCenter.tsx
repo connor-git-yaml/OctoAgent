@@ -1,5 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { fetchWorkerProfileRevisions } from "../api/client";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import type {
   AgentProfileItem,
@@ -9,6 +10,9 @@ import type {
   SetupReviewSummary,
   SkillGovernanceItem,
   WorkerCapabilityProfile,
+  WorkerProfileItem,
+  WorkerProfileRevisionItem,
+  WorkerProfilesDocument,
   WorkProjectionItem,
   WorkspaceOption,
 } from "../types";
@@ -88,6 +92,44 @@ interface WorkAgentDraft {
   taskCount: string;
   waitingCount: string;
   mergeReadyCount: string;
+}
+
+interface RootAgentStudioDraft {
+  profileId: string;
+  scope: string;
+  projectId: string;
+  name: string;
+  summary: string;
+  baseArchetype: string;
+  modelAlias: string;
+  toolProfile: string;
+  defaultToolGroupsText: string;
+  selectedToolsText: string;
+  runtimeKindsText: string;
+  policyRefsText: string;
+  instructionOverlaysText: string;
+  tagsText: string;
+}
+
+interface RootAgentReviewResult {
+  mode: string;
+  can_save: boolean;
+  ready: boolean;
+  warnings: string[];
+  save_errors: string[];
+  blocking_reasons: string[];
+  next_actions: string[];
+  profile: Record<string, unknown>;
+  existing_profile: Record<string, unknown>;
+  source_profile: Record<string, unknown>;
+  diff: {
+    has_changes: boolean;
+    changed_fields: Array<{
+      field: string;
+      before: unknown;
+      after: unknown;
+    }>;
+  };
 }
 
 const WORKER_TYPE_LABELS: Record<string, string> = {
@@ -250,6 +292,28 @@ const CATALOG_COPY = {
 
 const DEFAULT_PERSONA =
   "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
+
+const EMPTY_ROOT_AGENT_PROFILES: WorkerProfilesDocument = {
+  contract_version: "1.0.0",
+  resource_type: "worker_profiles",
+  resource_id: "worker-profiles:overview",
+  schema_version: 1,
+  generated_at: "",
+  updated_at: "",
+  status: "degraded",
+  degraded: {
+    is_degraded: true,
+    reasons: ["worker_profiles_missing"],
+    unavailable_sections: ["worker_profiles"],
+  },
+  warnings: ["worker profiles resource missing from snapshot"],
+  capabilities: [],
+  refs: {},
+  active_project_id: "",
+  active_workspace_id: "",
+  profiles: [],
+  summary: {},
+};
 
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -508,6 +572,159 @@ function formatTokenLabel(token: string): string {
 
 function formatToolToken(toolName: string, toolLabelByName: Record<string, string>): string {
   return TOKEN_LABELS[toolName] ?? toolLabelByName[toolName] ?? formatTokenLabel(toolName);
+}
+
+function formatScope(scope: string): string {
+  return SCOPE_OPTIONS.find((option) => option.value === scope)?.label ?? formatTokenLabel(scope);
+}
+
+function joinStudioList(values: string[]): string {
+  return values.join("\n");
+}
+
+function parseStudioList(value: string): string[] {
+  return value
+    .split(/[\n,]+/g)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, all) => all.indexOf(item) === index);
+}
+
+function appendStudioListValue(current: string, value: string): string {
+  return joinStudioList(uniqueStrings([...parseStudioList(current), value]));
+}
+
+function readStudioList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return uniqueStrings(
+    value.map((item) => (typeof item === "string" ? item : ""))
+  );
+}
+
+function buildRootAgentStudioDraft(
+  profile: WorkerProfileItem | null,
+  selector: ControlPlaneSnapshot["resources"]["project_selector"],
+  fallbackArchetype = "general"
+): RootAgentStudioDraft {
+  return {
+    profileId: profile?.profile_id ?? "",
+    scope: profile?.scope ?? "project",
+    projectId: profile?.project_id || selector.current_project_id,
+    name: profile?.name ?? "",
+    summary: profile?.summary ?? "",
+    baseArchetype: profile?.static_config.base_archetype ?? fallbackArchetype,
+    modelAlias: profile?.static_config.model_alias ?? "main",
+    toolProfile: profile?.static_config.tool_profile ?? "minimal",
+    defaultToolGroupsText: joinStudioList(profile?.static_config.default_tool_groups ?? []),
+    selectedToolsText: joinStudioList(profile?.static_config.selected_tools ?? []),
+    runtimeKindsText: joinStudioList(profile?.static_config.runtime_kinds ?? []),
+    policyRefsText: joinStudioList(profile?.static_config.policy_refs ?? []),
+    instructionOverlaysText: joinStudioList(profile?.static_config.instruction_overlays ?? []),
+    tagsText: joinStudioList(profile?.static_config.tags ?? []),
+  };
+}
+
+function buildRootAgentStudioDraftFromPayload(
+  profile: Record<string, unknown>,
+  selector: ControlPlaneSnapshot["resources"]["project_selector"],
+  fallbackArchetype = "general"
+): RootAgentStudioDraft {
+  const scope =
+    typeof profile.scope === "string" && profile.scope.trim() ? profile.scope : "project";
+  const projectId =
+    scope === "project" &&
+    typeof profile.project_id === "string" &&
+    profile.project_id.trim()
+      ? profile.project_id
+      : selector.current_project_id;
+  return {
+    profileId:
+      typeof profile.profile_id === "string" && profile.profile_id.trim()
+        ? profile.profile_id
+        : "",
+    scope,
+    projectId: scope === "project" ? projectId : "",
+    name: typeof profile.name === "string" ? profile.name : "",
+    summary: typeof profile.summary === "string" ? profile.summary : "",
+    baseArchetype:
+      typeof profile.base_archetype === "string" && profile.base_archetype.trim()
+        ? profile.base_archetype
+        : fallbackArchetype,
+    modelAlias:
+      typeof profile.model_alias === "string" && profile.model_alias.trim()
+        ? profile.model_alias
+        : "main",
+    toolProfile:
+      typeof profile.tool_profile === "string" && profile.tool_profile.trim()
+        ? profile.tool_profile
+        : "minimal",
+    defaultToolGroupsText: joinStudioList(readStudioList(profile.default_tool_groups)),
+    selectedToolsText: joinStudioList(readStudioList(profile.selected_tools)),
+    runtimeKindsText: joinStudioList(readStudioList(profile.runtime_kinds)),
+    policyRefsText: joinStudioList(readStudioList(profile.policy_refs)),
+    instructionOverlaysText: joinStudioList(readStudioList(profile.instruction_overlays)),
+    tagsText: joinStudioList(readStudioList(profile.tags)),
+  };
+}
+
+function buildRootAgentStudioDraftFromReview(
+  review: unknown,
+  selector: ControlPlaneSnapshot["resources"]["project_selector"]
+): RootAgentStudioDraft | null {
+  const profile = toRecord(toRecord(review).profile);
+  if (Object.keys(profile).length === 0) {
+    return null;
+  }
+  return buildRootAgentStudioDraftFromPayload(profile, selector);
+}
+
+function buildRootAgentPayload(draft: RootAgentStudioDraft): Record<string, unknown> {
+  return {
+    profile_id: draft.profileId || undefined,
+    scope: draft.scope,
+    project_id: draft.scope === "project" ? draft.projectId : "",
+    name: draft.name,
+    summary: draft.summary,
+    base_archetype: draft.baseArchetype,
+    model_alias: draft.modelAlias,
+    tool_profile: draft.toolProfile,
+    default_tool_groups: parseStudioList(draft.defaultToolGroupsText),
+    selected_tools: parseStudioList(draft.selectedToolsText),
+    runtime_kinds: parseStudioList(draft.runtimeKindsText),
+    policy_refs: parseStudioList(draft.policyRefsText),
+    instruction_overlays: parseStudioList(draft.instructionOverlaysText),
+    tags: parseStudioList(draft.tagsText),
+  };
+}
+
+function formatWorkerProfileStatus(status: string): string {
+  switch (status) {
+    case "draft":
+      return "草稿";
+    case "active":
+      return "已发布";
+    case "archived":
+      return "已归档";
+    default:
+      return formatTokenLabel(status);
+  }
+}
+
+function formatWorkerProfileOrigin(originKind: string): string {
+  switch (originKind) {
+    case "builtin":
+      return "Starter Template";
+    case "custom":
+      return "自定义";
+    case "cloned":
+      return "复制而来";
+    case "extracted":
+      return "运行态提炼";
+    default:
+      return formatTokenLabel(originKind);
+  }
 }
 
 function primaryProfileFromSnapshot(snapshot: ControlPlaneSnapshot): AgentProfileItem | null {
@@ -865,12 +1082,15 @@ export default function AgentCenter() {
   const setup = snapshot!.resources.setup_governance;
   const skillGovernance = snapshot!.resources.skill_governance;
   const policyProfiles = snapshot!.resources.policy_profiles.profiles;
-  const workerProfiles = snapshot!.resources.capability_pack.pack.worker_profiles;
+  const capabilityWorkerProfiles = snapshot!.resources.capability_pack.pack.worker_profiles;
+  const rootAgentProfilesDocument =
+    snapshot!.resources.worker_profiles ?? EMPTY_ROOT_AGENT_PROFILES;
+  const rootAgentProfiles = rootAgentProfilesDocument.profiles ?? [];
   const toolLabelByName = Object.fromEntries(
     snapshot!.resources.capability_pack.pack.tools.map((tool) => [tool.tool_name, tool.label])
   ) as Record<string, string>;
   const workerProfilesByType = Object.fromEntries(
-    workerProfiles.map((profile) => [profile.worker_type, profile])
+    capabilityWorkerProfiles.map((profile) => [profile.worker_type, profile])
   ) as Record<string, WorkerCapabilityProfile>;
   const modelAliasOptions = uniqueStrings([
     ...Object.keys(toRecord(configValue.model_aliases)),
@@ -920,6 +1140,32 @@ export default function AgentCenter() {
   const [flashMessage, setFlashMessage] = useState(
     "先把 Butler 的身份、边界和默认落点定稳，再把具体任务交给合适的 Worker。"
   );
+  const [selectedRootAgentId, setSelectedRootAgentId] = useState(
+    rootAgentProfiles[0]?.profile_id ?? ""
+  );
+  const [rootAgentDraft, setRootAgentDraft] = useState<RootAgentStudioDraft>(() =>
+    buildRootAgentStudioDraft(rootAgentProfiles[0] ?? null, selector)
+  );
+  const [rootAgentReview, setRootAgentReview] = useState<RootAgentReviewResult | null>(null);
+  const [rootAgentRevisions, setRootAgentRevisions] = useState<WorkerProfileRevisionItem[]>([]);
+  const [rootAgentRevisionLoading, setRootAgentRevisionLoading] = useState(false);
+  const [rootAgentRevisionError, setRootAgentRevisionError] = useState("");
+  const [rootAgentSpawnObjective, setRootAgentSpawnObjective] = useState("");
+  const [rootAgentEditorMode, setRootAgentEditorMode] = useState<"existing" | "create">(
+    rootAgentProfiles[0] ? "existing" : "create"
+  );
+  const selectedRootAgentProfile =
+    rootAgentProfiles.find((profile) => profile.profile_id === selectedRootAgentId) ?? null;
+  const rootAgentDraftDirty =
+    JSON.stringify(buildRootAgentPayload(rootAgentDraft)) !==
+    JSON.stringify(
+      buildRootAgentPayload(buildRootAgentStudioDraft(selectedRootAgentProfile, selector))
+    );
+  const rootAgentRevisionSyncKey = [
+    selectedRootAgentId,
+    selectedRootAgentProfile?.active_revision ?? 0,
+    selectedRootAgentProfile?.draft_revision ?? 0,
+  ].join(":");
   const deferredSearch = useDeferredValue(searchQuery);
 
   useEffect(() => {
@@ -950,6 +1196,74 @@ export default function AgentCenter() {
   useEffect(() => {
     setPrimaryReview(setup.review);
   }, [setup.generated_at]);
+
+  useEffect(() => {
+    if (rootAgentEditorMode === "create") {
+      return;
+    }
+    const nextSelectedId =
+      rootAgentProfiles.find((profile) => profile.profile_id === selectedRootAgentId)?.profile_id ??
+      rootAgentProfiles.find((profile) => profile.origin_kind !== "builtin")?.profile_id ??
+      rootAgentProfiles[0]?.profile_id ??
+      "";
+    const nextSelectedProfile =
+      rootAgentProfiles.find((profile) => profile.profile_id === nextSelectedId) ?? null;
+    if (nextSelectedProfile === null) {
+      setSelectedRootAgentId("");
+      setRootAgentDraft(buildRootAgentStudioDraft(null, selector));
+      setRootAgentReview(null);
+      setRootAgentEditorMode("create");
+      return;
+    }
+    if (nextSelectedId !== selectedRootAgentId) {
+      setSelectedRootAgentId(nextSelectedId);
+    }
+    if (nextSelectedId !== selectedRootAgentId || !rootAgentDraftDirty) {
+      setRootAgentDraft(buildRootAgentStudioDraft(nextSelectedProfile, selector));
+      setRootAgentReview(null);
+    }
+  }, [
+    rootAgentEditorMode,
+    rootAgentProfilesDocument.generated_at,
+    selector.current_project_id,
+    selector.current_workspace_id,
+    selectedRootAgentId,
+    rootAgentDraftDirty,
+  ]);
+
+  useEffect(() => {
+    if (!selectedRootAgentId) {
+      setRootAgentRevisions([]);
+      setRootAgentRevisionError("");
+      setRootAgentRevisionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRootAgentRevisionLoading(true);
+    setRootAgentRevisionError("");
+    void fetchWorkerProfileRevisions(selectedRootAgentId)
+      .then((document) => {
+        if (cancelled) {
+          return;
+        }
+        setRootAgentRevisions(document.revisions ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setRootAgentRevisionError(error instanceof Error ? error.message : "revision 加载失败");
+        setRootAgentRevisions([]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRootAgentRevisionLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rootAgentRevisionSyncKey]);
 
   const currentProject =
     availableProjects.find((project) => project.project_id === selector.current_project_id) ?? null;
@@ -1060,6 +1374,74 @@ export default function AgentCenter() {
     ...snapshot!.resources.capability_pack.pack.fallback_toolset,
     ...workDraft.selectedTools,
   ]).slice(0, 10);
+  const rootAgentActiveWorkCount = rootAgentProfiles.reduce(
+    (sum, profile) => sum + Math.max(profile.dynamic_context.active_work_count || 0, 0),
+    0
+  );
+  const rootAgentRunningWorkCount = rootAgentProfiles.reduce(
+    (sum, profile) => sum + Math.max(profile.dynamic_context.running_work_count || 0, 0),
+    0
+  );
+  const rootAgentAttentionWorkCount = rootAgentProfiles.reduce(
+    (sum, profile) => sum + Math.max(profile.dynamic_context.attention_work_count || 0, 0),
+    0
+  );
+  const builtinRootAgentProfiles = rootAgentProfiles.filter(
+    (profile) => profile.origin_kind === "builtin"
+  );
+  const customRootAgentProfiles = rootAgentProfiles.filter(
+    (profile) => profile.origin_kind !== "builtin"
+  );
+  const latestRootAgentUpdate =
+    rootAgentProfiles
+      .map((profile) => profile.dynamic_context.updated_at ?? "")
+      .sort((left, right) => right.localeCompare(left))[0] || null;
+  const selectedRootAgentWorks = snapshot!.resources.delegation.works.filter((work) => {
+    if (!selectedRootAgentProfile) {
+      return false;
+    }
+    if (work.requested_worker_profile_id === selectedRootAgentProfile.profile_id) {
+      return true;
+    }
+    return (
+      selectedRootAgentProfile.origin_kind === "builtin" &&
+      !work.requested_worker_profile_id &&
+      work.selected_worker_type === selectedRootAgentProfile.static_config.base_archetype
+    );
+  });
+  const rootAgentProjectOptions = projectSelectOptions(availableProjects, rootAgentDraft.projectId);
+  const rootAgentArchetypeProfile = workerProfilesByType[rootAgentDraft.baseArchetype] ?? null;
+  const rootAgentSuggestedToolGroups = uniqueStrings([
+    ...(rootAgentArchetypeProfile?.default_tool_groups ?? []),
+    ...(selectedRootAgentProfile?.static_config.default_tool_groups ?? []),
+  ]).slice(0, 8);
+  const rootAgentSuggestedTools = uniqueStrings([
+    ...(selectedRootAgentProfile?.dynamic_context.current_selected_tools ?? []),
+    ...(selectedRootAgentProfile?.static_config.selected_tools ?? []),
+    ...snapshot!.resources.capability_pack.pack.fallback_toolset,
+  ]).slice(0, 10);
+  const rootAgentSuggestedRuntimeKinds = uniqueStrings([
+    ...(rootAgentArchetypeProfile?.runtime_kinds ?? []),
+    ...parseStudioList(rootAgentDraft.runtimeKindsText),
+    "worker",
+    "subagent",
+    "acp_runtime",
+    "graph_agent",
+  ]);
+  const rootAgentSuggestedTags = uniqueStrings([
+    ...(rootAgentArchetypeProfile?.capabilities ?? []),
+    ...parseStudioList(rootAgentDraft.tagsText),
+    "singleton",
+    "router",
+    "workspace",
+  ]).slice(0, 10);
+  const rootAgentReviewDiff = rootAgentReview?.diff.changed_fields ?? [];
+  const selectedRootAgentDynamicContext = selectedRootAgentProfile?.dynamic_context ?? null;
+  const selectedRootAgentCapabilities = selectedRootAgentProfile?.capabilities ?? [];
+  const selectedRootAgentWarnings = selectedRootAgentProfile?.warnings ?? [];
+  const selectedRootAgentEditable = selectedRootAgentProfile?.editable ?? true;
+  const selectedRootAgentIsBuiltin = selectedRootAgentProfile?.origin_kind === "builtin";
+  const selectedRootAgentDisplayStatus = selectedRootAgentProfile?.status ?? "draft";
 
   function updatePrimary<Key extends keyof PrimaryAgentDraft>(
     key: Key,
@@ -1472,6 +1854,226 @@ export default function AgentCenter() {
     if (result) {
       setFlashMessage("当前视角已切到新的 Project / Workspace，列表会随之刷新。");
     }
+  }
+
+  async function handleSwitchToRootAgentContext(profile: WorkerProfileItem) {
+    const projectId =
+      profile.dynamic_context.active_project_id || profile.project_id || selector.current_project_id;
+    const workspaceId =
+      profile.dynamic_context.active_workspace_id ||
+      normalizeWorkspaceForProject(
+        availableWorkspaces,
+        projectId,
+        selector.current_workspace_id
+      );
+    if (!workspaceId) {
+      return;
+    }
+    const result = await submitAction("project.select", {
+      project_id: projectId,
+      workspace_id: workspaceId,
+    });
+    if (result) {
+      startTransition(() => {
+        setContextProjectId(projectId);
+        setContextWorkspaceId(workspaceId);
+      });
+      setFlashMessage(`当前视角已切到 Root Agent「${profile.name}」所在上下文。`);
+    }
+  }
+
+  function selectRootAgentProfile(profile: WorkerProfileItem | null) {
+    startTransition(() => {
+      setRootAgentEditorMode(profile ? "existing" : "create");
+      setSelectedRootAgentId(profile?.profile_id ?? "");
+      setRootAgentDraft(buildRootAgentStudioDraft(profile, selector));
+      setRootAgentReview(null);
+    });
+  }
+
+  function updateRootAgentDraft<Key extends keyof RootAgentStudioDraft>(
+    key: Key,
+    value: RootAgentStudioDraft[Key]
+  ) {
+    setRootAgentDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function updateRootAgentProject(projectId: string) {
+    setRootAgentDraft((current) => ({
+      ...current,
+      projectId,
+    }));
+  }
+
+  function appendRootAgentDraftValue(
+    key:
+      | "defaultToolGroupsText"
+      | "selectedToolsText"
+      | "runtimeKindsText"
+      | "policyRefsText"
+      | "instructionOverlaysText"
+      | "tagsText",
+    value: string
+  ) {
+    setRootAgentDraft((current) => ({
+      ...current,
+      [key]: appendStudioListValue(current[key], value),
+    }));
+  }
+
+  function applyRootAgentArchetypeDefaults() {
+    const archetype = workerProfilesByType[rootAgentDraft.baseArchetype];
+    if (!archetype) {
+      return;
+    }
+    setRootAgentDraft((current) => ({
+      ...current,
+      modelAlias: current.modelAlias || archetype.default_model_alias,
+      toolProfile: current.toolProfile || archetype.default_tool_profile,
+      defaultToolGroupsText:
+        parseStudioList(current.defaultToolGroupsText).length > 0
+          ? current.defaultToolGroupsText
+          : joinStudioList(archetype.default_tool_groups),
+      runtimeKindsText:
+        parseStudioList(current.runtimeKindsText).length > 0
+          ? current.runtimeKindsText
+          : joinStudioList(archetype.runtime_kinds),
+      tagsText:
+        parseStudioList(current.tagsText).length > 0
+          ? current.tagsText
+          : joinStudioList(archetype.capabilities),
+    }));
+    setFlashMessage(`已套用 ${formatWorkerType(rootAgentDraft.baseArchetype)} archetype 的默认配置。`);
+  }
+
+  async function handleCreateRootAgentDraftFromTemplate(profile: WorkerProfileItem) {
+    const name =
+      profile.origin_kind === "builtin" ? `${profile.name} Copy` : `${profile.name} 副本`;
+    const result = await submitAction("worker_profile.clone", {
+      source_profile_id: profile.profile_id,
+      name,
+    });
+    const payload = result?.data ?? {};
+    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextProfileId =
+      typeof payload.profile_id === "string" ? payload.profile_id : "";
+    if (nextProfileId) {
+      setRootAgentEditorMode("existing");
+      setSelectedRootAgentId(nextProfileId);
+      if (nextDraft) {
+        setRootAgentDraft(nextDraft);
+      }
+      setFlashMessage(`已基于「${profile.name}」创建新的 Root Agent 草稿。`);
+    }
+    if (payload.review && typeof payload.review === "object") {
+      setRootAgentReview(payload.review as RootAgentReviewResult);
+    }
+  }
+
+  async function handleReviewRootAgentDraft() {
+    const result = await submitAction("worker_profile.review", {
+      draft: buildRootAgentPayload(rootAgentDraft),
+    });
+    const review = result?.data.review;
+    if (!review || typeof review !== "object") {
+      return;
+    }
+    setRootAgentReview(review as RootAgentReviewResult);
+    setFlashMessage(
+      (review as RootAgentReviewResult).ready
+        ? "Root Agent 检查通过，可以保存或发布。"
+        : "Root Agent 检查已返回，请先处理阻塞项。"
+    );
+  }
+
+  async function handleSaveRootAgentDraft(publish = false) {
+    const result = await submitAction("worker_profile.apply", {
+      draft: buildRootAgentPayload(rootAgentDraft),
+      publish,
+      change_summary: publish ? "通过 AgentCenter 发布" : "通过 AgentCenter 更新草稿",
+    });
+    const payload = result?.data ?? {};
+    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextProfileId =
+      typeof payload.profile_id === "string" ? payload.profile_id : rootAgentDraft.profileId;
+    if (nextProfileId) {
+      setRootAgentEditorMode("existing");
+      setSelectedRootAgentId(nextProfileId);
+      if (nextDraft) {
+        setRootAgentDraft(nextDraft);
+      } else {
+        setRootAgentDraft((current) => ({
+          ...current,
+          profileId: nextProfileId,
+        }));
+      }
+    }
+    const review = payload.review;
+    if (review && typeof review === "object") {
+      setRootAgentReview(review as RootAgentReviewResult);
+    }
+    setFlashMessage(publish ? "Root Agent 已发布。" : "Root Agent 草稿已保存。");
+  }
+
+  async function handleArchiveRootAgent() {
+    if (!rootAgentDraft.profileId) {
+      return;
+    }
+    const result = await submitAction("worker_profile.archive", {
+      profile_id: rootAgentDraft.profileId,
+    });
+    if (result) {
+      setFlashMessage("Root Agent 已归档。");
+    }
+  }
+
+  async function handleSpawnFromRootAgent(profileId: string) {
+    if (!rootAgentSpawnObjective.trim()) {
+      setFlashMessage("先给这个 Root Agent 写一个 objective，再启动。");
+      return;
+    }
+    const result = await submitAction("worker.spawn_from_profile", {
+      profile_id: profileId,
+      objective: rootAgentSpawnObjective.trim(),
+    });
+    if (result) {
+      setRootAgentSpawnObjective("");
+      setFlashMessage("已按 Root Agent 创建新任务，稍后去 Work 或 Chat 看执行结果。");
+    }
+  }
+
+  async function handleExtractRootAgentFromWork(work: WorkProjectionItem) {
+    const result = await submitAction("worker.extract_profile_from_runtime", {
+      work_id: work.work_id,
+      name: `${work.title || formatWorkerType(work.selected_worker_type)} Root Agent`,
+    });
+    const payload = result?.data ?? {};
+    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextProfileId =
+      typeof payload.profile_id === "string" ? payload.profile_id : "";
+    if (nextProfileId) {
+      setRootAgentEditorMode("existing");
+      setSelectedRootAgentId(nextProfileId);
+      if (nextDraft) {
+        setRootAgentDraft(nextDraft);
+      }
+      setFlashMessage("已从运行态提炼出新的 Root Agent 草稿。");
+    }
+    if (payload.review && typeof payload.review === "object") {
+      setRootAgentReview(payload.review as RootAgentReviewResult);
+    }
+  }
+
+  function handleCreateFreshRootAgent() {
+    setRootAgentEditorMode("create");
+    setSelectedRootAgentId("");
+    setRootAgentDraft(buildRootAgentStudioDraft(null, selector));
+    setRootAgentReview(null);
+    setRootAgentSpawnObjective("");
+    setFlashMessage("开始一个新的 Root Agent 草稿。");
   }
 
   function renderPolicyCard(profile: PolicyProfileItem) {
@@ -2090,6 +2692,816 @@ export default function AgentCenter() {
           </div>
         </section>
       </div>
+
+      <section className="wb-panel wb-root-agent-hub">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">Root Agent Profiles</p>
+            <h3>把 Root Agent 当成可治理的单例产品对象，而不是一组钉死的 Worker 枚举</h3>
+            <p className="wb-panel-copy">
+              这里直接消费 `worker_profiles` canonical resource，并把 Starter Template、Profile
+              Library、Profile Studio 和运行态 lineage 放在同一张工作台里。
+            </p>
+          </div>
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <button
+              type="button"
+              className="wb-button wb-button-primary"
+              onClick={handleCreateFreshRootAgent}
+            >
+              新建 Root Agent
+            </button>
+            <Link className="wb-button wb-button-secondary" to="/advanced">
+              去 Control Plane
+            </Link>
+            <Link className="wb-button wb-button-tertiary" to="/work">
+              去看 Work
+            </Link>
+          </div>
+        </div>
+
+        <div className="wb-inline-banner is-muted">
+          <strong>当前按 Singleton 模式工作</strong>
+          <span>
+            Profile 和运行实例在产品体验里先按单个 Root Agent 理解，但页面会同时显示静态配置、
+            当前 Project / Workspace、运行负载与 revision，方便你决定何时另存、发布或提炼。
+          </span>
+        </div>
+
+        <div className="wb-root-agent-summary-grid">
+          <div className="wb-detail-block">
+            <span className="wb-card-label">Root Agent 数</span>
+            <strong>{rootAgentProfiles.length}</strong>
+            <p>
+              resource {rootAgentProfilesDocument.status || "pending"} / Starter{" "}
+              {builtinRootAgentProfiles.length} / 自定义 {customRootAgentProfiles.length}
+            </p>
+          </div>
+          <div className="wb-detail-block">
+            <span className="wb-card-label">激活中的 Work</span>
+            <strong>{rootAgentActiveWorkCount}</strong>
+            <p>运行中 {rootAgentRunningWorkCount} / 需关注 {rootAgentAttentionWorkCount}</p>
+          </div>
+          <div className="wb-detail-block">
+            <span className="wb-card-label">当前选中</span>
+            <strong>{(selectedRootAgentProfile?.name ?? rootAgentDraft.name) || "新建草稿"}</strong>
+            <p>{selectedRootAgentProfile?.profile_id ?? "尚未保存 profile_id"}</p>
+          </div>
+          <div className="wb-detail-block">
+            <span className="wb-card-label">最近更新时间</span>
+            <strong>{latestRootAgentUpdate ? formatDateTime(latestRootAgentUpdate) : "未记录"}</strong>
+            <p>
+              上下文 {selectedRootAgentDynamicContext?.active_project_id || selector.current_project_id} /{" "}
+              {selectedRootAgentDynamicContext?.active_workspace_id || selector.current_workspace_id}
+            </p>
+          </div>
+        </div>
+
+        <div className="wb-root-agent-layout">
+          <aside className="wb-root-agent-browser">
+            <article className="wb-root-agent-browser-panel">
+              <div className="wb-root-agent-browser-head">
+                <div>
+                  <p className="wb-card-label">Starter Templates</p>
+                  <strong>先选起点，再决定是直接复用还是另存为新的 Root Agent</strong>
+                </div>
+                <span className="wb-status-pill is-ready">{builtinRootAgentProfiles.length}</span>
+              </div>
+              <div className="wb-root-agent-library-section">
+                {builtinRootAgentProfiles.map((profile) => (
+                  <button
+                    key={profile.profile_id}
+                    type="button"
+                    className={`wb-root-agent-library-item ${
+                      selectedRootAgentId === profile.profile_id ? "is-active" : ""
+                    }`}
+                    onClick={() => selectRootAgentProfile(profile)}
+                  >
+                    <div className="wb-root-agent-library-head">
+                      <div>
+                        <strong>{profile.name}</strong>
+                        <span>{profile.summary || "系统 archetype 默认配置。"}</span>
+                      </div>
+                      <span className={`wb-status-pill is-${profile.status}`}>
+                        {formatWorkerProfileStatus(profile.status)}
+                      </span>
+                    </div>
+                    <div className="wb-chip-row">
+                      <span className="wb-chip">{formatWorkerProfileOrigin(profile.origin_kind)}</span>
+                      <span className="wb-chip">{formatWorkerType(profile.static_config.base_archetype)}</span>
+                      <span className="wb-chip">{formatToolProfile(profile.static_config.tool_profile)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </article>
+
+            <article className="wb-root-agent-browser-panel">
+              <div className="wb-root-agent-browser-head">
+                <div>
+                  <p className="wb-card-label">Profile Library</p>
+                  <strong>你已经保存过的 Root Agent</strong>
+                </div>
+                <span className="wb-status-pill is-active">{customRootAgentProfiles.length}</span>
+              </div>
+              {customRootAgentProfiles.length === 0 ? (
+                <div className="wb-empty-state">
+                  <strong>还没有自定义 Root Agent</strong>
+                  <span>从左上角的 Starter Template 选一个，或直接点“新建 Root Agent”。</span>
+                </div>
+              ) : (
+                <div className="wb-root-agent-library-section">
+                  {customRootAgentProfiles.map((profile) => {
+                    const isSelected = selectedRootAgentId === profile.profile_id;
+                    const hasAttention = profile.dynamic_context.attention_work_count > 0;
+                    return (
+                      <button
+                        key={profile.profile_id}
+                        type="button"
+                        className={`wb-root-agent-library-item ${isSelected ? "is-active" : ""}`}
+                        onClick={() => selectRootAgentProfile(profile)}
+                      >
+                        <div className="wb-root-agent-library-head">
+                          <div>
+                            <strong>{profile.name}</strong>
+                            <span>{profile.summary || "当前 profile 没有额外摘要。"}</span>
+                          </div>
+                          <span
+                            className={`wb-status-pill is-${
+                              hasAttention ? "warning" : profile.status
+                            }`}
+                          >
+                            {hasAttention
+                              ? `提醒 ${profile.dynamic_context.attention_work_count}`
+                              : formatWorkerProfileStatus(profile.status)}
+                          </span>
+                        </div>
+                        <div className="wb-root-agent-library-meta">
+                          <span>{findProjectName(availableProjects, profile.project_id || selector.current_project_id)}</span>
+                          <span>
+                            rev {profile.active_revision || 0}
+                            {profile.draft_revision > profile.active_revision
+                              ? ` / draft ${profile.draft_revision}`
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="wb-chip-row">
+                          <span className="wb-chip">{formatWorkerProfileOrigin(profile.origin_kind)}</span>
+                          <span className="wb-chip">{formatScope(profile.scope)}</span>
+                          <span className="wb-chip">
+                            {formatWorkerType(profile.static_config.base_archetype)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </article>
+          </aside>
+
+          <section className="wb-root-agent-studio">
+            <article className="wb-root-agent-studio-panel">
+              <div className="wb-root-agent-card-head">
+                <div>
+                  <p className="wb-card-label">Profile Studio</p>
+                  <h3>{(selectedRootAgentProfile?.name ?? rootAgentDraft.name) || "新的 Root Agent 草稿"}</h3>
+                  <p className="wb-inline-note">
+                    静态配置决定默认行为边界；动态上下文和 runtime lineage 在右侧实时展示。
+                  </p>
+                </div>
+                <div className="wb-chip-row">
+                  <span className={`wb-status-pill is-${selectedRootAgentDisplayStatus}`}>
+                    {formatWorkerProfileStatus(selectedRootAgentDisplayStatus)}
+                  </span>
+                  {rootAgentDraftDirty ? <span className="wb-chip is-warning">未保存变更</span> : null}
+                  <span className="wb-chip">
+                    {formatWorkerProfileOrigin(selectedRootAgentProfile?.origin_kind ?? "custom")}
+                  </span>
+                  <span className="wb-chip">{formatScope(rootAgentDraft.scope)}</span>
+                </div>
+              </div>
+
+              {selectedRootAgentIsBuiltin ? (
+                <div className="wb-inline-banner is-muted">
+                  <strong>当前选中的是 Starter Template</strong>
+                  <span>
+                    你可以直接修改并保存，系统会自动生成新的自定义 Root Agent；也可以先点击“复制成新
+                    Root Agent”保留原模板不动。
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="wb-root-agent-studio-form">
+                <label className="wb-field">
+                  <span>名称</span>
+                  <input
+                    type="text"
+                    value={rootAgentDraft.name}
+                    onChange={(event) => updateRootAgentDraft("name", event.target.value)}
+                    placeholder="例如：家庭 NAS 管家"
+                  />
+                </label>
+                <label className="wb-field">
+                  <span>Scope</span>
+                  <select
+                    value={rootAgentDraft.scope}
+                    onChange={(event) => updateRootAgentDraft("scope", event.target.value)}
+                  >
+                    <option value="project">项目级默认</option>
+                    <option value="system">系统级默认</option>
+                  </select>
+                </label>
+                <label className="wb-field">
+                  <span>Project</span>
+                  <select
+                    value={rootAgentDraft.projectId}
+                    disabled={rootAgentDraft.scope !== "project"}
+                    onChange={(event) => updateRootAgentProject(event.target.value)}
+                  >
+                    {rootAgentProjectOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="wb-field">
+                  <span>Base Archetype</span>
+                  <select
+                    value={rootAgentDraft.baseArchetype}
+                    onChange={(event) => updateRootAgentDraft("baseArchetype", event.target.value)}
+                  >
+                    {capabilityWorkerProfiles.map((profile) => (
+                      <option key={profile.worker_type} value={profile.worker_type}>
+                        {formatWorkerType(profile.worker_type)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="wb-field">
+                  <span>Model Alias</span>
+                  <select
+                    value={rootAgentDraft.modelAlias}
+                    onChange={(event) => updateRootAgentDraft("modelAlias", event.target.value)}
+                  >
+                    {modelAliasOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="wb-field">
+                  <span>Tool Profile</span>
+                  <select
+                    value={rootAgentDraft.toolProfile}
+                    onChange={(event) => updateRootAgentDraft("toolProfile", event.target.value)}
+                  >
+                    {toolProfileOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {formatToolProfile(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="wb-field wb-field-span-2">
+                  <span>Summary</span>
+                  <textarea
+                    className="wb-textarea-prose"
+                    value={rootAgentDraft.summary}
+                    onChange={(event) => updateRootAgentDraft("summary", event.target.value)}
+                    placeholder="说明它长期负责什么、边界在哪里、什么时候应该叫它出场。"
+                  />
+                </label>
+                <label className="wb-field">
+                  <span>默认工具组</span>
+                  <textarea
+                    value={rootAgentDraft.defaultToolGroupsText}
+                    onChange={(event) =>
+                      updateRootAgentDraft("defaultToolGroupsText", event.target.value)
+                    }
+                    placeholder="每行一个 tool_group，例如 web、memory、project"
+                  />
+                  <small>这里写 tool group，不是具体 tool name。</small>
+                </label>
+                <label className="wb-field">
+                  <span>固定工具</span>
+                  <textarea
+                    value={rootAgentDraft.selectedToolsText}
+                    onChange={(event) =>
+                      updateRootAgentDraft("selectedToolsText", event.target.value)
+                    }
+                    placeholder="每行一个 tool，例如 web.search"
+                  />
+                  <small>pin 住 1-3 个关键工具，运行行为会稳定很多。</small>
+                </label>
+                <label className="wb-field">
+                  <span>Runtime Kinds</span>
+                  <textarea
+                    value={rootAgentDraft.runtimeKindsText}
+                    onChange={(event) =>
+                      updateRootAgentDraft("runtimeKindsText", event.target.value)
+                    }
+                    placeholder="例如 worker、subagent"
+                  />
+                </label>
+                <label className="wb-field">
+                  <span>Policy Refs</span>
+                  <textarea
+                    value={rootAgentDraft.policyRefsText}
+                    onChange={(event) =>
+                      updateRootAgentDraft("policyRefsText", event.target.value)
+                    }
+                    placeholder="例如 default"
+                  />
+                </label>
+                <label className="wb-field">
+                  <span>Instruction Overlays</span>
+                  <textarea
+                    value={rootAgentDraft.instructionOverlaysText}
+                    onChange={(event) =>
+                      updateRootAgentDraft("instructionOverlaysText", event.target.value)
+                    }
+                    placeholder="每行一句补充指令，例如：优先解释风险，不直接执行高危操作。"
+                  />
+                </label>
+                <label className="wb-field">
+                  <span>Tags</span>
+                  <textarea
+                    value={rootAgentDraft.tagsText}
+                    onChange={(event) => updateRootAgentDraft("tagsText", event.target.value)}
+                    placeholder="每行一个标签，例如 nas、router、finance"
+                  />
+                </label>
+              </div>
+
+              <div className="wb-root-agent-token-grid">
+                <div className="wb-root-agent-token-card">
+                  <div className="wb-root-agent-column-head">
+                    <strong>推荐工具组</strong>
+                    <button
+                      type="button"
+                      className="wb-button wb-button-tertiary"
+                      onClick={applyRootAgentArchetypeDefaults}
+                    >
+                      套用 archetype 默认值
+                    </button>
+                  </div>
+                  <div className="wb-chip-row">
+                    {rootAgentSuggestedToolGroups.map((toolGroup) => (
+                      <button
+                        key={toolGroup}
+                        type="button"
+                        className="wb-chip-button"
+                        onClick={() => appendRootAgentDraftValue("defaultToolGroupsText", toolGroup)}
+                      >
+                        {formatTokenLabel(toolGroup)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="wb-root-agent-token-card">
+                  <div className="wb-root-agent-column-head">
+                    <strong>推荐固定工具</strong>
+                    <span>优先 pin 关键能力</span>
+                  </div>
+                  <div className="wb-chip-row">
+                    {rootAgentSuggestedTools.map((tool) => (
+                      <button
+                        key={tool}
+                        type="button"
+                        className="wb-chip-button"
+                        onClick={() => appendRootAgentDraftValue("selectedToolsText", tool)}
+                      >
+                        {formatToolToken(tool, toolLabelByName)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="wb-root-agent-token-card">
+                  <div className="wb-root-agent-column-head">
+                    <strong>运行形态</strong>
+                    <span>和 Agent Zero / OpenClaw 一样，先把运行边界说清楚</span>
+                  </div>
+                  <div className="wb-chip-row">
+                    {rootAgentSuggestedRuntimeKinds.map((kind) => (
+                      <button
+                        key={kind}
+                        type="button"
+                        className="wb-chip-button"
+                        onClick={() => appendRootAgentDraftValue("runtimeKindsText", kind)}
+                      >
+                        {formatTokenLabel(kind)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="wb-root-agent-token-card">
+                  <div className="wb-root-agent-column-head">
+                    <strong>标签建议</strong>
+                    <span>标签帮助 Butler 发现和解释这个 Root Agent</span>
+                  </div>
+                  <div className="wb-chip-row">
+                    {rootAgentSuggestedTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        className="wb-chip-button"
+                        onClick={() => appendRootAgentDraftValue("tagsText", tag)}
+                      >
+                        {formatTokenLabel(tag)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {rootAgentReview ? (
+                <div className="wb-root-agent-review-panel">
+                  <div className="wb-root-agent-card-head">
+                    <div>
+                      <p className="wb-card-label">Review Result</p>
+                      <strong>
+                        {rootAgentReview.ready
+                          ? "当前草稿可以保存或发布"
+                          : "先处理阻塞项，再继续发布"}
+                      </strong>
+                    </div>
+                    <span
+                      className={`wb-status-pill is-${
+                        rootAgentReview.ready
+                          ? "success"
+                          : rootAgentReview.save_errors.length > 0
+                            ? "danger"
+                            : "warning"
+                      }`}
+                    >
+                      {rootAgentReview.ready ? "ready" : "attention"}
+                    </span>
+                  </div>
+                  <div className="wb-root-agent-review-grid">
+                    <div className="wb-note-stack">
+                      {rootAgentReview.save_errors.map((item) => (
+                        <div key={item} className="wb-note">
+                          <strong>保存失败</strong>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                      {rootAgentReview.blocking_reasons.map((item) => (
+                        <div key={item} className="wb-note">
+                          <strong>阻塞项</strong>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                      {rootAgentReview.warnings.map((item) => (
+                        <div key={item} className="wb-note">
+                          <strong>提醒</strong>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="wb-note-stack">
+                      {rootAgentReview.next_actions.map((item) => (
+                        <div key={item} className="wb-note">
+                          <strong>下一步</strong>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                      {rootAgentReviewDiff.length > 0 ? (
+                        <div className="wb-note">
+                          <strong>变更字段</strong>
+                          <span>
+                            {rootAgentReviewDiff.map((item) => formatTokenLabel(item.field)).join("、")}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="wb-inline-actions wb-inline-actions-wrap">
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary"
+                  onClick={() => void handleReviewRootAgentDraft()}
+                  disabled={busyActionId === "worker_profile.review"}
+                >
+                  检查草稿
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-primary"
+                  onClick={() => void handleSaveRootAgentDraft(false)}
+                  disabled={busyActionId === "worker_profile.apply"}
+                >
+                  {selectedRootAgentIsBuiltin ? "另存草稿" : "保存草稿"}
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-primary"
+                  onClick={() => void handleSaveRootAgentDraft(true)}
+                  disabled={busyActionId === "worker_profile.apply"}
+                >
+                  {selectedRootAgentIsBuiltin ? "另存并发布" : "发布 Revision"}
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() =>
+                    selectedRootAgentProfile
+                      ? void handleCreateRootAgentDraftFromTemplate(selectedRootAgentProfile)
+                      : undefined
+                  }
+                  disabled={!selectedRootAgentProfile || busyActionId === "worker_profile.clone"}
+                >
+                  复制成新 Root Agent
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() =>
+                    selectedRootAgentProfile
+                      ? void handleSwitchToRootAgentContext(selectedRootAgentProfile)
+                      : undefined
+                  }
+                  disabled={!selectedRootAgentProfile || busyActionId === "project.select"}
+                >
+                  切到这个 Root Agent 上下文
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() => void handleArchiveRootAgent()}
+                  disabled={
+                    !rootAgentDraft.profileId ||
+                    !selectedRootAgentEditable ||
+                    busyActionId === "worker_profile.archive"
+                  }
+                >
+                  归档当前 Root Agent
+                </button>
+              </div>
+            </article>
+          </section>
+
+          <aside className="wb-root-agent-runtime-rail">
+            <article className="wb-root-agent-runtime-panel">
+              <div className="wb-root-agent-card-head">
+                <div>
+                  <p className="wb-card-label">Dynamic Context</p>
+                  <strong>
+                    {selectedRootAgentProfile
+                      ? "当前运行态投影"
+                      : "先从左侧选一个 Root Agent，或直接保存当前草稿"}
+                  </strong>
+                </div>
+                <span className="wb-chip">
+                  {selectedRootAgentDynamicContext?.updated_at
+                    ? formatDateTime(selectedRootAgentDynamicContext.updated_at)
+                    : "尚未刷新"}
+                </span>
+              </div>
+              {selectedRootAgentProfile ? (
+                <>
+                  <div className="wb-root-agent-context-grid">
+                    <div className="wb-detail-block">
+                      <span className="wb-card-label">Active Work</span>
+                      <strong>{selectedRootAgentDynamicContext?.active_work_count ?? 0}</strong>
+                      <p>运行中 {selectedRootAgentDynamicContext?.running_work_count ?? 0}</p>
+                    </div>
+                    <div className="wb-detail-block">
+                      <span className="wb-card-label">Attention</span>
+                      <strong>{selectedRootAgentDynamicContext?.attention_work_count ?? 0}</strong>
+                      <p>Target {selectedRootAgentDynamicContext?.latest_target_kind || "-"}</p>
+                    </div>
+                  </div>
+                  <div className="wb-key-value-list">
+                    <span>Project / Workspace</span>
+                    <strong>
+                      {findProjectName(
+                        availableProjects,
+                        selectedRootAgentDynamicContext?.active_project_id ||
+                          selectedRootAgentProfile.project_id ||
+                          selector.current_project_id
+                      )}{" "}
+                      /{" "}
+                      {findWorkspaceName(
+                        availableWorkspaces,
+                        selectedRootAgentDynamicContext?.active_workspace_id ||
+                          selector.current_workspace_id
+                      )}
+                    </strong>
+                    <span>Snapshot</span>
+                    <strong>{selectedRootAgentProfile.effective_snapshot_id || "-"}</strong>
+                    <span>Latest Work</span>
+                    <strong>
+                      {selectedRootAgentDynamicContext?.latest_work_title ||
+                        selectedRootAgentDynamicContext?.latest_work_id ||
+                        "-"}
+                    </strong>
+                    <span>Latest Task</span>
+                    <strong>{selectedRootAgentDynamicContext?.latest_task_id || "-"}</strong>
+                  </div>
+                  <div className="wb-root-agent-token-stack">
+                    <div>
+                      <p className="wb-card-label">当前工具选择</p>
+                      <div className="wb-chip-row">
+                        {(selectedRootAgentDynamicContext?.current_selected_tools ?? []).length > 0 ? (
+                          selectedRootAgentDynamicContext!.current_selected_tools.map((tool) => (
+                            <span key={tool} className="wb-chip">
+                              {formatToolToken(tool, toolLabelByName)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="wb-inline-note">还没有记录 selected tools。</span>
+                        )}
+                      </div>
+                    </div>
+                    {selectedRootAgentCapabilities.length > 0 ? (
+                      <div>
+                        <p className="wb-card-label">控制面能力</p>
+                        <div className="wb-chip-row">
+                          {selectedRootAgentCapabilities.map((capability) => (
+                            <span key={capability.capability_id} className="wb-chip">
+                              {capability.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  {selectedRootAgentWarnings.length > 0 ? (
+                    <div className="wb-note-stack">
+                      {selectedRootAgentWarnings.map((warning) => (
+                        <div key={warning} className="wb-note">
+                          <strong>提醒</strong>
+                          <span>{warning}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="wb-empty-state">
+                  <strong>还没有运行态视图</strong>
+                  <span>先选一个已有 Root Agent，或者保存现在的草稿，再回来观察动态上下文。</span>
+                </div>
+              )}
+            </article>
+
+            <article className="wb-root-agent-runtime-panel">
+              <div className="wb-root-agent-card-head">
+                <div>
+                  <p className="wb-card-label">Launch</p>
+                  <strong>按这个 Root Agent 生成新的执行任务</strong>
+                </div>
+                <Link className="wb-button wb-button-tertiary" to="/chat">
+                  去 Chat 观察执行
+                </Link>
+              </div>
+              <label className="wb-field">
+                <span>Objective</span>
+                <textarea
+                  className="wb-textarea-prose"
+                  value={rootAgentSpawnObjective}
+                  onChange={(event) => setRootAgentSpawnObjective(event.target.value)}
+                  placeholder="例如：检查家庭 NAS 备份是否异常，并给出今天的处理建议。"
+                />
+              </label>
+              <div className="wb-inline-actions wb-inline-actions-wrap">
+                <button
+                  type="button"
+                  className="wb-button wb-button-primary"
+                  disabled={!selectedRootAgentProfile || busyActionId === "worker.spawn_from_profile"}
+                  onClick={() =>
+                    selectedRootAgentProfile
+                      ? void handleSpawnFromRootAgent(selectedRootAgentProfile.profile_id)
+                      : undefined
+                  }
+                >
+                  从这个 Root Agent 启动
+                </button>
+                <Link className="wb-button wb-button-secondary" to="/work">
+                  去看 Runtime Work
+                </Link>
+              </div>
+            </article>
+
+            <article className="wb-root-agent-runtime-panel">
+              <div className="wb-root-agent-card-head">
+                <div>
+                  <p className="wb-card-label">Revision History</p>
+                  <strong>发布记录和 effective snapshot</strong>
+                </div>
+                <span className="wb-chip">{selectedRootAgentProfile?.profile_id || "未选中 profile"}</span>
+              </div>
+              {rootAgentRevisionLoading ? (
+                <div className="wb-empty-state">
+                  <strong>正在加载 revisions</strong>
+                  <span>稍等一下，马上就好。</span>
+                </div>
+              ) : rootAgentRevisionError ? (
+                <div className="wb-inline-banner is-error">
+                  <strong>revisions 加载失败</strong>
+                  <span>{rootAgentRevisionError}</span>
+                </div>
+              ) : rootAgentRevisions.length === 0 ? (
+                <div className="wb-empty-state">
+                  <strong>还没有 revision</strong>
+                  <span>保存草稿后点击“发布 Revision”，这里就会出现可追踪版本。</span>
+                </div>
+              ) : (
+                <div className="wb-root-agent-revision-list">
+                  {rootAgentRevisions.map((revision) => (
+                    <div key={revision.revision_id} className="wb-root-agent-runtime-item">
+                      <div className="wb-root-agent-library-head">
+                        <div>
+                          <strong>Revision {revision.revision}</strong>
+                          <span>{revision.change_summary || "未填写变更摘要"}</span>
+                        </div>
+                        <span className="wb-chip">{revision.created_by || "system"}</span>
+                      </div>
+                      <div className="wb-root-agent-library-meta">
+                        <span>{revision.created_at ? formatDateTime(revision.created_at) : "未记录时间"}</span>
+                        <span>{String(revision.snapshot_payload.profile_id || revision.revision_id)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+
+            <article className="wb-root-agent-runtime-panel">
+              <div className="wb-root-agent-card-head">
+                <div>
+                  <p className="wb-card-label">Runtime Lineage</p>
+                  <strong>哪些 Work 是按这个 Root Agent 启动的</strong>
+                </div>
+                <span className="wb-chip">{selectedRootAgentWorks.length} 个 Work</span>
+              </div>
+              {selectedRootAgentWorks.length === 0 ? (
+                <div className="wb-empty-state">
+                  <strong>当前还没有关联 Work</strong>
+                  <span>发布后从上面的 Launch 区域启动一次，这里就会显示 lineage。</span>
+                </div>
+              ) : (
+                <div className="wb-root-agent-work-list">
+                  {selectedRootAgentWorks.map((work) => (
+                    <div key={work.work_id} className="wb-root-agent-runtime-item">
+                      <div className="wb-root-agent-library-head">
+                        <div>
+                          <strong>{work.title || work.work_id}</strong>
+                          <span>{work.route_reason || formatWorkerType(work.selected_worker_type)}</span>
+                        </div>
+                        <span className={`wb-status-pill is-${work.status}`}>{work.status}</span>
+                      </div>
+                      <div className="wb-key-value-list">
+                        <span>Requested Profile</span>
+                        <strong>{work.requested_worker_profile_id || "archetype fallback"}</strong>
+                        <span>Revision / Snapshot</span>
+                        <strong>
+                          {work.requested_worker_profile_version || "-"} /{" "}
+                          {work.effective_worker_snapshot_id || "-"}
+                        </strong>
+                        <span>Worker / Target</span>
+                        <strong>
+                          {formatWorkerType(work.selected_worker_type)} / {work.target_kind || "-"}
+                        </strong>
+                      </div>
+                      <div className="wb-chip-row">
+                        {work.selected_tools.length > 0 ? (
+                          work.selected_tools.map((tool) => (
+                            <span key={tool} className="wb-chip">
+                              {formatToolToken(tool, toolLabelByName)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="wb-inline-note">当前 work 没有 selected tools 记录。</span>
+                        )}
+                      </div>
+                      <div className="wb-inline-actions wb-inline-actions-wrap">
+                        <button
+                          type="button"
+                          className="wb-button wb-button-secondary"
+                          onClick={() => void handleExtractRootAgentFromWork(work)}
+                          disabled={busyActionId === "worker.extract_profile_from_runtime"}
+                        >
+                          从这个运行态提炼新 Root Agent
+                        </button>
+                        <Link className="wb-button wb-button-tertiary" to="/work">
+                          去 Work 看详情
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+          </aside>
+        </div>
+      </section>
 
       <section className="wb-panel wb-worker-hub">
         <div className="wb-panel-head">

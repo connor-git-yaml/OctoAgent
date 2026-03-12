@@ -52,6 +52,8 @@ async function fetchSnapshotResource(
       return fetchControlResource("project-selector");
     case "sessions":
       return fetchControlResource("sessions");
+    case "worker-profiles":
+      return fetchControlResource("worker-profiles");
     case "context-frames":
       return fetchControlResource("context-frames");
     case "policy-profiles":

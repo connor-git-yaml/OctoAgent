@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .capability import BundledCapabilityPack
 from .operator_inbox import OperatorInboxItem, OperatorInboxSummary
 from .pipeline import PipelineReplayFrame
+from .agent_context import WorkerProfileOriginKind, WorkerProfileStatus
 
 
 def _utc_now() -> datetime:
@@ -225,6 +226,83 @@ class AgentProfilesDocument(ControlPlaneDocument):
     profiles: list[AgentProfileItem] = Field(default_factory=list)
 
 
+class WorkerProfileStaticConfig(BaseModel):
+    base_archetype: str = Field(default="")
+    summary: str = Field(default="")
+    model_alias: str = Field(default="main")
+    tool_profile: str = Field(default="minimal")
+    default_tool_groups: list[str] = Field(default_factory=list)
+    selected_tools: list[str] = Field(default_factory=list)
+    runtime_kinds: list[str] = Field(default_factory=list)
+    policy_refs: list[str] = Field(default_factory=list)
+    instruction_overlays: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class WorkerProfileDynamicContext(BaseModel):
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    active_work_count: int = Field(default=0, ge=0)
+    running_work_count: int = Field(default=0, ge=0)
+    attention_work_count: int = Field(default=0, ge=0)
+    latest_work_id: str = Field(default="")
+    latest_task_id: str = Field(default="")
+    latest_work_title: str = Field(default="")
+    latest_work_status: str = Field(default="")
+    latest_target_kind: str = Field(default="")
+    current_selected_tools: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class WorkerProfileViewItem(BaseModel):
+    profile_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    scope: str = Field(default="system")
+    project_id: str = Field(default="")
+    mode: str = Field(default="singleton")
+    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.BUILTIN
+    status: WorkerProfileStatus = WorkerProfileStatus.ACTIVE
+    active_revision: int = Field(default=0, ge=0)
+    draft_revision: int = Field(default=0, ge=0)
+    effective_snapshot_id: str = Field(default="")
+    editable: bool = False
+    summary: str = Field(default="")
+    static_config: WorkerProfileStaticConfig = Field(default_factory=WorkerProfileStaticConfig)
+    dynamic_context: WorkerProfileDynamicContext = Field(
+        default_factory=WorkerProfileDynamicContext
+    )
+    warnings: list[str] = Field(default_factory=list)
+    capabilities: list[ControlPlaneCapability] = Field(default_factory=list)
+
+
+class WorkerProfilesDocument(ControlPlaneDocument):
+    resource_type: str = "worker_profiles"
+    resource_id: str = "worker-profiles:overview"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    profiles: list[WorkerProfileViewItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkerProfileRevisionItem(BaseModel):
+    revision_id: str = Field(min_length=1)
+    profile_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    change_summary: str = Field(default="")
+    created_by: str = Field(default="")
+    created_at: datetime | None = None
+    snapshot_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkerProfileRevisionsDocument(ControlPlaneDocument):
+    resource_type: str = "worker_profile_revisions"
+    resource_id: str = "worker-profile-revisions:overview"
+    profile_id: str = Field(default="")
+    revisions: list[WorkerProfileRevisionItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
 class OwnerProfileDocument(ControlPlaneDocument):
     resource_type: str = "owner_profile"
     resource_id: str = "owner-profile:default"
@@ -420,6 +498,9 @@ class WorkProjectionItem(BaseModel):
     runtime_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    requested_worker_profile_id: str = Field(default="")
+    requested_worker_profile_version: int = Field(default=0, ge=0)
+    effective_worker_snapshot_id: str = Field(default="")
     child_work_ids: list[str] = Field(default_factory=list)
     child_work_count: int = Field(default=0, ge=0)
     merge_ready: bool = False

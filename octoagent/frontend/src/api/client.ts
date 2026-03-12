@@ -32,6 +32,8 @@ import type {
   TaskListResponse,
   UpdateAttemptSummary,
   VaultAuthorizationDocument,
+  WorkerProfileRevisionsDocument,
+  WorkerProfilesDocument,
   WizardSessionDocument,
   ConfigSchemaDocument,
   AutomationJobDocument,
@@ -62,6 +64,7 @@ type ControlResourceName =
   | "config"
   | "project-selector"
   | "sessions"
+  | "worker-profiles"
   | "context-frames"
   | "policy-profiles"
   | "capability-pack"
@@ -346,6 +349,9 @@ export async function fetchControlResource(
   resource: "sessions"
 ): Promise<SessionProjectionDocument>;
 export async function fetchControlResource(
+  resource: "worker-profiles"
+): Promise<WorkerProfilesDocument>;
+export async function fetchControlResource(
   resource: "context-frames"
 ): Promise<ContextContinuityDocument>;
 export async function fetchControlResource(
@@ -385,6 +391,7 @@ export async function fetchControlResource(
   | ConfigSchemaDocument
   | ProjectSelectorDocument
   | SessionProjectionDocument
+  | WorkerProfilesDocument
   | ContextContinuityDocument
   | PolicyProfilesDocument
   | CapabilityPackDocument
@@ -398,6 +405,14 @@ export async function fetchControlResource(
   | ImportWorkbenchDocument
 > {
   return apiFetch(`/api/control/resources/${resource}`);
+}
+
+export async function fetchWorkerProfileRevisions(
+  profileId: string
+): Promise<WorkerProfileRevisionsDocument> {
+  return apiFetch<WorkerProfileRevisionsDocument>(
+    `/api/control/resources/worker-profile-revisions/${encodeURIComponent(profileId)}`
+  );
 }
 
 export async function fetchMemoryConsole(

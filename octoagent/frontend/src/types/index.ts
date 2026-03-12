@@ -507,6 +507,84 @@ export interface AgentProfilesDocument extends ControlPlaneDocumentBase {
   profiles: AgentProfileItem[];
 }
 
+export type WorkerProfileOriginKind = "builtin" | "custom" | "cloned" | "extracted";
+export type WorkerProfileStatus = "draft" | "active" | "archived";
+
+export interface WorkerProfileStaticConfig {
+  base_archetype: string;
+  summary: string;
+  model_alias: string;
+  tool_profile: string;
+  default_tool_groups: string[];
+  selected_tools: string[];
+  runtime_kinds: string[];
+  policy_refs: string[];
+  instruction_overlays: string[];
+  tags: string[];
+  capabilities: string[];
+}
+
+export interface WorkerProfileDynamicContext {
+  active_project_id: string;
+  active_workspace_id: string;
+  active_work_count: number;
+  running_work_count: number;
+  attention_work_count: number;
+  latest_work_id: string;
+  latest_task_id: string;
+  latest_work_title: string;
+  latest_work_status: string;
+  latest_target_kind: string;
+  current_selected_tools: string[];
+  updated_at: string | null;
+}
+
+export interface WorkerProfileItem {
+  profile_id: string;
+  name: string;
+  scope: string;
+  project_id: string;
+  mode: string;
+  origin_kind: WorkerProfileOriginKind;
+  status: WorkerProfileStatus;
+  active_revision: number;
+  draft_revision: number;
+  effective_snapshot_id: string;
+  editable: boolean;
+  summary: string;
+  static_config: WorkerProfileStaticConfig;
+  dynamic_context: WorkerProfileDynamicContext;
+  warnings: string[];
+  capabilities: ControlPlaneCapability[];
+}
+
+export interface WorkerProfilesDocument extends ControlPlaneDocumentBase {
+  resource_type: "worker_profiles";
+  resource_id: "worker-profiles:overview";
+  active_project_id: string;
+  active_workspace_id: string;
+  profiles: WorkerProfileItem[];
+  summary: Record<string, unknown>;
+}
+
+export interface WorkerProfileRevisionItem {
+  revision_id: string;
+  profile_id: string;
+  revision: number;
+  change_summary: string;
+  created_by: string;
+  created_at: string | null;
+  snapshot_payload: Record<string, unknown>;
+}
+
+export interface WorkerProfileRevisionsDocument extends ControlPlaneDocumentBase {
+  resource_type: "worker_profile_revisions";
+  resource_id: string;
+  profile_id: string;
+  revisions: WorkerProfileRevisionItem[];
+  summary: Record<string, unknown>;
+}
+
 export interface OwnerProfileDocument extends ControlPlaneDocumentBase {
   resource_type: "owner_profile";
   resource_id: "owner-profile:default";
@@ -750,6 +828,9 @@ export interface WorkProjectionItem {
   runtime_id: string;
   project_id: string;
   workspace_id: string;
+  requested_worker_profile_id: string;
+  requested_worker_profile_version: number;
+  effective_worker_snapshot_id: string;
   child_work_ids: string[];
   child_work_count: number;
   merge_ready: boolean;
@@ -1262,6 +1343,7 @@ export interface ControlPlaneSnapshot {
     project_selector: ProjectSelectorDocument;
     sessions: SessionProjectionDocument;
     agent_profiles: AgentProfilesDocument;
+    worker_profiles?: WorkerProfilesDocument;
     owner_profile: OwnerProfileDocument;
     bootstrap_session: BootstrapSessionDocument;
     context_continuity: ContextContinuityDocument;

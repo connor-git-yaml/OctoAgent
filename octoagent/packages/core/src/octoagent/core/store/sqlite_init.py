@@ -276,6 +276,9 @@ CREATE TABLE IF NOT EXISTS works (
     project_id              TEXT NOT NULL DEFAULT '',
     workspace_id            TEXT NOT NULL DEFAULT '',
     agent_profile_id        TEXT NOT NULL DEFAULT '',
+    requested_worker_profile_id TEXT NOT NULL DEFAULT '',
+    requested_worker_profile_version INTEGER NOT NULL DEFAULT 0,
+    effective_worker_snapshot_id TEXT NOT NULL DEFAULT '',
     context_frame_id        TEXT NOT NULL DEFAULT '',
     tool_selection_id       TEXT NOT NULL DEFAULT '',
     selected_tools          TEXT NOT NULL DEFAULT '[]',
@@ -311,6 +314,48 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     version                 INTEGER NOT NULL DEFAULT 1,
     created_at              TEXT NOT NULL,
     updated_at              TEXT NOT NULL
+);
+"""
+
+_WORKER_PROFILES_DDL = """
+CREATE TABLE IF NOT EXISTS worker_profiles (
+    profile_id              TEXT PRIMARY KEY,
+    scope                   TEXT NOT NULL DEFAULT 'project',
+    project_id              TEXT NOT NULL DEFAULT '',
+    name                    TEXT NOT NULL,
+    summary                 TEXT NOT NULL DEFAULT '',
+    base_archetype          TEXT NOT NULL DEFAULT 'general',
+    instruction_overlays    TEXT NOT NULL DEFAULT '[]',
+    model_alias             TEXT NOT NULL DEFAULT 'main',
+    tool_profile            TEXT NOT NULL DEFAULT 'minimal',
+    default_tool_groups     TEXT NOT NULL DEFAULT '[]',
+    selected_tools          TEXT NOT NULL DEFAULT '[]',
+    runtime_kinds           TEXT NOT NULL DEFAULT '[]',
+    policy_refs             TEXT NOT NULL DEFAULT '[]',
+    tags                    TEXT NOT NULL DEFAULT '[]',
+    metadata                TEXT NOT NULL DEFAULT '{}',
+    status                  TEXT NOT NULL DEFAULT 'draft',
+    origin_kind             TEXT NOT NULL DEFAULT 'custom',
+    draft_revision          INTEGER NOT NULL DEFAULT 0,
+    active_revision         INTEGER NOT NULL DEFAULT 0,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    archived_at             TEXT
+);
+"""
+
+_WORKER_PROFILE_REVISIONS_DDL = """
+CREATE TABLE IF NOT EXISTS worker_profile_revisions (
+    revision_id             TEXT PRIMARY KEY,
+    profile_id              TEXT NOT NULL,
+    revision                INTEGER NOT NULL,
+    change_summary          TEXT NOT NULL DEFAULT '',
+    snapshot_payload        TEXT NOT NULL DEFAULT '{}',
+    created_by              TEXT NOT NULL DEFAULT '',
+    created_at              TEXT NOT NULL,
+
+    FOREIGN KEY (profile_id) REFERENCES worker_profiles(profile_id),
+    UNIQUE(profile_id, revision)
 );
 """
 
@@ -502,6 +547,10 @@ _WORK_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_works_status_updated ON works(status, updated_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_parent_work ON works(parent_work_id, created_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_agent_profile ON works(agent_profile_id);",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_works_requested_worker_profile "
+        "ON works(requested_worker_profile_id, requested_worker_profile_version);"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_works_context_frame ON works(context_frame_id);",
     (
         "CREATE INDEX IF NOT EXISTS idx_skill_pipeline_runs_work_updated "
@@ -521,6 +570,14 @@ _AGENT_CONTEXT_INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_agent_profiles_scope_project "
         "ON agent_profiles(scope, project_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_worker_profiles_scope_project "
+        "ON worker_profiles(scope, project_id, status, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_worker_profile_revisions_profile_created "
+        "ON worker_profile_revisions(profile_id, revision DESC, created_at DESC);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_owner_profile_overlays_scope "
@@ -577,6 +634,18 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''"
         )
+    if work_columns and "requested_worker_profile_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN requested_worker_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "requested_worker_profile_version" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN requested_worker_profile_version INTEGER NOT NULL DEFAULT 0"
+        )
+    if work_columns and "effective_worker_snapshot_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN effective_worker_snapshot_id TEXT NOT NULL DEFAULT ''"
+        )
     if work_columns and "context_frame_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''"
@@ -609,6 +678,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
     await conn.execute(_WORKS_DDL)
     await conn.execute(_AGENT_PROFILES_DDL)
+    await conn.execute(_WORKER_PROFILES_DDL)
+    await conn.execute(_WORKER_PROFILE_REVISIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
     await conn.execute(_BOOTSTRAP_SESSIONS_DDL)

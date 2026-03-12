@@ -41,6 +41,7 @@ import type {
   SessionProjectionItem,
   SkillPipelineDocument,
   VaultAuthorizationDocument,
+  WorkerProfilesDocument,
 } from "../types";
 import {
   buildFreshnessReadiness,
@@ -99,6 +100,28 @@ const EMPTY_DELEGATION: DelegationPlaneDocument = {
   summary: {},
 };
 
+const EMPTY_ROOT_AGENT_PROFILES: WorkerProfilesDocument = {
+  contract_version: "1.0.0",
+  resource_type: "worker_profiles",
+  resource_id: "worker-profiles:overview",
+  schema_version: 1,
+  generated_at: "",
+  updated_at: "",
+  status: "degraded",
+  degraded: {
+    is_degraded: true,
+    reasons: ["worker_profiles_missing"],
+    unavailable_sections: ["worker_profiles"],
+  },
+  warnings: ["worker profiles resource missing from snapshot"],
+  capabilities: [],
+  refs: {},
+  active_project_id: "",
+  active_workspace_id: "",
+  profiles: [],
+  summary: {},
+};
+
 const EMPTY_PIPELINES: SkillPipelineDocument = {
   contract_version: "1.0.0",
   resource_type: "skill_pipeline",
@@ -128,6 +151,20 @@ const WORKER_TYPE_LABELS: Record<string, string> = {
 
 function formatWorkerType(workerType: string): string {
   return WORKER_TYPE_LABELS[workerType] ?? workerType;
+}
+
+function formatScope(scope: string): string {
+  if (!scope) {
+    return "-";
+  }
+  return scope.replace(/[._-]+/g, " ").trim();
+}
+
+function formatProfileMode(mode: string): string {
+  if (!mode) {
+    return "-";
+  }
+  return mode.replace(/[._-]+/g, " ").trim();
 }
 
 type SectionId =
@@ -251,6 +288,7 @@ type ControlResourceRoute =
   | "config"
   | "project-selector"
   | "sessions"
+  | "worker-profiles"
   | "context-frames"
   | "capability-pack"
   | "delegation"
@@ -267,6 +305,7 @@ const RESOURCE_ROUTE_BY_TYPE: Record<string, ControlResourceRoute> = {
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
+  worker_profiles: "worker-profiles",
   context_continuity: "context-frames",
   capability_pack: "capability-pack",
   delegation_plane: "delegation",
@@ -287,6 +326,7 @@ const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   config: "config",
   "project-selector": "project_selector",
   sessions: "sessions",
+  "worker-profiles": "worker_profiles",
   "context-frames": "context_continuity",
   "capability-pack": "capability_pack",
   delegation: "delegation",
@@ -394,6 +434,8 @@ async function loadControlResource(
       return fetchControlResource("project-selector");
     case "sessions":
       return fetchControlResource("sessions");
+    case "worker-profiles":
+      return fetchControlResource("worker-profiles");
     case "context-frames":
       return fetchControlResource("context-frames");
     case "capability-pack":
@@ -1079,6 +1121,7 @@ export default function ControlPlane() {
     project_selector,
     sessions,
     context_continuity,
+    worker_profiles,
     capability_pack,
     delegation,
     pipelines,
@@ -1089,6 +1132,9 @@ export default function ControlPlane() {
   } = snapshot.resources;
   const capabilityPack: CapabilityPackDocument =
     capability_pack ?? EMPTY_CAPABILITY_PACK;
+  const rootAgentProfilesDocument: WorkerProfilesDocument =
+    worker_profiles ?? EMPTY_ROOT_AGENT_PROFILES;
+  const rootAgentProfiles = rootAgentProfilesDocument.profiles ?? [];
   const delegationPlane: DelegationPlaneDocument =
     delegation ?? EMPTY_DELEGATION;
   const skillPipelines: SkillPipelineDocument = pipelines ?? EMPTY_PIPELINES;
@@ -1106,6 +1152,15 @@ export default function ControlPlane() {
   const pairingItems = operatorItems.filter((item) => item.kind === "pairing_request");
   const diagnosticTone = statusTone(diagnostics.overall_status);
   const lastMemoryAction = memoryActionResult(lastAction);
+  const primaryRootAgentProfile = rootAgentProfiles[0] ?? null;
+  const rootAgentRunningCount = rootAgentProfiles.reduce(
+    (sum, profile) => sum + Math.max(profile.dynamic_context.running_work_count || 0, 0),
+    0
+  );
+  const rootAgentAttentionCount = rootAgentProfiles.reduce(
+    (sum, profile) => sum + Math.max(profile.dynamic_context.attention_work_count || 0, 0),
+    0
+  );
   const selectedSubjectHistory =
     memorySubject?.subject_key === selectedMemorySubjectKey ? memorySubject : null;
   const latestContextFrame = context_continuity?.frames?.[0] ?? null;
@@ -1232,6 +1287,15 @@ export default function ControlPlane() {
               <span>
                 当前结论 {memory.summary.sor_current_count} / 提议{" "}
                 {memory.summary.proposal_count}
+              </span>
+            </article>
+            <article className="control-summary-card">
+              <p className="eyebrow">Root Agent</p>
+              <strong>{primaryRootAgentProfile?.name ?? "未接入"}</strong>
+              <span>
+                {primaryRootAgentProfile
+                  ? `运行中 ${rootAgentRunningCount} / 需关注 ${rootAgentAttentionCount}`
+                  : "等待 worker_profiles canonical resource"}
               </span>
             </article>
           </div>
@@ -1636,6 +1700,206 @@ export default function ControlPlane() {
             <article className="panel">
               <div className="panel-head">
                 <div>
+                  <p className="eyebrow">Canonical Root Agent Profiles</p>
+                  <h3>{rootAgentProfiles.length}</h3>
+                </div>
+                <span className={`tone-chip ${statusTone(rootAgentProfilesDocument.status)}`}>
+                  {rootAgentProfilesDocument.status}
+                </span>
+              </div>
+              <p className="muted">
+                这组数据来自 `worker_profiles` canonical resource，用于看 Root Agent 的真实静态配置与动态上下文；
+                它不等同于下方 bundled capability pack 里的 Worker archetypes。
+              </p>
+              {rootAgentProfiles.length === 0 ? (
+                <div className="event-item">
+                  <div>
+                    <strong>worker_profiles 还没有数据</strong>
+                    <p>等后端把 canonical resource 投进 snapshot 后，这里会直接显示 Root Agent lens。</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="wb-root-agent-list">
+                  {rootAgentProfiles.map((profile) => {
+                    const staticConfig = profile.static_config;
+                    const dynamicContext = profile.dynamic_context;
+                    const defaultToolGroups = staticConfig.default_tool_groups ?? [];
+                    const staticCapabilities = staticConfig.capabilities ?? [];
+                    const runtimeKinds = staticConfig.runtime_kinds ?? [];
+                    const currentSelectedTools = dynamicContext.current_selected_tools ?? [];
+                    const tone =
+                      dynamicContext.attention_work_count > 0
+                        ? "warning"
+                        : dynamicContext.running_work_count > 0
+                          ? "running"
+                          : "neutral";
+                    return (
+                      <article
+                        key={profile.profile_id}
+                        className={`wb-root-agent-card ${
+                          profile.warnings.length > 0 ? "has-warning" : ""
+                        }`}
+                      >
+                        <div className="wb-root-agent-card-head">
+                          <div>
+                            <p className="wb-card-label">Root Agent Lens</p>
+                            <h3>{profile.name || profile.profile_id}</h3>
+                            <p className="wb-inline-note">
+                              {profile.summary || "当前 profile 没有额外 summary。"}
+                            </p>
+                          </div>
+                          <div className="wb-chip-row">
+                            <span className="wb-chip">{formatScope(profile.scope)}</span>
+                            <span className="wb-chip">{formatProfileMode(profile.mode)}</span>
+                            <span className={`tone-chip ${tone}`}>
+                              {dynamicContext.latest_work_status || "idle"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="wb-root-agent-console">
+                          <section className="wb-root-agent-column">
+                            <div className="wb-root-agent-column-head">
+                              <strong>静态配置</strong>
+                              <span>{profile.profile_id}</span>
+                            </div>
+                            <div className="wb-key-value-list">
+                              <span>Archetype</span>
+                              <strong>{staticConfig.base_archetype || "-"}</strong>
+                              <span>Model</span>
+                              <strong>{staticConfig.model_alias || "-"}</strong>
+                              <span>Tool Profile</span>
+                              <strong>{staticConfig.tool_profile || "-"}</strong>
+                              <span>Runtime</span>
+                              <strong>{runtimeKinds.join(", ") || "-"}</strong>
+                            </div>
+                            <div className="wb-root-agent-token-stack">
+                              <div>
+                                <p className="wb-card-label">默认工具组</p>
+                                <div className="wb-chip-row">
+                                  {defaultToolGroups.length > 0 ? (
+                                    defaultToolGroups.map((toolGroup) => (
+                                      <span key={toolGroup} className="wb-chip">
+                                        {toolGroup}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="wb-inline-note">未标记默认工具组</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="wb-card-label">Capabilities</p>
+                                <div className="wb-chip-row">
+                                  {staticCapabilities.length > 0 ? (
+                                    staticCapabilities.map((capability) => (
+                                      <span key={capability} className="wb-chip is-warning">
+                                        {capability}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="wb-inline-note">未标记静态能力</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </section>
+                          <section className="wb-root-agent-column">
+                            <div className="wb-root-agent-column-head">
+                              <strong>动态上下文</strong>
+                              <span>
+                                {dynamicContext.updated_at
+                                  ? formatDateTime(dynamicContext.updated_at)
+                                  : "未记录"}
+                              </span>
+                            </div>
+                            <div className="wb-root-agent-context-grid">
+                              <div className="wb-detail-block">
+                                <span className="wb-card-label">Active</span>
+                                <strong>{dynamicContext.active_work_count ?? 0}</strong>
+                                <p>Running {dynamicContext.running_work_count ?? 0}</p>
+                              </div>
+                              <div className="wb-detail-block">
+                                <span className="wb-card-label">Attention</span>
+                                <strong>{dynamicContext.attention_work_count ?? 0}</strong>
+                                <p>Target {dynamicContext.latest_target_kind || "-"}</p>
+                              </div>
+                            </div>
+                            <div className="wb-key-value-list">
+                              <span>Context</span>
+                              <strong>
+                                {dynamicContext.active_project_id || "-"} /{" "}
+                                {dynamicContext.active_workspace_id || "-"}
+                              </strong>
+                              <span>Latest Work</span>
+                              <strong>
+                                {dynamicContext.latest_work_title || dynamicContext.latest_work_id || "-"}
+                              </strong>
+                              <span>Latest Task</span>
+                              <strong>{dynamicContext.latest_task_id || "-"}</strong>
+                            </div>
+                            <div>
+                              <p className="wb-card-label">当前选中工具</p>
+                              <div className="wb-chip-row">
+                                {currentSelectedTools.length > 0 ? (
+                                  currentSelectedTools.map((tool) => (
+                                    <span key={tool} className="wb-chip">
+                                      {tool}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="wb-inline-note">当前没有记录 selected tools</span>
+                                )}
+                              </div>
+                            </div>
+                          </section>
+                        </div>
+                        {profile.capabilities.length > 0 ? (
+                          <div className="wb-root-agent-cap-row">
+                            <span className="wb-card-label">资源能力</span>
+                            <div className="wb-chip-row">
+                              {profile.capabilities.map((capability) => (
+                                <span key={capability.capability_id} className="wb-chip">
+                                  {capability.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {profile.warnings.length > 0 ? (
+                          <div className="event-list">
+                            {profile.warnings.map((warning) => (
+                              <div key={warning} className="event-item">
+                                <div>
+                                  <strong>Warning</strong>
+                                  <p>{warning}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="action-row">
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => setActiveSection("delegation")}
+                          >
+                            查看委派链路
+                          </button>
+                          {dynamicContext.latest_task_id ? (
+                            <Link className="inline-link" to={`/tasks/${dynamicContext.latest_task_id}`}>
+                              打开最近任务
+                            </Link>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </article>
+            <article className="panel">
+              <div className="panel-head">
+                <div>
                   <p className="eyebrow">Bundled Capability Pack</p>
                   <h3>{capabilityPack.pack.pack_id}</h3>
                 </div>
@@ -1652,16 +1916,15 @@ export default function ControlPlane() {
                 <span>Version {capabilityPack.pack.version}</span>
                 <span>Tools {capabilityPack.pack.tools.length}</span>
                 <span>Skills {capabilityPack.pack.skills.length}</span>
-                <span>
-                  Fallback {capabilityPack.pack.fallback_toolset.join(", ") || "-"}
-                </span>
+                <span>Bundled Worker Archetypes {capabilityPack.pack.worker_profiles.length}</span>
+                <span>Fallback {capabilityPack.pack.fallback_toolset.join(", ") || "-"}</span>
               </div>
             </article>
             {capabilityPack.pack.worker_profiles.map((profile) => (
               <article key={profile.worker_type} className="panel">
                 <div className="panel-head">
                   <div>
-                    <p className="eyebrow">Worker Profile</p>
+                    <p className="eyebrow">Bundled Worker Archetype</p>
                     <h3>{profile.worker_type}</h3>
                   </div>
                   <span className="tone-chip neutral">
@@ -1751,6 +2014,13 @@ export default function ControlPlane() {
                   <span>Pipeline {work.pipeline_run_id || "-"}</span>
                   <span>Children {work.child_work_count}</span>
                   <span>Merge Ready {work.merge_ready ? "yes" : "no"}</span>
+                  <span>
+                    Requested Profile {work.requested_worker_profile_id || "archetype fallback"}
+                  </span>
+                  <span>
+                    Revision {work.requested_worker_profile_version || "-"} / Snapshot{" "}
+                    {work.effective_worker_snapshot_id || "-"}
+                  </span>
                 </div>
                 <p>{work.route_reason || "无 route reason"}</p>
                 <p className="muted">
@@ -1819,6 +2089,19 @@ export default function ControlPlane() {
                     disabled={busyActionId === "work.escalate"}
                   >
                     升级
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() =>
+                      void submitAction("worker.extract_profile_from_runtime", {
+                        work_id: work.work_id,
+                        name: `${work.title || formatWorkerType(work.selected_worker_type)} Root Agent`,
+                      })
+                    }
+                    disabled={busyActionId === "worker.extract_profile_from_runtime"}
+                  >
+                    提炼 Root Agent
                   </button>
                 </div>
                 </article>

@@ -15,6 +15,10 @@ from ..models.agent_context import (
     OwnerProfile,
     OwnerProfileOverlay,
     SessionContextState,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileRevision,
+    WorkerProfileStatus,
 )
 
 
@@ -98,6 +102,141 @@ class SqliteAgentContextStore:
                 (),
             )
         return [self._row_to_agent_profile(row) for row in rows]
+
+    async def save_worker_profile(self, profile: WorkerProfile) -> WorkerProfile:
+        await self._conn.execute(
+            """
+            INSERT INTO worker_profiles (
+                profile_id, scope, project_id, name, summary, base_archetype,
+                instruction_overlays, model_alias, tool_profile, default_tool_groups,
+                selected_tools, runtime_kinds, policy_refs, tags, metadata, status,
+                origin_kind, draft_revision, active_revision, created_at, updated_at, archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id) DO UPDATE SET
+                scope = excluded.scope,
+                project_id = excluded.project_id,
+                name = excluded.name,
+                summary = excluded.summary,
+                base_archetype = excluded.base_archetype,
+                instruction_overlays = excluded.instruction_overlays,
+                model_alias = excluded.model_alias,
+                tool_profile = excluded.tool_profile,
+                default_tool_groups = excluded.default_tool_groups,
+                selected_tools = excluded.selected_tools,
+                runtime_kinds = excluded.runtime_kinds,
+                policy_refs = excluded.policy_refs,
+                tags = excluded.tags,
+                metadata = excluded.metadata,
+                status = excluded.status,
+                origin_kind = excluded.origin_kind,
+                draft_revision = excluded.draft_revision,
+                active_revision = excluded.active_revision,
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at
+            """,
+            (
+                profile.profile_id,
+                profile.scope.value,
+                profile.project_id,
+                profile.name,
+                profile.summary,
+                profile.base_archetype,
+                self._dump(profile.instruction_overlays),
+                profile.model_alias,
+                profile.tool_profile,
+                self._dump(profile.default_tool_groups),
+                self._dump(profile.selected_tools),
+                self._dump(profile.runtime_kinds),
+                self._dump(profile.policy_refs),
+                self._dump(profile.tags),
+                self._dump(profile.metadata),
+                profile.status.value,
+                profile.origin_kind.value,
+                profile.draft_revision,
+                profile.active_revision,
+                profile.created_at.isoformat(),
+                profile.updated_at.isoformat(),
+                profile.archived_at.isoformat() if profile.archived_at else None,
+            ),
+        )
+        return profile
+
+    async def get_worker_profile(self, profile_id: str) -> WorkerProfile | None:
+        row = await self._fetchone(
+            "SELECT * FROM worker_profiles WHERE profile_id = ?",
+            (profile_id,),
+        )
+        return self._row_to_worker_profile(row) if row is not None else None
+
+    async def list_worker_profiles(
+        self,
+        *,
+        project_id: str | None = None,
+        include_archived: bool = True,
+    ) -> list[WorkerProfile]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if project_id:
+            clauses.append("(project_id = ? OR scope = 'system')")
+            args.append(project_id)
+        if not include_archived:
+            clauses.append("status != 'archived'")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = await self._fetchall(
+            f"""
+            SELECT * FROM worker_profiles
+            {where}
+            ORDER BY scope ASC, updated_at DESC, created_at DESC
+            """,
+            tuple(args),
+        )
+        return [self._row_to_worker_profile(row) for row in rows]
+
+    async def save_worker_profile_revision(
+        self,
+        revision: WorkerProfileRevision,
+    ) -> WorkerProfileRevision:
+        await self._conn.execute(
+            """
+            INSERT INTO worker_profile_revisions (
+                revision_id, profile_id, revision, change_summary,
+                snapshot_payload, created_by, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(revision_id) DO UPDATE SET
+                profile_id = excluded.profile_id,
+                revision = excluded.revision,
+                change_summary = excluded.change_summary,
+                snapshot_payload = excluded.snapshot_payload,
+                created_by = excluded.created_by,
+                created_at = excluded.created_at
+            """,
+            (
+                revision.revision_id,
+                revision.profile_id,
+                revision.revision,
+                revision.change_summary,
+                self._dump(revision.snapshot_payload),
+                revision.created_by,
+                revision.created_at.isoformat(),
+            ),
+        )
+        return revision
+
+    async def list_worker_profile_revisions(
+        self,
+        profile_id: str,
+    ) -> list[WorkerProfileRevision]:
+        rows = await self._fetchall(
+            """
+            SELECT * FROM worker_profile_revisions
+            WHERE profile_id = ?
+            ORDER BY revision DESC, created_at DESC
+            """,
+            (profile_id,),
+        )
+        return [self._row_to_worker_profile_revision(row) for row in rows]
 
     async def save_owner_profile(self, profile: OwnerProfile) -> OwnerProfile:
         await self._conn.execute(
@@ -573,6 +712,50 @@ class SqliteAgentContextStore:
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @classmethod
+    def _row_to_worker_profile(cls, row: aiosqlite.Row) -> WorkerProfile:
+        return WorkerProfile(
+            profile_id=row["profile_id"],
+            scope=row["scope"],
+            project_id=row["project_id"],
+            name=row["name"],
+            summary=row["summary"],
+            base_archetype=row["base_archetype"],
+            instruction_overlays=cls._load(row["instruction_overlays"], []),
+            model_alias=row["model_alias"],
+            tool_profile=row["tool_profile"],
+            default_tool_groups=cls._load(row["default_tool_groups"], []),
+            selected_tools=cls._load(row["selected_tools"], []),
+            runtime_kinds=cls._load(row["runtime_kinds"], []),
+            policy_refs=cls._load(row["policy_refs"], []),
+            tags=cls._load(row["tags"], []),
+            metadata=cls._load(row["metadata"], {}),
+            status=WorkerProfileStatus(row["status"]),
+            origin_kind=WorkerProfileOriginKind(row["origin_kind"]),
+            draft_revision=row["draft_revision"],
+            active_revision=row["active_revision"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            archived_at=(
+                datetime.fromisoformat(row["archived_at"]) if row["archived_at"] else None
+            ),
+        )
+
+    @classmethod
+    def _row_to_worker_profile_revision(
+        cls,
+        row: aiosqlite.Row,
+    ) -> WorkerProfileRevision:
+        return WorkerProfileRevision(
+            revision_id=row["revision_id"],
+            profile_id=row["profile_id"],
+            revision=row["revision"],
+            change_summary=row["change_summary"],
+            snapshot_payload=cls._load(row["snapshot_payload"], {}),
+            created_by=row["created_by"],
+            created_at=datetime.fromisoformat(row["created_at"]),
         )
 
     @classmethod

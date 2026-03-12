@@ -22,12 +22,13 @@ class SqliteWorkStore:
             INSERT INTO works (
                 work_id, task_id, parent_work_id, title, kind, status, target_kind,
                 owner_id, requested_capability, selected_worker_type, route_reason,
-                project_id, workspace_id, agent_profile_id, context_frame_id,
+                project_id, workspace_id, agent_profile_id, requested_worker_profile_id,
+                requested_worker_profile_version, effective_worker_snapshot_id, context_frame_id,
                 tool_selection_id, selected_tools, pipeline_run_id, delegation_id,
                 runtime_id, retry_count, escalation_count, metadata,
                 created_at, updated_at, completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(work_id) DO UPDATE SET
                 task_id = excluded.task_id,
                 parent_work_id = excluded.parent_work_id,
@@ -42,6 +43,9 @@ class SqliteWorkStore:
                 project_id = excluded.project_id,
                 workspace_id = excluded.workspace_id,
                 agent_profile_id = excluded.agent_profile_id,
+                requested_worker_profile_id = excluded.requested_worker_profile_id,
+                requested_worker_profile_version = excluded.requested_worker_profile_version,
+                effective_worker_snapshot_id = excluded.effective_worker_snapshot_id,
                 context_frame_id = excluded.context_frame_id,
                 tool_selection_id = excluded.tool_selection_id,
                 selected_tools = excluded.selected_tools,
@@ -69,6 +73,9 @@ class SqliteWorkStore:
                 work.project_id,
                 work.workspace_id,
                 work.agent_profile_id,
+                work.requested_worker_profile_id,
+                work.requested_worker_profile_version,
+                work.effective_worker_snapshot_id,
                 work.context_frame_id,
                 work.tool_selection_id,
                 json.dumps(work.selected_tools, ensure_ascii=False),
@@ -292,6 +299,9 @@ class SqliteWorkStore:
             project_id=row["project_id"],
             workspace_id=row["workspace_id"],
             agent_profile_id=row["agent_profile_id"],
+            requested_worker_profile_id=row["requested_worker_profile_id"],
+            requested_worker_profile_version=row["requested_worker_profile_version"],
+            effective_worker_snapshot_id=row["effective_worker_snapshot_id"],
             context_frame_id=row["context_frame_id"],
             tool_selection_id=row["tool_selection_id"],
             selected_tools=json.loads(row["selected_tools"] or "[]"),

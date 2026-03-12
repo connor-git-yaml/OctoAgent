@@ -44,6 +44,23 @@ async def get_control_agent_profiles(control_plane=Depends(get_control_plane_ser
     )
 
 
+@router.get("/api/control/resources/worker-profiles")
+async def get_control_worker_profiles(control_plane=Depends(get_control_plane_service)):
+    return (await control_plane.get_worker_profiles_document()).model_dump(
+        mode="json", by_alias=True
+    )
+
+
+@router.get("/api/control/resources/worker-profile-revisions/{profile_id}")
+async def get_control_worker_profile_revisions(
+    profile_id: str,
+    control_plane=Depends(get_control_plane_service),
+):
+    return (await control_plane.get_worker_profile_revisions_document(profile_id)).model_dump(
+        mode="json", by_alias=True
+    )
+
+
 @router.get("/api/control/resources/owner-profile")
 async def get_control_owner_profile(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_owner_profile_document()).model_dump(mode="json", by_alias=True)

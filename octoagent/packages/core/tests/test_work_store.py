@@ -6,12 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from octoagent.core.models import (
+    DelegationTargetKind,
     PipelineCheckpoint,
     PipelineRunStatus,
     RequesterInfo,
     SkillPipelineRun,
     Task,
     Work,
+    WorkerType,
+    WorkKind,
     WorkStatus,
 )
 from octoagent.core.store import create_store_group
@@ -52,7 +55,14 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         parent_work_id="work-parent",
         title="child",
         status=WorkStatus.WAITING_APPROVAL,
+        kind=WorkKind.DELEGATION,
+        target_kind=DelegationTargetKind.SUBAGENT,
         agent_profile_id="agent-profile-child",
+        requested_worker_profile_id="worker-profile-alpha",
+        requested_worker_profile_version=2,
+        effective_worker_snapshot_id="worker-snapshot:worker-profile-alpha:2",
+        selected_worker_type=WorkerType.RESEARCH,
+        selected_tools=["web.search"],
         context_frame_id="context-frame-child",
     )
 
@@ -67,6 +77,10 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
     assert stored.status == WorkStatus.WAITING_APPROVAL
     assert stored.agent_profile_id == "agent-profile-child"
     assert stored.context_frame_id == "context-frame-child"
+    assert stored.requested_worker_profile_id == "worker-profile-alpha"
+    assert stored.requested_worker_profile_version == 2
+    assert stored.effective_worker_snapshot_id == "worker-snapshot:worker-profile-alpha:2"
+    assert stored.selected_tools == ["web.search"]
 
     by_task = await store_group.work_store.list_works(task_id="task-1")
     assert [item.work_id for item in by_task] == ["work-child", "work-parent"]

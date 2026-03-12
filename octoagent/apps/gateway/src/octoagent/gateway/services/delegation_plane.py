@@ -106,6 +106,18 @@ class DelegationPlaneService:
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
         )
+        requested_worker_profile_id = str(
+            request.metadata.get("requested_worker_profile_id", "")
+        ).strip()
+        try:
+            requested_worker_profile_version = int(
+                str(request.metadata.get("requested_worker_profile_version", "0") or "0")
+            )
+        except ValueError:
+            requested_worker_profile_version = 0
+        effective_worker_snapshot_id = str(
+            request.metadata.get("effective_worker_snapshot_id", "")
+        ).strip()
         initial_target_kind = (
             DelegationTargetKind(requested_target_kind)
             if requested_target_kind in {item.value for item in DelegationTargetKind}
@@ -149,12 +161,18 @@ class DelegationPlaneService:
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
             agent_profile_id=agent_profile_id,
+            requested_worker_profile_id=requested_worker_profile_id,
+            requested_worker_profile_version=requested_worker_profile_version,
+            effective_worker_snapshot_id=effective_worker_snapshot_id,
             context_frame_id=context_frame_id,
             metadata={
                 "requested_target_kind": requested_target_kind,
                 "requested_worker_type": (
                     requested_worker_type.value if requested_worker_type is not None else ""
                 ),
+                "requested_worker_profile_id": requested_worker_profile_id,
+                "requested_worker_profile_version": requested_worker_profile_version,
+                "effective_worker_snapshot_id": effective_worker_snapshot_id,
                 "requested_tool_profile": request.tool_profile,
                 "parent_task_id": str(request.metadata.get("parent_task_id", "")),
                 "resume_from_node": request.resume_from_node or "",
@@ -304,6 +322,11 @@ class DelegationPlaneService:
                 "target_kind": updated_work.target_kind.value,
                 "tool_selection_id": selection.selection_id,
                 "agent_profile_id": updated_work.agent_profile_id,
+                "requested_worker_profile_id": updated_work.requested_worker_profile_id,
+                "requested_worker_profile_version": str(
+                    updated_work.requested_worker_profile_version
+                ),
+                "effective_worker_snapshot_id": updated_work.effective_worker_snapshot_id,
                 "context_frame_id": updated_work.context_frame_id,
                 "runtime_context_json": encode_runtime_context(resolved_runtime_context),
             },

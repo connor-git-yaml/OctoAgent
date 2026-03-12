@@ -843,7 +843,7 @@ select:focus-visible {
 .control-summary-grid {
   display: grid;
   gap: var(--cp-space-3);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .control-summary-card {
@@ -2058,6 +2058,199 @@ select:focus-visible {
   gap: var(--cp-space-4);
 }
 
+.wb-root-agent-hub,
+.wb-root-agent-list,
+.wb-root-agent-token-stack {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-root-agent-layout,
+.wb-root-agent-browser,
+.wb-root-agent-studio,
+.wb-root-agent-runtime-rail,
+.wb-root-agent-browser-panel,
+.wb-root-agent-studio-panel,
+.wb-root-agent-runtime-panel,
+.wb-root-agent-library-section,
+.wb-root-agent-revision-list,
+.wb-root-agent-work-list {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-root-agent-layout {
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.15fr) minmax(320px, 0.92fr);
+  align-items: start;
+}
+
+.wb-root-agent-browser-panel,
+.wb-root-agent-studio-panel,
+.wb-root-agent-runtime-panel {
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 250, 0.92)),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: var(--cp-shadow);
+}
+
+.wb-root-agent-browser-head,
+.wb-root-agent-library-head,
+.wb-root-agent-library-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wb-root-agent-browser-head strong,
+.wb-root-agent-library-head strong {
+  color: var(--cp-ink);
+}
+
+.wb-root-agent-browser-head span,
+.wb-root-agent-library-head span,
+.wb-root-agent-library-meta span {
+  color: var(--cp-muted);
+}
+
+.wb-root-agent-library-item,
+.wb-root-agent-runtime-item,
+.wb-root-agent-review-panel,
+.wb-root-agent-token-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(246, 248, 250, 0.86);
+}
+
+.wb-root-agent-library-item {
+  width: 100%;
+  text-align: left;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.wb-root-agent-library-item:hover,
+.wb-root-agent-library-item:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 34%),
+    rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
+.wb-root-agent-library-item.is-active {
+  border-color: rgba(183, 106, 43, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(183, 106, 43, 0.12), transparent 34%),
+    rgba(255, 250, 245, 0.96);
+}
+
+.wb-root-agent-studio-panel,
+.wb-root-agent-runtime-panel {
+  gap: var(--cp-space-3);
+}
+
+.wb-root-agent-studio-form,
+.wb-root-agent-token-grid,
+.wb-root-agent-review-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+}
+
+.wb-root-agent-studio-form,
+.wb-root-agent-token-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-root-agent-review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-root-agent-summary-grid,
+.wb-root-agent-context-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.wb-root-agent-card {
+  display: grid;
+  gap: var(--cp-space-3);
+  padding: var(--cp-space-3);
+  border-radius: 24px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.92)),
+    rgba(255, 255, 255, 0.88);
+  box-shadow: var(--cp-shadow);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.wb-root-agent-card:hover,
+.wb-root-agent-card:focus-within {
+  border-color: rgba(31, 106, 91, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(245, 248, 246, 0.94));
+  box-shadow: 0 18px 34px rgba(20, 32, 47, 0.08);
+}
+
+.wb-root-agent-card.has-warning {
+  border-color: rgba(217, 119, 6, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 251, 235, 0.92));
+}
+
+.wb-root-agent-card-head,
+.wb-root-agent-column-head,
+.wb-root-agent-cap-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wb-root-agent-console {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.wb-root-agent-column {
+  display: grid;
+  gap: var(--cp-space-3);
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(20, 32, 47, 0.07);
+  background: rgba(244, 247, 249, 0.74);
+}
+
+.wb-root-agent-column-head strong,
+.wb-root-agent-cap-row .wb-card-label {
+  color: var(--cp-ink);
+}
+
+.wb-root-agent-column-head span,
+.wb-root-agent-cap-row span:first-child {
+  color: var(--cp-muted);
+}
+
 .wb-agent-tablist {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2753,6 +2946,12 @@ select:focus-visible {
   .wb-agent-layout,
   .wb-agent-advanced-grid,
   .wb-agent-tablist,
+  .wb-root-agent-layout,
+  .wb-root-agent-console,
+  .wb-root-agent-context-grid,
+  .wb-root-agent-studio-form,
+  .wb-root-agent-token-grid,
+  .wb-root-agent-review-grid,
   .wb-worker-toolbar,
   .wb-worker-hub-layout,
   .wb-provider-mode-grid,
@@ -2796,6 +2995,12 @@ select:focus-visible {
   .wb-topbar-leading,
   .wb-panel-head,
   .wb-butler-brief-head,
+  .wb-root-agent-card-head,
+  .wb-root-agent-browser-head,
+  .wb-root-agent-library-head,
+  .wb-root-agent-library-meta,
+  .wb-root-agent-column-head,
+  .wb-root-agent-cap-row,
   .wb-provider-card-head,
   .wb-list-row,
   .wb-work-head,

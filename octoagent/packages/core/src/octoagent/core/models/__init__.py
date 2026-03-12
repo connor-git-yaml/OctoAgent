@@ -17,6 +17,10 @@ from .agent_context import (
     OwnerProfile,
     OwnerProfileOverlay,
     SessionContextState,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileRevision,
+    WorkerProfileStatus,
 )
 from .artifact import Artifact, ArtifactPart
 from .backup import (
@@ -124,6 +128,12 @@ from .control_plane import (
     WizardSessionDocument,
     WizardStepDocument,
     WorkProjectionItem,
+    WorkerProfileDynamicContext,
+    WorkerProfileRevisionItem,
+    WorkerProfileRevisionsDocument,
+    WorkerProfileStaticConfig,
+    WorkerProfilesDocument,
+    WorkerProfileViewItem,
     WorkspaceOption,
 )
 from .delegation import (
@@ -300,6 +310,10 @@ __all__ = [
     "BootstrapSessionStatus",
     "ContextRequestKind",
     "AgentProfile",
+    "WorkerProfileStatus",
+    "WorkerProfileOriginKind",
+    "WorkerProfile",
+    "WorkerProfileRevision",
     "OwnerProfile",
     "OwnerProfileOverlay",
     "BootstrapSession",
@@ -468,6 +482,12 @@ __all__ = [
     "SessionProjectionDocument",
     "AgentProfileItem",
     "AgentProfilesDocument",
+    "WorkerProfileStaticConfig",
+    "WorkerProfileDynamicContext",
+    "WorkerProfileViewItem",
+    "WorkerProfilesDocument",
+    "WorkerProfileRevisionItem",
+    "WorkerProfileRevisionsDocument",
     "OwnerProfileDocument",
     "BootstrapSessionDocument",
     "ContextSessionItem",

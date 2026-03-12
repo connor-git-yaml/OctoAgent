@@ -14,6 +14,10 @@ from octoagent.core.models import (
     OwnerProfile,
     OwnerProfileOverlay,
     SessionContextState,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileRevision,
+    WorkerProfileStatus,
 )
 from octoagent.core.store import create_store_group
 
@@ -119,5 +123,62 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         limit=5,
     )
     assert [item.context_frame_id for item in frames] == ["context-frame-alpha"]
+
+    await store_group.conn.close()
+
+
+async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "worker-profile.db"),
+        str(tmp_path / "artifacts"),
+    )
+    profile = WorkerProfile(
+        profile_id="worker-profile-alpha",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-alpha",
+        name="NAS Root Agent",
+        summary="负责 NAS 巡检与文件整理。",
+        base_archetype="ops",
+        model_alias="main",
+        tool_profile="standard",
+        default_tool_groups=["project", "filesystem"],
+        selected_tools=["filesystem.read"],
+        runtime_kinds=["worker", "acp_runtime"],
+        policy_refs=["default"],
+        tags=["nas", "storage"],
+        status=WorkerProfileStatus.ACTIVE,
+        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        draft_revision=1,
+        active_revision=1,
+    )
+    revision = WorkerProfileRevision(
+        revision_id="worker-snapshot:worker-profile-alpha:1",
+        profile_id=profile.profile_id,
+        revision=1,
+        change_summary="首次发布",
+        snapshot_payload={
+            "profile_id": profile.profile_id,
+            "name": profile.name,
+            "selected_tools": profile.selected_tools,
+        },
+        created_by="tests",
+    )
+
+    await store_group.agent_context_store.save_worker_profile(profile)
+    await store_group.agent_context_store.save_worker_profile_revision(revision)
+    await store_group.conn.commit()
+
+    stored_profile = await store_group.agent_context_store.get_worker_profile(profile.profile_id)
+    stored_revisions = await store_group.agent_context_store.list_worker_profile_revisions(
+        profile.profile_id
+    )
+
+    assert stored_profile is not None
+    assert stored_profile.name == "NAS Root Agent"
+    assert stored_profile.selected_tools == ["filesystem.read"]
+    assert stored_profile.origin_kind == WorkerProfileOriginKind.CUSTOM
+    assert len(stored_revisions) == 1
+    assert stored_revisions[0].change_summary == "首次发布"
+    assert stored_revisions[0].snapshot_payload["selected_tools"] == ["filesystem.read"]
 
     await store_group.conn.close()
