@@ -382,6 +382,7 @@ class DoctorRunner:
 
         runtime = self._resolve_runtime_context()
         proxy_url = runtime.proxy_url
+        fix_hint = self._build_proxy_start_hint()
         try:
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.get(f"{proxy_url}/health/liveliness")
@@ -405,7 +406,7 @@ class DoctorRunner:
                 status=CheckStatus.WARN,
                 level=CheckLevel.RECOMMENDED,
                 message=f"LiteLLM Proxy 不可达 ({proxy_url})",
-                fix_hint="docker compose -f docker-compose.litellm.yml up -d",
+                fix_hint=fix_hint,
             )
 
     async def check_db_writable(self) -> CheckResult:
@@ -809,6 +810,14 @@ class DoctorRunner:
         if manual_steps:
             return str(manual_steps[0])
         return str(getattr(action, "description", ""))
+
+    def _build_proxy_start_hint(self) -> str:
+        try:
+            from .runtime_activation import RuntimeActivationService
+
+            return RuntimeActivationService(self._root).build_compose_up_command()
+        except Exception:
+            return "docker compose -f docker-compose.litellm.yml up -d"
 
     @staticmethod
     def _compute_overall(checks: list[CheckResult]) -> CheckStatus:

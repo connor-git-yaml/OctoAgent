@@ -356,6 +356,81 @@ class TestLiteLLMClientComplete:
         assert result.content == "ok"
         assert captured[0]["reasoning"] == {"effort": "xhigh"}
 
+    async def test_responses_alias_encodes_assistant_history_as_output_text(self):
+        """Responses API 历史 assistant 消息应使用 output_text。"""
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            async def aiter_lines(self):
+                yield 'data: {"type":"response.completed","response":{"model":"gpt-5.4","output":[{"content":[{"type":"output_text","text":"杭州今天多云。"}]}]}}'
+                yield "data: [DONE]"
+
+        class _StreamContext:
+            async def __aenter__(self):
+                return FakeResponse()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+        captured: list[dict[str, object]] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            def stream(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: dict[str, str],
+                json: dict[str, object],
+            ):
+                del method, url, headers
+                captured.append(json)
+                return _StreamContext()
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeAsyncClient):
+            result = await client.complete(
+                messages=[
+                    {"role": "user", "content": "今天杭州天气怎么样？"},
+                    {"role": "assistant", "content": "我去查一下。"},
+                    {"role": "user", "content": "直接告诉我结果。"},
+                ],
+                model_alias="main",
+            )
+
+        assert result.content == "杭州今天多云。"
+        assert captured[0]["input"] == [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "今天杭州天气怎么样？"}],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "我去查一下。"}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "直接告诉我结果。"}],
+            },
+        ]
+
 
 class TestLiteLLMClientRoutingOverrides:
     """路由覆盖测试（003-b JWT 方案多认证隔离）"""

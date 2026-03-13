@@ -136,12 +136,7 @@ class SecretService:
                 report.reload_required = True
             if report.unresolved_refs or report.plaintext_risks:
                 report.overall_status = "blocked"
-            elif (
-                report.missing_targets
-                or report.conflicts
-                or report.reload_required
-                or report.warnings
-            ):
+            elif report.missing_targets or report.conflicts or report.reload_required:
                 report.overall_status = "action_required"
             else:
                 report.overall_status = "ready"

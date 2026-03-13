@@ -568,6 +568,11 @@ def run_init_wizard(
     console.print(f"  生成文件: {', '.join(generated_files)}")
     console.print()
     if llm_mode == "litellm":
-        console.print("[dim]下一步: docker compose -f docker-compose.litellm.yml up -d[/dim]")
+        from .runtime_activation import RuntimeActivationService
+
+        console.print(
+            "[dim]下一步: "
+            f"{RuntimeActivationService(project_root).build_compose_up_command()}[/dim]"
+        )
 
     return config

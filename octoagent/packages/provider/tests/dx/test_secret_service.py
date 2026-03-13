@@ -271,6 +271,22 @@ async def test_secret_service_skips_disabled_provider_targets(tmp_path: Path) ->
     assert "providers.disabled-provider.api_key_env" not in report.missing_targets
 
 
+async def test_secret_service_warning_only_bridge_reports_ready(tmp_path: Path) -> None:
+    _write_secret_test_config(tmp_path)
+    (tmp_path / ".env.litellm").write_text(
+        "OPENROUTER_API_KEY=provider-secret\nLITELLM_MASTER_KEY=master-secret\n",
+        encoding="utf-8",
+    )
+    service = SecretService(tmp_path, environ={})
+
+    report = await service.audit()
+
+    assert report.overall_status == "ready"
+    assert report.missing_targets == []
+    assert report.reload_required is False
+    assert len(report.warnings) == 2
+
+
 async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path) -> None:
     _write_secret_test_config(tmp_path)
     selector = ProjectSelectorService(tmp_path)

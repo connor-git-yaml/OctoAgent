@@ -179,10 +179,11 @@ class LiteLLMClient:
             if role == "system":
                 continue
             content = str(message.get("content", ""))
+            content_type = "output_text" if role == "assistant" else "input_text"
             input_items.append(
                 {
                     "role": role,
-                    "content": [{"type": "input_text", "text": content}],
+                    "content": [{"type": content_type, "text": content}],
                 }
             )
         return input_items

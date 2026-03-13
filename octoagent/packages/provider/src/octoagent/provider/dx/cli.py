@@ -13,6 +13,8 @@ from typing import Any
 import click
 from rich.console import RenderableType
 
+from octoagent.core.models import ControlPlaneActionStatus
+
 from .backup_commands import backup, export, restore
 from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
@@ -64,6 +66,17 @@ def _build_setup_config_patch(config: Any) -> dict[str, Any]:
 
 def _generate_local_proxy_key() -> str:
     return f"sk-local-{secrets.token_urlsafe(24)}"
+
+
+def _ensure_action_completed(result: Any, *, action_label: str) -> None:
+    status = getattr(result, "status", None)
+    if status in (None, "", ControlPlaneActionStatus.COMPLETED, "completed"):
+        return
+    code = str(getattr(result, "code", "")).strip()
+    message = str(getattr(result, "message", "")).strip() or f"{action_label} 未成功完成。"
+    if code:
+        raise click.ClickException(f"{action_label} 失败（{code}）：{message}")
+    raise click.ClickException(f"{action_label} 失败：{message}")
 
 
 @click.group()
@@ -176,10 +189,11 @@ def setup(
         adapter = LocalSetupGovernanceAdapter(project_root)
         if provider_entry.id == "openai-codex":
             console.print("[dim]正在连接 OpenAI Auth ...[/dim]")
-            await adapter.connect_openai_codex_oauth(
+            oauth_result = await adapter.connect_openai_codex_oauth(
                 env_name=provider_entry.api_key_env,
                 profile_name="openai-codex-default",
             )
+            _ensure_action_completed(oauth_result, action_label="OpenAI Auth")
 
         draft = await adapter.prepare_wizard_draft(
             {
@@ -188,6 +202,7 @@ def setup(
             }
         )
         result = await adapter.quick_connect(draft)
+        _ensure_action_completed(result, action_label="setup.quick_connect")
         review = result.data.get("review", {})
         activation = result.data.get("activation", {})
         if isinstance(review, dict) and review:

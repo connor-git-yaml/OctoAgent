@@ -86,6 +86,17 @@ class RuntimeActivationService:
             return config.runtime.litellm_proxy_url
         return os.environ.get("LITELLM_PROXY_URL", "http://localhost:4000")
 
+    def build_compose_up_command(self) -> str:
+        """生成可直接复制执行的 LiteLLM Proxy 启动命令。"""
+        source_root = self.resolve_source_root()
+        compose_file = source_root / "docker-compose.litellm.yml"
+        env_file = self._root / ".env.litellm"
+        return (
+            f'OCTOAGENT_INSTANCE_ROOT="{self._root}" '
+            f'docker compose --env-file "{env_file}" '
+            f'-f "{compose_file}" up -d'
+        )
+
     async def start_proxy(self, *, timeout_seconds: float = 25.0) -> RuntimeActivationSummary:
         """拉起 LiteLLM Proxy 并等待 liveliness。"""
         self.load_runtime_env(override=True)

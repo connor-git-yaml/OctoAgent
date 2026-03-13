@@ -16,6 +16,7 @@ from octoagent.core.models import (
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.capability_pack import CapabilityPackService
 from octoagent.gateway.services.control_plane import ControlPlaneService
+from octoagent.memory.store import init_memory_db
 from octoagent.tooling import ToolBroker
 from ulid import ULID
 
@@ -35,6 +36,8 @@ class LocalSetupGovernanceAdapter:
         db_path = self._project_root / "data" / "sqlite" / "octoagent.db"
         artifacts_dir = self._project_root / "data" / "artifacts"
         store_group = await create_store_group(db_path, artifacts_dir)
+        # CLI setup/review 会读取 memory console；单独走 control-plane 时也要补齐 memory schema。
+        await init_memory_db(store_group.conn)
         tool_broker = ToolBroker(
             event_store=store_group.event_store,
             artifact_store=store_group.artifact_store,
