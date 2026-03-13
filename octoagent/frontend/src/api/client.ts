@@ -19,6 +19,7 @@ import type {
   ImportSourceDocument,
   ImportWorkbenchDocument,
   MemoryConsoleDocument,
+  McpProviderCatalogDocument,
   MemoryProposalAuditDocument,
   MemorySubjectHistoryDocument,
   OperatorActionRequest,
@@ -40,6 +41,7 @@ import type {
   PolicyProfilesDocument,
   SetupGovernanceDocument,
   SkillGovernanceDocument,
+  SkillProviderCatalogDocument,
 } from "../types";
 
 const BASE_URL = "";
@@ -69,6 +71,8 @@ type ControlResourceName =
   | "policy-profiles"
   | "capability-pack"
   | "skill-governance"
+  | "skill-provider-catalog"
+  | "mcp-provider-catalog"
   | "setup-governance"
   | "delegation"
   | "pipelines"
@@ -364,6 +368,12 @@ export async function fetchControlResource(
   resource: "skill-governance"
 ): Promise<SkillGovernanceDocument>;
 export async function fetchControlResource(
+  resource: "skill-provider-catalog"
+): Promise<SkillProviderCatalogDocument>;
+export async function fetchControlResource(
+  resource: "mcp-provider-catalog"
+): Promise<McpProviderCatalogDocument>;
+export async function fetchControlResource(
   resource: "setup-governance"
 ): Promise<SetupGovernanceDocument>;
 export async function fetchControlResource(
@@ -396,6 +406,8 @@ export async function fetchControlResource(
   | PolicyProfilesDocument
   | CapabilityPackDocument
   | SkillGovernanceDocument
+  | SkillProviderCatalogDocument
+  | McpProviderCatalogDocument
   | SetupGovernanceDocument
   | DelegationPlaneDocument
   | SkillPipelineDocument

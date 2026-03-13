@@ -1579,8 +1579,30 @@ select:focus-visible {
   align-items: center;
 }
 
+.wb-list-row:is(button) {
+  width: 100%;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(244, 247, 249, 0.86);
+  text-align: left;
+}
+
+.wb-list-row.is-active {
+  border-color: rgba(31, 106, 91, 0.24);
+  background: linear-gradient(135deg, rgba(31, 106, 91, 0.1), rgba(183, 106, 43, 0.08));
+}
+
 .wb-list-row.is-static {
   cursor: default;
+}
+
+.wb-capability-toggle {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.wb-capability-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
 }
 
 .wb-list-meta,

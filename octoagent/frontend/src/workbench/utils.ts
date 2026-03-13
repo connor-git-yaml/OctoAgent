@@ -14,6 +14,8 @@ export type SnapshotResourceRoute =
   | "policy-profiles"
   | "capability-pack"
   | "skill-governance"
+  | "skill-provider-catalog"
+  | "mcp-provider-catalog"
   | "setup-governance"
   | "delegation"
   | "pipelines"
@@ -32,6 +34,8 @@ export const RESOURCE_ROUTE_BY_TYPE: Record<string, SnapshotResourceRoute> = {
   policy_profiles: "policy-profiles",
   capability_pack: "capability-pack",
   skill_governance: "skill-governance",
+  skill_provider_catalog: "skill-provider-catalog",
+  mcp_provider_catalog: "mcp-provider-catalog",
   setup_governance: "setup-governance",
   delegation_plane: "delegation",
   skill_pipeline: "pipelines",
@@ -54,6 +58,8 @@ export const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<
   "policy-profiles": "policy_profiles",
   "capability-pack": "capability_pack",
   "skill-governance": "skill_governance",
+  "skill-provider-catalog": "skill_provider_catalog",
+  "mcp-provider-catalog": "mcp_provider_catalog",
   "setup-governance": "setup_governance",
   delegation: "delegation",
   pipelines: "pipelines",

@@ -169,6 +169,9 @@ class McpRegistryService:
     def list_servers(self) -> list[McpServerRecord]:
         return list(self._server_records.values())
 
+    def list_configs(self) -> list[McpServerConfig]:
+        return list(self._load_configs())
+
     def list_tools(self, *, server_name: str = "") -> list[McpToolRecord]:
         tools = list(self._tool_records.values())
         if server_name:
@@ -221,6 +224,19 @@ class McpRegistryService:
             await self._tool_broker.unregister(tool_name)
         self._registered_tool_names.clear()
 
+    def save_config(self, config: McpServerConfig) -> None:
+        configs = {item.name: item for item in self._load_configs()}
+        configs[config.name] = config
+        self._write_configs(list(configs.values()))
+
+    def delete_config(self, server_name: str) -> bool:
+        configs = {item.name: item for item in self._load_configs()}
+        removed = configs.pop(server_name, None)
+        if removed is None:
+            return False
+        self._write_configs(list(configs.values()))
+        return True
+
     def _resolve_config_path(self) -> Path:
         override = os.getenv("OCTOAGENT_MCP_SERVERS_PATH", "").strip()
         if override:
@@ -256,6 +272,21 @@ class McpRegistryService:
             except Exception as exc:
                 self._last_config_error = f"{type(exc).__name__}: {exc}"
         return configs
+
+    def _write_configs(self, configs: list[McpServerConfig]) -> None:
+        path = self._resolve_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "servers": [
+                item.model_dump(mode="json", by_alias=True)
+                for item in sorted(configs, key=lambda current: current.name.lower())
+            ]
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self._last_config_error = ""
 
     def _find_server_config(self, server_name: str) -> McpServerConfig | None:
         for item in self._load_configs():

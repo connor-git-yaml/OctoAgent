@@ -8,10 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .agent_context import WorkerProfileOriginKind, WorkerProfileStatus
 from .capability import BundledCapabilityPack, ToolAvailabilityExplanation
 from .operator_inbox import OperatorInboxItem, OperatorInboxSummary
 from .pipeline import PipelineReplayFrame
-from .agent_context import WorkerProfileOriginKind, WorkerProfileStatus
 
 
 def _utc_now() -> datetime:
@@ -215,6 +215,7 @@ class AgentProfileItem(BaseModel):
     tool_profile: str = Field(default="standard")
     memory_access_policy: dict[str, Any] = Field(default_factory=dict)
     context_budget_policy: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
 
 
@@ -238,6 +239,7 @@ class WorkerProfileStaticConfig(BaseModel):
     instruction_overlays: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkerProfileDynamicContext(BaseModel):
@@ -439,6 +441,65 @@ class SkillGovernanceDocument(ControlPlaneDocument):
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
     items: list[SkillGovernanceItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillProviderItem(BaseModel):
+    provider_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str = Field(default="")
+    source_kind: str = Field(default="builtin")
+    editable: bool = False
+    removable: bool = False
+    enabled: bool = True
+    availability: str = Field(default="available")
+    trust_level: str = Field(default="trusted")
+    model_alias: str = Field(default="main")
+    worker_type: str = Field(default="general")
+    tool_profile: str = Field(default="minimal")
+    tools_allowed: list[str] = Field(default_factory=list)
+    selection_item_id: str = Field(default="")
+    prompt_template: str = Field(default="")
+    install_hint: str = Field(default="")
+    warnings: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillProviderCatalogDocument(ControlPlaneDocument):
+    resource_type: str = "skill_provider_catalog"
+    resource_id: str = "skill-providers:catalog"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    items: list[SkillProviderItem] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpProviderItem(BaseModel):
+    provider_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str = Field(default="")
+    editable: bool = True
+    removable: bool = True
+    enabled: bool = True
+    status: str = Field(default="unconfigured")
+    command: str = Field(default="")
+    args: list[str] = Field(default_factory=list)
+    cwd: str = Field(default="")
+    env: dict[str, str] = Field(default_factory=dict)
+    tool_count: int = Field(default=0, ge=0)
+    selection_item_id: str = Field(default="")
+    install_hint: str = Field(default="")
+    error: str = Field(default="")
+    warnings: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpProviderCatalogDocument(ControlPlaneDocument):
+    resource_type: str = "mcp_provider_catalog"
+    resource_id: str = "mcp-providers:catalog"
+    active_project_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")
+    items: list[McpProviderItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
 

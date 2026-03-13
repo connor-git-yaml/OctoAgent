@@ -52,6 +52,8 @@ from octoagent.core.models import (
     Event,
     EventCausality,
     EventType,
+    McpProviderCatalogDocument,
+    McpProviderItem,
     MemoryConsoleDocument,
     MemoryProposalAuditDocument,
     MemorySubjectHistoryDocument,
@@ -76,6 +78,8 @@ from octoagent.core.models import (
     SkillGovernanceDocument,
     SkillGovernanceItem,
     SkillPipelineDocument,
+    SkillProviderCatalogDocument,
+    SkillProviderItem,
     Task,
     TaskPointers,
     TaskStatus,
@@ -84,17 +88,17 @@ from octoagent.core.models import (
     WizardSessionDocument,
     WizardStepDocument,
     Work,
-    WorkProjectionItem,
     WorkerProfile,
     WorkerProfileDynamicContext,
     WorkerProfileOriginKind,
     WorkerProfileRevision,
     WorkerProfileRevisionItem,
     WorkerProfileRevisionsDocument,
+    WorkerProfilesDocument,
     WorkerProfileStaticConfig,
     WorkerProfileStatus,
-    WorkerProfilesDocument,
     WorkerProfileViewItem,
+    WorkProjectionItem,
     WorkspaceOption,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
@@ -147,7 +151,9 @@ from pydantic import SecretStr
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
+from .capability_pack import SkillProviderConfig
 from .connection_metadata import merge_control_metadata
+from .mcp_registry import McpServerConfig
 from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
@@ -259,6 +265,8 @@ class ControlPlaneService:
             ("policy_profiles", self.get_policy_profiles_document),
             ("capability_pack", self.get_capability_pack_document),
             ("skill_governance", self.get_skill_governance_document),
+            ("skill_provider_catalog", self.get_skill_provider_catalog_document),
+            ("mcp_provider_catalog", self.get_mcp_provider_catalog_document),
             ("setup_governance", self.get_setup_governance_document),
             ("delegation", self.get_delegation_document),
             ("pipelines", self.get_skill_pipeline_document),
@@ -830,6 +838,7 @@ class ControlPlaneService:
                 tool_profile=profile.tool_profile,
                 memory_access_policy=dict(profile.memory_access_policy),
                 context_budget_policy=dict(profile.context_budget_policy),
+                metadata=dict(profile.metadata),
                 updated_at=profile.updated_at,
             )
             for profile in profiles
@@ -939,6 +948,7 @@ class ControlPlaneService:
                         instruction_overlays=list(profile.instruction_overlays),
                         tags=list(profile.tags),
                         capabilities=list(profile.tags),
+                        metadata=dict(profile.metadata),
                     ),
                     dynamic_context=self._build_worker_dynamic_context(
                         matched_works,
@@ -995,6 +1005,7 @@ class ControlPlaneService:
                         instruction_overlays=[],
                         tags=list(profile.capabilities),
                         capabilities=list(profile.capabilities),
+                        metadata={},
                     ),
                     dynamic_context=self._build_worker_dynamic_context(
                         matched_works,
@@ -1637,6 +1648,206 @@ class ControlPlaneService:
             degraded=ControlPlaneDegradedState(
                 is_degraded=bool(blocked_items),
                 reasons=["skills_blocked"] if blocked_items else [],
+            ),
+        )
+
+    async def get_skill_provider_catalog_document(self) -> SkillProviderCatalogDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        if self._capability_pack_service is None:
+            return SkillProviderCatalogDocument(
+                active_project_id=selected_project.project_id if selected_project else "",
+                active_workspace_id=selected_workspace.workspace_id if selected_workspace else "",
+                warnings=["capability pack 尚未绑定，无法加载 Skill providers。"],
+                degraded=ControlPlaneDegradedState(
+                    is_degraded=True,
+                    reasons=["capability_pack_unavailable"],
+                ),
+            )
+
+        pack = await self._capability_pack_service.get_pack()
+        custom_configs = {
+            item.provider_id: item
+            for item in self._capability_pack_service.list_skill_provider_configs()
+        }
+        governance = await self.get_skill_governance_document(
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        governance_map = {item.item_id: item for item in governance.items}
+        items: list[SkillProviderItem] = []
+        for skill in pack.skills:
+            selection_item_id = f"skill:{skill.skill_id}"
+            governance_item = governance_map.get(selection_item_id)
+            metadata = dict(skill.metadata)
+            source_kind = str(metadata.get("source_kind", "builtin")).strip() or "builtin"
+            config = custom_configs.get(skill.skill_id)
+            items.append(
+                SkillProviderItem(
+                    provider_id=skill.skill_id,
+                    label=skill.label or skill.skill_id,
+                    description=skill.description,
+                    source_kind=source_kind,
+                    editable=source_kind != "builtin",
+                    removable=source_kind != "builtin",
+                    enabled=config.enabled if config is not None else True,
+                    availability=governance_item.availability if governance_item else "available",
+                    trust_level=governance_item.trust_level if governance_item else "trusted",
+                    model_alias=skill.model_alias,
+                    worker_type=(
+                        skill.worker_types[0].value if skill.worker_types else "general"
+                    ),
+                    tool_profile=str(metadata.get("tool_profile", "minimal")),
+                    tools_allowed=list(skill.tools_allowed),
+                    selection_item_id=selection_item_id,
+                    prompt_template=config.prompt_template if config is not None else "",
+                    install_hint=(
+                        str(metadata.get("install_hint", "")).strip()
+                        or (config.install_hint if config is not None else "")
+                    ),
+                    warnings=(
+                        []
+                        if governance_item is None
+                        else list(governance_item.missing_requirements)
+                    ),
+                    details={
+                        "worker_types": [item.value for item in skill.worker_types],
+                        "pipeline_templates": list(skill.pipeline_templates),
+                    },
+                )
+            )
+        existing_ids = {item.provider_id for item in items}
+        for config in custom_configs.values():
+            if config.provider_id in existing_ids:
+                continue
+            items.append(
+                SkillProviderItem(
+                    provider_id=config.provider_id,
+                    label=config.label,
+                    description=config.description,
+                    source_kind="custom",
+                    editable=True,
+                    removable=True,
+                    enabled=config.enabled,
+                    availability="disabled" if not config.enabled else "unavailable",
+                    trust_level="trusted",
+                    model_alias=config.model_alias,
+                    worker_type=config.worker_type,
+                    tool_profile=config.tool_profile,
+                    tools_allowed=list(config.tools_allowed),
+                    selection_item_id=f"skill:{config.provider_id}",
+                    prompt_template=config.prompt_template,
+                    install_hint=config.install_hint,
+                    warnings=["当前 provider 已停用，不会进入运行时 skill registry。"]
+                    if not config.enabled
+                    else ["当前 provider 未成功注册，请检查字段配置后重新保存。"],
+                    details={},
+                )
+            )
+        return SkillProviderCatalogDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            items=items,
+            summary={
+                "installed_count": len(items),
+                "custom_count": len([item for item in items if item.source_kind != "builtin"]),
+                "builtin_count": len([item for item in items if item.source_kind == "builtin"]),
+            },
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="skill_provider.save",
+                    label="安装 Skill Provider",
+                    action_id="skill_provider.save",
+                )
+            ],
+            warnings=[] if items else ["当前没有已安装的 Skill providers。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=not bool(items),
+                reasons=["skill_provider_catalog_empty"] if not items else [],
+            ),
+        )
+
+    async def get_mcp_provider_catalog_document(self) -> McpProviderCatalogDocument:
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        mcp_registry = (
+            None
+            if self._capability_pack_service is None
+            else self._capability_pack_service.mcp_registry
+        )
+        if mcp_registry is None:
+            return McpProviderCatalogDocument(
+                active_project_id=selected_project.project_id if selected_project else "",
+                active_workspace_id=selected_workspace.workspace_id if selected_workspace else "",
+                warnings=["MCP registry 尚未绑定，无法加载 MCP providers。"],
+                degraded=ControlPlaneDegradedState(
+                    is_degraded=True,
+                    reasons=["mcp_registry_unavailable"],
+                ),
+            )
+        servers = {item.server_name: item for item in mcp_registry.list_servers()}
+        governance = await self.get_skill_governance_document(
+            selected_project=selected_project,
+            selected_workspace=selected_workspace,
+        )
+        governance_map = {item.item_id: item for item in governance.items}
+        items: list[McpProviderItem] = []
+        for config in mcp_registry.list_configs():
+            record = servers.get(config.name)
+            governance_item = governance_map.get(f"mcp:{config.name}")
+            items.append(
+                McpProviderItem(
+                    provider_id=config.name,
+                    label=config.name,
+                    description=record.error if record and record.error else config.command,
+                    editable=True,
+                    removable=True,
+                    enabled=config.enabled,
+                    status=record.status if record is not None else "unconfigured",
+                    command=config.command,
+                    args=list(config.args),
+                    cwd=config.cwd,
+                    env=dict(config.env),
+                    tool_count=record.tool_count if record is not None else 0,
+                    selection_item_id=f"mcp:{config.name}",
+                    install_hint=governance_item.install_hint if governance_item else "",
+                    error=record.error if record is not None else "",
+                    warnings=(
+                        []
+                        if governance_item is None
+                        else list(governance_item.missing_requirements)
+                    ),
+                    details={
+                        "discovered_at": (
+                            record.discovered_at.isoformat()
+                            if record is not None and record.discovered_at is not None
+                            else ""
+                        )
+                    },
+                )
+            )
+        return McpProviderCatalogDocument(
+            active_project_id=selected_project.project_id if selected_project is not None else "",
+            active_workspace_id=(
+                selected_workspace.workspace_id if selected_workspace is not None else ""
+            ),
+            items=items,
+            summary={
+                "installed_count": len(items),
+                "enabled_count": len([item for item in items if item.enabled]),
+                "healthy_count": len([item for item in items if item.status == "available"]),
+            },
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="mcp_provider.save",
+                    label="安装 MCP Provider",
+                    action_id="mcp_provider.save",
+                )
+            ],
+            warnings=[] if items else ["当前没有已安装的 MCP providers。"],
+            degraded=ControlPlaneDegradedState(
+                is_degraded=not bool(items),
+                reasons=["mcp_provider_catalog_empty"] if not items else [],
             ),
         )
 
@@ -2720,6 +2931,14 @@ class ControlPlaneService:
             return await self._handle_policy_profile_select(request)
         if action_id == "skills.selection.save":
             return await self._handle_skills_selection_save(request)
+        if action_id == "skill_provider.save":
+            return await self._handle_skill_provider_save(request)
+        if action_id == "skill_provider.delete":
+            return await self._handle_skill_provider_delete(request)
+        if action_id == "mcp_provider.save":
+            return await self._handle_mcp_provider_save(request)
+        if action_id == "mcp_provider.delete":
+            return await self._handle_mcp_provider_delete(request)
         if action_id == "worker_profile.create":
             return await self._handle_worker_profile_create(request)
         if action_id == "worker_profile.update":
@@ -3276,6 +3495,199 @@ class ControlPlaneService:
                     target_id=selected_project.project_id,
                     label=selected_project.name,
                 )
+            ],
+        )
+
+    async def _handle_skill_provider_save(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        if self._capability_pack_service is None:
+            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 未绑定")
+        raw = request.params.get("provider")
+        if not isinstance(raw, Mapping):
+            raise ControlPlaneActionError("SKILL_PROVIDER_REQUIRED", "provider 必须是对象")
+
+        provider_id = self._normalize_provider_id(
+            self._param_str(raw, "provider_id") or self._param_str(raw, "label")
+        )
+        if not provider_id:
+            raise ControlPlaneActionError("SKILL_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
+        existing_builtin_ids = {
+            item.provider_id
+            for item in (await self.get_skill_provider_catalog_document()).items
+            if item.source_kind == "builtin"
+        }
+        if provider_id in existing_builtin_ids:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_BUILTIN_LOCKED",
+                "内置 Skill provider 不能直接编辑，请另存为新的自定义 provider。",
+            )
+        label = self._param_str(raw, "label") or provider_id
+        prompt_template = self._param_str(raw, "prompt_template")
+        if not prompt_template:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_PROMPT_REQUIRED",
+                "prompt_template 不能为空",
+            )
+        available_tool_names = {
+            tool.tool_name for tool in (await self._capability_pack_service.get_pack()).tools
+        }
+        tools_allowed = self._normalize_string_list(raw.get("tools_allowed"))
+        unknown_tools = sorted(set(tools_allowed) - available_tool_names)
+        if unknown_tools:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_TOOL_UNKNOWN",
+                f"未知工具：{unknown_tools[0]}",
+            )
+        worker_type = self._param_str(raw, "worker_type", default="general").lower()
+        if worker_type not in {"general", "ops", "research", "dev"}:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_WORKER_TYPE_INVALID",
+                "worker_type 不合法",
+            )
+        tool_profile = self._param_str(raw, "tool_profile", default="minimal").lower()
+        if tool_profile not in {"minimal", "standard", "privileged"}:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_TOOL_PROFILE_INVALID",
+                "tool_profile 不合法",
+            )
+
+        config = SkillProviderConfig.model_validate(
+            {
+                "provider_id": provider_id,
+                "label": label,
+                "description": self._param_str(raw, "description"),
+                "enabled": self._param_bool(raw, "enabled", default=True),
+                "model_alias": self._param_str(raw, "model_alias", default="main") or "main",
+                "worker_type": worker_type,
+                "tool_profile": tool_profile,
+                "tools_allowed": tools_allowed,
+                "prompt_template": prompt_template,
+                "install_hint": self._param_str(raw, "install_hint"),
+                "metadata": self._normalize_dict(raw.get("metadata")),
+            }
+        )
+        self._capability_pack_service.save_skill_provider_config(config)
+        await self._capability_pack_service.refresh()
+        document = await self.get_skill_provider_catalog_document()
+        return self._completed_result(
+            request=request,
+            code="SKILL_PROVIDER_SAVED",
+            message="Skill provider 已保存。",
+            data={
+                "provider_id": provider_id,
+                "installed_count": document.summary.get("installed_count", 0),
+            },
+            resource_refs=[
+                self._resource_ref("skill_provider_catalog", "skill-providers:catalog"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
+            ],
+        )
+
+    async def _handle_skill_provider_delete(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        if self._capability_pack_service is None:
+            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 未绑定")
+        provider_id = self._normalize_provider_id(self._param_str(request.params, "provider_id"))
+        if not provider_id:
+            raise ControlPlaneActionError("SKILL_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
+        removed = self._capability_pack_service.delete_skill_provider_config(provider_id)
+        if not removed:
+            raise ControlPlaneActionError("SKILL_PROVIDER_NOT_FOUND", "Skill provider 不存在")
+        await self._capability_pack_service.refresh()
+        return self._completed_result(
+            request=request,
+            code="SKILL_PROVIDER_DELETED",
+            message="Skill provider 已删除。",
+            data={"provider_id": provider_id},
+            resource_refs=[
+                self._resource_ref("skill_provider_catalog", "skill-providers:catalog"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
+            ],
+        )
+
+    async def _handle_mcp_provider_save(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        if (
+            self._capability_pack_service is None
+            or self._capability_pack_service.mcp_registry is None
+        ):
+            raise ControlPlaneActionError("MCP_REGISTRY_UNAVAILABLE", "MCP registry 未绑定")
+        raw = request.params.get("provider")
+        if not isinstance(raw, Mapping):
+            raise ControlPlaneActionError("MCP_PROVIDER_REQUIRED", "provider 必须是对象")
+        provider_id = self._normalize_provider_id(
+            self._param_str(raw, "provider_id") or self._param_str(raw, "label")
+        )
+        if not provider_id:
+            raise ControlPlaneActionError("MCP_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
+        command = self._param_str(raw, "command")
+        if not command:
+            raise ControlPlaneActionError("MCP_PROVIDER_COMMAND_REQUIRED", "command 不能为空")
+        config = McpServerConfig.model_validate(
+            {
+                "name": provider_id,
+                "command": command,
+                "args": self._normalize_text_list(raw.get("args")),
+                "env": {
+                    key: str(value)
+                    for key, value in self._normalize_dict(raw.get("env")).items()
+                    if str(key).strip()
+                },
+                "cwd": self._param_str(raw, "cwd"),
+                "enabled": self._param_bool(raw, "enabled", default=True),
+            }
+        )
+        self._capability_pack_service.mcp_registry.save_config(config)
+        await self._capability_pack_service.refresh()
+        document = await self.get_mcp_provider_catalog_document()
+        return self._completed_result(
+            request=request,
+            code="MCP_PROVIDER_SAVED",
+            message="MCP provider 已保存。",
+            data={
+                "provider_id": provider_id,
+                "installed_count": document.summary.get("installed_count", 0),
+            },
+            resource_refs=[
+                self._resource_ref("mcp_provider_catalog", "mcp-providers:catalog"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
+            ],
+        )
+
+    async def _handle_mcp_provider_delete(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        if (
+            self._capability_pack_service is None
+            or self._capability_pack_service.mcp_registry is None
+        ):
+            raise ControlPlaneActionError("MCP_REGISTRY_UNAVAILABLE", "MCP registry 未绑定")
+        provider_id = self._normalize_provider_id(self._param_str(request.params, "provider_id"))
+        if not provider_id:
+            raise ControlPlaneActionError("MCP_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
+        removed = self._capability_pack_service.mcp_registry.delete_config(provider_id)
+        if not removed:
+            raise ControlPlaneActionError("MCP_PROVIDER_NOT_FOUND", "MCP provider 不存在")
+        await self._capability_pack_service.refresh()
+        return self._completed_result(
+            request=request,
+            code="MCP_PROVIDER_DELETED",
+            message="MCP provider 已删除。",
+            data={"provider_id": provider_id},
+            resource_refs=[
+                self._resource_ref("mcp_provider_catalog", "mcp-providers:catalog"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
             ],
         )
 
@@ -6485,6 +6897,7 @@ class ControlPlaneService:
         existing: AgentProfile | None = None,
     ) -> AgentProfile:
         metadata = dict(existing.metadata) if existing is not None else {}
+        metadata.update(dict(profile.metadata))
         metadata.update(
             {
                 "source_kind": "worker_profile_sync",
@@ -8036,6 +8449,24 @@ class ControlPlaneService:
         }
         return mapping[surface]
 
+    @staticmethod
+    def _normalize_provider_id(value: str) -> str:
+        lowered = value.strip().lower()
+        if not lowered:
+            return ""
+        chars: list[str] = []
+        previous_dash = False
+        for char in lowered:
+            if char.isascii() and char.isalnum():
+                chars.append(char)
+                previous_dash = False
+                continue
+            if previous_dash:
+                continue
+            chars.append("-")
+            previous_dash = True
+        return "".join(chars).strip("-")
+
     def _param_str(
         self,
         params: Mapping[str, Any],
@@ -8048,8 +8479,14 @@ class ControlPlaneService:
             return default
         return str(value).strip()
 
-    def _param_bool(self, params: Mapping[str, Any], key: str) -> bool:
-        value = params.get(key, False)
+    def _param_bool(
+        self,
+        params: Mapping[str, Any],
+        key: str,
+        *,
+        default: bool = False,
+    ) -> bool:
+        value = params.get(key, default)
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -8213,6 +8650,38 @@ class ControlPlaneService:
                     category="setup",
                     description="保存当前 project 的 skills / MCP 默认启用范围。",
                     params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "skill_provider.save",
+                    "保存 Skill Provider",
+                    category="capability",
+                    description="安装或编辑一个自定义 Skill provider。",
+                    params_schema={"type": "object", "required": ["provider"]},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "skill_provider.delete",
+                    "删除 Skill Provider",
+                    category="capability",
+                    description="删除一个自定义 Skill provider。",
+                    params_schema={"type": "object", "required": ["provider_id"]},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "mcp_provider.save",
+                    "保存 MCP Provider",
+                    category="capability",
+                    description="安装或编辑一个 MCP provider。",
+                    params_schema={"type": "object", "required": ["provider"]},
+                    risk_hint="medium",
+                ),
+                definition(
+                    "mcp_provider.delete",
+                    "删除 MCP Provider",
+                    category="capability",
+                    description="删除一个 MCP provider。",
+                    params_schema={"type": "object", "required": ["provider_id"]},
                     risk_hint="medium",
                 ),
                 definition(

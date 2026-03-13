@@ -32,15 +32,15 @@ from octoagent.core.models import (
     ToolAvailabilityExplanation,
     ToolIndexQuery,
     Work,
-    WorkKind,
     WorkerProfile,
     WorkerProfileOriginKind,
     WorkerProfileRevision,
     WorkerProfileStatus,
     WorkerType,
-    WorkStatus,
+    WorkKind,
     Workspace,
     WorkspaceKind,
+    WorkStatus,
 )
 from octoagent.gateway.services.agent_context import build_scope_aware_session_id
 from octoagent.gateway.services.task_service import TaskService
@@ -457,6 +457,8 @@ class TestControlPlaneApi:
             "policy_profiles",
             "capability_pack",
             "skill_governance",
+            "skill_provider_catalog",
+            "mcp_provider_catalog",
             "setup_governance",
             "delegation",
             "pipelines",
@@ -921,7 +923,9 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        )
         target_skill = next(
             item for item in skill_doc.items if item.source_kind == "builtin"
         )
@@ -1117,6 +1121,190 @@ class TestControlPlaneApi:
         assert selection.selected_tools
         assert "runtime.inspect" not in selection.selected_tools
         assert "tool_selection_filtered_by_skill_governance" in selection.warnings
+
+    async def test_agent_profile_capability_selection_overrides_project_default(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        target_skill = next(
+            item for item in skill_doc.items if item.item_id == "skill:ops_triage"
+        )
+
+        disable_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "skills.selection.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "selection": {
+                        "disabled_item_ids": [target_skill.item_id],
+                    }
+                },
+            },
+        )
+        assert disable_resp.status_code == 200
+
+        save_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "agent_profile.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile": {
+                        "scope": "project",
+                        "name": "运行排障主 Agent",
+                        "persona_summary": "优先诊断运行健康。",
+                        "tool_profile": "standard",
+                        "model_alias": "main",
+                        "metadata": {
+                            "capability_provider_selection": {
+                                "selected_item_ids": [target_skill.item_id],
+                            }
+                        },
+                    }
+                },
+            },
+        )
+        assert save_resp.status_code == 200
+        profile_id = save_resp.json()["result"]["data"]["profile_id"]
+
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        workspace = await control_plane_app.state.store_group.project_store.get_primary_workspace(
+            default_project.project_id
+        )
+        assert workspace is not None
+
+        base_pack = await control_plane_app.state.capability_pack_service.get_pack(
+            project_id=default_project.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+        overridden_pack = await control_plane_app.state.capability_pack_service.get_pack(
+            project_id=default_project.project_id,
+            workspace_id=workspace.workspace_id,
+            profile_id=profile_id,
+        )
+
+        assert "ops_triage" not in {item.skill_id for item in base_pack.skills}
+        assert "ops_triage" in {item.skill_id for item in overridden_pack.skills}
+
+    async def test_provider_catalog_actions_save_and_delete_custom_entries(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        skill_save_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "skill_provider.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "provider": {
+                        "provider_id": "custom-brief",
+                        "label": "Custom Brief",
+                        "description": "快速摘要 provider",
+                        "model_alias": "main",
+                        "worker_type": "research",
+                        "tool_profile": "minimal",
+                        "tools_allowed": ["project.inspect", "artifact.list"],
+                        "prompt_template": "你负责输出简短摘要与下一步。",
+                    }
+                },
+            },
+        )
+        assert skill_save_resp.status_code == 200
+
+        skill_catalog_resp = await control_plane_client.get(
+            "/api/control/resources/skill-provider-catalog"
+        )
+        assert skill_catalog_resp.status_code == 200
+        skill_items = skill_catalog_resp.json()["items"]
+        custom_skill = next(item for item in skill_items if item["provider_id"] == "custom-brief")
+        assert custom_skill["enabled"] is True
+
+        mcp_save_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "mcp_provider.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "provider": {
+                        "provider_id": "custom-mcp",
+                        "command": "/bin/echo",
+                        "args": ["mcp"],
+                    }
+                },
+            },
+        )
+        assert mcp_save_resp.status_code == 200
+
+        mcp_catalog_resp = await control_plane_client.get(
+            "/api/control/resources/mcp-provider-catalog"
+        )
+        assert mcp_catalog_resp.status_code == 200
+        mcp_items = mcp_catalog_resp.json()["items"]
+        custom_mcp = next(item for item in mcp_items if item["provider_id"] == "custom-mcp")
+        assert custom_mcp["enabled"] is True
+
+        skill_delete_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "skill_provider.delete",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "provider_id": "custom-brief",
+                },
+            },
+        )
+        assert skill_delete_resp.status_code == 200
+
+        mcp_delete_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "mcp_provider.delete",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "provider_id": "custom-mcp",
+                },
+            },
+        )
+        assert mcp_delete_resp.status_code == 200
 
     async def test_setup_apply_rejects_invalid_skill_selection_before_writing_config(
         self,

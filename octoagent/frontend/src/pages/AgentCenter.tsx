@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchWorkerProfileRevisions } from "../api/client";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
@@ -55,6 +55,8 @@ interface PrimaryAgentDraft {
   policyProfileId: string;
   memoryAccessPolicy: PrimaryMemoryAccessDraft;
   memoryRecall: PrimaryMemoryRecallDraft;
+  metadata: Record<string, unknown>;
+  capabilitySelection: Record<string, boolean>;
 }
 
 interface WorkAgentItem {
@@ -113,6 +115,8 @@ interface RootAgentStudioDraft {
   policyRefsText: string;
   instructionOverlaysText: string;
   tagsText: string;
+  metadata: Record<string, unknown>;
+  capabilitySelection: Record<string, boolean>;
 }
 
 interface RootAgentReviewResult {
@@ -134,6 +138,19 @@ interface RootAgentReviewResult {
       after: unknown;
     }>;
   };
+}
+
+interface CapabilityProviderEntry {
+  providerId: string;
+  label: string;
+  description: string;
+  selectionItemId: string;
+  kind: "skill" | "mcp";
+  defaultSelected: boolean;
+  enabled: boolean;
+  availability: string;
+  editable: boolean;
+  tags: string[];
 }
 
 const WORKER_TYPE_LABELS: Record<string, string> = {
@@ -433,6 +450,115 @@ function buildSkillSelectionPayload(items: SkillGovernanceItem[]): Record<string
   };
 }
 
+function readCapabilitySelectionMetadata(
+  metadata: Record<string, unknown>
+): Record<string, unknown> {
+  const preferred = toRecord(metadata.capability_provider_selection);
+  if (Object.keys(preferred).length > 0) {
+    return preferred;
+  }
+  return toRecord(metadata.skill_selection);
+}
+
+function buildCapabilityProviderEntries(
+  snapshot: ControlPlaneSnapshot
+): CapabilityProviderEntry[] {
+  const governanceById = Object.fromEntries(
+    snapshot.resources.skill_governance.items.map((item) => [item.item_id, item])
+  ) as Record<string, SkillGovernanceItem>;
+  const skillEntries = snapshot.resources.skill_provider_catalog.items.map((item) => {
+    const governance = governanceById[item.selection_item_id];
+    return {
+      providerId: item.provider_id,
+      label: item.label,
+      description: item.description,
+      selectionItemId: item.selection_item_id,
+      kind: "skill" as const,
+      defaultSelected: governance?.selected ?? false,
+      enabled: item.enabled,
+      availability: item.availability,
+      editable: item.editable,
+      tags: [item.worker_type, item.model_alias, item.tool_profile],
+    };
+  });
+  const mcpEntries = snapshot.resources.mcp_provider_catalog.items.map((item) => {
+    const governance = governanceById[item.selection_item_id];
+    return {
+      providerId: item.provider_id,
+      label: item.label,
+      description: item.description,
+      selectionItemId: item.selection_item_id,
+      kind: "mcp" as const,
+      defaultSelected: governance?.selected ?? false,
+      enabled: item.enabled,
+      availability: item.status,
+      editable: item.editable,
+      tags: [`tools:${item.tool_count}`, item.enabled ? "enabled" : "disabled"],
+    };
+  });
+  return [...skillEntries, ...mcpEntries];
+}
+
+function buildCapabilitySelectionState(
+  items: CapabilityProviderEntry[],
+  metadata: Record<string, unknown>
+): Record<string, boolean> {
+  const rawSelection = readCapabilitySelectionMetadata(metadata);
+  const selectedItemIds = new Set(
+    readStudioList(rawSelection.selected_item_ids)
+  );
+  const disabledItemIds = new Set(
+    readStudioList(rawSelection.disabled_item_ids)
+  );
+  return Object.fromEntries(
+    items.map((item) => {
+      if (selectedItemIds.has(item.selectionItemId)) {
+        return [item.selectionItemId, true];
+      }
+      if (disabledItemIds.has(item.selectionItemId)) {
+        return [item.selectionItemId, false];
+      }
+      return [item.selectionItemId, item.defaultSelected];
+    })
+  );
+}
+
+function buildCapabilitySelectionPayload(
+  items: CapabilityProviderEntry[],
+  state: Record<string, boolean>
+): Record<string, string[]> {
+  const selected_item_ids: string[] = [];
+  const disabled_item_ids: string[] = [];
+  items.forEach((item) => {
+    const current = state[item.selectionItemId] ?? item.defaultSelected;
+    if (current && !item.defaultSelected) {
+      selected_item_ids.push(item.selectionItemId);
+    }
+    if (!current && item.defaultSelected) {
+      disabled_item_ids.push(item.selectionItemId);
+    }
+  });
+  return {
+    selected_item_ids,
+    disabled_item_ids,
+  };
+}
+
+function mergeCapabilitySelectionMetadata(
+  metadata: Record<string, unknown>,
+  items: CapabilityProviderEntry[],
+  state: Record<string, boolean>
+): Record<string, unknown> {
+  const nextMetadata = { ...metadata };
+  delete nextMetadata.skill_selection;
+  delete nextMetadata.capability_provider_selection;
+  const selection = buildCapabilitySelectionPayload(items, state);
+  if (selection.selected_item_ids.length > 0 || selection.disabled_item_ids.length > 0) {
+    nextMetadata.capability_provider_selection = selection;
+  }
+  return nextMetadata;
+}
+
 function reviewTone(review: SetupReviewSummary): "success" | "warning" | "danger" {
   if (review.blocking_reasons.length > 0) {
     return "danger";
@@ -476,7 +602,10 @@ function detectRecallPreset(recall: PrimaryMemoryRecallDraft): string | null {
   return matched?.label ?? null;
 }
 
-function buildPrimaryAgentPayload(primaryDraft: PrimaryAgentDraft): Record<string, unknown> {
+function buildPrimaryAgentPayload(
+  primaryDraft: PrimaryAgentDraft,
+  capabilityProviderEntries: CapabilityProviderEntry[]
+): Record<string, unknown> {
   return {
     scope: primaryDraft.scope,
     name: primaryDraft.name,
@@ -497,6 +626,11 @@ function buildPrimaryAgentPayload(primaryDraft: PrimaryAgentDraft): Record<strin
         max_hits: parsePositiveInt(primaryDraft.memoryRecall.maxHits, 4, 1, 20),
       },
     },
+    metadata: mergeCapabilitySelectionMetadata(
+      primaryDraft.metadata,
+      capabilityProviderEntries,
+      primaryDraft.capabilitySelection
+    ),
   };
 }
 
@@ -631,8 +765,10 @@ function readStudioList(value: unknown): string[] {
 function buildRootAgentStudioDraft(
   profile: WorkerProfileItem | null,
   selector: ControlPlaneSnapshot["resources"]["project_selector"],
+  capabilityProviderEntries: CapabilityProviderEntry[],
   fallbackArchetype = "general"
 ): RootAgentStudioDraft {
+  const metadata = profile?.static_config.metadata ?? {};
   return {
     profileId: profile?.profile_id ?? "",
     scope: profile?.scope ?? "project",
@@ -648,12 +784,15 @@ function buildRootAgentStudioDraft(
     policyRefsText: joinStudioList(profile?.static_config.policy_refs ?? []),
     instructionOverlaysText: joinStudioList(profile?.static_config.instruction_overlays ?? []),
     tagsText: joinStudioList(profile?.static_config.tags ?? []),
+    metadata,
+    capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
   };
 }
 
 function buildRootAgentStudioDraftFromPayload(
   profile: Record<string, unknown>,
   selector: ControlPlaneSnapshot["resources"]["project_selector"],
+  capabilityProviderEntries: CapabilityProviderEntry[],
   fallbackArchetype = "general"
 ): RootAgentStudioDraft {
   const scope =
@@ -691,21 +830,30 @@ function buildRootAgentStudioDraftFromPayload(
     policyRefsText: joinStudioList(readStudioList(profile.policy_refs)),
     instructionOverlaysText: joinStudioList(readStudioList(profile.instruction_overlays)),
     tagsText: joinStudioList(readStudioList(profile.tags)),
+    metadata: toRecord(profile.metadata),
+    capabilitySelection: buildCapabilitySelectionState(
+      capabilityProviderEntries,
+      toRecord(profile.metadata)
+    ),
   };
 }
 
 function buildRootAgentStudioDraftFromReview(
   review: unknown,
-  selector: ControlPlaneSnapshot["resources"]["project_selector"]
+  selector: ControlPlaneSnapshot["resources"]["project_selector"],
+  capabilityProviderEntries: CapabilityProviderEntry[]
 ): RootAgentStudioDraft | null {
   const profile = toRecord(toRecord(review).profile);
   if (Object.keys(profile).length === 0) {
     return null;
   }
-  return buildRootAgentStudioDraftFromPayload(profile, selector);
+  return buildRootAgentStudioDraftFromPayload(profile, selector, capabilityProviderEntries);
 }
 
-function buildRootAgentPayload(draft: RootAgentStudioDraft): Record<string, unknown> {
+function buildRootAgentPayload(
+  draft: RootAgentStudioDraft,
+  capabilityProviderEntries: CapabilityProviderEntry[]
+): Record<string, unknown> {
   return {
     profile_id: draft.profileId || undefined,
     scope: draft.scope,
@@ -721,6 +869,11 @@ function buildRootAgentPayload(draft: RootAgentStudioDraft): Record<string, unkn
     policy_refs: parseStudioList(draft.policyRefsText),
     instruction_overlays: parseStudioList(draft.instructionOverlaysText),
     tags: parseStudioList(draft.tagsText),
+    metadata: mergeCapabilitySelectionMetadata(
+      draft.metadata,
+      capabilityProviderEntries,
+      draft.capabilitySelection
+    ),
   };
 }
 
@@ -778,6 +931,12 @@ function primaryProfileFromSnapshot(snapshot: ControlPlaneSnapshot): AgentProfil
         !Array.isArray(activeProfile.context_budget_policy)
           ? (activeProfile.context_budget_policy as Record<string, unknown>)
           : {},
+      metadata:
+        activeProfile.metadata &&
+        typeof activeProfile.metadata === "object" &&
+        !Array.isArray(activeProfile.metadata)
+          ? (activeProfile.metadata as Record<string, unknown>)
+          : {},
       updated_at: typeof activeProfile.updated_at === "string" ? activeProfile.updated_at : null,
     };
   }
@@ -802,6 +961,8 @@ function buildPrimaryAgentSeed(snapshot: ControlPlaneSnapshot): PrimaryAgentDraf
   const activePolicy =
     snapshot.resources.policy_profiles.profiles.find((profile) => profile.is_active)?.profile_id ??
     "default";
+  const capabilityProviderEntries = buildCapabilityProviderEntries(snapshot);
+  const metadata = activeProfile?.metadata ?? {};
 
   return {
     name: activeProfile?.name || "OctoAgent",
@@ -817,6 +978,8 @@ function buildPrimaryAgentSeed(snapshot: ControlPlaneSnapshot): PrimaryAgentDraf
     policyProfileId: activePolicy,
     memoryAccessPolicy: primaryMemoryAccessFromProfile(activeProfile),
     memoryRecall: primaryMemoryRecallFromProfile(activeProfile),
+    metadata,
+    capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
   };
 }
 
@@ -1131,6 +1294,12 @@ export default function AgentCenter() {
   ]);
   const availableProjects = selector.available_projects;
   const availableWorkspaces = selector.available_workspaces;
+  const capabilityProviderEntries = useMemo(
+    () => buildCapabilityProviderEntries(snapshot!),
+    [snapshot!.resources.skill_provider_catalog.generated_at, snapshot!.resources.mcp_provider_catalog.generated_at, snapshot!.resources.skill_governance.generated_at]
+  );
+  const skillCapabilityEntries = capabilityProviderEntries.filter((item) => item.kind === "skill");
+  const mcpCapabilityEntries = capabilityProviderEntries.filter((item) => item.kind === "mcp");
   const primarySeed = buildPrimaryAgentSeed(snapshot!);
   const primarySeedSyncKey = JSON.stringify(primarySeed);
   const workAgentSeeds = buildWorkAgentSeeds(snapshot!);
@@ -1171,7 +1340,7 @@ export default function AgentCenter() {
     rootAgentProfiles[0]?.profile_id ?? ""
   );
   const [rootAgentDraft, setRootAgentDraft] = useState<RootAgentStudioDraft>(() =>
-    buildRootAgentStudioDraft(rootAgentProfiles[0] ?? null, selector)
+    buildRootAgentStudioDraft(rootAgentProfiles[0] ?? null, selector, capabilityProviderEntries)
   );
   const [rootAgentReview, setRootAgentReview] = useState<RootAgentReviewResult | null>(null);
   const [rootAgentRevisions, setRootAgentRevisions] = useState<WorkerProfileRevisionItem[]>([]);
@@ -1184,9 +1353,12 @@ export default function AgentCenter() {
   const selectedRootAgentProfile =
     rootAgentProfiles.find((profile) => profile.profile_id === selectedRootAgentId) ?? null;
   const rootAgentDraftDirty =
-    JSON.stringify(buildRootAgentPayload(rootAgentDraft)) !==
+    JSON.stringify(buildRootAgentPayload(rootAgentDraft, capabilityProviderEntries)) !==
     JSON.stringify(
-      buildRootAgentPayload(buildRootAgentStudioDraft(selectedRootAgentProfile, selector))
+      buildRootAgentPayload(
+        buildRootAgentStudioDraft(selectedRootAgentProfile, selector, capabilityProviderEntries),
+        capabilityProviderEntries
+      )
     );
   const rootAgentRevisionSyncKey = [
     selectedRootAgentId,
@@ -1237,7 +1409,7 @@ export default function AgentCenter() {
       rootAgentProfiles.find((profile) => profile.profile_id === nextSelectedId) ?? null;
     if (nextSelectedProfile === null) {
       setSelectedRootAgentId("");
-      setRootAgentDraft(buildRootAgentStudioDraft(null, selector));
+      setRootAgentDraft(buildRootAgentStudioDraft(null, selector, capabilityProviderEntries));
       setRootAgentReview(null);
       setRootAgentEditorMode("create");
       return;
@@ -1246,10 +1418,13 @@ export default function AgentCenter() {
       setSelectedRootAgentId(nextSelectedId);
     }
     if (nextSelectedId !== selectedRootAgentId || !rootAgentDraftDirty) {
-      setRootAgentDraft(buildRootAgentStudioDraft(nextSelectedProfile, selector));
+      setRootAgentDraft(
+        buildRootAgentStudioDraft(nextSelectedProfile, selector, capabilityProviderEntries)
+      );
       setRootAgentReview(null);
     }
   }, [
+    capabilityProviderEntries,
     rootAgentEditorMode,
     rootAgentProfilesDocument.generated_at,
     selector.current_project_id,
@@ -1487,12 +1662,28 @@ export default function AgentCenter() {
     selectedRootAgentDynamicContext?.current_blocked_tools ?? [];
   const selectedRootAgentDiscoveryEntrypoints =
     selectedRootAgentDynamicContext?.current_discovery_entrypoints ?? [];
+  const selectedPrimaryCapabilityCount = capabilityProviderEntries.filter(
+    (item) => primaryDraft.capabilitySelection[item.selectionItemId] ?? item.defaultSelected
+  ).length;
+  const selectedRootAgentCapabilityCount = capabilityProviderEntries.filter(
+    (item) => rootAgentDraft.capabilitySelection[item.selectionItemId] ?? item.defaultSelected
+  ).length;
 
   function updatePrimary<Key extends keyof PrimaryAgentDraft>(
     key: Key,
     value: PrimaryAgentDraft[Key]
   ) {
     setPrimaryDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updatePrimaryCapabilitySelection(itemId: string, selected: boolean) {
+    setPrimaryDraft((current) => ({
+      ...current,
+      capabilitySelection: {
+        ...current.capabilitySelection,
+        [itemId]: selected,
+      },
+    }));
   }
 
   function updatePrimaryProject(projectId: string) {
@@ -1538,7 +1729,7 @@ export default function AgentCenter() {
       agent_profile: buildPrimaryAgentPayload({
         ...primaryDraft,
         scope: primaryDraft.scope || "project",
-      }),
+      }, capabilityProviderEntries),
       skill_selection: buildSkillSelectionPayload(skillGovernance.items),
       secret_values: {},
     };
@@ -1948,7 +2139,7 @@ export default function AgentCenter() {
     startTransition(() => {
       setRootAgentEditorMode(profile ? "existing" : "create");
       setSelectedRootAgentId(profile?.profile_id ?? "");
-      setRootAgentDraft(buildRootAgentStudioDraft(profile, selector));
+      setRootAgentDraft(buildRootAgentStudioDraft(profile, selector, capabilityProviderEntries));
       setRootAgentReview(null);
     });
   }
@@ -1960,6 +2151,16 @@ export default function AgentCenter() {
     setRootAgentDraft((current) => ({
       ...current,
       [key]: value,
+    }));
+  }
+
+  function updateRootAgentCapabilitySelection(itemId: string, selected: boolean) {
+    setRootAgentDraft((current) => ({
+      ...current,
+      capabilitySelection: {
+        ...current.capabilitySelection,
+        [itemId]: selected,
+      },
     }));
   }
 
@@ -2020,7 +2221,11 @@ export default function AgentCenter() {
       name,
     });
     const payload = result?.data ?? {};
-    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextDraft = buildRootAgentStudioDraftFromReview(
+      payload.review,
+      selector,
+      capabilityProviderEntries
+    );
     const nextProfileId =
       typeof payload.profile_id === "string" ? payload.profile_id : "";
     if (nextProfileId) {
@@ -2043,7 +2248,7 @@ export default function AgentCenter() {
 
   async function handleReviewRootAgentDraft() {
     const result = await submitAction("worker_profile.review", {
-      draft: buildRootAgentPayload(rootAgentDraft),
+      draft: buildRootAgentPayload(rootAgentDraft, capabilityProviderEntries),
     });
     const review = result?.data.review;
     if (!review || typeof review !== "object") {
@@ -2059,12 +2264,16 @@ export default function AgentCenter() {
 
   async function handleSaveRootAgentDraft(publish = false) {
     const result = await submitAction("worker_profile.apply", {
-      draft: buildRootAgentPayload(rootAgentDraft),
+      draft: buildRootAgentPayload(rootAgentDraft, capabilityProviderEntries),
       publish,
       change_summary: publish ? "通过 AgentCenter 发布" : "通过 AgentCenter 更新草稿",
     });
     const payload = result?.data ?? {};
-    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextDraft = buildRootAgentStudioDraftFromReview(
+      payload.review,
+      selector,
+      capabilityProviderEntries
+    );
     const nextProfileId =
       typeof payload.profile_id === "string" ? payload.profile_id : rootAgentDraft.profileId;
     if (nextProfileId) {
@@ -2136,7 +2345,11 @@ export default function AgentCenter() {
       name: `${work.title || formatWorkerType(work.selected_worker_type)} Worker 模板`,
     });
     const payload = result?.data ?? {};
-    const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
+    const nextDraft = buildRootAgentStudioDraftFromReview(
+      payload.review,
+      selector,
+      capabilityProviderEntries
+    );
     const nextProfileId =
       typeof payload.profile_id === "string" ? payload.profile_id : "";
     if (nextProfileId) {
@@ -2156,10 +2369,64 @@ export default function AgentCenter() {
     setActiveWorkspaceView("templates");
     setRootAgentEditorMode("create");
     setSelectedRootAgentId("");
-    setRootAgentDraft(buildRootAgentStudioDraft(null, selector));
+    setRootAgentDraft(buildRootAgentStudioDraft(null, selector, capabilityProviderEntries));
     setRootAgentReview(null);
     setRootAgentSpawnObjective("");
     setFlashMessage("开始一个新的 Worker 模板草稿。");
+  }
+
+  function renderCapabilityProviderSection(
+    title: string,
+    entries: CapabilityProviderEntry[],
+    selection: Record<string, boolean>,
+    onToggle: (itemId: string, selected: boolean) => void,
+    manageTo: string
+  ) {
+    if (entries.length === 0) {
+      return (
+        <div className="wb-note">
+          <strong>{title}</strong>
+          <span>当前还没有可勾选的 Provider，先去对应设置页安装。</span>
+        </div>
+      );
+    }
+    return (
+      <div className="wb-note-stack">
+        <div className="wb-root-agent-column-head">
+          <strong>{title}</strong>
+          <Link className="wb-button wb-button-tertiary" to={manageTo}>
+            去管理
+          </Link>
+        </div>
+        {entries.map((item) => {
+          const selected = selection[item.selectionItemId] ?? item.defaultSelected;
+          return (
+            <label key={item.selectionItemId} className="wb-note wb-capability-toggle">
+              <div>
+                <strong>{item.label}</strong>
+                <span>{item.description || item.providerId}</span>
+                <small>
+                  默认 {item.defaultSelected ? "开启" : "关闭"} · 当前 {item.availability}
+                </small>
+                <div className="wb-chip-row">
+                  {item.tags.map((tag) => (
+                    <span key={`${item.selectionItemId}:${tag}`} className="wb-chip">
+                      {formatTokenLabel(tag)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={selected}
+                disabled={!item.enabled}
+                onChange={(event) => onToggle(item.selectionItemId, event.target.checked)}
+              />
+            </label>
+          );
+        })}
+      </div>
+    );
   }
 
   function renderPolicyCard(profile: PolicyProfileItem) {
@@ -2488,6 +2755,30 @@ export default function AgentCenter() {
                   <p className="wb-inline-note">
                     `standard` 适合大多数场景；只有明确需要更宽的工具面时再切 `privileged`。
                   </p>
+                </div>
+
+                <div className="wb-root-agent-review-panel">
+                  <div className="wb-root-agent-card-head">
+                    <div>
+                      <p className="wb-card-label">Provider 白名单</p>
+                      <strong>给 Butler 圈定默认可用的 Skills / MCP Providers</strong>
+                    </div>
+                    <span className="wb-chip">当前勾选 {selectedPrimaryCapabilityCount}</span>
+                  </div>
+                  {renderCapabilityProviderSection(
+                    "Skills",
+                    skillCapabilityEntries,
+                    primaryDraft.capabilitySelection,
+                    updatePrimaryCapabilitySelection,
+                    "/settings/skills"
+                  )}
+                  {renderCapabilityProviderSection(
+                    "MCP",
+                    mcpCapabilityEntries,
+                    primaryDraft.capabilitySelection,
+                    updatePrimaryCapabilitySelection,
+                    "/settings/mcp"
+                  )}
                 </div>
 
                 <div>
@@ -3240,6 +3531,30 @@ export default function AgentCenter() {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              <div className="wb-root-agent-review-panel">
+                <div className="wb-root-agent-card-head">
+                  <div>
+                    <p className="wb-card-label">Provider 白名单</p>
+                    <strong>给这个 Worker 模板圈定允许调用的能力 Provider</strong>
+                  </div>
+                  <span className="wb-chip">当前勾选 {selectedRootAgentCapabilityCount}</span>
+                </div>
+                {renderCapabilityProviderSection(
+                  "Skills",
+                  skillCapabilityEntries,
+                  rootAgentDraft.capabilitySelection,
+                  updateRootAgentCapabilitySelection,
+                  "/settings/skills"
+                )}
+                {renderCapabilityProviderSection(
+                  "MCP",
+                  mcpCapabilityEntries,
+                  rootAgentDraft.capabilitySelection,
+                  updateRootAgentCapabilitySelection,
+                  "/settings/mcp"
+                )}
               </div>
 
               {rootAgentReview ? (

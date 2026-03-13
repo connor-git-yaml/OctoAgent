@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from octoagent.core.models import (
+    AgentProfile,
     AgentProfileScope,
     ContextFrame,
     NormalizedMessage,
@@ -267,6 +269,83 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
     assert "web.search" in plan.tool_selection.selected_tools
     assert plan.dispatch_envelope is not None
     assert plan.dispatch_envelope.metadata["requested_worker_profile_id"] == profile.profile_id
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool_universe(
+    tmp_path: Path,
+) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    project = await store_group.project_store.get_default_project()
+    assert project is not None
+    await store_group.project_store.save_project(
+        project.model_copy(
+            update={
+                "metadata": {
+                    **dict(project.metadata),
+                    "skill_selection": {
+                        "selected_item_ids": [],
+                        "disabled_item_ids": ["skill:ops_triage"],
+                    },
+                },
+                "updated_at": datetime.now(tz=UTC),
+            }
+        )
+    )
+    agent_profile = AgentProfile(
+        profile_id="agent-profile-ops-boundary",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-default",
+        name="Ops Butler",
+        persona_summary="按受控边界处理运行问题。",
+        tool_profile="standard",
+        model_alias="main",
+        metadata={
+            "capability_provider_selection": {
+                "selected_item_ids": ["skill:ops_triage"],
+                "disabled_item_ids": [],
+            }
+        },
+    )
+    await store_group.agent_context_store.save_agent_profile(agent_profile)
+    await store_group.conn.commit()
+
+    base_pack = await delegation_plane._capability_pack.get_pack(
+        project_id="project-default",
+        workspace_id="workspace-default",
+    )
+    assert "runtime.inspect" not in {item.tool_name for item in base_pack.tools}
+
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请帮我诊断当前运行状态",
+            thread_id="thread-ops-boundary",
+            idempotency_key="delegation-agent-profile-boundary",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请帮我诊断当前运行状态",
+            worker_capability="llm_generation",
+            metadata={
+                "agent_profile_id": agent_profile.profile_id,
+                "requested_worker_type": "ops",
+            },
+        )
+    )
+
+    assert plan.work.agent_profile_id == agent_profile.profile_id
+    assert plan.work.requested_worker_profile_id == agent_profile.profile_id
+    assert plan.work.selected_worker_type.value == "ops"
+    assert plan.tool_selection.effective_tool_universe is not None
+    assert (
+        plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
+    )
+    assert "runtime.inspect" in plan.tool_selection.selected_tools
 
     await store_group.conn.close()
 

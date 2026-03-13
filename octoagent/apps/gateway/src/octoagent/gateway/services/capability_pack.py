@@ -20,7 +20,6 @@ from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
 from octoagent.core.models import (
-    AgentProfileScope,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
@@ -33,11 +32,9 @@ from octoagent.core.models import (
     RuntimeKind,
     ToolAvailabilityExplanation,
     ToolIndexQuery,
-    WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileStatus,
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
+    WorkerProfileStatus,
     WorkerType,
     WorkStatus,
 )
@@ -72,6 +69,22 @@ from .task_service import TaskService
 
 if TYPE_CHECKING:
     from .mcp_registry import McpRegistryService
+
+_DEFAULT_SKILL_PROVIDER_CONFIG_PATH = Path("data/ops/skill-providers.json")
+
+
+class SkillProviderConfig(BaseModel):
+    provider_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str = Field(default="")
+    enabled: bool = True
+    model_alias: str = Field(default="main")
+    worker_type: str = Field(default="general")
+    tool_profile: str = Field(default="minimal")
+    tools_allowed: list[str] = Field(default_factory=list)
+    prompt_template: str = Field(min_length=1)
+    install_hint: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class _BuiltinSkillInput(BaseModel):
@@ -289,11 +302,14 @@ class CapabilityPackService:
     def bind_mcp_registry(self, mcp_registry: McpRegistryService) -> None:
         self._mcp_registry = mcp_registry
 
+    @property
+    def mcp_registry(self) -> McpRegistryService | None:
+        return self._mcp_registry
+
     async def startup(self) -> None:
         if self._bootstrapped:
             return
         await self._register_builtin_tools()
-        self._register_builtin_skills()
         if self._mcp_registry is not None:
             await self._mcp_registry.startup()
         await self.refresh()
@@ -302,6 +318,7 @@ class CapabilityPackService:
     async def refresh(self) -> BundledCapabilityPack:
         if self._mcp_registry is not None:
             await self._mcp_registry.refresh()
+        self._rebuild_skill_registry()
         metas = await self._tool_broker.discover()
         await self._tool_index.rebuild(metas)
         tools = [
@@ -330,7 +347,10 @@ class CapabilityPackService:
         skills = [
             BundledSkillDefinition(
                 skill_id=manifest.skill_id,
-                label=manifest.skill_id.replace("_", " ").title(),
+                label=(
+                    str(manifest.metadata.get("label", "")).strip()
+                    or manifest.skill_id.replace("_", " ").title()
+                ),
                 description=manifest.description or "",
                 model_alias=manifest.model_alias,
                 worker_types=self._resolve_skill_worker_types(manifest),
@@ -369,16 +389,18 @@ class CapabilityPackService:
         *,
         project_id: str = "",
         workspace_id: str = "",
+        profile_id: str = "",
     ) -> BundledCapabilityPack:
         await self.startup()
         if self._pack is None:
             self._pack = await self.refresh()
-        if not project_id and not workspace_id:
+        if not project_id and not workspace_id and not profile_id:
             return self._pack
         return await self._filter_pack_for_scope(
             self._pack,
             project_id=project_id,
             workspace_id=workspace_id,
+            profile_id=profile_id,
         )
 
     def get_worker_profile(self, worker_type: WorkerType) -> WorkerCapabilityProfile:
@@ -426,6 +448,23 @@ class CapabilityPackService:
                     source_kind="worker_profile",
                     profile_name=stored_profile.name,
                 )
+            agent_profile = await self._stores.agent_context_store.get_agent_profile(
+                normalized_profile_id
+            )
+            if agent_profile is not None:
+                builtin_profile = self.get_worker_profile(fallback_worker_type)
+                return _ResolvedWorkerBinding(
+                    profile_id=agent_profile.profile_id,
+                    profile_revision=agent_profile.version,
+                    worker_type=fallback_worker_type,
+                    tool_profile=(
+                        agent_profile.tool_profile or builtin_profile.default_tool_profile
+                    ),
+                    default_tool_groups=list(builtin_profile.default_tool_groups),
+                    selected_tools=[],
+                    source_kind="agent_profile",
+                    profile_name=agent_profile.name,
+                )
         builtin_profile = self.get_worker_profile(fallback_worker_type)
         return _ResolvedWorkerBinding(
             profile_id=f"singleton:{builtin_profile.worker_type.value}",
@@ -442,11 +481,13 @@ class CapabilityPackService:
         normalized = profile_id.strip()
         if not normalized:
             return None
-        binding = await self.resolve_worker_binding(
-            requested_profile_id=normalized,
-            fallback_worker_type=WorkerType.GENERAL,
-        )
-        return binding.worker_type if binding.profile_id else None
+        builtin_worker_type = self._builtin_worker_type_from_profile_id(normalized)
+        if builtin_worker_type is not None:
+            return builtin_worker_type
+        stored_profile = await self._stores.agent_context_store.get_worker_profile(normalized)
+        if stored_profile is None or stored_profile.status == WorkerProfileStatus.ARCHIVED:
+            return None
+        return self._coerce_worker_type_name(stored_profile.base_archetype)
 
     async def select_tools(
         self,
@@ -493,6 +534,7 @@ class CapabilityPackService:
         pack = await self.get_pack(
             project_id=request.project_id,
             workspace_id=request.workspace_id,
+            profile_id=binding.profile_id,
         )
         effective_tool_profile = request.tool_profile or binding.tool_profile
         context_profile = self._coerce_tool_profile(effective_tool_profile)
@@ -768,7 +810,27 @@ class CapabilityPackService:
                 "healthy_server_count": self._mcp_registry.healthy_server_count(),
                 "registered_tool_count": self._mcp_registry.registered_tool_count(),
             },
+            "skill_providers": {
+                "config_path": str(self._resolve_skill_provider_config_path()),
+                "installed_count": len(self.list_skill_provider_configs()),
+            },
         }
+
+    def list_skill_provider_configs(self) -> list[SkillProviderConfig]:
+        return self._load_skill_provider_configs()
+
+    def save_skill_provider_config(self, config: SkillProviderConfig) -> None:
+        configs = {item.provider_id: item for item in self._load_skill_provider_configs()}
+        configs[config.provider_id] = config
+        self._write_skill_provider_configs(list(configs.values()))
+
+    def delete_skill_provider_config(self, provider_id: str) -> bool:
+        configs = {item.provider_id: item for item in self._load_skill_provider_configs()}
+        removed = configs.pop(provider_id, None)
+        if removed is None:
+            return False
+        self._write_skill_provider_configs(list(configs.values()))
+        return True
 
     async def review_worker_plan(
         self,
@@ -2950,6 +3012,45 @@ class CapabilityPackService:
         }
         return selected_item_ids, disabled_item_ids
 
+    async def _resolve_profile_skill_selection(
+        self,
+        *,
+        profile_id: str = "",
+    ) -> tuple[set[str], set[str]]:
+        normalized_profile_id = profile_id.strip()
+        if not normalized_profile_id:
+            return set(), set()
+
+        metadata: dict[str, Any] = {}
+        agent_profile = await self._stores.agent_context_store.get_agent_profile(
+            normalized_profile_id
+        )
+        if agent_profile is not None and isinstance(agent_profile.metadata, dict):
+            metadata = dict(agent_profile.metadata)
+        else:
+            worker_profile = await self._stores.agent_context_store.get_worker_profile(
+                normalized_profile_id
+            )
+            if worker_profile is not None and isinstance(worker_profile.metadata, dict):
+                metadata = dict(worker_profile.metadata)
+
+        raw_selection = metadata.get("capability_provider_selection")
+        if not isinstance(raw_selection, Mapping):
+            raw_selection = metadata.get("skill_selection")
+        if not isinstance(raw_selection, Mapping):
+            return set(), set()
+        selected_item_ids = {
+            str(item).strip()
+            for item in raw_selection.get("selected_item_ids", [])
+            if str(item).strip()
+        }
+        disabled_item_ids = {
+            str(item).strip()
+            for item in raw_selection.get("disabled_item_ids", [])
+            if str(item).strip()
+        }
+        return selected_item_ids, disabled_item_ids
+
     @staticmethod
     def _skill_item_selected(
         *,
@@ -2970,23 +3071,47 @@ class CapabilityPackService:
         *,
         project_id: str = "",
         workspace_id: str = "",
+        profile_id: str = "",
     ) -> BundledCapabilityPack:
-        selected_item_ids, disabled_item_ids = await self._resolve_scope_skill_selection(
+        (
+            project_selected_item_ids,
+            project_disabled_item_ids,
+        ) = await self._resolve_scope_skill_selection(
             project_id=project_id,
             workspace_id=workspace_id,
         )
-        if not selected_item_ids and not disabled_item_ids:
+        (
+            profile_selected_item_ids,
+            profile_disabled_item_ids,
+        ) = await self._resolve_profile_skill_selection(
+            profile_id=profile_id,
+        )
+        if (
+            not project_selected_item_ids
+            and not project_disabled_item_ids
+            and not profile_selected_item_ids
+            and not profile_disabled_item_ids
+        ):
             return pack
+
+        def is_selected(item_id: str, *, enabled_by_default: bool) -> bool:
+            project_selected = self._skill_item_selected(
+                item_id=item_id,
+                enabled_by_default=enabled_by_default,
+                selected_item_ids=project_selected_item_ids,
+                disabled_item_ids=project_disabled_item_ids,
+            )
+            return self._skill_item_selected(
+                item_id=item_id,
+                enabled_by_default=project_selected,
+                selected_item_ids=profile_selected_item_ids,
+                disabled_item_ids=profile_disabled_item_ids,
+            )
 
         skills = [
             skill
             for skill in pack.skills
-            if self._skill_item_selected(
-                item_id=f"skill:{skill.skill_id}",
-                enabled_by_default=True,
-                selected_item_ids=selected_item_ids,
-                disabled_item_ids=disabled_item_ids,
-            )
+            if is_selected(item_id=f"skill:{skill.skill_id}", enabled_by_default=True)
         ]
         governed_skill_tool_names = {
             tool_name
@@ -3005,21 +3130,17 @@ class CapabilityPackService:
         for tool in pack.tools:
             if tool.tool_group == "mcp":
                 server_name = str(tool.metadata.get("mcp_server_name", "")).strip() or "mcp"
-                include = self._skill_item_selected(
+                include = is_selected(
                     item_id=f"mcp:{server_name}",
                     enabled_by_default=False,
-                    selected_item_ids=selected_item_ids,
-                    disabled_item_ids=disabled_item_ids,
                 )
             else:
                 include = True
                 if tool.tool_name in governed_skill_tool_names:
                     include = tool.tool_name in enabled_skill_tool_names
-                include = self._skill_item_selected(
+                include = is_selected(
                     item_id=f"skill:{tool.tool_name}",
                     enabled_by_default=include,
-                    selected_item_ids=selected_item_ids,
-                    disabled_item_ids=disabled_item_ids,
                 )
             if include:
                 tools.append(tool)
@@ -3107,6 +3228,84 @@ class CapabilityPackService:
         if raw in {member.value for member in WorkerType}:
             return [WorkerType(raw)]
         return [WorkerType.GENERAL]
+
+    def _resolve_skill_provider_config_path(self) -> Path:
+        override = os.getenv("OCTOAGENT_SKILL_PROVIDERS_PATH", "").strip()
+        if override:
+            return Path(override)
+        return self._project_root / _DEFAULT_SKILL_PROVIDER_CONFIG_PATH
+
+    def _load_skill_provider_configs(self) -> list[SkillProviderConfig]:
+        path = self._resolve_skill_provider_config_path()
+        if not path.exists():
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        raw_items = payload.get("providers", payload) if isinstance(payload, dict) else payload
+        if not isinstance(raw_items, list):
+            return []
+        configs: list[SkillProviderConfig] = []
+        for item in raw_items:
+            try:
+                configs.append(SkillProviderConfig.model_validate(item))
+            except Exception:
+                continue
+        return configs
+
+    def _write_skill_provider_configs(self, configs: list[SkillProviderConfig]) -> None:
+        path = self._resolve_skill_provider_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "providers": [
+                item.model_dump(mode="json", by_alias=True)
+                for item in sorted(configs, key=lambda current: current.provider_id.lower())
+            ]
+        }
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _rebuild_skill_registry(self) -> None:
+        current_ids = [item.skill_id for item in self._skill_registry.list_skills()]
+        for skill_id in current_ids:
+            self._skill_registry.unregister(skill_id)
+        self._register_builtin_skills()
+        self._register_custom_skill_providers()
+
+    def _register_custom_skill_providers(self) -> None:
+        existing_ids = {item.skill_id for item in self._skill_registry.list_skills()}
+        for config in self._load_skill_provider_configs():
+            if not config.enabled or config.provider_id in existing_ids:
+                continue
+            try:
+                tool_profile = ToolProfile(str(config.tool_profile).strip().lower() or "minimal")
+            except ValueError:
+                tool_profile = ToolProfile.MINIMAL
+            worker_type = str(config.worker_type).strip().lower() or "general"
+            self._skill_registry.register(
+                SkillManifest(
+                    skill_id=config.provider_id,
+                    input_model=_BuiltinSkillInput,
+                    output_model=_BuiltinSkillOutput,
+                    description=config.description or config.label,
+                    model_alias=config.model_alias or "main",
+                    tools_allowed=list(config.tools_allowed),
+                    tool_profile=tool_profile,
+                    metadata={
+                        "label": config.label,
+                        "worker_type": worker_type,
+                        "source_kind": "custom",
+                        "provider_id": config.provider_id,
+                        "install_hint": config.install_hint,
+                        **dict(config.metadata),
+                    },
+                ),
+                prompt_template=config.prompt_template,
+            )
+            existing_ids.add(config.provider_id)
 
     def _resolve_tool_availability(
         self,

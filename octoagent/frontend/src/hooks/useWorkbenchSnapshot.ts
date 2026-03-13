@@ -62,6 +62,10 @@ async function fetchSnapshotResource(
       return fetchControlResource("capability-pack");
     case "skill-governance":
       return fetchControlResource("skill-governance");
+    case "skill-provider-catalog":
+      return fetchControlResource("skill-provider-catalog");
+    case "mcp-provider-catalog":
+      return fetchControlResource("mcp-provider-catalog");
     case "setup-governance":
       return fetchControlResource("setup-governance");
     case "delegation":

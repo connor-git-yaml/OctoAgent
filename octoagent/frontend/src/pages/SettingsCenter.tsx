@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
   categoryForHint,
@@ -516,6 +516,8 @@ export default function SettingsCenter() {
   const setup = snapshot!.resources.setup_governance;
   const policyProfiles = snapshot!.resources.policy_profiles;
   const skillGovernance = snapshot!.resources.skill_governance;
+  const skillProviderCatalog = snapshot!.resources.skill_provider_catalog;
+  const mcpProviderCatalog = snapshot!.resources.mcp_provider_catalog;
   const skillSelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
@@ -1549,7 +1551,18 @@ export default function SettingsCenter() {
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">安全与能力</p>
-            <h3>平台级安全开关与默认能力范围</h3>
+            <h3>平台默认边界放这里，具体安装与编辑去专页</h3>
+          </div>
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <Link className="wb-button wb-button-secondary" to="/settings/skills">
+              管理 Skills
+            </Link>
+            <Link className="wb-button wb-button-secondary" to="/settings/mcp">
+              管理 MCP
+            </Link>
+            <Link className="wb-button wb-button-tertiary" to="/agents">
+              去 Agents 勾选
+            </Link>
           </div>
         </div>
 
@@ -1560,34 +1573,68 @@ export default function SettingsCenter() {
             <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
           </article>
           <article className="wb-card">
-            <p className="wb-card-label">Tools & Skills</p>
+            <p className="wb-card-label">Skill Providers</p>
+            <strong>{Number(skillProviderCatalog.summary.installed_count ?? 0)}</strong>
+            <span>
+              自定义 {Number(skillProviderCatalog.summary.custom_count ?? 0)} / 内置{" "}
+              {Number(skillProviderCatalog.summary.builtin_count ?? 0)}
+            </span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">MCP Providers</p>
+            <strong>{Number(mcpProviderCatalog.summary.installed_count ?? 0)}</strong>
+            <span>
+              已启用 {Number(mcpProviderCatalog.summary.enabled_count ?? 0)} / 健康{" "}
+              {Number(mcpProviderCatalog.summary.healthy_count ?? 0)}
+            </span>
+          </article>
+        </div>
+
+        <div className="wb-card-grid wb-card-grid-3">
+          <article className="wb-card">
+            <p className="wb-card-label">项目默认启用</p>
+            <strong>{selectedSkills.length}</strong>
+            <span>不可用 {unavailableSkills.length} / 阻塞 {blockedSkills.length}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">为什么拆开</p>
+            <strong>安装与授权分层</strong>
+            <span>Settings 管安装，Agents 管谁能用，减少页面里混在一起的解释成本。</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">当前提醒</p>
             <strong>{setup.tools_skills.label}</strong>
             <span>{setup.tools_skills.summary}</span>
           </article>
-          <article className="wb-card">
-            <p className="wb-card-label">默认能力数</p>
-            <strong>{selectedSkills.length}</strong>
-            <span>不可用 {unavailableSkills.length}</span>
-          </article>
+        </div>
+
+        <div className="wb-inline-banner is-muted">
+          <strong>项目默认能力仍然保留</strong>
+          <span>
+            这里保存的是 project 级默认启用范围；更细的 Agent 级 Provider 勾选，请去
+            Agents 页面处理。
+          </span>
         </div>
 
         <div className="wb-note-stack">
           {skillGovernance.items.map((item) => {
             const selected = skillSelection[item.item_id] ?? item.selected;
             return (
-              <label key={item.item_id} className="wb-note">
-                <strong>
-                  {item.label} · {selected ? "已启用" : "未启用"}
-                </strong>
-                <span>
-                  {item.missing_requirements.length > 0
-                    ? item.missing_requirements.join("；")
-                    : "当前 capability pack 可用"}
-                </span>
-                <small>
-                  {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
-                  {item.availability}
-                </small>
+              <label key={item.item_id} className="wb-note wb-capability-toggle">
+                <div>
+                  <strong>
+                    {item.label} · {selected ? "项目默认启用" : "项目默认关闭"}
+                  </strong>
+                  <span>
+                    {item.missing_requirements.length > 0
+                      ? item.missing_requirements.join("；")
+                      : item.install_hint || "当前默认状态没有额外阻塞"}
+                  </span>
+                  <small>
+                    {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
+                    {item.availability}
+                  </small>
+                </div>
                 <input
                   type="checkbox"
                   aria-label={`启用 ${item.label}`}
