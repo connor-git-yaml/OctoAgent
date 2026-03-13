@@ -1,280 +1,422 @@
+<!-- speckit:section:badges -->
+![Version](https://img.shields.io/badge/version-0.1.0-0f766e.svg)
+![Python](https://img.shields.io/badge/python-3.12%2B-2563eb.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+<!-- speckit:section:badges:end -->
+
 # OctoAgent
 
-OctoAgent 是一个面向个人使用的 AI OS：提供持久化任务账本、Web / Telegram 双入口、统一配置与健康检查、聊天导入/导出、备份恢复，以及带治理面的 Agent 运行时。
+<!-- speckit:section:description -->
+OctoAgent is a Personal AI OS for people who need an AI system, not just an AI reply box.
 
-当前仓库同时提供两种使用方式：
+It combines a Butler-owned user experience, durable task execution, internal Butler-to-Worker delegation, governed tool usage, and observable runtime state into one local-first workspace. I built it first for my own use as a long-lived AI environment that can answer, delegate, recover, and explain itself, then turned it into a clean open-source project others can inspect and run.
+<!-- speckit:section:description:end -->
 
-- 普通用户路径：一键安装到 `~/.octoagent`，先用 `echo` 模式跑通 Web，再切真实模型
-- 开发者路径：在仓库里直接运行、调试和测试
+<!-- speckit:section:features -->
+## Features
 
-## 架构
+- **One accountable Butler**
+  You talk to a single default agent. The Butler keeps the main conversation, decides when work should be delegated, and remains responsible for the final answer.
 
-```
-Web UI (React 19)  ──HTTP/SSE──>  FastAPI Gateway  ──>  SQLite WAL
-                                      |                    |
-                                  Routes / Services     3 tables:
-                                  - message              tasks
-                                  - tasks                events
-                                  - cancel               artifacts
-                                  - stream (SSE)
-                                  - health
-```
+- **Internal delegation you can actually inspect**
+  Specialized Workers run behind the Butler with their own sessions, memory scopes, recall frames, and durable A2A conversations instead of disappearing into a black box.
 
-**核心组件**:
+- **Context that behaves like a system**
+  OctoAgent separates project memory, Butler memory, Worker memory, and per-turn recall so context does not collapse into one oversized prompt.
 
-- **packages/core** -- Domain Models (Pydantic) + SQLite Store + Projection Rebuild
-- **apps/gateway** -- FastAPI 合并进程 (Routes + Services + Middleware)
-- **frontend** -- React 19 + Vite 6 Web UI (TaskList + TaskDetail + SSE)
+- **Long-running work that survives reality**
+  Tasks, events, artifacts, and runtime state are persisted to SQLite WAL so restart, retry, and inspection are first-class behaviors.
 
-## 快速启动
+- **A setup path for normal users**
+  You can start in `echo` mode, verify the product end to end, then switch to real providers through `octo setup` without hand-assembling the whole stack.
 
-### 前置条件
+- **Operator visibility without reading raw logs**
+  The Web UI exposes runtime health, A2A conversations, task state, memory surfaces, configuration hints, and operator actions through Control Plane and Advanced views.
 
+- **Real freshness and research flow**
+  Questions such as weather, “latest”, and web-backed research are designed to follow `Butler -> Research Worker -> Butler`, instead of pretending one flat chat agent can safely answer everything.
+
+- **Web first, Telegram optional**
+  Web is the default surface. Telegram can be added later when you want a second control surface.
+<!-- speckit:section:features:end -->
+
+## What Makes OctoAgent Different
+
+- It treats runtime state as product truth, not as invisible implementation detail.
+- It distinguishes between the agent you talk to and the workers doing delegated execution.
+- It is designed to recover, inspect, and continue, not just to answer.
+- It lets you begin safely in `echo` mode before trusting real provider credentials and live tools.
+
+## Acknowledgements
+
+OctoAgent is an independent implementation, but its design has been sharpened by studying several open-source projects whose ideas were genuinely useful.
+
+Special thanks to:
+
+- **OpenClaw**, for ideas around onboarding, runtime visibility, tool governance, and operator ergonomics
+- **Agent Zero**, for ideas around project-scoped runtime structure, long-running agent execution, and practical system operation
+- **Agent Studio**, for ideas around agent workspace design and multi-agent product experience
+
+<!-- speckit:section:getting-started -->
+## Getting Started
+
+### Recommended First Experience
+
+If this is your first time, do not start by wiring every provider and channel at once.
+
+The intended onboarding path is:
+
+1. Install the managed local instance.
+2. Start OctoAgent in `echo` mode and verify the Web flow.
+3. Switch to a real provider with `octo setup`.
+4. Ask a freshness or research-style question.
+5. Inspect the result in Chat, Workbench, and Control Plane.
+
+This sequence gives you a clean separation between:
+
+- “does the product boot and behave correctly?”
+- “is my provider and LiteLLM configuration healthy?”
+
+### Prerequisites
+
+Minimum requirements:
+
+- Git
 - Python 3.12+
 - Node.js 20+
-- [uv](https://docs.astral.sh/uv/) 包管理器
+- npm
+- [uv](https://docs.astral.sh/uv/)
 
-### 脚本分层约定
+Required for real provider mode:
 
-仓库里现在保留两层脚本目录，职责明确分开：
+- Docker Desktop or another working Docker daemon
 
-- `repo-scripts/`
-  - 仓库级脚本
-  - 负责远程一键安装、agent-config 同步、仓库级验证
-- `octoagent/scripts/`
-  - 产品级脚本
-  - 负责个人实例初始化、启动 Web runtime、执行实例 doctor
+You do **not** need Docker just to test the default `echo` mode.
 
-如果你是普通用户，优先使用 `repo-scripts/install-octo-user.sh` 作为远程入口；如果你已经在仓库里开发，再使用 `octoagent/scripts/` 下的脚本。
+### Installation
 
-### 个人体验模式（推荐）
+#### Option A: Managed install for end users
 
-如果你只是想“像普通用户一样用起来”，不要先手动 clone 仓库，直接执行一键安装：
+This is the recommended path if you want to experience OctoAgent as a normal user and do not want to bootstrap the repo manually.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/connor-git-yaml/OctoAgent/master/repo-scripts/install-octo-user.sh | bash
 ```
 
-这条命令会：
+This installs:
 
-- 把源码拉到 `~/.octoagent/app`
-- 把个人实例初始化到 `~/.octoagent/`
-- 默认生成 `echo` 模式配置，方便先验证 Web 流程
-- 生成 3 个可直接使用的入口：
-  - `~/.octoagent/bin/octo-start`
-  - `~/.octoagent/bin/octo-doctor`
-  - `~/.octoagent/bin/octo`
+- a managed instance under `~/.octoagent`
+- the source checkout under `~/.octoagent/app`
+- three ready-to-use entrypoints under `~/.octoagent/bin`
 
-安装完成后，先启动实例：
-
-```bash
-~/.octoagent/bin/octo-start
-```
-
-另开一个终端做健康检查：
-
-```bash
-~/.octoagent/bin/octo-doctor
-curl 'http://127.0.0.1:8000/ready?profile=core'
-```
-
-看到 `/ready` 返回 `"status": "ready"` 后，就可以打开：
-
-- Web UI: `http://127.0.0.1:8000`
-- Swagger: `http://127.0.0.1:8000/docs`
-
-如需把 CLI 加进 PATH：
+Optional: add the CLI to your shell `PATH`.
 
 ```bash
 export PATH="$HOME/.octoagent/bin:$PATH"
 ```
 
-安装后的实例目录结构大致如下：
+#### Option B: Run from source
+
+```bash
+git clone https://github.com/connor-git-yaml/OctoAgent.git
+cd OctoAgent/octoagent
+uv sync
+npm install --prefix frontend
+./scripts/install-octo-home.sh
+```
+
+This initializes a local instance in `~/.octoagent` by default.
+
+### First Start
+
+Managed instance:
+
+```bash
+octo-start
+```
+
+Source checkout:
+
+```bash
+./scripts/run-octo-home.sh
+```
+
+In another terminal:
+
+```bash
+octo-doctor
+curl "http://127.0.0.1:8000/ready?profile=core"
+```
+
+When the readiness endpoint returns `status: ready`, open:
+
+- Web UI: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+<!-- speckit:section:getting-started:end -->
+
+<!-- speckit:section:usage -->
+## Usage
+
+### 1. Start in `echo` mode first
+
+The default installation starts in `echo` mode on purpose. This lets you verify the Web UI, task ledger, and runtime wiring before introducing provider credentials or Docker-based LiteLLM.
+
+Typical first-run flow:
+
+1. Install the managed instance.
+2. Start with `octo-start`.
+3. Run `octo-doctor`.
+4. Open the Web UI and send a simple prompt.
+5. Confirm that chat, task creation, and event streaming all work.
+
+### 2. Switch to a real provider
+
+Run:
+
+```bash
+octo setup
+```
+
+The setup flow is the main onboarding command for non-developers. It can:
+
+- choose a provider preset
+- collect or connect credentials
+- write configuration to the managed instance
+- prepare LiteLLM proxy state
+- activate the runtime and run live verification
+
+Common presets:
+
+- `openrouter`
+- `openai`
+- `openai-codex`
+- `anthropic`
+
+If you use ChatGPT Pro / Codex-style OAuth, `openai-codex` is the current dedicated path.
+
+### 3. Ask a real question
+
+Once `octo-doctor --live` passes, try a question that benefits from delegation:
+
+```text
+Shenzhen weather today
+```
+
+The intended product flow is:
+
+1. Butler receives the question.
+2. Butler decides this is a freshness query.
+3. Butler opens an internal A2A conversation with a Research Worker.
+4. The Research Worker gathers current evidence.
+5. Butler synthesizes the result and answers the user.
+
+### 4. Inspect what happened
+
+Use the Web UI to inspect:
+
+- **Chat / Workbench**
+  For the user-facing thread, task detail, and the current execution snapshot.
+- **Control Plane / Advanced**
+  For runtime state, A2A conversations, session health, memory surfaces, and deeper diagnostics.
+
+### 5. Optional: connect Telegram
+
+If you want Telegram in addition to Web:
+
+```bash
+octo config init --force --enable-telegram --telegram-mode polling
+export TELEGRAM_BOT_TOKEN=your_bot_token
+octo onboard --channel telegram
+```
+
+`polling` is the simplest way to start. Use `webhook` only when you already have a reliable HTTPS endpoint.
+<!-- speckit:section:usage:end -->
+
+## Initialization and Configuration
+
+### Instance layout
+
+The managed install keeps your personal instance under `~/.octoagent`.
+
+Key files and directories:
 
 - `~/.octoagent/octoagent.yaml`
 - `~/.octoagent/litellm-config.yaml`
+- `~/.octoagent/.env.litellm`
 - `~/.octoagent/data/sqlite`
 - `~/.octoagent/data/artifacts`
 - `~/.octoagent/app`
 
-### 切换到真实模型
+### What `octo setup` configures
 
-个人体验模式默认是 `echo`，这样可以先确认系统本身能跑。要切真实模型，现在推荐直接用一条交互式命令：
+`octo setup` is the preferred first-time configuration command for non-developers.
 
-```bash
-~/.octoagent/bin/octo setup
-```
-
-这条命令会一次完成：
-
-- 选择 provider 预设（推荐先选 `openrouter`）
-- 输入 API Key 或走 `openai-codex` 浏览器 OAuth
-- 写入 `octoagent.yaml` 与 `~/.octoagent/.env.litellm`
-- 启动 LiteLLM Proxy
-- 在托管实例中自动切到真实模型
-- 最后跑一次 `octo doctor --live`
-
-如果你要走 ChatGPT Pro OAuth / Codex，也可以直接选 `openai-codex`，默认模型 preset 已经是 `gpt-5.4`。
-
-### 可选：接入 Telegram
-
-如果只想先用 Web，可以跳过。要接 Telegram，最简单的是 `polling`：
-
-```bash
-~/.octoagent/bin/octo config init --force --enable-telegram --telegram-mode polling
-export TELEGRAM_BOT_TOKEN=你的_bot_token
-~/.octoagent/bin/octo onboard --channel telegram
-```
-
-普通用户第一次接 Telegram 时，建议先用 `polling`；只有当你已经有公网 HTTPS 地址时，再切 `webhook`。
-
-### 开发者模式
-
-如果你已经在仓库内开发，直接执行：
-
-```bash
-cd octoagent
-./scripts/install-octo-home.sh
-```
-
-这条命令会完成依赖安装、前端构建，并初始化 `~/.octoagent/`：
+It typically updates:
 
 - `octoagent.yaml`
+  - provider entries
+  - model aliases
+  - runtime mode
+  - front-door access mode
+- `.env.litellm`
+  - provider API keys
+  - `LITELLM_MASTER_KEY`
+  - proxy-related environment variables
 - `litellm-config.yaml`
-- `data/sqlite`
-- `data/artifacts`
+  - generated proxy-side routing config
 
-默认会初始化为 `echo` 模式，方便先把 Web 流程跑通。启动实例：
+### Provider configuration model
+
+The example config file is [`octoagent.yaml.example`](./octoagent.yaml.example).
+
+Important sections:
+
+- `providers`
+  - defines provider IDs, display names, auth type, and which environment variable stores the credential
+- `model_aliases`
+  - binds user-facing aliases like `main` and `cheap` to actual provider/model pairs
+- `runtime`
+  - controls `echo` vs `litellm`, proxy URL, and master key env names
+- `front_door`
+  - controls whether the owner-facing APIs stay loopback-only or require bearer / trusted proxy protection
+
+### Credentials and secrets
+
+Do **not** store raw API keys in `octoagent.yaml`.
+
+The intended split is:
+
+- tracked config in `octoagent.yaml`
+- secret values in `.env.litellm` or runtime environment variables
+
+### Docker and LiteLLM
+
+For real providers, OctoAgent uses a local LiteLLM proxy by default. That means:
+
+- Docker must be running
+- the proxy must be reachable on the configured URL
+- `octo-doctor --live` should pass before you trust runtime answers
+
+If the proxy is healthy, you should see:
+
+```bash
+octo-doctor --live
+```
+
+If configuration changes do not take effect immediately, restart the runtime:
+
+```bash
+octo restart
+```
+
+### Remote exposure and front-door safety
+
+The default `front_door.mode` is `loopback`, which is the safest default for local-first use.
+
+Other modes exist, but they are operator choices and should be used intentionally:
+
+- `loopback`
+  - only local access
+- `bearer`
+  - requires a bearer token for owner-facing APIs
+- `trusted_proxy`
+  - expects a trusted reverse proxy plus shared header token
+
+If you expose OctoAgent beyond localhost, you should review `front_door` before doing anything else.
+
+## Architecture at a Glance
+
+```text
+Web / Telegram
+      |
+      v
+  Butler Session
+      |
+      v
+  OctoGateway / Runtime
+      |
+      +--> A2AConversation --> Worker Session --> Tools / Skills / Research
+      |
+      +--> SQLite WAL (tasks / events / artifacts / runtime state)
+```
+
+The important product-level point is not just “multi-agent”. It is that the Butler, Workers, sessions, A2A conversations, and memory surfaces are durable and inspectable.
+
+## Project Structure
+
+<!-- speckit:section:project-structure -->
+```text
+octoagent/
+├── apps/
+│   └── gateway/              # FastAPI app and runtime services
+├── frontend/                 # React + Vite Web UI
+├── packages/
+│   ├── core/                 # Domain models, stores, projections
+│   ├── memory/               # Memory governance and recall
+│   ├── policy/               # Approval and policy logic
+│   ├── protocol/             # A2A and normalized protocol models
+│   ├── provider/             # Provider bootstrap, doctor, setup DX
+│   ├── skills/               # Skill runner and LLM integration
+│   └── tooling/              # Tool contracts and broker
+├── scripts/                  # install / run / doctor helper scripts
+├── tests/                    # contract, unit, and integration tests
+├── octoagent.yaml.example    # tracked configuration example
+└── pyproject.toml            # uv workspace root
+```
+<!-- speckit:section:project-structure:end -->
+
+<!-- speckit:section:tech-stack -->
+## Tech Stack
+
+- Python 3.12+
+- FastAPI + Uvicorn
+- Pydantic v2
+- SQLite WAL
+- React 19 + Vite 6
+- TypeScript 5
+- uv workspace
+- pytest / pytest-asyncio
+- ruff
+- Docker + LiteLLM Proxy
+<!-- speckit:section:tech-stack:end -->
+
+<!-- speckit:section:testing -->
+## Testing
+
+Backend:
 
 ```bash
 cd octoagent
-./scripts/run-octo-home.sh
+uv run pytest -q
+uv run ruff check packages apps tests
 ```
 
-健康检查：
-
-```bash
-cd octoagent
-./scripts/doctor-octo-home.sh
-```
-
-如需切换到真实模型，直接执行 `uv run octo setup` 即可；如果你需要更细粒度地调试 provider/runtime，再退回 `uv run octo config init`。
-
-### 后端
-
-```bash
-cd octoagent
-
-# 安装依赖
-uv sync
-
-# 启动开发服务器
-uv run uvicorn octoagent.gateway.main:app --reload --port 8000
-```
-
-### 前端
+Frontend:
 
 ```bash
 cd octoagent/frontend
-
-# 安装依赖
-npm install
-
-# 开发模式（自动代理到后端 :8000）
-npm run dev
-
-# 生产构建
+npm test
 npm run build
 ```
 
-生产模式下 FastAPI 自动托管 `frontend/dist/`，访问 `http://localhost:8000` 即可使用 Web UI。
-
-### 测试
+Useful local operator commands:
 
 ```bash
-cd octoagent
-
-# 运行全部测试（105 个）
-uv run pytest -v
-
-# 仅运行单元测试
-uv run pytest packages/core/tests/ -v
-
-# 仅运行 Gateway 测试
-uv run pytest apps/gateway/tests/ -v
-
-# 仅运行集成测试
-uv run pytest tests/integration/ -v
-
-# 代码风格检查
-uv run ruff check packages/ apps/ tests/
+octo-doctor
+octo-doctor --live
+octo restart
+python -m octoagent.core rebuild-projections
 ```
+<!-- speckit:section:testing:end -->
 
-### Projection 重建
+<!-- speckit:section:contributing -->
+## Contributing
 
-```bash
-uv run python -m octoagent.core rebuild-projections
-```
+Please read [../CONTRIBUTING.md](../CONTRIBUTING.md) before submitting a pull request.
+<!-- speckit:section:contributing:end -->
 
-## API 文档
-
-启动后端后访问 `http://localhost:8000/docs` 查看 Swagger UI。
-
-### 端点一览
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| POST | /api/message | 发送消息，创建任务 |
-| GET | /api/tasks | 任务列表（支持 ?status= 筛选） |
-| GET | /api/tasks/{id} | 任务详情（含 events + artifacts） |
-| POST | /api/tasks/{id}/cancel | 取消任务 |
-| GET | /api/stream/task/{id} | SSE 事件流 |
-| GET | /health | Liveness 检查 |
-| GET | /ready | Readiness 检查 |
-
-## 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| 语言 | Python 3.12+ / TypeScript 5.x |
-| Web 框架 | FastAPI + Uvicorn |
-| 数据模型 | Pydantic v2 |
-| 数据库 | SQLite WAL (aiosqlite) |
-| SSE | sse-starlette |
-| ID 生成 | ULID (python-ulid) |
-| 日志 | structlog + Logfire (可选) |
-| 前端 | React 19 + Vite 6 + React Router 7 |
-| 测试 | pytest + pytest-asyncio + httpx |
-| Lint | ruff |
-| 包管理 | uv (workspace) |
-
-## 项目结构
-
-```
-octoagent/
-  pyproject.toml              # uv workspace 根
-  packages/
-    core/                     # Domain Models + Store
-      src/octoagent/core/
-        models/               # Pydantic 数据模型
-        store/                # SQLite Store 实现
-        projection.py         # Projection 重建
-        config.py             # 配置常量
-  apps/
-    gateway/                  # FastAPI 合并进程
-      src/octoagent/gateway/
-        routes/               # API 路由
-        services/             # 业务服务
-        middleware/            # 日志/追踪中间件
-  frontend/                   # React + Vite Web UI
-    src/
-      pages/                  # TaskList + TaskDetail
-      hooks/                  # useSSE
-      api/                    # API client
-  tests/
-    integration/              # 端到端集成测试
-```
-
+<!-- speckit:section:license -->
 ## License
 
-MIT
+This project is licensed under the MIT License. See [../LICENSE](../LICENSE).
+<!-- speckit:section:license:end -->
