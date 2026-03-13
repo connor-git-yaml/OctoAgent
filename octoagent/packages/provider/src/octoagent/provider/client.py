@@ -80,6 +80,7 @@ class LiteLLMClient:
         stream_model_aliases: set[str] | None = None,
         responses_model_aliases: set[str] | None = None,
         responses_reasoning_aliases: dict[str, ReasoningConfig] | None = None,
+        reasoning_supported_aliases: set[str] | None = None,
     ) -> None:
         """初始化 LiteLLM Proxy 客户端
 
@@ -97,6 +98,28 @@ class LiteLLMClient:
         self._stream_model_aliases = set(stream_model_aliases or ())
         self._responses_model_aliases = set(responses_model_aliases or ())
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
+        self._reasoning_supported_aliases = (
+            None
+            if reasoning_supported_aliases is None
+            else set(reasoning_supported_aliases)
+        )
+
+    def _resolve_reasoning_for_alias(
+        self,
+        *,
+        model_alias: str,
+        reasoning: ReasoningConfig | None,
+    ) -> ReasoningConfig | None:
+        resolved = reasoning or self._responses_reasoning_aliases.get(model_alias)
+        if resolved is None:
+            return None
+        if (
+            self._reasoning_supported_aliases is None
+            or model_alias in self._reasoning_supported_aliases
+        ):
+            return resolved
+        log.info("skip_unsupported_reasoning_runtime", model_alias=model_alias)
+        return None
 
     async def _collect_stream_response(
         self,
@@ -221,7 +244,10 @@ class LiteLLMClient:
         if extra_headers:
             request_headers.update(extra_headers)
 
-        resolved_reasoning = reasoning or self._responses_reasoning_aliases.get(model_alias)
+        resolved_reasoning = self._resolve_reasoning_for_alias(
+            model_alias=model_alias,
+            reasoning=reasoning,
+        )
         body: dict[str, Any] = {
             "model": model_alias,
             "instructions": self._build_responses_instructions(messages),
@@ -236,60 +262,62 @@ class LiteLLMClient:
         body.update(kwargs)
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout_s) as http_client:
-                async with http_client.stream(
+            async with (
+                httpx.AsyncClient(timeout=self._timeout_s) as http_client,
+                http_client.stream(
                     "POST",
                     self._build_responses_url(api_base),
                     headers=request_headers,
                     json=body,
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data: "):
-                            continue
-                        payload = line[6:].strip()
-                        if not payload or payload == "[DONE]":
-                            continue
-                        try:
-                            event = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
+                ) as resp,
+            ):
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
 
-                        event_type = str(event.get("type", ""))
-                        if event_type == "response.output_text.delta":
-                            delta = str(event.get("delta", ""))
-                            if delta:
-                                text_parts.append(delta)
-                            continue
+                    event_type = str(event.get("type", ""))
+                    if event_type == "response.output_text.delta":
+                        delta = str(event.get("delta", ""))
+                        if delta:
+                            text_parts.append(delta)
+                        continue
 
-                        if event_type != "response.completed":
-                            continue
+                    if event_type != "response.completed":
+                        continue
 
-                        response = event.get("response", {})
-                        if isinstance(response, dict):
-                            response_model_name = str(response.get("model", "") or "")
-                            usage_payload = response.get("usage", {})
-                            if isinstance(usage_payload, dict):
-                                usage = TokenUsage(
-                                    prompt_tokens=int(usage_payload.get("input_tokens", 0) or 0),
-                                    completion_tokens=int(
-                                        usage_payload.get("output_tokens", 0) or 0
-                                    ),
-                                    total_tokens=int(usage_payload.get("total_tokens", 0) or 0),
-                                )
-                            if not text_parts:
-                                output_items = response.get("output", [])
-                                if isinstance(output_items, list):
-                                    for output in output_items:
-                                        if not isinstance(output, dict):
-                                            continue
-                                        for part in output.get("content", []):
-                                            if (
-                                                isinstance(part, dict)
-                                                and part.get("type") == "output_text"
-                                                and part.get("text")
-                                            ):
-                                                text_parts.append(str(part["text"]))
+                    response = event.get("response", {})
+                    if isinstance(response, dict):
+                        response_model_name = str(response.get("model", "") or "")
+                        usage_payload = response.get("usage", {})
+                        if isinstance(usage_payload, dict):
+                            usage = TokenUsage(
+                                prompt_tokens=int(usage_payload.get("input_tokens", 0) or 0),
+                                completion_tokens=int(
+                                    usage_payload.get("output_tokens", 0) or 0
+                                ),
+                                total_tokens=int(usage_payload.get("total_tokens", 0) or 0),
+                            )
+                        if not text_parts:
+                            output_items = response.get("output", [])
+                            if isinstance(output_items, list):
+                                for output in output_items:
+                                    if not isinstance(output, dict):
+                                        continue
+                                    for part in output.get("content", []):
+                                        if (
+                                            isinstance(part, dict)
+                                            and part.get("type") == "output_text"
+                                            and part.get("text")
+                                        ):
+                                            text_parts.append(str(part["text"]))
         except Exception as e:
             duration_ms = int((time.monotonic() - start_time) * 1000)
             sanitized_error = _redact_sensitive_text(str(e))
@@ -403,8 +431,12 @@ class LiteLLMClient:
             if extra_headers:
                 call_kwargs["extra_headers"] = extra_headers
             # Chat Completions API 使用顶层 reasoning_effort 字符串
-            if reasoning is not None:
-                call_kwargs["reasoning_effort"] = reasoning.effort
+            resolved_reasoning = self._resolve_reasoning_for_alias(
+                model_alias=model_alias,
+                reasoning=reasoning,
+            )
+            if resolved_reasoning is not None:
+                call_kwargs["reasoning_effort"] = resolved_reasoning.effort
             if use_stream:
                 # ChatGPT backend / Codex OAuth 路径经 LiteLLM Proxy 会返回 SSE 分片，
                 # 这里显式切到 stream 模式，再在客户端聚合回完整结果。

@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatStream } from "./useChatStream";
 
 const frontDoorRequestMock = vi.fn();
-const buildFrontDoorSseUrlMock = vi.fn((path: string) => path);
+const buildFrontDoorSseUrlMock = vi.fn((path: string, _options?: unknown) => path);
 
 vi.mock("../api/client", () => ({
-  frontDoorRequest: (...args: unknown[]) => frontDoorRequestMock(...args),
-  buildFrontDoorSseUrl: (...args: unknown[]) => buildFrontDoorSseUrlMock(...args),
+  frontDoorRequest: (...args: unknown[]) => frontDoorRequestMock(args[0], args[1]),
+  buildFrontDoorSseUrl: (path: string, options?: unknown) =>
+    buildFrontDoorSseUrlMock(path, options),
   fetchTaskDetail: vi.fn(),
 }));
 
@@ -87,7 +88,9 @@ describe("useChatStream", () => {
     await waitFor(() => {
       expect(FakeEventSource.instances).toHaveLength(1);
     });
-    expect(result.current.messages.at(-1)?.content).toBe("主助手已接手，正在处理这条消息…");
+    expect(result.current.messages[result.current.messages.length - 1]?.content).toBe(
+      "主助手已接手，正在处理这条消息…"
+    );
 
     await act(async () => {
       FakeEventSource.instances[0]?.emit("MODEL_CALL_FAILED", {
@@ -109,9 +112,9 @@ describe("useChatStream", () => {
         "这次卡在当前工具或运行环境上了，不是你不会问。稍后重试，或先检查联网和后台连接。"
       );
     });
-    expect(result.current.messages.at(-1)?.content).toBe(
+    expect(result.current.messages[result.current.messages.length - 1]?.content).toBe(
       "这次卡在当前工具或运行环境上了，不是你不会问。稍后重试，或先检查联网和后台连接。"
     );
-    expect(result.current.messages.at(-1)?.isStreaming).toBe(false);
+    expect(result.current.messages[result.current.messages.length - 1]?.isStreaming).toBe(false);
   });
 });

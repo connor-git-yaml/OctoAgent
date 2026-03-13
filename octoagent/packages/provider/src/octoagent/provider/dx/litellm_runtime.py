@@ -8,8 +8,9 @@ from typing import Any
 import structlog
 import yaml
 
-from ..models import ReasoningConfig
 from ..auth.oauth_provider import BUILTIN_PROVIDERS
+from ..models import ReasoningConfig
+from ..reasoning_support import supports_reasoning
 from .config_wizard import load_config
 from .litellm_generator import LITELLM_CONFIG_NAME
 
@@ -129,4 +130,28 @@ def resolve_codex_reasoning_aliases(project_root: Path) -> dict[str, ReasoningCo
         ):
             continue
         result[alias_name] = ReasoningConfig(effort=alias_cfg.thinking_level)
+    return result
+
+
+def resolve_reasoning_supported_aliases(project_root: Path) -> set[str]:
+    """解析允许启用 reasoning/thinking 的 model aliases。"""
+    try:
+        cfg = load_config(project_root)
+    except Exception as exc:
+        log.warning(
+            "reasoning_supported_aliases_config_invalid",
+            error_type=type(exc).__name__,
+        )
+        return set()
+
+    if cfg is None:
+        return set()
+
+    result: set[str] = set()
+    for alias_name, alias_cfg in cfg.model_aliases.items():
+        provider = cfg.get_provider(alias_cfg.provider)
+        if provider is None or not provider.enabled:
+            continue
+        if supports_reasoning(provider.id, alias_cfg.model):
+            result.add(alias_name)
     return result

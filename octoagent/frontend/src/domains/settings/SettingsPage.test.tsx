@@ -322,4 +322,56 @@ describe("SettingsPage", () => {
     expect(screen.getAllByRole("link", { name: "打开 Agents > Providers" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("安全与能力")).not.toBeInTheDocument();
   });
+
+  it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.runtime.llm_mode = "litellm";
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "openrouter",
+        name: "OpenRouter",
+        auth_type: "api_key",
+        api_key_env: "OPENROUTER_API_KEY",
+        enabled: true,
+      },
+    ] as unknown as never[];
+    snapshot.resources.config.current_value.model_aliases = {
+      cheap: {
+        provider: "openrouter",
+        model: "qwen/qwen3.5-9b",
+        description: "低成本模型",
+        thinking_level: "low",
+      },
+    } as never;
+    const submitAction = vi.fn().mockResolvedValue({
+      data: {
+        review: snapshot.resources.setup_governance.review,
+      },
+    });
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      screen.getByText("这个 alias 当前不在支持名单里。保存时会自动清空，后端也会忽略 reasoning 参数。")
+    ).toBeInTheDocument();
+
+    const reasoningSelect = screen.getByRole("combobox", { name: /推理强度/ });
+    expect(reasoningSelect).toBeDisabled();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+
+    await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
+
+    const setupReviewPayload = submitAction.mock.calls[0][1];
+    expect(setupReviewPayload.draft.config.model_aliases.cheap.thinking_level).toBeUndefined();
+  });
 });

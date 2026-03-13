@@ -2,6 +2,8 @@ import type { ConfigFieldHint } from "../../types";
 import {
   generateSecretValue,
   providerStatus,
+  reasoningSupportCopy,
+  reasoningSupportStateForAlias,
   type ModelAliasDraftItem,
   type ProviderDraftItem,
   type ProviderRuntimeDetails,
@@ -426,73 +428,87 @@ export default function SettingsProviderSection({
           ) : null}
           {aliasDrafts.map((item, index) => (
             <div key={`${item.alias}-${index}`} className="wb-alias-row">
-              <label className="wb-field">
-                <span>别名</span>
-                <input
-                  type="text"
-                  value={item.alias}
-                  onChange={(event) => onUpdateAliasAt(index, { alias: event.target.value })}
-                />
-              </label>
-              <label className="wb-field">
-                <span>Provider</span>
-                <select
-                  value={item.provider}
-                  onChange={(event) => onUpdateAliasAt(index, { provider: event.target.value })}
-                >
-                  <option value="">选择 Provider</option>
-                  {providerSelectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>模型名</span>
-                <input
-                  type="text"
-                  value={item.model}
-                  placeholder={defaultProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"}
-                  onChange={(event) => onUpdateAliasAt(index, { model: event.target.value })}
-                />
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>说明</span>
-                <input
-                  type="text"
-                  value={item.description}
-                  placeholder="例如：主力模型 / 低成本模型"
-                  onChange={(event) => onUpdateAliasAt(index, { description: event.target.value })}
-                />
-              </label>
-              <label className="wb-field">
-                <span>推理强度</span>
-                <select
-                  value={item.thinking_level}
-                  onChange={(event) =>
-                    onUpdateAliasAt(index, {
-                      thinking_level: event.target.value as ModelAliasDraftItem["thinking_level"],
-                    })
-                  }
-                >
-                  <option value="">默认</option>
-                  <option value="xhigh">xhigh</option>
-                  <option value="high">high</option>
-                  <option value="medium">medium</option>
-                  <option value="low">low</option>
-                </select>
-              </label>
-              <div className="wb-alias-actions">
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary wb-button-inline"
-                  onClick={() => onRemoveAliasDraft(index)}
-                  disabled={aliasDrafts.length <= 1}
-                >
-                  删除
-                </button>
-              </div>
+              {(() => {
+                const reasoningState = reasoningSupportStateForAlias(item.provider, item.model);
+                return (
+                  <>
+                    <label className="wb-field">
+                      <span>别名</span>
+                      <input
+                        type="text"
+                        value={item.alias}
+                        onChange={(event) => onUpdateAliasAt(index, { alias: event.target.value })}
+                      />
+                    </label>
+                    <label className="wb-field">
+                      <span>Provider</span>
+                      <select
+                        value={item.provider}
+                        onChange={(event) => onUpdateAliasAt(index, { provider: event.target.value })}
+                      >
+                        <option value="">选择 Provider</option>
+                        {providerSelectOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="wb-field wb-field-span-2">
+                      <span>模型名</span>
+                      <input
+                        type="text"
+                        value={item.model}
+                        placeholder={
+                          defaultProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"
+                        }
+                        onChange={(event) => onUpdateAliasAt(index, { model: event.target.value })}
+                      />
+                    </label>
+                    <label className="wb-field wb-field-span-2">
+                      <span>说明</span>
+                      <input
+                        type="text"
+                        value={item.description}
+                        placeholder="例如：主力模型 / 低成本模型"
+                        onChange={(event) =>
+                          onUpdateAliasAt(index, { description: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label className="wb-field">
+                      <span>推理强度</span>
+                      <select
+                        value={item.thinking_level}
+                        disabled={reasoningState !== "supported"}
+                        onChange={(event) =>
+                          onUpdateAliasAt(index, {
+                            thinking_level:
+                              event.target.value as ModelAliasDraftItem["thinking_level"],
+                          })
+                        }
+                      >
+                        <option value="">默认</option>
+                        <option value="xhigh">xhigh</option>
+                        <option value="high">high</option>
+                        <option value="medium">medium</option>
+                        <option value="low">low</option>
+                      </select>
+                      <small>{reasoningSupportCopy(item.provider, item.model)}</small>
+                    </label>
+                    <div className="wb-alias-actions">
+                      <button
+                        type="button"
+                        className="wb-button wb-button-tertiary wb-button-inline"
+                        onClick={() => onRemoveAliasDraft(index)}
+                        disabled={aliasDrafts.length <= 1}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           ))}
         </div>

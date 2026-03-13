@@ -17,6 +17,7 @@ from pathlib import Path
 import structlog
 import yaml
 
+from ..reasoning_support import supports_reasoning
 from .config_schema import THINKING_BUDGET_TOKENS, OctoAgentConfig
 from .config_wizard import _atomic_write
 
@@ -61,9 +62,19 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
             "model": alias_val.model,
             "api_key": f"os.environ/{provider_entry.api_key_env}",
         }
-        if alias_val.thinking_level is not None:
+        if alias_val.thinking_level is not None and supports_reasoning(
+            provider_entry.id, alias_val.model
+        ):
             budget = THINKING_BUDGET_TOKENS[alias_val.thinking_level]
             litellm_params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        elif alias_val.thinking_level is not None:
+            log.info(
+                "skip_unsupported_reasoning_config",
+                alias=alias_key,
+                provider=provider_entry.id,
+                model=alias_val.model,
+                thinking_level=alias_val.thinking_level,
+            )
         # OAuth Provider：注入 api_base 和 headers（如 openai-codex → chatgpt.com/backend-api）
         if provider_entry.auth_type == "oauth":
             from ..auth.oauth_flows import extract_account_id_from_jwt

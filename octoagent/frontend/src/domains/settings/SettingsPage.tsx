@@ -18,6 +18,7 @@ import {
   envPresence,
   generateSecretValue,
   groupLabel,
+  normalizeAliasDrafts,
   parseAliasDrafts,
   parseProviderDrafts,
   readProviderRuntimeDetails,
@@ -85,7 +86,7 @@ export default function SettingsPage() {
   );
   const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
   const providerDrafts = parseProviderDrafts(fieldState.providers);
-  const aliasDrafts = parseAliasDrafts(fieldState.model_aliases);
+  const aliasDrafts = normalizeAliasDrafts(parseAliasDrafts(fieldState.model_aliases));
   const activeProviders = providerDrafts.filter((item) => item.enabled);
   const defaultProvider =
     activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
@@ -100,7 +101,15 @@ export default function SettingsPage() {
   const proxyUrlHint = config.ui_hints["runtime.litellm_proxy_url"];
 
   function buildSetupDraft(secretStateOverride?: Record<string, string>) {
-    const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
+    const normalizedFieldState = {
+      ...fieldState,
+      model_aliases: stringifyAliasDrafts(aliasDrafts),
+    };
+    const result = buildConfigPayload(
+      config.current_value,
+      config.ui_hints,
+      normalizedFieldState
+    );
     setFieldErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
       return null;
@@ -268,7 +277,7 @@ export default function SettingsPage() {
   }
 
   function updateAliases(nextAliases: ModelAliasDraftItem[]) {
-    updateFieldValue("model_aliases", stringifyAliasDrafts(nextAliases));
+    updateFieldValue("model_aliases", stringifyAliasDrafts(normalizeAliasDrafts(nextAliases)));
   }
 
   function ensureProviderForAliases(): string {

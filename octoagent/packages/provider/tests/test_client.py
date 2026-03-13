@@ -626,3 +626,23 @@ class TestLiteLLMClientReasoning:
         assert call_kwargs["api_key"] == "jwt-token"
         assert call_kwargs["extra_headers"]["chatgpt-account-id"] == "acct-123"
         assert call_kwargs["reasoning_effort"] == "high"
+
+    @patch("octoagent.provider.client.acompletion")
+    async def test_unsupported_alias_omits_reasoning_effort(self, mock_acompletion):
+        """不支持 reasoning 的 alias 应自动忽略 reasoning_effort。"""
+        mock_acompletion.return_value = _make_mock_litellm_response()
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4000",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            reasoning_supported_aliases={"main"},
+        )
+
+        await client.complete(
+            messages=[{"role": "user", "content": "test"}],
+            model_alias="cheap",
+            reasoning=ReasoningConfig(effort="high"),
+        )
+
+        call_kwargs = mock_acompletion.call_args.kwargs
+        assert "reasoning_effort" not in call_kwargs

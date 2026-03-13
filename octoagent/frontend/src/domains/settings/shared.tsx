@@ -44,6 +44,8 @@ export interface ModelAliasDraftItem {
   thinking_level: "" | "xhigh" | "high" | "medium" | "low";
 }
 
+export type ReasoningSupportState = "supported" | "unsupported" | "pending";
+
 export interface ProviderRuntimeDetails {
   provider_entries?: Array<Record<string, unknown>>;
   litellm_env_names?: string[];
@@ -82,6 +84,16 @@ export const PROVIDER_PRESETS: Record<
     api_key_env: "OPENAI_API_KEY",
   },
 };
+
+const OPENROUTER_REASONING_PATTERNS = [
+  /(^|\/)(deepseek-r1|deepseek-r1-distill)\b/i,
+  /(^|\/)qwq\b/i,
+  /(^|\/)(o1|o3|o4)\b/i,
+  /(^|\/)gpt-5\b/i,
+  /claude-3\.7-sonnet-thinking/i,
+  /claude-opus-4-thinking/i,
+  /gemini-2\.5-(pro|flash-thinking)/i,
+];
 
 export const CUSTOM_PROVIDER_FIELD_PATHS = new Set([
   "runtime.llm_mode",
@@ -519,4 +531,64 @@ export function providerStatus(
     return { label: "已配置密钥", tone: "is-ready" };
   }
   return { label: "待填密钥", tone: "is-warning" };
+}
+
+export function reasoningSupportStateForAlias(
+  providerId: string,
+  modelName: string
+): ReasoningSupportState {
+  const provider = providerId.trim().toLowerCase();
+  const model = modelName.trim().toLowerCase();
+  if (!provider || !model) {
+    return "pending";
+  }
+  if (provider === "openai-codex") {
+    return "supported";
+  }
+  if (provider === "openai") {
+    return model.startsWith("gpt-5") ||
+      model.startsWith("o1") ||
+      model.startsWith("o3") ||
+      model.startsWith("o4")
+      ? "supported"
+      : "unsupported";
+  }
+  if (provider === "anthropic") {
+    return model.includes("thinking") ? "supported" : "unsupported";
+  }
+  if (provider === "openrouter") {
+    return OPENROUTER_REASONING_PATTERNS.some((pattern) => pattern.test(model))
+      ? "supported"
+      : "unsupported";
+  }
+  return "unsupported";
+}
+
+export function normalizeAliasDrafts(items: ModelAliasDraftItem[]): ModelAliasDraftItem[] {
+  return items.map((item) => {
+    if (
+      item.thinking_level &&
+      reasoningSupportStateForAlias(item.provider, item.model) !== "supported"
+    ) {
+      return {
+        ...item,
+        thinking_level: "",
+      };
+    }
+    return item;
+  });
+}
+
+export function reasoningSupportCopy(
+  providerId: string,
+  modelName: string
+): string {
+  const state = reasoningSupportStateForAlias(providerId, modelName);
+  if (state === "supported") {
+    return "当前 alias 看起来支持推理强度，可以按需要选择。";
+  }
+  if (state === "pending") {
+    return "先填 Provider 和模型名，再判断是否支持推理强度。";
+  }
+  return "这个 alias 当前不在支持名单里。保存时会自动清空，后端也会忽略 reasoning 参数。";
 }

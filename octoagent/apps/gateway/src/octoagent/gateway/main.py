@@ -31,6 +31,7 @@ from octoagent.provider.dx.dotenv_loader import load_project_dotenv
 from octoagent.provider.dx.litellm_runtime import (
     resolve_codex_backend_aliases,
     resolve_codex_reasoning_aliases,
+    resolve_reasoning_supported_aliases,
 )
 from octoagent.provider.dx.memory_console_service import MemoryConsoleService
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
@@ -382,6 +383,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             stream_model_aliases=_resolve_stream_model_aliases(project_root),
             responses_model_aliases=_resolve_stream_model_aliases(project_root),
             responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
+            reasoning_supported_aliases=resolve_reasoning_supported_aliases(project_root),
         )
         echo_adapter = EchoMessageAdapter()
         fallback_manager = FallbackManager(

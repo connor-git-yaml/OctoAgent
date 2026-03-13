@@ -27,6 +27,10 @@ import { formatWorkerTemplateName } from "../workbench/utils";
 
 const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
 
+function ensureArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void {
   if (!taskId || taskIds.includes(taskId)) {
     return;
@@ -35,8 +39,9 @@ function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void 
 }
 
 function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[] {
-  const webSessions = sessions.sessions.filter((item) => item.channel === "web");
-  const candidates = webSessions.length > 0 ? webSessions : sessions.sessions;
+  const sessionItems = ensureArray(sessions.sessions);
+  const webSessions = sessionItems.filter((item) => item.channel === "web");
+  const candidates = webSessions.length > 0 ? webSessions : sessionItems;
   const taskIds: string[] = [];
   if (sessions.focused_session_id) {
     const focused = candidates.find((item) => item.session_id === sessions.focused_session_id);
@@ -54,7 +59,7 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
   for (const item of candidates) {
     pushRestoreTaskId(taskIds, item.task_id);
   }
-  for (const item of sessions.sessions) {
+  for (const item of sessionItems) {
     pushRestoreTaskId(taskIds, item.task_id);
   }
 
@@ -212,10 +217,11 @@ function formatCuratedProgressEvent(
 
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
-  const sessions = snapshot!.resources.sessions.sessions;
+  const sessionDocument = snapshot!.resources.sessions;
+  const sessions = ensureArray(sessionDocument?.sessions);
   const workerProfilesDocument = snapshot!.resources.worker_profiles;
-  const workerProfiles = workerProfilesDocument?.profiles ?? [];
-  const restoreTaskIds = resolveRestorableTaskIds(snapshot!.resources.sessions);
+  const workerProfiles = ensureArray(workerProfilesDocument?.profiles);
+  const restoreTaskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
   const { messages, sendMessage, streaming, restoring, error, taskId } = useChatStream(
     restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
   );
@@ -226,21 +232,29 @@ export default function ChatWorkbench() {
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const context = snapshot!.resources.context_continuity;
   const memory = snapshot!.resources.memory;
+  const delegationWorks = ensureArray(snapshot!.resources.delegation.works);
+  const contextFrames = ensureArray(context.frames);
+  const a2aConversations = ensureArray(context.a2a_conversations);
+  const a2aMessages = ensureArray(context.a2a_messages);
+  const recallFrames = ensureArray(context.recall_frames);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
+  const activeExecutionSummary =
+    activeSession?.execution_summary &&
+    typeof activeSession.execution_summary === "object" &&
+    !Array.isArray(activeSession.execution_summary)
+      ? (activeSession.execution_summary as Record<string, unknown>)
+      : null;
   const activeWorkId =
-    typeof activeSession?.execution_summary["work_id"] === "string"
-      ? (activeSession.execution_summary["work_id"] as string)
+    typeof activeExecutionSummary?.work_id === "string"
+      ? (activeExecutionSummary.work_id as string)
       : "";
   const activeWork =
-    snapshot!.resources.delegation.works.find((item) => item.work_id === activeWorkId) ?? null;
+    delegationWorks.find((item) => item.work_id === activeWorkId) ?? null;
   const activeContextFrame =
-    context.frames.find((item) => item.task_id === taskId) ??
+    contextFrames.find((item) => item.task_id === taskId) ??
     (activeSession
-      ? context.frames.find((item) => item.session_id === activeSession.session_id) ?? null
+      ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null
       : null);
-  const a2aConversations = context.a2a_conversations ?? [];
-  const a2aMessages = context.a2a_messages ?? [];
-  const recallFrames = context.recall_frames ?? [];
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
     activeWork?.a2a_conversation_id ||
@@ -365,10 +379,20 @@ export default function ChatWorkbench() {
     activeWork?.tool_resolution_mode ||
     activeRootAgent?.dynamic_context.current_tool_resolution_mode ||
     "";
-  const activeMountedTools = activeWork?.mounted_tools ?? activeRootAgent?.dynamic_context.current_mounted_tools ?? [];
-  const activeBlockedTools = activeWork?.blocked_tools ?? activeRootAgent?.dynamic_context.current_blocked_tools ?? [];
+  const activeMountedTools =
+    activeWork?.mounted_tools ?? activeRootAgent?.dynamic_context?.current_mounted_tools ?? [];
+  const activeBlockedTools =
+    activeWork?.blocked_tools ?? activeRootAgent?.dynamic_context?.current_blocked_tools ?? [];
   const activeDiscoveryEntrypoints =
-    activeRootAgent?.dynamic_context.current_discovery_entrypoints ?? [];
+    activeRootAgent?.dynamic_context?.current_discovery_entrypoints ?? [];
+  const fallbackMountedTools = activeRootAgent?.dynamic_context?.current_mounted_tools ?? [];
+  const fallbackBlockedTools = activeRootAgent?.dynamic_context?.current_blocked_tools ?? [];
+  const normalizedMountedTools = Array.isArray(activeMountedTools)
+    ? activeMountedTools
+    : fallbackMountedTools;
+  const normalizedBlockedTools = Array.isArray(activeBlockedTools)
+    ? activeBlockedTools
+    : fallbackBlockedTools;
   const activeRootAgentBindingSource = activeWork?.requested_worker_profile_id
     ? "当前 Work"
     : activeContextFrame?.agent_profile_id
@@ -387,10 +411,10 @@ export default function ChatWorkbench() {
       ? { label: "专门角色会话", value: activeConversationWorkerSessionId }
       : null,
   ].filter((item): item is { label: string; value: string } => Boolean(item));
-  const taskStatusLabel = formatTaskStatusLabel(taskDetail?.task.status ?? "");
-  const taskStatusTone = formatTaskStatusTone(taskDetail?.task.status ?? "");
+  const taskStatusLabel = formatTaskStatusLabel(taskDetail?.task?.status ?? "");
+  const taskStatusTone = formatTaskStatusTone(taskDetail?.task?.status ?? "");
   const collaborationStatusTone = hasInternalCollaboration ? "success" : "draft";
-  const taskStatus = String(taskDetail?.task.status ?? "").trim().toUpperCase();
+  const taskStatus = String(taskDetail?.task?.status ?? "").trim().toUpperCase();
   const hasLoadedTaskStatus = taskStatus.length > 0;
   const shouldPollLiveState =
     Boolean(taskId) &&
@@ -674,7 +698,7 @@ export default function ChatWorkbench() {
               </div>
               <div className="wb-note">
                 <strong>默认工具范围</strong>
-                <span>{activeRootAgent?.static_config.tool_profile ?? "未记录"}</span>
+                <span>{activeRootAgent?.static_config?.tool_profile ?? "未记录"}</span>
               </div>
               <div className="wb-note">
                 <strong>默认 Worker 模板</strong>
@@ -692,7 +716,7 @@ export default function ChatWorkbench() {
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">当前任务</p>
-                <h3>{taskDetail?.task.title ?? "等待开始"}</h3>
+                <h3>{taskDetail?.task?.title ?? "等待开始"}</h3>
               </div>
               <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge>
             </div>
@@ -813,11 +837,11 @@ export default function ChatWorkbench() {
             <div className="wb-note-stack">
               <div className="wb-note">
                 <strong>当前可用</strong>
-                <span>{activeMountedTools.length > 0 ? activeMountedTools.length : 0}</span>
+                <span>{normalizedMountedTools.length > 0 ? normalizedMountedTools.length : 0}</span>
               </div>
               <div className="wb-note">
                 <strong>暂时不可用</strong>
-                <span>{activeBlockedTools.length > 0 ? activeBlockedTools.length : 0}</span>
+                <span>{normalizedBlockedTools.length > 0 ? normalizedBlockedTools.length : 0}</span>
               </div>
               <div className="wb-note">
                 <strong>补充资料入口</strong>
@@ -831,18 +855,18 @@ export default function ChatWorkbench() {
               </div>
             </div>
             <div className="wb-chip-row">
-              {activeMountedTools.slice(0, 6).map((tool) => (
+              {normalizedMountedTools.slice(0, 6).map((tool) => (
                 <span key={`mounted-${tool.tool_name}`} className="wb-chip">
                   {tool.tool_name}
                 </span>
               ))}
-              {activeMountedTools.length === 0 ? (
+              {normalizedMountedTools.length === 0 ? (
                 <span className="wb-inline-note">当前还没有可用工具记录。</span>
               ) : null}
             </div>
-            {activeBlockedTools.length > 0 ? (
+            {normalizedBlockedTools.length > 0 ? (
               <div className="wb-note-stack">
-                {activeBlockedTools.slice(0, 3).map((tool) => (
+                {normalizedBlockedTools.slice(0, 3).map((tool) => (
                   <div key={`blocked-${tool.tool_name}`} className="wb-note">
                     <strong>{tool.tool_name}</strong>
                     <span>{tool.summary || tool.reason_code || tool.status}</span>

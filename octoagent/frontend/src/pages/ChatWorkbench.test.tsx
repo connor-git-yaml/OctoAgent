@@ -449,4 +449,75 @@ describe("ChatWorkbench", () => {
     expect(screen.getByText("2 条 / 最新 结果回传")).toBeInTheDocument();
     expect(screen.getByText(/当前只显示协作摘要/)).toBeInTheDocument();
   });
+
+  it("session 缺少 execution_summary 时也不会白屏", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "thread-chat-missing-summary",
+        thread_id: "thread-chat-missing-summary",
+        task_id: "task-chat-missing-summary",
+        latest_message_summary: "帮我继续看刚才那条天气结果",
+      },
+    ];
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-missing-summary", role: "agent", content: "我来继续帮你看。" }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-missing-summary",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-missing-summary",
+        title: "帮我继续看刚才那条天气结果",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("我来继续帮你看。")).toBeInTheDocument();
+    expect(screen.getByText("当前这轮先由主 Agent 直接处理")).toBeInTheDocument();
+  });
+
+  it("sessions 资源文档暂时缺少 sessions 数组时也不会白屏", async () => {
+    const snapshot = buildSnapshot();
+    delete snapshot.resources.sessions.sessions;
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-missing-sessions", role: "agent", content: "我还在这里。" }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: null,
+    });
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("我还在这里。")).toBeInTheDocument();
+    expect(screen.getByText("当前这轮先由主 Agent 直接处理")).toBeInTheDocument();
+  });
 });
