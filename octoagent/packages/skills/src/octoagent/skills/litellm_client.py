@@ -60,9 +60,6 @@ class LiteLLMSkillClient:
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
         # 对话历史：key = "{task_id}:{trace_id}"
         self._histories: dict[str, list[dict[str, Any]]] = {}
-        # 上一步的 tool_call id 映射：key → [(call_id, tool_name)]
-        self._last_call_ids: dict[str, list[tuple[str, str]]] = {}
-
     def _key(self, ctx: SkillExecutionContext) -> str:
         return f"{ctx.task_id}:{ctx.trace_id}"
 
@@ -461,46 +458,31 @@ class LiteLLMSkillClient:
                 use_responses_api=use_responses_api,
             )
             self._histories[key] = history
-            self._last_call_ids[key] = []
 
         history = self._histories[key]
 
         if step > 1 and feedback:
-            if use_responses_api:
-                call_ids = self._last_call_ids.get(key, [])
-                step_history: list[dict[str, Any]] = []
-                for index, fb in enumerate(feedback):
-                    if index < len(call_ids):
-                        call_id, _ = call_ids[index]
-                    else:
-                        call_id = f"call_{index}"
-                    step_history.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": fb.error if fb.is_error else fb.output,
-                        }
-                    )
-                history.extend(step_history)
-            else:
-                # 注意：不使用 role:tool 消息，因为 LiteLLM 将 Chat Completions
-                # 转换为 Responses API 时 function_call_output 格式转换存在 bug。
-                results = []
-                for fb in feedback:
-                    if fb.is_error:
-                        results.append(f"- {fb.tool_name}: ERROR: {fb.error}")
-                    else:
-                        results.append(f"- {fb.tool_name}: {fb.output}")
-                history.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Tool execution results:\n"
-                            + "\n".join(results)
-                            + "\n\nBased on these results, please provide your final answer."
-                        ),
-                    }
-                )
+            # 注意：Responses API 在 Codex 代理链路上复用 function_call_output 时，
+            # call_id 可能与上一轮 function_call 脱节，导致 400 invalid_request。
+            # 为保证多轮工具调用稳定，统一把工具结果折叠成自然语言回填。
+            results = []
+            for fb in feedback:
+                if fb.is_error:
+                    results.append(f"- {fb.tool_name}: ERROR: {fb.error}")
+                else:
+                    results.append(f"- {fb.tool_name}: {fb.output}")
+            history.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Tool execution results:\n"
+                        + "\n".join(results)
+                        + "\n\nBased on these results, either call the next necessary tool "
+                        "immediately or provide the final answer now. "
+                        "Do not reply with plans like '我先查一下' or '我再看看'."
+                    ),
+                }
+            )
 
         tools = await self._get_tool_schemas(manifest, responses_api=use_responses_api)
 
@@ -526,22 +508,10 @@ class LiteLLMSkillClient:
                 body["tool_choice"] = "auto"
             content, tool_calls, metadata = await self._call_proxy(body)
 
-        # 追加 assistant 消息到历史（不含 tool_calls 字段，避免 Responses API 转换 bug）
+        # 追加 assistant 消息到历史，后续轮次通过自然语言摘要回填工具结果。
         if tool_calls:
-            if not use_responses_api:
-                tc_summary = ", ".join(
-                    f"{tc['tool_name']}({tc['arguments']})" for tc in tool_calls
-                )
-                history.append(
-                    {"role": "assistant", "content": f"[Calling tools: {tc_summary}]"}
-                )
-            else:
-                history.extend(
-                    item
-                    for item in metadata.get("function_call_items", [])
-                    if isinstance(item, dict)
-                )
-            self._last_call_ids[key] = [(tc["id"], tc["tool_name"]) for tc in tool_calls]
+            tc_summary = ", ".join(f"{tc['tool_name']}({tc['arguments']})" for tc in tool_calls)
+            history.append({"role": "assistant", "content": f"[Calling tools: {tc_summary}]"})
             return SkillOutputEnvelope(
                 content=content,
                 complete=False,

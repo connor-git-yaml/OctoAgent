@@ -2293,8 +2293,19 @@ describe("App workbench routing", () => {
         },
       },
       {
-        event_id: "evt-agent-1",
+        event_id: "evt-agent-hidden",
         task_seq: 2,
+        ts: "2026-03-09T10:01:30Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          skill_id: "chat.general.inline",
+          response_summary: "这是中间 skill 的内部摘要。",
+        },
+      },
+      {
+        event_id: "evt-agent-1",
+        task_seq: 3,
         ts: "2026-03-09T10:02:00Z",
         type: "MODEL_CALL_COMPLETED",
         actor: "system",
@@ -2319,7 +2330,131 @@ describe("App workbench routing", () => {
 
     expect(await screen.findByText("帮我整理这周的发布安排")).toBeInTheDocument();
     expect(await screen.findByText("这周先锁定范围，再排发布时间表。")).toBeInTheDocument();
+    expect(screen.queryByText("这是中间 skill 的内部摘要。")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "历史对话" })).toBeInTheDocument();
+  });
+
+  it("聊天流会忽略中间 skill 失败事件并等待最终回复", async () => {
+    window.history.pushState({}, "", "/chat");
+
+    class FakeEventSource {
+      static CLOSED = 2;
+      static instances: FakeEventSource[] = [];
+      readyState = 1;
+      onopen: ((this: EventSource, ev: Event) => void) | null = null;
+      onerror:
+        | ((this: EventSource, ev: Event) => void)
+        | null = null;
+      onmessage:
+        | ((this: EventSource, ev: MessageEvent) => void)
+        | null = null;
+      listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
+
+      constructor() {
+        FakeEventSource.instances.push(this);
+      }
+
+      addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
+        const current = this.listeners.get(type) ?? [];
+        current.push(listener);
+        this.listeners.set(type, current);
+      }
+
+      removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
+        const current = this.listeners.get(type) ?? [];
+        this.listeners.set(
+          type,
+          current.filter((item) => item !== listener)
+        );
+      }
+
+      emit(type: string, payload: unknown): void {
+        const event = {
+          data: JSON.stringify(payload),
+        } as MessageEvent;
+        for (const listener of this.listeners.get(type) ?? []) {
+          listener(event);
+        }
+      }
+
+      close(): void {
+        this.readyState = FakeEventSource.CLOSED;
+      }
+    }
+
+    vi.stubGlobal("EventSource", FakeEventSource);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(buildSnapshot()));
+      }
+      if (url.includes("/api/chat/send") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            task_id: "task-chat-stream-filter",
+            stream_url: "/api/stream/task/task-chat-stream-filter",
+          })
+        );
+      }
+      if (url.includes("/api/tasks/task-chat-stream-filter")) {
+        return Promise.resolve(
+          jsonResponse(buildTaskDetail("task-chat-stream-filter", "过滤内部事件"))
+        );
+      }
+      if (url.includes("/api/control/resources/sessions")) {
+        return Promise.resolve(jsonResponse(buildSnapshot().resources.sessions));
+      }
+      if (url.includes("/api/control/resources/delegation")) {
+        return Promise.resolve(jsonResponse(buildSnapshot().resources.delegation));
+      }
+      if (url.includes("/api/control/resources/context-frames")) {
+        return Promise.resolve(jsonResponse(buildSnapshot().resources.context_continuity));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
+    await userEvent.type(input, "今天天气怎么样？");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    await act(async () => {
+      FakeEventSource.instances[0]?.emit("MODEL_CALL_FAILED", {
+        event_id: "evt-hidden-failure",
+        task_id: "task-chat-stream-filter",
+        task_seq: 2,
+        ts: "2026-03-09T10:05:10Z",
+        type: "MODEL_CALL_FAILED",
+        actor: "system",
+        payload: {
+          skill_id: "chat.general.inline",
+          error: "temporary upstream failure",
+        },
+        final: false,
+      });
+      FakeEventSource.instances[0]?.emit("MODEL_CALL_COMPLETED", {
+        event_id: "evt-final-completed",
+        task_id: "task-chat-stream-filter",
+        task_seq: 3,
+        ts: "2026-03-09T10:05:30Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "深圳今天晴，约 20 摄氏度。",
+        },
+        final: false,
+      });
+    });
+
+    expect(await screen.findByText("深圳今天晴，约 20 摄氏度。")).toBeInTheDocument();
+    expect(screen.queryByText("本次回复失败，请重试。")).not.toBeInTheDocument();
+    expect(screen.queryByText("本次回复没有成功完成，请稍后重试。")).not.toBeInTheDocument();
   });
 
   it("重新进入 Chat 时会优先恢复最近的 Web 会话", async () => {

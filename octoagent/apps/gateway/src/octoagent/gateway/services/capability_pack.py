@@ -497,17 +497,28 @@ class CapabilityPackService:
         effective_tool_profile = request.tool_profile or binding.tool_profile
         context_profile = self._coerce_tool_profile(effective_tool_profile)
         tool_by_name = {tool.tool_name: tool for tool in pack.tools}
-        desired_tools = self._dedupe_preserve_order(
-            [
-                *binding.selected_tools,
-                *self._profile_first_core_tool_names(),
-                *[
-                    tool.tool_name
-                    for tool in pack.tools
-                    if tool.tool_group in binding.default_tool_groups
-                ],
-            ]
-        )
+        if self._requires_weather_toolset(request.query, binding.worker_type):
+            desired_tools = self._dedupe_preserve_order(
+                [
+                    *binding.selected_tools,
+                    *self._profile_first_core_tool_names(),
+                    "runtime.now",
+                    "web.search",
+                    "web.fetch",
+                ]
+            )
+        else:
+            desired_tools = self._dedupe_preserve_order(
+                [
+                    *binding.selected_tools,
+                    *self._profile_first_core_tool_names(),
+                    *[
+                        tool.tool_name
+                        for tool in pack.tools
+                        if tool.tool_group in binding.default_tool_groups
+                    ],
+                ]
+            )
         mounted_tools: list[ToolAvailabilityExplanation] = []
         blocked_tools: list[ToolAvailabilityExplanation] = []
         mounted_names: list[str] = []
@@ -2758,6 +2769,23 @@ class CapabilityPackService:
         if any(token in lowered for token in common_tokens):
             return worker_type in {WorkerType.RESEARCH, WorkerType.OPS}
         return worker_type == WorkerType.OPS and any(token in lowered for token in ops_tokens)
+
+    @staticmethod
+    def _requires_weather_toolset(objective: str, worker_type: WorkerType) -> bool:
+        if worker_type != WorkerType.RESEARCH:
+            return False
+        lowered = objective.lower()
+        weather_tokens = (
+            "天气",
+            "weather",
+            "气温",
+            "温度",
+            "下雨",
+            "降雨",
+            "体感",
+            "穿衣",
+        )
+        return any(token in lowered for token in weather_tokens)
 
     @classmethod
     def _effective_tool_profile_for_objective(

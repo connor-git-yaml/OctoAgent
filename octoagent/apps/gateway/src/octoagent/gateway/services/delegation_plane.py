@@ -961,6 +961,11 @@ class DelegationPlaneService:
             return WorkerType.RESEARCH
         if any(token in text for token in ("dev", "代码", "修复", "实现", "测试", "patch")):
             return WorkerType.DEV
+        if CapabilityPackService._requires_standard_web_access(
+            user_text,
+            WorkerType.RESEARCH,
+        ):
+            return WorkerType.RESEARCH
         return WorkerType.GENERAL
 
     def _select_target_kind(

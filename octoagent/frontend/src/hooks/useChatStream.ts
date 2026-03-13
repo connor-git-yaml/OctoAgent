@@ -98,8 +98,8 @@ function buildRestoreCandidateTaskIds(
 function extractAgentMessage(
   eventData: Pick<SSEEventData, "payload"> & { type: string }
 ): string {
-  const payload = eventData.payload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+  const payload = extractEventPayload(eventData);
+  if (!payload) {
     return "";
   }
   if (typeof payload.response === "string" && payload.response.trim()) {
@@ -115,6 +115,39 @@ function extractAgentMessage(
     return payload.summary;
   }
   return "";
+}
+
+function extractEventPayload(
+  eventData: Pick<SSEEventData, "payload"> & { type: string }
+): Record<string, unknown> | null {
+  const payload = eventData.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  return payload;
+}
+
+function extractArtifactRef(
+  eventData: Pick<SSEEventData, "payload"> & { type: string }
+): string {
+  const payload = extractEventPayload(eventData);
+  if (!payload) {
+    return "";
+  }
+  const artifactRef = payload.artifact_ref;
+  return typeof artifactRef === "string" ? artifactRef.trim() : "";
+}
+
+function isUserVisibleModelEvent(
+  eventData: Pick<SSEEventData, "payload"> & { type: string }
+): boolean {
+  const payload = extractEventPayload(eventData);
+  if (!payload) {
+    return true;
+  }
+  const skillId = typeof payload.skill_id === "string" ? payload.skill_id.trim() : "";
+  const artifactRef = typeof payload.artifact_ref === "string" ? payload.artifact_ref.trim() : "";
+  return !skillId || Boolean(artifactRef);
 }
 
 function extractUserMessage(event: TaskEvent): string {
@@ -142,6 +175,7 @@ function extractArtifactText(artifact: Artifact | undefined): string {
 
 function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] {
   const llmArtifacts = detail.artifacts.filter((artifact) => artifact.name === "llm-response");
+  const llmArtifactsById = new Map(llmArtifacts.map((artifact) => [artifact.artifact_id, artifact]));
   const orderedEvents = [...detail.events].sort((left, right) => left.task_seq - right.task_seq);
   const restored: ChatMessage[] = [];
   let artifactIndex = 0;
@@ -162,10 +196,17 @@ function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] 
     }
 
     if (event.type === "MODEL_CALL_COMPLETED") {
+      if (!isUserVisibleModelEvent(event as TaskEvent & { type: string })) {
+        continue;
+      }
+      const artifactRef = extractArtifactRef(event as TaskEvent & { type: string });
+      const artifact =
+        (artifactRef ? llmArtifactsById.get(artifactRef) : undefined) ?? llmArtifacts[artifactIndex];
       const content =
-        extractAgentMessage(event as TaskEvent & { type: string }) ||
-        extractArtifactText(llmArtifacts[artifactIndex]);
-      artifactIndex += 1;
+        extractAgentMessage(event as TaskEvent & { type: string }) || extractArtifactText(artifact);
+      if (!artifactRef && artifactIndex < llmArtifacts.length) {
+        artifactIndex += 1;
+      }
       if (!content) {
         continue;
       }
@@ -179,6 +220,9 @@ function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] 
     }
 
     if (event.type === "MODEL_CALL_FAILED") {
+      if (!isUserVisibleModelEvent(event as TaskEvent & { type: string })) {
+        continue;
+      }
       restored.push({
         id: `restore-agent-${event.event_id}`,
         role: "agent",
@@ -272,7 +316,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
             };
 
             // 检查是否是模型回复事件
-            if (eventData.type === "MODEL_CALL_COMPLETED") {
+            if (eventData.type === "MODEL_CALL_COMPLETED" && isUserVisibleModelEvent(eventData)) {
               const content = extractAgentMessage(eventData);
               setMessages((prev) =>
                 prev.map((msg) =>
@@ -288,7 +332,10 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
               setStreaming(false);
             }
 
-            if (eventData.type === "MODEL_CALL_FAILED" || eventData.type === "ERROR") {
+            if (
+              (eventData.type === "MODEL_CALL_FAILED" && isUserVisibleModelEvent(eventData)) ||
+              eventData.type === "ERROR"
+            ) {
               setError("本次回复没有成功完成，请稍后重试。");
               setMessages((prev) =>
                 prev.map((msg) =>

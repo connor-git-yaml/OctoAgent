@@ -113,6 +113,38 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     await store_group.conn.close()
 
 
+async def test_prepare_dispatch_routes_weather_queries_to_research_with_web_tools(
+    tmp_path: Path,
+) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="深圳今天天气怎么样",
+            idempotency_key="delegation-weather-route",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="深圳今天天气怎么样",
+            worker_capability="llm_generation",
+            metadata={},
+        )
+    )
+
+    assert plan.dispatch_envelope is not None
+    assert plan.work.selected_worker_type.value == "research"
+    assert plan.work.target_kind.value == "subagent"
+    assert plan.dispatch_envelope.worker_capability == "research"
+    assert "web.search" in plan.tool_selection.selected_tools
+    assert "browser.open" not in plan.tool_selection.selected_tools
+    assert "browser.snapshot" not in plan.tool_selection.selected_tools
+
+    await store_group.conn.close()
+
+
 async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     store_group, task_service, delegation_plane = await _build_services(tmp_path)
     task_id, _ = await task_service.create_task(

@@ -247,8 +247,30 @@ async def test_litellm_skill_client_uses_responses_api_and_roundtrips_function_c
     assert second.complete is True
     assert "Default Project" in second.content
     assert second.metadata["model_name"] == "gpt-5.4"
-    assert captures[1]["json"]["input"][-1]["type"] == "function_call_output"
-    assert captures[1]["json"]["input"][-1]["call_id"] == "call_123"
+    assert captures[1]["json"]["input"][-2] == {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "output_text",
+                "text": "[Calling tools: project.inspect({'project_id': 'project-default'})]",
+            }
+        ],
+    }
+    assert captures[1]["json"]["input"][-1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": (
+                    "Tool execution results:\n"
+                    '- project.inspect: {"project":{"name":"Default Project"}}\n\n'
+                    "Based on these results, either call the next necessary tool "
+                    "immediately or provide the final answer now. "
+                    "Do not reply with plans like '我先查一下' or '我再看看'."
+                ),
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
