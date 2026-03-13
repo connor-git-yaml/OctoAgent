@@ -440,7 +440,10 @@ class TestControlPlaneApi:
 
         assert resp.status_code == 200
         payload = resp.json()
+        assert payload["status"] == "ready"
         assert payload["contract_version"] == "1.0.0"
+        assert payload["degraded_sections"] == []
+        assert payload["resource_errors"] == {}
         assert set(payload["resources"].keys()) == {
             "wizard",
             "config",
@@ -550,6 +553,31 @@ class TestControlPlaneApi:
         worker_profiles_payload = worker_profiles_resp.json()
         assert worker_profiles_payload["resource_type"] == "worker_profiles"
         assert worker_profiles_payload["profiles"][0]["dynamic_context"]["active_project_id"]
+
+    async def test_snapshot_returns_partial_degraded_payload_when_section_fails(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+        monkeypatch,
+    ) -> None:
+        async def broken_memory_console():
+            raise RuntimeError("memory backend offline")
+
+        monkeypatch.setattr(
+            seeded_memory_control_plane.state.control_plane_service,
+            "get_memory_console",
+            broken_memory_console,
+        )
+
+        resp = await control_plane_client.get("/api/control/snapshot")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["status"] == "degraded"
+        assert "memory" in payload["degraded_sections"]
+        assert payload["resource_errors"]["memory"]["code"] == "SNAPSHOT_SECTION_UNAVAILABLE"
+        assert payload["resources"]["memory"]["resource_type"] == "memory_unavailable"
+        assert payload["resources"]["memory"]["degraded"]["is_degraded"] is True
 
     async def test_capability_refresh_action_invokes_refresh(
         self,
@@ -3418,8 +3446,10 @@ class TestControlPlaneApi:
 
         events = await store_group.event_store.get_events_for_task(task_id)
         user_event = next(item for item in events if item.type.value == "USER_MESSAGE")
-        assert user_event.payload["metadata"]["requested_worker_profile_id"] == profile.profile_id
-        assert user_event.payload["metadata"]["effective_worker_snapshot_id"] == (
+        assert user_event.payload["control_metadata"]["requested_worker_profile_id"] == (
+            profile.profile_id
+        )
+        assert user_event.payload["control_metadata"]["effective_worker_snapshot_id"] == (
             "worker-snapshot:worker-profile-runtime-alpha:1"
         )
 

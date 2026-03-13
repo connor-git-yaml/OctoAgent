@@ -83,7 +83,7 @@ class OrchestratorRequest(BaseModel):
         default=None,
         description="冻结后的运行时控制上下文",
     )
-    metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
 
     @model_validator(mode="after")
     def _validate_hops(self) -> "OrchestratorRequest":
@@ -119,7 +119,7 @@ class DispatchEnvelope(BaseModel):
         default=None,
         description="冻结后的运行时控制上下文",
     )
-    metadata: dict[str, str] = Field(default_factory=dict, description="扩展元数据")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
 
     @model_validator(mode="after")
     def _validate_hops(self) -> "DispatchEnvelope":

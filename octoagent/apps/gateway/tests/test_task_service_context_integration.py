@@ -293,6 +293,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         task_id=task_id,
         user_text=message.text,
         llm_service=llm_service,
+        dispatch_metadata=await service.get_latest_user_metadata(task_id),
     )
 
     assert len(memory_calls) == 1
@@ -364,6 +365,91 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in request_text
     assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in request_text
     assert final_tokens > history_tokens
+
+    await store_group.conn.close()
+
+
+async def test_task_service_prompt_context_only_exposes_sanitized_control_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f043-context.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的方案拆解",
+        metadata={
+            "agent_profile_id": "attacker-profile",
+            "approval_token": "secret-token-123",
+        },
+        control_metadata={
+            "agent_profile_id": "agent-profile-alpha",
+            "requested_worker_profile_id": "agent-profile-alpha",
+            "target_kind": "worker",
+        },
+        idempotency_key="f043-context-sanitize-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata=await service.get_latest_user_metadata(task_id),
+    )
+
+    prompt = llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "control_metadata_summary" in joined
+    assert "agent-profile-alpha" in joined
+    assert "attacker-profile" not in joined
+    assert "secret-token-123" not in joined
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    request_artifact = next(item for item in artifacts if item.name == "llm-request-context")
+    request_content = await store_group.artifact_store.get_artifact_content(
+        request_artifact.artifact_id
+    )
+    assert request_content is not None
+    request_text = request_content.decode("utf-8")
+    assert "control_metadata_summary" in request_text
+    assert "attacker-profile" not in request_text
+    assert "secret-token-123" not in request_text
 
     await store_group.conn.close()
 

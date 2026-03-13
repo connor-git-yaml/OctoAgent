@@ -4,6 +4,7 @@
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +30,11 @@ class UserMessagePayload(BaseModel):
     text_length: int = Field(description="原始文本长度")
     text: str = Field(default="", description="完整消息文本，供续对话和上下文压缩使用")
     attachment_count: int = Field(default=0)
-    metadata: dict[str, str] = Field(default_factory=dict, description="渠道侧扩展元数据")
+    metadata: dict[str, str] = Field(default_factory=dict, description="渠道侧输入元数据")
+    control_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="受控运行元数据，仅 trusted control envelope 可写入",
+    )
 
 
 class ModelCallStartedPayload(BaseModel):

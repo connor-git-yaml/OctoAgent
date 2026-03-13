@@ -30,6 +30,7 @@ from octoagent.core.store.transaction import create_task_with_initial_events
 from octoagent.policy.models import ApprovalDecision, ApprovalStatus
 from ulid import ULID
 
+from .connection_metadata import input_metadata_from_payload, merge_control_metadata
 from .task_journal import TaskJournalService
 from .task_service import TaskService
 from .watchdog.config import WatchdogConfig
@@ -531,8 +532,9 @@ class OperatorActionService:
                 handled_at=now,
             )
 
-        metadata = self._extract_user_metadata(events)
-        metadata.update(
+        input_metadata = self._extract_input_metadata(events)
+        control_metadata = self._extract_control_metadata(events)
+        control_metadata.update(
             {
                 "retry_source_task_id": task_id,
                 "retry_action_source": request.source.value,
@@ -546,7 +548,8 @@ class OperatorActionService:
             sender_id=task.requester.sender_id,
             sender_name=task.requester.sender_id,
             text=user_text,
-            metadata=metadata,
+            metadata=input_metadata,
+            control_metadata=control_metadata,
             idempotency_key=f"operator-retry:{task_id}",
         )
         result_task_id, created = await self._task_service.create_task(message)
@@ -836,15 +839,13 @@ class OperatorActionService:
         return None
 
     @staticmethod
-    def _extract_user_metadata(events: list[Any]) -> dict[str, str]:
-        for event in events:
+    def _extract_input_metadata(events: list[Any]) -> dict[str, str]:
+        for event in reversed(events):
             if event.type != EventType.USER_MESSAGE:
                 continue
-            metadata = event.payload.get("metadata", {})
-            if isinstance(metadata, dict):
-                return {
-                    str(key): str(value)
-                    for key, value in metadata.items()
-                    if value is not None
-                }
+            return input_metadata_from_payload(event.payload)
         return {}
+
+    @staticmethod
+    def _extract_control_metadata(events: list[Any]) -> dict[str, Any]:
+        return merge_control_metadata(events)

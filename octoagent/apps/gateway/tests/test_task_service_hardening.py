@@ -275,7 +275,7 @@ class TestTaskServiceHardening:
             NormalizedMessage(
                 text="child objective",
                 idempotency_key="child-followup-metadata-001",
-                metadata={
+                control_metadata={
                     "parent_task_id": "task-parent-1",
                     "parent_work_id": "work-parent-1",
                     "requested_worker_type": "research",
@@ -291,5 +291,5 @@ class TestTaskServiceHardening:
 
         assert metadata["parent_task_id"] == "task-parent-1"
         assert metadata["parent_work_id"] == "work-parent-1"
-        assert metadata["requested_worker_type"] == "research"
-        assert metadata["target_kind"] == "subagent"
+        assert "requested_worker_type" not in metadata
+        assert "target_kind" not in metadata

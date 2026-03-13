@@ -122,7 +122,7 @@ class ContextCompactionService:
         task_id: str,
         fallback_user_text: str,
         llm_service,
-        dispatch_metadata: dict[str, str] | None = None,
+        dispatch_metadata: dict[str, Any] | None = None,
         worker_capability: str | None = None,
         tool_profile: str | None = None,
     ) -> CompiledTaskContext:
@@ -251,7 +251,7 @@ class ContextCompactionService:
         *,
         raw_tokens: int,
         turns: list[ConversationTurn],
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         worker_capability: str | None,
     ) -> bool:
         if not self._config.enabled:

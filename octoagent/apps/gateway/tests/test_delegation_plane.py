@@ -239,6 +239,42 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
     await store_group.conn.close()
 
 
+async def test_prepare_dispatch_preserves_typed_metadata_in_dispatch_envelope(
+    tmp_path: Path,
+) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请走一遍 typed metadata 路由",
+            idempotency_key="delegation-typed-metadata",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请走一遍 typed metadata 路由",
+            worker_capability="llm_generation",
+            metadata={
+                "requested_worker_profile_version": 7,
+                "target_kind": "worker",
+            },
+        )
+    )
+
+    assert plan.dispatch_envelope is not None
+    assert isinstance(plan.dispatch_envelope.metadata["requested_worker_profile_version"], int)
+    assert (
+        plan.dispatch_envelope.metadata["requested_worker_profile_version"]
+        == plan.work.requested_worker_profile_version
+    )
+    assert isinstance(plan.dispatch_envelope.metadata["selected_tools"], list)
+    assert plan.dispatch_envelope.metadata["target_kind"] == "worker"
+
+    await store_group.conn.close()
+
+
 async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> None:
     store_group, task_service, delegation_plane = await _build_services(tmp_path)
     alpha_task_id, _ = await task_service.create_task(

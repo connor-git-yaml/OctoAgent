@@ -2827,7 +2827,7 @@ class CapabilityPackService:
             sender_id=parent_task.requester.sender_id,
             sender_name=parent_task.requester.sender_id or "owner",
             text=objective,
-            metadata={
+            control_metadata={
                 "parent_task_id": parent_task.task_id,
                 "parent_work_id": parent_work.work_id,
                 "requested_worker_type": worker_type,

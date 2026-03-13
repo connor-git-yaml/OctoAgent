@@ -150,12 +150,21 @@ async def test_retry_task_creates_successor_and_records_audit(tmp_path: Path) ->
     )
 
     events = await store_group.event_store.get_events_for_task(task_id)
+    retry_events = await store_group.event_store.get_events_for_task(
+        result.retry_launch.result_task_id if result.retry_launch is not None else ""
+    )
     assert result.outcome == OperatorActionOutcome.SUCCEEDED
     assert result.retry_launch is not None
     assert result.retry_launch.source_task_id == task_id
     assert runner.enqueued[0][0] == result.retry_launch.result_task_id
     assert events[-1].type == EventType.OPERATOR_ACTION_RECORDED
     assert events[-1].payload["result_task_id"] == result.retry_launch.result_task_id
+    retry_user_event = next(
+        event for event in retry_events if event.type == EventType.USER_MESSAGE
+    )
+    assert retry_user_event.payload["control_metadata"]["retry_source_task_id"] == task_id
+    assert retry_user_event.payload["control_metadata"]["retry_action_source"] == "web"
+    assert retry_user_event.payload["control_metadata"]["retry_actor_id"] == "user:web"
 
     await store_group.conn.close()
 

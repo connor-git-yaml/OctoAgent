@@ -108,8 +108,8 @@ class OrchestratorPolicyGate:
             return OrchestratorPolicyDecision(allow=True, reason="risk_not_high")
 
         approval_id = (
-            request.metadata.get("approval_id", "").strip()
-            or request.metadata.get("approval_token", "").strip()
+            str(request.metadata.get("approval_id", "")).strip()
+            or str(request.metadata.get("approval_token", "")).strip()
         )
         if not approval_id:
             return OrchestratorPolicyDecision(
@@ -373,7 +373,7 @@ class OrchestratorService:
         hop_count: int = 0,
         max_hops: int = 3,
         tool_profile: str = "standard",
-        metadata: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> WorkerResult:
         trace_id = f"trace-{task_id}"
         task = await self._stores.task_store.get_task(task_id)

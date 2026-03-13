@@ -48,6 +48,7 @@ from .context_compaction import (
     estimate_messages_tokens,
     truncate_chars,
 )
+from .connection_metadata import summarize_control_metadata_for_prompt
 
 log = structlog.get_logger()
 
@@ -296,7 +297,7 @@ class AgentContextService:
         *,
         task: Task,
         compiled: CompiledTaskContext,
-        dispatch_metadata: dict[str, str] | None = None,
+        dispatch_metadata: dict[str, Any] | None = None,
         worker_capability: str | None = None,
         runtime_context: RuntimeControlContext | None = None,
     ) -> CompiledTaskContext:
@@ -478,7 +479,7 @@ class AgentContextService:
         *,
         task: Task,
         trigger_text: str,
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         worker_capability: str | None,
         runtime_context: RuntimeControlContext | None,
     ) -> ContextResolveRequest:
@@ -1237,7 +1238,7 @@ class AgentContextService:
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
         include_runtime_context: bool = True,
     ) -> tuple[list[dict[str, str]], list[str]]:
@@ -1364,6 +1365,7 @@ class AgentContextService:
         if include_runtime_context and (
             worker_capability or dispatch_metadata or runtime_context is not None
         ):
+            control_summary = summarize_control_metadata_for_prompt(dispatch_metadata)
             if runtime_context is not None:
                 runtime_summary = (
                     f"session_id={runtime_context.session_id or 'N/A'}, "
@@ -1381,7 +1383,7 @@ class AgentContextService:
                     "content": (
                         f"RuntimeContext: worker_capability={worker_capability or 'main'}\n"
                         f"runtime_snapshot={runtime_summary}\n"
-                        f"dispatch_metadata={dispatch_metadata}"
+                        f"control_metadata_summary={control_summary}"
                     ),
                 }
             )
@@ -1402,7 +1404,7 @@ class AgentContextService:
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]

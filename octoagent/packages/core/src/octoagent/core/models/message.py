@@ -4,6 +4,7 @@
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -41,5 +42,9 @@ class NormalizedMessage(BaseModel):
     metadata: dict[str, str] = Field(
         default_factory=dict,
         description="渠道侧扩展元数据",
+    )
+    control_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="受控运行元数据，仅 trusted internal flows 可写入",
     )
     idempotency_key: str = Field(description="幂等键，必填")

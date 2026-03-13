@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import octoagent.gateway.services.task_service as task_service_module
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.store import create_store_group
@@ -78,7 +79,7 @@ class TestChatSendRoute:
         payload = detail.json()
         user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
         assert user_events
-        metadata = user_events[-1]["payload"]["metadata"]
+        metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["agent_profile_id"] == "worker-profile-chat-alpha"
         assert metadata["requested_worker_profile_id"] == "worker-profile-chat-alpha"
 
@@ -134,3 +135,35 @@ class TestChatSendRoute:
             json={"message": "unknown", "task_id": "task-not-exists"},
         )
         assert resp.status_code == 404
+
+    async def test_send_chat_returns_create_failure_when_task_creation_breaks(
+        self, client: AsyncClient, monkeypatch
+    ) -> None:
+        async def boom(*args, **kwargs):
+            raise RuntimeError("create failed")
+
+        monkeypatch.setattr(task_service_module.TaskService, "create_task", boom)
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={"message": "create failure"},
+        )
+
+        assert resp.status_code == 500
+        assert resp.json()["detail"]["code"] == "CHAT_TASK_CREATE_FAILED"
+
+    async def test_send_chat_returns_enqueue_failure_when_new_task_cannot_start(
+        self, client: AsyncClient, test_app
+    ) -> None:
+        async def broken_enqueue(*args, **kwargs):
+            raise RuntimeError("enqueue failed")
+
+        test_app.state.task_runner.enqueue = broken_enqueue
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={"message": "enqueue failure"},
+        )
+
+        assert resp.status_code == 500
+        assert resp.json()["detail"]["code"] == "CHAT_TASK_ENQUEUE_FAILED"

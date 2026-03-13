@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -30,7 +31,7 @@ async def _enqueue_or_run(
     service,
     task_id: str,
     message: str,
-    dispatch_metadata: dict[str, str] | None = None,
+    dispatch_metadata: dict[str, Any] | None = None,
 ) -> None:
     if not (
         hasattr(request.app.state, "llm_service")
@@ -53,6 +54,22 @@ async def _enqueue_or_run(
     task.add_done_callback(_background_tasks.discard)
 
 
+def _chat_send_failure(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    task_id: str | None = None,
+) -> HTTPException:
+    detail: dict[str, Any] = {
+        "code": code,
+        "message": message,
+    }
+    if task_id:
+        detail["task_id"] = task_id
+    return HTTPException(status_code=status_code, detail=detail)
+
+
 @router.post("/api/chat/send", response_model=ChatSendResponse)
 async def send_chat_message(
     body: ChatSendRequest,
@@ -64,11 +81,11 @@ async def send_chat_message(
     FR-023: 接收消息，创建/复用 Task，返回 stream_url。
     前端使用 EventSource 连接 stream_url 获取流式输出。
     """
-    chat_metadata: dict[str, str] = {}
+    chat_control_metadata: dict[str, Any] = {}
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
     if requested_agent_profile_id:
-        chat_metadata["agent_profile_id"] = requested_agent_profile_id
-        chat_metadata["requested_worker_profile_id"] = requested_agent_profile_id
+        chat_control_metadata["agent_profile_id"] = requested_agent_profile_id
+        chat_control_metadata["requested_worker_profile_id"] = requested_agent_profile_id
 
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
@@ -79,32 +96,46 @@ async def send_chat_message(
 
     # 创建 Task 记录（如果是新对话）
     if not body.task_id:
+        from octoagent.core.models.message import NormalizedMessage
+
+        msg = NormalizedMessage(
+            channel="web",
+            thread_id=task_id,
+            sender_id="owner",
+            sender_name="Owner",
+            text=body.message,
+            control_metadata=chat_control_metadata,
+            idempotency_key=f"chat-{task_id}",
+        )
+
         try:
-            from octoagent.core.models.message import NormalizedMessage
-
-            msg = NormalizedMessage(
-                channel="web",
-                thread_id=task_id,
-                sender_id="owner",
-                sender_name="Owner",
-                text=body.message,
-                metadata=chat_metadata,
-                idempotency_key=f"chat-{task_id}",
-            )
-
             created_task_id, created = await service.create_task(msg)
-            if created:
-                task_id = created_task_id
+        except Exception as exc:
+            logger.warning("chat_send_create_failed", exc_info=True)
+            raise _chat_send_failure(
+                status_code=500,
+                code="CHAT_TASK_CREATE_FAILED",
+                message="任务未创建或未进入执行主链。",
+                task_id=task_id if task_id.startswith("01") else None,
+            ) from exc
+        if created:
+            task_id = created_task_id
+            try:
                 await _enqueue_or_run(
                     request,
                     service,
                     task_id,
                     body.message,
-                    dispatch_metadata=chat_metadata,
+                    dispatch_metadata=chat_control_metadata,
                 )
-        except Exception:
-            # 降级: Task 创建失败时仍返回 task_id，记录日志便于排查
-            logger.warning("Task 创建失败，降级返回 task_id", exc_info=True)
+            except Exception as exc:
+                logger.warning("chat_send_enqueue_failed", exc_info=True)
+                raise _chat_send_failure(
+                    status_code=500,
+                    code="CHAT_TASK_ENQUEUE_FAILED",
+                    message="任务已创建但未能进入执行主链。",
+                    task_id=task_id,
+                ) from exc
     else:
         try:
             existing_task = await store_group.task_store.get_task(task_id)
@@ -117,22 +148,27 @@ async def send_chat_message(
             await service.append_user_message(
                 task_id=task_id,
                 text=body.message,
-                metadata=chat_metadata,
+                control_metadata=chat_control_metadata,
             )
             await _enqueue_or_run(
                 request,
                 service,
                 task_id,
                 body.message,
-                dispatch_metadata=chat_metadata,
+                dispatch_metadata=chat_control_metadata,
             )
         except HTTPException:
             raise
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception:
-            logger.warning("续对话写入失败", exc_info=True)
-            raise
+        except Exception as exc:
+            logger.warning("chat_send_continue_failed", exc_info=True)
+            raise _chat_send_failure(
+                status_code=500,
+                code="CHAT_TASK_ENQUEUE_FAILED",
+                message="任务已接收但未能进入执行主链。",
+                task_id=task_id,
+            ) from exc
 
     # 构造 stream URL
     stream_url = f"/api/stream/task/{task_id}"

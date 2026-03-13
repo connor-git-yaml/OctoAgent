@@ -147,6 +147,7 @@ from pydantic import SecretStr
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
+from .connection_metadata import merge_control_metadata
 from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
@@ -241,51 +242,84 @@ class ControlPlaneService:
         )
 
     async def get_snapshot(self) -> dict[str, Any]:
-        wizard = await self.get_wizard_session()
-        config = await self.get_config_schema()
-        project_selector = await self.get_project_selector()
-        sessions = await self.get_session_projection()
-        agent_profiles = await self.get_agent_profiles_document()
-        worker_profiles = await self.get_worker_profiles_document()
-        owner_profile = await self.get_owner_profile_document()
-        bootstrap_session = await self.get_bootstrap_session_document()
-        context_continuity = await self.get_context_continuity_document()
-        policy_profiles = await self.get_policy_profiles_document()
-        capability_pack = await self.get_capability_pack_document()
-        skill_governance = await self.get_skill_governance_document()
-        setup_governance = await self.get_setup_governance_document()
-        delegation = await self.get_delegation_document()
-        pipelines = await self.get_skill_pipeline_document()
-        automation = await self.get_automation_document()
-        diagnostics = await self.get_diagnostics_summary()
-        memory = await self.get_memory_console()
-        imports = await self.get_import_workbench()
         registry = self.get_action_registry()
+        resources: dict[str, Any] = {}
+        degraded_sections: list[str] = []
+        resource_errors: dict[str, dict[str, str]] = {}
+        resolvers: tuple[tuple[str, Any], ...] = (
+            ("wizard", self.get_wizard_session),
+            ("config", self.get_config_schema),
+            ("project_selector", self.get_project_selector),
+            ("sessions", self.get_session_projection),
+            ("agent_profiles", self.get_agent_profiles_document),
+            ("worker_profiles", self.get_worker_profiles_document),
+            ("owner_profile", self.get_owner_profile_document),
+            ("bootstrap_session", self.get_bootstrap_session_document),
+            ("context_continuity", self.get_context_continuity_document),
+            ("policy_profiles", self.get_policy_profiles_document),
+            ("capability_pack", self.get_capability_pack_document),
+            ("skill_governance", self.get_skill_governance_document),
+            ("setup_governance", self.get_setup_governance_document),
+            ("delegation", self.get_delegation_document),
+            ("pipelines", self.get_skill_pipeline_document),
+            ("automation", self.get_automation_document),
+            ("diagnostics", self.get_diagnostics_summary),
+            ("memory", self.get_memory_console),
+            ("imports", self.get_import_workbench),
+        )
+        for section, resolver in resolvers:
+            try:
+                document = await resolver()
+                resources[section] = document.model_dump(mode="json", by_alias=True)
+            except Exception as exc:  # pragma: no cover - 通过 API 测试覆盖
+                log.warning(
+                    "control_plane_snapshot_section_failed",
+                    section=section,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                    exc_info=True,
+                )
+                degraded_sections.append(section)
+                resource_errors[section] = {
+                    "code": "SNAPSHOT_SECTION_UNAVAILABLE",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+                resources[section] = self._degraded_snapshot_resource(
+                    section=section,
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                )
         return {
+            "status": "degraded" if degraded_sections else "ready",
             "contract_version": registry.contract_version,
-            "resources": {
-                "wizard": wizard.model_dump(mode="json", by_alias=True),
-                "config": config.model_dump(mode="json", by_alias=True),
-                "project_selector": project_selector.model_dump(mode="json", by_alias=True),
-                "sessions": sessions.model_dump(mode="json", by_alias=True),
-                "agent_profiles": agent_profiles.model_dump(mode="json", by_alias=True),
-                "worker_profiles": worker_profiles.model_dump(mode="json", by_alias=True),
-                "owner_profile": owner_profile.model_dump(mode="json", by_alias=True),
-                "bootstrap_session": bootstrap_session.model_dump(mode="json", by_alias=True),
-                "context_continuity": context_continuity.model_dump(mode="json", by_alias=True),
-                "policy_profiles": policy_profiles.model_dump(mode="json", by_alias=True),
-                "capability_pack": capability_pack.model_dump(mode="json", by_alias=True),
-                "skill_governance": skill_governance.model_dump(mode="json", by_alias=True),
-                "setup_governance": setup_governance.model_dump(mode="json", by_alias=True),
-                "delegation": delegation.model_dump(mode="json", by_alias=True),
-                "pipelines": pipelines.model_dump(mode="json", by_alias=True),
-                "automation": automation.model_dump(mode="json", by_alias=True),
-                "diagnostics": diagnostics.model_dump(mode="json", by_alias=True),
-                "memory": memory.model_dump(mode="json", by_alias=True),
-                "imports": imports.model_dump(mode="json", by_alias=True),
-            },
+            "resources": resources,
             "registry": registry.model_dump(mode="json", by_alias=True),
+            "degraded_sections": degraded_sections,
+            "resource_errors": resource_errors,
             "generated_at": datetime.now(tz=UTC).isoformat(),
+        }
+
+    @staticmethod
+    def _degraded_snapshot_resource(
+        *,
+        section: str,
+        error_type: str,
+        message: str,
+    ) -> dict[str, Any]:
+        return {
+            "resource_type": f"{section}_unavailable",
+            "status": "degraded",
+            "warnings": [f"{section} snapshot unavailable"],
+            "capabilities": [],
+            "degraded": {
+                "is_degraded": True,
+                "reasons": ["snapshot_section_unavailable"],
+            },
+            "error": {
+                "type": error_type,
+                "message": message,
+            },
         }
 
     def get_action_registry(self) -> ActionRegistryDocument:
@@ -3952,7 +3986,7 @@ class ControlPlaneService:
                 sender_id=parent_task.requester.sender_id,
                 sender_name=parent_task.requester.sender_id or "owner",
                 text=objective,
-                metadata={
+                control_metadata={
                     "parent_task_id": parent_task.task_id,
                     "parent_work_id": parent_work.work_id,
                     "requested_worker_type": worker_type,
@@ -4901,9 +4935,9 @@ class ControlPlaneService:
             sender_name=request.actor.actor_label or "Owner",
             text=objective,
             idempotency_key=f"spawn:{profile.profile_id}:{objective}:{ULID()}",
-            metadata={
+            control_metadata={
                 "requested_worker_profile_id": profile.profile_id,
-                "requested_worker_profile_version": str(requested_revision),
+                "requested_worker_profile_version": requested_revision,
                 "effective_worker_snapshot_id": self._worker_snapshot_id(
                     profile.profile_id,
                     requested_revision,
@@ -6399,16 +6433,9 @@ class ControlPlaneService:
                 return str(event.payload.get("text_preview", "")).strip()
         return ""
 
-    async def _extract_latest_user_metadata(self, task_id: str) -> dict[str, str]:
+    async def _extract_latest_user_metadata(self, task_id: str) -> dict[str, Any]:
         events = await self._stores.event_store.get_events_for_task(task_id)
-        for event in reversed(events):
-            if event.type != EventType.USER_MESSAGE:
-                continue
-            raw = event.payload.get("metadata", {})
-            if not isinstance(raw, dict):
-                return {}
-            return {str(key): str(value) for key, value in raw.items()}
-        return {}
+        return merge_control_metadata(events)
 
     @staticmethod
     def _is_work_merge_ready(work, works: list[Any]) -> bool:

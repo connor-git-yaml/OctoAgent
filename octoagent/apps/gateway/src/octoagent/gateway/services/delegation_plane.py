@@ -339,18 +339,17 @@ class DelegationPlaneService:
             tool_profile=request.tool_profile,
             runtime_context=resolved_runtime_context,
             metadata={
-                **{key: str(value) for key, value in request.metadata.items()},
+                **dict(request.metadata),
                 "work_id": updated_work.work_id,
                 "pipeline_run_id": pipeline_run.run_id,
                 "selected_worker_type": updated_work.selected_worker_type.value,
+                "selected_tools": list(selection.selected_tools),
                 "selected_tools_json": json.dumps(selection.selected_tools, ensure_ascii=False),
                 "target_kind": updated_work.target_kind.value,
                 "tool_selection_id": selection.selection_id,
                 "agent_profile_id": updated_work.agent_profile_id,
                 "requested_worker_profile_id": updated_work.requested_worker_profile_id,
-                "requested_worker_profile_version": str(
-                    updated_work.requested_worker_profile_version
-                ),
+                "requested_worker_profile_version": updated_work.requested_worker_profile_version,
                 "effective_worker_snapshot_id": updated_work.effective_worker_snapshot_id,
                 "context_frame_id": updated_work.context_frame_id,
                 "runtime_context_json": encode_runtime_context(resolved_runtime_context),
@@ -656,14 +655,18 @@ class DelegationPlaneService:
                 }
             )
         metadata = {
-            **{key: str(value) for key, value in state.get("metadata", {}).items()},
+            **dict(state.get("metadata", {})),
             "work_id": work.work_id,
             "pipeline_run_id": run.run_id,
             "selected_worker_type": work.selected_worker_type.value,
+            "selected_tools": list(work.selected_tools),
             "selected_tools_json": json.dumps(work.selected_tools, ensure_ascii=False),
             "target_kind": work.target_kind.value,
             "tool_selection_id": work.tool_selection_id,
             "agent_profile_id": work.agent_profile_id,
+            "requested_worker_profile_id": work.requested_worker_profile_id,
+            "requested_worker_profile_version": work.requested_worker_profile_version,
+            "effective_worker_snapshot_id": work.effective_worker_snapshot_id,
             "context_frame_id": work.context_frame_id,
             "runtime_context_json": encode_runtime_context(runtime_context),
         }

@@ -115,7 +115,7 @@ class A2ATaskPayload(BaseModel):
     """Payload for TASK messages."""
 
     user_text: str = Field(description="normalized user text")
-    metadata: dict[str, str] = Field(default_factory=dict, description="routing metadata")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="routing metadata")
     resume_from_node: str | None = Field(default=None)
     resume_state_snapshot: dict[str, Any] | None = Field(default=None)
 

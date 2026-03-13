@@ -732,7 +732,7 @@ async def test_subagent_management_tools_list_kill_and_steer_descendants(
             NormalizedMessage(
                 text="请先停下来等待我下一步指令",
                 idempotency_key="feature-032-subagents-child-manage",
-                metadata={
+                control_metadata={
                     "parent_task_id": task_id,
                     "parent_work_id": plan.work.work_id,
                     "requested_worker_type": "research",
@@ -1456,7 +1456,7 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
         events = await store_group.event_store.get_events_for_task(payload["task_id"])
         user_event = next(event for event in events if event.type.value == "USER_MESSAGE")
         assert user_event.payload["text_preview"] == "请先读取 API 现状，再输出研究摘要"
-        assert user_event.payload["metadata"]["child_title"] == "研究子任务"
+        assert user_event.payload["control_metadata"]["child_title"] == "研究子任务"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

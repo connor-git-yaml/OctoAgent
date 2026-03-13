@@ -77,6 +77,12 @@ from .agent_context import (
     memory_recall_max_hits,
     memory_recall_per_scope_limit,
 )
+from .connection_metadata import (
+    input_metadata_from_payload,
+    merge_control_metadata,
+    normalize_control_metadata,
+    normalize_input_metadata,
+)
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 from .runtime_control import runtime_context_from_metadata
@@ -158,6 +164,8 @@ class TaskService:
 
         # USER_MESSAGE 事件
         text_preview = message.text[:MESSAGE_PREVIEW_LENGTH]
+        input_metadata = normalize_input_metadata(message.metadata)
+        control_metadata = normalize_control_metadata(message.control_metadata)
         event_2_id = str(ULID())
         event_2 = Event(
             event_id=event_2_id,
@@ -171,7 +179,8 @@ class TaskService:
                 text_length=len(message.text),
                 text=message.text,
                 attachment_count=len(message.attachments),
-                metadata=message.metadata,
+                metadata=input_metadata,
+                control_metadata=control_metadata,
             ).model_dump(),
             trace_id=trace_id,
         )
@@ -213,6 +222,7 @@ class TaskService:
         sender_id: str = "owner",
         attachment_count: int = 0,
         metadata: dict[str, str] | None = None,
+        control_metadata: dict[str, Any] | None = None,
     ) -> Event:
         """向已有任务追加 USER_MESSAGE 事件。"""
         task = await self._stores.task_store.get_task(task_id)
@@ -221,6 +231,8 @@ class TaskService:
 
         trace_id = f"trace-{task_id}"
         text_preview = text[:MESSAGE_PREVIEW_LENGTH]
+        input_metadata = normalize_input_metadata(metadata)
+        trusted_control = normalize_control_metadata(control_metadata)
         event = await self._append_event_only_with_retry(
             task_id=task_id,
             event_builder=lambda seq: Event(
@@ -235,7 +247,8 @@ class TaskService:
                     text_length=len(text),
                     text=text,
                     attachment_count=attachment_count,
-                    metadata=metadata or {},
+                    metadata=input_metadata,
+                    control_metadata=trusted_control,
                 ).model_dump(),
                 trace_id=trace_id,
                 causality=EventCausality(idempotency_key=f"chat-{task_id}-{ULID()}"),
@@ -334,7 +347,7 @@ class TaskService:
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
         execution_context=None,
-        dispatch_metadata: dict[str, str] | None = None,
+        dispatch_metadata: dict[str, Any] | None = None,
         worker_capability: str | None = None,
         tool_profile: str | None = None,
         runtime_context: RuntimeControlContext | None = None,
@@ -631,7 +644,7 @@ class TaskService:
         model_alias: str | None,
         task_id: str,
         trace_id: str,
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         worker_capability: str | None,
         tool_profile: str | None,
     ):
@@ -673,7 +686,7 @@ class TaskService:
         task_id: str,
         fallback_user_text: str,
         llm_service,
-        dispatch_metadata: dict[str, str],
+        dispatch_metadata: dict[str, Any],
         worker_capability: str | None,
         tool_profile: str | None,
         runtime_context: RuntimeControlContext | None = None,
@@ -1714,18 +1727,19 @@ class TaskService:
         """查询任务详情"""
         return await self._stores.task_store.get_task(task_id)
 
-    async def get_latest_user_metadata(self, task_id: str) -> dict[str, str]:
-        """读取当前任务累计生效的 USER_MESSAGE metadata。"""
+    async def get_latest_user_metadata(self, task_id: str) -> dict[str, Any]:
+        """读取当前任务累计生效的 trusted control metadata。"""
         events = await self._stores.event_store.get_events_for_task(task_id)
-        merged: dict[str, str] = {}
-        for event in events:
+        return merge_control_metadata(events)
+
+    async def get_latest_input_metadata(self, task_id: str) -> dict[str, str]:
+        """读取最近一条 USER_MESSAGE 的 input metadata。"""
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
             if event.type != EventType.USER_MESSAGE:
                 continue
-            raw = event.payload.get("metadata", {})
-            if not isinstance(raw, dict):
-                continue
-            merged.update({str(key): str(value) for key, value in raw.items()})
-        return merged
+            return input_metadata_from_payload(event.payload)
+        return {}
 
     async def list_tasks(self, status: str | None = None) -> list[Task]:
         """查询任务列表"""
