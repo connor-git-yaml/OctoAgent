@@ -1797,6 +1797,51 @@ select:focus-visible {
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 242, 0.94));
 }
 
+.wb-settings-hero-refined {
+  align-items: center;
+}
+
+.wb-settings-hero-actions {
+  display: grid;
+  gap: 10px;
+  width: min(320px, 100%);
+}
+
+.wb-settings-summary-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.wb-settings-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.wb-section-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--cp-ink);
+  font-weight: 600;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.wb-section-chip:hover {
+  transform: translateY(-1px);
+  border-color: rgba(31, 106, 91, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+}
+
 .wb-settings-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
@@ -2455,6 +2500,30 @@ select:focus-visible {
   margin: 0;
 }
 
+.wb-field-guide-disclosure {
+  padding: 0;
+  overflow: hidden;
+}
+
+.wb-field-guide-disclosure summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: var(--cp-ink);
+}
+
+.wb-field-guide-disclosure p,
+.wb-field-guide-disclosure .wb-inline-actions,
+.wb-field-guide-disclosure .wb-field-guide-sample {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.wb-field-guide-disclosure .wb-field-guide-sample,
+.wb-field-guide-disclosure .wb-inline-actions {
+  padding-bottom: 12px;
+}
+
 .wb-field-guide-sample pre {
   margin: 0;
   padding: 12px;
@@ -2490,6 +2559,12 @@ select:focus-visible {
   gap: var(--cp-space-4);
 }
 
+.wb-settings-mode-row {
+  display: grid;
+  gap: var(--cp-space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .wb-provider-mode-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -2501,7 +2576,8 @@ select:focus-visible {
 
 .wb-mode-card,
 .wb-provider-card,
-.wb-alias-row {
+.wb-alias-row,
+.wb-provider-item {
   display: grid;
   gap: 12px;
   padding: 18px;
@@ -2518,7 +2594,8 @@ select:focus-visible {
 
 .wb-mode-card strong,
 .wb-provider-card strong,
-.wb-provider-card-head strong {
+.wb-provider-card-head strong,
+.wb-provider-item strong {
   font-size: 1rem;
   color: var(--cp-ink);
 }
@@ -2531,6 +2608,13 @@ select:focus-visible {
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
     rgba(255, 255, 255, 0.94);
   box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
+.wb-provider-item.is-default {
+  border-color: rgba(31, 106, 91, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.1), transparent 36%),
+    rgba(255, 255, 255, 0.94);
 }
 
 .wb-provider-card-head,
@@ -2554,6 +2638,32 @@ select:focus-visible {
   font-size: 0.88rem;
 }
 
+.wb-provider-preset-row,
+.wb-provider-list {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-provider-preset-row {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.wb-settings-provider-form {
+  align-items: start;
+}
+
+.wb-provider-toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--cp-ink);
+}
+
 .wb-alias-row {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
@@ -2562,6 +2672,13 @@ select:focus-visible {
 .wb-alias-actions {
   justify-content: flex-end;
   align-self: end;
+}
+
+.wb-settings-review-grid {
+  display: grid;
+  gap: var(--cp-space-4);
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  align-items: start;
 }
 
 .wb-chat-layout {
@@ -2980,7 +3097,10 @@ select:focus-visible {
 
   .wb-card-grid-4,
   .wb-card-grid-3,
+  .wb-settings-summary-grid,
   .wb-settings-layout,
+  .wb-settings-mode-row,
+  .wb-settings-review-grid,
   .wb-butler-summary-grid,
   .wb-agent-workflow-nav,
   .wb-split,
@@ -2998,6 +3118,7 @@ select:focus-visible {
   .wb-worker-hub-layout,
   .wb-provider-mode-grid,
   .wb-provider-layout,
+  .wb-provider-preset-row,
   .wb-chat-layout,
   .wb-form-grid,
   .wb-agent-form-grid,
@@ -3057,6 +3178,7 @@ select:focus-visible {
 
   .wb-topbar-actions,
   .wb-hero-actions,
+  .wb-settings-hero-actions,
   .wb-inline-form,
   .wb-inline-actions,
   .wb-worker-card-actions {

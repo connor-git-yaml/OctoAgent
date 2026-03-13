@@ -945,7 +945,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
+    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
     const input = (await screen.findAllByDisplayValue("http://localhost:4000"))[0];
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
@@ -1086,7 +1086,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
+    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
     await userEvent.click(screen.getAllByRole("button", { name: "连接并启用真实模型" })[0]);
 
     await waitFor(() =>
@@ -1165,7 +1165,7 @@ describe("App workbench routing", () => {
     expect(nameInput.value).toBe("新的 Butler");
   });
 
-  it("设置页会为体验模式展示双模式 Provider 配置和模型别名编辑器", async () => {
+  it("设置页会在体验模式下展示多 Provider 管理和别名编辑器", async () => {
     window.history.pushState({}, "", "/settings");
 
     const snapshot = buildSnapshot() as any;
@@ -1212,21 +1212,17 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
-    expect(
-      screen.getByText("你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。")
-    ).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
+    expect(screen.getByText("你现在处于体验模式，可以先完成页面和渠道配置。")).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/主 Agent 的身份与边界只在 Agents 维护/)
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "去 Agents 调 Butler" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "保持体验模式" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Provider 预设")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("OPENROUTER_API_KEY")).toBeInTheDocument();
+    expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
+    expect(screen.getByText("体验模式")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "恢复 main / cheap" }));
-    await waitFor(() => expect(screen.getAllByDisplayValue("main").length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("button", { name: "添加 OpenRouter" }));
+    await waitFor(() => expect(screen.getByDisplayValue("OPENROUTER_API_KEY")).toBeInTheDocument());
+    expect(screen.getByDisplayValue("main")).toBeInTheDocument();
     expect(screen.getByDisplayValue("cheap")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "新增别名" }));
@@ -1311,9 +1307,9 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByText("选择接入方式，并用表单完成 Provider 与模型别名配置");
-    await userEvent.click(screen.getByText("浏览器登录 ChatGPT Pro / Codex").closest("button")!);
-    await userEvent.click(screen.getByRole("button", { name: "连接并启用 OpenAI Auth" }));
+    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
+    await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
+    await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
 
     await waitFor(() =>
       expect(
@@ -1323,7 +1319,7 @@ describe("App workbench routing", () => {
         })
       ).toBe(true)
     );
-    expect(await screen.findByText("已连接")).toBeInTheDocument();
+    expect(await screen.findByText("已授权")).toBeInTheDocument();
   });
 
   it("Agents 页会把 Butler 记忆边界和召回策略提交到 setup.review", async () => {

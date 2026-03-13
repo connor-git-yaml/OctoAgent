@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
   categoryForHint,
@@ -11,7 +10,6 @@ import {
   widgetValueToFieldState,
 } from "../workbench/utils";
 import type {
-  AgentProfileItem,
   ConfigFieldHint,
   SkillGovernanceItem,
   SetupReviewSummary,
@@ -22,47 +20,8 @@ type FieldState = Record<string, string | boolean>;
 type FieldErrors = Record<string, string>;
 type SkillSelectionState = Record<string, boolean>;
 
-const DEFAULT_AGENT_NAME = "OctoAgent";
-const DEFAULT_AGENT_PERSONA =
-  "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
 const DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32\n::1/128";
 const DEFAULT_MEMORY_TIMEOUT = "5";
-const DEFAULT_MEMORY_SCOPE_LIMIT = "4";
-const DEFAULT_MEMORY_PER_SCOPE_LIMIT = "3";
-const DEFAULT_MEMORY_MAX_HITS = "4";
-
-interface MemoryAccessPolicyDraft {
-  allow_vault: boolean;
-  include_history: boolean;
-}
-
-interface MemoryRecallDraft {
-  post_filter_mode: string;
-  rerank_mode: string;
-  min_keyword_overlap: string;
-  scope_limit: string;
-  per_scope_limit: string;
-  max_hits: string;
-}
-
-interface AgentDraft {
-  scope: string;
-  name: string;
-  persona_summary: string;
-  model_alias: string;
-  tool_profile: string;
-  memory_access_policy: MemoryAccessPolicyDraft;
-  context_budget_policy: {
-    memory_recall: MemoryRecallDraft;
-  };
-}
-
-interface BlockingGuide {
-  guide_id: string;
-  section_id: string;
-  section_label: string;
-  risk: SetupRiskItem;
-}
 
 interface FieldGuide {
   title: string;
@@ -71,8 +30,6 @@ interface FieldGuide {
   exampleLabel?: string;
   actions?: Array<{ label: string; value: string }>;
 }
-
-type ProviderMode = "openai-auth" | "api-key";
 
 interface ProviderDraftItem {
   id: string;
@@ -169,94 +126,12 @@ function buildConfigPayload(
   return { config: nextConfig, errors };
 }
 
-function memoryAccessPolicyFromProfile(profile: AgentProfileItem | null): MemoryAccessPolicyDraft {
-  const raw =
-    profile?.memory_access_policy &&
-    typeof profile.memory_access_policy === "object" &&
-    !Array.isArray(profile.memory_access_policy)
-      ? profile.memory_access_policy
-      : {};
-  return {
-    allow_vault: Boolean(raw.allow_vault),
-    include_history: Boolean(raw.include_history),
-  };
-}
-
-function memoryRecallDraftFromProfile(profile: AgentProfileItem | null): MemoryRecallDraft {
-  const budget =
-    profile?.context_budget_policy &&
-    typeof profile.context_budget_policy === "object" &&
-    !Array.isArray(profile.context_budget_policy)
-      ? profile.context_budget_policy
-      : {};
-  const raw =
-    budget.memory_recall && typeof budget.memory_recall === "object" && !Array.isArray(budget.memory_recall)
-      ? (budget.memory_recall as Record<string, unknown>)
-      : {};
-  return {
-    post_filter_mode: String(raw.post_filter_mode ?? "keyword_overlap") || "keyword_overlap",
-    rerank_mode: String(raw.rerank_mode ?? "heuristic") || "heuristic",
-    min_keyword_overlap: String(raw.min_keyword_overlap ?? "1") || "1",
-    scope_limit: String(raw.scope_limit ?? DEFAULT_MEMORY_SCOPE_LIMIT) || DEFAULT_MEMORY_SCOPE_LIMIT,
-    per_scope_limit:
-      String(raw.per_scope_limit ?? DEFAULT_MEMORY_PER_SCOPE_LIMIT) || DEFAULT_MEMORY_PER_SCOPE_LIMIT,
-    max_hits: String(raw.max_hits ?? DEFAULT_MEMORY_MAX_HITS) || DEFAULT_MEMORY_MAX_HITS,
-  };
-}
-
-function buildAgentDraft(profile: AgentProfileItem | null): AgentDraft {
-  return {
-    scope: profile?.scope ?? "project",
-    name: profile?.name?.trim() ? profile.name : DEFAULT_AGENT_NAME,
-    persona_summary:
-      profile?.persona_summary?.trim() ? profile.persona_summary : DEFAULT_AGENT_PERSONA,
-    model_alias: profile?.model_alias ?? "main",
-    tool_profile: profile?.tool_profile ?? "standard",
-    memory_access_policy: memoryAccessPolicyFromProfile(profile),
-    context_budget_policy: {
-      memory_recall: memoryRecallDraftFromProfile(profile),
-    },
-  };
-}
-
-function readActiveAgentProfile(source: unknown): AgentProfileItem | null {
-  if (!source || typeof source !== "object" || Array.isArray(source)) {
-    return null;
-  }
-  const payload = source as Record<string, unknown>;
-  return {
-    profile_id: String(payload.profile_id ?? ""),
-    scope: String(payload.scope ?? "project"),
-    project_id: String(payload.project_id ?? ""),
-    name: String(payload.name ?? ""),
-    persona_summary: String(payload.persona_summary ?? ""),
-    model_alias: String(payload.model_alias ?? "main"),
-    tool_profile: String(payload.tool_profile ?? "standard"),
-    memory_access_policy:
-      payload.memory_access_policy &&
-      typeof payload.memory_access_policy === "object" &&
-      !Array.isArray(payload.memory_access_policy)
-        ? (payload.memory_access_policy as Record<string, unknown>)
-        : {},
-    context_budget_policy:
-      payload.context_budget_policy &&
-      typeof payload.context_budget_policy === "object" &&
-      !Array.isArray(payload.context_budget_policy)
-        ? (payload.context_budget_policy as Record<string, unknown>)
-        : {},
-    updated_at:
-      typeof payload.updated_at === "string" || payload.updated_at === null
-        ? payload.updated_at
-        : null,
-  };
-}
-
 function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
     case "main-agent":
       return {
-        title: "Butler",
-        description: "Butler 的身份和默认行为已经迁到 Agents 页面。",
+        title: "Providers",
+        description: "配置模型 Provider、LiteLLM 和别名路由。",
       };
     case "channels":
       return {
@@ -341,60 +216,6 @@ function parseJsonFieldValue(
   return fallback;
 }
 
-function detectPrimaryProviderId(fieldState: FieldState): string {
-  const providers = parseJsonFieldValue(fieldState.providers, []) as Array<Record<string, unknown>>;
-  const firstEnabled = providers.find(
-    (item) => typeof item?.id === "string" && item.enabled !== false
-  );
-  return typeof firstEnabled?.id === "string" ? firstEnabled.id : "openrouter";
-}
-
-function providerExampleJson(): string {
-  return JSON.stringify(
-    [
-      {
-        id: "openrouter",
-        name: "OpenRouter",
-        auth_type: "api_key",
-        api_key_env: "OPENROUTER_API_KEY",
-        enabled: true,
-      },
-    ],
-    null,
-    2
-  );
-}
-
-function modelAliasesExampleJson(providerId: string): string {
-  return JSON.stringify(
-    {
-      main: {
-        provider: providerId,
-        model: "openai/gpt-4.1-mini",
-      },
-      cheap: {
-        provider: providerId,
-        model: "openai/gpt-4.1-nano",
-      },
-    },
-    null,
-    2
-  );
-}
-
-function formatToolProfile(value: string): string {
-  switch (value) {
-    case "minimal":
-      return "仅基础工具";
-    case "standard":
-      return "常用工具";
-    case "privileged":
-      return "扩展工具";
-    default:
-      return value;
-  }
-}
-
 function optionLabelForHint(hint: ConfigFieldHint, option: string): string {
   if (hint.field_path === "runtime.llm_mode") {
     if (option === "echo") {
@@ -417,7 +238,6 @@ function optionLabelForHint(hint: ConfigFieldHint, option: string): string {
 
 function buildFieldGuide(
   hint: ConfigFieldHint,
-  fieldState: FieldState,
   usingEchoMode: boolean
 ): FieldGuide | null {
   if (hint.field_path === "memory.bridge_api_key_env") {
@@ -468,33 +288,10 @@ function buildFieldGuide(
     };
   }
   if (hint.field_path === "providers") {
-    return {
-      title: "这里填什么",
-      description: usingEchoMode
-        ? "如果你现在只是先体验本地 Web，这里可以先留空。准备接 OpenRouter / OpenAI 时，再填一个 provider。"
-        : "这里填写模型提供方列表。通常先填一个 provider 就够了，例如 OpenRouter。",
-      exampleLabel: "OpenRouter 示例",
-      example: providerExampleJson(),
-      actions: [
-        { label: "填入 OpenRouter 示例", value: providerExampleJson() },
-        { label: "清空", value: "[]" },
-      ],
-    };
+    return null;
   }
   if (hint.field_path === "model_aliases") {
-    const providerId = detectPrimaryProviderId(fieldState);
-    return {
-      title: "这里填什么",
-      description: usingEchoMode
-        ? "体验模式下可以先不填。准备接真实模型时，至少补一个 main，建议再补一个 cheap。"
-        : "这里把业务里的通用别名映射到真实模型。主 Agent 至少需要 main，便宜模型建议叫 cheap。",
-      exampleLabel: `使用 ${providerId} 的别名示例`,
-      example: modelAliasesExampleJson(providerId),
-      actions: [
-        { label: "填入 main / cheap 示例", value: modelAliasesExampleJson(providerId) },
-        { label: "清空", value: "{}" },
-      ],
-    };
+    return null;
   }
   if (hint.field_path === "front_door.trusted_proxy_cidrs") {
     return {
@@ -515,6 +312,13 @@ function buildFieldGuide(
     };
   }
   if (hint.field_path.startsWith("memory.bridge_")) {
+    if (
+      hint.field_path !== "memory.bridge_url" &&
+      hint.field_path !== "memory.bridge_api_key_env" &&
+      hint.field_path !== "memory.bridge_timeout_seconds"
+    ) {
+      return null;
+    }
     return {
       title: "什么时候才需要改",
       description:
@@ -522,51 +326,6 @@ function buildFieldGuide(
     };
   }
   return null;
-}
-
-function collectBlockingGuides(review: SetupReviewSummary): BlockingGuide[] {
-  return [
-    ...review.provider_runtime_risks.map((risk) => ({
-      guide_id: `provider-${risk.risk_id}`,
-      section_id: "main-agent",
-      section_label: "模型与连接",
-      risk,
-    })),
-    ...review.channel_exposure_risks.map((risk) => ({
-      guide_id: `channel-${risk.risk_id}`,
-      section_id: "channels",
-      section_label: "渠道接入",
-      risk,
-    })),
-    ...review.agent_autonomy_risks.map((risk) => ({
-      guide_id: `agent-${risk.risk_id}`,
-      section_id: "butler",
-      section_label: "Butler",
-      risk,
-    })),
-    ...review.tool_skill_readiness_risks.map((risk) => ({
-      guide_id: `skill-${risk.risk_id}`,
-      section_id: "governance",
-      section_label: "Skills",
-      risk,
-    })),
-    ...review.secret_binding_risks.map((risk) => ({
-      guide_id: `secret-${risk.risk_id}`,
-      section_id: "advanced",
-      section_label: "更多设置",
-      risk,
-    })),
-  ].filter((item) => item.risk.blocking);
-}
-
-function guideButtonLabel(guide: BlockingGuide): string {
-  if (guide.section_id === "butler") {
-    return "去 Agents 调 Butler";
-  }
-  if (guide.section_id === "governance") {
-    return "去 Skills 处理";
-  }
-  return `去“${guide.section_label}”处理`;
 }
 
 function readProviderRuntimeDetails(source: unknown): ProviderRuntimeDetails {
@@ -729,14 +488,6 @@ function buildDefaultAliasDrafts(providerId: string): ModelAliasDraftItem[] {
   ];
 }
 
-function guessProviderMode(providers: ProviderDraftItem[]): ProviderMode {
-  const firstEnabled = providers.find((item) => item.enabled) ?? providers[0];
-  if (firstEnabled?.id === "openai-codex" && firstEnabled.auth_type === "oauth") {
-    return "openai-auth";
-  }
-  return "api-key";
-}
-
 function envPresence(details: ProviderRuntimeDetails): Set<string> {
   return new Set([
     ...(Array.isArray(details.litellm_env_names) ? details.litellm_env_names : []),
@@ -763,10 +514,6 @@ export default function SettingsCenter() {
   const setup = snapshot!.resources.setup_governance;
   const policyProfiles = snapshot!.resources.policy_profiles;
   const skillGovernance = snapshot!.resources.skill_governance;
-  const activeAgentProfile = readActiveAgentProfile(
-    setup.agent_governance.details["active_agent_profile"]
-  );
-  const activeButlerDraft = buildAgentDraft(activeAgentProfile);
   const skillSelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
@@ -816,17 +563,20 @@ export default function SettingsCenter() {
   const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
   const providerDrafts = parseProviderDrafts(fieldState.providers);
   const aliasDrafts = parseAliasDrafts(fieldState.model_aliases);
-  const providerMode = guessProviderMode(providerDrafts);
   const activeProviders = providerDrafts.filter((item) => item.enabled);
-  const primaryProvider = activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
-  const availableProviderOptions = Array.from(
-    new Set(
-      providerDrafts.map((item) => item.id).filter(Boolean).concat(Object.keys(PROVIDER_PRESETS))
-    )
-  );
+  const defaultProvider = activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
+  const providerSelectOptions = providerDrafts
+    .map((item) => ({
+      value: item.id,
+      label: item.name?.trim() ? `${item.name} · ${item.id}` : item.id,
+    }))
+    .filter((item) => item.value.trim());
   const savedEnvNames = envPresence(providerRuntimeDetails);
   const masterKeyHint = config.ui_hints["runtime.master_key_env"];
   const proxyUrlHint = config.ui_hints["runtime.litellm_proxy_url"];
+  const reviewBlockingCount = review.blocking_reasons.length;
+  const reviewWarningCount = review.warnings.length;
+  const reviewNextActions = review.next_actions.slice(0, 3);
   function buildSetupDraft(secretStateOverride?: Record<string, string>) {
     const result = buildConfigPayload(config.current_value, config.ui_hints, fieldState);
     setFieldErrors(result.errors);
@@ -896,7 +646,11 @@ export default function SettingsCenter() {
     if (!draft) {
       return;
     }
-    if (providerMode === "openai-auth" && !providerRuntimeDetails.openai_oauth_connected) {
+    const needsOpenAIOAuth =
+      defaultProvider.id === "openai-codex" &&
+      defaultProvider.auth_type === "oauth" &&
+      !providerRuntimeDetails.openai_oauth_connected;
+    if (needsOpenAIOAuth) {
       const connected = await handleOpenAIOAuthConnect();
       if (!connected) {
         return;
@@ -951,23 +705,11 @@ export default function SettingsCenter() {
     )
       .trim()
       .toLowerCase() || "local_only";
-  const blockingGuides = collectBlockingGuides(review);
-  const activeButlerName = activeButlerDraft.name.trim() || DEFAULT_AGENT_NAME;
-  const activeButlerPersona = activeButlerDraft.persona_summary.trim() || DEFAULT_AGENT_PERSONA;
-  const activeButlerModel = activeButlerDraft.model_alias.trim() || "main";
-  const activeButlerToolProfile = activeButlerDraft.tool_profile.trim() || "standard";
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
     setFieldState((state) => ({
       ...state,
       [fieldPath]: value,
-    }));
-  }
-
-  function updateFieldValues(nextValues: Record<string, string | boolean>) {
-    setFieldState((state) => ({
-      ...state,
-      ...nextValues,
     }));
   }
 
@@ -993,21 +735,117 @@ export default function SettingsCenter() {
     updateFieldValue("model_aliases", stringifyAliasDrafts(nextAliases));
   }
 
-  function updatePrimaryProvider(patch: Partial<ProviderDraftItem>) {
-    const current = activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
-    const nextProvider: ProviderDraftItem = {
-      ...current,
-      ...patch,
-      enabled: patch.enabled ?? true,
-    };
-    if (providerDrafts.length === 0) {
-      updateProviders([nextProvider]);
+  function ensureProviderForAliases(): string {
+    const candidateId = activeProviders[0]?.id ?? providerDrafts[0]?.id;
+    if (candidateId) {
+      return candidateId;
+    }
+    const fallbackProvider = buildProviderPreset("openrouter");
+    updateProviders([fallbackProvider]);
+    return fallbackProvider.id;
+  }
+
+  function updateProviderAt(index: number, patch: Partial<ProviderDraftItem>) {
+    const current = providerDrafts[index];
+    if (!current) {
       return;
     }
     const nextProviders = [...providerDrafts];
-    const enabledIndex = nextProviders.findIndex((item) => item.enabled);
-    nextProviders[enabledIndex >= 0 ? enabledIndex : 0] = nextProvider;
+    const nextProvider: ProviderDraftItem = {
+      ...current,
+      ...patch,
+    };
+    nextProviders[index] = nextProvider;
     updateProviders(nextProviders);
+    if (patch.id && patch.id !== current.id) {
+      updateAliases(
+        aliasDrafts.map((item) =>
+          item.provider === current.id ? { ...item, provider: patch.id ?? "" } : item
+        )
+      );
+    }
+  }
+
+  function moveProviderToFront(index: number) {
+    const current = providerDrafts[index];
+    if (!current) {
+      return;
+    }
+    const nextProviders = [...providerDrafts];
+    nextProviders.splice(index, 1);
+    nextProviders.unshift({
+      ...current,
+      enabled: true,
+    });
+    updateProviders(nextProviders);
+  }
+
+  function addProviderDraft(providerId: string) {
+    if (providerId !== "custom") {
+      const existingIndex = providerDrafts.findIndex((item) => item.id === providerId);
+      if (existingIndex >= 0) {
+        updateProviderAt(existingIndex, { enabled: true });
+        moveProviderToFront(existingIndex);
+        updateFieldValue("runtime.llm_mode", "litellm");
+        return;
+      }
+    }
+    const customIndex = providerDrafts.length + 1;
+    const preset =
+      providerId === "custom"
+        ? {
+            id: `custom-provider-${customIndex}`,
+            name: `Custom Provider ${customIndex}`,
+            auth_type: "api_key" as const,
+            api_key_env: `CUSTOM_PROVIDER_${customIndex}_API_KEY`,
+            enabled: true,
+          }
+        : buildProviderPreset(providerId);
+    const nextProviders = [...providerDrafts, preset];
+    updateProviders(nextProviders);
+    updateFieldValue("runtime.llm_mode", "litellm");
+    if (aliasDrafts.length === 0) {
+      updateAliases(buildDefaultAliasDrafts(preset.id));
+    }
+  }
+
+  function removeProviderAt(index: number) {
+    const target = providerDrafts[index];
+    if (!target) {
+      return;
+    }
+    const nextProviders = providerDrafts.filter((_, providerIndex) => providerIndex !== index);
+    const fallbackProviderId = nextProviders.find((item) => item.enabled)?.id ?? nextProviders[0]?.id ?? "";
+    updateProviders(nextProviders);
+    updateAliases(
+      aliasDrafts.map((item) =>
+        item.provider === target.id ? { ...item, provider: fallbackProviderId } : item
+      )
+    );
+  }
+
+  function restoreRecommendedAliases(providerId?: string) {
+    const nextProviderId = providerId?.trim() ? providerId : ensureProviderForAliases();
+    updateAliases(buildDefaultAliasDrafts(nextProviderId));
+  }
+
+  function providerStatus(provider: ProviderDraftItem): {
+    label: string;
+    tone: string;
+  } {
+    if (!provider.enabled) {
+      return { label: "已停用", tone: "is-draft" };
+    }
+    if (provider.id === "openai-codex" && provider.auth_type === "oauth") {
+      return {
+        label: providerRuntimeDetails.openai_oauth_connected ? "已授权" : "待授权",
+        tone: providerRuntimeDetails.openai_oauth_connected ? "is-ready" : "is-warning",
+      };
+    }
+    if (savedEnvNames.has(provider.api_key_env) || Boolean(secretValues[provider.api_key_env]?.trim())) {
+      return { label: "已配置密钥", tone: "is-ready" };
+    }
+    return { label: "待填密钥", tone: "is-warning" };
   }
 
   function updateAliasAt(index: number, patch: Partial<ModelAliasDraftItem>) {
@@ -1024,7 +862,7 @@ export default function SettingsCenter() {
       ...aliasDrafts,
       {
         alias: `alias_${aliasDrafts.length + 1}`,
-        provider: primaryProvider.id,
+        provider: ensureProviderForAliases(),
         model: "",
         description: "",
         thinking_level: "",
@@ -1036,45 +874,21 @@ export default function SettingsCenter() {
     updateAliases(aliasDrafts.filter((_, itemIndex) => itemIndex !== index));
   }
 
-  function applyProviderMode(mode: ProviderMode) {
-    if (mode === "openai-auth") {
-      updateFieldValues({
-        "runtime.llm_mode": "litellm",
-        providers: stringifyProviderDrafts([buildProviderPreset("openai-codex")]),
-        model_aliases: stringifyAliasDrafts(buildDefaultAliasDrafts("openai-codex")),
-      });
-      return;
-    }
-    const currentApiKeyProvider =
-      activeProviders.find((item) => item.auth_type === "api_key") ??
-      providerDrafts.find((item) => item.auth_type === "api_key") ??
-      buildProviderPreset("openrouter");
-    updateFieldValues({
-      "runtime.llm_mode": "litellm",
-      providers: stringifyProviderDrafts([currentApiKeyProvider]),
-      model_aliases: stringifyAliasDrafts(buildDefaultAliasDrafts(currentApiKeyProvider.id)),
-    });
-  }
-
-  function changePrimaryProvider(providerId: string) {
-    const nextProvider = buildProviderPreset(providerId);
-    updatePrimaryProvider(nextProvider);
-    const currentAliases = aliasDrafts.filter((item) => item.alias.trim());
-    if (currentAliases.length === 0) {
-      updateAliases(buildDefaultAliasDrafts(providerId));
-      return;
-    }
-    updateAliases(
-      currentAliases.map((item) => ({
-        ...item,
-        provider: providerId,
-      }))
-    );
-  }
-
   async function handleOpenAIOAuthConnect() {
-    applyProviderMode("openai-auth");
-    const envName = primaryProvider.id === "openai-codex" ? primaryProvider.api_key_env : "OPENAI_API_KEY";
+    const existingIndex = providerDrafts.findIndex((item) => item.id === "openai-codex");
+    if (existingIndex >= 0) {
+      updateProviderAt(existingIndex, { auth_type: "oauth", enabled: true });
+      moveProviderToFront(existingIndex);
+    } else {
+      updateProviders([buildProviderPreset("openai-codex"), ...providerDrafts]);
+      if (aliasDrafts.length === 0) {
+        updateAliases(buildDefaultAliasDrafts("openai-codex"));
+      }
+    }
+    updateFieldValue("runtime.llm_mode", "litellm");
+    const oauthProvider =
+      providerDrafts.find((item) => item.id === "openai-codex") ?? buildProviderPreset("openai-codex");
+    const envName = oauthProvider.api_key_env || "OPENAI_API_KEY";
     const result = await submitAction("provider.oauth.openai_codex", {
       env_name: envName,
       profile_name: "openai-codex-default",
@@ -1102,7 +916,7 @@ export default function SettingsCenter() {
           const currentValue = fieldState[hint.field_path] ?? "";
           const options = selectOptions(config.schema, hint);
           const error = fieldErrors[hint.field_path];
-          const fieldGuide = buildFieldGuide(hint, fieldState, usingEchoMode);
+          const fieldGuide = buildFieldGuide(hint, usingEchoMode);
           return (
             <label
               key={hint.field_path}
@@ -1111,8 +925,8 @@ export default function SettingsCenter() {
               <span>{hint.label}</span>
               {hint.help_text ? <small>{hint.help_text}</small> : null}
               {fieldGuide ? (
-                <div className="wb-field-guide">
-                  <strong>{fieldGuide.title}</strong>
+                <details className="wb-field-guide wb-field-guide-disclosure">
+                  <summary>{fieldGuide.title}</summary>
                   <p>{fieldGuide.description}</p>
                   {fieldGuide.actions?.length ? (
                     <div className="wb-inline-actions wb-inline-actions-wrap">
@@ -1135,7 +949,7 @@ export default function SettingsCenter() {
                       <pre>{fieldGuide.example}</pre>
                     </div>
                   ) : null}
-                </div>
+                </details>
               ) : null}
               {hint.widget === "toggle" ? (
                 <input
@@ -1182,59 +996,80 @@ export default function SettingsCenter() {
 
   return (
     <div className="wb-page wb-settings-page">
-      <section className="wb-hero wb-settings-hero">
+      <section id="settings-group-overview" className="wb-hero wb-settings-hero wb-settings-hero-refined">
         <div className="wb-hero-copy">
           <p className="wb-kicker">Settings</p>
-          <h1>把平台连接留在这里，把 Butler 放回 Agents</h1>
-          <p>
-            `Settings` 现在只处理 Provider / LiteLLM、渠道接入、Memory 后端和 Skills 默认范围；
-            Butler 的身份、审批和记忆边界统一放回 `Agents`。
-          </p>
+          <h1>系统连接与默认能力</h1>
+          <p>统一管理 Provider、模型别名、渠道入口、Memory 后端和平台级安全开关。</p>
           <div className="wb-chip-row">
             <span className="wb-chip">{usingEchoMode ? "体验模式" : "真实模型模式"}</span>
             <span className="wb-chip">
               当前 Project {selector.current_project_id} / {selector.current_workspace_id}
             </span>
-            <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`}>
-              {review.ready ? "检查通过" : `待处理 ${review.blocking_reasons.length}`}
+            <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`} role="status">
+              {review.ready ? "检查通过" : `待处理 ${reviewBlockingCount}`}
             </span>
           </div>
         </div>
-        <div className="wb-hero-insights">
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">当前 Butler</p>
-            <strong>{activeButlerName}</strong>
-            <span>{formatToolProfile(activeButlerToolProfile)} · {activeButlerModel}</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">连接状态</p>
-            <strong>{usingEchoMode ? "Echo" : "LiteLLM"}</strong>
-            <span>{setup.provider_runtime.status}</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">Skills</p>
-            <strong>{selectedSkills.length}</strong>
-            <span>阻塞 {blockedSkills.length} / 不可用 {unavailableSkills.length}</span>
-          </article>
+        <div className="wb-settings-hero-actions">
+          <button
+            type="button"
+            className="wb-button wb-button-primary"
+            onClick={() => void handleQuickConnect()}
+            disabled={connectBusy}
+          >
+            {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
+          </button>
+          <button
+            type="button"
+            className="wb-button wb-button-secondary"
+            onClick={() => void handleReview()}
+            disabled={connectBusy}
+          >
+            检查配置
+          </button>
+          <button
+            type="button"
+            className="wb-button wb-button-secondary"
+            onClick={() => void handleApply()}
+            disabled={connectBusy}
+          >
+            保存配置
+          </button>
         </div>
       </section>
 
-      <div className="wb-card-grid wb-card-grid-4">
+      <div className="wb-settings-summary-grid">
         <article className={`wb-card wb-card-accent is-${summaryTone(review)}`}>
           <p className="wb-card-label">配置状态</p>
           <strong>{review.ready ? "可以保存" : "需要处理"}</strong>
-          <span>阻塞项 {review.blocking_reasons.length}</span>
-          <span>提醒 {review.warnings.length}</span>
+          <span>阻塞项 {reviewBlockingCount}</span>
+          <span>提醒 {reviewWarningCount}</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">模型接入</p>
-          <strong>{primaryProvider.name}</strong>
-          <span>{runtimeMode === "echo" ? "先体验再接模型" : "准备连真实模型"}</span>
+          <p className="wb-card-label">接入模式</p>
+          <strong>{usingEchoMode ? "Echo" : "LiteLLM"}</strong>
+          <span>{setup.provider_runtime.status}</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">Providers</p>
+          <strong>{providerDrafts.length}</strong>
+          <span>已启用 {activeProviders.length}</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">模型别名</p>
+          <strong>{aliasDrafts.length}</strong>
+          <span>默认引用 {defaultProvider.id || "未设置"}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">Memory</p>
           <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
           <span>{memory.backend_state || memory.status}</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">默认技能</p>
+          <strong>{selectedSkills.length}</strong>
+          <span>阻塞 {blockedSkills.length} / 不可用 {unavailableSkills.length}</span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">安全等级</p>
@@ -1243,742 +1078,685 @@ export default function SettingsCenter() {
         </article>
       </div>
 
-      <div className="wb-settings-layout">
-        <div className="wb-settings-main">
-          <section id="settings-group-main-agent" className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">模型与连接</p>
-                <h3>选择接入方式，并用表单完成 Provider 与模型别名配置</h3>
-                <p className="wb-panel-copy">
-                  这里是平台连接层：先决定体验模式还是 LiteLLM，再补齐 Provider、密钥和模型别名。
-                </p>
-              </div>
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary wb-button-inline"
-                  onClick={() => updateFieldValue("runtime.llm_mode", "echo")}
-                >
-                  保持体验模式
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary wb-button-inline"
-                  onClick={() => applyProviderMode("api-key")}
-                >
-                  改为 LiteLLM / API Key
-                </button>
-              </div>
-            </div>
+      <nav className="wb-settings-section-nav" aria-label="Settings sections">
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("overview")}>
+          概览
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("main-agent")}>
+          Providers
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("aliases")}>
+          模型别名
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("channels")}>
+          渠道
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("memory")}>
+          Memory
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("governance")}>
+          安全与能力
+        </button>
+        <button type="button" className="wb-section-chip" onClick={() => scrollToSection("review")}>
+          保存检查
+        </button>
+      </nav>
 
-            <div className="wb-inline-banner is-muted">
-              <strong>平台连接层</strong>
-              <span>
-                主 Butler 只引用 `main` / `cheap` 这类别名，不直接在这里定义 Persona、审批或记忆边界。
+      <section id="settings-group-main-agent" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">Models & Providers</p>
+            <h3>先确定接入模式，再管理多个 Provider</h3>
+            <p className="wb-panel-copy">
+              `Settings` 只处理平台连接层。模型别名会引用这里的 Provider 和真实模型名。
+            </p>
+          </div>
+        </div>
+
+        <div className="wb-settings-mode-row">
+          <button
+            type="button"
+            className={`wb-mode-card ${usingEchoMode ? "is-active" : ""}`}
+            onClick={() => updateFieldValue("runtime.llm_mode", "echo")}
+          >
+            <span className="wb-card-label">体验模式</span>
+            <strong>先跑通页面和任务流</strong>
+            <p>不依赖真实模型，适合先检查控制台和交互。</p>
+          </button>
+          <button
+            type="button"
+            className={`wb-mode-card ${!usingEchoMode ? "is-active" : ""}`}
+            onClick={() => updateFieldValue("runtime.llm_mode", "litellm")}
+          >
+            <span className="wb-card-label">真实模型模式</span>
+            <strong>通过 LiteLLM 连接 Provider</strong>
+            <p>支持多个 Provider 并存，别名按 provider + model 路由。</p>
+          </button>
+        </div>
+
+        <div className="wb-provider-layout">
+          <div className="wb-provider-card">
+            <div className="wb-provider-card-head">
+              <div>
+                <p className="wb-card-label">Gateway</p>
+                <strong>LiteLLM 运行参数</strong>
+              </div>
+              <span className={`wb-status-pill ${usingEchoMode ? "is-draft" : "is-ready"}`}>
+                {usingEchoMode ? "Echo" : "LiteLLM"}
               </span>
             </div>
 
-            <div className="wb-provider-mode-grid">
+            <div className="wb-note">
+              <strong>当前默认接入</strong>
+              <span>
+                {usingEchoMode
+                  ? "当前仍是体验模式。需要真实模型时，再启用 LiteLLM 并补齐 Provider。"
+                  : `默认 Provider 为 ${defaultProvider.name || defaultProvider.id}。新的推荐别名会优先引用它。`}
+              </span>
+            </div>
+
+            <div className="wb-form-grid">
+              <label className="wb-field">
+                <span>LiteLLM 代理地址</span>
+                <input
+                  type="text"
+                  value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
+                  placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
+                  onChange={(event) =>
+                    updateFieldValue("runtime.litellm_proxy_url", event.target.value)
+                  }
+                />
+                <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
+              </label>
+              <label className="wb-field">
+                <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
+                <input
+                  type="text"
+                  value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
+                  onChange={(event) =>
+                    updateFieldValue("runtime.master_key_env", event.target.value)
+                  }
+                />
+              </label>
+              <label className="wb-field wb-field-span-2">
+                <span>LiteLLM Master Key 值</span>
+                <input
+                  type="password"
+                  value={
+                    secretValues[
+                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                    ] ?? ""
+                  }
+                  placeholder={
+                    savedEnvNames.has(
+                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
+                    )
+                      ? "本地已存在值；重新输入才会覆盖"
+                      : "生成或输入一串随机长字符串"
+                  }
+                  onChange={(event) =>
+                    updateSecretValue(
+                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                      event.target.value
+                    )
+                  }
+                />
+                <div className="wb-inline-actions wb-inline-actions-wrap">
+                  <button
+                    type="button"
+                    className="wb-button wb-button-tertiary wb-button-inline"
+                    onClick={() =>
+                      updateSecretValue(
+                        String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
+                        generateSecretValue()
+                      )
+                    }
+                  >
+                    生成随机 Master Key
+                  </button>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div className="wb-provider-card">
+            <div className="wb-provider-card-head">
+              <div>
+                <p className="wb-card-label">Providers</p>
+                <strong>多个 Provider 可同时存在</strong>
+              </div>
+              <span className="wb-status-pill is-active">共 {providerDrafts.length} 个</span>
+            </div>
+
+            <div className="wb-provider-preset-row">
               <button
                 type="button"
-                className={`wb-mode-card ${providerMode === "openai-auth" ? "is-active" : ""}`}
-                onClick={() => applyProviderMode("openai-auth")}
+                className="wb-button wb-button-tertiary wb-button-inline"
+                onClick={() => addProviderDraft("openrouter")}
               >
-                <span className="wb-card-label">OpenAI Auth</span>
-                <strong>浏览器登录 ChatGPT Pro / Codex</strong>
-                <p>适合已经有 ChatGPT Pro / Codex 账号的用户，不需要手贴 API Key。</p>
+                添加 OpenRouter
               </button>
               <button
                 type="button"
-                className={`wb-mode-card ${providerMode === "api-key" ? "is-active" : ""}`}
-                onClick={() => applyProviderMode("api-key")}
+                className="wb-button wb-button-tertiary wb-button-inline"
+                onClick={() => addProviderDraft("openai")}
               >
-                <span className="wb-card-label">LiteLLM / API Key</span>
-                <strong>手动填写 Provider Key 与 LiteLLM 运行参数</strong>
-                <p>适合 OpenRouter / OpenAI / Anthropic 等标准 API Key 场景。</p>
+                添加 OpenAI
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-tertiary wb-button-inline"
+                onClick={() => addProviderDraft("anthropic")}
+              >
+                添加 Anthropic
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-tertiary wb-button-inline"
+                onClick={() => addProviderDraft("openai-codex")}
+              >
+                添加 OpenAI Auth
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary wb-button-inline"
+                onClick={() => addProviderDraft("custom")}
+              >
+                添加自定义 Provider
               </button>
             </div>
 
-            <div className="wb-provider-layout">
-              <div className="wb-section-stack">
-                <div className="wb-note">
-                  <strong>当前运行模式</strong>
-                  <span>
-                    {runtimeMode === "echo"
-                      ? "现在还是体验模式。你可以先体验页面，也可以继续完成下面的真实模型配置。"
-                      : "当前会通过 LiteLLM 代理接入真实模型。改完配置后请点击“保存并重新连接”。"}
-                  </span>
+            <div className="wb-provider-list">
+              {providerDrafts.length === 0 ? (
+                <div className="wb-empty-state">
+                  <strong>还没有 Provider</strong>
+                  <span>先添加一个 Provider，再为模型别名选择 provider + model。</span>
                 </div>
+              ) : null}
 
-                {providerMode === "openai-auth" ? (
-                  <div className="wb-provider-card">
+              {providerDrafts.map((provider, index) => {
+                const status = providerStatus(provider);
+                const providerName = provider.name?.trim() || provider.id || `Provider ${index + 1}`;
+                const isOAuthProvider =
+                  provider.id === "openai-codex" && provider.auth_type === "oauth";
+                return (
+                  <article
+                    key={`${provider.id}-${index}`}
+                    className={`wb-provider-item ${index === 0 ? "is-default" : ""}`}
+                  >
                     <div className="wb-provider-card-head">
                       <div>
-                        <p className="wb-card-label">连接 OpenAI Auth</p>
-                        <strong>通过浏览器授权，把凭证写入本地</strong>
+                        <p className="wb-card-label">{index === 0 ? "默认 Provider" : "Provider"}</p>
+                        <strong>{providerName}</strong>
+                        <div className="wb-provider-meta">
+                          <span>ID {provider.id}</span>
+                          <span>{provider.auth_type === "oauth" ? "OAuth" : "API Key"}</span>
+                        </div>
                       </div>
-                      <span
-                        className={`wb-status-pill ${
-                          providerRuntimeDetails.openai_oauth_connected ? "is-ready" : "is-warning"
-                        }`}
-                      >
-                        {providerRuntimeDetails.openai_oauth_connected ? "已连接" : "未连接"}
-                      </span>
-                    </div>
-                    <div className="wb-provider-meta">
-                      <span>Provider: `openai-codex`</span>
-                      <span>环境变量: `OPENAI_API_KEY`</span>
-                      <span>
-                        当前凭证:
-                        {providerRuntimeDetails.openai_oauth_profile
-                          ? ` ${providerRuntimeDetails.openai_oauth_profile}`
-                          : " 还没有连接"}
-                      </span>
-                    </div>
-                    <div className="wb-inline-actions wb-inline-actions-wrap">
-                      <button
-                        type="button"
-                        className="wb-button wb-button-primary"
-                        onClick={() => void handleQuickConnect()}
-                        disabled={connectBusy}
-                      >
-                        {providerRuntimeDetails.openai_oauth_connected
-                          ? "启用 OpenAI Auth"
-                          : "连接并启用 OpenAI Auth"}
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() => updateAliases(buildDefaultAliasDrafts("openai-codex"))}
-                      >
-                        恢复推荐别名
-                      </button>
-                    </div>
-                    <div className="wb-note">
-                      <strong>完成后会发生什么</strong>
-                      <span>
-                        按下按钮后会先完成浏览器授权，再把 `openai-codex` 写入配置、启动 LiteLLM
-                        Proxy，并在托管实例里自动切到真实模型。
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="wb-provider-card">
-                    <div className="wb-provider-card-head">
-                      <div>
-                        <p className="wb-card-label">LiteLLM / API Key</p>
-                        <strong>先选主 Provider，再填写真实密钥</strong>
-                      </div>
-                      <span
-                        className={`wb-status-pill ${
-                          savedEnvNames.has(primaryProvider.api_key_env) ? "is-ready" : ""
-                        }`}
-                      >
-                        {savedEnvNames.has(primaryProvider.api_key_env) ? "已写入密钥" : "待填写密钥"}
-                      </span>
-                    </div>
-
-                    {providerDrafts.length > 1 ? (
-                      <div className="wb-note">
-                        <strong>当前已存在多个 Provider</strong>
-                        <span>
-                          这块表单会优先编辑第一个启用的 Provider。其余项会保留，但建议你先把主
-                          Provider 跑通。
-                        </span>
-                      </div>
-                    ) : null}
-
-                    <div className="wb-form-grid">
-                      <label className="wb-field">
-                        <span>Provider 预设</span>
-                        <select
-                          value={
-                            availableProviderOptions.includes(primaryProvider.id)
-                              ? primaryProvider.id
-                              : "openrouter"
-                          }
-                          onChange={(event) => changePrimaryProvider(event.target.value)}
+                      <div className="wb-inline-actions wb-inline-actions-wrap">
+                        <span className={`wb-status-pill ${status.tone}`}>{status.label}</span>
+                        {index !== 0 ? (
+                          <button
+                            type="button"
+                            className="wb-button wb-button-tertiary wb-button-inline"
+                            onClick={() => moveProviderToFront(index)}
+                          >
+                            设为默认
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="wb-button wb-button-tertiary wb-button-inline"
+                          onClick={() => removeProviderAt(index)}
                         >
-                          {availableProviderOptions.map((providerId) => (
-                            <option key={providerId} value={providerId}>
-                              {PROVIDER_PRESETS[providerId]?.name ?? providerId}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                          删除
+                        </button>
+                      </div>
+                    </div>
 
+                    <div className="wb-form-grid wb-settings-provider-form">
                       <label className="wb-field">
-                        <span>LiteLLM 代理地址</span>
+                        <span>显示名称</span>
                         <input
                           type="text"
-                          value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
-                          placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
-                          onChange={(event) =>
-                            updateFieldValue("runtime.litellm_proxy_url", event.target.value)
-                          }
+                          value={provider.name}
+                          onChange={(event) => updateProviderAt(index, { name: event.target.value })}
                         />
-                        <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
                       </label>
-
                       <label className="wb-field">
                         <span>Provider ID</span>
                         <input
                           type="text"
-                          value={primaryProvider.id}
+                          value={provider.id}
+                          onChange={(event) => updateProviderAt(index, { id: event.target.value })}
+                        />
+                      </label>
+                      <label className="wb-field">
+                        <span>鉴权方式</span>
+                        <select
+                          value={provider.auth_type}
                           onChange={(event) =>
-                            updatePrimaryProvider({
-                              id: event.target.value,
-                              auth_type: "api_key",
+                            updateProviderAt(index, {
+                              auth_type: event.target.value === "oauth" ? "oauth" : "api_key",
                             })
                           }
-                        />
+                        >
+                          <option value="api_key">API Key</option>
+                          <option value="oauth">OAuth</option>
+                        </select>
                       </label>
-
                       <label className="wb-field">
-                        <span>Provider 显示名称</span>
+                        <span>环境变量名</span>
                         <input
                           type="text"
-                          value={primaryProvider.name}
-                          onChange={(event) => updatePrimaryProvider({ name: event.target.value })}
-                        />
-                      </label>
-
-                      <label className="wb-field">
-                        <span>API Key 环境变量名</span>
-                        <input
-                          type="text"
-                          value={primaryProvider.api_key_env}
+                          value={provider.api_key_env}
                           onChange={(event) =>
-                            updatePrimaryProvider({ api_key_env: event.target.value })
+                            updateProviderAt(index, { api_key_env: event.target.value })
                           }
                         />
-                        <small>这里只写变量名，例如 `OPENROUTER_API_KEY`。</small>
+                        <small>这里只填写环境变量名。</small>
                       </label>
-
-                      <label className="wb-field">
-                        <span>API Key / Token</span>
-                        <input
-                          type="password"
-                          value={secretValues[primaryProvider.api_key_env] ?? ""}
-                          placeholder={
-                            savedEnvNames.has(primaryProvider.api_key_env)
-                              ? "已存在本地值；如需替换请重新输入"
-                              : "粘贴真实 API Key"
-                          }
-                          onChange={(event) =>
-                            updateSecretValue(primaryProvider.api_key_env, event.target.value)
-                          }
-                        />
-                        <small>
-                          {savedEnvNames.has(primaryProvider.api_key_env)
-                            ? "本地已保存过这个变量。留空不会覆盖，重新输入才会更新。"
-                            : "点击“连接并启用真实模型”后会写入 ~/.octoagent/.env.litellm。"}
-                        </small>
+                      <label className="wb-field wb-field-span-2">
+                        <span>启用状态</span>
+                        <div className="wb-provider-toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={provider.enabled}
+                            aria-label={`启用 ${providerName}`}
+                            onChange={(event) =>
+                              updateProviderAt(index, { enabled: event.target.checked })
+                            }
+                          />
+                          <span>{provider.enabled ? "已启用" : "已停用"}</span>
+                        </div>
                       </label>
+                    </div>
 
-                      <label className="wb-field">
-                        <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
-                        <input
-                          type="text"
-                          value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
-                          onChange={(event) =>
-                            updateFieldValue("runtime.master_key_env", event.target.value)
-                          }
-                        />
-                      </label>
-
-                      <label className="wb-field">
-                        <span>LiteLLM Master Key 值</span>
-                        <input
-                          type="password"
-                          value={
-                            secretValues[
-                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                            ] ?? ""
-                          }
-                          placeholder={
-                            savedEnvNames.has(
-                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                            )
-                              ? "已存在本地值；如需替换请重新输入"
-                              : "生成或输入一串随机长字符串"
-                          }
-                          onChange={(event) =>
-                            updateSecretValue(
-                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                              event.target.value
-                            )
-                          }
-                        />
+                    {isOAuthProvider ? (
+                      <div className="wb-note">
+                        <strong>OpenAI Auth</strong>
+                        <span>
+                          {providerRuntimeDetails.openai_oauth_profile
+                            ? `当前凭证 ${providerRuntimeDetails.openai_oauth_profile}`
+                            : "当前还没有本地授权凭证。"}
+                        </span>
                         <div className="wb-inline-actions wb-inline-actions-wrap">
                           <button
                             type="button"
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                            onClick={() =>
-                              updateSecretValue(
-                                String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                                generateSecretValue()
-                              )
-                            }
+                            className="wb-button wb-button-secondary wb-button-inline"
+                            onClick={() => void handleOpenAIOAuthConnect()}
+                            disabled={connectBusy}
                           >
-                            生成随机 Master Key
+                            {providerRuntimeDetails.openai_oauth_connected
+                              ? "重新连接 OpenAI Auth"
+                              : "连接 OpenAI Auth"}
                           </button>
-                          <span className="wb-inline-meta">
-                            {savedEnvNames.has(
-                              String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                            )
-                              ? "当前本地已存在旧值"
-                              : "首次接入建议先生成一条"}
-                          </span>
                         </div>
+                      </div>
+                    ) : (
+                      <label className="wb-field wb-field-span-2">
+                        <span>API Key / Token</span>
+                        <input
+                          type="password"
+                          value={secretValues[provider.api_key_env] ?? ""}
+                          placeholder={
+                            savedEnvNames.has(provider.api_key_env)
+                              ? "本地已存在值；重新输入才会覆盖"
+                              : "粘贴真实 API Key"
+                          }
+                          onChange={(event) =>
+                            updateSecretValue(provider.api_key_env, event.target.value)
+                          }
+                        />
                       </label>
-                    </div>
-                    <div className="wb-inline-actions wb-inline-actions-wrap">
-                      <button
-                        type="button"
-                        className="wb-button wb-button-primary"
-                        onClick={() => void handleQuickConnect()}
-                        disabled={connectBusy}
-                      >
-                        连接并启用真实模型
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
-                      >
-                        恢复推荐别名
-                      </button>
-                    </div>
-                    <div className="wb-note">
-                      <strong>一步完成</strong>
-                      <span>
-                        这个按钮会同时保存 Provider、写入密钥、启动 LiteLLM Proxy，并在托管实例里自动切到真实模型。
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="wb-section-stack">
-                <div className="wb-provider-card">
-                  <div className="wb-provider-card-head">
-                    <div>
-                      <p className="wb-card-label">模型别名</p>
-                      <strong>用易记的别名映射到真实模型</strong>
-                    </div>
-                    <div className="wb-inline-actions wb-inline-actions-wrap">
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary wb-button-inline"
-                        onClick={() => updateAliases(buildDefaultAliasDrafts(primaryProvider.id))}
-                      >
-                        恢复 main / cheap
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-secondary wb-button-inline"
-                        onClick={() => addAliasDraft()}
-                      >
-                        新增别名
-                      </button>
-                    </div>
-                  </div>
-                  <div className="wb-note">
-                    <strong>怎么理解</strong>
-                    <span>
-                      Butler 和 Worker 只会引用别名，例如 `main`。以后要换底层模型，只改这里，不用全局改配置。
-                    </span>
-                  </div>
-                  <div className="wb-alias-editor">
-                    {aliasDrafts.length === 0 ? (
-                      <div className="wb-empty-state">
-                        <strong>还没有模型别名</strong>
-                        <span>建议至少保留 `main`，需要便宜模型时再补一个 `cheap`。</span>
-                      </div>
-                    ) : null}
-                    {aliasDrafts.map((item, index) => (
-                      <div key={`${item.alias}-${index}`} className="wb-alias-row">
-                        <label className="wb-field">
-                          <span>别名</span>
-                          <input
-                            type="text"
-                            value={item.alias}
-                            onChange={(event) => updateAliasAt(index, { alias: event.target.value })}
-                          />
-                        </label>
-                        <label className="wb-field">
-                          <span>Provider</span>
-                          <input
-                            type="text"
-                            value={item.provider}
-                            onChange={(event) =>
-                              updateAliasAt(index, { provider: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="wb-field wb-field-span-2">
-                          <span>模型名</span>
-                          <input
-                            type="text"
-                            value={item.model}
-                            placeholder={
-                              primaryProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"
-                            }
-                            onChange={(event) => updateAliasAt(index, { model: event.target.value })}
-                          />
-                        </label>
-                        <label className="wb-field wb-field-span-2">
-                          <span>说明</span>
-                          <input
-                            type="text"
-                            value={item.description}
-                            placeholder="例如：主力模型 / 低成本模型"
-                            onChange={(event) =>
-                              updateAliasAt(index, { description: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="wb-field">
-                          <span>推理强度</span>
-                          <select
-                            value={item.thinking_level}
-                            onChange={(event) =>
-                              updateAliasAt(index, {
-                                thinking_level: event.target
-                                  .value as ModelAliasDraftItem["thinking_level"],
-                              })
-                            }
-                          >
-                            <option value="">默认</option>
-                            <option value="xhigh">xhigh</option>
-                            <option value="high">high</option>
-                            <option value="medium">medium</option>
-                            <option value="low">low</option>
-                          </select>
-                        </label>
-                        <div className="wb-alias-actions">
-                          <button
-                            type="button"
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                            onClick={() => removeAliasDraft(index)}
-                            disabled={aliasDrafts.length <= 1}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section id="settings-group-governance" className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">Skills</p>
-                <h3>保留默认能力范围与平台级治理开关</h3>
-              </div>
-            </div>
-
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>{setup.tools_skills.label}</strong>
-                <span>{setup.tools_skills.summary}</span>
-              </div>
-              <div className="wb-note">
-                <strong>{setup.agent_governance.label}</strong>
-                <span>{setup.agent_governance.summary}</span>
-              </div>
-              <div className="wb-note">
-                <strong>Skills 默认范围</strong>
-                <span>
-                  这里控制默认暴露给 setup / workbench 的能力集合，不直接改 Butler 的身份或 Persona。
-                </span>
-              </div>
-              {skillGovernance.items.map((item) => {
-                const selected = skillSelection[item.item_id] ?? item.selected;
-                return (
-                  <label key={item.item_id} className="wb-note">
-                    <strong>
-                      {item.label} · {selected ? "已启用" : "未启用"}
-                    </strong>
-                    <span>
-                      {item.missing_requirements.length > 0
-                        ? item.missing_requirements.join("；")
-                        : "当前 capability pack 可用"}
-                    </span>
-                    <small>
-                      {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
-                      {item.availability}
-                    </small>
-                    <input
-                      type="checkbox"
-                      aria-label={`启用 ${item.label}`}
-                      checked={selected}
-                      onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
-                    />
-                  </label>
+                    )}
+                  </article>
                 );
               })}
             </div>
-          </section>
+          </div>
+        </div>
+      </section>
 
-          <section id="settings-group-memory" className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">Memory</p>
-                <h3>先决定系统记什么、怎么找，再决定要不要接远端 bridge</h3>
+      <section id="settings-group-aliases" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">模型别名</p>
+            <h3>别名只引用 provider + model</h3>
+            <p className="wb-panel-copy">业务侧统一使用 alias，底层 Provider 和模型切换都在这里完成。</p>
+          </div>
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <button
+              type="button"
+              className="wb-button wb-button-tertiary wb-button-inline"
+              onClick={() => restoreRecommendedAliases(defaultProvider.id)}
+            >
+              恢复 main / cheap
+            </button>
+            <button
+              type="button"
+              className="wb-button wb-button-secondary wb-button-inline"
+              onClick={() => addAliasDraft()}
+            >
+              新增别名
+            </button>
+          </div>
+        </div>
+
+        <div className="wb-alias-editor">
+          {providerSelectOptions.length === 0 ? (
+            <div className="wb-empty-state">
+              <strong>先添加 Provider</strong>
+              <span>模型别名需要绑定到现有 Provider；可以先添加 OpenRouter 或 OpenAI。</span>
+            </div>
+          ) : null}
+          {aliasDrafts.length === 0 ? (
+            <div className="wb-empty-state">
+              <strong>还没有模型别名</strong>
+              <span>建议至少保留 `main`，需要低成本路由时再添加 `cheap`。</span>
+            </div>
+          ) : null}
+          {aliasDrafts.map((item, index) => (
+            <div key={`${item.alias}-${index}`} className="wb-alias-row">
+              <label className="wb-field">
+                <span>别名</span>
+                <input
+                  type="text"
+                  value={item.alias}
+                  onChange={(event) => updateAliasAt(index, { alias: event.target.value })}
+                />
+              </label>
+              <label className="wb-field">
+                <span>Provider</span>
+                <select
+                  value={item.provider}
+                  onChange={(event) => updateAliasAt(index, { provider: event.target.value })}
+                >
+                  <option value="">选择 Provider</option>
+                  {providerSelectOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="wb-field wb-field-span-2">
+                <span>模型名</span>
+                <input
+                  type="text"
+                  value={item.model}
+                  placeholder={defaultProvider.id === "openai-codex" ? "gpt-5.4" : "openrouter/auto"}
+                  onChange={(event) => updateAliasAt(index, { model: event.target.value })}
+                />
+              </label>
+              <label className="wb-field wb-field-span-2">
+                <span>说明</span>
+                <input
+                  type="text"
+                  value={item.description}
+                  placeholder="例如：主力模型 / 低成本模型"
+                  onChange={(event) => updateAliasAt(index, { description: event.target.value })}
+                />
+              </label>
+              <label className="wb-field">
+                <span>推理强度</span>
+                <select
+                  value={item.thinking_level}
+                  onChange={(event) =>
+                    updateAliasAt(index, {
+                      thinking_level: event.target.value as ModelAliasDraftItem["thinking_level"],
+                    })
+                  }
+                >
+                  <option value="">默认</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="high">high</option>
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <div className="wb-alias-actions">
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary wb-button-inline"
+                  onClick={() => removeAliasDraft(index)}
+                  disabled={aliasDrafts.length <= 1}
+                >
+                  删除
+                </button>
               </div>
             </div>
+          ))}
+        </div>
+      </section>
 
-            <div className="wb-card-grid wb-card-grid-4">
-              <article className="wb-card">
-                <p className="wb-card-label">当前模式</p>
-                <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
-                <span>
-                  {memoryMode === "memu"
-                    ? "适合需要跨会话检索和高级回放"
-                    : "先把基础记忆链路跑通"}
-                </span>
-              </article>
-              <article className="wb-card">
-                <p className="wb-card-label">后端健康</p>
-                <strong>{memory.backend_state || memory.status}</strong>
-                <span>{memory.backend_id || "未标记"}</span>
-              </article>
-              <article className="wb-card">
-                <p className="wb-card-label">当前结论</p>
-                <strong>{memory.summary.sor_current_count}</strong>
-                <span>片段 {memory.summary.fragment_count}</span>
-              </article>
-              <article className="wb-card">
-                <p className="wb-card-label">待处理积压</p>
-                <strong>{memory.summary.pending_replay_count}</strong>
-                <span>Vault refs {memory.summary.vault_ref_count}</span>
-              </article>
-            </div>
+      <section id="settings-group-governance" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">安全与能力</p>
+            <h3>平台级安全开关与默认能力范围</h3>
+          </div>
+        </div>
 
-            {memory.warnings.length > 0 ? (
-              <div className="wb-inline-banner is-error">
-                <strong>Memory 当前有提醒</strong>
-                <span>{memory.warnings.join("；")}</span>
-              </div>
-            ) : (
-              <div className="wb-inline-banner is-muted">
-                <strong>推荐做法</strong>
-                <span>
-                  首次体验先保持本地记忆 + 保守召回；只有在你明确需要远端检索后端时，再切到 MemU bridge。
-                </span>
-              </div>
-            )}
+        <div className="wb-card-grid wb-card-grid-3">
+          <article className="wb-card">
+            <p className="wb-card-label">安全等级</p>
+            <strong>{currentPolicy?.label ?? policyProfiles.active_profile_id}</strong>
+            <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">Tools & Skills</p>
+            <strong>{setup.tools_skills.label}</strong>
+            <span>{setup.tools_skills.summary}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">默认能力数</p>
+            <strong>{selectedSkills.length}</strong>
+            <span>不可用 {unavailableSkills.length}</span>
+          </article>
+        </div>
 
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>Butler 记忆边界已迁到 Agents</strong>
-                <span>
-                  Butler 的 Persona、默认模型、工具权限、Vault / 历史版本读取范围，以及 recall 细调，现在统一放在 `Agents` 页面维护。
-                </span>
-                <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents">
-                  去 Agents 调 Butler
-                </Link>
-              </div>
-              <div className="wb-note">
-                <strong>这里保留平台级 Memory 设置</strong>
-                <span>
-                  `Settings` 只保留 Memory 后端模式、MemU bridge 地址、鉴权变量名和连接超时这些平台级开关。
-                </span>
-              </div>
-            </div>
-
-            {memoryBasicHints.length > 0 ? (
-              <>
-                <div className="wb-panel-head">
-                  <div>
-                    <p className="wb-card-label">连接配置</p>
-                    <h3>先选本地模式还是远端 MemU bridge</h3>
-                  </div>
-                </div>
-                {renderHintFields(memoryBasicHints)}
-              </>
-            ) : null}
-
-            {memoryAdvancedHints.length > 0 ? (
-              <>
-                <div className="wb-panel-head">
-                  <div>
-                    <p className="wb-card-label">高阶连接</p>
-                    <h3>只有 bridge API 约定不一致时才需要改这些路径</h3>
-                  </div>
-                </div>
-                {renderHintFields(memoryAdvancedHints)}
-              </>
-            ) : null}
-          </section>
-
-          {otherGroupIds.map((groupId) => {
-            const hints = (groupedHints[groupId] ?? []).filter(
-              (hint) => !CUSTOM_PROVIDER_FIELD_PATHS.has(hint.field_path)
-            );
-            if (hints.length === 0) {
-              return null;
-            }
-            const group = groupLabel(groupId);
+        <div className="wb-note-stack">
+          {skillGovernance.items.map((item) => {
+            const selected = skillSelection[item.item_id] ?? item.selected;
             return (
-              <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
-                <div className="wb-panel-head">
-                  <div>
-                    <p className="wb-card-label">{group.title}</p>
-                    <h3>{group.description}</h3>
-                  </div>
-                </div>
-                {renderHintFields(hints)}
-              </section>
+              <label key={item.item_id} className="wb-note">
+                <strong>
+                  {item.label} · {selected ? "已启用" : "未启用"}
+                </strong>
+                <span>
+                  {item.missing_requirements.length > 0
+                    ? item.missing_requirements.join("；")
+                    : "当前 capability pack 可用"}
+                </span>
+                <small>
+                  {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
+                  {item.availability}
+                </small>
+                <input
+                  type="checkbox"
+                  aria-label={`启用 ${item.label}`}
+                  checked={selected}
+                  onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
+                />
+              </label>
             );
           })}
         </div>
+      </section>
 
-        <aside className="wb-settings-rail">
-          <section id="settings-group-butler" className="wb-panel">
+      <section id="settings-group-memory" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">Memory</p>
+            <h3>平台级 Memory 后端与 bridge 连接</h3>
+          </div>
+        </div>
+
+        <div className="wb-card-grid wb-card-grid-4">
+          <article className="wb-card">
+            <p className="wb-card-label">当前模式</p>
+            <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
+            <span>{memoryMode === "memu" ? "远端检索与回放" : "本地优先"}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">后端健康</p>
+            <strong>{memory.backend_state || memory.status}</strong>
+            <span>{memory.backend_id || "未标记"}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">当前结论</p>
+            <strong>{memory.summary.sor_current_count}</strong>
+            <span>片段 {memory.summary.fragment_count}</span>
+          </article>
+          <article className="wb-card">
+            <p className="wb-card-label">待处理积压</p>
+            <strong>{memory.summary.pending_replay_count}</strong>
+            <span>Vault refs {memory.summary.vault_ref_count}</span>
+          </article>
+        </div>
+
+        {memory.warnings.length > 0 ? (
+          <div className="wb-inline-banner is-error" role="alert">
+            <strong>Memory 当前有提醒</strong>
+            <span>{memory.warnings.join("；")}</span>
+          </div>
+        ) : (
+          <div className="wb-inline-banner is-muted">
+            <strong>推荐做法</strong>
+            <span>首次使用先保持本地记忆；只有需要远端检索后端时再切到 MemU bridge。</span>
+          </div>
+        )}
+
+        {memoryBasicHints.length > 0 ? (
+          <>
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">Butler 已迁出</p>
-                <h3>主 Agent 的身份与边界只在 Agents 维护</h3>
-              </div>
-              <Link className="wb-button wb-button-secondary" to="/agents">
-                去 Agents
-              </Link>
-            </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>{activeButlerName}</strong>
-                <span>{activeButlerPersona}</span>
-              </div>
-              <div className="wb-note">
-                <strong>当前默认能力</strong>
-                <span>
-                  {formatToolProfile(activeButlerToolProfile)} · 模型别名 {activeButlerModel}
-                </span>
-              </div>
-              <div className="wb-note">
-                <strong>为什么迁出</strong>
-                <span>
-                  这样 `Settings` 只做平台级配置，`Agents` 只做 Butler / Worker 的角色与治理，信息边界更清晰。
-                </span>
+                <p className="wb-card-label">连接配置</p>
+                <h3>基础连接</h3>
               </div>
             </div>
-          </section>
+            {renderHintFields(memoryBasicHints)}
+          </>
+        ) : null}
 
-          <section className="wb-panel">
+        {memoryAdvancedHints.length > 0 ? (
+          <>
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">保存前检查</p>
-                <h3>先确认是否可用，再决定是否保存</h3>
+                <p className="wb-card-label">高阶连接</p>
+                <h3>仅在 bridge 协议不一致时调整</h3>
               </div>
             </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>下一步</strong>
-                <div className="wb-note-stack">
-                  {review.next_actions.map((item) => (
-                    <span key={item}>{item}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="wb-note">
-                <strong>当前模式</strong>
-                <span>
-                  {usingEchoMode
-                    ? "你现在处于体验模式，可以先跑通 Web 和任务流，真实模型稍后再接。"
-                    : "你正在准备接入真实模型，请优先完成 Provider 和模型别名配置。"}
-                </span>
-              </div>
-              {blockingGuides.length > 0 ? (
-                <div className="wb-note">
-                  <strong>需要先处理的问题</strong>
-                  <div className="wb-note-stack">
-                    {blockingGuides.map((guide) => (
-                      <div key={guide.guide_id} className="wb-guide-card">
-                        <strong>{guide.risk.title}</strong>
-                        <span>{guide.risk.summary}</span>
-                        {guide.risk.recommended_action ? (
-                          <small>{guide.risk.recommended_action}</small>
-                        ) : null}
-                        {guide.section_id === "butler" ? (
-                          <Link
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                            to="/agents"
-                          >
-                            {guideButtonLabel(guide)}
-                          </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            aria-label={guideButtonLabel(guide)}
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                            onClick={() => scrollToSection(guide.section_id)}
-                          >
-                            {guideButtonLabel(guide)}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {renderRiskList("模型与运行连接", review.provider_runtime_risks)}
-              {renderRiskList("渠道暴露范围", review.channel_exposure_risks)}
-              {renderRiskList("Butler 与治理", review.agent_autonomy_risks)}
-              {renderRiskList("工具与技能", review.tool_skill_readiness_risks)}
-              {renderRiskList("密钥绑定", review.secret_binding_risks)}
-            </div>
-          </section>
+            {renderHintFields(memoryAdvancedHints)}
+          </>
+        ) : null}
+      </section>
 
-          <section className="wb-panel">
+      {otherGroupIds.map((groupId) => {
+        const hints = (groupedHints[groupId] ?? []).filter(
+          (hint) => !CUSTOM_PROVIDER_FIELD_PATHS.has(hint.field_path)
+        );
+        if (hints.length === 0) {
+          return null;
+        }
+        const group = groupLabel(groupId);
+        return (
+          <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
             <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">{group.title}</p>
+                <h3>{group.description}</h3>
+              </div>
+            </div>
+            {renderHintFields(hints)}
+          </section>
+        );
+      })}
+
+      <section id="settings-group-review" className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">保存检查</p>
+            <h3>先看风险，再决定保存或一键接入</h3>
+          </div>
+        </div>
+
+        <div className="wb-settings-review-grid">
+          <div className="wb-note-stack">
+            <div className="wb-note">
+              <strong>下一步</strong>
+              <div className="wb-note-stack">
+                {reviewNextActions.length > 0 ? (
+                  reviewNextActions.map((item) => <span key={item}>{item}</span>)
+                ) : (
+                  <span>当前没有额外提示。</span>
+                )}
+              </div>
+            </div>
+            <div className="wb-note">
+              <strong>当前模式</strong>
+              <span>
+                {usingEchoMode
+                  ? "你现在处于体验模式，可以先完成页面和渠道配置。"
+                  : "你正在准备接入真实模型，请先确认 Provider 和 alias。"}
+              </span>
+            </div>
+            {review.agent_autonomy_risks.length > 0 ? (
+              <div className="wb-note">
+                <strong>其他模块仍有阻塞项</strong>
+                <span>{review.agent_autonomy_risks.map((risk) => risk.title).join("；")}</span>
+              </div>
+            ) : null}
+            {renderRiskList("模型与运行连接", review.provider_runtime_risks)}
+            {renderRiskList("渠道暴露范围", review.channel_exposure_risks)}
+            {renderRiskList("工具与技能", review.tool_skill_readiness_risks)}
+            {renderRiskList("密钥绑定", review.secret_binding_risks)}
+          </div>
+
+          <div className="wb-provider-card">
+            <div className="wb-provider-card-head">
               <div>
                 <p className="wb-card-label">本页动作</p>
-                <h3>先检查，再保存或一键接入</h3>
+                <strong>检查、保存或一键接入</strong>
               </div>
+              <span className={`wb-status-pill ${review.ready ? "is-ready" : "is-warning"}`}>
+                {review.ready ? "Ready" : "Needs review"}
+              </span>
             </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>检查配置</strong>
-                <span>先用 `setup.review` 看阻塞项，再决定是否保存或一键连接。</span>
-              </div>
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => void handleQuickConnect()}
-                  disabled={connectBusy}
-                >
-                  {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={() => void handleReview()}
-                  disabled={connectBusy}
-                >
-                  检查配置
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={() => void handleApply()}
-                  disabled={connectBusy}
-                >
-                  保存配置
-                </button>
-              </div>
+            <div className="wb-note">
+              <strong>检查配置</strong>
+              <span>先执行 `setup.review`，确认阻塞项和风险摘要。</span>
             </div>
-          </section>
-        </aside>
-      </div>
+            <div className="wb-inline-actions wb-inline-actions-wrap">
+              <button
+                type="button"
+                className="wb-button wb-button-primary"
+                onClick={() => void handleQuickConnect()}
+                disabled={connectBusy}
+              >
+                {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={() => void handleReview()}
+                disabled={connectBusy}
+              >
+                检查配置
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={() => void handleApply()}
+                disabled={connectBusy}
+              >
+                保存配置
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
