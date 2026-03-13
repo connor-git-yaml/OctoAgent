@@ -3,7 +3,7 @@ feature_id: "048"
 title: "Guided Surface Clarity Refresh"
 created: "2026-03-14"
 updated: "2026-03-14"
-status: "Draft"
+status: "Implemented"
 ---
 
 # Plan - Feature 048

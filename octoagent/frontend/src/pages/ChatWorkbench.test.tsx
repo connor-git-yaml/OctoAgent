@@ -119,6 +119,46 @@ describe("ChatWorkbench", () => {
     });
   });
 
+  it("发送后会立刻显示处理中反馈和折叠式进度入口", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [
+        {
+          id: "msg-streaming",
+          role: "agent",
+          content: "主助手已接手，正在处理这条消息…",
+          isStreaming: true,
+        },
+      ],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-streaming-1",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-streaming-1",
+        title: "深圳今天天气怎么样",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("主助手正在处理这条消息")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看内部协作进度" })).toBeInTheDocument();
+  });
+
   it("会在侧栏展示当前 Butler 到 Worker 的内部协作链", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
@@ -296,10 +336,14 @@ describe("ChatWorkbench", () => {
     );
 
     expect(await screen.findByText("OctoAgent 已拆给专门角色继续处理")).toBeInTheDocument();
+    expect(screen.getByText("这轮协作已经完成")).toBeInTheDocument();
     expect(screen.getByText("主助手 -> Research Worker")).toBeInTheDocument();
     expect(screen.getByText("3 条 / 最新 结果回传")).toBeInTheDocument();
-    expect(screen.getByText("结果回传 · #3")).toBeInTheDocument();
+    expect(screen.getByText("Research Worker 已回传结果")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开 Advanced 诊断" })).toBeInTheDocument();
+    expect(screen.queryByText("Butler 已经把天气查询转给 Research Worker。")).not.toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    expect(fetchTaskDetailMock).toHaveBeenCalledTimes(2);
   });
 
   it("当前会话的 A2A 不在全局快照里时仍会展示最小内部协作态", async () => {

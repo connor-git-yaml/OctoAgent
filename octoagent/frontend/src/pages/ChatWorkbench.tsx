@@ -25,6 +25,8 @@ import type {
 } from "../types";
 import { formatWorkerTemplateName } from "../workbench/utils";
 
+const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
+
 function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void {
   if (!taskId || taskIds.includes(taskId)) {
     return;
@@ -99,6 +101,115 @@ function formatAgentUri(agentId: string, fallback: string): string {
   return `agent://${normalized}`;
 }
 
+interface UserFacingProgressEvent {
+  title: string;
+  summary: string;
+}
+
+function buildProgressStage(
+  streaming: boolean,
+  hasInternalCollaboration: boolean,
+  latestMessageType: string,
+  targetAgent: string,
+  error: string | null
+): { title: string; summary: string } | null {
+  if (error) {
+    return {
+      title: "这轮处理没有顺利完成",
+      summary: error,
+    };
+  }
+  if (hasInternalCollaboration) {
+    const targetLabel = formatAgentRoleLabel(targetAgent);
+    switch (latestMessageType.trim().toUpperCase()) {
+      case "RESULT":
+        return {
+          title: streaming
+            ? `${targetLabel} 已回传结果，主助手正在整理回复`
+            : "这轮协作已经完成",
+          summary: streaming
+            ? "专门角色已经把资料和结论交回来了，主助手正在把它收口成最终答复。"
+            : "这轮消息已经通过内部协作完成，你可以继续追问同一个话题。",
+        };
+      case "ERROR":
+        return {
+          title: `${targetLabel} 这轮没有拿到可用结果`,
+          summary: "主助手会解释影响，或改用别的方式继续处理。",
+        };
+      case "UPDATE":
+      case "HEARTBEAT":
+        return {
+          title: `${targetLabel} 还在处理中`,
+          summary: "系统没有卡住，它正在继续查资料、整理证据或推进内部步骤。",
+        };
+      case "TASK":
+      default:
+        return {
+          title: `已委托 ${targetLabel} 继续处理`,
+          summary: "这轮问题需要更多资料或专门能力，主助手已经把任务交给更适合的角色。",
+        };
+    }
+  }
+  if (streaming) {
+    return {
+      title: "主助手正在处理这条消息",
+      summary: "通常几秒内会给你回复；如果需要专门角色或外部资料，这里会继续显示进度。",
+    };
+  }
+  return null;
+}
+
+function formatCuratedProgressEvent(
+  messageType: string,
+  direction: string,
+  targetAgent: string
+): UserFacingProgressEvent {
+  const targetLabel = formatAgentRoleLabel(targetAgent);
+  switch (messageType.trim().toUpperCase()) {
+    case "TASK":
+      return {
+        title: `已委托 ${targetLabel}`,
+        summary:
+          direction === "outbound"
+            ? "主助手已经把这轮任务交给更适合的角色。"
+            : `${targetLabel} 已收到新的内部任务。`,
+      };
+    case "UPDATE":
+      return {
+        title: "内部进度有更新",
+        summary:
+          direction === "inbound"
+            ? `${targetLabel} 刚回传了一次处理中进展。`
+            : "主助手刚补充了新的要求或上下文。",
+      };
+    case "RESULT":
+      return {
+        title: `${targetLabel} 已回传结果`,
+        summary: "主助手会基于这批结果整理成你能直接使用的答复。",
+      };
+    case "ERROR":
+      return {
+        title: `${targetLabel} 这轮没有拿到结果`,
+        summary: "主助手会说明影响，并尽量给你一个清晰的下一步。",
+      };
+    case "HEARTBEAT":
+      return {
+        title: `${targetLabel} 还在继续`,
+        summary: "系统仍在运行，没有卡死在中途。",
+      };
+    case "CANCEL":
+      return {
+        title: "内部协作已取消",
+        summary: "主助手会改用别的路径继续处理，或直接告诉你影响。",
+      };
+    default:
+      return {
+        title: "内部协作有新的变化",
+        summary: "系统正在继续推进这轮处理。",
+      };
+  }
+}
+
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
   const sessions = snapshot!.resources.sessions.sessions;
@@ -111,6 +222,7 @@ export default function ChatWorkbench() {
   const [input, setInput] = useState("");
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
   const [showCollaborationTechRefs, setShowCollaborationTechRefs] = useState(false);
+  const [showProgressDetails, setShowProgressDetails] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const context = snapshot!.resources.context_continuity;
   const memory = snapshot!.resources.memory;
@@ -184,6 +296,31 @@ export default function ChatWorkbench() {
           )
           .sort((left, right) => right.message_seq - left.message_seq)
           .slice(0, 3);
+  const progressStage = buildProgressStage(
+    streaming,
+    hasInternalCollaboration,
+    activeConversationLatestType,
+    activeConversationTargetAgent,
+    error
+  );
+  const progressEvents =
+    activeA2AMessages.length > 0
+      ? activeA2AMessages.map((message) =>
+          formatCuratedProgressEvent(
+            message.message_type,
+            message.direction,
+            activeConversationTargetAgent
+          )
+        )
+      : hasInternalCollaboration
+        ? [
+            formatCuratedProgressEvent(
+              activeConversationLatestType || "TASK",
+              "outbound",
+              activeConversationTargetAgent
+            ),
+          ]
+        : [];
   const activeWorkerSessionId = activeConversationWorkerSessionId;
   const activeWorkerRecall =
     activeWorkerSessionId.length > 0
@@ -253,6 +390,16 @@ export default function ChatWorkbench() {
   const taskStatusLabel = formatTaskStatusLabel(taskDetail?.task.status ?? "");
   const taskStatusTone = formatTaskStatusTone(taskDetail?.task.status ?? "");
   const collaborationStatusTone = hasInternalCollaboration ? "success" : "draft";
+  const taskStatus = String(taskDetail?.task.status ?? "").trim().toUpperCase();
+  const hasLoadedTaskStatus = taskStatus.length > 0;
+  const shouldPollLiveState =
+    Boolean(taskId) &&
+    (streaming ||
+      (hasLoadedTaskStatus &&
+        !TERMINAL_TASK_STATUSES.has(taskStatus) &&
+        (hasInternalCollaboration ||
+          ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(taskStatus))));
+  const shouldShowProgress = Boolean(progressStage);
   const internalRefs = [
     taskId ? { label: "任务 ID", value: taskId } : null,
     activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
@@ -290,7 +437,9 @@ export default function ChatWorkbench() {
     if (!taskId) {
       return;
     }
-    void refreshResources([
+    let cancelled = false;
+    const currentTaskId = taskId;
+    const resources = [
       {
         resource_type: snapshot!.resources.sessions.resource_type,
         resource_id: snapshot!.resources.sessions.resource_id,
@@ -306,8 +455,51 @@ export default function ChatWorkbench() {
         resource_id: snapshot!.resources.context_continuity.resource_id,
         schema_version: snapshot!.resources.context_continuity.schema_version,
       },
-    ]);
-  }, [taskId, streaming]);
+    ];
+
+    async function refreshLiveState() {
+      try {
+        const detail = await fetchTaskDetail(currentTaskId);
+        if (cancelled) {
+          return;
+        }
+        setTaskDetail(detail);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setTaskDetail(null);
+      }
+      if (cancelled) {
+        return;
+      }
+      await refreshResources(resources);
+    }
+
+    void refreshLiveState();
+    if (!shouldPollLiveState) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshLiveState();
+    }, 1200);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    taskId,
+    shouldPollLiveState,
+    refreshResources,
+    snapshot!.resources.context_continuity.resource_id,
+    snapshot!.resources.context_continuity.schema_version,
+    snapshot!.resources.delegation.resource_id,
+    snapshot!.resources.delegation.schema_version,
+    snapshot!.resources.sessions.resource_id,
+    snapshot!.resources.sessions.schema_version,
+  ]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -413,6 +605,33 @@ export default function ChatWorkbench() {
                   <MessageBubble key={message.id} message={message} />
                 ))}
               </div>
+
+              {shouldShowProgress && progressStage ? (
+                <>
+                  <InlineCallout title={progressStage.title}>{progressStage.summary}</InlineCallout>
+                  <HoverReveal
+                    label="查看内部协作进度"
+                    expanded={showProgressDetails}
+                    onToggle={setShowProgressDetails}
+                    ariaLabel="当前内部协作进度"
+                  >
+                    <div className="wb-note-stack">
+                      {progressEvents.map((item, index) => (
+                        <div key={`${item.title}-${index}`} className="wb-note">
+                          <strong>{item.title}</strong>
+                          <span>{item.summary}</span>
+                        </div>
+                      ))}
+                      {progressEvents.length === 0 ? (
+                        <div className="wb-note">
+                          <strong>主助手已接手</strong>
+                          <span>这轮消息已经进入处理流程，稍后会继续补上内部进展。</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </HoverReveal>
+                </>
+              ) : null}
 
               {error ? (
                 <InlineCallout title="刚才没有发送成功" tone="error">
@@ -546,14 +765,24 @@ export default function ChatWorkbench() {
                 ) : null}
                 {activeA2AMessages.length > 0 ? (
                   <div className="wb-note-stack">
-                    {activeA2AMessages.map((message) => (
-                      <div key={message.a2a_message_id} className="wb-note">
-                        <strong>
-                          {formatA2AMessageType(message.message_type)} · #{message.message_seq}
-                        </strong>
-                        <span>{formatCollaborationDirectionLabel(message.direction)}</span>
-                      </div>
-                    ))}
+                    {activeA2AMessages.map((message) => {
+                      const item = formatCuratedProgressEvent(
+                        message.message_type,
+                        message.direction,
+                        activeConversationTargetAgent
+                      );
+                      return (
+                        <div key={message.a2a_message_id} className="wb-note">
+                          <strong>{item.title}</strong>
+                          <span>{item.summary}</span>
+                          <small>
+                            {formatA2AMessageType(message.message_type)} · #
+                            {message.message_seq} ·{" "}
+                            {formatCollaborationDirectionLabel(message.direction)}
+                          </small>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
                 {activeA2AMessages.length === 0 && activeA2AConversationRecord == null ? (
@@ -648,8 +877,12 @@ export default function ChatWorkbench() {
                 </span>
               </div>
               <div className="wb-note">
-                <strong>最近摘要</strong>
-                <span>{activeContextFrame?.recent_summary ?? "当前还没有生成摘要。"}</span>
+                <strong>继续追问时</strong>
+                <span>
+                  {activeContextFrame
+                    ? "这轮对话已经整理过背景和上下文，你继续追问时不用从头再讲。"
+                    : "当前还没有形成稳定背景，继续多聊几轮后这里会逐步补齐。"}
+                </span>
               </div>
             </div>
           </section>

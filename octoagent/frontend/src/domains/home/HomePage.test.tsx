@@ -18,11 +18,13 @@ function buildSnapshot(options?: {
   diagnosticsStatus?: string;
   llmMode?: string;
   pendingCount?: number;
+  channelSummary?: Record<string, unknown>;
 }) {
   const setupReady = options?.setupReady ?? false;
   const diagnosticsStatus = options?.diagnosticsStatus ?? "degraded";
   const llmMode = options?.llmMode ?? "echo";
   const pendingCount = options?.pendingCount ?? 0;
+  const channelSummary = options?.channelSummary ?? {};
 
   return {
     resources: {
@@ -49,7 +51,7 @@ function buildSnapshot(options?: {
       },
       diagnostics: {
         overall_status: diagnosticsStatus,
-        channel_summary: {},
+        channel_summary: channelSummary,
       },
       sessions: {
         sessions: [],
@@ -117,9 +119,10 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "先完成基础配置" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "连接真实模型" })).toBeInTheDocument();
-    expect(screen.getByText("先完成 Provider 与密钥连接。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先连接真实模型" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "打开设置" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("先完成 Provider 与密钥连接。").length).toBeGreaterThan(0);
+    expect(screen.getByText("当前还没有启用外部渠道，先用 Web 即可。")).toBeInTheDocument();
   });
 
   it("已就绪且非 echo 模式时优先引导进入聊天", () => {
@@ -139,8 +142,64 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "可以开始使用" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "进入聊天" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "连接真实模型" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "现在可以直接开始聊天" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "进入聊天" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "继续完成设置" })).not.toBeInTheDocument();
+  });
+
+  it("会把渠道对象转成用户语言，而不是显示 object 字符串", () => {
+    mockWorkbench = {
+      snapshot: buildSnapshot({
+        setupReady: true,
+        diagnosticsStatus: "ready",
+        llmMode: "litellm",
+        channelSummary: {
+          telegram: {
+            status: "ready",
+          },
+        },
+      }),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Telegram已连接")).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
+  it("不会因为存在渠道对象就误报外部渠道都已可用", () => {
+    mockWorkbench = {
+      snapshot: buildSnapshot({
+        setupReady: true,
+        diagnosticsStatus: "ready",
+        llmMode: "litellm",
+        channelSummary: {
+          telegram: {
+            enabled: false,
+          },
+        },
+      }),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>
+    );
+
+    expect(
+      screen.getByText("已经看到了外部渠道配置，但连接或授权可能还没走完；先用 Web 也不受影响。")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("常用入口和外部渠道都已经可用，你可以直接开始使用。")
+    ).not.toBeInTheDocument();
   });
 });

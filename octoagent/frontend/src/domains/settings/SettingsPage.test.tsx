@@ -241,6 +241,9 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("还没有 Provider")).toBeInTheDocument();
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先把真实模型接起来" })).toBeInTheDocument();
+    expect(screen.getByText("先按这 3 步走通一次")).toBeInTheDocument();
+    expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
@@ -274,5 +277,31 @@ describe("SettingsPage", () => {
         profile_name: "openai-codex-default",
       })
     );
+  });
+
+  it("review 已就绪时仍优先要求先保存当前修改", () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.runtime.llm_mode = "litellm";
+    snapshot.resources.setup_governance.review = {
+      ...snapshot.resources.setup_governance.review,
+      ready: true,
+      blocking_reasons: [],
+      next_actions: [],
+    };
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("heading", { name: "配置已经够用，先保存再验证" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "先保存当前修改" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
   });
 });

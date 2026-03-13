@@ -48,6 +48,7 @@ export interface ChatSendOptions {
 }
 
 const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
+const AGENT_STREAM_PLACEHOLDER = "主助手已接手，正在处理这条消息…";
 
 function readStoredTaskId(): string | null {
   if (typeof window === "undefined") {
@@ -171,6 +172,55 @@ function extractArtifactText(artifact: Artifact | undefined): string {
     }
   }
   return "";
+}
+
+function normalizeFailureMessage(raw: string): string {
+  const message = raw.trim();
+  if (!message) {
+    return "";
+  }
+  if (
+    /城市|区县|地点|位置|补充|缺少|missing|clarify|location|city|where/i.test(message)
+  ) {
+    return "还差一条关键信息才能继续，请补充地点或你要查询的对象。";
+  }
+  if (
+    /browser|web|network|proxy|docker|backend|connection|timeout|EOF|unreachable|fetch/i.test(
+      message
+    )
+  ) {
+    return "这次卡在当前工具或运行环境上了，不是你不会问。稍后重试，或先检查联网和后台连接。";
+  }
+  if (/degrad|fallback|降级/i.test(message)) {
+    return "系统当前在降级运行，这次结果可能不完整。";
+  }
+  return message;
+}
+
+function extractFailureMessage(
+  eventData: Pick<SSEEventData, "payload"> & { type: string }
+): string {
+  const payload = extractEventPayload(eventData);
+  if (!payload) {
+    return "本次回复没有成功完成，请稍后重试。";
+  }
+  const candidates = [
+    payload.user_message,
+    payload.message,
+    payload.error,
+    payload.reason,
+    payload.detail,
+    payload.response_summary,
+    payload.summary,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return (
+        normalizeFailureMessage(candidate) || "本次回复没有成功完成，请稍后重试。"
+      );
+    }
+  }
+  return "本次回复没有成功完成，请稍后重试。";
 }
 
 function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] {
@@ -297,7 +347,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         const agentMsg: ChatMessage = {
           id: agentMsgId,
           role: "agent",
-          content: "",
+          content: AGENT_STREAM_PLACEHOLDER,
           isStreaming: true,
         };
         setMessages((prev) => [...prev, agentMsg]);
@@ -336,13 +386,17 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
               (eventData.type === "MODEL_CALL_FAILED" && isUserVisibleModelEvent(eventData)) ||
               eventData.type === "ERROR"
             ) {
-              setError("本次回复没有成功完成，请稍后重试。");
+              const failureMessage = extractFailureMessage(eventData);
+              setError(failureMessage);
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === agentMsgId
                     ? {
                         ...msg,
-                        content: msg.content || "本次回复失败，请重试。",
+                        content:
+                          msg.isStreaming || msg.content === AGENT_STREAM_PLACEHOLDER
+                            ? failureMessage
+                            : msg.content || failureMessage,
                         isStreaming: false,
                       }
                     : msg

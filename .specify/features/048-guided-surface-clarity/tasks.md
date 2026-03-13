@@ -1,5 +1,9 @@
 # Tasks - Feature 048
 
+## 完成情况
+
+- T001-T008 已完成，普通用户主路径已更新到新的首页信息架构、Settings 最少必要路径与 Chat 等待态/协作进度表达。
+
 ## T001 - 重写 Home 首屏结论与主行动
 
 - 基于 setup / diagnostics / operator pending / active work 综合推导首页主状态
