@@ -696,3 +696,78 @@ async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path
     assert plan.dispatch_envelope.metadata["target_kind"] == "subagent"
 
     await store_group.conn.close()
+
+
+async def test_prepare_dispatch_preserves_resume_state_for_top_level_work(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请继续处理这个顶层任务",
+            idempotency_key="delegation-top-level-resume",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请继续处理这个顶层任务",
+            worker_capability="llm_generation",
+            resume_from_node="model_call_started",
+            resume_state_snapshot={
+                "llm_call_idempotency_key": "task-top-level:llm_call:main:test",
+            },
+            metadata={"requested_worker_type": "dev"},
+        )
+    )
+
+    assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.resume_from_node == "model_call_started"
+    assert plan.dispatch_envelope.resume_state_snapshot == {
+        "llm_call_idempotency_key": "task-top-level:llm_call:main:test",
+    }
+    assert plan.work.metadata["request_context"]["resume_from_node"] == "model_call_started"
+    assert plan.work.metadata["request_context"]["resume_state_snapshot"] == {
+        "llm_call_idempotency_key": "task-top-level:llm_call:main:test",
+    }
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path: Path) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="请把这项工作继续委派给 research subagent",
+            idempotency_key="delegation-child-resume-cleared",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="请把这项工作继续委派给 research subagent",
+            worker_capability="llm_generation",
+            resume_from_node="model_call_started",
+            resume_state_snapshot={
+                "llm_call_idempotency_key": "task-child:llm_call:main:test",
+            },
+            metadata={
+                "parent_work_id": "work-parent-1",
+                "parent_task_id": "task-parent-1",
+                "requested_worker_type": "research",
+                "target_kind": "subagent",
+                "spawned_by": "butler_freshness_delegate",
+            },
+        )
+    )
+
+    assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.resume_from_node is None
+    assert plan.dispatch_envelope.resume_state_snapshot is None
+    assert plan.work.metadata["resume_from_node"] == ""
+    assert plan.work.metadata["request_context"]["resume_from_node"] == ""
+    assert plan.work.metadata["request_context"]["resume_state_snapshot"] == {}
+
+    await store_group.conn.close()

@@ -138,6 +138,12 @@ class DelegationPlaneService:
             if requested_worker_type is not None or requested_target_kind
             else ""
         )
+        delegated_resume_from_node, delegated_resume_state_snapshot = (
+            self._delegated_resume_context(
+                request=request,
+                target_kind=initial_target_kind,
+            )
+        )
         work_id = str(ULID())
         runtime_context = self._build_runtime_context(
             request=request,
@@ -180,7 +186,7 @@ class DelegationPlaneService:
                 "effective_worker_snapshot_id": effective_worker_snapshot_id,
                 "requested_tool_profile": request.tool_profile,
                 "parent_task_id": str(request.metadata.get("parent_task_id", "")),
-                "resume_from_node": request.resume_from_node or "",
+                "resume_from_node": delegated_resume_from_node,
                 "runtime_context": runtime_context.model_dump(mode="json"),
                 "request_context": {
                     "trace_id": request.trace_id,
@@ -188,8 +194,8 @@ class DelegationPlaneService:
                     "hop_count": request.hop_count,
                     "max_hops": request.max_hops,
                     "model_alias": request.model_alias or "",
-                    "resume_from_node": request.resume_from_node or "",
-                    "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
+                    "resume_from_node": delegated_resume_from_node,
+                    "resume_state_snapshot": dict(delegated_resume_state_snapshot),
                     "tool_profile": request.tool_profile,
                     "agent_profile_id": agent_profile_id,
                     "context_frame_id": context_frame_id,
@@ -216,8 +222,8 @@ class DelegationPlaneService:
                 "hop_count": request.hop_count,
                 "max_hops": request.max_hops,
                 "model_alias": request.model_alias or "",
-                "resume_from_node": request.resume_from_node or "",
-                "resume_state_snapshot": dict(request.resume_state_snapshot or {}),
+                "resume_from_node": delegated_resume_from_node,
+                "resume_state_snapshot": dict(delegated_resume_state_snapshot),
                 "tool_profile": request.tool_profile,
                 "agent_profile_id": agent_profile_id,
                 "context_frame_id": context_frame_id,
@@ -334,8 +340,12 @@ class DelegationPlaneService:
             max_hops=request.max_hops,
             user_text=request.user_text,
             model_alias=request.model_alias,
-            resume_from_node=request.resume_from_node,
-            resume_state_snapshot=request.resume_state_snapshot,
+            resume_from_node=delegated_resume_from_node or None,
+            resume_state_snapshot=(
+                dict(delegated_resume_state_snapshot)
+                if delegated_resume_state_snapshot
+                else None
+            ),
             tool_profile=request.tool_profile,
             runtime_context=resolved_runtime_context,
             metadata={
@@ -361,6 +371,20 @@ class DelegationPlaneService:
             tool_selection=selection,
             dispatch_envelope=dispatch,
         )
+
+    @staticmethod
+    def _delegated_resume_context(
+        *,
+        request: OrchestratorRequest,
+        target_kind: DelegationTargetKind,
+    ) -> tuple[str, dict[str, Any]]:
+        has_parent_context = any(
+            str(request.metadata.get(key, "")).strip()
+            for key in ("parent_task_id", "parent_work_id", "spawned_by")
+        )
+        if has_parent_context or target_kind is DelegationTargetKind.SUBAGENT:
+            return "", {}
+        return request.resume_from_node or "", dict(request.resume_state_snapshot or {})
 
     async def mark_dispatched(
         self,
