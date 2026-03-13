@@ -37,6 +37,7 @@ Thumbs.db
 # Node/前端
 node_modules/
 frontend/dist/
+frontend/pnpm-lock.yaml
 *.tsbuildinfo
 
 # uv
