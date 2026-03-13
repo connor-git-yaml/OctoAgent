@@ -30,6 +30,7 @@ from octoagent.core.models import (
     Event,
     EventCausality,
     EventType,
+    MemoryNamespaceKind,
     PartType,
     RequesterInfo,
     RuntimeControlContext,
@@ -62,7 +63,6 @@ from octoagent.core.store.transaction import (
 )
 from octoagent.memory import (
     EvidenceRef,
-    MemoryAccessPolicy,
     MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
     MemoryPartition,
@@ -431,6 +431,11 @@ class TaskService:
                 tool_profile=tool_profile,
                 runtime_context=runtime_context,
             )
+            llm_dispatch_metadata = self._build_llm_dispatch_metadata(
+                dispatch_metadata=dispatch_metadata or {},
+                compiled_context=compiled_context,
+                runtime_context=runtime_context,
+            )
             request_summary = compiled_context.request_summary
             if self._should_execute_node("model_call_started", resume_from_node):
                 request_artifact_id = await self._store_request_snapshot_artifact(
@@ -522,7 +527,7 @@ class TaskService:
                             model_alias=effective_alias,
                             task_id=task_id,
                             trace_id=trace_id,
-                            dispatch_metadata=dispatch_metadata or {},
+                            dispatch_metadata=llm_dispatch_metadata,
                             worker_capability=worker_capability,
                             tool_profile=tool_profile,
                         )
@@ -679,6 +684,39 @@ class TaskService:
                 kwargs[key] = value
 
         return await call_fn(prompt_or_messages, **kwargs)
+
+    @staticmethod
+    def _build_llm_dispatch_metadata(
+        *,
+        dispatch_metadata: dict[str, Any],
+        compiled_context: CompiledTaskContext | None,
+        runtime_context: RuntimeControlContext | None,
+    ) -> dict[str, Any]:
+        merged = dict(dispatch_metadata)
+        if compiled_context is not None:
+            if compiled_context.effective_agent_runtime_id and not str(
+                merged.get("agent_runtime_id", "")
+            ).strip():
+                merged["agent_runtime_id"] = compiled_context.effective_agent_runtime_id
+            if compiled_context.effective_agent_session_id and not str(
+                merged.get("agent_session_id", "")
+            ).strip():
+                merged["agent_session_id"] = compiled_context.effective_agent_session_id
+            if compiled_context.context_frame_id and not str(
+                merged.get("context_frame_id", "")
+            ).strip():
+                merged["context_frame_id"] = compiled_context.context_frame_id
+            if compiled_context.recall_frame_id and not str(
+                merged.get("recall_frame_id", "")
+            ).strip():
+                merged["recall_frame_id"] = compiled_context.recall_frame_id
+            if compiled_context.memory_namespace_ids and "memory_namespace_ids" not in merged:
+                merged["memory_namespace_ids"] = list(compiled_context.memory_namespace_ids)
+        if runtime_context is not None and runtime_context.work_id and not str(
+            merged.get("work_id", "")
+        ).strip():
+            merged["work_id"] = runtime_context.work_id
+        return merged
 
     async def _build_task_context(
         self,
@@ -846,6 +884,7 @@ class TaskService:
 
         memory_flush_run_id = await self._persist_compaction_flush(
             task_id=task_id,
+            context_frame_id=compiled.context_frame_id,
             summary_text=compiled.summary_text,
             summary_artifact_id=summary_artifact.artifact_id,
             request_artifact_id=request_artifact_id,
@@ -1240,6 +1279,7 @@ class TaskService:
         self,
         *,
         task_id: str,
+        context_frame_id: str,
         summary_text: str,
         summary_artifact_id: str,
         request_artifact_id: str,
@@ -1248,7 +1288,7 @@ class TaskService:
         compressed_turn_count: int,
     ) -> str:
         task = await self.get_task(task_id)
-        if task is None or not task.scope_id:
+        if task is None:
             return ""
 
         try:
@@ -1257,6 +1297,12 @@ class TaskService:
                 task=task,
                 surface=task.requester.channel,
             )
+            flush_scope_id, flush_scope_metadata = await self._resolve_compaction_flush_scope(
+                task=task,
+                context_frame_id=context_frame_id,
+            )
+            if not flush_scope_id:
+                return ""
             memory_service = await self._agent_context.get_memory_service(
                 project=project,
                 workspace=workspace,
@@ -1265,7 +1311,7 @@ class TaskService:
                 MemoryMaintenanceCommand(
                     command_id=str(ULID()),
                     kind=MemoryMaintenanceCommandKind.FLUSH,
-                    scope_id=task.scope_id,
+                    scope_id=flush_scope_id,
                     partition=MemoryPartition.WORK,
                     reason="context compaction flush",
                     requested_by=f"context_compaction:{worker_capability or 'main'}",
@@ -1287,6 +1333,7 @@ class TaskService:
                         "source": "context_compaction",
                         "task_id": task_id,
                         "compressed_turn_count": compressed_turn_count,
+                        **flush_scope_metadata,
                     },
                 )
             )
@@ -1299,6 +1346,64 @@ class TaskService:
                 error=str(exc),
             )
             return ""
+
+    async def _resolve_compaction_flush_scope(
+        self,
+        *,
+        task,
+        context_frame_id: str,
+    ) -> tuple[str, dict[str, str]]:
+        if context_frame_id:
+            frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+            if frame is not None:
+                namespaces = []
+                for namespace_id in frame.memory_namespace_ids:
+                    namespace = await self._stores.agent_context_store.get_memory_namespace(
+                        namespace_id
+                    )
+                    if namespace is not None:
+                        namespaces.append(namespace)
+                private_namespace = next(
+                    (
+                        item
+                        for item in namespaces
+                        if item.kind
+                        in {
+                            MemoryNamespaceKind.BUTLER_PRIVATE,
+                            MemoryNamespaceKind.WORKER_PRIVATE,
+                        }
+                        and item.memory_scope_ids
+                    ),
+                    None,
+                )
+                if private_namespace is not None:
+                    return private_namespace.memory_scope_ids[0], {
+                        "memory_namespace_id": private_namespace.namespace_id,
+                        "memory_namespace_kind": private_namespace.kind.value,
+                        "memory_scope_id": private_namespace.memory_scope_ids[0],
+                    }
+                project_namespace = next(
+                    (
+                        item
+                        for item in namespaces
+                        if item.kind is MemoryNamespaceKind.PROJECT_SHARED
+                        and item.memory_scope_ids
+                    ),
+                    None,
+                )
+                if project_namespace is not None:
+                    return project_namespace.memory_scope_ids[0], {
+                        "memory_namespace_id": project_namespace.namespace_id,
+                        "memory_namespace_kind": project_namespace.kind.value,
+                        "memory_scope_id": project_namespace.memory_scope_ids[0],
+                    }
+        if task.scope_id:
+            return task.scope_id, {
+                "memory_namespace_id": "",
+                "memory_namespace_kind": "legacy_task_scope",
+                "memory_scope_id": task.scope_id,
+            }
+        return "", {}
 
     def _truncate_response_summary(self, text: str, suffix: str = "see artifact") -> str:
         """截断超出字节限制的响应摘要（UTF-8 字节数）"""

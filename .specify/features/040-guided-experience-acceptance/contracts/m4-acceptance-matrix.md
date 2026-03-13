@@ -16,6 +16,7 @@
 - 033 与 036 关闭后，M4 如何完成最终签收。
 
 040 的 verification、milestone 回写与 release 结论必须以本矩阵为准。
+2026-03-13 起，需要补充一个重要约束：040 证明的是 guided experience、setup convergence 和 workbench orchestration surface 的可用性；它 **不自动等价于** 039 的 message-native A2A 主链和 041 的 Butler-owned freshness runtime 已完全闭合。
 
 ---
 
@@ -24,7 +25,7 @@
 | Gate | 场景 ID | 场景名称 | 主要 surface | 最低通过标准 | 主证据 | Supporting Evidence |
 |---|---|---|---|---|---|---|
 | `GATE-M4-GUIDED-WORKBENCH` | `SCN-040-001` | Home / Settings readiness 闭环 | guided workbench + control plane | `Home` 显示 readiness，`Settings` 走 `setup.review -> setup.apply`，且不引入私有 backend | `octoagent/frontend/src/App.test.tsx::设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷` | `octoagent/apps/gateway/tests/test_control_plane_api.py::test_setup_apply_persists_config_policy_and_agent_profile`、Feature 036 verification |
-| `GATE-M4-SUPERVISOR-WORKFLOW` | `SCN-040-002` | supervisor -> worker review/apply | WorkbenchBoard + orchestration | 用户可在图形化工作台 review/apply worker plan，主 Agent 继续保持 supervisor-only | `octoagent/frontend/src/App.test.tsx::Work 页面会先展示 worker.review 方案，再批准 worker.apply` | Feature 039 verification |
+| `GATE-M4-SUPERVISOR-WORKFLOW` | `SCN-040-002` | supervisor -> worker review/apply | WorkbenchBoard + orchestration | 用户可在图形化工作台 review/apply worker plan，主 Agent 继续保持 supervisor-only；若 A2A 仍停留在 envelope 归一化，release report MUST 显式标注 039 follow-up gap | `octoagent/frontend/src/App.test.tsx::Work 页面会先展示 worker.review 方案，再批准 worker.apply` | Feature 039 verification |
 | `GATE-M4-MEMORY-OPERATOR-RECOVERY` | `SCN-040-003` | memory -> operator -> export/recovery | MemoryCenter + diagnostics + sessions | `/memory` 使用 canonical `sessions / diagnostics / session.export / backup.create` 串联主路径 | `octoagent/frontend/src/App.test.tsx::Memory 页面会串起 operator 动作和 export/recovery 入口` | `octoagent/apps/gateway/tests/test_control_plane_api.py::test_backup_create_and_restore_plan_actions_refresh_diagnostics` |
 | `GATE-M4-SETUP-CONVERGENCE` | `SCN-040-004` | setup governance 最终收口 | Web Settings + CLI onboarding | `skills.selection.save` 已交付，且 CLI / Web 共用同一 setup 状态机 | Feature 036 verification report | Feature 036 tasks / spec |
 | `GATE-M4-CONTEXT-CONTINUITY` | `SCN-040-005` | main agent context continuity | ChatWorkbench + runtime + memory | 033 真实交付，或 release report 明确阻塞 M4 最终签收 | Feature 033 verification report | `octoagent/frontend/src/App.test.tsx::聊天发送后会回刷 sessions、delegation 和 context 摘要`、Feature 034 verification |
@@ -49,6 +50,7 @@
 1. `SCN-040-001`、`SCN-040-002`、`SCN-040-003`、`SCN-040-006` 已回填；
 2. 040 不新增平行 backend / 私有 REST / 新产品对象；
 3. release report 明确写出 M4 是否可签收，以及被谁阻塞。
+4. 040 的通过结论不得被解读为 039/041 的运行语义已经 fully closed。
 
 ### M4 最终签收规则
 
@@ -56,7 +58,8 @@ M4 最终签收必须额外满足：
 
 1. `SCN-040-004` 已关闭；
 2. `SCN-040-005` 已关闭；
-3. release report 已把总体结论更新为可签收，而不是 blocked / conditional。
+3. 039 的 message-native Butler -> Worker A2A 主链与 041 的 Butler-owned freshness runtime 已闭合，或 release report 明确写出仍 blocked；
+4. release report 已把总体结论更新为可签收，而不是 blocked / conditional。
 
 ---
 

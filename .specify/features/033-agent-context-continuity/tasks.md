@@ -1,6 +1,6 @@
 # Tasks: Feature 033 Agent Profile + Bootstrap + Context Continuity
 
-> 状态：Implemented（runtime/context gate 已关闭；未勾选项主要是 bootstrap/operator UX 与补充前端验收）
+> 状态：Partially Implemented（Butler 主聊天链已闭合；Worker parity、独立 session/private memory/recall continuity 仍待补齐）
 
 ## Phase 0 - 验收门禁与测试矩阵先行
 
@@ -51,6 +51,13 @@
 - [x] T027 [P0] 更新 `docs/blueprint.md`、`docs/m3-feature-split.md`，修正文档中对 030/031 的过度乐观表述
 - [x] T028 [P0] 更新 031 release report 的 follow-up gate 说明，明确 033 对 live cutover 的风险等级
 - [x] T029 [P0] 输出 verification report、remaining risks、deferred items
+
+## Phase 7 - Butler / Worker 全 Agent Runtime 对齐
+
+- [ ] T030 [P0] 把 `AgentRuntime` / `AgentSession` / `MemoryNamespace` / `RecallFrame` 收敛成 033 的 canonical contract，并回写到 runtime store / projection
+- [ ] T031 [P0] 为 Worker 建立独立 `WorkerSession` continuity 主链，禁止直接读取完整用户主会话
+- [ ] T032 [P1] 让 control plane / event chain 能同时解释 `ButlerSession`、`WorkerSession`、`ContextFrame`、`RecallFrame` 的映射关系
+- [ ] T033 [P1] 补 Butler -> Worker 真链路集成测试，证明 Worker private memory/recall continuity 成立
 
 ## 测试矩阵
 

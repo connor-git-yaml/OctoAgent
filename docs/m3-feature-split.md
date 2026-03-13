@@ -1,9 +1,9 @@
-# M3 Feature 拆分方案（v1.1）
+# M3 Feature 拆分方案（v1.2）
 
 > **文档类型**: 里程碑拆分方案（Implementation Planning）  
 > **依据**: `docs/blueprint.md` §8.7 + §8.9.4 + §14（M3 定义）+ 本轮 OpenClaw / Agent Zero 深度调研  
-> **状态**: v1.4 — 024-033 已交付；Feature 033 context continuity gate 已关闭
-> **日期**: 2026-03-09
+> **状态**: v1.5 — 024-031 已交付；033/038 已完成 Butler 主链，但 Butler/Worker 全 Agent runtime parity 仍待补齐
+> **日期**: 2026-03-13
 
 ---
 
@@ -21,12 +21,13 @@
 - 029 已交付 WeChat Import + Multi-source Import Workbench
 - 030 已交付 capability pack、ToolIndex、Delegation Plane、Skill Pipeline
 
-031 完成后，曾通过 033 补齐一条主 Agent context continuity 主链；当前剩余工作主要转入发布后的持续硬化与 UX 细化：
+031 完成后，曾通过 033 补齐一条主 Agent context continuity 主链；但 2026-03-13 的架构复核确认，这仍不足以代表“每个 Agent 都拥有完整上下文系统”。当前剩余工作不只是 UX 细化，还包括 Butler / Worker 的 session / memory / recall parity：
 
 - Feature 031 已补齐 acceptance 制品、release report 和 remaining risks 清单
 - control-plane 的 front-door 部署边界已经写入正式验收门禁，并对 `loopback` 模式补了代理转发 header 的 fail-closed 拒绝
 - OpenClaw -> OctoAgent 迁移演练已经完成，后续差距主要转入 live cutover 与长期运维阶段
-- 已关闭的缺口：主 Agent 运行时现已真实消费 `AgentProfile`、owner basics、bootstrap guidance、recent session summary 与 long-term memory retrieval；`TaskService -> LLMService` 不再只以原始 `user_text` 驱动
+- 已关闭的缺口：Butler 主链运行时现已真实消费 `AgentProfile`、owner basics、bootstrap guidance、recent session summary 与 long-term memory retrieval；`TaskService -> LLMService` 不再只以原始 `user_text` 驱动
+- 尚未关闭的缺口：Worker 仍未具备与 Butler 对等的独立 `AgentSession / MemoryNamespace / RecallFrame` 主链；live A2A 也还未达到 `ButlerSession -> WorkerSession` 的 message-native 语义
 
 ### 1.2 本轮复核后的结论
 
@@ -34,9 +35,11 @@ M3 的功能建设已经足够完整，但复核结论需修正为：
 
 1. **M3 主功能线 024-031 已交付**：Project、Control Plane、Memory Console、MemU、Import Workbench、Delegation Plane 和 acceptance harness 都已存在。
 2. **031 原范围已完成 release 收口**：已具备独立 spec、release gates、验收矩阵、迁移演练和最终报告，且 follow-up `GATE-M3-CONTEXT-CONTINUITY` 已由 033 关闭。
-3. **033 已完成主 Agent 上下文连续性补位**：主 Agent 已真实消费 `AgentProfile / bootstrap / recent summary / memory retrieval`，M3 的“日常可用”主链闭环现已成立。
-4. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
-5. **OpenClaw 迁移演练已纳入 M3 签收**：但正式 live cutover 前，应优先完成 033，而不是先开启 M4 体验增强。
+3. **033 只完成了 Butler 主链的上下文连续性补位**：Butler 已真实消费 `AgentProfile / bootstrap / recent summary / memory retrieval`，但 Worker 侧的独立 session / private memory / recall parity 仍未闭环。
+4. **038 只完成了 project-scoped recall 主链**：runtime resolver、`memory.recall`、recall provenance 已成立，但 agent-private namespace / worker recall runtime / namespace-aware MemU index 仍需补位。
+5. **031 的历史签收仍成立，但语义需重新解释**：它证明 M3 的用户可用骨架成立；不再意味着“全 Agent 运行语义已经到位”。
+6. **公网边界必须继续按 front-door 约束执行**：当前产品适合单 owner / localhost、bearer 或 trusted-network 部署，不应裸暴露。
+7. **OpenClaw 迁移演练已纳入 M3 签收**：但正式 live cutover 后，仍需要把 033/038 的“主 Agent 完成”升级成“全 Agent 完成”。
 
 ### 1.3 调研证据（不仅 README）
 
@@ -119,20 +122,29 @@ M3 的一句话目标：
 - 多模态记忆、Category、ToM 等结果必须带证据链，且可在管理台中追溯
 - MemU 不可用时系统必须自动降级回核心 Memory 能力
 
-### 2.6 核心对象关系与术语收口（2026-03-08 补充）
+### 2.6 核心对象关系与术语收口（2026-03-13 更新）
 
 | 对象 | 归属 / 作用域 | 主要承载 | 默认继承来源 | 说明 |
 |---|---|---|---|---|
 | `Project` | Owner 显式选择的一级产品对象 | instructions、memory bindings、secret bindings、asset bindings、channel/A2A routing | system defaults | M3 的根隔离单位 |
-| `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability pack refs、policy refs、budget defaults | project | 供 session / automation / work 选择 |
-| `Session` | 严格隶属于一个 project | history、queue、focus、effective config snapshot | project + selected agent profile | 正式会话对象 |
-| `Automation` | 严格隶属于一个 project | schedule、target、run history、effective config snapshot | project + selected agent profile | 可创建 session 或直接派生 work |
-| `Work` | 隶属于一个 session 或 automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 委派/合并/回放的一等单位 |
+| `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability refs、policy refs、budget defaults | project | Butler / Worker runtime 的静态模板 |
+| `WorkerProfile` | project 作用域的可复用模板 | worker role、bootstrap、工具集合、权限集合、能力集合 | project + AgentProfile | WorkerRuntime 的静态模板 |
+| `AgentRuntime` | 严格隶属于一个 project | agent identity、effective config、persona、capability、memory namespace bindings | project + selected profile | Butler 或 Worker 的长期运行实体 |
+| `ButlerSession` | 严格隶属于一个 ButlerRuntime | 用户 ↔ Butler 对话、history、queue、focus、rolling summary | project + ButlerRuntime | 当前阶段唯一 user-facing session |
+| `WorkerSession` | 严格隶属于一个 WorkerRuntime | Butler ↔ Worker 内部对话、worker recency、tool/evidence summary、compaction | project + WorkerRuntime + A2AConversation | 默认 internal-only，不直接面向用户 |
+| `DirectWorkerSession` | 严格隶属于一个 WorkerRuntime | 用户 ↔ Worker 直接对话 | project + WorkerRuntime | 后续扩展能力；当前不默认开放 |
+| `Automation` | 严格隶属于一个 project | schedule、target、run history、effective config snapshot | project + selected runtime/profile | 可创建 session 或直接派生 work |
+| `Work` | 隶属于一个 ButlerSession / WorkerSession / Automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 执行与委派单元，不再兼职承载 Agent 私有会话 |
+| `A2AConversation` | 隶属于一个 Work | Butler ↔ Worker 消息往返、context capsule、message lineage | Work + source/target sessions | 多 Agent 运行链的一等对象 |
+| `MemoryNamespace` | project 或 agent 作用域 | shared memory / private memory / partition bindings | project 或 agent runtime | 支撑 SoR / Fragments / Vault / MemU |
+| `RecallFrame` | 单次响应或单次 A2A 交互 | session recency、memory hits、artifact evidence、provenance | AgentSession + MemoryNamespace + Work | “当前问题真正取回了什么”的 durable 证明 |
 
 补充约束：
 
-- 必须明确 `project -> session -> work` 与 `project -> automation -> work` 两条继承链，禁止在运行时临时拼装一套不可追溯的 effective config
+- 必须明确 `project -> agent runtime -> agent session -> work` 与 `project -> automation -> work` 两条继承链，禁止在运行时临时拼装一套不可追溯的 effective config
 - `AgentProfile` / `WorkerProfile` 必须是正式产品对象，不能只作为 `AGENTS.md` 或 bootstrap 文件里的隐式约定
+- 每个 Agent 都必须拥有完整上下文栈：persona / project markdown / session recency / memory namespace / recall frame / capability / scratchpad
+- Butler 当前必须是唯一 user-facing speaker；后续若开放 DirectWorkerSession，必须在产品面和数据模型中显式建模
 - `project/workspace` 至少要有最小 asset manifest 能力（upload / list / inspect / bind）；完整 file browser / editor / diff 可以延后到 M4
 - 术语必须收敛：`tool profile`、`auth profile`、`agent profile`、`readiness level` 分开命名；除记忆分区外不再使用裸 `profile`
 
@@ -143,13 +155,15 @@ M3 的一句话目标：
 - M3 正式签收前必须完成一次 OpenClaw -> OctoAgent 迁移演练，至少覆盖 project 建立、secret 处理、导入、memory 审计、dashboard 操作与 rollback 记录
 - 验收 harness 必须考虑共享 `.venv` 并发 `uv run` 的环境竞争；需要串行化相关步骤或显式使用隔离环境，避免把工具链竞争误判成产品不稳定
 
-### 2.8 Agent Context Continuity 约束（2026-03-09 追加）
+### 2.8 Agent Context Continuity 约束（2026-03-13 重写）
 
 - `AgentProfile` 不能只作为 blueprint 中的术语或 bootstrap 文件里的隐式约定，必须是正式 durable object
-- owner basics / assistant identity / bootstrap guidance 必须进入主 Agent 的真实运行链，而不是只停留在配置或文档层
-- 短期上下文连续性必须 durable，不能只依赖进程内 history
-- 长期 Memory 检索必须真正进入主 Agent / automation / delegation 路径，但不得绕过 020/027/028 的治理边界
-- control plane 必须能够解释“本次回答用了哪些 profile/bootstrap/recent summary/memory hits”，否则 033 视为未完成
+- owner basics / assistant identity / bootstrap guidance 必须进入 Butler 与 Worker 的真实运行链，而不是只停留在配置或文档层
+- 短期上下文连续性必须 durable，不能只依赖进程内 history；`WorkerSession` 不得退化成纯运行态结构
+- 长期 Memory 检索必须真正进入 Butler / Worker / automation / delegation 路径，但不得绕过 020/027/028 的治理边界
+- 每个 Agent 都必须拥有自己的 `AgentSession + MemoryNamespace + RecallFrame`
+- Worker 默认不得直接读取完整用户主聊天历史；Butler 必须通过 A2A payload / context capsule 选择性转述
+- control plane 必须能够解释“本次回答用了哪些 profile/bootstrap/recent summary/memory hits / A2AConversation / recall frame”，否则 033/038 视为未完成
 
 ---
 
@@ -631,13 +645,14 @@ Feature 025 + 027 + 030 + 031
 
 ## 6. 本轮结论
 
-截至 2026-03-11，M3 的主功能建设与 release harness 已完成 024-033，之前通过 live-usage 复核发现的补位结论已经关闭：
+截至 2026-03-13，M3 的主功能建设与 release harness 已完成 024-031；033/038 的 Butler / project-scoped 主链已经建立，但全 Agent runtime parity 仍未完全闭合：
 
-1. 031 已证明 install / project / control plane / memory / import / delegation / migration drill 可以联合成立。
-2. Feature 033 已证明“主 Agent 拥有连续上下文”，当前运行链已正式消费 `AgentProfile`、owner basics、bootstrap 与 memory retrieval。
-3. 因此，M3 的 user-ready 主闭环已经成立，后续重点转入 M4 的引导式工作台与 setup governance 收口。
+1. 031 仍然证明 install / project / control plane / memory / import / delegation / migration drill 可以联合成立。
+2. Feature 033 已证明 Butler 主链拥有连续上下文，当前主聊天运行链已正式消费 `AgentProfile`、owner basics、bootstrap 与 memory retrieval。
+3. Feature 038 已证明 project-scoped recall contract 成立，但还没有完成 `agent-private namespace + worker recall runtime`。
+4. 因此，M3 的 user-ready 主闭环仍然成立，但这个结论只覆盖 Butler / project-scoped 主路径；后续还需继续把全 Agent runtime parity 补齐。
 
-现在，OctoAgent 已经从“能力齐全的系统”推进到“具备长期上下文主链的日常助手”；后续工作主要是 setup / workbench / supervisor 体验继续收口。
+现在，OctoAgent 已经从“能力齐全的系统”推进到“具备 Butler 主链上下文与 recall 主路径的日常助手”；后续工作除了 setup / workbench / supervisor 体验，还包括 Worker 独立 session / memory / recall 与 message-native A2A 主链。
 
 ---
 

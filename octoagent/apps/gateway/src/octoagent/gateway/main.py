@@ -353,13 +353,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await policy_engine.startup()
     app.state.policy_engine = policy_engine
     app.state.approval_manager = policy_engine.approval_manager
-    from octoagent.tooling import ToolBroker
+    from octoagent.tooling import LargeOutputHandler, ToolBroker
 
     tool_broker = ToolBroker(
         event_store=store_group.event_store,
         artifact_store=store_group.artifact_store,
     )
     tool_broker.add_hook(policy_engine.hook)
+    tool_broker.add_hook(
+        LargeOutputHandler(
+            artifact_store=store_group.artifact_store,
+            event_store=store_group.event_store,
+            event_broadcaster=app.state.sse_hub,
+        )
+    )
     app.state.tool_broker = tool_broker
 
     # LLM 服务初始化（根据配置选择模式）

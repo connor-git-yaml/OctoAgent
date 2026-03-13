@@ -202,6 +202,9 @@ class ExecutionContext(BaseModel):
     task_id: str = Field(description="关联任务 ID")
     trace_id: str = Field(description="追踪标识（同一 task 共享）")
     caller: str = Field(default="system", description="调用者标识（如 Worker ID）")
+    agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
+    agent_session_id: str = Field(default="", description="当前 agent session ID")
+    work_id: str = Field(default="", description="当前 work ID")
     profile: ToolProfile = Field(
         default=ToolProfile.MINIMAL,
         description="当前执行上下文的 ToolProfile（决定可用工具集）",

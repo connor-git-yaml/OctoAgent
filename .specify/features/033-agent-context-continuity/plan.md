@@ -199,3 +199,18 @@ Feature 026 的 control plane 不重做，但要增量发布：
 - 重启后 continuity 不丢
 - 跨 project 不串 profile/memory
 - context provenance 可见
+
+## 8. 2026-03-13 Wave 1 执行入口
+
+基于最新 `blueprint` 与 `docs/agent-runtime-refactor-plan.md`，033 在 Wave 1 中优先承载以下对象冻结：
+
+1. `AgentRuntime`
+2. `AgentSession`
+3. `SessionContextState` 向 `agent_runtime_id / agent_session_id / last_recall_frame_id` 演进
+4. `ContextFrame` 向 `agent_runtime_id / agent_session_id / recall_frame_id` 演进
+
+执行原则：
+
+- 先把新对象与旧 `session/context_frame` 主链并存落盘
+- 先提供 durable store / migration / roundtrip tests
+- 暂不在这一阶段切断旧运行链；先为后续 `039` 的 message-native A2A 和 `038` 的 worker recall parity 提供底座

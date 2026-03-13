@@ -17,6 +17,11 @@ from typing import Any
 import structlog
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
+from octoagent.core.models.payloads import (
+    ToolCallCompletedPayload,
+    ToolCallFailedPayload,
+    ToolCallStartedPayload,
+)
 from ulid import ULID
 
 from .exceptions import (
@@ -504,13 +509,16 @@ class ToolBroker:
         """生成 TOOL_CALL_STARTED 事件"""
         try:
             # FR-015: 参数摘要经过脱敏处理
-            raw_payload = {
-                "tool_name": tool_name,
-                "tool_group": meta.tool_group,
-                "side_effect_level": meta.side_effect_level.value,
-                "args_summary": str(args)[:200],
-                "timeout_seconds": meta.timeout_seconds,
-            }
+            raw_payload = ToolCallStartedPayload(
+                tool_name=tool_name,
+                tool_group=meta.tool_group,
+                side_effect_level=meta.side_effect_level.value,
+                args_summary=str(args)[:200],
+                agent_runtime_id=context.agent_runtime_id,
+                agent_session_id=context.agent_session_id,
+                work_id=context.work_id,
+                timeout_seconds=meta.timeout_seconds,
+            ).model_dump()
             sanitized_payload = sanitize_for_event(raw_payload)
             event = Event(
                 event_id=str(ULID()),
@@ -540,13 +548,16 @@ class ToolBroker:
         """生成 TOOL_CALL_COMPLETED 事件"""
         try:
             # FR-015: payload 经过脱敏处理
-            raw_payload = {
-                "tool_name": tool_name,
-                "duration_ms": int(duration * 1000),
-                "output_summary": output_summary[:200],
-                "truncated": truncated,
-                "artifact_ref": artifact_ref,
-            }
+            raw_payload = ToolCallCompletedPayload(
+                tool_name=tool_name,
+                duration_ms=int(duration * 1000),
+                output_summary=output_summary[:200],
+                agent_runtime_id=context.agent_runtime_id,
+                agent_session_id=context.agent_session_id,
+                work_id=context.work_id,
+                truncated=truncated,
+                artifact_ref=artifact_ref,
+            ).model_dump()
             sanitized_payload = sanitize_for_event(raw_payload)
             event = Event(
                 event_id=str(ULID()),
@@ -573,13 +584,16 @@ class ToolBroker:
         """生成 TOOL_CALL_FAILED 事件"""
         try:
             # FR-015: payload 经过脱敏处理
-            raw_payload = {
-                "tool_name": tool_name,
-                "duration_ms": int(duration * 1000),
-                "error_type": error_type,
-                "error_message": error_message[:500],
-                "recoverable": error_type != "rejection",
-            }
+            raw_payload = ToolCallFailedPayload(
+                tool_name=tool_name,
+                duration_ms=int(duration * 1000),
+                error_type=error_type,
+                error_message=error_message[:500],
+                agent_runtime_id=context.agent_runtime_id,
+                agent_session_id=context.agent_session_id,
+                work_id=context.work_id,
+                recoverable=error_type != "rejection",
+            ).model_dump()
             sanitized_payload = sanitize_for_event(raw_payload)
             event = Event(
                 event_id=str(ULID()),

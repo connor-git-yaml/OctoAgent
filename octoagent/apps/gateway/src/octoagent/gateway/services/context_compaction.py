@@ -102,8 +102,12 @@ class CompiledTaskContext:
     kept_turn_count: int = 0
     context_frame_id: str = ""
     effective_agent_profile_id: str = ""
+    effective_agent_runtime_id: str = ""
+    effective_agent_session_id: str = ""
     system_blocks: list[dict[str, str]] = field(default_factory=list)
     recent_summary: str = ""
+    recall_frame_id: str = ""
+    memory_namespace_ids: list[str] = field(default_factory=list)
     memory_hits: list[dict[str, Any]] = field(default_factory=list)
     degraded_reason: str = ""
     source_refs: list[dict[str, Any]] = field(default_factory=list)

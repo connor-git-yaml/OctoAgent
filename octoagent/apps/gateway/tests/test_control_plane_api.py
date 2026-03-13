@@ -8,14 +8,24 @@ from pathlib import Path
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from octoagent.core.models import (
+    A2AConversation,
+    A2AConversationStatus,
+    A2AMessageDirection,
+    A2AMessageRecord,
     AgentProfile,
     AgentProfileScope,
+    AgentRuntime,
+    AgentRuntimeRole,
+    AgentSession,
+    AgentSessionKind,
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
     DelegationTargetKind,
     DynamicToolSelection,
     EffectiveToolUniverse,
+    MemoryNamespace,
+    MemoryNamespaceKind,
     NormalizedMessage,
     OrchestratorRequest,
     OwnerOverlayScope,
@@ -25,6 +35,7 @@ from octoagent.core.models import (
     ProjectBindingType,
     ProjectSecretBinding,
     ProjectSelectorState,
+    RecallFrame,
     SecretBindingStatus,
     SecretRefSourceType,
     SecretTargetKind,
@@ -304,6 +315,57 @@ async def _seed_context_resources(app) -> None:
     assert project is not None
     workspace = await store_group.project_store.get_primary_workspace(project.project_id)
     assert workspace is not None
+    tasks = await store_group.task_store.list_tasks()
+    seeded_task_id = (
+        tasks[0].task_id
+        if tasks
+        else await _create_task(
+            app,
+            text="control plane context seed",
+            thread_id="thread-control-context",
+            scope_id="scope-control",
+        )
+    )
+    runtime = AgentRuntime(
+        agent_runtime_id="runtime-butler-default",
+        project_id=project.project_id,
+        workspace_id=workspace.workspace_id,
+        agent_profile_id="agent-profile-default",
+        role=AgentRuntimeRole.BUTLER,
+        name="Default Agent",
+        persona_summary="用于 control plane 可视化的默认 runtime。",
+    )
+    agent_session = AgentSession(
+        agent_session_id="agent-session-butler-default",
+        agent_runtime_id=runtime.agent_runtime_id,
+        kind=AgentSessionKind.BUTLER_MAIN,
+        project_id=project.project_id,
+        workspace_id=workspace.workspace_id,
+        surface="web",
+        thread_id="thread-control-context",
+        legacy_session_id="thread-control-context",
+        last_context_frame_id="context-frame-default",
+        last_recall_frame_id="recall-frame-default",
+    )
+    project_namespace = MemoryNamespace(
+        namespace_id="memory-namespace-project-default",
+        project_id=project.project_id,
+        workspace_id=workspace.workspace_id,
+        agent_runtime_id=runtime.agent_runtime_id,
+        kind=MemoryNamespaceKind.PROJECT_SHARED,
+        name="Project Shared",
+        description="控制面 project shared namespace。",
+        memory_scope_ids=["memory/project-alpha"],
+    )
+    private_namespace = MemoryNamespace(
+        namespace_id="memory-namespace-butler-default",
+        project_id=project.project_id,
+        workspace_id=workspace.workspace_id,
+        agent_runtime_id=runtime.agent_runtime_id,
+        kind=MemoryNamespaceKind.BUTLER_PRIVATE,
+        name="Butler Private",
+        description="控制面 butler private namespace。",
+    )
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id="agent-profile-default",
@@ -345,28 +407,81 @@ async def _seed_context_resources(app) -> None:
             answers={"assistant_identity": "Default Agent"},
         )
     )
+    await store_group.agent_context_store.save_agent_runtime(runtime)
+    await store_group.agent_context_store.save_agent_session(agent_session)
+    await store_group.agent_context_store.save_memory_namespace(project_namespace)
+    await store_group.agent_context_store.save_memory_namespace(private_namespace)
     await store_group.agent_context_store.save_session_context(
         SessionContextState(
             session_id="thread-control-context",
+            agent_runtime_id=runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
             thread_id="thread-control-context",
             project_id=project.project_id,
             workspace_id=workspace.workspace_id,
-            task_ids=["task-context"],
+            task_ids=[seeded_task_id],
             rolling_summary="控制面可以直接看到 recent summary。",
             last_context_frame_id="context-frame-default",
+            last_recall_frame_id="recall-frame-default",
+        )
+    )
+    await store_group.agent_context_store.save_recall_frame(
+        RecallFrame(
+            recall_frame_id="recall-frame-default",
+            agent_runtime_id=runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
+            context_frame_id="context-frame-default",
+            task_id=seeded_task_id,
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            query="project alpha next step",
+            recent_summary="控制面可以直接看到 recent summary。",
+            memory_namespace_ids=[
+                project_namespace.namespace_id,
+                private_namespace.namespace_id,
+            ],
+            memory_hits=[
+                {
+                    "record_id": "memory-1",
+                    "summary": "memory visible",
+                    "search_query": "project alpha next step",
+                }
+            ],
+            source_refs=[
+                {
+                    "ref_type": "memory_namespace",
+                    "ref_id": project_namespace.namespace_id,
+                    "label": "project_shared",
+                }
+            ],
+            budget={
+                "memory_recall": {
+                    "backend_id": "sqlite",
+                    "retrieval_backend": "sqlite",
+                    "scope_ids": ["memory/project-alpha"],
+                    "hit_count": 1,
+                }
+            },
         )
     )
     await store_group.agent_context_store.save_context_frame(
         ContextFrame(
             context_frame_id="context-frame-default",
-            task_id="task-context",
+            task_id=seeded_task_id,
             session_id="thread-control-context",
+            agent_runtime_id=runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
             project_id=project.project_id,
             workspace_id=workspace.workspace_id,
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
             owner_overlay_id="owner-overlay-default",
             bootstrap_session_id="bootstrap-default",
+            recall_frame_id="recall-frame-default",
+            memory_namespace_ids=[
+                project_namespace.namespace_id,
+                private_namespace.namespace_id,
+            ],
             recent_summary="控制面可以直接看到 recent summary。",
             memory_hits=[
                 {
@@ -411,6 +526,79 @@ async def _seed_context_resources(app) -> None:
                     "metadata": {"partition": "work"},
                 },
             ],
+        )
+    )
+    await store_group.a2a_store.save_conversation(
+        A2AConversation(
+            a2a_conversation_id="work-weather-default",
+            task_id=seeded_task_id,
+            work_id="work-weather-default",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            source_agent_runtime_id=runtime.agent_runtime_id,
+            source_agent_session_id=agent_session.agent_session_id,
+            target_agent_runtime_id="runtime-worker-research-default",
+            target_agent_session_id="agent-session-worker-research-default",
+            source_agent="agent://butler.main",
+            target_agent="agent://worker.llm.research",
+            context_frame_id="context-frame-default",
+            request_message_id="a2a-message-task-default",
+            latest_message_id="a2a-message-result-default",
+            latest_message_type="RESULT",
+            status=A2AConversationStatus.COMPLETED,
+            message_count=2,
+            trace_id="trace-task-context",
+            metadata={"worker_capability": "research"},
+        )
+    )
+    await store_group.a2a_store.save_message(
+        A2AMessageRecord(
+            a2a_message_id="a2a-message-task-default",
+            a2a_conversation_id="work-weather-default",
+            message_seq=1,
+            task_id=seeded_task_id,
+            work_id="work-weather-default",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            source_agent_runtime_id=runtime.agent_runtime_id,
+            source_agent_session_id=agent_session.agent_session_id,
+            target_agent_runtime_id="runtime-worker-research-default",
+            target_agent_session_id="agent-session-worker-research-default",
+            direction=A2AMessageDirection.OUTBOUND,
+            message_type="TASK",
+            protocol_message_id="dispatch-weather-default",
+            from_agent="agent://butler.main",
+            to_agent="agent://worker.llm.research",
+            idempotency_key=f"{seeded_task_id}:dispatch-weather-default:task",
+            payload={"user_text": "深圳今天天气怎么样？"},
+            trace={"trace_id": "trace-task-context"},
+            metadata={"route_reason": "freshness"},
+            raw_message={"type": "TASK"},
+        )
+    )
+    await store_group.a2a_store.save_message(
+        A2AMessageRecord(
+            a2a_message_id="a2a-message-result-default",
+            a2a_conversation_id="work-weather-default",
+            message_seq=2,
+            task_id=seeded_task_id,
+            work_id="work-weather-default",
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+            source_agent_runtime_id="runtime-worker-research-default",
+            source_agent_session_id="agent-session-worker-research-default",
+            target_agent_runtime_id=runtime.agent_runtime_id,
+            target_agent_session_id=agent_session.agent_session_id,
+            direction=A2AMessageDirection.INBOUND,
+            message_type="RESULT",
+            protocol_message_id="dispatch-weather-default-result",
+            from_agent="agent://worker.llm.research",
+            to_agent="agent://butler.main",
+            idempotency_key=f"{seeded_task_id}:dispatch-weather-default:result",
+            payload={"summary": "深圳晴，21C。"},
+            trace={"trace_id": "trace-task-context"},
+            metadata={"backend": "inline"},
+            raw_message={"type": "RESULT"},
         )
     )
     await store_group.conn.commit()
@@ -503,9 +691,39 @@ class TestControlPlaneApi:
         assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
             "context-frame-default"
         )
+        assert payload["resources"]["context_continuity"]["agent_runtimes"][0][
+            "agent_runtime_id"
+        ] == "runtime-butler-default"
+        assert payload["resources"]["context_continuity"]["agent_sessions"][0][
+            "agent_session_id"
+        ] == "agent-session-butler-default"
+        assert {
+            item["kind"] for item in payload["resources"]["context_continuity"]["memory_namespaces"]
+        } == {"project_shared", "butler_private"}
+        assert (
+            payload["resources"]["context_continuity"]["recall_frames"][0]["recall_frame_id"]
+            == "recall-frame-default"
+        )
+        assert (
+            payload["resources"]["context_continuity"]["a2a_conversations"][0][
+                "a2a_conversation_id"
+            ]
+            == "work-weather-default"
+        )
+        assert (
+            payload["resources"]["context_continuity"]["a2a_messages"][0]["a2a_message_id"]
+            == "a2a-message-task-default"
+        )
         frame = payload["resources"]["context_continuity"]["frames"][0]
         assert frame["project_id"]
         assert frame["workspace_id"]
+        assert frame["agent_runtime_id"] == "runtime-butler-default"
+        assert frame["agent_session_id"] == "agent-session-butler-default"
+        assert frame["recall_frame_id"] == "recall-frame-default"
+        assert set(frame["memory_namespace_ids"]) == {
+            "memory-namespace-project-default",
+            "memory-namespace-butler-default",
+        }
         assert frame["memory_hit_count"] == 1
         assert frame["memory_hits"][0]["search_query"] == "project alpha next step"
         assert frame["memory_recall"]["backend_id"] == "sqlite"
@@ -547,7 +765,16 @@ class TestControlPlaneApi:
         assert context_resp.status_code == 200
         context_payload = context_resp.json()
         assert context_payload["resource_type"] == "context_continuity"
+        assert context_payload["sessions"][0]["agent_runtime_id"] == "runtime-butler-default"
+        assert context_payload["sessions"][0]["last_recall_frame_id"] == "recall-frame-default"
         assert context_payload["frames"][0]["memory_recall"]["hit_count"] == 1
+        assert context_payload["recall_frames"][0]["agent_session_id"] == (
+            "agent-session-butler-default"
+        )
+        assert context_payload["a2a_conversations"][0]["target_agent"] == (
+            "agent://worker.llm.research"
+        )
+        assert context_payload["a2a_messages"][1]["message_type"] == "RESULT"
         assert context_payload["frames"][0]["source_refs"][1]["ref_id"] == "memory-1"
         assert policy_resp.status_code == 200
         assert skill_resp.status_code == 200

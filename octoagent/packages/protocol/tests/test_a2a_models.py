@@ -28,6 +28,7 @@ from octoagent.protocol import (
     build_heartbeat_message,
     build_result_message,
     build_task_message,
+    build_update_message,
     dispatch_envelope_from_task_message,
 )
 
@@ -281,7 +282,7 @@ class TestAdaptersAndFixtures:
 
         assert restored.worker_capability == "worker.ops"
 
-    def test_result_error_cancel_and_heartbeat_messages(self) -> None:
+    def test_result_update_error_cancel_and_heartbeat_messages(self) -> None:
         result = WorkerResult(
             dispatch_id="dispatch-001",
             task_id="task-001",
@@ -320,11 +321,27 @@ class TestAdaptersAndFixtures:
             artifacts=[artifact],
             timestamp_ms=1,
         )
+        update_message = build_update_message(
+            task_id="task-001",
+            context_id="thread-001",
+            trace_id="trace-001",
+            from_agent="agent://worker.ops",
+            to_agent="agent://butler.main",
+            state=TaskStatus.WAITING_INPUT,
+            summary="input requested",
+            requested_input="confirm",
+            idempotency_key="task-001:update:0001",
+            message_id="task-001-update-0001",
+            timestamp_ms=2,
+            backend="docker",
+            loop_step=2,
+            max_steps=5,
+        )
         error_message = build_error_message(
             result,
             context_id="thread-001",
             trace_id="trace-001",
-            timestamp_ms=2,
+            timestamp_ms=3,
         )
         cancel_message = build_cancel_message(
             task_id="task-001",
@@ -333,7 +350,7 @@ class TestAdaptersAndFixtures:
             to_agent="agent://worker.ops",
             reason="user_cancelled",
             idempotency_key="task-001:cancel:0001",
-            timestamp_ms=3,
+            timestamp_ms=4,
         )
         heartbeat = build_heartbeat_message(
             session,
@@ -341,10 +358,12 @@ class TestAdaptersAndFixtures:
             trace_id="trace-001",
             state=TaskStatus.RUNNING,
             summary="step-2",
-            timestamp_ms=4,
+            timestamp_ms=5,
         )
 
         assert result_message.payload.artifacts[0].name == "reply"
+        assert update_message.payload.requested_input == "confirm"
+        assert update_message.metadata.internal_status == TaskStatus.WAITING_INPUT
         assert error_message.payload.error_type == "Timeout"
         assert cancel_message.payload.reason == "user_cancelled"
         assert heartbeat.payload.summary == "step-2"

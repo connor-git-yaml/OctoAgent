@@ -55,6 +55,9 @@ class SkillExecutionContext(BaseModel):
     task_id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
     caller: str = Field(default="worker", min_length=1)
+    agent_runtime_id: str = Field(default="")
+    agent_session_id: str = Field(default="")
+    work_id: str = Field(default="")
     conversation_messages: list[dict[str, str]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

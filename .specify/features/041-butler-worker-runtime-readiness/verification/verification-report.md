@@ -2,9 +2,9 @@
 
 **Feature ID**: `041`  
 **Date**: 2026-03-12  
-**Updated**: 2026-03-12  
+**Updated**: 2026-03-13  
 **Branch**: `codex/041-butler-worker-runtime-readiness`  
-**Status**: Passed
+**Status**: Partially Implemented（ambient facts + freshness routing/tooling 已验证；Butler-owned A2A runtime readiness 仍待补齐）
 
 ## Verification Scope
 
@@ -84,12 +84,12 @@ cd octoagent/frontend && npm run build
 
 ## Release Decision
 
-**结论**：Feature 041 已完成，041 的 targeted release gates 已闭合。
+**结论**：Feature 041 的 targeted release gates 中，ambient facts、freshness routing、tool entitlement 与 surface truth 已闭合；但按 2026-03-13 更新后的 blueprint 标准，041 仍不能视为 fully complete。
 
 当前 release 口径应为：
 
-- **041 feature**：已完成
-- **M4 follow-up readiness**：已闭环
+- **041 feature**：Partially Implemented
+- **M4 follow-up readiness**：已完成 routing/tooling readiness，但 Butler-owned freshness delegation 主链仍待补齐
 
 成立前提：
 
@@ -110,3 +110,4 @@ cd octoagent/frontend && npm run build
 - `FQ-003` 目前以 prompt/bootstrap 约束和 targeted regression 为主，后续仍建议补一条 chat-level 集成测试，专门验证“缺城市时先追问而不是否认能力”。
 - `FQ-005` 目前已有 degraded 语义和 UI/runtime 解释，但仍建议后续补 gateway-level 的 web/browser backend unavailable 专门验收。
 - 当前验证属于 targeted release verification，而非整仓全量 `pytest`；如需 nightly 级别置信度，仍应继续保留更大范围 CI。
+- 当前验证主要证明 freshness objective 可以被正确识别并授予合适工具面；仍未证明 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply` 已 fully closed。

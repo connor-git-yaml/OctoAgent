@@ -46,6 +46,7 @@ class MockToolBroker:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.contexts: list[Any] = []
         self._results: dict[str, ToolResult] = {}
 
     def set_result(self, tool_name: str, result: ToolResult) -> None:
@@ -53,6 +54,7 @@ class MockToolBroker:
 
     async def execute(self, tool_name: str, args: dict[str, Any], context: Any) -> ToolResult:
         self.calls.append((tool_name, args))
+        self.contexts.append(context)
         if tool_name in self._results:
             return self._results[tool_name]
         return ToolResult(
@@ -94,7 +96,14 @@ class QueueModelClient:
 
 @pytest.fixture
 def execution_context() -> SkillExecutionContext:
-    return SkillExecutionContext(task_id="task-1", trace_id="trace-1", caller="worker")
+    return SkillExecutionContext(
+        task_id="task-1",
+        trace_id="trace-1",
+        caller="worker",
+        agent_runtime_id="runtime-worker-1",
+        agent_session_id="agent-session-1",
+        work_id="work-1",
+    )
 
 
 @pytest.fixture

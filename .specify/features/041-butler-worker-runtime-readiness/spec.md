@@ -2,9 +2,9 @@
 feature_id: "041"
 title: "Butler / Worker Runtime Readiness + Ambient Context"
 milestone: "M4"
-status: "Passed"
+status: "Partially Implemented"
 created: "2026-03-12"
-updated: "2026-03-12"
+updated: "2026-03-13"
 research_mode: "codebase-scan"
 blueprint_ref: "docs/blueprint.md M4 follow-up；docs/m4-feature-split.md；Feature 030（Capability Pack / Delegation Plane）、Feature 033（Agent Context Continuity）、Feature 039（Supervisor Worker Governance）、Feature 040（Guided Experience Acceptance）；Agent Zero current datetime / subordinate / browser agent"
 predecessor: "Feature 030（Capability Pack / Delegation Plane）、Feature 033（Agent Context Continuity）、Feature 039（Supervisor Worker Governance）、Feature 040（Guided Experience Acceptance）"
@@ -15,8 +15,8 @@ parallel_dependency: "Feature 035 / 036 继续负责用户入口与 setup 主链
 
 **Feature Branch**: `codex/041-butler-worker-runtime-readiness`  
 **Created**: 2026-03-12  
-**Updated**: 2026-03-12  
-**Status**: Passed（041 runtime readiness / freshness gates 已闭合）  
+**Updated**: 2026-03-13  
+**Status**: Partially Implemented  
 **Input**: live usage 中出现了高频失败场景：用户问“今天天气怎么样”时，Butler 仍按“我不知道你在哪，也没有实时天气数据”的静态聊天方式回答，而不是利用已有的子 Worker 能力、Project 上下文和受治理网络工具完成任务。需要对比 Agent Zero 当前的内置上下文和工具组织方式，把 OctoAgent 缺的部分收敛成一个正式 Feature 041。  
 **调研基础**: `research/product-research.md`、`research/tech-research.md`、`research/research-synthesis.md`
 
@@ -46,6 +46,9 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 5. **当前没有正式 acceptance 覆盖“今天 / 最新 / 天气 / 官网查询”这类高频外部事实场景**  
    Feature 040 已经闭合了 `setup -> workbench -> worker review/apply -> memory/operator/export/recovery` 主链，但还没有把“面向真实使用的 freshness query”纳入 release gate。
 
+6. **当前 freshness path 仍更像“preflight route 到 research”，不是 Butler 拥有的 A2A 对话链**  
+   系统已经能在许多天气/最新问题上把执行权切到 `research`，但这更接近 routing success，而不是 blueprint 目标里的 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply`。因此 041 不能因为“结果能答出来”就被视为 fully passed。
+
 因此，041 要解决的不是“再加一个天气插件”，而是：
 
 > 把 Butler、可由 Butler 创建的 Worker、Project/Workspace 作用域和受治理工具面组织成一条真正能处理“今天 / 最新 / 外部事实”问题的默认运行主链。
@@ -58,7 +61,17 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 - 主 Agent 遇到“实时/外部世界”问题时，会优先把任务解释为受治理 delegation，而不是直接声称自己没有实时能力
 - 被 Butler 创建的 research / ops worker 会继承 project/workspace 作用域，并拿到清晰的 capability bootstrap
 - Worker 在授权范围内可使用 `web.search / web.fetch / browser.*` 等现有工具完成查询
+- freshness query 的默认主链是 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply`
 - runtime truth / control plane / tests 能解释“为什么这次回答用了哪个 worker、拿到了什么工具级别、为何能或不能回答”
+
+## 2026-03-13 架构纠偏补记
+
+041 的历史实现已经把 ambient runtime facts、freshness objective 识别、research tool profile 收口和工作台体验做到了可用状态，但它还没有完整闭合你当前要求的两个标准：
+
+1. freshness query 必须是 **Butler 拥有的 delegation 主链**，而不是系统在 preflight 层直接改派 worker type
+2. 执行 freshness query 的 Worker 必须拥有自己的 session/private memory/recall runtime，而不是只拿到一份临时 dispatch metadata
+
+因此，041 现在应被视为 **routing/tooling readiness 已成立，但 Butler-owned A2A runtime readiness 仍待补齐**。
 
 ## Scope Alignment
 
@@ -71,6 +84,9 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
   - `bootstrap:shared` 注入 owner/project/runtime ambient facts 与 capability summary
   - `bootstrap:general` 明确“实时/最新/天气/网页查询”应优先委派给合适 worker
   - 补一个最小 deterministic built-in tool（如 `runtime.now`），让 agent/worker 在需要时可以工具化读取当前本地时间
+- `A2AConversation` / `WorkerSession`
+  - freshness query 走 Butler-owned delegation 主链
+  - worker side continuity / recall runtime 可审计
 - worker planning / governance
   - `workers.review` 对“今天 / 最新 / 天气 / 官网 / 查资料”类 objective 输出更明确的 worker_type / reason / tool_profile
   - `worker.review / worker.apply` 的结果继续保留 `requested_tool_profile`
@@ -89,6 +105,7 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 - 给主 Agent 直接开放 browser/code/full network 执行面
 - 新建第二套 worker registry、project object 或 parallel backend
 - 解决多模态、文件工作台、PWA、companion 等 M5 主题
+- 在本阶段默认开放用户直连 Worker；当前仍由 Butler 作为 user-facing speaker
 
 ## Functional Requirements
 
@@ -106,6 +123,9 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
   - 缺城市信息的天气问题
   - 最新网页资料/官网查询
 - **FR-010**: graceful degradation MUST 仍遵守 Constitution：如果网络/浏览器不可用，系统可以说明限制，但不得忽略已存在的 project、worker、tool capability。
+- **FR-011**: freshness query 的 canonical runtime path MUST 由 Butler 发起 delegation，并形成 durable `A2AConversation` / `A2AMessage` / `WorkerSession` 审计链，不得只依赖 preflight 直接改派 `worker_type`。
+- **FR-012**: 执行 freshness query 的 Worker MUST 拥有自己的 private memory / recall runtime，并只能消费 Butler 明确转交的上下文胶囊或 A2A payload，而不是直接读取完整用户主会话。
+- **FR-013**: control plane / workbench / acceptance evidence MUST 能直接展示 freshness query 的 `selected_worker_type`、`A2AConversation`、`WorkerSession`、`tool_profile` 与 degraded reason，证明这是 Butler-owned runtime chain。
 
 ## Success Criteria
 
@@ -114,6 +134,7 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 - **SC-003**: 用户问“查一下某项目官网/最新文档”时，系统会创建或利用合适的 worker，并在 runtime truth 中留下工具和权限证据。
 - **SC-004**: 控制台和工作台能够解释 child worker 的 effective tool profile，而不是只看到抽象的 split/merge 结果。
 - **SC-005**: 041 回归测试通过后，Butler / Worker / Project / Tool 这条链可以按“默认 ready for real-world queries”对外描述。
+- **SC-006**: 至少一条真实 freshness query 可以在 event chain / control plane 中回放出 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply`，而不是只看到 route 升级为 research。
 
 ## Residual Risks
 

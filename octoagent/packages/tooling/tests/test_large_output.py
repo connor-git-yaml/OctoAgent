@@ -34,8 +34,22 @@ def _make_meta(
 
 def _make_context() -> ExecutionContext:
     return ExecutionContext(
-        task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+        task_id="t1",
+        trace_id="tr1",
+        caller="test",
+        agent_runtime_id="runtime-test-1",
+        agent_session_id="session-test-1",
+        work_id="work-test-1",
+        profile=ToolProfile.STANDARD,
     )
+
+
+class _CapturingBroadcaster:
+    def __init__(self) -> None:
+        self.broadcasts: list[tuple[str, object]] = []
+
+    async def broadcast(self, task_id: str, event: object) -> None:
+        self.broadcasts.append((task_id, event))
 
 
 class TestLargeOutputTruncation:
@@ -131,6 +145,47 @@ class TestLargeOutputTruncation:
 
         assert "PREFIX_" in new_result.output
         assert new_result.truncated is True
+
+    async def test_truncated_result_emits_artifact_created_event(
+        self, mock_artifact_store, mock_event_store
+    ) -> None:
+        """裁切后的 artifact 会补写 ARTIFACT_CREATED 并挂上 agent session。"""
+        handler = LargeOutputHandler(
+            artifact_store=mock_artifact_store,
+            event_store=mock_event_store,
+        )
+        meta = _make_meta()
+        result = ToolResult(output="x" * 800, duration=0.1)
+
+        new_result = await handler.after_execute(meta, result, _make_context())
+
+        assert new_result.artifact_ref is not None
+        artifact_events = [e for e in mock_event_store.events if e.type.value == "ARTIFACT_CREATED"]
+        assert len(artifact_events) == 1
+        assert artifact_events[0].payload["artifact_id"] == new_result.artifact_ref
+        assert artifact_events[0].payload["session_id"] == "session-test-1"
+        assert artifact_events[0].payload["source"] == "tool_output:test_tool"
+
+    async def test_truncated_result_broadcasts_artifact_created_event(
+        self, mock_artifact_store, mock_event_store
+    ) -> None:
+        broadcaster = _CapturingBroadcaster()
+        handler = LargeOutputHandler(
+            artifact_store=mock_artifact_store,
+            event_store=mock_event_store,
+            event_broadcaster=broadcaster,
+        )
+        meta = _make_meta()
+        result = ToolResult(output="x" * 800, duration=0.1)
+
+        new_result = await handler.after_execute(meta, result, _make_context())
+
+        assert new_result.artifact_ref is not None
+        assert len(broadcaster.broadcasts) == 1
+        task_id, event = broadcaster.broadcasts[0]
+        assert task_id == "t1"
+        assert getattr(event.type, "value", event.type) == "ARTIFACT_CREATED"
+        assert event.payload["artifact_id"] == new_result.artifact_ref
 
 
 class TestLargeOutputHandlerProperties:

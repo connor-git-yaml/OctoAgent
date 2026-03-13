@@ -37,6 +37,14 @@ class EventStoreProtocol(Protocol):
         ...
 
 
+class EventBroadcasterProtocol(Protocol):
+    """事件广播接口契约 -- 用于 SSE 等实时分发。"""
+
+    async def broadcast(self, task_id: str, event: Any) -> None:
+        """广播 task 增量事件"""
+        ...
+
+
 class ArtifactStoreProtocol(Protocol):
     """ArtifactStore 接口契约 -- Artifact 存储
 

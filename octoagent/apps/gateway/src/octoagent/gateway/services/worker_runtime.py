@@ -174,6 +174,20 @@ class RuntimeBackend(Protocol):
         """执行一次 worker 步骤。"""
 
 
+class WorkerRuntimeA2AObserver(Protocol):
+    """Worker Runtime -> A2A durable 同步接口。"""
+
+    async def record_worker_heartbeat(
+        self,
+        *,
+        envelope: DispatchEnvelope,
+        session: WorkerSession,
+        summary: str = "",
+        state: TaskStatus = TaskStatus.RUNNING,
+    ) -> None:
+        """记录 worker heartbeat。"""
+
+
 class InlineRuntimeBackend:
     """默认 inline backend。"""
 
@@ -392,6 +406,7 @@ class WorkerRuntime:
         docker_available_checker: Callable[[], bool] | None = None,
         cancellation_registry: WorkerCancellationRegistry | None = None,
         execution_console=None,
+        a2a_observer: WorkerRuntimeA2AObserver | None = None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -402,6 +417,7 @@ class WorkerRuntime:
         )
         self._cancellation_registry = cancellation_registry
         self._execution_console = execution_console
+        self._a2a_observer = a2a_observer
         self._inline_backend = InlineRuntimeBackend()
         self._docker_backend = DockerRuntimeBackend()
         self._graph_backend = GraphRuntimeBackend()
@@ -413,8 +429,17 @@ class WorkerRuntime:
             raw_session_id = envelope.resume_state_snapshot.get("execution_session_id")
             if isinstance(raw_session_id, str) and raw_session_id.strip():
                 resumed_session_id = raw_session_id.strip()
+        durable_agent_session_id = ""
+        runtime_metadata = envelope.runtime_context.metadata if envelope.runtime_context else {}
+        for candidate in (
+            runtime_metadata.get("agent_session_id"),
+            envelope.metadata.get("agent_session_id"),
+        ):
+            if isinstance(candidate, str) and candidate.strip():
+                durable_agent_session_id = candidate.strip()
+                break
         session = WorkerSession(
-            session_id=resumed_session_id or str(ULID()),
+            session_id=durable_agent_session_id or resumed_session_id or str(ULID()),
             dispatch_id=envelope.dispatch_id,
             task_id=envelope.task_id,
             worker_id=worker_id,
@@ -488,6 +513,22 @@ class WorkerRuntime:
                         step_name=f"loop_step_{step}",
                         summary="worker runtime iteration",
                     )
+                if self._a2a_observer is not None:
+                    try:
+                        await self._a2a_observer.record_worker_heartbeat(
+                            envelope=envelope,
+                            session=session,
+                            summary="worker runtime iteration",
+                            state=TaskStatus.RUNNING,
+                        )
+                    except Exception as exc:  # pragma: no cover - 心跳失败不阻塞执行
+                        log.warning(
+                            "worker_runtime_a2a_heartbeat_failed",
+                            task_id=envelope.task_id,
+                            worker_id=worker_id,
+                            loop_step=step,
+                            error_type=type(exc).__name__,
+                        )
 
                 if cancel_signal is not None and cancel_signal.is_set():
                     raise WorkerRuntimeCancelled("cancel_signal_received")

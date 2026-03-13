@@ -1,5 +1,7 @@
 # Tasks: Feature 038 Agent Memory Recall Optimization
 
+> 状态：Partially Implemented（project-scoped recall 已闭合；agent-private namespace 与 worker recall parity 仍待补齐）
+
 ## Phase 0 - 调研与范围冻结
 
 - [x] T001 [P0] 深读 OpenClaw / Agent Zero / OpenClaw MemU 实际脚本，区分“可借鉴机制”和“不应照抄的实现”
@@ -34,3 +36,10 @@
 - [x] T015 [P1] 引入 recall rerank / post-filter hooks
 - [x] T016 [P1] 为 delayed recall 设计 durable event/artifact 承载，而不是进程内临时 extras
 - [x] T017 [P2] 把 recall provenance 增量接进 Control Plane 的可视化资源
+
+## Phase 5 - Agent Private Namespace & Worker Recall Parity
+
+- [ ] T018 [P0] 为 Butler private / Worker private / Project shared 建立正式 `MemoryNamespace` 分层与 resolver
+- [ ] T019 [P0] 让 Worker runtime 拥有独立 recall continuity、压缩与恢复主链，而不是复用 Butler recall 副产物
+- [ ] T020 [P1] 让 MemU / indexing / retrieval provenance 升级为 `namespace + agent + session` 感知
+- [ ] T021 [P1] 补 Butler -> Worker recall parity 的集成测试与验收证据

@@ -422,9 +422,132 @@ CREATE TABLE IF NOT EXISTS bootstrap_sessions (
 );
 """
 
+_AGENT_RUNTIMES_DDL = """
+CREATE TABLE IF NOT EXISTS agent_runtimes (
+    agent_runtime_id   TEXT PRIMARY KEY,
+    project_id         TEXT NOT NULL DEFAULT '',
+    workspace_id       TEXT NOT NULL DEFAULT '',
+    agent_profile_id   TEXT NOT NULL DEFAULT '',
+    worker_profile_id  TEXT NOT NULL DEFAULT '',
+    role               TEXT NOT NULL DEFAULT 'butler',
+    name               TEXT NOT NULL DEFAULT '',
+    persona_summary    TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'active',
+    metadata           TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    archived_at        TEXT
+);
+"""
+
+_AGENT_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    agent_session_id         TEXT PRIMARY KEY,
+    agent_runtime_id         TEXT NOT NULL,
+    kind                     TEXT NOT NULL DEFAULT 'butler_main',
+    status                   TEXT NOT NULL DEFAULT 'active',
+    project_id               TEXT NOT NULL DEFAULT '',
+    workspace_id             TEXT NOT NULL DEFAULT '',
+    surface                  TEXT NOT NULL DEFAULT 'chat',
+    thread_id                TEXT NOT NULL DEFAULT '',
+    legacy_session_id        TEXT NOT NULL DEFAULT '',
+    parent_agent_session_id  TEXT NOT NULL DEFAULT '',
+    work_id                  TEXT NOT NULL DEFAULT '',
+    a2a_conversation_id      TEXT NOT NULL DEFAULT '',
+    last_context_frame_id    TEXT NOT NULL DEFAULT '',
+    last_recall_frame_id     TEXT NOT NULL DEFAULT '',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    closed_at                TEXT,
+
+    FOREIGN KEY (agent_runtime_id) REFERENCES agent_runtimes(agent_runtime_id)
+);
+"""
+
+_A2A_CONVERSATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS a2a_conversations (
+    a2a_conversation_id      TEXT PRIMARY KEY,
+    task_id                  TEXT NOT NULL DEFAULT '',
+    work_id                  TEXT NOT NULL DEFAULT '',
+    project_id               TEXT NOT NULL DEFAULT '',
+    workspace_id             TEXT NOT NULL DEFAULT '',
+    source_agent_runtime_id  TEXT NOT NULL DEFAULT '',
+    source_agent_session_id  TEXT NOT NULL DEFAULT '',
+    target_agent_runtime_id  TEXT NOT NULL DEFAULT '',
+    target_agent_session_id  TEXT NOT NULL DEFAULT '',
+    source_agent             TEXT NOT NULL DEFAULT '',
+    target_agent             TEXT NOT NULL DEFAULT '',
+    context_frame_id         TEXT NOT NULL DEFAULT '',
+    request_message_id       TEXT NOT NULL DEFAULT '',
+    latest_message_id        TEXT NOT NULL DEFAULT '',
+    latest_message_type      TEXT NOT NULL DEFAULT '',
+    status                   TEXT NOT NULL DEFAULT 'active',
+    message_count            INTEGER NOT NULL DEFAULT 0,
+    trace_id                 TEXT NOT NULL DEFAULT '',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    completed_at             TEXT,
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
+_A2A_MESSAGES_DDL = """
+CREATE TABLE IF NOT EXISTS a2a_messages (
+    a2a_message_id           TEXT PRIMARY KEY,
+    a2a_conversation_id      TEXT NOT NULL,
+    message_seq              INTEGER NOT NULL,
+    task_id                  TEXT NOT NULL DEFAULT '',
+    work_id                  TEXT NOT NULL DEFAULT '',
+    project_id               TEXT NOT NULL DEFAULT '',
+    workspace_id             TEXT NOT NULL DEFAULT '',
+    source_agent_runtime_id  TEXT NOT NULL DEFAULT '',
+    source_agent_session_id  TEXT NOT NULL DEFAULT '',
+    target_agent_runtime_id  TEXT NOT NULL DEFAULT '',
+    target_agent_session_id  TEXT NOT NULL DEFAULT '',
+    direction                TEXT NOT NULL DEFAULT 'outbound',
+    message_type             TEXT NOT NULL DEFAULT '',
+    protocol_message_id      TEXT NOT NULL DEFAULT '',
+    from_agent               TEXT NOT NULL DEFAULT '',
+    to_agent                 TEXT NOT NULL DEFAULT '',
+    idempotency_key          TEXT NOT NULL DEFAULT '',
+    payload                  TEXT NOT NULL DEFAULT '{}',
+    trace                    TEXT NOT NULL DEFAULT '{}',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    raw_message              TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+
+    FOREIGN KEY (a2a_conversation_id) REFERENCES a2a_conversations(a2a_conversation_id),
+    UNIQUE(a2a_conversation_id, message_seq)
+);
+"""
+
+_MEMORY_NAMESPACES_DDL = """
+CREATE TABLE IF NOT EXISTS memory_namespaces (
+    namespace_id       TEXT PRIMARY KEY,
+    project_id         TEXT NOT NULL DEFAULT '',
+    workspace_id       TEXT NOT NULL DEFAULT '',
+    agent_runtime_id   TEXT NOT NULL DEFAULT '',
+    kind               TEXT NOT NULL DEFAULT 'project_shared',
+    name               TEXT NOT NULL DEFAULT '',
+    description        TEXT NOT NULL DEFAULT '',
+    memory_scope_ids   TEXT NOT NULL DEFAULT '[]',
+    metadata           TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    archived_at        TEXT,
+
+    FOREIGN KEY (agent_runtime_id) REFERENCES agent_runtimes(agent_runtime_id)
+);
+"""
+
 _SESSION_CONTEXT_STATES_DDL = """
 CREATE TABLE IF NOT EXISTS session_context_states (
     session_id            TEXT PRIMARY KEY,
+    agent_runtime_id      TEXT NOT NULL DEFAULT '',
+    agent_session_id      TEXT NOT NULL DEFAULT '',
     thread_id             TEXT NOT NULL DEFAULT '',
     project_id            TEXT NOT NULL DEFAULT '',
     workspace_id          TEXT NOT NULL DEFAULT '',
@@ -434,6 +557,7 @@ CREATE TABLE IF NOT EXISTS session_context_states (
     rolling_summary       TEXT NOT NULL DEFAULT '',
     summary_artifact_id   TEXT NOT NULL DEFAULT '',
     last_context_frame_id TEXT NOT NULL DEFAULT '',
+    last_recall_frame_id  TEXT NOT NULL DEFAULT '',
     updated_at            TEXT NOT NULL
 );
 """
@@ -443,6 +567,8 @@ CREATE TABLE IF NOT EXISTS context_frames (
     context_frame_id       TEXT PRIMARY KEY,
     task_id                TEXT NOT NULL DEFAULT '',
     session_id             TEXT NOT NULL DEFAULT '',
+    agent_runtime_id       TEXT NOT NULL DEFAULT '',
+    agent_session_id       TEXT NOT NULL DEFAULT '',
     project_id             TEXT NOT NULL DEFAULT '',
     workspace_id           TEXT NOT NULL DEFAULT '',
     agent_profile_id       TEXT NOT NULL DEFAULT '',
@@ -450,14 +576,37 @@ CREATE TABLE IF NOT EXISTS context_frames (
     owner_overlay_id       TEXT NOT NULL DEFAULT '',
     owner_profile_revision INTEGER,
     bootstrap_session_id   TEXT,
+    recall_frame_id        TEXT,
     system_blocks          TEXT NOT NULL DEFAULT '[]',
     recent_summary         TEXT NOT NULL DEFAULT '',
+    memory_namespace_ids   TEXT NOT NULL DEFAULT '[]',
     memory_hits            TEXT NOT NULL DEFAULT '[]',
     delegation_context     TEXT NOT NULL DEFAULT '{}',
     budget                 TEXT NOT NULL DEFAULT '{}',
     degraded_reason        TEXT NOT NULL DEFAULT '',
     source_refs            TEXT NOT NULL DEFAULT '[]',
     created_at             TEXT NOT NULL
+);
+"""
+
+_RECALL_FRAMES_DDL = """
+CREATE TABLE IF NOT EXISTS recall_frames (
+    recall_frame_id      TEXT PRIMARY KEY,
+    agent_runtime_id     TEXT NOT NULL DEFAULT '',
+    agent_session_id     TEXT NOT NULL DEFAULT '',
+    context_frame_id     TEXT NOT NULL DEFAULT '',
+    task_id              TEXT NOT NULL DEFAULT '',
+    project_id           TEXT NOT NULL DEFAULT '',
+    workspace_id         TEXT NOT NULL DEFAULT '',
+    query                TEXT NOT NULL DEFAULT '',
+    recent_summary       TEXT NOT NULL DEFAULT '',
+    memory_namespace_ids TEXT NOT NULL DEFAULT '[]',
+    memory_hits          TEXT NOT NULL DEFAULT '[]',
+    source_refs          TEXT NOT NULL DEFAULT '[]',
+    budget               TEXT NOT NULL DEFAULT '{}',
+    degraded_reason      TEXT NOT NULL DEFAULT '',
+    metadata             TEXT NOT NULL DEFAULT '{}',
+    created_at           TEXT NOT NULL
 );
 """
 
@@ -572,6 +721,46 @@ _AGENT_CONTEXT_INDEXES = [
         "ON agent_profiles(scope, project_id, updated_at DESC);"
     ),
     (
+        "CREATE INDEX IF NOT EXISTS idx_agent_runtimes_role_project "
+        "ON agent_runtimes(role, project_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_runtime_updated "
+        "ON agent_sessions(agent_runtime_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_legacy "
+        "ON agent_sessions(legacy_session_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_a2a_conversations_work_updated "
+        "ON a2a_conversations(work_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_a2a_conversations_project_updated "
+        "ON a2a_conversations(project_id, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_a2a_messages_conversation_seq "
+        "ON a2a_messages(a2a_conversation_id, message_seq ASC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_a2a_messages_task_created "
+        "ON a2a_messages(task_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_a2a_messages_work_created "
+        "ON a2a_messages(work_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_namespaces_project_kind "
+        "ON memory_namespaces(project_id, kind, updated_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_namespaces_runtime_kind "
+        "ON memory_namespaces(agent_runtime_id, kind, updated_at DESC);"
+    ),
+    (
         "CREATE INDEX IF NOT EXISTS idx_worker_profiles_scope_project "
         "ON worker_profiles(scope, project_id, status, updated_at DESC);"
     ),
@@ -592,6 +781,10 @@ _AGENT_CONTEXT_INDEXES = [
         "ON session_context_states(thread_id, updated_at DESC);"
     ),
     (
+        "CREATE INDEX IF NOT EXISTS idx_session_context_states_runtime "
+        "ON session_context_states(agent_runtime_id, updated_at DESC);"
+    ),
+    (
         "CREATE INDEX IF NOT EXISTS idx_session_context_states_project "
         "ON session_context_states(project_id, updated_at DESC);"
     ),
@@ -600,12 +793,24 @@ _AGENT_CONTEXT_INDEXES = [
         "ON context_frames(session_id, created_at DESC);"
     ),
     (
+        "CREATE INDEX IF NOT EXISTS idx_context_frames_agent_session_created "
+        "ON context_frames(agent_session_id, created_at DESC);"
+    ),
+    (
         "CREATE INDEX IF NOT EXISTS idx_context_frames_task_created "
         "ON context_frames(task_id, created_at DESC);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_context_frames_project_created "
         "ON context_frames(project_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_recall_frames_agent_session_created "
+        "ON recall_frames(agent_session_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_recall_frames_context_created "
+        "ON recall_frames(context_frame_id, created_at DESC);"
     ),
 ]
 
@@ -640,7 +845,8 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         )
     if work_columns and "requested_worker_profile_version" not in work_columns:
         await conn.execute(
-            "ALTER TABLE works ADD COLUMN requested_worker_profile_version INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE works "
+            "ADD COLUMN requested_worker_profile_version INTEGER NOT NULL DEFAULT 0"
         )
     if work_columns and "effective_worker_snapshot_id" not in work_columns:
         await conn.execute(
@@ -649,6 +855,42 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if work_columns and "context_frame_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    session_context_columns = await _table_columns(conn, "session_context_states")
+    if session_context_columns and "agent_runtime_id" not in session_context_columns:
+        await conn.execute(
+            "ALTER TABLE session_context_states "
+            "ADD COLUMN agent_runtime_id TEXT NOT NULL DEFAULT ''"
+        )
+    if session_context_columns and "agent_session_id" not in session_context_columns:
+        await conn.execute(
+            "ALTER TABLE session_context_states "
+            "ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''"
+        )
+    if session_context_columns and "last_recall_frame_id" not in session_context_columns:
+        await conn.execute(
+            "ALTER TABLE session_context_states "
+            "ADD COLUMN last_recall_frame_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    context_frame_columns = await _table_columns(conn, "context_frames")
+    if context_frame_columns and "agent_runtime_id" not in context_frame_columns:
+        await conn.execute(
+            "ALTER TABLE context_frames ADD COLUMN agent_runtime_id TEXT NOT NULL DEFAULT ''"
+        )
+    if context_frame_columns and "agent_session_id" not in context_frame_columns:
+        await conn.execute(
+            "ALTER TABLE context_frames ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''"
+        )
+    if context_frame_columns and "recall_frame_id" not in context_frame_columns:
+        await conn.execute(
+            "ALTER TABLE context_frames ADD COLUMN recall_frame_id TEXT"
+        )
+    if context_frame_columns and "memory_namespace_ids" not in context_frame_columns:
+        await conn.execute(
+            "ALTER TABLE context_frames "
+            "ADD COLUMN memory_namespace_ids TEXT NOT NULL DEFAULT '[]'"
         )
 
 
@@ -683,8 +925,14 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
     await conn.execute(_BOOTSTRAP_SESSIONS_DDL)
+    await conn.execute(_AGENT_RUNTIMES_DDL)
+    await conn.execute(_AGENT_SESSIONS_DDL)
+    await conn.execute(_A2A_CONVERSATIONS_DDL)
+    await conn.execute(_A2A_MESSAGES_DDL)
+    await conn.execute(_MEMORY_NAMESPACES_DDL)
     await conn.execute(_SESSION_CONTEXT_STATES_DDL)
     await conn.execute(_CONTEXT_FRAMES_DDL)
+    await conn.execute(_RECALL_FRAMES_DDL)
     await conn.execute(_SKILL_PIPELINE_RUNS_DDL)
     await conn.execute(_SKILL_PIPELINE_CHECKPOINTS_DDL)
     await _migrate_legacy_tables(conn)

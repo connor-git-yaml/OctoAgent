@@ -301,6 +301,9 @@ class LLMService:
             task_id=task_id,
             trace_id=trace_id,
             caller=f"worker:{worker_type}",
+            agent_runtime_id=str(metadata.get("agent_runtime_id", "")).strip(),
+            agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
+            work_id=str(metadata.get("work_id", "")).strip(),
             conversation_messages=conversation_messages,
             metadata=metadata,
         )

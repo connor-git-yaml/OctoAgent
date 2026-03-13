@@ -26,6 +26,7 @@ from .models import (
     A2ATaskPayload,
     A2ATaskState,
     A2ATraceContext,
+    A2AUpdatePayload,
 )
 
 
@@ -113,7 +114,7 @@ def build_result_message(
     mapped_artifacts = [A2AArtifactMapper.to_a2a(artifact) for artifact in artifacts]
     return A2AMessage(
         schema_version="0.1",
-        message_id=result.dispatch_id,
+        message_id=f"{result.dispatch_id}-result",
         task_id=result.task_id,
         context_id=context_id,
         from_agent=from_agent or f"agent://{result.worker_id}",
@@ -137,6 +138,49 @@ def build_result_message(
             backend=result.backend,
             loop_step=result.loop_step,
             max_steps=result.max_steps,
+        ),
+    )
+
+
+def build_update_message(
+    *,
+    task_id: str,
+    context_id: str,
+    trace_id: str,
+    from_agent: str,
+    to_agent: str,
+    state: TaskStatus = TaskStatus.RUNNING,
+    summary: str = "",
+    requested_input: str | None = None,
+    idempotency_key: str,
+    message_id: str | None = None,
+    timestamp_ms: int | None = None,
+    backend: str | None = None,
+    loop_step: int | None = None,
+    max_steps: int | None = None,
+) -> A2AMessage:
+    return A2AMessage(
+        schema_version="0.1",
+        message_id=message_id or f"{task_id}-update-{_now_ms()}",
+        task_id=task_id,
+        context_id=context_id,
+        from_agent=from_agent,
+        to_agent=to_agent,
+        type=A2AMessageType.UPDATE,
+        idempotency_key=idempotency_key,
+        timestamp_ms=timestamp_ms or _now_ms(),
+        payload=A2AUpdatePayload(
+            state=A2AStateMapper.to_a2a(state),
+            summary=summary,
+            requested_input=requested_input,
+        ),
+        trace=A2ATraceContext(trace_id=trace_id),
+        metadata=A2AMessageMetadata(
+            internal_status=state,
+            backend=backend,
+            loop_step=loop_step,
+            max_steps=max_steps,
+            final=False,
         ),
     )
 
@@ -220,9 +264,10 @@ def build_heartbeat_message(
     idempotency_key: str | None = None,
     timestamp_ms: int | None = None,
 ) -> A2AMessage:
+    message_root = session.dispatch_id or session.task_id or "worker"
     return A2AMessage(
         schema_version="0.1",
-        message_id=f"{session.session_id}-heartbeat-{session.loop_step}",
+        message_id=f"{message_root}-heartbeat-{session.loop_step}",
         task_id=session.task_id,
         context_id=context_id,
         from_agent=from_agent or f"agent://{session.worker_id}",
@@ -230,7 +275,7 @@ def build_heartbeat_message(
         type=A2AMessageType.HEARTBEAT,
         idempotency_key=(
             idempotency_key
-            or f"{session.task_id}:{session.session_id}:heartbeat:{session.loop_step}"
+            or f"{session.task_id}:{message_root}:heartbeat:{session.loop_step}"
         ),
         timestamp_ms=timestamp_ms or _now_ms(),
         payload=A2AHeartbeatPayload(

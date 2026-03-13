@@ -2,21 +2,21 @@
 feature_id: "033"
 title: "Agent Profile + Bootstrap + Context Continuity"
 milestone: "M3 carry-forward"
-status: "Implemented"
+status: "Partially Implemented"
 created: "2026-03-09"
-updated: "2026-03-11"
+updated: "2026-03-13"
 research_mode: "full"
 blueprint_ref: "docs/m3-feature-split.md Feature 033；docs/blueprint.md M3 产品化约束；Feature 025 / 027 / 030 / 031"
 predecessor: "Feature 025（Project / Workspace / Secret / Wizard）；Feature 027（Memory Console）；Feature 030（Capability Pack / Delegation Plane）；Feature 031（M3 Acceptance）"
-parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；后续任何 Memory/Agent/Automation 增量都必须消费 033 的 canonical profile/context contract，不得重新拼 prompt metadata"
+parallel_dependency: "Feature 033 定义 Butler / Worker 全 Agent runtime 的 canonical context contract；后续任何 Memory/Agent/Automation/A2A 增量都必须消费 033 的统一 session / memory / recall semantics，不得重新拼 prompt metadata"
 ---
 
 # Feature Specification: Agent Profile + Bootstrap + Context Continuity
 
 **Feature Branch**: `codex/feat-033-agent-context-continuity`
 **Created**: 2026-03-09
-**Updated**: 2026-03-11
-**Status**: Implemented
+**Updated**: 2026-03-13
+**Status**: Partially Implemented
 **Input**: 补齐 OctoAgent 当前主 Agent 没有真实接入 Memory、用户基础信息、Bootstrap 和正式 Agent Profile 的结构性缺口；借鉴 OpenClaw 与 Agent Zero 的产品形态，但在 OctoAgent 现有 Project / Memory / Control Plane / ToolBroker / Policy 体系内落地。  
 **调研基础**: `research/product-research.md`、`research/tech-research.md`、`research/online-research.md`、`research/research-synthesis.md`
 
@@ -58,6 +58,18 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
 - 把 profile / bootstrap / context assembly / retrieval provenance 接入 control plane
 - 保证所有记忆读取/写入、工具调用、自动化与委派仍走现有 ToolBroker / Policy / Event / Audit 治理面
 
+## 2026-03-13 架构纠偏补记
+
+033 的历史实现已经让 **Butler 主聊天路径** 具备了 durable context continuity，但结合本轮 blueprint 复核，可以确认它还没有完整覆盖“每个 Agent 都是一等运行体”的目标模型。
+
+本 Feature 现在的正确完成标准应当是：
+
+1. `Butler` 与每个 `Worker` 都拥有自己的 `AgentRuntime`、`AgentSession`、`MemoryNamespace` 与 `RecallFrame`
+2. `Worker` 不得直接读取完整用户主会话；Butler 必须通过受控上下文胶囊或 A2A payload 向 Worker 转述必要信息
+3. `Context continuity` 不只覆盖主聊天链，还要覆盖 `ButlerSession -> A2AConversation -> WorkerSession` 的恢复、压缩、召回与审计
+
+因此，033 当前应被视为 **Butler 主链已打通，但 Worker parity 仍待补齐**，而不是最终完成。
+
 ## Scope Alignment
 
 ### In Scope
@@ -73,6 +85,8 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
   - delegation/runtime context
 - 短期上下文 durable state（不再只依赖进程内 `_histories`）
 - 与 `MemoryService.search_memory()` / `get_memory()` 的真实运行时接线
+- `AgentRuntime` / `AgentSession` / `MemoryNamespace` / `RecallFrame` 的一等对象约束
+- `WorkerSession` / `WorkerMemory` / worker-side recall runtime 的 continuity contract
 - bootstrap 首启 / project-init 引导，支持 CLI / Web / chat surface 共享同一 canonical session
 - control-plane 资源与动作：
   - agent profiles
@@ -88,6 +102,7 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
 - M4 remote nodes / companion surfaces / mobile-native bootstrap
 - 把所有长期偏好都强行塞进 Memory；Profile 仍应是正式对象，Memory 只承接可检索事实与证据
 - 全图形化 prompt editor 或全自由模板系统
+- 在本阶段开放用户直连 Worker 作为默认产品面；当前仍以 Butler 为 user-facing speaker
 
 ## User Stories & Testing
 
@@ -162,9 +177,14 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
 - **FR-019**: 在 group/shared context 中，系统 MUST 支持将 owner-private bootstrap/profile/memory 标记为 main-session-only，避免跨 surface 泄露。
 - **FR-020**: Feature 033 MUST 提供单元测试、关键集成测试和至少一条 e2e：证明“上下文真的被接进实际响应链”，而不是只有模型/store 和伪测试。
 - **FR-021**: Feature 033 MUST 与 Feature 031 的 acceptance matrix 衔接，补充“Agent context continuity” 验收 gate，明确其阻塞 live cutover 的风险级别。
+- **FR-022**: `AgentContextService` 的 canonical contract MUST 同时适用于 `ButlerSession`、`WorkerSession` 与未来 `DirectWorkerSession`，不得继续把 Worker continuity 视为主聊天链的派生 metadata。
+- **FR-023**: 每个 Worker MUST 拥有独立的 `AgentSession`、私有 `MemoryNamespace` 与 `RecallFrame`；Worker runtime 不得直接读取完整用户主会话，只能消费 Butler 提供的受控上下文胶囊或 A2A payload。
+- **FR-024**: control plane / event chain MUST 能解释 `ButlerSession`、`WorkerSession`、`ContextFrame` 与 `RecallFrame` 之间的映射关系，保证“是谁在回忆、回忆了什么、从哪里来的”可追溯。
 
 ### Key Entities
 
+- `AgentRuntime`
+- `AgentSession`
 - `AgentProfile`
 - `OwnerProfile`
 - `OwnerProfileOverlay`
@@ -174,6 +194,8 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
 - `SessionContextState`
 - `ContextFrame`
 - `ContextSourceRef`
+- `MemoryNamespace`
+- `RecallFrame`
 - `MemoryRetrievalPlan`
 - `EffectiveAgentConfigSnapshot`
 
@@ -185,6 +207,7 @@ parallel_dependency: "Feature 033 定义主 Agent 的上下文连续性主链；
 - **SC-004**: project 切换不会串用 agent profile、owner overlay、recent context 或 memory retrieval。
 - **SC-005**: control plane 能解释至少一条真实响应所使用的 context provenance 和 degraded reason。
 - **SC-006**: automation / delegation / worker 至少一条关键路径能继承同一 `context_frame` 或等价 snapshot ref。
+- **SC-007**: 至少一条真实 `Butler -> Worker` 链路证明 Worker 具备独立 session/private memory/recall continuity，且不会直接暴露完整用户主会话。
 
 ## Clarifications
 

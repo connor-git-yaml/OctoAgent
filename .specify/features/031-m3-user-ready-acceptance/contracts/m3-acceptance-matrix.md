@@ -18,6 +18,7 @@
 
 031 的测试、migration rehearsal、verification report 和里程碑结论必须以本矩阵为准。
 2026-03-09 起，本矩阵同时承担 M3 最终签收的 carry-forward gate 事实源。
+2026-03-13 起，需要补充一个重要纠偏说明：`GATE-M3-CONTEXT-CONTINUITY` 的历史闭环主要证明 **Butler 主聊天链** 已经接入 canonical context continuity；它不再自动等价于 Butler / Worker 全 Agent runtime parity 已闭合。后者改由 033 / 038 / 039 / 041 的 follow-up 约束继续承接。
 
 ---
 
@@ -33,7 +34,7 @@
 | `GATE-M3-DELEGATION-AUTOMATION` | `SCN-031-006` | automation + delegation inheritance | control plane + delegation plane | automation job 与 work dispatch 继承正确 project/workspace | `octoagent/tests/integration/test_f031_m3_acceptance.py::test_m3_project_selection_syncs_delegation_work_context` | `octoagent/apps/gateway/tests/test_delegation_plane.py`、`octoagent/apps/gateway/tests/test_control_plane_api.py` |
 | `GATE-M3-MIGRATION-OPENCLAW` | `SCN-031-007` | OpenClaw migration rehearsal | local snapshot + import path | 完成一次有 mapping / rollback / deferred items 的 rehearsal | `.specify/features/031-m3-user-ready-acceptance/verification/openclaw-migration-rehearsal.md` | `_references/openclaw-snapshot/`、`octoagent/packages/provider/tests/test_import_workbench_service.py::test_import_workbench_detects_weflow_jsonl_export` |
 | `GATE-M3-RELEASE-REPORT` | `SCN-031-008` | release report | spec / docs | 形成 gates / evidence / risks / boundary 汇总报告 | `.specify/features/031-m3-user-ready-acceptance/verification/verification-report.md` | `docs/blueprint.md`、`docs/m3-feature-split.md` |
-| `GATE-M3-CONTEXT-CONTINUITY` | `SCN-031-009` | main agent context continuity | gateway + agent runtime + memory | 主 Agent 真实消费 profile/bootstrap/recent summary/memory retrieval，且 automation/work/pipeline/worker 复用同一 canonical context semantics | `.specify/features/033-agent-context-continuity/verification/verification-report.md` | `.specify/features/033-agent-context-continuity/spec.md`、`.specify/features/033-agent-context-continuity/contracts/agent-context-contract.md` |
+| `GATE-M3-CONTEXT-CONTINUITY` | `SCN-031-009` | main agent context continuity | gateway + agent runtime + memory | 主 Agent 真实消费 profile/bootstrap/recent summary/memory retrieval；若 Worker parity 尚未闭合，release report MUST 明确其为 follow-up gap，而不得假定已完成全 Agent runtime parity | `.specify/features/033-agent-context-continuity/verification/verification-report.md` | `.specify/features/033-agent-context-continuity/spec.md`、`.specify/features/033-agent-context-continuity/contracts/agent-context-contract.md` |
 
 ---
 
@@ -63,6 +64,7 @@ M3 最终签收必须额外满足：
 1. `SCN-031-009` 已由 Feature 033 交付并回填主证据；
 2. 主 Agent 不再依赖 stateless chat shell 行为；
 3. release report 已明确说明 context continuity gate 的结论。
+4. 若 Butler / Worker 全 Agent runtime parity 尚未闭合，必须在 release report 中显式列入后续阻塞，不得借 `SCN-031-009` 的历史通过结论掩盖。
 
 ---
 

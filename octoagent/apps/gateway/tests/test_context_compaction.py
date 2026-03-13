@@ -306,6 +306,31 @@ class TestContextCompaction:
             )
             maintenance_count = (await cursor.fetchone())[0]
             assert maintenance_count >= 1
+            frames = await store_group.agent_context_store.list_context_frames(
+                task_id=task_id,
+                limit=5,
+            )
+            latest_frame = frames[0]
+            namespaces = []
+            for namespace_id in latest_frame.memory_namespace_ids:
+                namespace = await store_group.agent_context_store.get_memory_namespace(
+                    namespace_id
+                )
+                if namespace is not None:
+                    namespaces.append(namespace)
+            private_namespace = next(
+                item for item in namespaces if item.kind.value == "butler_private"
+            )
+            cursor = await store_group.conn.execute(
+                """
+                SELECT scope_id
+                FROM memory_maintenance_runs
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            )
+            latest_flush_scope_id = (await cursor.fetchone())[0]
+            assert latest_flush_scope_id == private_namespace.memory_scope_ids[0]
 
             cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_fragments")
             fragment_count = (await cursor.fetchone())[0]

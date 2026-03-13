@@ -1,8 +1,8 @@
 # Verification Report: Feature 038 Agent Memory Recall Optimization
 
 **Feature**: Agent Memory Recall Optimization  
-**Date**: 2026-03-10  
-**Status**: Passed
+**Date**: 2026-03-13  
+**Status**: Partially Implemented（2026-03-10 的验证已证明 project-scoped recall 主链成立；2026-03-13 起补充 agent-private / worker-parity follow-up）
 
 ## 实现摘要
 
@@ -90,3 +90,10 @@ uv run --group dev python -m pytest \
 ## 已知未覆盖项
 
 - 还没有实现 delayed recall 的独立后台 queue consumer
+- 2026-03-13 架构纠偏后，仍缺 `MemoryNamespace` 分层、Worker private recall runtime 与 `namespace + agent + session` 感知的 MemU / provenance
+
+## 结论更新（2026-03-13）
+
+- 038 的历史验证结果仍成立：project-scoped recall contract、`memory.recall`、runtime resolver、delayed recall durability 与 hook trace 已真实落地
+- 但 038 现在不再被解释为“全部 memory recall 目标已完成”
+- 当前更准确的结论是：**Butler / project-scoped recall 主链已闭合，agent-private namespace 与 worker recall parity 仍待补齐**

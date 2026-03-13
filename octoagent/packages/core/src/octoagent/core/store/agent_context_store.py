@@ -10,10 +10,19 @@ import aiosqlite
 
 from ..models.agent_context import (
     AgentProfile,
+    AgentRuntime,
+    AgentRuntimeRole,
+    AgentRuntimeStatus,
+    AgentSession,
+    AgentSessionKind,
+    AgentSessionStatus,
     BootstrapSession,
     ContextFrame,
+    MemoryNamespace,
+    MemoryNamespaceKind,
     OwnerProfile,
     OwnerProfileOverlay,
+    RecallFrame,
     SessionContextState,
     WorkerProfile,
     WorkerProfileOriginKind,
@@ -446,6 +455,250 @@ class SqliteAgentContextStore:
         )
         return session
 
+    async def save_agent_runtime(self, runtime: AgentRuntime) -> AgentRuntime:
+        await self._conn.execute(
+            """
+            INSERT INTO agent_runtimes (
+                agent_runtime_id, project_id, workspace_id, agent_profile_id,
+                worker_profile_id, role, name, persona_summary, status,
+                metadata, created_at, updated_at, archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_runtime_id) DO UPDATE SET
+                project_id = excluded.project_id,
+                workspace_id = excluded.workspace_id,
+                agent_profile_id = excluded.agent_profile_id,
+                worker_profile_id = excluded.worker_profile_id,
+                role = excluded.role,
+                name = excluded.name,
+                persona_summary = excluded.persona_summary,
+                status = excluded.status,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at
+            """,
+            (
+                runtime.agent_runtime_id,
+                runtime.project_id,
+                runtime.workspace_id,
+                runtime.agent_profile_id,
+                runtime.worker_profile_id,
+                runtime.role.value,
+                runtime.name,
+                runtime.persona_summary,
+                runtime.status.value,
+                self._dump(runtime.metadata),
+                runtime.created_at.isoformat(),
+                runtime.updated_at.isoformat(),
+                runtime.archived_at.isoformat() if runtime.archived_at else None,
+            ),
+        )
+        return runtime
+
+    async def get_agent_runtime(self, agent_runtime_id: str) -> AgentRuntime | None:
+        row = await self._fetchone(
+            "SELECT * FROM agent_runtimes WHERE agent_runtime_id = ?",
+            (agent_runtime_id,),
+        )
+        return self._row_to_agent_runtime(row) if row is not None else None
+
+    async def list_agent_runtimes(
+        self,
+        *,
+        project_id: str | None = None,
+        role: AgentRuntimeRole | None = None,
+    ) -> list[AgentRuntime]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if project_id:
+            clauses.append("project_id = ?")
+            args.append(project_id)
+        if role is not None:
+            clauses.append("role = ?")
+            args.append(role.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = await self._fetchall(
+            f"""
+            SELECT * FROM agent_runtimes
+            {where}
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            tuple(args),
+        )
+        return [self._row_to_agent_runtime(row) for row in rows]
+
+    async def save_agent_session(self, session: AgentSession) -> AgentSession:
+        await self._conn.execute(
+            """
+            INSERT INTO agent_sessions (
+                agent_session_id, agent_runtime_id, kind, status, project_id,
+                workspace_id, surface, thread_id, legacy_session_id,
+                parent_agent_session_id, work_id, a2a_conversation_id,
+                last_context_frame_id, last_recall_frame_id, metadata,
+                created_at, updated_at, closed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_session_id) DO UPDATE SET
+                agent_runtime_id = excluded.agent_runtime_id,
+                kind = excluded.kind,
+                status = excluded.status,
+                project_id = excluded.project_id,
+                workspace_id = excluded.workspace_id,
+                surface = excluded.surface,
+                thread_id = excluded.thread_id,
+                legacy_session_id = excluded.legacy_session_id,
+                parent_agent_session_id = excluded.parent_agent_session_id,
+                work_id = excluded.work_id,
+                a2a_conversation_id = excluded.a2a_conversation_id,
+                last_context_frame_id = excluded.last_context_frame_id,
+                last_recall_frame_id = excluded.last_recall_frame_id,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at,
+                closed_at = excluded.closed_at
+            """,
+            (
+                session.agent_session_id,
+                session.agent_runtime_id,
+                session.kind.value,
+                session.status.value,
+                session.project_id,
+                session.workspace_id,
+                session.surface,
+                session.thread_id,
+                session.legacy_session_id,
+                session.parent_agent_session_id,
+                session.work_id,
+                session.a2a_conversation_id,
+                session.last_context_frame_id,
+                session.last_recall_frame_id,
+                self._dump(session.metadata),
+                session.created_at.isoformat(),
+                session.updated_at.isoformat(),
+                session.closed_at.isoformat() if session.closed_at else None,
+            ),
+        )
+        return session
+
+    async def get_agent_session(self, agent_session_id: str) -> AgentSession | None:
+        row = await self._fetchone(
+            "SELECT * FROM agent_sessions WHERE agent_session_id = ?",
+            (agent_session_id,),
+        )
+        return self._row_to_agent_session(row) if row is not None else None
+
+    async def list_agent_sessions(
+        self,
+        *,
+        agent_runtime_id: str | None = None,
+        legacy_session_id: str | None = None,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        kind: AgentSessionKind | None = None,
+        limit: int = 20,
+    ) -> list[AgentSession]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if agent_runtime_id:
+            clauses.append("agent_runtime_id = ?")
+            args.append(agent_runtime_id)
+        if legacy_session_id:
+            clauses.append("legacy_session_id = ?")
+            args.append(legacy_session_id)
+        if project_id:
+            clauses.append("project_id = ?")
+            args.append(project_id)
+        if workspace_id:
+            clauses.append("workspace_id = ?")
+            args.append(workspace_id)
+        if kind is not None:
+            clauses.append("kind = ?")
+            args.append(kind.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = await self._fetchall(
+            f"""
+            SELECT * FROM agent_sessions
+            {where}
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            tuple([*args, limit]),
+        )
+        return [self._row_to_agent_session(row) for row in rows]
+
+    async def save_memory_namespace(self, namespace: MemoryNamespace) -> MemoryNamespace:
+        await self._conn.execute(
+            """
+            INSERT INTO memory_namespaces (
+                namespace_id, project_id, workspace_id, agent_runtime_id,
+                kind, name, description, memory_scope_ids, metadata,
+                created_at, updated_at, archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(namespace_id) DO UPDATE SET
+                project_id = excluded.project_id,
+                workspace_id = excluded.workspace_id,
+                agent_runtime_id = excluded.agent_runtime_id,
+                kind = excluded.kind,
+                name = excluded.name,
+                description = excluded.description,
+                memory_scope_ids = excluded.memory_scope_ids,
+                metadata = excluded.metadata,
+                updated_at = excluded.updated_at,
+                archived_at = excluded.archived_at
+            """,
+            (
+                namespace.namespace_id,
+                namespace.project_id,
+                namespace.workspace_id,
+                namespace.agent_runtime_id,
+                namespace.kind.value,
+                namespace.name,
+                namespace.description,
+                self._dump(namespace.memory_scope_ids),
+                self._dump(namespace.metadata),
+                namespace.created_at.isoformat(),
+                namespace.updated_at.isoformat(),
+                namespace.archived_at.isoformat() if namespace.archived_at else None,
+            ),
+        )
+        return namespace
+
+    async def get_memory_namespace(self, namespace_id: str) -> MemoryNamespace | None:
+        row = await self._fetchone(
+            "SELECT * FROM memory_namespaces WHERE namespace_id = ?",
+            (namespace_id,),
+        )
+        return self._row_to_memory_namespace(row) if row is not None else None
+
+    async def list_memory_namespaces(
+        self,
+        *,
+        project_id: str | None = None,
+        agent_runtime_id: str | None = None,
+        kind: MemoryNamespaceKind | None = None,
+    ) -> list[MemoryNamespace]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if project_id:
+            clauses.append("project_id = ?")
+            args.append(project_id)
+        if agent_runtime_id:
+            clauses.append("agent_runtime_id = ?")
+            args.append(agent_runtime_id)
+        if kind is not None:
+            clauses.append("kind = ?")
+            args.append(kind.value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = await self._fetchall(
+            f"""
+            SELECT * FROM memory_namespaces
+            {where}
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            tuple(args),
+        )
+        return [self._row_to_memory_namespace(row) for row in rows]
+
     async def get_bootstrap_session(self, bootstrap_id: str) -> BootstrapSession | None:
         row = await self._fetchone(
             "SELECT * FROM bootstrap_sessions WHERE bootstrap_id = ?",
@@ -507,12 +760,15 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO session_context_states (
-                session_id, thread_id, project_id, workspace_id, task_ids,
+                session_id, agent_runtime_id, agent_session_id, thread_id,
+                project_id, workspace_id, task_ids,
                 recent_turn_refs, recent_artifact_refs, rolling_summary,
-                summary_artifact_id, last_context_frame_id, updated_at
+                summary_artifact_id, last_context_frame_id, last_recall_frame_id, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
+                agent_runtime_id = excluded.agent_runtime_id,
+                agent_session_id = excluded.agent_session_id,
                 thread_id = excluded.thread_id,
                 project_id = excluded.project_id,
                 workspace_id = excluded.workspace_id,
@@ -522,10 +778,13 @@ class SqliteAgentContextStore:
                 rolling_summary = excluded.rolling_summary,
                 summary_artifact_id = excluded.summary_artifact_id,
                 last_context_frame_id = excluded.last_context_frame_id,
+                last_recall_frame_id = excluded.last_recall_frame_id,
                 updated_at = excluded.updated_at
             """,
             (
                 state.session_id,
+                state.agent_runtime_id,
+                state.agent_session_id,
                 state.thread_id,
                 state.project_id,
                 state.workspace_id,
@@ -535,6 +794,7 @@ class SqliteAgentContextStore:
                 state.rolling_summary,
                 state.summary_artifact_id,
                 state.last_context_frame_id,
+                state.last_recall_frame_id,
                 state.updated_at.isoformat(),
             ),
         )
@@ -583,24 +843,29 @@ class SqliteAgentContextStore:
             """
             INSERT INTO context_frames (
                 context_frame_id, task_id, session_id, project_id, workspace_id,
+                agent_runtime_id, agent_session_id,
                 agent_profile_id, owner_profile_id, owner_overlay_id,
-                owner_profile_revision, bootstrap_session_id, system_blocks,
-                recent_summary, memory_hits, delegation_context, budget,
-                degraded_reason, source_refs, created_at
+                owner_profile_revision, bootstrap_session_id, recall_frame_id,
+                system_blocks, recent_summary, memory_namespace_ids, memory_hits,
+                delegation_context, budget, degraded_reason, source_refs, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(context_frame_id) DO UPDATE SET
                 task_id = excluded.task_id,
                 session_id = excluded.session_id,
                 project_id = excluded.project_id,
                 workspace_id = excluded.workspace_id,
+                agent_runtime_id = excluded.agent_runtime_id,
+                agent_session_id = excluded.agent_session_id,
                 agent_profile_id = excluded.agent_profile_id,
                 owner_profile_id = excluded.owner_profile_id,
                 owner_overlay_id = excluded.owner_overlay_id,
                 owner_profile_revision = excluded.owner_profile_revision,
                 bootstrap_session_id = excluded.bootstrap_session_id,
+                recall_frame_id = excluded.recall_frame_id,
                 system_blocks = excluded.system_blocks,
                 recent_summary = excluded.recent_summary,
+                memory_namespace_ids = excluded.memory_namespace_ids,
                 memory_hits = excluded.memory_hits,
                 delegation_context = excluded.delegation_context,
                 budget = excluded.budget,
@@ -613,18 +878,70 @@ class SqliteAgentContextStore:
                 frame.session_id,
                 frame.project_id,
                 frame.workspace_id,
+                frame.agent_runtime_id,
+                frame.agent_session_id,
                 frame.agent_profile_id,
                 frame.owner_profile_id,
                 frame.owner_overlay_id,
                 frame.owner_profile_revision,
                 frame.bootstrap_session_id,
+                frame.recall_frame_id,
                 self._dump(frame.system_blocks),
                 frame.recent_summary,
+                self._dump(frame.memory_namespace_ids),
                 self._dump(frame.memory_hits),
                 self._dump(frame.delegation_context),
                 self._dump(frame.budget),
                 frame.degraded_reason,
                 self._dump(frame.source_refs),
+                frame.created_at.isoformat(),
+            ),
+        )
+        return frame
+
+    async def save_recall_frame(self, frame: RecallFrame) -> RecallFrame:
+        await self._conn.execute(
+            """
+            INSERT INTO recall_frames (
+                recall_frame_id, agent_runtime_id, agent_session_id,
+                context_frame_id, task_id, project_id, workspace_id, query,
+                recent_summary, memory_namespace_ids, memory_hits, source_refs,
+                budget, degraded_reason, metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(recall_frame_id) DO UPDATE SET
+                agent_runtime_id = excluded.agent_runtime_id,
+                agent_session_id = excluded.agent_session_id,
+                context_frame_id = excluded.context_frame_id,
+                task_id = excluded.task_id,
+                project_id = excluded.project_id,
+                workspace_id = excluded.workspace_id,
+                query = excluded.query,
+                recent_summary = excluded.recent_summary,
+                memory_namespace_ids = excluded.memory_namespace_ids,
+                memory_hits = excluded.memory_hits,
+                source_refs = excluded.source_refs,
+                budget = excluded.budget,
+                degraded_reason = excluded.degraded_reason,
+                metadata = excluded.metadata,
+                created_at = excluded.created_at
+            """,
+            (
+                frame.recall_frame_id,
+                frame.agent_runtime_id,
+                frame.agent_session_id,
+                frame.context_frame_id,
+                frame.task_id,
+                frame.project_id,
+                frame.workspace_id,
+                frame.query,
+                frame.recent_summary,
+                self._dump(frame.memory_namespace_ids),
+                self._dump(frame.memory_hits),
+                self._dump(frame.source_refs),
+                self._dump(frame.budget),
+                frame.degraded_reason,
+                self._dump(frame.metadata),
                 frame.created_at.isoformat(),
             ),
         )
@@ -636,6 +953,13 @@ class SqliteAgentContextStore:
             (context_frame_id,),
         )
         return self._row_to_context_frame(row) if row is not None else None
+
+    async def get_recall_frame(self, recall_frame_id: str) -> RecallFrame | None:
+        row = await self._fetchone(
+            "SELECT * FROM recall_frames WHERE recall_frame_id = ?",
+            (recall_frame_id,),
+        )
+        return self._row_to_recall_frame(row) if row is not None else None
 
     async def list_context_frames(
         self,
@@ -671,6 +995,45 @@ class SqliteAgentContextStore:
             tuple([*args, limit]),
         )
         return [self._row_to_context_frame(row) for row in rows]
+
+    async def list_recall_frames(
+        self,
+        *,
+        agent_session_id: str | None = None,
+        context_frame_id: str | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+        limit: int = 20,
+    ) -> list[RecallFrame]:
+        clauses: list[str] = []
+        args: list[object] = []
+        if agent_session_id:
+            clauses.append("agent_session_id = ?")
+            args.append(agent_session_id)
+        if context_frame_id:
+            clauses.append("context_frame_id = ?")
+            args.append(context_frame_id)
+        if task_id:
+            clauses.append("task_id = ?")
+            args.append(task_id)
+        if project_id:
+            clauses.append("project_id = ?")
+            args.append(project_id)
+        if workspace_id:
+            clauses.append("workspace_id = ?")
+            args.append(workspace_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = await self._fetchall(
+            f"""
+            SELECT * FROM recall_frames
+            {where}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            tuple([*args, limit]),
+        )
+        return [self._row_to_recall_frame(row) for row in rows]
 
     async def _fetchone(self, query: str, params: tuple[object, ...]) -> aiosqlite.Row | None:
         cursor = await self._conn.execute(query, params)
@@ -759,6 +1122,70 @@ class SqliteAgentContextStore:
         )
 
     @classmethod
+    def _row_to_agent_runtime(cls, row: aiosqlite.Row) -> AgentRuntime:
+        return AgentRuntime(
+            agent_runtime_id=row["agent_runtime_id"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            agent_profile_id=row["agent_profile_id"],
+            worker_profile_id=row["worker_profile_id"],
+            role=AgentRuntimeRole(row["role"]),
+            name=row["name"],
+            persona_summary=row["persona_summary"],
+            status=AgentRuntimeStatus(row["status"]),
+            metadata=cls._load(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            archived_at=(
+                datetime.fromisoformat(row["archived_at"]) if row["archived_at"] else None
+            ),
+        )
+
+    @classmethod
+    def _row_to_agent_session(cls, row: aiosqlite.Row) -> AgentSession:
+        return AgentSession(
+            agent_session_id=row["agent_session_id"],
+            agent_runtime_id=row["agent_runtime_id"],
+            kind=AgentSessionKind(row["kind"]),
+            status=AgentSessionStatus(row["status"]),
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            surface=row["surface"],
+            thread_id=row["thread_id"],
+            legacy_session_id=row["legacy_session_id"],
+            parent_agent_session_id=row["parent_agent_session_id"],
+            work_id=row["work_id"],
+            a2a_conversation_id=row["a2a_conversation_id"],
+            last_context_frame_id=row["last_context_frame_id"],
+            last_recall_frame_id=row["last_recall_frame_id"],
+            metadata=cls._load(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            closed_at=(
+                datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None
+            ),
+        )
+
+    @classmethod
+    def _row_to_memory_namespace(cls, row: aiosqlite.Row) -> MemoryNamespace:
+        return MemoryNamespace(
+            namespace_id=row["namespace_id"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            agent_runtime_id=row["agent_runtime_id"],
+            kind=MemoryNamespaceKind(row["kind"]),
+            name=row["name"],
+            description=row["description"],
+            memory_scope_ids=cls._load(row["memory_scope_ids"], []),
+            metadata=cls._load(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            archived_at=(
+                datetime.fromisoformat(row["archived_at"]) if row["archived_at"] else None
+            ),
+        )
+
+    @classmethod
     def _row_to_owner_profile(cls, row: aiosqlite.Row) -> OwnerProfile:
         return OwnerProfile(
             owner_profile_id=row["owner_profile_id"],
@@ -833,6 +1260,8 @@ class SqliteAgentContextStore:
     def _row_to_session_context(cls, row: aiosqlite.Row) -> SessionContextState:
         return SessionContextState(
             session_id=row["session_id"],
+            agent_runtime_id=row["agent_runtime_id"],
+            agent_session_id=row["agent_session_id"],
             thread_id=row["thread_id"],
             project_id=row["project_id"],
             workspace_id=row["workspace_id"],
@@ -842,6 +1271,7 @@ class SqliteAgentContextStore:
             rolling_summary=row["rolling_summary"],
             summary_artifact_id=row["summary_artifact_id"],
             last_context_frame_id=row["last_context_frame_id"],
+            last_recall_frame_id=row["last_recall_frame_id"],
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
@@ -851,6 +1281,8 @@ class SqliteAgentContextStore:
             context_frame_id=row["context_frame_id"],
             task_id=row["task_id"],
             session_id=row["session_id"],
+            agent_runtime_id=row["agent_runtime_id"],
+            agent_session_id=row["agent_session_id"],
             project_id=row["project_id"],
             workspace_id=row["workspace_id"],
             agent_profile_id=row["agent_profile_id"],
@@ -858,12 +1290,35 @@ class SqliteAgentContextStore:
             owner_overlay_id=row["owner_overlay_id"],
             owner_profile_revision=row["owner_profile_revision"],
             bootstrap_session_id=row["bootstrap_session_id"],
+            recall_frame_id=row["recall_frame_id"],
             system_blocks=cls._load(row["system_blocks"], []),
             recent_summary=row["recent_summary"],
+            memory_namespace_ids=cls._load(row["memory_namespace_ids"], []),
             memory_hits=cls._load(row["memory_hits"], []),
             delegation_context=cls._load(row["delegation_context"], {}),
             budget=cls._load(row["budget"], {}),
             degraded_reason=row["degraded_reason"],
             source_refs=cls._load(row["source_refs"], []),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    @classmethod
+    def _row_to_recall_frame(cls, row: aiosqlite.Row) -> RecallFrame:
+        return RecallFrame(
+            recall_frame_id=row["recall_frame_id"],
+            agent_runtime_id=row["agent_runtime_id"],
+            agent_session_id=row["agent_session_id"],
+            context_frame_id=row["context_frame_id"],
+            task_id=row["task_id"],
+            project_id=row["project_id"],
+            workspace_id=row["workspace_id"],
+            query=row["query"],
+            recent_summary=row["recent_summary"],
+            memory_namespace_ids=cls._load(row["memory_namespace_ids"], []),
+            memory_hits=cls._load(row["memory_hits"], []),
+            source_refs=cls._load(row["source_refs"], []),
+            budget=cls._load(row["budget"], {}),
+            degraded_reason=row["degraded_reason"],
+            metadata=cls._load(row["metadata"], {}),
             created_at=datetime.fromisoformat(row["created_at"]),
         )

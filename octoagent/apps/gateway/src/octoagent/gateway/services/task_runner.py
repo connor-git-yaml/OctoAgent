@@ -330,6 +330,18 @@ class TaskRunner:
             actor="user:web",
             reason="用户取消",
         )
+        try:
+            await self._orchestrator.record_cancel(
+                task_id=task_id,
+                reason="用户取消",
+                actor="user:web",
+            )
+        except Exception as exc:  # pragma: no cover - 取消不应因 A2A 审计失败而阻塞
+            log.warning(
+                "task_runner_a2a_cancel_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+            )
         self._cancellation_registry.cancel(task_id)
 
         async with self._lock:

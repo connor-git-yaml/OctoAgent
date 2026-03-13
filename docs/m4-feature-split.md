@@ -12,8 +12,9 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 因此，**当前 M4 的真实范围** 是：
 
 - `032 / 034 / 035 / 036 / 037 / 039`
-- `033` 与 `038` 都是已完成的 M3 carry-forward；它们服务 M4，但不并入 M4 编号面
-- `040` 已闭合 guided experience release gate；随后由 `041` 收口 live usage 暴露的 runtime readiness / freshness query 缺口
+- `033` 与 `038` 都是 M3 carry-forward，但截至 2026-03-13 只完成了 Butler / project-scoped 主链，尚未完成全 Agent parity
+- `040` 已闭合 guided experience release gate；但它不再自动代表 039/041 的运行语义已完全收口
+- `041` 仍需把 freshness query 从“路由正确”升级成“Butler 拥有并审计一条真实的 A2A delegation 主链”
 
 ## 2. 当前 Feature 队列
 
@@ -24,9 +25,9 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced`，已接入 setup readiness、worker review/apply、context degraded |
 | 036 | Implemented | Guided Setup Governance：`setup-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` |
 | 037 | Implemented | Runtime control context hardening，解决 selector drift 与 lineage 漂移 |
-| 039 | Implemented | Supervisor worker governance + internal A2A dispatch，补齐三层结构 |
+| 039 | Partially Implemented | supervisor-only 与 worker governance 已成立；message-native A2A 仍待补齐 |
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
-| 041 | Passed | Butler / Worker runtime readiness：ambient current time、freshness query delegation、worker web/tool readiness（见 §5） |
+| 041 | Partially Implemented | ambient facts 与 freshness routing 已成立；Butler-owned freshness delegation 仍待补齐（见 §5） |
 
 ## 3. 各 Feature 边界
 
@@ -114,9 +115,15 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `workers.review` built-in tool
 - `worker.review / worker.apply` control-plane actions
 - child work `requested_tool_profile` runtime truth
-- orchestrator live dispatch 内部 A2A roundtrip
+- orchestrator live dispatch 内部 envelope 归一化
 
-039 之后，主 Agent / Work / Worker(Subagent/Graph) 三层结构已经成为默认主链，而不是蓝图概念。
+但 2026-03-13 架构复核确认，039 还没有真正闭合：
+
+- 当前缺 `ButlerSession -> A2AConversation -> WorkerSession` 的 durable 主链
+- 当前缺一等 `A2A_MESSAGE_SENT / RECEIVED / RESULT` 运行审计对象
+- 当前 worker dispatch 仍偏向“preflight 路由 + 直调 worker adapter”，而不是 Butler 发消息给 Worker
+
+因此 039 的最终完成定义不再是“有 A2A adapter”，而是“存在真实的 message-native A2A 运行链”。
 
 ## 4. 是否还需要一个“串联全部功能”的 M4 Feature
 
@@ -128,7 +135,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 040：M4 Guided Experience Integration Acceptance
 
-状态：**Passed**
+状态：**Passed（guided experience 视角）**
 
 目标：
 
@@ -148,8 +155,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 当前结论：
 
-- 040 的 acceptance gates 已全部闭合
-- M4 当前波次不再受 033 / 036 blocker 影响
+- 040 的 guided experience acceptance gates 已全部闭合
+- 但 040 不再被视为 039/041 运行语义最终完成的替代证据
 
 约束：
 
@@ -164,12 +171,13 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - Butler 已经具备创建 child worker 的系统能力，但在“今天几号 / 今天天气 / 查一下最新官网”这类日常问题上，仍可能像 stateless chat shell 一样回答
 - child worker 也已经具备 `web.search / web.fetch / browser.*` 等受治理工具，但 bootstrap 和默认 runtime context 没有把这些能力组织成“显然可用”的默认运行面
 - 当前 system/bootstrap context 里也缺少“当前本地时间 / 日期 / timezone / locale”这层 ambient facts
+- 当前 weather/latest 这类问题虽然常能被路由到 research worker，但主链仍偏向“系统预判后直接切 worker”，而不是“Butler 先拥有问题，再通过 A2AConversation 委派给 Worker”
 
 因此需要新增：
 
 ### Feature 041：Butler / Worker Runtime Readiness + Ambient Context
 
-状态：**Passed**
+状态：**Partially Implemented**
 
 目标：
 
@@ -177,6 +185,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - 让 Butler 在“实时 / 外部世界 / 最新资料”问题上优先考虑 delegation，而不是直接宣称没有实时能力
 - 让 research / ops worker 的 governed web/browser 执行面和 tool_profile 更可解释、更可验收
 - 把“今天 / 天气 / 官网 / 最新资料”纳入正式 acceptance matrix
+- 把 freshness query 的默认执行主链收口为 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerResponse`
 
 已落地：
 
@@ -188,14 +197,15 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 当前结论：
 
-- 041 已通过 targeted release gates
-- 当前 M4 升级波次现在可以按“默认具备真实世界 freshness query readiness，但仍遵守 supervisor-only 与 governed tools 边界”的口径对外描述
+- 041 已通过 targeted release gates 中“ambient facts + routing/tool readiness”这部分
+- 但截至 2026-03-13，仍不能把 041 描述成“完整的 Butler-owned freshness delegation 主链已完成”
 
 约束：
 
 - 041 不是给主 Agent 重新挂 web/browser/code 执行面；Butler 仍是 supervisor-only
 - 041 不以专用天气 API 为前提；优先复用现有 `web.search / web.fetch / browser.*`
 - 041 必须保留 runtime truth：谁去查、拿到什么 tool profile、为何降级，都要可解释
+- 041 的最终完成标准不是“research route 命中了”，而是“用户可审计地看到 Butler 委派给 Worker，Worker 以独立 session/memory/recall 完成任务”
 
 ## 6. 非伪实现门禁
 
@@ -203,11 +213,12 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 1. 主 Agent 默认必须是 supervisor，而不是继续直接持有 web/browser/code 等执行面。
 2. `work -> child work -> subagent/graph` 必须是 durable 主链，并能在 control plane / workbench 被解释。
-3. live dispatch 必须真正经过 A2A 归一化，而不是只有 adapter/tests。
+3. live dispatch 必须真正经过 `ButlerSession -> A2AConversation -> WorkerSession` 的 message-native A2A 主链，而不是只有 adapter/tests。
 4. Workbench / Settings / Setup 必须直接复用 canonical resources/actions，不得造 `settings/*`、`setup/*` 私有 backend。
 5. setup 必须存在统一的 review/apply 语义，CLI 与 Web 不得各讲一套。
 6. 035/040 必须显式展示 `context_continuity` 运行状态；若未来出现 degraded，不能把“缺上下文连续性”隐藏在默认行为里。
 7. 若系统已经具备 delegated web/browser path，则 Butler/Worker 不得把“自己不直接上网”误表述成“系统整体不能处理实时/外部事实问题”。
+8. `WorkerSession` 不得继续退化为 loop/backoff/tool_profile 一类运行态对象；它必须是完整的 internal conversation / memory / recall carrier。
 
 ## 7. 移入 M5 的内容
 
@@ -219,3 +230,16 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - 更完整的通知中心与 attention model（提醒、升级提示、后台任务完成通知、多端同步提示）
 
 这些能力都建立在 035/036/039 彻底收口之后再做，避免继续把“入口未闭环”和“未来表面增强”混在一个里程碑里。
+
+## 8. 架构重构实施蓝图
+
+本轮纠偏后，`039 / 041` 不再适合继续按“局部补丁”推进。正式实施顺序见：
+
+- `docs/agent-runtime-refactor-plan.md`
+
+执行原则：
+
+- 继续复用 `033 / 038 / 039 / 041` 作为承载 Feature
+- 先做 `AgentRuntime / AgentSession / MemoryNamespace / RecallFrame`
+- 再做 `A2AConversation / WorkerSession`
+- 最后再把 freshness / research / workbench acceptance 切到新主链

@@ -6,6 +6,7 @@ from .adapters import (
     build_heartbeat_message,
     build_result_message,
     build_task_message,
+    build_update_message,
     dispatch_envelope_from_task_message,
 )
 from .mappers import A2AArtifactMapper, A2AStateMapper
@@ -56,5 +57,6 @@ __all__ = [
     "build_heartbeat_message",
     "build_result_message",
     "build_task_message",
+    "build_update_message",
     "dispatch_envelope_from_task_message",
 ]

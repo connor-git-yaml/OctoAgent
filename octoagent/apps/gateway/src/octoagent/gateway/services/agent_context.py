@@ -12,17 +12,25 @@ import structlog
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
+    AgentRuntime,
+    AgentRuntimeRole,
+    AgentSession,
+    AgentSessionKind,
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
     ContextRequestKind,
     ContextResolveRequest,
     ContextResolveResult,
+    EventType,
+    MemoryNamespace,
+    MemoryNamespaceKind,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
     Project,
     ProjectBindingType,
+    RecallFrame,
     RuntimeControlContext,
     SessionContextState,
     Task,
@@ -30,25 +38,30 @@ from octoagent.core.models import (
     Workspace,
 )
 from octoagent.memory import (
+    EvidenceRef,
     MemoryAccessPolicy,
+    MemoryMaintenanceCommand,
+    MemoryMaintenanceCommandKind,
+    MemoryPartition,
     MemoryRecallHit,
     MemoryRecallHookOptions,
     MemoryRecallPostFilterMode,
     MemoryRecallRerankMode,
     MemoryRecallResult,
     MemoryService,
+    WriteAction,
     init_memory_db,
 )
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
+from .connection_metadata import summarize_control_metadata_for_prompt
 from .context_compaction import (
     CompiledTaskContext,
     ContextCompactionConfig,
     estimate_messages_tokens,
     truncate_chars,
 )
-from .connection_metadata import summarize_control_metadata_for_prompt
 
 log = structlog.get_logger()
 
@@ -248,6 +261,79 @@ def build_scope_aware_session_id(
     return "|".join(parts)
 
 
+def build_agent_runtime_id(
+    *,
+    role: AgentRuntimeRole,
+    project_id: str,
+    workspace_id: str,
+    agent_profile_id: str,
+    worker_profile_id: str,
+    worker_capability: str,
+) -> str:
+    parts = [f"role:{role.value}", f"project:{project_id or 'default'}"]
+    if workspace_id:
+        parts.append(f"workspace:{workspace_id}")
+    if role is AgentRuntimeRole.WORKER:
+        if worker_profile_id:
+            parts.append(f"worker_profile:{worker_profile_id}")
+        else:
+            parts.append(f"worker_capability:{worker_capability or 'general'}")
+    else:
+        parts.append(f"agent_profile:{agent_profile_id or 'default'}")
+    return "|".join(parts)
+
+
+def build_agent_session_id(
+    *,
+    agent_runtime_id: str,
+    kind: AgentSessionKind,
+    legacy_session_id: str,
+    work_id: str,
+    task_id: str,
+) -> str:
+    parts = [f"runtime:{agent_runtime_id}", f"kind:{kind.value}"]
+    if kind is AgentSessionKind.WORKER_INTERNAL:
+        parts.append(f"work:{work_id or task_id}")
+    else:
+        parts.append(f"legacy:{legacy_session_id or task_id}")
+    return "|".join(parts)
+
+
+def build_memory_namespace_id(
+    *,
+    kind: MemoryNamespaceKind,
+    project_id: str,
+    workspace_id: str,
+    agent_runtime_id: str = "",
+) -> str:
+    parts = [f"memory_namespace:{kind.value}", f"project:{project_id or 'default'}"]
+    if workspace_id:
+        parts.append(f"workspace:{workspace_id}")
+    if agent_runtime_id:
+        parts.append(f"runtime:{agent_runtime_id}")
+    return "|".join(parts)
+
+
+def build_private_memory_scope_ids(
+    *,
+    kind: MemoryNamespaceKind,
+    agent_runtime_id: str,
+    agent_session_id: str = "",
+) -> list[str]:
+    if kind not in {
+        MemoryNamespaceKind.BUTLER_PRIVATE,
+        MemoryNamespaceKind.WORKER_PRIVATE,
+    }:
+        return []
+    owner = "worker" if kind is MemoryNamespaceKind.WORKER_PRIVATE else "butler"
+    scope_ids: list[str] = []
+    if agent_session_id:
+        scope_ids.append(f"memory/private/{owner}/session:{agent_session_id}")
+    if agent_runtime_id:
+        scope_ids.append(f"memory/private/{owner}/runtime:{agent_runtime_id}")
+    return scope_ids
+
+
 def session_state_matches_scope(
     state: SessionContextState,
     *,
@@ -274,7 +360,10 @@ class ResolvedContextBundle:
     owner_profile: OwnerProfile
     owner_overlay: OwnerProfileOverlay | None
     bootstrap: BootstrapSession
+    agent_runtime: AgentRuntime
+    agent_session: AgentSession
     session_state: SessionContextState
+    memory_namespaces: list[MemoryNamespace]
     memory_hits: list[MemoryRecallHit]
     memory_scope_ids: list[str]
     degraded_reasons: list[str]
@@ -320,7 +409,10 @@ class AgentContextService:
         owner_profile = bundle.owner_profile
         owner_overlay = bundle.owner_overlay
         bootstrap = bundle.bootstrap
+        agent_runtime = bundle.agent_runtime
+        agent_session = bundle.agent_session
         session_state = bundle.session_state
+        memory_namespaces = bundle.memory_namespaces
         memory_hits = bundle.memory_hits
         memory_scope_ids = bundle.memory_scope_ids
         degraded_reasons = list(bundle.degraded_reasons)
@@ -369,6 +461,7 @@ class AgentContextService:
                 )
             ),
         }
+        memory_namespace_ids = [item.namespace_id for item in memory_namespaces]
         source_refs = self._build_source_refs(
             project=project,
             workspace=workspace,
@@ -381,10 +474,68 @@ class AgentContextService:
             memory_hits=memory_hits,
             runtime_context=runtime_context,
         )
+        source_refs = self._append_source_refs(
+            source_refs,
+            [
+                {
+                    "ref_type": "agent_runtime",
+                    "ref_id": agent_runtime.agent_runtime_id,
+                    "label": agent_runtime.role.value,
+                },
+                {
+                    "ref_type": "agent_session",
+                    "ref_id": agent_session.agent_session_id,
+                    "label": agent_session.kind.value,
+                },
+                *[
+                    {
+                        "ref_type": "memory_namespace",
+                        "ref_id": item.namespace_id,
+                        "label": item.kind.value,
+                        "metadata": {
+                            "scope_ids": list(item.memory_scope_ids),
+                            "agent_runtime_id": item.agent_runtime_id,
+                        },
+                    }
+                    for item in memory_namespaces
+                ],
+            ],
+        )
+        context_frame_id = str(ULID())
+        recall_frame_id = str(ULID())
+        recall_frame = RecallFrame(
+            recall_frame_id=recall_frame_id,
+            agent_runtime_id=agent_runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
+            context_frame_id=context_frame_id,
+            task_id=task.task_id,
+            project_id=project.project_id if project is not None else "",
+            workspace_id=workspace.workspace_id if workspace is not None else "",
+            query=compiled.latest_user_text or task.title,
+            recent_summary=recent_summary,
+            memory_namespace_ids=memory_namespace_ids,
+            memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
+            source_refs=source_refs,
+            budget={
+                "memory_recall": memory_recall,
+                "memory_scope_ids": memory_scope_ids,
+                "max_prompt_tokens": self._budget_config.max_input_tokens,
+            },
+            degraded_reason=degraded_reason,
+            metadata={
+                "request_kind": resolve_request.request_kind.value,
+                "surface": resolve_request.surface,
+                "worker_capability": worker_capability or "",
+                "dispatch_metadata": dict(dispatch_metadata),
+            },
+            created_at=datetime.now(tz=UTC),
+        )
         frame = ContextFrame(
-            context_frame_id=str(ULID()),
+            context_frame_id=context_frame_id,
             task_id=task.task_id,
             session_id=session_state.session_id,
+            agent_runtime_id=agent_runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
             agent_profile_id=agent_profile.profile_id,
@@ -392,8 +543,10 @@ class AgentContextService:
             owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
             owner_profile_revision=owner_profile.version,
             bootstrap_session_id=bootstrap.bootstrap_id,
+            recall_frame_id=recall_frame_id,
             system_blocks=system_blocks,
             recent_summary=recent_summary,
+            memory_namespace_ids=memory_namespace_ids,
             memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
             delegation_context={
                 "worker_capability": worker_capability or "",
@@ -416,11 +569,24 @@ class AgentContextService:
             source_refs=source_refs,
             created_at=datetime.now(tz=UTC),
         )
+        await self._stores.agent_context_store.save_recall_frame(recall_frame)
         await self._stores.agent_context_store.save_context_frame(frame)
+        await self._stores.agent_context_store.save_agent_session(
+            agent_session.model_copy(
+                update={
+                    "last_context_frame_id": frame.context_frame_id,
+                    "last_recall_frame_id": recall_frame.recall_frame_id,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
         await self._stores.agent_context_store.save_session_context(
             session_state.model_copy(
                 update={
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": agent_session.agent_session_id,
                     "last_context_frame_id": frame.context_frame_id,
+                    "last_recall_frame_id": recall_frame.recall_frame_id,
                     "updated_at": datetime.now(tz=UTC),
                 }
             )
@@ -443,11 +609,14 @@ class AgentContextService:
                 resolve_result=ContextResolveResult(
                     context_frame_id=frame.context_frame_id,
                     effective_agent_profile_id=agent_profile.profile_id,
+                    effective_agent_runtime_id=agent_runtime.agent_runtime_id,
+                    effective_agent_session_id=agent_session.agent_session_id,
                     effective_owner_overlay_id=(
                         owner_overlay.owner_overlay_id if owner_overlay is not None else None
                     ),
                     owner_profile_revision=owner_profile.version,
                     bootstrap_session_id=bootstrap.bootstrap_id,
+                    recall_frame_id=recall_frame.recall_frame_id,
                     system_blocks=system_blocks,
                     recent_summary=recent_summary,
                     memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
@@ -467,8 +636,12 @@ class AgentContextService:
             kept_turn_count=compiled.kept_turn_count,
             context_frame_id=frame.context_frame_id,
             effective_agent_profile_id=agent_profile.profile_id,
+            effective_agent_runtime_id=agent_runtime.agent_runtime_id,
+            effective_agent_session_id=agent_session.agent_session_id,
             system_blocks=system_blocks,
             recent_summary=recent_summary,
+            recall_frame_id=recall_frame.recall_frame_id,
+            memory_namespace_ids=memory_namespace_ids,
             memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
             degraded_reason=degraded_reason,
             source_refs=source_refs,
@@ -483,11 +656,35 @@ class AgentContextService:
         worker_capability: str | None,
         runtime_context: RuntimeControlContext | None,
     ) -> ContextResolveRequest:
-        request_kind = (
-            ContextRequestKind.WORK
-            if runtime_context is not None and runtime_context.work_id
-            else ContextRequestKind.CHAT
+        runtime_metadata = (
+            runtime_context.model_dump(mode="json") if runtime_context is not None else {}
         )
+        runtime_extra = runtime_context.metadata if runtime_context is not None else {}
+        requested_worker_profile_id = str(
+            dispatch_metadata.get("requested_worker_profile_id", "")
+        ).strip()
+        is_worker_request = bool(
+            requested_worker_profile_id
+            or str(runtime_extra.get("parent_agent_session_id", "")).strip()
+            or str(dispatch_metadata.get("parent_agent_session_id", "")).strip()
+            or str(dispatch_metadata.get("target_agent_session_id", "")).strip()
+        )
+        request_kind = (
+            ContextRequestKind.WORKER
+            if is_worker_request
+            else (
+                ContextRequestKind.WORK
+                if runtime_context is not None and runtime_context.work_id
+                else ContextRequestKind.CHAT
+            )
+        )
+        requested_agent_profile_id = (
+            runtime_context.agent_profile_id
+            if runtime_context is not None and runtime_context.agent_profile_id
+            else dispatch_metadata.get("agent_profile_id") or None
+        )
+        if is_worker_request and requested_worker_profile_id:
+            requested_agent_profile_id = requested_worker_profile_id
         return ContextResolveRequest(
             request_id=str(ULID()),
             request_kind=request_kind,
@@ -504,11 +701,17 @@ class AgentContextService:
             pipeline_run_id=(
                 runtime_context.pipeline_run_id if runtime_context is not None else None
             ),
-            agent_profile_id=(
-                runtime_context.agent_profile_id
-                if runtime_context is not None and runtime_context.agent_profile_id
-                else dispatch_metadata.get("agent_profile_id") or None
+            agent_runtime_id=(
+                str(runtime_extra.get("agent_runtime_id", "")).strip()
+                or str(dispatch_metadata.get("agent_runtime_id", "")).strip()
+                or None
             ),
+            agent_session_id=(
+                str(runtime_extra.get("agent_session_id", "")).strip()
+                or str(dispatch_metadata.get("agent_session_id", "")).strip()
+                or None
+            ),
+            agent_profile_id=requested_agent_profile_id,
             trigger_text=trigger_text,
             thread_id=(
                 runtime_context.thread_id
@@ -517,9 +720,7 @@ class AgentContextService:
             ),
             requester_id=task.requester.sender_id or None,
             delegation_metadata=dict(dispatch_metadata),
-            runtime_metadata=(
-                runtime_context.model_dump(mode="json") if runtime_context is not None else {}
-            ),
+            runtime_metadata=runtime_metadata,
         )
 
     async def _resolve_context_bundle(
@@ -559,6 +760,32 @@ class AgentContextService:
             workspace=workspace,
             session_id_hint=request.session_id or "",
         )
+        agent_runtime = await self._ensure_agent_runtime(
+            request=request,
+            project=project,
+            workspace=workspace,
+            agent_profile=agent_profile,
+        )
+        agent_session = await self._ensure_agent_session(
+            request=request,
+            task=task,
+            project=project,
+            workspace=workspace,
+            agent_runtime=agent_runtime,
+            session_state=session_state,
+        )
+        project_memory_scope_ids = await self._resolve_project_memory_scope_ids(
+            task=task,
+            project=project,
+            workspace=workspace,
+        )
+        memory_namespaces = await self._ensure_memory_namespaces(
+            project=project,
+            workspace=workspace,
+            agent_runtime=agent_runtime,
+            agent_session=agent_session,
+            project_memory_scope_ids=project_memory_scope_ids,
+        )
         (
             memory_hits,
             memory_scope_ids,
@@ -569,6 +796,9 @@ class AgentContextService:
             project=project,
             workspace=workspace,
             agent_profile=agent_profile,
+            agent_runtime=agent_runtime,
+            agent_session=agent_session,
+            memory_namespaces=memory_namespaces,
             query=query,
         )
         degraded_reasons.extend(memory_reasons)
@@ -582,7 +812,15 @@ class AgentContextService:
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
             bootstrap=bootstrap,
-            session_state=session_state,
+            agent_runtime=agent_runtime,
+            agent_session=agent_session,
+            session_state=session_state.model_copy(
+                update={
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": agent_session.agent_session_id,
+                }
+            ),
+            memory_namespaces=memory_namespaces,
             memory_hits=memory_hits,
             memory_scope_ids=memory_scope_ids,
             degraded_reasons=degraded_reasons,
@@ -670,10 +908,74 @@ class AgentContextService:
                 "recent_artifact_refs": recent_artifact_refs,
                 "rolling_summary": merged_summary,
                 "last_context_frame_id": context_frame_id,
+                "last_recall_frame_id": (
+                    frame.recall_frame_id if frame is not None and frame.recall_frame_id else ""
+                ),
                 "updated_at": datetime.now(tz=UTC),
             }
         )
         await self._stores.agent_context_store.save_session_context(updated)
+        agent_session = None
+        if frame is not None and frame.agent_session_id:
+            agent_session = await self._stores.agent_context_store.get_agent_session(
+                frame.agent_session_id
+            )
+            if agent_session is not None:
+                agent_session = agent_session.model_copy(
+                    update={
+                        "last_context_frame_id": context_frame_id,
+                        "last_recall_frame_id": frame.recall_frame_id or "",
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                await self._stores.agent_context_store.save_agent_session(agent_session)
+        if frame is not None:
+            current_frame = frame
+            try:
+                current_frame = await self._record_private_memory_writeback(
+                    task=task,
+                    frame=current_frame,
+                    agent_session=agent_session,
+                    project=project,
+                    workspace=workspace,
+                    request_artifact_id=request_artifact_id,
+                    response_artifact_id=response_artifact_id,
+                    latest_user_text=latest_user_text,
+                    model_response=model_response,
+                    continuity_summary=merged_summary,
+                )
+            except Exception as exc:
+                log.warning(
+                    "agent_context_private_memory_writeback_degraded",
+                    task_id=task_id,
+                    context_frame_id=context_frame_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+            if agent_session is not None and current_frame.agent_session_id:
+                latest_agent_session = await self._stores.agent_context_store.get_agent_session(
+                    current_frame.agent_session_id
+                )
+                if latest_agent_session is not None:
+                    agent_session = latest_agent_session
+            try:
+                await self._record_private_tool_evidence_writeback(
+                    task=task,
+                    frame=current_frame,
+                    agent_session=agent_session,
+                    project=project,
+                    workspace=workspace,
+                    request_artifact_id=request_artifact_id,
+                    response_artifact_id=response_artifact_id,
+                )
+            except Exception as exc:
+                log.warning(
+                    "agent_context_private_tool_writeback_degraded",
+                    task_id=task_id,
+                    context_frame_id=context_frame_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
         await self._stores.conn.commit()
 
     async def record_delayed_recall_state(
@@ -752,6 +1054,900 @@ class AgentContextService:
             )
         )
         await self._stores.conn.commit()
+
+    async def _record_private_memory_writeback(
+        self,
+        *,
+        task: Task,
+        frame: ContextFrame,
+        agent_session: AgentSession | None,
+        project: Project | None,
+        workspace: Workspace | None,
+        request_artifact_id: str,
+        response_artifact_id: str,
+        latest_user_text: str,
+        model_response: str,
+        continuity_summary: str,
+    ) -> ContextFrame:
+        if not frame.agent_runtime_id:
+            return frame
+        agent_runtime = await self._stores.agent_context_store.get_agent_runtime(
+            frame.agent_runtime_id
+        )
+        if agent_runtime is None or agent_runtime.role is not AgentRuntimeRole.WORKER:
+            return frame
+
+        writeback_state = dict(frame.budget.get("private_memory_writeback", {}))
+        if response_artifact_id and (
+            str(writeback_state.get("response_artifact_ref", "")) == response_artifact_id
+        ):
+            return frame
+
+        namespace = await self._resolve_memory_namespace_by_kind(
+            frame=frame,
+            kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        )
+        if namespace is None:
+            return frame
+
+        scope_id, scope_kind = self._select_writeback_scope(namespace)
+        if not scope_id:
+            return frame
+
+        await init_memory_db(self._stores.conn)
+        memory_service = await self.get_memory_service(project=project, workspace=workspace)
+        evidence_refs = await self._collect_private_writeback_evidence_refs(
+            task_id=task.task_id,
+            agent_session_id=frame.agent_session_id,
+            request_artifact_id=request_artifact_id,
+            response_artifact_id=response_artifact_id,
+        )
+        run = await memory_service.run_memory_maintenance(
+            MemoryMaintenanceCommand(
+                command_id=str(ULID()),
+                kind=MemoryMaintenanceCommandKind.FLUSH,
+                scope_id=scope_id,
+                partition=MemoryPartition.WORK,
+                reason="worker private memory writeback",
+                requested_by=f"agent_context:{agent_runtime.agent_runtime_id}",
+                idempotency_key=(
+                    f"{frame.context_frame_id}:private_writeback:{response_artifact_id or task.task_id}"
+                ),
+                summary=self._build_private_memory_writeback_summary(
+                    latest_user_text=latest_user_text,
+                    model_response=model_response,
+                    continuity_summary=continuity_summary,
+                ),
+                evidence_refs=evidence_refs,
+                metadata={
+                    "source": "agent_context.worker_private_writeback",
+                    "task_id": task.task_id,
+                    "context_frame_id": frame.context_frame_id,
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": frame.agent_session_id,
+                    "memory_namespace_id": namespace.namespace_id,
+                    "namespace_kind": namespace.kind.value,
+                    "scope_kind": scope_kind,
+                    "request_artifact_ref": request_artifact_id,
+                    "response_artifact_ref": response_artifact_id,
+                },
+            )
+        )
+
+        updated_budget = dict(frame.budget)
+        updated_budget["private_memory_writeback"] = {
+            "status": run.status.value,
+            "run_id": run.run_id,
+            "scope_id": scope_id,
+            "scope_kind": scope_kind,
+            "namespace_id": namespace.namespace_id,
+            "namespace_kind": namespace.kind.value,
+            "fragment_refs": list(run.fragment_refs),
+            "proposal_refs": list(run.proposal_refs),
+            "backend_used": run.backend_used,
+            "backend_state": run.backend_state.value,
+            "request_artifact_ref": request_artifact_id,
+            "response_artifact_ref": response_artifact_id,
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+        }
+        updated_source_refs = self._append_source_refs(
+            frame.source_refs,
+            [
+                {
+                    "ref_type": "memory_maintenance_run",
+                    "ref_id": run.run_id,
+                    "label": "worker_private_writeback",
+                    "metadata": {
+                        "scope_id": scope_id,
+                        "scope_kind": scope_kind,
+                        "namespace_id": namespace.namespace_id,
+                    },
+                },
+                *[
+                    {
+                        "ref_type": "memory_fragment",
+                        "ref_id": ref_id,
+                        "label": "worker_private_writeback",
+                    }
+                    for ref_id in run.fragment_refs
+                ],
+            ],
+        )
+        updated_frame = frame.model_copy(
+            update={
+                "budget": updated_budget,
+                "source_refs": updated_source_refs,
+            }
+        )
+        await self._stores.agent_context_store.save_context_frame(updated_frame)
+        if agent_session is not None:
+            await self._stores.agent_context_store.save_agent_session(
+                agent_session.model_copy(
+                    update={
+                        "metadata": {
+                            **agent_session.metadata,
+                            "last_private_memory_writeback_run_id": run.run_id,
+                            "last_private_memory_scope_id": scope_id,
+                            "last_private_memory_scope_kind": scope_kind,
+                        },
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
+        return updated_frame
+
+    async def _record_private_tool_evidence_writeback(
+        self,
+        *,
+        task: Task,
+        frame: ContextFrame,
+        agent_session: AgentSession | None,
+        project: Project | None,
+        workspace: Workspace | None,
+        request_artifact_id: str,
+        response_artifact_id: str,
+    ) -> ContextFrame:
+        if not frame.agent_runtime_id:
+            return frame
+        agent_runtime = await self._stores.agent_context_store.get_agent_runtime(
+            frame.agent_runtime_id
+        )
+        if agent_runtime is None or agent_runtime.role is not AgentRuntimeRole.WORKER:
+            return frame
+
+        namespace = await self._resolve_memory_namespace_by_kind(
+            frame=frame,
+            kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        )
+        if namespace is None:
+            return frame
+
+        scope_id, scope_kind = self._select_writeback_scope(namespace)
+        if not scope_id:
+            return frame
+
+        budget = dict(frame.budget)
+        existing_state = dict(budget.get("private_tool_writeback", {}))
+        existing_event_ids = {
+            str(item).strip() for item in existing_state.get("event_ids", []) if str(item).strip()
+        }
+        tool_events = await self._collect_private_tool_completion_events(
+            task_id=task.task_id,
+            agent_session_id=frame.agent_session_id,
+            known_event_ids=existing_event_ids,
+        )
+        if not tool_events:
+            return frame
+
+        await init_memory_db(self._stores.conn)
+        memory_service = await self.get_memory_service(project=project, workspace=workspace)
+
+        committed_event_ids: list[str] = []
+        committed_tool_names: list[str] = []
+        committed_proposal_ids: list[str] = []
+        committed_sor_ids: list[str] = []
+        updated_source_refs = list(frame.source_refs)
+
+        for event in tool_events:
+            payload = dict(event.payload)
+            tool_name = str(payload.get("tool_name", "")).strip()
+            output_summary = str(payload.get("output_summary", "")).strip()
+            artifact_ref = str(payload.get("artifact_ref", "") or "").strip()
+            if not tool_name or (not output_summary and not artifact_ref):
+                continue
+
+            proposal = await memory_service.propose_write(
+                scope_id=scope_id,
+                partition=MemoryPartition.WORK,
+                action=WriteAction.ADD,
+                subject_key=self._build_worker_tool_subject_key(
+                    tool_name=tool_name,
+                    event_id=event.event_id,
+                    artifact_ref=artifact_ref,
+                ),
+                content=self._build_worker_tool_memory_content(
+                    tool_name=tool_name,
+                    output_summary=output_summary,
+                    artifact_ref=artifact_ref,
+                    task_id=task.task_id,
+                    response_artifact_id=response_artifact_id,
+                ),
+                rationale="worker tool evidence writeback",
+                confidence=0.82,
+                evidence_refs=self._build_worker_tool_evidence_refs(
+                    tool_name=tool_name,
+                    output_summary=output_summary,
+                    artifact_ref=artifact_ref,
+                    request_artifact_id=request_artifact_id,
+                    response_artifact_id=response_artifact_id,
+                ),
+                metadata={
+                    "source": "agent_context.worker_tool_writeback",
+                    "task_id": task.task_id,
+                    "context_frame_id": frame.context_frame_id,
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": frame.agent_session_id,
+                    "memory_namespace_id": namespace.namespace_id,
+                    "namespace_kind": namespace.kind.value,
+                    "scope_kind": scope_kind,
+                    "tool_name": tool_name,
+                    "tool_event_id": event.event_id,
+                    "tool_artifact_ref": artifact_ref,
+                    "response_artifact_ref": response_artifact_id,
+                },
+            )
+            validation = await memory_service.validate_proposal(proposal.proposal_id)
+            if not validation.accepted:
+                continue
+            commit = await memory_service.commit_memory(proposal.proposal_id)
+            committed_event_ids.append(event.event_id)
+            committed_tool_names.append(tool_name)
+            committed_proposal_ids.append(proposal.proposal_id)
+            if commit.sor_id:
+                committed_sor_ids.append(commit.sor_id)
+            updated_source_refs = self._append_source_refs(
+                updated_source_refs,
+                [
+                    {
+                        "ref_type": "event",
+                        "ref_id": event.event_id,
+                        "label": tool_name,
+                        "metadata": {
+                            "tool_name": tool_name,
+                            "artifact_ref": artifact_ref,
+                        },
+                    },
+                    {
+                        "ref_type": "memory_proposal",
+                        "ref_id": proposal.proposal_id,
+                        "label": tool_name,
+                        "metadata": {
+                            "scope_id": scope_id,
+                            "scope_kind": scope_kind,
+                        },
+                    },
+                    *(
+                        [
+                            {
+                                "ref_type": "memory_sor",
+                                "ref_id": commit.sor_id,
+                                "label": tool_name,
+                            }
+                        ]
+                        if commit.sor_id
+                        else []
+                    ),
+                ],
+            )
+
+        if not committed_event_ids:
+            return frame
+
+        budget["private_tool_writeback"] = {
+            "status": "completed",
+            "scope_id": scope_id,
+            "scope_kind": scope_kind,
+            "namespace_id": namespace.namespace_id,
+            "namespace_kind": namespace.kind.value,
+            "committed_count": len(committed_event_ids),
+            "event_ids": self._append_unique_tail(
+                [str(item) for item in existing_state.get("event_ids", [])],
+                committed_event_ids,
+                limit=24,
+            ),
+            "tool_names": self._append_unique_tail(
+                [str(item) for item in existing_state.get("tool_names", [])],
+                committed_tool_names,
+                limit=16,
+            ),
+            "proposal_refs": self._append_unique_tail(
+                [str(item) for item in existing_state.get("proposal_refs", [])],
+                committed_proposal_ids,
+                limit=24,
+            ),
+            "sor_refs": self._append_unique_tail(
+                [str(item) for item in existing_state.get("sor_refs", [])],
+                committed_sor_ids,
+                limit=24,
+            ),
+            "updated_at": datetime.now(tz=UTC).isoformat(),
+        }
+        updated_frame = frame.model_copy(
+            update={
+                "budget": budget,
+                "source_refs": updated_source_refs,
+            }
+        )
+        await self._stores.agent_context_store.save_context_frame(updated_frame)
+        if agent_session is not None:
+            await self._stores.agent_context_store.save_agent_session(
+                agent_session.model_copy(
+                    update={
+                        "metadata": {
+                            **agent_session.metadata,
+                            "last_private_tool_writeback_count": len(committed_event_ids),
+                            "last_private_tool_scope_id": scope_id,
+                            "last_private_tool_scope_kind": scope_kind,
+                        },
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
+        return updated_frame
+
+    async def _resolve_memory_namespace_by_kind(
+        self,
+        *,
+        frame: ContextFrame,
+        kind: MemoryNamespaceKind,
+    ) -> MemoryNamespace | None:
+        for namespace_id in frame.memory_namespace_ids:
+            namespace = await self._stores.agent_context_store.get_memory_namespace(namespace_id)
+            if namespace is not None and namespace.kind is kind:
+                return namespace
+        return None
+
+    @staticmethod
+    def _select_writeback_scope(namespace: MemoryNamespace) -> tuple[str, str]:
+        for scope_id in namespace.memory_scope_ids:
+            if "/runtime:" in scope_id:
+                return scope_id, "runtime_private"
+        for scope_id in namespace.memory_scope_ids:
+            if "/session:" in scope_id:
+                return scope_id, "session_private"
+        return (namespace.memory_scope_ids[0], "namespace_primary") if namespace.memory_scope_ids else ("", "")
+
+    async def _collect_private_writeback_evidence_refs(
+        self,
+        *,
+        task_id: str,
+        agent_session_id: str,
+        request_artifact_id: str,
+        response_artifact_id: str,
+        limit: int = 8,
+    ) -> list[EvidenceRef]:
+        refs: list[EvidenceRef] = []
+        seen: set[str] = set()
+
+        def add(ref_id: str, *, snippet: str | None = None) -> None:
+            normalized = ref_id.strip()
+            if not normalized or normalized in seen or len(refs) >= limit:
+                return
+            refs.append(
+                EvidenceRef(
+                    ref_id=normalized,
+                    ref_type="artifact",
+                    snippet=truncate_chars(" ".join((snippet or "").split()), 120) or None,
+                )
+            )
+            seen.add(normalized)
+
+        add(request_artifact_id, snippet="llm request context snapshot")
+        add(response_artifact_id, snippet="worker llm response")
+
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
+            if len(refs) >= limit:
+                break
+            if event.type is not EventType.ARTIFACT_CREATED:
+                continue
+            payload = event.payload
+            if agent_session_id and str(payload.get("session_id", "")).strip() != agent_session_id:
+                continue
+            add(
+                str(payload.get("artifact_id", "")),
+                snippet=str(payload.get("source") or payload.get("name") or "").strip(),
+            )
+
+        for event in reversed(events):
+            if len(refs) >= limit:
+                break
+            if event.type is not EventType.TOOL_CALL_COMPLETED:
+                continue
+            payload_agent_session_id = str(event.payload.get("agent_session_id", "")).strip()
+            if agent_session_id:
+                if not payload_agent_session_id:
+                    continue
+                if payload_agent_session_id != agent_session_id:
+                    continue
+            add(
+                str(event.payload.get("artifact_ref", "")),
+                snippet=f"tool:{str(event.payload.get('tool_name', '')).strip()}",
+            )
+        return refs
+
+    @staticmethod
+    def _build_private_memory_writeback_summary(
+        *,
+        latest_user_text: str,
+        model_response: str,
+        continuity_summary: str,
+    ) -> str:
+        cleaned_user = " ".join(latest_user_text.split())
+        cleaned_response = " ".join(model_response.split())
+        cleaned_continuity = " ".join(continuity_summary.split())
+        parts = [
+            f"Butler 请求: {truncate_chars(cleaned_user, 280)}",
+            f"Worker 回复: {truncate_chars(cleaned_response, 420)}",
+        ]
+        if cleaned_continuity:
+            parts.append(f"连续性摘要: {truncate_chars(cleaned_continuity, 320)}")
+        return "\n".join(part for part in parts if part).strip()
+
+    async def _collect_private_tool_completion_events(
+        self,
+        *,
+        task_id: str,
+        agent_session_id: str,
+        known_event_ids: set[str],
+    ) -> list[Any]:
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        return [
+            event
+            for event in events
+            if event.type is EventType.TOOL_CALL_COMPLETED
+            and event.event_id not in known_event_ids
+            and (
+                not agent_session_id
+                or str(event.payload.get("agent_session_id", "")).strip() == agent_session_id
+            )
+        ]
+
+    @staticmethod
+    def _build_worker_tool_subject_key(
+        *,
+        tool_name: str,
+        event_id: str,
+        artifact_ref: str,
+    ) -> str:
+        suffix = artifact_ref or event_id
+        return f"worker_tool:{tool_name}:{suffix}"
+
+    @staticmethod
+    def _build_worker_tool_memory_content(
+        *,
+        tool_name: str,
+        output_summary: str,
+        artifact_ref: str,
+        task_id: str,
+        response_artifact_id: str,
+    ) -> str:
+        parts = [
+            f"tool_name: {tool_name}",
+            f"output_summary: {truncate_chars(' '.join(output_summary.split()), 360)}",
+        ]
+        if artifact_ref:
+            parts.append(f"artifact_ref: {artifact_ref}")
+        if response_artifact_id:
+            parts.append(f"response_artifact_ref: {response_artifact_id}")
+        parts.append(f"task_id: {task_id}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_worker_tool_evidence_refs(
+        *,
+        tool_name: str,
+        output_summary: str,
+        artifact_ref: str,
+        request_artifact_id: str,
+        response_artifact_id: str,
+    ) -> list[EvidenceRef]:
+        refs: list[EvidenceRef] = []
+        for ref_id, snippet in (
+            (artifact_ref, f"tool:{tool_name}"),
+            (request_artifact_id, "llm request context snapshot"),
+            (response_artifact_id, truncate_chars(" ".join(output_summary.split()), 120)),
+        ):
+            normalized = str(ref_id).strip()
+            if not normalized:
+                continue
+            refs.append(
+                EvidenceRef(
+                    ref_id=normalized,
+                    ref_type="artifact",
+                    snippet=snippet or None,
+                )
+            )
+        return refs
+
+    @staticmethod
+    def _resolve_agent_runtime_role(request: ContextResolveRequest) -> AgentRuntimeRole:
+        requested_worker_profile_id = str(
+            request.delegation_metadata.get("requested_worker_profile_id", "")
+        ).strip()
+        if (
+            request.request_kind is ContextRequestKind.WORKER
+            or request.request_kind is ContextRequestKind.WORK
+            or request.work_id
+            or requested_worker_profile_id
+        ):
+            return AgentRuntimeRole.WORKER
+        return AgentRuntimeRole.BUTLER
+
+    @staticmethod
+    def _build_agent_runtime_id(
+        *,
+        role: AgentRuntimeRole,
+        project_id: str,
+        workspace_id: str,
+        agent_profile_id: str,
+        worker_profile_id: str,
+        worker_capability: str,
+    ) -> str:
+        return build_agent_runtime_id(
+            role=role,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            agent_profile_id=agent_profile_id,
+            worker_profile_id=worker_profile_id,
+            worker_capability=worker_capability,
+        )
+
+    @staticmethod
+    def _build_agent_session_id(
+        *,
+        agent_runtime_id: str,
+        kind: AgentSessionKind,
+        legacy_session_id: str,
+        work_id: str,
+        task_id: str,
+    ) -> str:
+        return build_agent_session_id(
+            agent_runtime_id=agent_runtime_id,
+            kind=kind,
+            legacy_session_id=legacy_session_id,
+            work_id=work_id,
+            task_id=task_id,
+        )
+
+    @staticmethod
+    def _build_memory_namespace_id(
+        *,
+        kind: MemoryNamespaceKind,
+        project_id: str,
+        workspace_id: str,
+        agent_runtime_id: str = "",
+    ) -> str:
+        return build_memory_namespace_id(
+            kind=kind,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            agent_runtime_id=agent_runtime_id,
+        )
+
+    async def _ensure_agent_runtime(
+        self,
+        *,
+        request: ContextResolveRequest,
+        project: Project | None,
+        workspace: Workspace | None,
+        agent_profile: AgentProfile,
+    ) -> AgentRuntime:
+        role = self._resolve_agent_runtime_role(request)
+        project_id = project.project_id if project is not None else ""
+        workspace_id = workspace.workspace_id if workspace is not None else ""
+        worker_profile_id = str(
+            request.delegation_metadata.get("requested_worker_profile_id", "")
+        ).strip()
+        worker_capability = (
+            str(request.runtime_metadata.get("worker_capability", "")).strip()
+            or str(request.delegation_metadata.get("selected_worker_type", "")).strip()
+            or str(request.delegation_metadata.get("worker_capability", "")).strip()
+        )
+        runtime_id = (
+            request.agent_runtime_id or ""
+        ).strip() or self._build_agent_runtime_id(
+            role=role,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            agent_profile_id=agent_profile.profile_id,
+            worker_profile_id=worker_profile_id,
+            worker_capability=worker_capability,
+        )
+        existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
+        worker_profile = (
+            await self._stores.agent_context_store.get_worker_profile(worker_profile_id)
+            if worker_profile_id
+            else None
+        )
+        if role is AgentRuntimeRole.BUTLER:
+            runtime_name = agent_profile.name
+            persona_summary = agent_profile.persona_summary
+        else:
+            worker_label = (
+                worker_profile.name
+                if worker_profile is not None
+                else worker_profile_id or worker_capability or "worker"
+            )
+            runtime_name = worker_label
+            persona_summary = (
+                worker_profile.summary
+                if worker_profile is not None
+                else f"{worker_label} internal worker runtime"
+            )
+        runtime = (
+            existing.model_copy(
+                update={
+                    "project_id": project_id,
+                    "workspace_id": workspace_id,
+                    "agent_profile_id": agent_profile.profile_id,
+                    "worker_profile_id": worker_profile_id,
+                    "role": role,
+                    "name": runtime_name,
+                    "persona_summary": persona_summary,
+                    "metadata": {
+                        **existing.metadata,
+                        "surface": request.surface,
+                        "request_kind": request.request_kind.value,
+                        "worker_capability": worker_capability,
+                        "selected_worker_type": request.delegation_metadata.get(
+                            "selected_worker_type", ""
+                        ),
+                    },
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            if existing is not None
+            else AgentRuntime(
+                agent_runtime_id=runtime_id,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                agent_profile_id=agent_profile.profile_id,
+                worker_profile_id=worker_profile_id,
+                role=role,
+                name=runtime_name,
+                persona_summary=persona_summary,
+                metadata={
+                    "surface": request.surface,
+                    "request_kind": request.request_kind.value,
+                    "worker_capability": worker_capability,
+                    "selected_worker_type": request.delegation_metadata.get(
+                        "selected_worker_type", ""
+                    ),
+                },
+            )
+        )
+        await self._stores.agent_context_store.save_agent_runtime(runtime)
+        return runtime
+
+    async def _ensure_agent_session(
+        self,
+        *,
+        request: ContextResolveRequest,
+        task: Task,
+        project: Project | None,
+        workspace: Workspace | None,
+        agent_runtime: AgentRuntime,
+        session_state: SessionContextState,
+    ) -> AgentSession:
+        kind = (
+            AgentSessionKind.WORKER_INTERNAL
+            if agent_runtime.role is AgentRuntimeRole.WORKER
+            else AgentSessionKind.BUTLER_MAIN
+        )
+        agent_session_id = (
+            request.agent_session_id or ""
+        ).strip() or self._build_agent_session_id(
+            agent_runtime_id=agent_runtime.agent_runtime_id,
+            kind=kind,
+            legacy_session_id=session_state.session_id,
+            work_id=request.work_id or "",
+            task_id=task.task_id,
+        )
+        existing = await self._stores.agent_context_store.get_agent_session(agent_session_id)
+        session = (
+            existing.model_copy(
+                update={
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "kind": kind,
+                    "project_id": project.project_id if project is not None else "",
+                    "workspace_id": workspace.workspace_id if workspace is not None else "",
+                    "surface": request.surface,
+                    "thread_id": request.thread_id or task.thread_id,
+                    "legacy_session_id": session_state.session_id,
+                    "work_id": request.work_id or existing.work_id,
+                    "parent_agent_session_id": (
+                        existing.parent_agent_session_id
+                        or (
+                            session_state.agent_session_id
+                            if kind is AgentSessionKind.WORKER_INTERNAL
+                            else ""
+                        )
+                    ),
+                    "metadata": {
+                        **existing.metadata,
+                        "request_kind": request.request_kind.value,
+                        "worker_capability": request.runtime_metadata.get(
+                            "worker_capability", ""
+                        ),
+                        "selected_worker_type": request.delegation_metadata.get(
+                            "selected_worker_type", ""
+                        ),
+                    },
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            if existing is not None
+            else AgentSession(
+                agent_session_id=agent_session_id,
+                agent_runtime_id=agent_runtime.agent_runtime_id,
+                kind=kind,
+                project_id=project.project_id if project is not None else "",
+                workspace_id=workspace.workspace_id if workspace is not None else "",
+                surface=request.surface,
+                thread_id=request.thread_id or task.thread_id,
+                legacy_session_id=session_state.session_id,
+                parent_agent_session_id=(
+                    session_state.agent_session_id
+                    if kind is AgentSessionKind.WORKER_INTERNAL
+                    else ""
+                ),
+                work_id=request.work_id or "",
+                metadata={
+                    "request_kind": request.request_kind.value,
+                    "worker_capability": request.runtime_metadata.get(
+                        "worker_capability", ""
+                    ),
+                    "selected_worker_type": request.delegation_metadata.get(
+                        "selected_worker_type", ""
+                    ),
+                },
+            )
+        )
+        await self._stores.agent_context_store.save_agent_session(session)
+        return session
+
+    async def _ensure_memory_namespaces(
+        self,
+        *,
+        project: Project | None,
+        workspace: Workspace | None,
+        agent_runtime: AgentRuntime,
+        agent_session: AgentSession,
+        project_memory_scope_ids: list[str],
+    ) -> list[MemoryNamespace]:
+        project_id = project.project_id if project is not None else ""
+        workspace_id = workspace.workspace_id if workspace is not None else ""
+        project_scope_ids = list(
+            dict.fromkeys(scope for scope in project_memory_scope_ids if scope)
+        )
+        namespaces: list[MemoryNamespace] = []
+
+        if project_id or project_scope_ids:
+            project_namespace_id = self._build_memory_namespace_id(
+                kind=MemoryNamespaceKind.PROJECT_SHARED,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                agent_runtime_id=agent_runtime.agent_runtime_id,
+            )
+            project_existing = await self._stores.agent_context_store.get_memory_namespace(
+                project_namespace_id
+            )
+            project_namespace = (
+                project_existing.model_copy(
+                    update={
+                        "project_id": project_id,
+                        "workspace_id": workspace_id,
+                        "agent_runtime_id": agent_runtime.agent_runtime_id,
+                        "kind": MemoryNamespaceKind.PROJECT_SHARED,
+                        "name": "Project Shared",
+                        "description": "Project 共享记忆命名空间。",
+                        "memory_scope_ids": project_scope_ids,
+                        "metadata": {
+                            **project_existing.metadata,
+                            "source": "agent_context.resolve",
+                        },
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                if project_existing is not None
+                else MemoryNamespace(
+                    namespace_id=project_namespace_id,
+                    project_id=project_id,
+                    workspace_id=workspace_id,
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                    kind=MemoryNamespaceKind.PROJECT_SHARED,
+                    name="Project Shared",
+                    description="Project 共享记忆命名空间。",
+                    memory_scope_ids=project_scope_ids,
+                    metadata={"source": "agent_context.resolve"},
+                )
+            )
+            await self._stores.agent_context_store.save_memory_namespace(project_namespace)
+            namespaces.append(project_namespace)
+
+        private_kind = (
+            MemoryNamespaceKind.WORKER_PRIVATE
+            if agent_runtime.role is AgentRuntimeRole.WORKER
+            else MemoryNamespaceKind.BUTLER_PRIVATE
+        )
+        private_namespace_id = self._build_memory_namespace_id(
+            kind=private_kind,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            agent_runtime_id=agent_runtime.agent_runtime_id,
+        )
+        private_existing = await self._stores.agent_context_store.get_memory_namespace(
+            private_namespace_id
+        )
+        private_scope_ids = build_private_memory_scope_ids(
+            kind=private_kind,
+            agent_runtime_id=agent_runtime.agent_runtime_id,
+            agent_session_id=agent_session.agent_session_id,
+        )
+        private_namespace = (
+            private_existing.model_copy(
+                update={
+                    "project_id": project_id,
+                    "workspace_id": workspace_id,
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "kind": private_kind,
+                    "name": (
+                        "Worker Private"
+                        if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
+                        else "Butler Private"
+                    ),
+                    "description": (
+                        "Worker 私有记忆命名空间。"
+                        if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
+                        else "Butler 私有记忆命名空间。"
+                    ),
+                    "memory_scope_ids": private_scope_ids,
+                    "metadata": {
+                        **private_existing.metadata,
+                        "source": "agent_context.resolve",
+                        "agent_session_id": agent_session.agent_session_id,
+                    },
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            if private_existing is not None
+            else MemoryNamespace(
+                namespace_id=private_namespace_id,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                agent_runtime_id=agent_runtime.agent_runtime_id,
+                kind=private_kind,
+                name=(
+                    "Worker Private"
+                    if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
+                    else "Butler Private"
+                ),
+                description=(
+                    "Worker 私有记忆命名空间。"
+                    if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
+                    else "Butler 私有记忆命名空间。"
+                ),
+                memory_scope_ids=private_scope_ids,
+                metadata={
+                    "source": "agent_context.resolve",
+                    "agent_session_id": agent_session.agent_session_id,
+                },
+            )
+        )
+        await self._stores.agent_context_store.save_memory_namespace(private_namespace)
+        namespaces.append(private_namespace)
+        return namespaces
 
     async def resolve_project_scope(
         self,
@@ -1139,15 +2335,30 @@ class AgentContextService:
         project: Project | None,
         workspace: Workspace | None,
         agent_profile: AgentProfile,
+        agent_runtime: AgentRuntime,
+        agent_session: AgentSession,
+        memory_namespaces: list[MemoryNamespace],
         query: str,
     ) -> tuple[list[MemoryRecallHit], list[str], list[str], dict[str, Any]]:
-        scope_ids = await self._resolve_memory_scope_ids(
-            task=task,
-            project=project,
-            workspace=workspace,
+        scope_entries = self._build_memory_scope_entries(
+            agent_runtime=agent_runtime,
+            agent_session=agent_session,
+            memory_namespaces=memory_namespaces,
         )
+        scope_ids = [str(item["scope_id"]).strip() for item in scope_entries if item["scope_id"]]
         if not scope_ids or not query.strip():
-            return [], scope_ids, [], {}
+            return (
+                [],
+                scope_ids,
+                [],
+                {
+                    "scope_entries": scope_entries,
+                    "namespace_ids": [item.namespace_id for item in memory_namespaces],
+                    "recall_owner_role": agent_runtime.role.value,
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": agent_session.agent_session_id,
+                },
+            )
 
         try:
             await init_memory_db(self._stores.conn)
@@ -1156,8 +2367,14 @@ class AgentContextService:
                 workspace=workspace,
             )
             policy = effective_memory_access_policy(agent_profile)
+            selected_scope_ids = scope_ids[: memory_recall_scope_limit(agent_profile, default=4)]
+            scope_entry_map = {
+                str(item["scope_id"]): dict(item)
+                for item in scope_entries
+                if str(item["scope_id"]).strip()
+            }
             recall = await memory_service.recall_memory(
-                scope_ids=scope_ids[: memory_recall_scope_limit(agent_profile, default=4)],
+                scope_ids=selected_scope_ids,
                 query=query,
                 policy=policy,
                 per_scope_limit=memory_recall_per_scope_limit(agent_profile, default=3),
@@ -1166,10 +2383,30 @@ class AgentContextService:
                     agent_profile=agent_profile
                 ),
             )
+            recall_hits = [
+                hit.model_copy(
+                    update={
+                        "metadata": {
+                            **hit.metadata,
+                            **scope_entry_map.get(hit.scope_id, {}),
+                            "recall_owner_role": agent_runtime.role.value,
+                            "agent_runtime_id": agent_runtime.agent_runtime_id,
+                            "agent_session_id": agent_session.agent_session_id,
+                        }
+                    }
+                )
+                for hit in recall.hits
+            ]
             recall_meta = {
                 "query": recall.query,
                 "expanded_queries": recall.expanded_queries,
                 "scope_ids": list(recall.scope_ids),
+                "scope_entries": [
+                    scope_entry_map[scope_id]
+                    for scope_id in recall.scope_ids
+                    if scope_id in scope_entry_map
+                ],
+                "namespace_ids": [item.namespace_id for item in memory_namespaces],
                 "hit_count": len(recall.hits),
                 "degraded_reasons": list(recall.degraded_reasons),
                 "backend": (
@@ -1186,12 +2423,15 @@ class AgentContextService:
                     else 0
                 ),
                 "hook_trace": (
-                    recall.hook_trace.model_dump(mode="json")
+                        recall.hook_trace.model_dump(mode="json")
                     if recall.hook_trace is not None
                     else {}
                 ),
+                "recall_owner_role": agent_runtime.role.value,
+                "agent_runtime_id": agent_runtime.agent_runtime_id,
+                "agent_session_id": agent_session.agent_session_id,
             }
-            return recall.hits, scope_ids, recall.degraded_reasons, recall_meta
+            return recall_hits, scope_ids, recall.degraded_reasons, recall_meta
         except Exception as exc:
             log.warning(
                 "agent_context_memory_degraded",
@@ -1201,7 +2441,7 @@ class AgentContextService:
             )
             return [], scope_ids, ["memory_unavailable"], {}
 
-    async def _resolve_memory_scope_ids(
+    async def _resolve_project_memory_scope_ids(
         self,
         *,
         task: Task,
@@ -1223,6 +2463,51 @@ class AgentContextService:
         if not scope_ids and task.scope_id:
             scope_ids.append(task.scope_id)
         return list(dict.fromkeys(sorted(scope_ids)))
+
+    @staticmethod
+    def _build_memory_scope_entries(
+        *,
+        agent_runtime: AgentRuntime,
+        agent_session: AgentSession,
+        memory_namespaces: list[MemoryNamespace],
+    ) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        ordered_namespaces = sorted(
+            memory_namespaces,
+            key=lambda namespace: (
+                0
+                if namespace.kind
+                in {
+                    MemoryNamespaceKind.BUTLER_PRIVATE,
+                    MemoryNamespaceKind.WORKER_PRIVATE,
+                }
+                else 1,
+                namespace.kind.value,
+                namespace.namespace_id,
+            ),
+        )
+        for namespace in ordered_namespaces:
+            for index, scope_id in enumerate(namespace.memory_scope_ids):
+                normalized_scope_id = str(scope_id).strip()
+                if not normalized_scope_id:
+                    continue
+                if namespace.kind is MemoryNamespaceKind.PROJECT_SHARED:
+                    scope_kind = "project_shared"
+                else:
+                    scope_kind = "session_private" if index == 0 else "runtime_private"
+                entries.append(
+                    {
+                        "scope_id": normalized_scope_id,
+                        "namespace_id": namespace.namespace_id,
+                        "namespace_kind": namespace.kind.value,
+                        "scope_kind": scope_kind,
+                        "recall_provenance": namespace.kind.value,
+                        "owner_role": agent_runtime.role.value,
+                        "agent_runtime_id": agent_runtime.agent_runtime_id,
+                        "agent_session_id": agent_session.agent_session_id,
+                    }
+                )
+        return entries
 
     def _build_system_blocks(
         self,
@@ -1576,6 +2861,10 @@ class AgentContextService:
                 "metadata": {
                     "scope_id": item.scope_id,
                     "citation": item.citation,
+                    "namespace_id": str(item.metadata.get("namespace_id", "")),
+                    "namespace_kind": str(item.metadata.get("namespace_kind", "")),
+                    "scope_kind": str(item.metadata.get("scope_kind", "")),
+                    "recall_provenance": str(item.metadata.get("recall_provenance", "")),
                     "evidence_refs": [
                         evidence.model_dump(mode="json") for evidence in item.evidence_refs
                     ],
@@ -1599,6 +2888,10 @@ class AgentContextService:
         return {
             "record_id": hit.record_id,
             "scope_id": hit.scope_id,
+            "namespace_id": str(hit.metadata.get("namespace_id", "")),
+            "namespace_kind": str(hit.metadata.get("namespace_kind", "")),
+            "scope_kind": str(hit.metadata.get("scope_kind", "")),
+            "recall_provenance": str(hit.metadata.get("recall_provenance", "")),
             "partition": hit.partition.value,
             "summary": hit.summary,
             "subject_key": hit.subject_key or "",
@@ -1666,14 +2959,21 @@ class AgentContextService:
             "# request-context",
             f"context_frame_id: {frame.context_frame_id}",
             f"session_id: {frame.session_id or 'N/A'}",
+            f"agent_runtime_id: {frame.agent_runtime_id or 'N/A'}",
+            f"agent_session_id: {frame.agent_session_id or 'N/A'}",
             f"project_id: {frame.project_id or 'N/A'}",
             f"workspace_id: {frame.workspace_id or 'N/A'}",
             f"agent_profile_id: {frame.agent_profile_id}",
             f"bootstrap_session_id: {frame.bootstrap_session_id or 'N/A'}",
+            f"recall_frame_id: {frame.recall_frame_id or 'N/A'}",
+            "memory_namespace_ids: "
+            f"{AgentContextService._render_list(frame.memory_namespace_ids, max_chars=320)}",
             f"resolve_request_kind: {resolve_request.request_kind.value}",
             f"resolve_surface: {resolve_request.surface}",
             f"resolve_work_id: {resolve_request.work_id or 'N/A'}",
             f"resolve_pipeline_run_id: {resolve_request.pipeline_run_id or 'N/A'}",
+            f"effective_agent_runtime_id: {resolve_result.effective_agent_runtime_id or 'N/A'}",
+            f"effective_agent_session_id: {resolve_result.effective_agent_session_id or 'N/A'}",
             f"effective_owner_overlay_id: {resolve_result.effective_owner_overlay_id or 'N/A'}",
             f"raw_tokens: {raw_tokens}",
             f"history_tokens: {history_tokens}",

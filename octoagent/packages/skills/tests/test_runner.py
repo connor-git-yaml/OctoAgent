@@ -81,6 +81,10 @@ async def test_runner_tool_call_success(
     assert result.status == SkillRunStatus.SUCCEEDED
     assert len(tool_broker.calls) == 1
     assert tool_broker.calls[0][0] == "system.echo"
+    assert len(tool_broker.contexts) == 1
+    assert tool_broker.contexts[0].agent_runtime_id == "runtime-worker-1"
+    assert tool_broker.contexts[0].agent_session_id == "agent-session-1"
+    assert tool_broker.contexts[0].work_id == "work-1"
 
 
 async def test_runner_output_validation_retry(execution_context, tool_broker, event_store) -> None:

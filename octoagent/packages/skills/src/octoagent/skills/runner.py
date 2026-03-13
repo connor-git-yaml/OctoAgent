@@ -315,6 +315,9 @@ class SkillRunner:
                 task_id=execution_context.task_id,
                 trace_id=execution_context.trace_id,
                 caller=execution_context.caller,
+                agent_runtime_id=execution_context.agent_runtime_id,
+                agent_session_id=execution_context.agent_session_id,
+                work_id=execution_context.work_id,
                 profile=manifest.tool_profile,
             )
             tool_result = await self._tool_broker.execute(

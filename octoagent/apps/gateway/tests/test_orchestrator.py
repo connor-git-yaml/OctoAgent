@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from octoagent.core.models import (
+    A2AConversation,
+    A2AConversationStatus,
     DispatchEnvelope,
     RiskLevel,
     RuntimeControlContext,
@@ -61,8 +63,16 @@ class TestOrchestrator:
         events = await store_group.event_store.get_events_for_task(task_id)
         event_types = [event.type for event in events]
         assert "ORCH_DECISION" in event_types
+        assert "A2A_MESSAGE_SENT" in event_types
+        assert "A2A_MESSAGE_RECEIVED" in event_types
         assert "WORKER_DISPATCHED" in event_types
         assert "WORKER_RETURNED" in event_types
+        conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+        assert len(conversations) == 1
+        messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=conversations[0].a2a_conversation_id
+        )
+        assert [item.message_type for item in messages] == ["TASK", "HEARTBEAT", "RESULT"]
 
         await store_group.conn.close()
 
@@ -143,11 +153,19 @@ class TestOrchestrator:
         result = await orchestrator.dispatch_prepared(envelope)
         assert result.status == WorkerExecutionStatus.SUCCEEDED
         captured = seen["envelope"]
+        conversation = await store_group.a2a_store.get_conversation_for_work("work-a2a")
+        assert conversation is not None
         assert captured.metadata["a2a_message_id"] == "dispatch-a2a"
-        assert captured.metadata["a2a_context_id"] == "work-a2a"
-        assert captured.metadata["a2a_to_agent"] == "agent://llm_generation"
+        assert captured.metadata["a2a_context_id"] == conversation.a2a_conversation_id
+        assert captured.metadata["a2a_to_agent"] == "agent://worker.capture"
+        assert captured.metadata["a2a_conversation_id"] == conversation.a2a_conversation_id
+        assert captured.metadata["source_agent_session_id"]
+        assert captured.metadata["agent_session_id"]
         assert captured.runtime_context is not None
         assert captured.runtime_context.session_id == "session-a2a"
+        assert captured.runtime_context.metadata["agent_session_id"] == captured.metadata[
+            "agent_session_id"
+        ]
 
         await store_group.conn.close()
 
@@ -301,5 +319,68 @@ class TestOrchestrator:
         task = await task_service.get_task(task_id)
         assert task is not None
         assert task.status == "FAILED"
+
+        await store_group.conn.close()
+
+    async def test_record_cancel_marks_all_active_a2a_conversations_for_task(
+        self, tmp_path: Path
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_context(tmp_path)
+
+        msg = NormalizedMessage(text="cancel all a2a", idempotency_key="f008-orch-cancel-all")
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+
+        active_conversation = A2AConversation(
+            a2a_conversation_id="conv-active",
+            task_id=task_id,
+            work_id="work-active",
+            source_agent="agent://butler.main",
+            target_agent="agent://worker.active",
+            status=A2AConversationStatus.ACTIVE,
+        )
+        waiting_conversation = A2AConversation(
+            a2a_conversation_id="conv-waiting",
+            task_id=task_id,
+            work_id="work-waiting",
+            source_agent="agent://butler.main",
+            target_agent="agent://worker.waiting",
+            status=A2AConversationStatus.WAITING_INPUT,
+        )
+        completed_conversation = A2AConversation(
+            a2a_conversation_id="conv-completed",
+            task_id=task_id,
+            work_id="work-completed",
+            source_agent="agent://butler.main",
+            target_agent="agent://worker.completed",
+            status=A2AConversationStatus.COMPLETED,
+        )
+        await store_group.a2a_store.save_conversation(active_conversation)
+        await store_group.a2a_store.save_conversation(waiting_conversation)
+        await store_group.a2a_store.save_conversation(completed_conversation)
+        await store_group.conn.commit()
+
+        await orchestrator.record_cancel(task_id=task_id, reason="user_cancelled_all")
+
+        conversations = await store_group.a2a_store.list_conversations(task_id=task_id, limit=None)
+        statuses = {conversation.work_id: conversation.status for conversation in conversations}
+        assert statuses == {
+            "work-active": A2AConversationStatus.CANCELLED,
+            "work-waiting": A2AConversationStatus.CANCELLED,
+            "work-completed": A2AConversationStatus.COMPLETED,
+        }
+
+        active_messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=active_conversation.a2a_conversation_id
+        )
+        waiting_messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=waiting_conversation.a2a_conversation_id
+        )
+        completed_messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=completed_conversation.a2a_conversation_id
+        )
+        assert [message.message_type for message in active_messages] == ["CANCEL"]
+        assert [message.message_type for message in waiting_messages] == ["CANCEL"]
+        assert completed_messages == []
 
         await store_group.conn.close()

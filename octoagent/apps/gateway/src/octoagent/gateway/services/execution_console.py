@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
+import structlog
 from octoagent.core.models import (
     ActorType,
     Artifact,
@@ -31,6 +33,8 @@ from octoagent.tooling.models import SideEffectLevel
 from ulid import ULID
 
 from .task_service import TaskService
+
+log = structlog.get_logger()
 
 
 class ExecutionInputError(RuntimeError):
@@ -79,6 +83,36 @@ class AttachInputResult:
     approval_id: str | None = None
 
 
+class ExecutionConsoleA2ANotifier(Protocol):
+    """Execution console -> A2A durable 同步接口。"""
+
+    async def record_waiting_input(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        prompt: str,
+        request_id: str,
+        approval_id: str | None,
+        worker_id: str,
+        work_id: str = "",
+    ) -> None:
+        """记录 worker -> butler 的 WAITING_INPUT update。"""
+
+    async def record_input_attached(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        request_id: str,
+        artifact_id: str,
+        actor: str,
+        worker_id: str,
+        work_id: str = "",
+    ) -> None:
+        """记录 butler -> worker 的 resume update。"""
+
+
 class ExecutionConsoleService:
     """Execution 控制台服务。"""
 
@@ -88,11 +122,17 @@ class ExecutionConsoleService:
         sse_hub,
         *,
         approval_manager=None,
+        a2a_notifier: ExecutionConsoleA2ANotifier | None = None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._approval_manager = approval_manager
+        self._a2a_notifier = a2a_notifier
         self._live_sessions: dict[str, LiveExecutionState] = {}
+
+    def bind_a2a_notifier(self, notifier: ExecutionConsoleA2ANotifier | None) -> None:
+        """延迟绑定 A2A notifier，避免构造期循环依赖。"""
+        self._a2a_notifier = notifier
 
     async def register_session(
         self,
@@ -286,6 +326,24 @@ class ExecutionConsoleService:
             status=ExecutionSessionState.WAITING_INPUT,
             message="waiting for human input",
         )
+        if self._a2a_notifier is not None:
+            try:
+                await self._a2a_notifier.record_waiting_input(
+                    task_id=task_id,
+                    session_id=session_id,
+                    prompt=prompt,
+                    request_id=request.request_id,
+                    approval_id=approval_id,
+                    worker_id=str(state.session.metadata.get("worker_id", "")),
+                    work_id=str(state.session.metadata.get("work_id", "")),
+                )
+            except Exception as exc:  # pragma: no cover - A2A 审计失败不阻塞人工接管
+                log.warning(
+                    "execution_console_a2a_waiting_input_failed",
+                    task_id=task_id,
+                    session_id=session_id,
+                    error_type=type(exc).__name__,
+                )
 
         try:
             return await request.queue.get()
@@ -388,6 +446,25 @@ class ExecutionConsoleService:
             live_state.session.can_cancel = True
             await live_state.current_request.queue.put(text)
             delivered_live = True
+
+        if self._a2a_notifier is not None:
+            try:
+                await self._a2a_notifier.record_input_attached(
+                    task_id=task_id,
+                    session_id=session.session_id,
+                    request_id=pending_request.request_id,
+                    artifact_id=artifact.artifact_id,
+                    actor=actor,
+                    worker_id=str(session.metadata.get("worker_id", "")),
+                    work_id=str(session.metadata.get("work_id", "")),
+                )
+            except Exception as exc:  # pragma: no cover - A2A 审计失败不影响恢复
+                log.warning(
+                    "execution_console_a2a_input_attached_failed",
+                    task_id=task_id,
+                    session_id=session.session_id,
+                    error_type=type(exc).__name__,
+                )
 
         return AttachInputResult(
             task_id=task_id,

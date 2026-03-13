@@ -50,6 +50,33 @@ class ContextRequestKind(StrEnum):
     BOOTSTRAP = "bootstrap"
 
 
+class AgentRuntimeRole(StrEnum):
+    BUTLER = "butler"
+    WORKER = "worker"
+
+
+class AgentRuntimeStatus(StrEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class AgentSessionKind(StrEnum):
+    BUTLER_MAIN = "butler_main"
+    WORKER_INTERNAL = "worker_internal"
+    DIRECT_WORKER = "direct_worker"
+
+
+class AgentSessionStatus(StrEnum):
+    ACTIVE = "active"
+    CLOSED = "closed"
+
+
+class MemoryNamespaceKind(StrEnum):
+    PROJECT_SHARED = "project_shared"
+    BUTLER_PRIVATE = "butler_private"
+    WORKER_PRIVATE = "worker_private"
+
+
 class AgentProfile(BaseModel):
     """主 Agent / automation / delegation 可消费的正式 profile。"""
 
@@ -171,10 +198,70 @@ class BootstrapSession(BaseModel):
     completed_at: datetime | None = None
 
 
+class AgentRuntime(BaseModel):
+    """Butler / Worker 的长期运行体。"""
+
+    agent_runtime_id: str = Field(min_length=1)
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
+    worker_profile_id: str = Field(default="")
+    role: AgentRuntimeRole = AgentRuntimeRole.BUTLER
+    name: str = Field(default="")
+    persona_summary: str = Field(default="")
+    status: AgentRuntimeStatus = AgentRuntimeStatus.ACTIVE
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    archived_at: datetime | None = None
+
+
+class AgentSession(BaseModel):
+    """绑定到 AgentRuntime 的正式会话对象。"""
+
+    agent_session_id: str = Field(min_length=1)
+    agent_runtime_id: str = Field(min_length=1)
+    kind: AgentSessionKind = AgentSessionKind.BUTLER_MAIN
+    status: AgentSessionStatus = AgentSessionStatus.ACTIVE
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    surface: str = Field(default="chat")
+    thread_id: str = Field(default="")
+    legacy_session_id: str = Field(default="")
+    parent_agent_session_id: str = Field(default="")
+    work_id: str = Field(default="")
+    a2a_conversation_id: str = Field(default="")
+    last_context_frame_id: str = Field(default="")
+    last_recall_frame_id: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    closed_at: datetime | None = None
+
+
+class MemoryNamespace(BaseModel):
+    """Project shared / Butler private / Worker private 记忆命名空间。"""
+
+    namespace_id: str = Field(min_length=1)
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    agent_runtime_id: str = Field(default="")
+    kind: MemoryNamespaceKind = MemoryNamespaceKind.PROJECT_SHARED
+    name: str = Field(default="")
+    description: str = Field(default="")
+    memory_scope_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+    updated_at: datetime = Field(default_factory=_utc_now)
+    archived_at: datetime | None = None
+
+
 class SessionContextState(BaseModel):
     """短期上下文 durable state。"""
 
     session_id: str = Field(min_length=1)
+    agent_runtime_id: str = Field(default="")
+    agent_session_id: str = Field(default="")
     thread_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
@@ -184,6 +271,7 @@ class SessionContextState(BaseModel):
     rolling_summary: str = Field(default="")
     summary_artifact_id: str = Field(default="")
     last_context_frame_id: str = Field(default="")
+    last_recall_frame_id: str = Field(default="")
     updated_at: datetime = Field(default_factory=_utc_now)
 
 
@@ -210,6 +298,8 @@ class ContextResolveRequest(BaseModel):
     pipeline_run_id: str | None = None
     automation_run_id: str | None = None
     worker_run_id: str | None = None
+    agent_runtime_id: str | None = None
+    agent_session_id: str | None = None
     agent_profile_id: str | None = None
     owner_overlay_id: str | None = None
     trigger_text: str | None = None
@@ -227,6 +317,8 @@ class ContextFrame(BaseModel):
     context_frame_id: str = Field(min_length=1)
     task_id: str = Field(default="")
     session_id: str = Field(default="")
+    agent_runtime_id: str = Field(default="")
+    agent_session_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
@@ -234,8 +326,10 @@ class ContextFrame(BaseModel):
     owner_overlay_id: str = Field(default="")
     owner_profile_revision: int | None = None
     bootstrap_session_id: str | None = None
+    recall_frame_id: str | None = None
     system_blocks: list[dict[str, Any]] = Field(default_factory=list)
     recent_summary: str = Field(default="")
+    memory_namespace_ids: list[str] = Field(default_factory=list)
     memory_hits: list[dict[str, Any]] = Field(default_factory=list)
     delegation_context: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
@@ -244,14 +338,38 @@ class ContextFrame(BaseModel):
     created_at: datetime = Field(default_factory=_utc_now)
 
 
+class RecallFrame(BaseModel):
+    """一次 Agent 侧召回的 durable 快照。"""
+
+    recall_frame_id: str = Field(min_length=1)
+    agent_runtime_id: str = Field(default="")
+    agent_session_id: str = Field(default="")
+    context_frame_id: str = Field(default="")
+    task_id: str = Field(default="")
+    project_id: str = Field(default="")
+    workspace_id: str = Field(default="")
+    query: str = Field(default="")
+    recent_summary: str = Field(default="")
+    memory_namespace_ids: list[str] = Field(default_factory=list)
+    memory_hits: list[dict[str, Any]] = Field(default_factory=list)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    degraded_reason: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
 class ContextResolveResult(BaseModel):
     """统一 resolver 输出。"""
 
     context_frame_id: str = Field(min_length=1)
     effective_agent_profile_id: str = Field(min_length=1)
+    effective_agent_runtime_id: str = Field(default="")
+    effective_agent_session_id: str = Field(default="")
     effective_owner_overlay_id: str | None = None
     owner_profile_revision: int | None = None
     bootstrap_session_id: str | None = None
+    recall_frame_id: str | None = None
     system_blocks: list[dict[str, Any]] = Field(default_factory=list)
     recent_summary: str = Field(default="")
     memory_hits: list[dict[str, Any]] = Field(default_factory=list)

@@ -13,6 +13,11 @@ import structlog
 from octoagent.core.models.artifact import Artifact, ArtifactPart
 from octoagent.core.models.enums import ActorType, EventType, PartType
 from octoagent.core.models.event import Event
+from octoagent.core.models.payloads import (
+    ArtifactCreatedPayload,
+    ToolCallCompletedPayload,
+    ToolCallFailedPayload,
+)
 from ulid import ULID
 
 from .models import (
@@ -21,7 +26,11 @@ from .models import (
     ToolMeta,
     ToolResult,
 )
-from .protocols import ArtifactStoreProtocol, EventStoreProtocol
+from .protocols import (
+    ArtifactStoreProtocol,
+    EventBroadcasterProtocol,
+    EventStoreProtocol,
+)
 from .sanitizer import sanitize_for_event
 
 logger = structlog.get_logger(__name__)
@@ -48,15 +57,21 @@ class LargeOutputHandler:
     def __init__(
         self,
         artifact_store: ArtifactStoreProtocol,
+        event_store: EventStoreProtocol | None = None,
+        event_broadcaster: EventBroadcasterProtocol | None = None,
         default_threshold: int = DEFAULT_THRESHOLD,
     ) -> None:
         """初始化 LargeOutputHandler
 
         Args:
             artifact_store: ArtifactStore 实例
+            event_store: EventStore 实例（可选，用于补写 ARTIFACT_CREATED 审计）
+            event_broadcaster: 事件广播器（可选，用于实时推送增量事件）
             default_threshold: 全局默认裁切阈值（字符数）
         """
         self._artifact_store = artifact_store
+        self._event_store = event_store
+        self._event_broadcaster = event_broadcaster
         self._default_threshold = default_threshold
 
     @property
@@ -150,6 +165,7 @@ class LargeOutputHandler:
             ts=datetime.now(),
             name=f"tool_output:{tool_name}",
             description=f"工具 {tool_name} 的完整输出（{len(output)} 字符）",
+            size=len(content_bytes),
             parts=[
                 ArtifactPart(
                     type=PartType.TEXT,
@@ -160,7 +176,59 @@ class LargeOutputHandler:
         )
 
         await self._artifact_store.put_artifact(artifact, content_bytes)
+        await self._emit_artifact_created_event(
+            artifact=artifact,
+            context=context,
+            source=f"tool_output:{tool_name}",
+        )
         return artifact_id
+
+    async def _emit_artifact_created_event(
+        self,
+        *,
+        artifact: Artifact,
+        context: ExecutionContext,
+        source: str,
+    ) -> None:
+        if self._event_store is None:
+            return
+        try:
+            event = Event(
+                event_id=str(ULID()),
+                task_id=context.task_id,
+                task_seq=await self._event_store.get_next_task_seq(context.task_id),
+                ts=datetime.now(),
+                type=EventType.ARTIFACT_CREATED,
+                actor=ActorType.SYSTEM,
+                payload=ArtifactCreatedPayload(
+                    artifact_id=artifact.artifact_id,
+                    name=artifact.name,
+                    size=artifact.size,
+                    part_count=len(artifact.parts),
+                    session_id=context.agent_session_id or None,
+                    source=source,
+                ).model_dump(),
+                trace_id=context.trace_id,
+            )
+            stored_event = await self._persist_event(event)
+            if self._event_broadcaster is not None:
+                await self._event_broadcaster.broadcast(context.task_id, stored_event)
+        except Exception as e:
+            logger.warning(
+                "large_output_artifact_event_failed",
+                task_id=context.task_id,
+                artifact_id=artifact.artifact_id,
+                error=str(e),
+            )
+
+    async def _persist_event(self, event: Event) -> Event:
+        if self._event_store is None:
+            return event
+        append_committed = getattr(self._event_store, "append_event_committed", None)
+        if callable(append_committed):
+            return await append_committed(event, update_task_pointer=True)
+        await self._event_store.append_event(event)
+        return event
 
 
 # ============================================================
@@ -243,14 +311,16 @@ class EventGenerationHook:
         context: ExecutionContext,
     ) -> None:
         """生成 TOOL_CALL_COMPLETED 事件（脱敏 payload）"""
-        raw_payload = {
-            "tool_name": tool_meta.name,
-            "tool_group": tool_meta.tool_group,
-            "duration_ms": int(result.duration * 1000),
-            "output_summary": result.output[:200] if result.output else "",
-            "truncated": result.truncated,
-            "artifact_ref": result.artifact_ref,
-        }
+        raw_payload = ToolCallCompletedPayload(
+            tool_name=tool_meta.name,
+            duration_ms=int(result.duration * 1000),
+            output_summary=result.output[:200] if result.output else "",
+            agent_runtime_id=context.agent_runtime_id,
+            agent_session_id=context.agent_session_id,
+            work_id=context.work_id,
+            truncated=result.truncated,
+            artifact_ref=result.artifact_ref,
+        ).model_dump()
         # FR-015: 脱敏处理
         sanitized_payload = sanitize_for_event(raw_payload)
 
@@ -277,14 +347,16 @@ class EventGenerationHook:
         context: ExecutionContext,
     ) -> None:
         """生成 TOOL_CALL_FAILED 事件（脱敏 payload）"""
-        raw_payload = {
-            "tool_name": tool_meta.name,
-            "tool_group": tool_meta.tool_group,
-            "duration_ms": int(result.duration * 1000),
-            "error_type": "exception",
-            "error_message": (result.error or "")[:500],
-            "recoverable": True,
-        }
+        raw_payload = ToolCallFailedPayload(
+            tool_name=tool_meta.name,
+            duration_ms=int(result.duration * 1000),
+            error_type="exception",
+            error_message=(result.error or "")[:500],
+            agent_runtime_id=context.agent_runtime_id,
+            agent_session_id=context.agent_session_id,
+            work_id=context.work_id,
+            recoverable=True,
+        ).model_dump()
         # FR-015: 脱敏处理
         sanitized_payload = sanitize_for_event(raw_payload)
 

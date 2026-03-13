@@ -125,3 +125,18 @@
 - task/context 测试验证 delayed recall carrier 可在 events/artifacts/context frame 中重建
 - recall 测试验证 hook trace、fallback 与 runtime 默认接线真实生效
 - `ruff + pytest` 作为收口门禁
+
+## 6. 2026-03-13 Wave 1 执行入口
+
+基于最新 `blueprint` 与 `docs/agent-runtime-refactor-plan.md`，038 在 Wave 1 中优先承载以下对象冻结：
+
+1. `MemoryNamespace`
+2. `RecallFrame`
+3. `ContextFrame.memory_namespace_ids`
+4. `SessionContextState.last_recall_frame_id`
+
+执行原则：
+
+- 先把 `Project shared / Butler private / Worker private` 的 durable namespace 模型立起来
+- 先把 recall provenance 从“当前命中列表”升级成独立 `RecallFrame`
+- 暂不在这一阶段切断现有 recall 主链；先完成持久化对象与基础 store，后续再推进 worker private recall runtime

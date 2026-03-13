@@ -208,6 +208,23 @@ class WorkerReturnedPayload(BaseModel):
     tool_profile: str = Field(default="standard", description="工具权限级别")
 
 
+class A2AMessageAuditPayload(BaseModel):
+    """A2A_MESSAGE_SENT / A2A_MESSAGE_RECEIVED 审计 payload。"""
+
+    a2a_conversation_id: str = Field(description="A2A conversation ID")
+    a2a_message_id: str = Field(description="durable A2A message ID")
+    protocol_message_id: str = Field(description="协议 message_id")
+    message_type: str = Field(description="A2A message type")
+    from_agent: str = Field(description="发送方 agent URI")
+    to_agent: str = Field(description="接收方 agent URI")
+    source_agent_runtime_id: str = Field(default="", description="源 runtime")
+    source_agent_session_id: str = Field(default="", description="源 session")
+    target_agent_runtime_id: str = Field(default="", description="目标 runtime")
+    target_agent_session_id: str = Field(default="", description="目标 session")
+    work_id: str = Field(default="", description="关联 work ID")
+    direction: str = Field(default="", description="message 方向")
+
+
 # Feature 004: 工具调用 Payload 类型 -- 对齐 FR-014
 
 
@@ -218,6 +235,9 @@ class ToolCallStartedPayload(BaseModel):
     tool_group: str = Field(description="工具分组")
     side_effect_level: str = Field(description="副作用等级")
     args_summary: str = Field(description="参数摘要（脱敏后）")
+    agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
+    agent_session_id: str = Field(default="", description="当前 agent session ID")
+    work_id: str = Field(default="", description="当前 work ID")
     timeout_seconds: float | None = Field(
         default=None,
         description="声明式超时",
@@ -230,6 +250,9 @@ class ToolCallCompletedPayload(BaseModel):
     tool_name: str = Field(description="工具名称")
     duration_ms: int = Field(description="执行耗时（毫秒）")
     output_summary: str = Field(description="输出摘要（脱敏后）")
+    agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
+    agent_session_id: str = Field(default="", description="当前 agent session ID")
+    work_id: str = Field(default="", description="当前 work ID")
     truncated: bool = Field(
         default=False,
         description="输出是否被裁切",
@@ -249,6 +272,9 @@ class ToolCallFailedPayload(BaseModel):
         description="错误分类（timeout / exception / rejection / hook_failure）"
     )
     error_message: str = Field(description="错误信息（脱敏后）")
+    agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
+    agent_session_id: str = Field(default="", description="当前 agent session ID")
+    work_id: str = Field(default="", description="当前 work ID")
     recoverable: bool = Field(
         default=False,
         description="是否可恢复",

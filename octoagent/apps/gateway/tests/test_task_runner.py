@@ -251,6 +251,13 @@ class TestTaskRunner:
         assert task.status == "CANCELLED"
         assert job is not None
         assert job.status == "CANCELLED"
+        conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+        assert len(conversations) == 1
+        assert conversations[0].status.value == "cancelled"
+        messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=conversations[0].a2a_conversation_id
+        )
+        assert [item.message_type for item in messages][-1] == "CANCEL"
 
         await runner.shutdown()
         await store_group.conn.close()
@@ -869,16 +876,43 @@ class TestTaskRunner:
         assert job is not None
         assert job.status == "SUCCEEDED"
 
-        events = await store_group.event_store.get_events_for_task(task_id)
-        event_types = [event.type.value for event in events]
+        for _ in range(20):
+            events = await store_group.event_store.get_events_for_task(task_id)
+            event_types = [event.type.value for event in events]
+            if {
+                "EXECUTION_INPUT_REQUESTED",
+                "EXECUTION_INPUT_ATTACHED",
+                "EXECUTION_STATUS_CHANGED",
+                "A2A_MESSAGE_RECEIVED",
+                "A2A_MESSAGE_SENT",
+                "TASK_HEARTBEAT",
+            }.issubset(set(event_types)):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError(f"missing expected events: {event_types}")
+
         assert "EXECUTION_INPUT_REQUESTED" in event_types
         assert "EXECUTION_INPUT_ATTACHED" in event_types
         assert "EXECUTION_STATUS_CHANGED" in event_types
+        assert "A2A_MESSAGE_RECEIVED" in event_types
+        assert "A2A_MESSAGE_SENT" in event_types
+        assert "TASK_HEARTBEAT" in event_types
 
         artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
         artifact_names = [artifact.name for artifact in artifacts]
         assert "human-input" in artifact_names
         assert "llm-response" in artifact_names
+        conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+        assert len(conversations) == 1
+        messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=conversations[0].a2a_conversation_id
+        )
+        message_types = [item.message_type for item in messages]
+        assert "TASK" in message_types
+        assert "HEARTBEAT" in message_types
+        assert message_types.count("UPDATE") >= 2
+        assert message_types[-1] == "RESULT"
 
         await runner.shutdown()
         await store_group.conn.close()
@@ -1039,6 +1073,13 @@ class TestTaskRunner:
         ]
         assert terminal_events
         assert terminal_events[-1].payload["status"] == ExecutionSessionState.CANCELLED.value
+        conversations = await store_group_2.a2a_store.list_conversations(task_id=task_id)
+        assert len(conversations) == 1
+        assert conversations[0].status.value == "cancelled"
+        messages = await store_group_2.a2a_store.list_messages(
+            a2a_conversation_id=conversations[0].a2a_conversation_id
+        )
+        assert [item.message_type for item in messages][-1] == "CANCEL"
 
         await runner_2.shutdown()
         await store_group_2.conn.close()

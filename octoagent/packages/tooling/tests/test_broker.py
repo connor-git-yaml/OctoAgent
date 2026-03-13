@@ -304,6 +304,9 @@ class TestBrokerExecution:
             task_id="test-task-001",
             trace_id="test-trace-001",
             caller="test",
+            agent_runtime_id="runtime-test-001",
+            agent_session_id="session-test-001",
+            work_id="work-test-001",
             profile=profile,
         )
 
@@ -336,6 +339,9 @@ class TestBrokerExecution:
         assert len(events) >= 2
         assert events[0].type.value == "TOOL_CALL_STARTED"
         assert events[1].type.value == "TOOL_CALL_COMPLETED"
+        assert events[0].payload["agent_runtime_id"] == "runtime-test-001"
+        assert events[0].payload["agent_session_id"] == "session-test-001"
+        assert events[1].payload["work_id"] == "work-test-001"
 
     async def test_execute_timeout(self, mock_event_store) -> None:
         """超时控制（timeout_seconds）"""
@@ -376,6 +382,7 @@ class TestBrokerExecution:
         failed_events = [e for e in mock_event_store.events if e.type.value == "TOOL_CALL_FAILED"]
         assert len(failed_events) >= 1
         assert failed_events[0].payload["error_type"] == "exception"
+        assert failed_events[0].payload["agent_session_id"] == "session-test-001"
 
     async def test_execute_sync_function(self, mock_event_store) -> None:
         """FR-013: sync 函数自动 async 包装"""

@@ -1,5 +1,7 @@
 # Tasks: Feature 041 Butler / Worker Runtime Readiness + Ambient Context
 
+> 状态：Partially Implemented（ambient runtime、freshness routing、tool entitlement 已可用；Butler-owned A2A runtime readiness 仍待补齐）
+
 ## Phase 1: Research & Contract Freeze
 
 - [x] T001 [P0] 对照 Agent Zero 的 current datetime / subordinate / browser agent 组织方式，确认 OctoAgent 当前缺口
@@ -33,3 +35,10 @@
 
 - [x] T015 [P0] 输出实现后的 verification report
 - [x] T016 [P0] 回写 blueprint / feature split / release gate 文档
+
+## Phase 7: Butler-Owned Freshness Delegation 主链
+
+- [ ] T017 [P0] 把天气/最新/官网查询等 freshness objective 收敛到 `ButlerSession -> A2AConversation -> WorkerSession` 主链
+- [ ] T018 [P0] 让 freshness worker 拥有独立 private memory / recall runtime，并禁止直接读取完整用户主会话
+- [ ] T019 [P1] 在 control plane / workbench 暴露 freshness query 的 `A2AConversation` / `WorkerSession` / `tool_profile` 真相
+- [ ] T020 [P0] 补 freshness query 的 A2A 主链验收与回放测试

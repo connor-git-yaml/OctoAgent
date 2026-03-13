@@ -36,6 +36,7 @@ class TestToolCallPayloads:
             args_summary="text='hello'",
         )
         assert payload.tool_name == "echo"
+        assert payload.agent_session_id == ""
         assert payload.timeout_seconds is None
 
     def test_completed_payload(self) -> None:
@@ -45,6 +46,7 @@ class TestToolCallPayloads:
             output_summary="hello",
         )
         assert payload.duration_ms == 150
+        assert payload.agent_runtime_id == ""
         assert payload.truncated is False
         assert payload.artifact_ref is None
 
@@ -56,5 +58,6 @@ class TestToolCallPayloads:
             error_message="执行超时",
         )
         assert payload.error_type == "timeout"
+        assert payload.work_id == ""
         assert payload.recoverable is False
         assert payload.recovery_hint == ""

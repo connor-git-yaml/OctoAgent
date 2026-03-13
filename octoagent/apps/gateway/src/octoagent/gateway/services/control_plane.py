@@ -11,6 +11,8 @@ from typing import Any
 
 import structlog
 from octoagent.core.models import (
+    A2AConversationItem,
+    A2AMessageItem,
     ActionDefinition,
     ActionRegistryDocument,
     ActionRequestEnvelope,
@@ -20,6 +22,8 @@ from octoagent.core.models import (
     AgentProfileItem,
     AgentProfileScope,
     AgentProfilesDocument,
+    AgentRuntimeItem,
+    AgentSessionContinuityItem,
     AutomationJob,
     AutomationJobDocument,
     AutomationJobItem,
@@ -55,6 +59,7 @@ from octoagent.core.models import (
     McpProviderCatalogDocument,
     McpProviderItem,
     MemoryConsoleDocument,
+    MemoryNamespaceItem,
     MemoryProposalAuditDocument,
     MemorySubjectHistoryDocument,
     NormalizedMessage,
@@ -69,6 +74,7 @@ from octoagent.core.models import (
     ProjectOption,
     ProjectSelectorDocument,
     ProjectSelectorState,
+    RecallFrameItem,
     SessionProjectionDocument,
     SessionProjectionItem,
     SetupGovernanceDocument,
@@ -1258,27 +1264,59 @@ class ControlPlaneService:
 
     async def get_context_continuity_document(self) -> ContextContinuityDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        active_project_id = selected_project.project_id if selected_project is not None else ""
+        active_workspace_id = (
+            selected_workspace.workspace_id if selected_workspace is not None else ""
+        )
         sessions = await self._stores.agent_context_store.list_session_contexts(
-            project_id=selected_project.project_id if selected_project is not None else None,
-            workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else None
-            ),
+            project_id=active_project_id or None,
+            workspace_id=active_workspace_id or None,
         )
         frames = await self._stores.agent_context_store.list_context_frames(
-            project_id=selected_project.project_id if selected_project is not None else None,
-            workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else None
-            ),
+            project_id=active_project_id or None,
+            workspace_id=active_workspace_id or None,
             limit=20,
         )
+        agent_runtimes = await self._stores.agent_context_store.list_agent_runtimes(
+            project_id=active_project_id or None,
+        )
+        agent_sessions = await self._stores.agent_context_store.list_agent_sessions(
+            project_id=active_project_id or None,
+            workspace_id=active_workspace_id or None,
+            limit=20,
+        )
+        memory_namespaces = await self._stores.agent_context_store.list_memory_namespaces(
+            project_id=active_project_id or None,
+        )
+        recall_frames = await self._stores.agent_context_store.list_recall_frames(
+            project_id=active_project_id or None,
+            workspace_id=active_workspace_id or None,
+            limit=20,
+        )
+        a2a_conversations = await self._stores.a2a_store.list_conversations(
+            project_id=active_project_id or None,
+            workspace_id=active_workspace_id or None,
+            limit=20,
+        )
+        a2a_messages = []
+        for conversation in a2a_conversations[:5]:
+            a2a_messages.extend(
+                await self._stores.a2a_store.list_messages(
+                    a2a_conversation_id=conversation.a2a_conversation_id,
+                    limit=20,
+                )
+            )
         session_items = [
             ContextSessionItem(
                 session_id=item.session_id,
+                agent_runtime_id=item.agent_runtime_id,
+                agent_session_id=item.agent_session_id,
                 thread_id=item.thread_id,
                 project_id=item.project_id,
                 workspace_id=item.workspace_id,
                 rolling_summary=item.rolling_summary,
                 last_context_frame_id=item.last_context_frame_id,
+                last_recall_frame_id=item.last_recall_frame_id,
                 updated_at=item.updated_at,
             )
             for item in sessions
@@ -1288,9 +1326,13 @@ class ControlPlaneService:
                 context_frame_id=item.context_frame_id,
                 task_id=item.task_id,
                 session_id=item.session_id,
+                agent_runtime_id=item.agent_runtime_id,
+                agent_session_id=item.agent_session_id,
                 project_id=item.project_id,
                 workspace_id=item.workspace_id,
                 agent_profile_id=item.agent_profile_id,
+                recall_frame_id=item.recall_frame_id or "",
+                memory_namespace_ids=list(item.memory_namespace_ids),
                 recent_summary=item.recent_summary,
                 memory_hit_count=len(item.memory_hits),
                 memory_hits=item.memory_hits,
@@ -1302,13 +1344,138 @@ class ControlPlaneService:
             )
             for item in frames
         ]
+        runtime_items = [
+            AgentRuntimeItem(
+                agent_runtime_id=item.agent_runtime_id,
+                role=item.role.value,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                agent_profile_id=item.agent_profile_id,
+                worker_profile_id=item.worker_profile_id,
+                name=item.name,
+                persona_summary=item.persona_summary,
+                status=item.status.value,
+                metadata=item.metadata,
+                updated_at=item.updated_at,
+            )
+            for item in agent_runtimes
+        ]
+        agent_session_items = [
+            AgentSessionContinuityItem(
+                agent_session_id=item.agent_session_id,
+                agent_runtime_id=item.agent_runtime_id,
+                kind=item.kind.value,
+                status=item.status.value,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                thread_id=item.thread_id,
+                legacy_session_id=item.legacy_session_id,
+                work_id=item.work_id,
+                last_context_frame_id=item.last_context_frame_id,
+                last_recall_frame_id=item.last_recall_frame_id,
+                updated_at=item.updated_at,
+            )
+            for item in agent_sessions
+        ]
+        namespace_items = [
+            MemoryNamespaceItem(
+                namespace_id=item.namespace_id,
+                kind=item.kind.value,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                agent_runtime_id=item.agent_runtime_id,
+                name=item.name,
+                description=item.description,
+                memory_scope_ids=list(item.memory_scope_ids),
+                updated_at=item.updated_at,
+            )
+            for item in memory_namespaces
+        ]
+        recall_items = [
+            RecallFrameItem(
+                recall_frame_id=item.recall_frame_id,
+                agent_runtime_id=item.agent_runtime_id,
+                agent_session_id=item.agent_session_id,
+                context_frame_id=item.context_frame_id,
+                task_id=item.task_id,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                query=item.query,
+                recent_summary=item.recent_summary,
+                memory_namespace_ids=list(item.memory_namespace_ids),
+                memory_hit_count=len(item.memory_hits),
+                degraded_reason=item.degraded_reason,
+                created_at=item.created_at,
+            )
+            for item in recall_frames
+        ]
+        conversation_items = [
+            A2AConversationItem(
+                a2a_conversation_id=item.a2a_conversation_id,
+                task_id=item.task_id,
+                work_id=item.work_id,
+                project_id=item.project_id,
+                workspace_id=item.workspace_id,
+                source_agent_runtime_id=item.source_agent_runtime_id,
+                source_agent_session_id=item.source_agent_session_id,
+                target_agent_runtime_id=item.target_agent_runtime_id,
+                target_agent_session_id=item.target_agent_session_id,
+                source_agent=item.source_agent,
+                target_agent=item.target_agent,
+                context_frame_id=item.context_frame_id,
+                request_message_id=item.request_message_id,
+                latest_message_id=item.latest_message_id,
+                latest_message_type=item.latest_message_type,
+                status=item.status.value,
+                message_count=item.message_count,
+                trace_id=item.trace_id,
+                metadata=item.metadata,
+                updated_at=item.updated_at,
+            )
+            for item in a2a_conversations
+        ]
+        message_items = [
+            A2AMessageItem(
+                a2a_message_id=item.a2a_message_id,
+                a2a_conversation_id=item.a2a_conversation_id,
+                message_seq=item.message_seq,
+                task_id=item.task_id,
+                work_id=item.work_id,
+                message_type=item.message_type,
+                direction=item.direction.value,
+                protocol_message_id=item.protocol_message_id,
+                source_agent_runtime_id=item.source_agent_runtime_id,
+                source_agent_session_id=item.source_agent_session_id,
+                target_agent_runtime_id=item.target_agent_runtime_id,
+                target_agent_session_id=item.target_agent_session_id,
+                from_agent=item.from_agent,
+                to_agent=item.to_agent,
+                idempotency_key=item.idempotency_key,
+                payload=item.payload,
+                trace=item.trace,
+                metadata=item.metadata,
+                created_at=item.created_at,
+            )
+            for item in sorted(
+                a2a_messages,
+                key=lambda current: (
+                    current.a2a_conversation_id,
+                    current.message_seq,
+                    current.created_at,
+                ),
+            )
+        ]
         return ContextContinuityDocument(
-            active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_project_id=active_project_id,
+            active_workspace_id=active_workspace_id,
             sessions=session_items,
             frames=frame_items,
+            agent_runtimes=runtime_items,
+            agent_sessions=agent_session_items,
+            memory_namespaces=namespace_items,
+            recall_frames=recall_items,
+            a2a_conversations=conversation_items,
+            a2a_messages=message_items,
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="context.refresh",
@@ -2260,6 +2427,10 @@ class ControlPlaneService:
                 child_work_ids=child_map.get(work.work_id, []),
                 child_work_count=len(child_map.get(work.work_id, [])),
                 merge_ready=self._is_work_merge_ready(work, works),
+                a2a_conversation_id=str(work.metadata.get("a2a_conversation_id", "")),
+                butler_agent_session_id=str(work.metadata.get("source_agent_session_id", "")),
+                worker_agent_session_id=str(work.metadata.get("target_agent_session_id", "")),
+                a2a_message_count=int(work.metadata.get("a2a_message_count", 0) or 0),
                 runtime_summary={
                     "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
                     "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),

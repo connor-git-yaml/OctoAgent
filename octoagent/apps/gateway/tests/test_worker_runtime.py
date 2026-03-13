@@ -214,7 +214,11 @@ class TestWorkerRuntime:
         assert call["trace_id"] == envelope.trace_id
         assert call["worker_capability"] == "ops"
         assert call["tool_profile"] == "minimal"
-        assert call["metadata"] == envelope.metadata
+        assert call["metadata"]["selected_tools_json"] == envelope.metadata["selected_tools_json"]
+        assert call["metadata"]["selected_worker_type"] == envelope.metadata["selected_worker_type"]
+        assert call["metadata"]["agent_runtime_id"]
+        assert call["metadata"]["agent_session_id"]
+        assert call["metadata"]["context_frame_id"]
 
         await store_group.conn.close()
 

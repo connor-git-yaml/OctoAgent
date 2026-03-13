@@ -2,9 +2,9 @@
 feature_id: "038"
 title: "Agent Memory Recall Optimization"
 milestone: "M3 carry-forward"
-status: "Implemented"
+status: "Partially Implemented"
 created: "2026-03-10"
-updated: "2026-03-10"
+updated: "2026-03-13"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md M3 carry-forward；Feature 020/027/028/033；OpenClaw / Agent Zero / OpenClaw MemU 实际脚本"
 predecessor: "Feature 020（Memory Core）；Feature 027（Memory Console）；Feature 028（MemU 深度集成）；Feature 033（Agent Context Continuity）"
@@ -15,8 +15,8 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 
 **Feature Branch**: `feat/038-agent-memory-recall-optimization`  
 **Created**: 2026-03-10  
-**Updated**: 2026-03-10  
-**Status**: Implemented  
+**Updated**: 2026-03-13  
+**Status**: Partially Implemented  
 **Input**: 复核 OctoAgent 当前 Agent Memory 从建立索引到实际使用的端到端流程，对比 OpenClaw、Agent Zero 及 OpenClaw 上实际调用 MemU 的脚本，把真正值得吸收的 recall / indexing 机制接入当前主链，而不是停留在 console-only 或参考文档层面。  
 **调研基础**: `research/research-synthesis.md`
 
@@ -42,6 +42,16 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 - 给 built-in tools 增加 `memory.recall`
 - 让 chat import / compaction flush / main agent recall 共享同一 backend resolve 语义
 
+## 2026-03-13 架构纠偏补记
+
+038 的历史实现已经把 project-scoped recall contract 接进 Butler 主链，但结合新的 Agent runtime 目标，仍有三个缺口没有闭合：
+
+1. recall 仍主要以 `project/workspace` 为主维度，缺少 `agent-private namespace` 的正式隔离
+2. Worker 虽可消费部分 recall 结果，但还没有自己的 durable recall runtime 与压缩/恢复主链
+3. MemU / indexing / recall provenance 还没有完全升级为 `namespace + agent + session` 感知
+
+因此，038 现在应被视为 **project-level recall contract 已落地，但 agent-private / worker-parity recall 仍待补齐**。
+
 ## Scope Alignment
 
 ### In Scope
@@ -49,6 +59,8 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 - `MemoryRecallHit` / `MemoryRecallResult` 结构化 recall contract
 - `MemoryService.recall_memory()` 的 query expansion、citation、preview、backend truth
 - `AgentContextService` 使用 recall pack 组装 runtime context
+- `MemoryNamespace` 感知的 recall contract，支持 Butler private / Worker private / Project shared 分层
+- Worker runtime / future direct-worker surface 的 recall continuity
 - `TaskService` compaction flush 继续复用 project-scoped memory resolver
 - `ChatImportService` indexing/write path 接入 project-scoped memory runtime resolver
 - `CapabilityPackService` 增加 `memory.recall`，并让现有 memory tools 优先解析当前 runtime project/workspace
@@ -65,6 +77,7 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 - 照抄 OpenClaw 外挂脚本式 MemU 文件落地模型
 - 本阶段不实现 delayed recall 的独立后台 worker / queue consumer、LLM rerank、自动 consolidation 改写 SoR
 - 本阶段不引入可执行任意脚本的 recall hook 插件面；只提供内建、可观测、可回退的 hook 模式
+- 在本阶段开放跨 Agent 任意读取彼此私有记忆；私有 namespace 必须保持边界
 
 ## User Stories & Testing
 
@@ -111,12 +124,17 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 - **FR-012**: 当即时 recall 出现 backend backlog / degraded state / prompt trim 等信号时，系统 MUST 把 delayed recall 的 request/result 以 task-scoped artifact + event 持久化，并把状态回填到 `ContextFrame.budget["delayed_recall"]`。
 - **FR-013**: `MemoryService.recall_memory()` MUST 支持内建 `post-filter / rerank` hook 选项，并把候选数、过滤数、fallback、最终模式等 trace 随 recall result 一并返回。
 - **FR-014**: 主 Agent runtime 与 `memory.recall` 工具 MUST 可以消费上述 hook 选项；默认 runtime 路径必须启用安全的内建 hook 组合，而不是仅停留在工具可选参数层。
+- **FR-015**: recall contract MUST 显式支持 `MemoryNamespace` / `agent_id` / `session_id` 维度，至少能够区分 `Project shared`、`Butler private`、`Worker private` 三类命名空间。
+- **FR-016**: `WorkerSession` 与未来 `DirectWorkerSession` MUST 使用与 Butler 相同的 recall contract、provenance 结构与恢复语义，不得继续依赖主聊天链的 recall 副产物。
+- **FR-017**: MemU / indexing / retrieval provenance MUST 演进为 namespace-aware 语义，确保同一 project 下多个 Agent 不会错误共享私有 recall 语境。
 
 ### Key Entities
 
 - `MemoryRecallHit`
 - `MemoryRecallResult`
 - `MemoryRuntimeService`
+- `MemoryNamespace`
+- `RecallFrame`
 - `AgentContextService.memory_recall`
 - `memory.recall`
 
@@ -129,6 +147,7 @@ parallel_dependency: "Feature 038 为 033 的 memory 主链补强：统一 index
 - **SC-005**: Control Plane 可以直接查看某次 `ContextFrame` 的 recall provenance，而不需要再查底层存储或日志。
 - **SC-006**: delayed recall 即便不依赖进程内 extras，也能在 task events / artifacts / context frame 中被重新审计与恢复消费。
 - **SC-007**: recall post-filter 命中过少或误伤时，系统仍能自动回退到未过滤候选，并把 hook trace 写入 recall provenance，不破坏主聊天链路。
+- **SC-008**: 至少一条 `Butler -> Worker` 链路证明 Worker 使用自己的 private recall namespace 与 recall runtime，而不是复用 Butler 主会话的 recall 结果。
 
 ## Clarifications
 
