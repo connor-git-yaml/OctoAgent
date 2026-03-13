@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import type {
-  PolicyProfileItem,
   ProjectSelectorDocument,
   SetupGovernanceDocument,
   SetupReviewSummary,
@@ -18,10 +17,6 @@ interface SettingsOverviewProps {
   defaultProviderId: string;
   memoryLabel: string;
   memoryStatus: string;
-  selectedSkillCount: number;
-  blockedSkillCount: number;
-  unavailableSkillCount: number;
-  currentPolicy: PolicyProfileItem | null;
   onQuickConnect: () => void;
   onReview: () => void;
   onApply: () => void;
@@ -40,10 +35,6 @@ export default function SettingsOverview({
   defaultProviderId,
   memoryLabel,
   memoryStatus,
-  selectedSkillCount,
-  blockedSkillCount,
-  unavailableSkillCount,
-  currentPolicy,
   onQuickConnect,
   onReview,
   onApply,
@@ -71,7 +62,7 @@ export default function SettingsOverview({
     ? [
         "保存当前配置，确保这次修改已经生效。",
         "回到聊天页发第一条消息，验证真实模型和 Butler 是否正常响应。",
-        "需要更多能力时，再回来补 Provider、Memory 或安全开关。",
+        "需要更多能力时，再回来补 Provider、Memory 或渠道连接。",
       ]
     : [
         review.next_actions[0] ??
@@ -171,6 +162,16 @@ export default function SettingsOverview({
           <span>{nextValidationHint}</span>
           <span>默认模型来源 {defaultProviderId || "未设置"}</span>
         </article>
+        <article className="wb-card">
+          <p className="wb-card-label">Memory</p>
+          <strong>{memoryLabel}</strong>
+          <span>{memoryStatus}</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">Agent 能力</p>
+          <strong>统一在 Agents 管理</strong>
+          <span>Provider 安装、默认范围和 Butler / Worker 绑定都已迁过去。</span>
+        </article>
       </div>
 
       <section className="wb-panel">
@@ -188,6 +189,12 @@ export default function SettingsOverview({
             >
               先检查配置
             </button>
+            <Link
+              className="wb-button wb-button-tertiary"
+              to="/agents?view=providers"
+            >
+              打开 Agents &gt; Providers
+            </Link>
             {review.ready ? (
               <Link className="wb-button wb-button-tertiary" to="/chat">
                 回聊天验证
@@ -206,7 +213,14 @@ export default function SettingsOverview({
           <div className="wb-note">
             <strong>这页下面还有什么</strong>
             <span>
-              Providers、模型别名、Memory、安全和渠道都还在下面；只想先用起来，不必一次看完。
+              Providers、模型别名、Memory 和渠道连接都还在下面；只想先用起来，不必一次看完。
+            </span>
+          </div>
+          <div className="wb-note">
+            <strong>哪些内容已经移走了</strong>
+            <span>
+              Skill / MCP Provider 的安装、当前项目默认启用范围，以及 Butler / Worker 的绑定，
+              现在统一去 Agents &gt; Providers 处理。
             </span>
           </div>
         </div>
@@ -219,17 +233,15 @@ export default function SettingsOverview({
             <span>别名 {aliasDraftCount}</span>
           </article>
           <article className="wb-card">
-            <p className="wb-card-label">记忆与能力</p>
+            <p className="wb-card-label">记忆连接</p>
             <strong>{memoryLabel}</strong>
             <span>{memoryStatus}</span>
-            <span>
-              默认技能 {selectedSkillCount} / 阻塞 {blockedSkillCount} / 不可用 {unavailableSkillCount}
-            </span>
+            <span>Memory 连接和模式切换仍在本页处理。</span>
           </article>
           <article className="wb-card">
-            <p className="wb-card-label">当前默认边界</p>
-            <strong>{currentPolicy?.label ?? "未选择"}</strong>
-            <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
+            <p className="wb-card-label">Agent 能力入口</p>
+            <strong>Agents &gt; Providers</strong>
+            <span>这里不再负责 Skills / MCP 的安装和授权。</span>
           </article>
         </div>
       </section>
@@ -238,7 +250,7 @@ export default function SettingsOverview({
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("overview")}>
           概览
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("main-agent")}>
+        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("models")}>
           Providers
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("aliases")}>
@@ -249,9 +261,6 @@ export default function SettingsOverview({
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
           Memory
-        </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("governance")}>
-          安全与能力
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("review")}>
           保存检查

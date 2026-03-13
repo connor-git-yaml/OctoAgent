@@ -15,9 +15,6 @@ import {
   buildDefaultAliasDrafts,
   buildFieldState,
   buildProviderPreset,
-  buildSkillSelectionPayload,
-  buildSkillSelectionState,
-  buildSkillSelectionSyncKey,
   envPresence,
   generateSecretValue,
   groupLabel,
@@ -31,7 +28,6 @@ import {
   type FieldState,
   type ModelAliasDraftItem,
   type ProviderDraftItem,
-  type SkillSelectionState,
 } from "./shared";
 
 export default function SettingsPage() {
@@ -41,19 +37,10 @@ export default function SettingsPage() {
   const selector = snapshot!.resources.project_selector;
   const memory = snapshot!.resources.memory;
   const setup = snapshot!.resources.setup_governance;
-  const policyProfiles = snapshot!.resources.policy_profiles;
-  const skillGovernance = snapshot!.resources.skill_governance;
-  const skillProviderCatalog = snapshot!.resources.skill_provider_catalog;
-  const mcpProviderCatalog = snapshot!.resources.mcp_provider_catalog;
-  const skillSelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [policyProfileId, setPolicyProfileId] = useState(policyProfiles.active_profile_id);
-  const [skillSelection, setSkillSelection] = useState<SkillSelectionState>(() =>
-    buildSkillSelectionState(skillGovernance.items)
-  );
   const [review, setReview] = useState<SetupReviewSummary>(setup.review);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
 
@@ -61,14 +48,6 @@ export default function SettingsPage() {
     setFieldState(buildFieldState(config.ui_hints, config.current_value));
     setFieldErrors({});
   }, [config.generated_at]);
-
-  useEffect(() => {
-    setPolicyProfileId(policyProfiles.active_profile_id);
-  }, [policyProfiles.generated_at, policyProfiles.active_profile_id]);
-
-  useEffect(() => {
-    setSkillSelection(buildSkillSelectionState(skillGovernance.items));
-  }, [skillSelectionSyncKey]);
 
   useEffect(() => {
     setReview(setup.review);
@@ -128,7 +107,6 @@ export default function SettingsPage() {
     }
     return {
       config: result.config,
-      skill_selection: buildSkillSelectionPayload(skillGovernance.items, skillSelection),
       secret_values: Object.fromEntries(
         Object.entries(secretStateOverride ?? secretValues).filter(([, value]) => value.trim())
       ),
@@ -247,15 +225,6 @@ export default function SettingsPage() {
     }
   }
 
-  const currentPolicy =
-    policyProfiles.profiles.find((item) => item.profile_id === policyProfileId) ?? null;
-  const selectedSkills = skillGovernance.items.filter(
-    (item) => skillSelection[item.item_id] ?? item.selected
-  );
-  const blockedSkills = selectedSkills.filter((item) => item.blocking);
-  const unavailableSkills = skillGovernance.items.filter(
-    (item) => item.availability !== "available"
-  );
   const runtimeMode =
     String(
       fieldState["runtime.llm_mode"] ??
@@ -291,13 +260,6 @@ export default function SettingsPage() {
     setSecretValues((state) => ({
       ...state,
       [envName]: value,
-    }));
-  }
-
-  function updateSkillSelection(itemId: string, selected: boolean) {
-    setSkillSelection((state) => ({
-      ...state,
-      [itemId]: selected,
     }));
   }
 
@@ -449,10 +411,6 @@ export default function SettingsPage() {
         defaultProviderId={defaultProvider.id}
         memoryLabel={memoryMode === "memu" ? "MemU bridge" : "本地记忆"}
         memoryStatus={memory.backend_state || memory.status}
-        selectedSkillCount={selectedSkills.length}
-        blockedSkillCount={blockedSkills.length}
-        unavailableSkillCount={unavailableSkills.length}
-        currentPolicy={currentPolicy}
         onQuickConnect={() => void handleQuickConnect()}
         onReview={() => void handleReview()}
         onApply={() => void handleApply()}
@@ -488,105 +446,16 @@ export default function SettingsPage() {
         }}
       />
 
-      <section id="settings-group-governance" className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">安全与能力</p>
-            <h3>平台默认边界放这里，具体安装与编辑去专页</h3>
-          </div>
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <Link className="wb-button wb-button-secondary" to="/settings/skills">
-              管理 Skills
-            </Link>
-            <Link className="wb-button wb-button-secondary" to="/settings/mcp">
-              管理 MCP
-            </Link>
-            <Link className="wb-button wb-button-tertiary" to="/agents">
-              去 Agents 勾选
-            </Link>
-          </div>
-        </div>
-
-        <div className="wb-card-grid wb-card-grid-3">
-          <article className="wb-card">
-            <p className="wb-card-label">安全等级</p>
-            <strong>{currentPolicy?.label ?? policyProfiles.active_profile_id}</strong>
-            <span>{currentPolicy?.approval_policy ?? "未选择"}</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">Skill Providers</p>
-            <strong>{Number(skillProviderCatalog.summary.installed_count ?? 0)}</strong>
-            <span>
-              自定义 {Number(skillProviderCatalog.summary.custom_count ?? 0)} / 内置{" "}
-              {Number(skillProviderCatalog.summary.builtin_count ?? 0)}
-            </span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">MCP Providers</p>
-            <strong>{Number(mcpProviderCatalog.summary.installed_count ?? 0)}</strong>
-            <span>
-              已启用 {Number(mcpProviderCatalog.summary.enabled_count ?? 0)} / 健康{" "}
-              {Number(mcpProviderCatalog.summary.healthy_count ?? 0)}
-            </span>
-          </article>
-        </div>
-
-        <div className="wb-card-grid wb-card-grid-3">
-          <article className="wb-card">
-            <p className="wb-card-label">项目默认启用</p>
-            <strong>{selectedSkills.length}</strong>
-            <span>不可用 {unavailableSkills.length} / 阻塞 {blockedSkills.length}</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">为什么拆开</p>
-            <strong>安装与授权分层</strong>
-            <span>Settings 管安装，Agents 管谁能用，减少页面里混在一起的解释成本。</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">当前提醒</p>
-            <strong>{setup.tools_skills.label}</strong>
-            <span>{setup.tools_skills.summary}</span>
-          </article>
-        </div>
-
-        <div className="wb-inline-banner is-muted">
-          <strong>项目默认能力仍然保留</strong>
-          <span>
-            这里保存的是 project 级默认启用范围；更细的 Agent 级 Provider 勾选，请去
-            Agents 页面处理。
-          </span>
-        </div>
-
-        <div className="wb-note-stack">
-          {skillGovernance.items.map((item) => {
-            const selected = skillSelection[item.item_id] ?? item.selected;
-            return (
-              <label key={item.item_id} className="wb-note wb-capability-toggle">
-                <div>
-                  <strong>
-                    {item.label} · {selected ? "项目默认启用" : "项目默认关闭"}
-                  </strong>
-                  <span>
-                    {item.missing_requirements.length > 0
-                      ? item.missing_requirements.join("；")
-                      : item.install_hint || "当前默认状态没有额外阻塞"}
-                  </span>
-                  <small>
-                    {item.source_kind} · 默认{item.enabled_by_default ? "开启" : "关闭"} · 当前{" "}
-                    {item.availability}
-                  </small>
-                </div>
-                <input
-                  type="checkbox"
-                  aria-label={`启用 ${item.label}`}
-                  checked={selected}
-                  onChange={(event) => updateSkillSelection(item.item_id, event.target.checked)}
-                />
-              </label>
-            );
-          })}
-        </div>
-      </section>
+      <div className="wb-inline-banner is-muted">
+        <strong>Agent 能力管理已移到 Agents</strong>
+        <span>
+          Skill / MCP Provider 的安装、当前项目默认启用范围，以及 Butler / Worker 的绑定，
+          现在统一放在 Agents &gt; Providers。
+        </span>
+        <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents?view=providers">
+          打开 Agents &gt; Providers
+        </Link>
+      </div>
 
       <section id="settings-group-memory" className="wb-panel">
         <div className="wb-panel-head">

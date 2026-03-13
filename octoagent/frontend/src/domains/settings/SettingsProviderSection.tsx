@@ -65,7 +65,7 @@ export default function SettingsProviderSection({
 }: SettingsProviderSectionProps) {
   return (
     <>
-      <section id="settings-group-main-agent" className="wb-panel">
+      <section id="settings-group-models" className="wb-panel">
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Models & Providers</p>

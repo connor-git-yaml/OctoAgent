@@ -35,7 +35,7 @@ function renderNavDescription(path: string): string {
     case "/memory":
       return "系统记住了什么";
     case "/settings":
-      return "Provider、渠道与安全设置";
+      return "模型连接、渠道与 Memory";
     case "/advanced":
       return "高级诊断与恢复";
     default:

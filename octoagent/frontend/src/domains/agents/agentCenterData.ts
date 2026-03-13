@@ -207,15 +207,17 @@ function readCapabilitySelectionMetadata(
 }
 
 export function buildSkillSelectionPayload(
-  items: SkillGovernanceItem[]
+  items: SkillGovernanceItem[],
+  selectionState?: Record<string, boolean>
 ): Record<string, string[]> {
   const selected_item_ids: string[] = [];
   const disabled_item_ids: string[] = [];
   items.forEach((item) => {
-    if (item.selected && !item.enabled_by_default) {
+    const selected = selectionState?.[item.item_id] ?? item.selected;
+    if (selected && !item.enabled_by_default) {
       selected_item_ids.push(item.item_id);
     }
-    if (!item.selected && item.enabled_by_default) {
+    if (!selected && item.enabled_by_default) {
       disabled_item_ids.push(item.item_id);
     }
   });
@@ -223,6 +225,22 @@ export function buildSkillSelectionPayload(
     selected_item_ids,
     disabled_item_ids,
   };
+}
+
+export function buildSkillSelectionState(
+  items: SkillGovernanceItem[]
+): Record<string, boolean> {
+  return Object.fromEntries(items.map((item) => [item.item_id, item.selected]));
+}
+
+export function buildSkillSelectionSyncKey(items: SkillGovernanceItem[]): string {
+  return JSON.stringify(
+    items.map((item) => ({
+      item_id: item.item_id,
+      selected: item.selected,
+      enabled_by_default: item.enabled_by_default,
+    }))
+  );
 }
 
 export function buildCapabilityProviderEntries(

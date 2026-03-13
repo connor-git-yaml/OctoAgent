@@ -956,7 +956,9 @@ describe("App workbench routing", () => {
       {
         path: "/settings",
         assertRoute: async () => {
-          expect(await screen.findByRole("heading", { name: "系统连接与默认能力" })).toBeInTheDocument();
+          expect(
+            await screen.findByRole("heading", { name: "模型连接、渠道入口与 Memory" })
+          ).toBeInTheDocument();
         },
       },
       {
@@ -1125,7 +1127,7 @@ describe("App workbench routing", () => {
     const input = (await screen.findAllByDisplayValue("http://localhost:4000"))[0];
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
-    await userEvent.click(screen.getByLabelText("启用 Worker Review"));
+    expect(await screen.findByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
 
     await waitFor(() =>
@@ -1148,9 +1150,6 @@ describe("App workbench routing", () => {
     ).toBe(true);
     expect(
       actionBodies.some((body) => body.includes("http://localhost:4100"))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"disabled_item_ids":["skill:workers.review"]'))
     ).toBe(true);
     expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
@@ -1610,7 +1609,9 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "系统连接与默认能力" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "模型连接、渠道入口与 Memory" })
+    ).toBeInTheDocument();
 
     await waitFor(() => {
       expect(scrollIntoView).toHaveBeenCalled();

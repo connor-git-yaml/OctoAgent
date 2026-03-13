@@ -1,5 +1,5 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentHeroSection from "../domains/agents/AgentHeroSection";
 import {
@@ -8,6 +8,8 @@ import {
   buildRootAgentPayload,
   buildRootAgentStudioDraftFromReview,
   buildSkillSelectionPayload,
+  buildSkillSelectionState,
+  buildSkillSelectionSyncKey,
   findProjectName,
   findWorkspaceName,
   formatTokenLabel,
@@ -27,6 +29,7 @@ import {
   workspaceSelectOptions,
 } from "../domains/agents/agentCenterData";
 import ButlerWorkspaceSection from "../domains/agents/ButlerWorkspaceSection";
+import ProviderWorkspaceSection from "../domains/agents/ProviderWorkspaceSection";
 import TemplateWorkspaceSection from "../domains/agents/TemplateWorkspaceSection";
 import TemplateRuntimeRail from "../domains/agents/TemplateRuntimeRail";
 import { useRootAgentStudio } from "../domains/agents/useRootAgentStudio";
@@ -49,7 +52,7 @@ import {
 } from "../workbench/utils";
 
 type WorkerCatalogView = "instances" | "templates";
-type AgentWorkspaceView = "butler" | "templates" | "workers";
+type AgentWorkspaceView = "butler" | "templates" | "workers" | "providers";
 type WorkUnitKind = "instance" | "template";
 type WorkAgentStatus = "active" | "syncing" | "attention" | "paused" | "draft";
 type WorkAgentSource = "runtime" | "capability" | "manual";
@@ -279,7 +282,22 @@ const AGENT_WORKSPACE_COPY: Record<
     title: "最后看现在谁在做事",
     description: "查看实例、拆分合并，并处理当前运行中的工作。",
   },
+  providers: {
+    label: "Providers",
+    title: "把能力目录和 Agent 绑定收回到同一个主路径",
+    description: "在这里管理 Skill / MCP Provider，并设置这个 Project 的默认启用范围。",
+  },
 };
+
+function parseWorkspaceView(rawValue: string | null): AgentWorkspaceView {
+  if (rawValue === "butler" || rawValue === "templates" || rawValue === "workers") {
+    return rawValue;
+  }
+  if (rawValue === "providers") {
+    return "providers";
+  }
+  return "templates";
+}
 
 const DEFAULT_PERSONA =
   "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
@@ -831,6 +849,7 @@ function createInstanceFromTemplate(agent: WorkAgentItem): WorkAgentDraft {
 
 export default function AgentCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const [searchParams, setSearchParams] = useSearchParams();
   const selector = snapshot!.resources.project_selector;
   const configValue = toRecord(snapshot!.resources.config.current_value);
   const setup = snapshot!.resources.setup_governance;
@@ -866,6 +885,7 @@ export default function AgentCenter() {
   );
   const skillCapabilityEntries = capabilityProviderEntries.filter((item) => item.kind === "skill");
   const mcpCapabilityEntries = capabilityProviderEntries.filter((item) => item.kind === "mcp");
+  const projectCapabilitySelectionSyncKey = buildSkillSelectionSyncKey(skillGovernance.items);
   const primarySeed = buildPrimaryAgentSeed(snapshot!);
   const primarySeedSyncKey = JSON.stringify(primarySeed);
   const workAgentSeeds = buildWorkAgentSeeds(snapshot!);
@@ -887,8 +907,9 @@ export default function AgentCenter() {
   const [editorMode, setEditorMode] = useState<"edit" | "create">(
     initialSelection ? "edit" : "create"
   );
-  const [activeWorkspaceView, setActiveWorkspaceView] =
-    useState<AgentWorkspaceView>("templates");
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<AgentWorkspaceView>(() =>
+    parseWorkspaceView(searchParams.get("view"))
+  );
   const [activeCatalog, setActiveCatalog] = useState<WorkerCatalogView>(
     initialSelection?.kind === "template" ? "templates" : "instances"
   );
@@ -899,6 +920,9 @@ export default function AgentCenter() {
   const [contextProjectId, setContextProjectId] = useState(selector.current_project_id);
   const [contextWorkspaceId, setContextWorkspaceId] = useState(selector.current_workspace_id);
   const [searchQuery, setSearchQuery] = useState("");
+  const [projectCapabilitySelection, setProjectCapabilitySelection] = useState<
+    Record<string, boolean>
+  >(() => buildSkillSelectionState(skillGovernance.items));
   const [flashMessage, setFlashMessage] = useState(
     "先确认默认配置，再从右侧启动任务或查看当前运行状态。"
   );
@@ -936,6 +960,15 @@ export default function AgentCenter() {
     setSavedPrimary(nextPrimary);
     setPrimaryDraft(nextPrimary);
   }, [primarySeedSyncKey]);
+
+  useEffect(() => {
+    setProjectCapabilitySelection(buildSkillSelectionState(skillGovernance.items));
+  }, [projectCapabilitySelectionSyncKey, skillGovernance.items]);
+
+  useEffect(() => {
+    const requestedView = parseWorkspaceView(searchParams.get("view"));
+    setActiveWorkspaceView((current) => (current === requestedView ? current : requestedView));
+  }, [searchParams]);
 
   useEffect(() => {
     const nextAgents = buildWorkAgentSeeds(snapshot!);
@@ -1034,7 +1067,6 @@ export default function AgentCenter() {
   const workDirty =
     editorMode === "create" ||
     (selectedWorkAgent !== null && JSON.stringify(toDraft(selectedWorkAgent)) !== JSON.stringify(workDraft));
-  const pendingChanges = Number(primaryDirty) + Number(workDirty);
   const projectFilterIds = uniqueStrings([
     ...availableProjects.map((project) => project.project_id),
     ...workAgents.map((agent) => agent.projectId),
@@ -1047,8 +1079,21 @@ export default function AgentCenter() {
   }));
   const currentPolicy =
     policyProfiles.find((profile) => profile.profile_id === primaryDraft.policyProfileId) ?? null;
+  const selectedProjectCapabilityCount = skillGovernance.items.filter(
+    (item) => projectCapabilitySelection[item.item_id] ?? item.selected
+  ).length;
+  const blockedProjectCapabilityCount = skillGovernance.items.filter((item) => item.blocking).length;
+  const unavailableProjectCapabilityCount = skillGovernance.items.filter(
+    (item) => item.availability !== "available"
+  ).length;
+  const projectCapabilityDirty =
+    JSON.stringify(buildSkillSelectionPayload(skillGovernance.items, projectCapabilitySelection)) !==
+    JSON.stringify(buildSkillSelectionPayload(skillGovernance.items));
+  const pendingChanges =
+    Number(primaryDirty) + Number(workDirty) + Number(projectCapabilityDirty);
   const butlerBusy =
     busyActionId === "setup.review" || busyActionId === "setup.apply";
+  const providerWorkspaceBusy = busyActionId === "skills.selection.save";
   const recallPresetLabel = detectRecallPreset(primaryDraft.memoryRecall);
   const selectedTemplateUsageCount =
     selectedWorkAgent?.kind === "template"
@@ -1223,7 +1268,6 @@ export default function AgentCenter() {
         ...primaryDraft,
         scope: primaryDraft.scope || "project",
       }, capabilityProviderEntries),
-      skill_selection: buildSkillSelectionPayload(skillGovernance.items),
       secret_values: {},
     };
   }
@@ -1320,8 +1364,40 @@ export default function AgentCenter() {
     });
   }
 
-  function openWorkspaceView(view: AgentWorkspaceView) {
+  function setWorkspaceView(view: AgentWorkspaceView) {
     setActiveWorkspaceView(view);
+    const nextParams = new URLSearchParams(searchParams);
+    if (view === "templates") {
+      nextParams.delete("view");
+    } else {
+      nextParams.set("view", view);
+    }
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function updateProjectCapabilitySelection(itemId: string, selected: boolean) {
+    setProjectCapabilitySelection((current) => ({
+      ...current,
+      [itemId]: selected,
+    }));
+  }
+
+  async function handleSaveProjectCapabilitySelection() {
+    const result = await submitAction("skills.selection.save", {
+      selection: buildSkillSelectionPayload(skillGovernance.items, projectCapabilitySelection),
+    });
+    if (result) {
+      setFlashMessage("当前项目默认范围已保存，Butler 和 Worker 绑定会继续以这里为基线。");
+    }
+  }
+
+  function handleResetProjectCapabilitySelection() {
+    setProjectCapabilitySelection(buildSkillSelectionState(skillGovernance.items));
+    setFlashMessage("Project 默认启用范围已恢复到当前已保存状态。");
+  }
+
+  function openWorkspaceView(view: AgentWorkspaceView) {
+    setWorkspaceView(view);
     if (view === "workers" && activeCatalog !== "instances") {
       openCatalog("instances");
     }
@@ -1375,7 +1451,7 @@ export default function AgentCenter() {
   }
 
   function handleCreateDraft(kind: WorkUnitKind) {
-    setActiveWorkspaceView(kind === "instance" ? "workers" : "templates");
+    setWorkspaceView(kind === "instance" ? "workers" : "templates");
     setActiveCatalog(kind === "instance" ? "instances" : "templates");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1496,7 +1572,7 @@ export default function AgentCenter() {
       ...current.filter((agent) => !selectedWorkAgentIds.includes(agent.id)),
     ]);
     setActiveCatalog("instances");
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setSelectedWorkAgentId(mergedAgent.id);
     setSelectedWorkAgentIds([mergedAgent.id]);
     setEditorMode("edit");
@@ -1546,7 +1622,7 @@ export default function AgentCenter() {
       ...current.filter((agent) => agent.id !== selectedWorkAgent.id),
     ]);
     setActiveCatalog("instances");
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setSelectedWorkAgentId(leftAgent.id);
     setSelectedWorkAgentIds([leftAgent.id, rightAgent.id]);
     setEditorMode("edit");
@@ -1558,7 +1634,7 @@ export default function AgentCenter() {
     if (!selectedWorkAgent || selectedWorkAgent.kind !== "instance") {
       return;
     }
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setActiveCatalog("templates");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1571,7 +1647,7 @@ export default function AgentCenter() {
     if (!selectedWorkAgent || selectedWorkAgent.kind !== "template") {
       return;
     }
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setActiveCatalog("instances");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1581,7 +1657,7 @@ export default function AgentCenter() {
   }
 
   function handleCreateInstanceFromAgent(agent: WorkAgentItem) {
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setActiveCatalog("instances");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1591,7 +1667,7 @@ export default function AgentCenter() {
   }
 
   function handleCreateTemplateFromAgent(agent: WorkAgentItem) {
-    setActiveWorkspaceView("workers");
+    setWorkspaceView("workers");
     setActiveCatalog("templates");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1674,7 +1750,7 @@ export default function AgentCenter() {
   }
 
   async function handleCreateRootAgentDraftFromTemplate(profile: WorkerProfileItem) {
-    setActiveWorkspaceView("templates");
+    setWorkspaceView("templates");
     const name =
       profile.origin_kind === "builtin" ? `${profile.name} Copy` : `${profile.name} 副本`;
     const result = await submitAction("worker_profile.clone", {
@@ -1827,7 +1903,7 @@ export default function AgentCenter() {
   }
 
   function handleCreateFreshRootAgent() {
-    setActiveWorkspaceView("templates");
+    setWorkspaceView("templates");
     resetToFreshRootAgent();
     setFlashMessage("开始一个新的 Worker 模板草稿。");
   }
@@ -1843,7 +1919,7 @@ export default function AgentCenter() {
       return (
         <div className="wb-note">
           <strong>{title}</strong>
-          <span>当前还没有可勾选的 Provider，先去对应设置页安装。</span>
+          <span>当前还没有可勾选的 Provider，先去对应 Provider 页安装，再回这里绑定。</span>
         </div>
       );
     }
@@ -2016,14 +2092,14 @@ export default function AgentCenter() {
             skillCapabilityEntries,
             primaryDraft.capabilitySelection,
             updatePrimaryCapabilitySelection,
-            "/settings/skills"
+            "/agents/skills"
           )}
           mcpCapabilitySection={renderCapabilityProviderSection(
             "MCP",
             mcpCapabilityEntries,
             primaryDraft.capabilitySelection,
             updatePrimaryCapabilitySelection,
-            "/settings/mcp"
+            "/agents/mcp"
           )}
           onResetPrimary={handleResetPrimary}
           onReviewPrimary={() => void handleReviewPrimary()}
@@ -2109,14 +2185,14 @@ export default function AgentCenter() {
             skillCapabilityEntries,
             rootAgentDraft.capabilitySelection,
             updateRootAgentCapabilitySelection,
-            "/settings/skills"
+            "/agents/skills"
           )}
           mcpCapabilitySection={renderCapabilityProviderSection(
             "MCP",
             mcpCapabilityEntries,
             rootAgentDraft.capabilitySelection,
             updateRootAgentCapabilitySelection,
-            "/settings/mcp"
+            "/agents/mcp"
           )}
           runtimeRail={
             <TemplateRuntimeRail
@@ -2174,6 +2250,37 @@ export default function AgentCenter() {
           findProjectName={findProjectName}
           availableProjects={availableProjects}
           toolLabelByName={toolLabelByName}
+        />
+      ) : null}
+
+      {activeWorkspaceView === "providers" ? (
+        <ProviderWorkspaceSection
+          skillProviderCount={snapshot!.resources.skill_provider_catalog.items.length}
+          customSkillProviderCount={snapshot!.resources.skill_provider_catalog.items.filter(
+            (item) => item.source_kind !== "builtin"
+          ).length}
+          builtinSkillProviderCount={snapshot!.resources.skill_provider_catalog.items.filter(
+            (item) => item.source_kind === "builtin"
+          ).length}
+          mcpProviderCount={snapshot!.resources.mcp_provider_catalog.items.length}
+          enabledMcpProviderCount={snapshot!.resources.mcp_provider_catalog.items.filter(
+            (item) => item.enabled
+          ).length}
+          healthyMcpProviderCount={snapshot!.resources.mcp_provider_catalog.items.filter(
+            (item) => item.status === "ready"
+          ).length}
+          selectedCapabilityCount={selectedProjectCapabilityCount}
+          blockedCapabilityCount={blockedProjectCapabilityCount}
+          unavailableCapabilityCount={unavailableProjectCapabilityCount}
+          capabilitySelection={projectCapabilitySelection}
+          capabilityItems={skillGovernance.items}
+          capabilityDirty={projectCapabilityDirty}
+          capabilitySaveBusy={providerWorkspaceBusy}
+          onCapabilitySelectionChange={updateProjectCapabilitySelection}
+          onSaveCapabilitySelection={() => void handleSaveProjectCapabilitySelection()}
+          onResetCapabilitySelection={handleResetProjectCapabilitySelection}
+          onOpenButler={() => openWorkspaceView("butler")}
+          onOpenTemplates={() => openWorkspaceView("templates")}
         />
       ) : null}
 

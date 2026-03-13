@@ -125,7 +125,7 @@ export function buildConfigPayload(
 
 export function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
-    case "main-agent":
+    case "models":
       return {
         title: "Providers",
         description: "配置模型 Provider、LiteLLM 和别名路由。",

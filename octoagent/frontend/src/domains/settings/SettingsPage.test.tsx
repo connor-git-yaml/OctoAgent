@@ -304,4 +304,22 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "先保存当前修改" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
   });
+
+  it("把 Agent 能力管理入口迁到 Agents 页面", async () => {
+    mockWorkbench = {
+      snapshot: buildSettingsSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "打开 Agents > Providers" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("安全与能力")).not.toBeInTheDocument();
+  });
 });

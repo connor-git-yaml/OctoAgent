@@ -117,7 +117,24 @@ function buildSnapshot() {
         },
       },
       skill_governance: {
-        items: [],
+        items: [
+          {
+            item_id: "skill:workers.review",
+            label: "Worker Review",
+            source_kind: "builtin",
+            scope: "project",
+            enabled_by_default: true,
+            selected: true,
+            selection_source: "default",
+            availability: "available",
+            trust_level: "trusted",
+            blocking: false,
+            required_secrets: [],
+            missing_requirements: [],
+            install_hint: "",
+            details: {},
+          },
+        ],
       },
       skill_provider_catalog: {
         generated_at: "2026-03-12T09:00:00Z",
@@ -418,7 +435,7 @@ describe("AgentCenter", () => {
     vi.clearAllMocks();
   });
 
-  it("支持在 Butler、Worker 模板和运行中的 Worker 三个工作区之间切换", async () => {
+  it("支持在 Butler、Providers、Worker 模板和运行中的 Worker 之间切换", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
       submitAction: vi.fn(),
@@ -455,6 +472,43 @@ describe("AgentCenter", () => {
     expect(
       await screen.findByRole("button", { name: "新建 Worker 模板" })
     ).toBeInTheDocument();
+
+    await userEvent.click(within(workflowTabs).getByRole("tab", { name: /Providers/ }));
+    expect(
+      await screen.findByRole("heading", {
+        name: "先安装能力 Provider，再把它们绑定给 Butler 或 Worker",
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("支持在 Providers 工作区保存当前项目默认能力范围", async () => {
+    const submitAction = vi.fn().mockResolvedValue({ data: {} });
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction,
+      busyActionId: "",
+    });
+    fetchWorkerProfileRevisionsMock.mockResolvedValue({ revisions: [] });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    const workflowTabs = await screen.findByRole("tablist", { name: "Agents 工作流" });
+    await userEvent.click(within(workflowTabs).getByRole("tab", { name: /Providers/ }));
+    await userEvent.click(screen.getByLabelText("启用 Worker Review"));
+    await userEvent.click(screen.getByRole("button", { name: "保存默认范围" }));
+
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith("skills.selection.save", {
+        selection: {
+          selected_item_ids: [],
+          disabled_item_ids: ["skill:workers.review"],
+        },
+      })
+    );
   });
 
   it("worker_profiles 刷新时保留未保存的 Worker 模板草稿", async () => {

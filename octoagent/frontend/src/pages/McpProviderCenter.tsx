@@ -150,8 +150,9 @@ export default function McpProviderCenter() {
           <p className="wb-kicker">MCP Providers</p>
           <h1>把外部能力接成可治理的 MCP Provider</h1>
           <p>
-            这里负责安装、编辑和删除 MCP Provider。是否允许某个 Agent 使用它，去
-            <Link to="/agents"> Agents</Link> 页面勾选。
+            这里负责安装、编辑和删除 MCP Provider。安装完成后，先去
+            <Link to="/agents?view=providers"> Agents &gt; Providers</Link> 决定当前
+            Project 的默认范围，再回 Butler 或 Worker 模板做更细的绑定。
           </p>
           <div className="wb-chip-row">
             <span className="wb-chip">已安装 {items.length}</span>
@@ -160,11 +161,11 @@ export default function McpProviderCenter() {
           </div>
         </div>
         <div className="wb-hero-actions">
-          <Link className="wb-button wb-button-secondary" to="/settings">
-            返回 Settings
+          <Link className="wb-button wb-button-secondary" to="/agents?view=providers">
+            返回 Agents &gt; Providers
           </Link>
-          <Link className="wb-button wb-button-tertiary" to="/agents">
-            去 Agents 勾选
+          <Link className="wb-button wb-button-tertiary" to="/agents?view=butler">
+            去 Butler 绑定
           </Link>
         </div>
       </section>

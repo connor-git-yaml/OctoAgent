@@ -37,17 +37,17 @@ export default function App() {
           <Route index element={withRouteSuspense(<Home />)} />
           <Route path="chat" element={withRouteSuspense(<ChatWorkbench />)} />
           <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
-          <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
-          <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
-          <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
           <Route
-            path="settings/skills"
+            path="agents/skills"
             element={withRouteSuspense(<SkillProviderCenter />)}
           />
           <Route
-            path="settings/mcp"
+            path="agents/mcp"
             element={withRouteSuspense(<McpProviderCenter />)}
           />
+          <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
+          <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
+          <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
           <Route path="advanced" element={withRouteSuspense(<AdvancedControlPlane />)} />
         </Route>
         <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />)} />
