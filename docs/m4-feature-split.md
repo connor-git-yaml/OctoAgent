@@ -14,7 +14,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `032 / 034 / 035 / 036 / 037 / 039`
 - `033` 与 `038` 都是 M3 carry-forward，但截至 2026-03-13 只完成了 Butler / project-scoped 主链，尚未完成全 Agent parity
 - `040` 已闭合 guided experience release gate；但它不再自动代表 039/041 的运行语义已完全收口
-- `041` 仍需把 freshness query 从“路由正确”升级成“Butler 拥有并审计一条真实的 A2A delegation 主链”
+- `041` 已把 freshness query 升级成 `ButlerSession -> A2AConversation -> WorkerSession -> ButlerReply` 主链，并已闭合缺城市追问与 backend unavailable acceptance
 
 ## 2. 当前 Feature 队列
 
@@ -25,9 +25,9 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced`，已接入 setup readiness、worker review/apply、context degraded |
 | 036 | Implemented | Guided Setup Governance：`setup-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` |
 | 037 | Implemented | Runtime control context hardening，解决 selector drift 与 lineage 漂移 |
-| 039 | Partially Implemented | supervisor-only 与 worker governance 已成立；message-native A2A 仍待补齐 |
+| 039 | Implemented | supervisor-only、Worker governance、message-native A2A 与 durable `A2AConversation / A2AMessage / WorkerSession` 已闭合 |
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
-| 041 | Partially Implemented | ambient facts 与 freshness routing 已成立；Butler-owned freshness delegation 仍待补齐（见 §5） |
+| 041 | Implemented | ambient facts、Butler-owned freshness delegation、worker private recall、surface truth 与缺城市/环境受限 acceptance 已闭合 |
 
 ## 3. 各 Feature 边界
 
@@ -115,15 +115,14 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `workers.review` built-in tool
 - `worker.review / worker.apply` control-plane actions
 - child work `requested_tool_profile` runtime truth
-- orchestrator live dispatch 内部 envelope 归一化
+- orchestrator 的 `ButlerSession -> A2AConversation -> WorkerSession` durable 主链
+- 一等 `A2A_MESSAGE_SENT / RECEIVED / RESULT / UPDATE / HEARTBEAT / CANCEL` 运行审计对象
+- `WorkerSession`、private recall、tool writeback 与 control-plane/runtime truth 对齐
 
-但 2026-03-13 架构复核确认，039 还没有真正闭合：
+当前结论：
 
-- 当前缺 `ButlerSession -> A2AConversation -> WorkerSession` 的 durable 主链
-- 当前缺一等 `A2A_MESSAGE_SENT / RECEIVED / RESULT` 运行审计对象
-- 当前 worker dispatch 仍偏向“preflight 路由 + 直调 worker adapter”，而不是 Butler 发消息给 Worker
-
-因此 039 的最终完成定义不再是“有 A2A adapter”，而是“存在真实的 message-native A2A 运行链”。
+- 039 的核心运行语义已经闭合，不再停留在“有 A2A adapter / envelope 归一化”
+- 后续增强若有，重点会落在更丰富的 guided surface，而不是再去补核心 runtime 语义
 
 ## 4. 是否还需要一个“串联全部功能”的 M4 Feature
 
@@ -177,7 +176,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 041：Butler / Worker Runtime Readiness + Ambient Context
 
-状态：**Partially Implemented**
+状态：**Implemented**
 
 目标：
 
@@ -197,8 +196,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 当前结论：
 
-- 041 已通过 targeted release gates 中“ambient facts + routing/tool readiness”这部分
-- 但截至 2026-03-13，仍不能把 041 描述成“完整的 Butler-owned freshness delegation 主链已完成”
+- 041 已通过 targeted release gates 中“ambient facts + Butler-owned freshness delegation + runtime truth surface”这部分
+- 截至 2026-03-13，041 已闭合主链、缺城市追问与 backend unavailable acceptance，可按完整 feature 签收
 
 约束：
 

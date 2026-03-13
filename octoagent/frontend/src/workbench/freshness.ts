@@ -234,7 +234,35 @@ function sortWorksByUpdate(works: WorkProjectionItem[]): WorkProjectionItem[] {
   );
 }
 
+function isButlerOwnedFreshnessWork(work: WorkProjectionItem): boolean {
+  return (
+    String(work.runtime_summary.delegation_strategy ?? "")
+      .trim()
+      .toLowerCase() === "butler_owned_freshness"
+  );
+}
+
+function formatInternalWorkStatus(status: string): string {
+  switch (status.trim().toUpperCase()) {
+    case "RUNNING":
+      return "仍在运行";
+    case "SUCCEEDED":
+      return "已经完成";
+    case "FAILED":
+      return "执行失败";
+    case "CANCELLED":
+      return "已取消";
+    case "WAITING_INPUT":
+      return "正在等待补充信息";
+    default:
+      return status ? `当前状态为 ${status}` : "";
+  }
+}
+
 export function isFreshnessRelevantWork(work: WorkProjectionItem): boolean {
+  if (isButlerOwnedFreshnessWork(work)) {
+    return true;
+  }
   const requestedToolProfile = String(work.runtime_summary.requested_tool_profile ?? "")
     .trim()
     .toLowerCase();
@@ -254,6 +282,9 @@ export function isFreshnessRelevantWork(work: WorkProjectionItem): boolean {
     work.selected_worker_type === "ops" ||
     requestedWorkerType === "research" ||
     requestedWorkerType === "ops" ||
+    String(work.runtime_summary.research_tool_profile ?? "")
+      .trim()
+      .toLowerCase() === "standard" ||
     routeReason.includes("worker_type=research") ||
     routeReason.includes("worker_type=ops");
   const hasElevatedProfile =
@@ -264,6 +295,45 @@ export function isFreshnessRelevantWork(work: WorkProjectionItem): boolean {
 export function describeFreshnessWorkPath(work: WorkProjectionItem): string {
   if (!isFreshnessRelevantWork(work)) {
     return "";
+  }
+  if (isButlerOwnedFreshnessWork(work)) {
+    const freshnessResolution = String(work.runtime_summary.freshness_resolution ?? "")
+      .trim()
+      .toLowerCase();
+    if (freshnessResolution === "location_required") {
+      return "Butler 已识别这是需要实时取证的天气问题，但当前还缺城市 / 区县，所以先留在 Butler 主会话里补问位置，而不是误答成系统没有实时能力。";
+    }
+    if (freshnessResolution === "backend_unavailable") {
+      const degradedReason = String(work.runtime_summary.freshness_degraded_reason ?? "").trim();
+      return `Butler 已经把问题交给内部 Research Worker，但当前外部取证后端暂时不可用，所以改为明确解释环境限制，而不是把问题说成系统整体没有能力。${degradedReason ? ` 当前限制：${degradedReason}` : ""}`;
+    }
+    const researchToolProfile =
+      String(work.runtime_summary.research_tool_profile ?? "").trim() ||
+      String(work.runtime_summary.requested_tool_profile ?? "").trim();
+    const routeReason =
+      String(work.runtime_summary.research_route_reason ?? "").trim() || work.route_reason;
+    const routeSummary = summarizeRouteReason(routeReason);
+    const toolSummary = researchToolProfile
+      ? formatToolProfile(researchToolProfile)
+      : "受治理工具面";
+    const researchChildStatus = formatInternalWorkStatus(
+      String(work.runtime_summary.research_child_status ?? "")
+    );
+    const messageCount = Number(work.runtime_summary.research_a2a_message_count ?? 0) || 0;
+    const hasA2AConversation = Boolean(
+      String(work.runtime_summary.research_a2a_conversation_id ?? "").trim()
+    );
+    const hasWorkerSession = Boolean(
+      String(work.runtime_summary.research_worker_agent_session_id ?? "").trim()
+    );
+    const linkageSummary =
+      hasA2AConversation && hasWorkerSession
+        ? "内部已经建立 A2A 对话和独立 Worker Session"
+        : "内部会按 A2A 对话转给独立 Worker Session";
+    const messageSummary =
+      messageCount > 0 ? `当前已记录 ${messageCount} 条内部 A2A 消息。` : "";
+    const statusSummary = researchChildStatus ? `Research 子任务${researchChildStatus}。` : "";
+    return `Butler 会先接住这条实时问题，再把它交给内层 Research Worker。${linkageSummary}，Research Worker 会按${toolSummary}取证。${routeSummary}。${messageSummary}${statusSummary}最终仍由 Butler 汇总回复用户。`;
   }
   const requestedToolProfile = String(work.runtime_summary.requested_tool_profile ?? "").trim();
   const effectiveWorkerType =
@@ -312,7 +382,12 @@ export function buildFreshnessReadiness({
       profile.worker_type === "ops" ||
       profile.default_tool_groups.some((group) => group === "network" || group === "browser")
   );
-  const relevantWork = sortWorksByUpdate(works).find((work) => isFreshnessRelevantWork(work)) ?? null;
+  const sortedWorks = sortWorksByUpdate(works).filter((work) => isFreshnessRelevantWork(work));
+  const relevantWork =
+    sortedWorks.find((work) => isButlerOwnedFreshnessWork(work)) ??
+    sortedWorks.find((work) => !work.parent_work_id) ??
+    sortedWorks[0] ??
+    null;
   const limitations = uniqueStrings([
     ...context.degraded.reasons,
     ...splitReasons(newestFrame?.degraded_reason ?? ""),

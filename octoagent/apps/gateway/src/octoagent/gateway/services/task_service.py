@@ -287,6 +287,18 @@ class TaskService:
             await self._sse_hub.broadcast(task_id, event)
         return event
 
+    async def ensure_task_running(
+        self,
+        task_id: str,
+        *,
+        trace_id: str | None = None,
+    ) -> None:
+        """确保任务进入 RUNNING，供 orchestrator 级长链路复用。"""
+        await self._prepare_task_for_processing(
+            task_id,
+            trace_id or f"trace-{task_id}",
+        )
+
     async def create_text_artifact(
         self,
         *,
@@ -1709,6 +1721,8 @@ class TaskService:
             task_id=task_id,
             error_type=type(error).__name__,
         )
+        raw_error_message = str(error).strip()
+        error_message = raw_error_message[:400] if raw_error_message else "LLM 调用失败，请查看服务端日志"
         try:
             failed_event = await self._append_event_only_with_retry(
                 task_id=task_id,
@@ -1724,7 +1738,7 @@ class TaskService:
                         model_name="",
                         provider="",
                         error_type=type(error).__name__,
-                        error_message="LLM 调用失败，请查看服务端日志",
+                        error_message=error_message,
                         duration_ms=0,
                         is_fallback=False,
                     ).model_dump(),

@@ -2,7 +2,7 @@
 
 **Feature ID**: `040`
 **Date**: 2026-03-10
-**Updated**: 2026-03-11
+**Updated**: 2026-03-13
 **Branch**: `codex/040-guided-experience-acceptance`
 **Status**: Passed
 
@@ -78,12 +78,12 @@ cd octoagent/frontend && npm run build
 
 ## Release Decision
 
-**结论**：Feature 040 已完成，且 M4 当前升级波次的 acceptance gates 已闭合。
+**结论**：Feature 040 已完成，且截至 2026-03-13，039/041 的运行语义与 acceptance 也已完成收口，M4 当前升级波次可正式签收。
 
 当前 release 口径应为：
 
 - **040 feature**：已完成
-- **M4 milestone**：可签收
+- **M4 milestone**：已可签收
 
 ## Key Release Notes
 
@@ -91,7 +91,8 @@ cd octoagent/frontend && npm run build
 - `skill_selection` 已进入统一 setup 主路径，CLI 与 Web 都复用 canonical `setup.review / setup.apply` 语义。
 - `MemoryCenter` 已把 operator、backup、session export、recovery summary 收进同一条 guided 路径。
 - M4 已具备正式 acceptance matrix 与 gate report，不再依赖口头同步 blocker 状态。
+- 从 2026-03-13 起，040 的 release gate 不再替代 039 的 message-native A2A 与 041 的 Butler-owned freshness runtime 验收；而当前这两项也都已经完成。
 
 ## Residual Risks
 
-- 035/036 仍可继续补更细的 detail drawer、bootstrap/operator UX 与独立 e2e，但这些都属于后续体验增强，不再阻塞 M4 签收。
+- 035/036 仍可继续补更细的 detail drawer、bootstrap/operator UX 与独立 e2e，但这些都属于后续体验增强，不再阻塞 040 feature 通过。

@@ -116,19 +116,59 @@ describe("freshness helpers", () => {
     const work = buildWork(
       {
         title: "检查官网最新公告",
-        selected_worker_type: "research",
-        route_reason: "worker_type=research | fallback=single_worker",
-        selected_tools: ["runtime.now", "web.search"],
+        selected_worker_type: "general",
+        route_reason: "delegation_strategy=butler_owned_freshness",
       },
       {
-        requested_tool_profile: "standard",
-        requested_worker_type: "research",
+        delegation_strategy: "butler_owned_freshness",
+        research_route_reason: "worker_type=research | fallback=single_worker",
+        research_tool_profile: "standard",
+        research_a2a_conversation_id: "a2a-weather-1",
+        research_worker_agent_session_id: "agent-session-worker-research-1",
+        research_a2a_message_count: 2,
+        research_child_status: "SUCCEEDED",
       }
     );
 
     expect(isFreshnessRelevantWork(work)).toBe(true);
-    expect(describeFreshnessWorkPath(work)).toContain(
-      "Research Worker 会按标准工具面处理这条工作"
+    expect(describeFreshnessWorkPath(work)).toContain("Butler 会先接住这条实时问题");
+    expect(describeFreshnessWorkPath(work)).toContain("内部已经建立 A2A 对话和独立 Worker Session");
+    expect(describeFreshnessWorkPath(work)).toContain("Research Worker 会按标准工具面取证");
+  });
+
+  it("会把缺城市的天气问题解释成 Butler 补问位置", () => {
+    const work = buildWork(
+      {
+        title: "今天天气怎么样",
+        selected_worker_type: "general",
+        route_reason: "delegation_strategy=butler_owned_freshness",
+      },
+      {
+        delegation_strategy: "butler_owned_freshness",
+        freshness_resolution: "location_required",
+      }
     );
+
+    expect(describeFreshnessWorkPath(work)).toContain("还缺城市 / 区县");
+    expect(describeFreshnessWorkPath(work)).toContain("不是误答成系统没有实时能力");
+  });
+
+  it("会把 backend unavailable 解释成环境限制而不是系统无能力", () => {
+    const work = buildWork(
+      {
+        title: "深圳今天天气怎么样",
+        selected_worker_type: "general",
+        route_reason: "delegation_strategy=butler_owned_freshness",
+      },
+      {
+        delegation_strategy: "butler_owned_freshness",
+        freshness_resolution: "backend_unavailable",
+        freshness_degraded_reason: "web search failed: ConnectError: network down",
+      }
+    );
+
+    expect(describeFreshnessWorkPath(work)).toContain("外部取证后端暂时不可用");
+    expect(describeFreshnessWorkPath(work)).toContain("不是把问题说成系统整体没有能力");
+    expect(describeFreshnessWorkPath(work)).toContain("web search failed");
   });
 });

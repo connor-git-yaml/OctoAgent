@@ -8,20 +8,35 @@ from pathlib import Path
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
+    AgentRuntimeRole,
+    AgentSessionKind,
     DispatchEnvelope,
+    Project,
+    ProjectSelectorState,
     RiskLevel,
     RuntimeControlContext,
+    TaskStatus,
     WorkerExecutionStatus,
     WorkerResult,
+    Workspace,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.agent_context import (
+    build_agent_runtime_id,
+    build_agent_session_id,
+    build_scope_aware_session_id,
+)
+from octoagent.gateway.services.capability_pack import CapabilityPackService
+from octoagent.gateway.services.delegation_plane import DelegationPlaneService
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.orchestrator import OrchestratorService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalDecision, ApprovalRequest
+from octoagent.provider import ModelCallResult, TokenUsage
+from octoagent.tooling import ToolBroker
 from octoagent.tooling.models import SideEffectLevel
 
 
@@ -38,6 +53,197 @@ async def _build_context(tmp_path: Path, approval_manager: ApprovalManager | Non
         sse_hub=sse_hub,
         llm_service=llm_service,
         approval_manager=approval_manager,
+    )
+    return store_group, task_service, orchestrator
+
+
+class _FreshnessLLMService:
+    def __init__(self) -> None:
+        self.handoff_roles: list[str] = []
+
+    async def call(
+        self,
+        prompt_or_messages,
+        model_alias: str | None = None,
+        *,
+        task_id: str | None = None,
+        trace_id: str | None = None,
+        metadata: dict | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
+    ) -> ModelCallResult:
+        metadata = metadata or {}
+        if isinstance(prompt_or_messages, str):
+            joined = prompt_or_messages
+        else:
+            for item in prompt_or_messages:
+                if "ResearchHandoff:" not in str(item.get("content", "")):
+                    continue
+                role = str(item.get("role", "")).strip()
+                if role:
+                    self.handoff_roles.append(role)
+            joined = "\n\n".join(str(item.get("content", "")) for item in prompt_or_messages)
+        if str(metadata.get("selected_worker_type", "")).strip() == "research":
+            content = "Research 结论：深圳当前约 21°C，晴，降水概率约 0%。"
+        elif "ResearchHandoff:" in joined:
+            content = "Butler 综合答复：深圳今天大致晴，约 21°C，基本不用担心下雨。"
+        else:
+            content = "Butler 常规答复。"
+        return ModelCallResult(
+            content=content,
+            model_alias=model_alias or "main",
+            model_name="test-model",
+            provider="tests",
+            duration_ms=5,
+            token_usage=TokenUsage(prompt_tokens=12, completion_tokens=8, total_tokens=20),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+
+class _FailingFreshnessLLMService(_FreshnessLLMService):
+    async def call(
+        self,
+        prompt_or_messages,
+        model_alias: str | None = None,
+        *,
+        task_id: str | None = None,
+        trace_id: str | None = None,
+        metadata: dict | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
+    ) -> ModelCallResult:
+        metadata = metadata or {}
+        if str(metadata.get("selected_worker_type", "")).strip() == "research":
+            raise RuntimeError("web search failed: ConnectError: network down")
+        return await super().call(
+            prompt_or_messages,
+            model_alias=model_alias,
+            task_id=task_id,
+            trace_id=trace_id,
+            metadata=metadata,
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
+        )
+
+
+async def _build_freshness_context(
+    tmp_path: Path,
+    *,
+    llm_service: _FreshnessLLMService | None = None,
+):
+    store_group = await create_store_group(
+        str(tmp_path / "orchestrator-freshness.db"),
+        str(tmp_path / "artifacts-freshness"),
+    )
+    await store_group.project_store.create_project(
+        Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+    )
+    await store_group.project_store.create_workspace(
+        Workspace(
+            workspace_id="workspace-default",
+            project_id="project-default",
+            slug="primary",
+            name="Primary",
+            root_path=str(tmp_path),
+        )
+    )
+    await store_group.project_store.save_selector_state(
+        ProjectSelectorState(
+            selector_id="selector-web",
+            surface="web",
+            active_project_id="project-default",
+            active_workspace_id="workspace-default",
+            source="tests",
+        )
+    )
+    await store_group.conn.commit()
+
+    sse_hub = SSEHub()
+    task_service = TaskService(store_group, sse_hub)
+    tool_broker = ToolBroker(event_store=store_group.event_store)
+    capability_pack = CapabilityPackService(
+        project_root=tmp_path,
+        store_group=store_group,
+        tool_broker=tool_broker,
+    )
+    delegation_plane = DelegationPlaneService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=sse_hub,
+        capability_pack=capability_pack,
+    )
+    await capability_pack.startup()
+    resolved_llm_service = llm_service or _FreshnessLLMService()
+    orchestrator = OrchestratorService(
+        store_group=store_group,
+        sse_hub=sse_hub,
+        llm_service=resolved_llm_service,
+        delegation_plane=delegation_plane,
+    )
+    return store_group, task_service, orchestrator
+
+
+async def _build_freshness_failure_context(tmp_path: Path):
+    store_group = await create_store_group(
+        str(tmp_path / "orchestrator-freshness-failure.db"),
+        str(tmp_path / "artifacts-freshness-failure"),
+    )
+    await store_group.project_store.create_project(
+        Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+    )
+    await store_group.project_store.create_workspace(
+        Workspace(
+            workspace_id="workspace-default",
+            project_id="project-default",
+            slug="primary",
+            name="Primary",
+            root_path=str(tmp_path),
+        )
+    )
+    await store_group.project_store.save_selector_state(
+        ProjectSelectorState(
+            selector_id="selector-web",
+            surface="web",
+            active_project_id="project-default",
+            active_workspace_id="workspace-default",
+            source="tests",
+        )
+    )
+    await store_group.conn.commit()
+
+    sse_hub = SSEHub()
+    task_service = TaskService(store_group, sse_hub)
+    tool_broker = ToolBroker(event_store=store_group.event_store)
+    capability_pack = CapabilityPackService(
+        project_root=tmp_path,
+        store_group=store_group,
+        tool_broker=tool_broker,
+    )
+    delegation_plane = DelegationPlaneService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=sse_hub,
+        capability_pack=capability_pack,
+    )
+    await capability_pack.startup()
+    orchestrator = OrchestratorService(
+        store_group=store_group,
+        sse_hub=sse_hub,
+        llm_service=_FailingFreshnessLLMService(),
+        delegation_plane=delegation_plane,
     )
     return store_group, task_service, orchestrator
 
@@ -384,3 +590,285 @@ class TestOrchestrator:
         assert completed_messages == []
 
         await store_group.conn.close()
+
+    async def test_freshness_query_runs_research_child_then_butler_reply(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_freshness_context(tmp_path)
+
+        try:
+            msg = NormalizedMessage(
+                text="深圳今天天气怎么样？",
+                idempotency_key="f041-orch-freshness",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "butler.main"
+
+            parent_task = await task_service.get_task(task_id)
+            assert parent_task is not None
+            assert parent_task.status == TaskStatus.SUCCEEDED
+
+            parent_events = await store_group.event_store.get_events_for_task(task_id)
+            parent_event_types = [event.type for event in parent_events]
+            assert parent_event_types.count("MODEL_CALL_COMPLETED") == 1
+
+            parent_completion = next(
+                event
+                for event in reversed(parent_events)
+                if event.type == "MODEL_CALL_COMPLETED"
+            )
+            parent_artifact_id = parent_completion.payload["artifact_ref"]
+            parent_content = (
+                await store_group.artifact_store.get_artifact_content(parent_artifact_id)
+            ).decode("utf-8")
+            assert "Butler 综合答复" in parent_content
+
+            parent_works = await store_group.work_store.list_works(task_id=task_id)
+            assert len(parent_works) == 1
+            parent_work = parent_works[0]
+            assert parent_work.selected_worker_type.value == "general"
+            assert parent_work.metadata["delegation_strategy"] == "butler_owned_freshness"
+            assert parent_work.metadata["research_tool_profile"] == "standard"
+
+            child_task_id = parent_work.metadata["research_child_task_id"]
+            child_task = await task_service.get_task(child_task_id)
+            assert child_task is not None
+            assert child_task.status == TaskStatus.SUCCEEDED
+
+            child_events = await store_group.event_store.get_events_for_task(child_task_id)
+            child_event_types = [event.type for event in child_events]
+            assert "A2A_MESSAGE_SENT" in child_event_types
+            assert "A2A_MESSAGE_RECEIVED" in child_event_types
+            assert child_event_types.count("MODEL_CALL_COMPLETED") == 1
+
+            child_completion = next(
+                event
+                for event in reversed(child_events)
+                if event.type == "MODEL_CALL_COMPLETED"
+            )
+            child_artifact_id = child_completion.payload["artifact_ref"]
+            child_content = (
+                await store_group.artifact_store.get_artifact_content(child_artifact_id)
+            ).decode("utf-8")
+            assert "Research 结论" in child_content
+
+            child_works = await store_group.work_store.list_works(task_id=child_task_id)
+            assert len(child_works) == 1
+            child_work = child_works[0]
+            assert child_work.parent_work_id == parent_work.work_id
+
+            conversation = await store_group.a2a_store.get_conversation_for_work(child_work.work_id)
+            assert conversation is not None
+            expected_runtime_id = build_agent_runtime_id(
+                role=AgentRuntimeRole.BUTLER,
+                project_id="project-default",
+                workspace_id="workspace-default",
+                agent_profile_id=parent_work.agent_profile_id,
+                worker_profile_id="",
+                worker_capability="",
+            )
+            expected_session_id = build_agent_session_id(
+                agent_runtime_id=expected_runtime_id,
+                kind=AgentSessionKind.BUTLER_MAIN,
+                legacy_session_id=build_scope_aware_session_id(
+                    parent_task,
+                    project_id="project-default",
+                    workspace_id="workspace-default",
+                ),
+                work_id="",
+                task_id=task_id,
+            )
+            assert conversation.source_agent_runtime_id == expected_runtime_id
+            assert conversation.source_agent_session_id == expected_session_id
+            assert conversation.target_agent_session_id
+            assert parent_work.metadata["research_a2a_message_count"] == conversation.message_count
+            assert (
+                parent_work.metadata["research_a2a_conversation_id"]
+                == conversation.a2a_conversation_id
+            )
+            assert (
+                parent_work.metadata["research_butler_agent_session_id"]
+                == conversation.source_agent_session_id
+            )
+            assert (
+                parent_work.metadata["research_worker_agent_session_id"]
+                == conversation.target_agent_session_id
+            )
+        finally:
+            await store_group.conn.close()
+
+    async def test_freshness_weather_without_location_clarifies_before_delegation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_freshness_context(tmp_path)
+
+        try:
+            msg = NormalizedMessage(
+                text="今天天气怎么样？",
+                idempotency_key="f041-orch-freshness-no-location",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "butler.main"
+            assert result.summary == "butler_freshness_location_clarified"
+
+            task = await task_service.get_task(task_id)
+            assert task is not None
+            assert task.status == TaskStatus.SUCCEEDED
+
+            events = await store_group.event_store.get_events_for_task(task_id)
+            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 1
+            assert "A2A_MESSAGE_SENT" not in [event.type for event in events]
+            completion = next(
+                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
+            )
+            content = (
+                await store_group.artifact_store.get_artifact_content(
+                    completion.payload["artifact_ref"]
+                )
+            ).decode("utf-8")
+            assert "缺少**城市 / 区县**信息" in content
+            assert "没有实时能力" in content
+
+            works = await store_group.work_store.list_works(task_id=task_id)
+            assert len(works) == 1
+            work = works[0]
+            assert work.metadata["freshness_resolution"] == "location_required"
+            assert work.metadata["clarification_needed"] == "weather_location"
+            assert work.metadata["delegation_strategy"] == "butler_owned_freshness"
+
+            conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+            assert conversations == []
+        finally:
+            await store_group.conn.close()
+
+    async def test_freshness_weather_location_followup_resumes_research_chain(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_freshness_context(tmp_path)
+
+        try:
+            msg = NormalizedMessage(
+                text="今天天气怎么样？",
+                idempotency_key="f041-orch-freshness-followup-location",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            first_result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert first_result.summary == "butler_freshness_location_clarified"
+
+            append_event = await task_service.append_user_message(task_id, "深圳")
+            assert append_event.type == "USER_MESSAGE"
+
+            second_result = await orchestrator.dispatch(task_id=task_id, user_text="深圳")
+            assert second_result.status == WorkerExecutionStatus.SUCCEEDED
+            assert second_result.worker_id == "butler.main"
+            assert second_result.summary == "butler_freshness_synthesized"
+
+            events = await store_group.event_store.get_events_for_task(task_id)
+            completions = [event for event in events if event.type == "MODEL_CALL_COMPLETED"]
+            assert len(completions) == 2
+            latest_content = (
+                await store_group.artifact_store.get_artifact_content(
+                    completions[-1].payload["artifact_ref"]
+                )
+            ).decode("utf-8")
+            assert "Butler 综合答复" in latest_content
+
+            works = await store_group.work_store.list_works(task_id=task_id)
+            assert len(works) == 2
+            latest_work = works[0]
+            assert latest_work.metadata["delegation_strategy"] == "butler_owned_freshness"
+            assert latest_work.metadata["freshness_followup_mode"] == "weather_location"
+            assert latest_work.metadata["research_child_task_id"]
+        finally:
+            await store_group.conn.close()
+
+    async def test_freshness_handoff_is_not_injected_as_system_message(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        llm_service = _FreshnessLLMService()
+        store_group, task_service, orchestrator = await _build_freshness_context(
+            tmp_path,
+            llm_service=llm_service,
+        )
+
+        try:
+            msg = NormalizedMessage(
+                text="深圳今天天气怎么样？",
+                idempotency_key="f041-orch-freshness-handoff-role",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert llm_service.handoff_roles == ["assistant"]
+        finally:
+            await store_group.conn.close()
+
+    async def test_freshness_backend_unavailable_returns_environment_limited_reply(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_freshness_failure_context(tmp_path)
+
+        try:
+            msg = NormalizedMessage(
+                text="深圳今天天气怎么样？",
+                idempotency_key="f041-orch-freshness-backend-unavailable",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "butler.main"
+            assert result.summary == "butler_freshness_backend_explained"
+
+            parent_task = await task_service.get_task(task_id)
+            assert parent_task is not None
+            assert parent_task.status == TaskStatus.SUCCEEDED
+
+            parent_events = await store_group.event_store.get_events_for_task(task_id)
+            completion = next(
+                event
+                for event in reversed(parent_events)
+                if event.type == "MODEL_CALL_COMPLETED"
+            )
+            content = (
+                await store_group.artifact_store.get_artifact_content(
+                    completion.payload["artifact_ref"]
+                )
+            ).decode("utf-8")
+            assert "web/browser 后端暂时不可用" in content
+            assert "不代表系统整体没有实时查询能力" in content
+
+            works = await store_group.work_store.list_works(task_id=task_id)
+            assert len(works) == 1
+            work = works[0]
+            assert work.metadata["freshness_resolution"] == "backend_unavailable"
+            assert "web search failed" in str(work.metadata["freshness_degraded_reason"])
+
+            child_task_id = work.metadata["research_child_task_id"]
+            child_events = await store_group.event_store.get_events_for_task(child_task_id)
+            assert "A2A_MESSAGE_SENT" in [event.type for event in child_events]
+            assert "A2A_MESSAGE_RECEIVED" in [event.type for event in child_events]
+            failure = next(
+                event for event in reversed(child_events) if event.type == "MODEL_CALL_FAILED"
+            )
+            assert "web search failed" in failure.payload["error_message"]
+        finally:
+            await store_group.conn.close()

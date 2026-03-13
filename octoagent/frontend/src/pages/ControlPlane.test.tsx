@@ -366,6 +366,179 @@ function buildSnapshot(currentProjectId = "project-default") {
             created_at: "2026-03-08T09:11:30Z",
           },
         ],
+        agent_runtimes: [
+          {
+            agent_runtime_id: "runtime-butler-default",
+            role: "butler",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            agent_profile_id: "owner-profile",
+            worker_profile_id: "",
+            worker_capability: "llm_generation",
+            status: "active",
+            updated_at: "2026-03-08T09:12:00Z",
+          },
+          {
+            agent_runtime_id: "runtime-worker-research-default",
+            role: "worker",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            agent_profile_id: "",
+            worker_profile_id: "singleton:research",
+            worker_capability: "research",
+            status: "active",
+            updated_at: "2026-03-08T09:12:10Z",
+          },
+        ],
+        agent_sessions: [
+          {
+            agent_session_id: "agent-session-butler-default",
+            agent_runtime_id: "runtime-butler-default",
+            kind: "butler_main",
+            status: "active",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            thread_id: "thread-1",
+            legacy_session_id: "thread-1",
+            work_id: "",
+            last_context_frame_id: "frame-context-1",
+            last_recall_frame_id: "recall-frame-butler-1",
+            updated_at: "2026-03-08T09:12:00Z",
+          },
+          {
+            agent_session_id: "agent-session-worker-research-default",
+            agent_runtime_id: "runtime-worker-research-default",
+            kind: "worker_a2a",
+            status: "active",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            thread_id: "thread-1:freshness",
+            legacy_session_id: "",
+            work_id: "work-1-child",
+            last_context_frame_id: "",
+            last_recall_frame_id: "recall-frame-worker-1",
+            updated_at: "2026-03-08T09:12:10Z",
+          },
+        ],
+        memory_namespaces: [
+          {
+            namespace_id: "memory-namespace-project-default",
+            kind: "project_shared",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            agent_runtime_id: "",
+            name: "项目共享记忆",
+            description: "",
+            memory_scope_ids: ["memory/project-default"],
+            updated_at: "2026-03-08T09:12:00Z",
+          },
+        ],
+        recall_frames: [
+          {
+            recall_frame_id: "recall-frame-worker-1",
+            agent_runtime_id: "runtime-worker-research-default",
+            agent_session_id: "agent-session-worker-research-default",
+            context_frame_id: "frame-context-1",
+            task_id: "task-1-child",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            query: "深圳今天天气怎么样",
+            recent_summary: "已整理实时天气证据。",
+            memory_namespace_ids: ["memory-namespace-project-default"],
+            memory_hit_count: 2,
+            degraded_reason: "",
+            created_at: "2026-03-08T09:12:05Z",
+          },
+        ],
+        a2a_conversations: [
+          {
+            a2a_conversation_id: "a2a-weather-default",
+            task_id: "task-1-child",
+            work_id: "work-1-child",
+            project_id: currentProjectId,
+            workspace_id: currentWorkspaceId,
+            source_agent_runtime_id: "runtime-butler-default",
+            source_agent_session_id: "agent-session-butler-default",
+            target_agent_runtime_id: "runtime-worker-research-default",
+            target_agent_session_id: "agent-session-worker-research-default",
+            source_agent: "agent://butler.main",
+            target_agent: "agent://worker.llm.research",
+            context_frame_id: "frame-context-1",
+            request_message_id: "a2a-msg-1",
+            latest_message_id: "a2a-msg-3",
+            latest_message_type: "RESULT",
+            status: "completed",
+            message_count: 3,
+            trace_id: "trace-1",
+            metadata: {},
+            updated_at: "2026-03-08T09:12:10Z",
+          },
+        ],
+        a2a_messages: [
+          {
+            a2a_message_id: "a2a-msg-1",
+            a2a_conversation_id: "a2a-weather-default",
+            message_seq: 1,
+            task_id: "task-1-child",
+            work_id: "work-1-child",
+            message_type: "TASK",
+            direction: "outbound",
+            protocol_message_id: "dispatch-1",
+            source_agent_runtime_id: "runtime-butler-default",
+            source_agent_session_id: "agent-session-butler-default",
+            target_agent_runtime_id: "runtime-worker-research-default",
+            target_agent_session_id: "agent-session-worker-research-default",
+            from_agent: "agent://butler.main",
+            to_agent: "agent://worker.llm.research",
+            idempotency_key: "a2a-msg-1",
+            payload: {},
+            trace: {},
+            metadata: {},
+            created_at: "2026-03-08T09:12:00Z",
+          },
+          {
+            a2a_message_id: "a2a-msg-2",
+            a2a_conversation_id: "a2a-weather-default",
+            message_seq: 2,
+            task_id: "task-1-child",
+            work_id: "work-1-child",
+            message_type: "HEARTBEAT",
+            direction: "inbound",
+            protocol_message_id: "dispatch-1-heartbeat",
+            source_agent_runtime_id: "runtime-worker-research-default",
+            source_agent_session_id: "agent-session-worker-research-default",
+            target_agent_runtime_id: "runtime-butler-default",
+            target_agent_session_id: "agent-session-butler-default",
+            from_agent: "agent://worker.llm.research",
+            to_agent: "agent://butler.main",
+            idempotency_key: "a2a-msg-2",
+            payload: {},
+            trace: {},
+            metadata: {},
+            created_at: "2026-03-08T09:12:05Z",
+          },
+          {
+            a2a_message_id: "a2a-msg-3",
+            a2a_conversation_id: "a2a-weather-default",
+            message_seq: 3,
+            task_id: "task-1-child",
+            work_id: "work-1-child",
+            message_type: "RESULT",
+            direction: "inbound",
+            protocol_message_id: "dispatch-1-result",
+            source_agent_runtime_id: "runtime-worker-research-default",
+            source_agent_session_id: "agent-session-worker-research-default",
+            target_agent_runtime_id: "runtime-butler-default",
+            target_agent_session_id: "agent-session-butler-default",
+            from_agent: "agent://worker.llm.research",
+            to_agent: "agent://butler.main",
+            idempotency_key: "a2a-msg-3",
+            payload: {},
+            trace: {},
+            metadata: {},
+            created_at: "2026-03-08T09:12:10Z",
+          },
+        ],
       },
       capability_pack: {
         contract_version: "1.0.0",
@@ -1197,13 +1370,19 @@ describe("ControlPlane", () => {
     snapshot.resources.delegation.works[0] = {
       ...snapshot.resources.delegation.works[0],
       title: "检查官网最新公告",
-      selected_worker_type: "research",
-      route_reason: "worker_type=research | fallback=single_worker",
-      selected_tools: ["runtime.now", "web.search"],
+      selected_worker_type: "general",
+      route_reason: "delegation_strategy=butler_owned_freshness",
+      selected_tools: [],
       runtime_summary: {
         ...snapshot.resources.delegation.works[0].runtime_summary,
-        requested_worker_type: "research",
-        requested_tool_profile: "standard",
+        delegation_strategy: "butler_owned_freshness",
+        final_speaker: "butler",
+        research_route_reason: "worker_type=research | fallback=single_worker",
+        research_tool_profile: "standard",
+        research_a2a_conversation_id: "a2a-weather-1",
+        research_worker_agent_session_id: "agent-session-worker-research-1",
+        research_a2a_message_count: 2,
+        research_child_status: "SUCCEEDED",
       },
     } as (typeof snapshot.resources.delegation.works)[number];
 
@@ -1229,9 +1408,40 @@ describe("ControlPlane", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
 
-    expect(
-      await screen.findByText(/Research Worker 会按标准工具面处理这条工作/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Butler 会先接住这条实时问题/)).toBeInTheDocument();
+    expect(screen.getByText(/内部已经建立 A2A 对话和独立 Worker Session/)).toBeInTheDocument();
+  });
+
+  it("Dashboard 和 Session Center 会显示 Butler 到 Worker 的内部 A2A 主链", async () => {
+    const snapshot = buildSnapshot();
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("多 Agent 主链")).toBeInTheDocument();
+    expect(screen.getByText(/最近一条内部委派来自 agent:\/\/butler\.main/)).toBeInTheDocument();
+    expect(screen.getByText(/最近一条 A2A 消息/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Session Center/i }));
+
+    expect(await screen.findByText("Butler -> Worker 内部会话")).toBeInTheDocument();
+    expect(screen.getByText(/agent:\/\/butler\.main -> agent:\/\/worker\.llm\.research/)).toBeInTheDocument();
+    expect(screen.getByText(/Butler Session agent-session-butler-default/)).toBeInTheDocument();
+    expect(screen.getByText(/Recall hits 2/)).toBeInTheDocument();
   });
 
   it("project.select 会提交统一 action 并按 resource_refs 回刷 project selector", async () => {

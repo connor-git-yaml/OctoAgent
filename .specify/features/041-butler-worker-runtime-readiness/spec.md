@@ -2,7 +2,7 @@
 feature_id: "041"
 title: "Butler / Worker Runtime Readiness + Ambient Context"
 milestone: "M4"
-status: "Partially Implemented"
+status: "Implemented"
 created: "2026-03-12"
 updated: "2026-03-13"
 research_mode: "codebase-scan"
@@ -16,7 +16,7 @@ parallel_dependency: "Feature 035 / 036 继续负责用户入口与 setup 主链
 **Feature Branch**: `codex/041-butler-worker-runtime-readiness`  
 **Created**: 2026-03-12  
 **Updated**: 2026-03-13  
-**Status**: Partially Implemented  
+**Status**: Implemented  
 **Input**: live usage 中出现了高频失败场景：用户问“今天天气怎么样”时，Butler 仍按“我不知道你在哪，也没有实时天气数据”的静态聊天方式回答，而不是利用已有的子 Worker 能力、Project 上下文和受治理网络工具完成任务。需要对比 Agent Zero 当前的内置上下文和工具组织方式，把 OctoAgent 缺的部分收敛成一个正式 Feature 041。  
 **调研基础**: `research/product-research.md`、`research/tech-research.md`、`research/research-synthesis.md`
 
@@ -46,8 +46,8 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 5. **当前没有正式 acceptance 覆盖“今天 / 最新 / 天气 / 官网查询”这类高频外部事实场景**  
    Feature 040 已经闭合了 `setup -> workbench -> worker review/apply -> memory/operator/export/recovery` 主链，但还没有把“面向真实使用的 freshness query”纳入 release gate。
 
-6. **当前 freshness path 仍更像“preflight route 到 research”，不是 Butler 拥有的 A2A 对话链**  
-   系统已经能在许多天气/最新问题上把执行权切到 `research`，但这更接近 routing success，而不是 blueprint 目标里的 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply`。因此 041 不能因为“结果能答出来”就被视为 fully passed。
+6. **041 的最终标准不是“结果能答出来”，而是整条 freshness 主链必须可审计且可降级**  
+   当前实现已经把 freshness path 收口为 `ButlerSession -> A2AConversation -> WorkerSession -> RESULT -> ButlerReply`，并补上缺城市追问与 backend unavailable 的受控降级；因此 041 的完成态以“可审计、可解释、可验收”成立。
 
 因此，041 要解决的不是“再加一个天气插件”，而是：
 
@@ -71,7 +71,7 @@ Feature 033 / 039 / 040 已经把主 Agent、上下文 continuity、worker revie
 1. freshness query 必须是 **Butler 拥有的 delegation 主链**，而不是系统在 preflight 层直接改派 worker type
 2. 执行 freshness query 的 Worker 必须拥有自己的 session/private memory/recall runtime，而不是只拿到一份临时 dispatch metadata
 
-因此，041 现在应被视为 **routing/tooling readiness 已成立，但 Butler-owned A2A runtime readiness 仍待补齐**。
+截至 2026-03-13 本轮收尾后，041 已完成 Butler-owned A2A runtime readiness、Worker private recall parity、缺城市追问与 backend unavailable acceptance，不再保留开放 blocker。
 
 ## Scope Alignment
 

@@ -783,6 +783,83 @@ class TestControlPlaneApi:
         assert worker_profiles_payload["resource_type"] == "worker_profiles"
         assert worker_profiles_payload["profiles"][0]["dynamic_context"]["active_project_id"]
 
+    async def test_snapshot_exposes_butler_owned_freshness_runtime_truth(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+
+        task_id = await _create_task(
+            control_plane_app,
+            text="深圳今天天气怎么样？",
+            thread_id="thread-freshness-parent",
+            scope_id=project.project_id,
+        )
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-freshness-parent",
+                task_id=task_id,
+                title="深圳今天天气怎么样？",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.SUCCEEDED,
+                target_kind=DelegationTargetKind.WORKER,
+                selected_worker_type=WorkerType.GENERAL,
+                route_reason="delegation_strategy=butler_owned_freshness",
+                owner_id="butler.main",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                selected_tools=[],
+                metadata={
+                    "delegation_strategy": "butler_owned_freshness",
+                    "final_speaker": "butler",
+                    "research_child_task_id": "task-freshness-child",
+                    "research_child_thread_id": "thread-freshness-parent:freshness:abc123",
+                    "research_child_work_id": "work-freshness-child",
+                    "research_child_status": "SUCCEEDED",
+                    "research_worker_status": "SUCCEEDED",
+                    "research_worker_id": "worker.llm.research",
+                    "research_route_reason": "worker_type=research | fallback=single_worker",
+                    "research_tool_profile": "standard",
+                    "research_a2a_conversation_id": "a2a-freshness-child",
+                    "research_butler_agent_session_id": "agent-session-butler-default",
+                    "research_worker_agent_session_id": "agent-session-worker-research-child",
+                    "research_a2a_message_count": 2,
+                    "research_result_artifact_ref": "artifact-freshness-result",
+                    "research_handoff_artifact_ref": "artifact-freshness-handoff",
+                },
+            )
+        )
+        await store_group.conn.commit()
+
+        resp = await control_plane_client.get("/api/control/snapshot")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        work = next(
+            item
+            for item in payload["resources"]["delegation"]["works"]
+            if item["work_id"] == "work-freshness-parent"
+        )
+        runtime_summary = work["runtime_summary"]
+        assert runtime_summary["delegation_strategy"] == "butler_owned_freshness"
+        assert runtime_summary["final_speaker"] == "butler"
+        assert runtime_summary["research_child_task_id"] == "task-freshness-child"
+        assert runtime_summary["research_tool_profile"] == "standard"
+        assert runtime_summary["research_a2a_conversation_id"] == "a2a-freshness-child"
+        assert runtime_summary["research_butler_agent_session_id"] == (
+            "agent-session-butler-default"
+        )
+        assert runtime_summary["research_worker_agent_session_id"] == (
+            "agent-session-worker-research-child"
+        )
+        assert runtime_summary["research_a2a_message_count"] == 2
+
     async def test_snapshot_returns_partial_degraded_payload_when_section_fails(
         self,
         control_plane_client: AsyncClient,

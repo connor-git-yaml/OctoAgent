@@ -2848,8 +2848,8 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；随后由 Feature 033 关闭 context continuity gate，M3 现已完成最终签收。
 - 2026-03-09 设计复核新增 Feature 033：当时主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；该补位已完成，不再作为当前 blocker。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
-- 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 live A2A dispatch 归一化。
-- 2026-03-12 live usage 复核新增并完成 Feature 041：当前系统已把 ambient current time、freshness query delegation、worker governed web/tool readiness 与 runtime truth/workbench 可视化收口为正式主链，Butler / Worker / Project / Tool 现在可以按默认 ready for real-world freshness queries 的口径对外描述。
+- 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 message-native A2A 主链。
+- 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、Butler-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
 
 2026-03-13 架构复核纠偏（基于 live usage + Agent Zero + OpenClaw 对标）：
@@ -2948,9 +2948,9 @@ M3 核心对象关系（2026-03-08 补充）：
 - [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；已接入 setup readiness、worker review/apply、context degraded 提示，以及 `memory -> operator -> export/recovery` guided 主路径；仍待更细粒度 context evidence）
 - [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义）
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
-- [~] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply` 与 dispatch envelope 归一化；仍缺 `ButlerSession -> WorkerSession` 的 message-native A2A roundtrip 与 durable `A2AConversation/A2AMessage`）
+- [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
-- [~] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、freshness query routing、worker governed web/tool readiness 与 runtime truth；仍缺 Butler-owned freshness delegation 主链、Worker private recall runtime 与 message-native 返回链）
+- [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、Butler-owned freshness delegation 主链、缺城市显式追问、backend unavailable 降级、worker private recall runtime、message-native 返回链与 runtime truth surface）
 
 M4 约束：
 

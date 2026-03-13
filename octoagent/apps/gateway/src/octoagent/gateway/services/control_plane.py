@@ -2432,12 +2432,65 @@ class ControlPlaneService:
                 worker_agent_session_id=str(work.metadata.get("target_agent_session_id", "")),
                 a2a_message_count=int(work.metadata.get("a2a_message_count", 0) or 0),
                 runtime_summary={
+                    "delegation_strategy": str(work.metadata.get("delegation_strategy", "")),
+                    "final_speaker": str(work.metadata.get("final_speaker", "")),
                     "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
                     "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
                     "requested_tool_profile": str(work.metadata.get("requested_tool_profile", "")),
                     "requested_worker_profile_id": work.requested_worker_profile_id,
                     "requested_worker_profile_version": work.requested_worker_profile_version,
                     "effective_worker_snapshot_id": work.effective_worker_snapshot_id,
+                    "a2a_conversation_id": str(work.metadata.get("a2a_conversation_id", "")),
+                    "butler_agent_session_id": str(
+                        work.metadata.get("source_agent_session_id", "")
+                    ),
+                    "worker_agent_session_id": str(
+                        work.metadata.get("target_agent_session_id", "")
+                    ),
+                    "a2a_message_count": int(work.metadata.get("a2a_message_count", 0) or 0),
+                    "research_child_task_id": str(
+                        work.metadata.get("research_child_task_id", "")
+                    ),
+                    "research_child_thread_id": str(
+                        work.metadata.get("research_child_thread_id", "")
+                    ),
+                    "research_child_work_id": str(
+                        work.metadata.get("research_child_work_id", "")
+                    ),
+                    "research_child_status": str(
+                        work.metadata.get("research_child_status", "")
+                    ),
+                    "research_worker_status": str(
+                        work.metadata.get("research_worker_status", "")
+                    ),
+                    "research_worker_id": str(work.metadata.get("research_worker_id", "")),
+                    "research_route_reason": str(work.metadata.get("research_route_reason", "")),
+                    "research_tool_profile": str(
+                        work.metadata.get("research_tool_profile", "")
+                    ),
+                    "research_a2a_conversation_id": str(
+                        work.metadata.get("research_a2a_conversation_id", "")
+                    ),
+                    "research_butler_agent_session_id": str(
+                        work.metadata.get("research_butler_agent_session_id", "")
+                    ),
+                    "research_worker_agent_session_id": str(
+                        work.metadata.get("research_worker_agent_session_id", "")
+                    ),
+                    "research_a2a_message_count": int(
+                        work.metadata.get("research_a2a_message_count", 0) or 0
+                    ),
+                    "research_result_artifact_ref": str(
+                        work.metadata.get("research_result_artifact_ref", "")
+                    ),
+                    "research_handoff_artifact_ref": str(
+                        work.metadata.get("research_handoff_artifact_ref", "")
+                    ),
+                    "freshness_resolution": str(work.metadata.get("freshness_resolution", "")),
+                    "freshness_degraded_reason": str(
+                        work.metadata.get("freshness_degraded_reason", "")
+                    ),
+                    "clarification_needed": str(work.metadata.get("clarification_needed", "")),
                     "runtime_status": str(work.metadata.get("runtime_status", "")),
                 },
                 updated_at=work.updated_at,

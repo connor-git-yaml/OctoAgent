@@ -1,6 +1,6 @@
 # Tasks: Feature 041 Butler / Worker Runtime Readiness + Ambient Context
 
-> 状态：Partially Implemented（ambient runtime、freshness routing、tool entitlement 已可用；Butler-owned A2A runtime readiness 仍待补齐）
+> 状态：Implemented（ambient runtime、Butler-owned freshness A2A 主链、worker private recall、runtime truth，以及 FQ-003 / FQ-005 acceptance 均已闭合）
 
 ## Phase 1: Research & Contract Freeze
 
@@ -38,7 +38,7 @@
 
 ## Phase 7: Butler-Owned Freshness Delegation 主链
 
-- [ ] T017 [P0] 把天气/最新/官网查询等 freshness objective 收敛到 `ButlerSession -> A2AConversation -> WorkerSession` 主链
-- [ ] T018 [P0] 让 freshness worker 拥有独立 private memory / recall runtime，并禁止直接读取完整用户主会话
-- [ ] T019 [P1] 在 control plane / workbench 暴露 freshness query 的 `A2AConversation` / `WorkerSession` / `tool_profile` 真相
-- [ ] T020 [P0] 补 freshness query 的 A2A 主链验收与回放测试
+- [x] T017 [P0] 把天气/最新/官网查询等 freshness objective 收敛到 `ButlerSession -> A2AConversation -> WorkerSession` 主链
+- [x] T018 [P0] 让 freshness worker 拥有独立 private memory / recall runtime，并禁止直接读取完整用户主会话
+- [x] T019 [P1] 在 control plane / workbench 暴露 freshness query 的 `A2AConversation` / `WorkerSession` / `tool_profile` 真相
+- [x] T020 [P0] 补 freshness query 的 A2A 主链验收与回放测试

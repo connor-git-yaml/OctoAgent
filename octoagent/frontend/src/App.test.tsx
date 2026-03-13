@@ -2417,6 +2417,15 @@ describe("App workbench routing", () => {
       if (url.includes("/api/tasks/task-chat-restore")) {
         return Promise.resolve(jsonResponse(detail));
       }
+      if (url.includes("/api/control/resources/sessions")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.sessions));
+      }
+      if (url.includes("/api/control/resources/delegation")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.delegation));
+      }
+      if (url.includes("/api/control/resources/context-frames")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.context_continuity));
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -2845,15 +2854,21 @@ describe("App workbench routing", () => {
       buildWork("work-weather", "running", {
         title: "查询北京今天会不会下雨",
         runtimeSummary: {
-          requested_tool_profile: "standard",
-          requested_worker_type: "research",
+          delegation_strategy: "butler_owned_freshness",
+          final_speaker: "butler",
+          research_route_reason: "worker_type=research | fallback=single_worker",
+          research_tool_profile: "standard",
+          research_a2a_conversation_id: "a2a-weather-1",
+          research_worker_agent_session_id: "agent-session-worker-research-1",
+          research_a2a_message_count: 2,
+          research_child_status: "SUCCEEDED",
         },
       }),
     ];
-    snapshot.resources.delegation.works[0]!.selected_worker_type = "research";
+    snapshot.resources.delegation.works[0]!.selected_worker_type = "general";
     snapshot.resources.delegation.works[0]!.route_reason =
-      "worker_type=research | fallback=single_worker";
-    snapshot.resources.delegation.works[0]!.selected_tools = ["runtime.now", "web.search"];
+      "delegation_strategy=butler_owned_freshness";
+    snapshot.resources.delegation.works[0]!.selected_tools = [];
 
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -2874,7 +2889,7 @@ describe("App workbench routing", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Research Worker · 标准工具面 · network \/ browser \/ session/)).toBeInTheDocument();
     expect(screen.getAllByText(/owner timezone 未配置/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Research Worker 会按标准工具面处理这条工作/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Butler 会先接住这条实时问题/).length).toBeGreaterThan(0);
   });
 
   it("Memory 页面会按当前筛选条件提交查询并展示可读摘要", async () => {

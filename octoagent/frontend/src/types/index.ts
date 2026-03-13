@@ -620,6 +620,106 @@ export interface ContextSessionItem {
   updated_at: string | null;
 }
 
+export interface AgentRuntimeItem {
+  agent_runtime_id: string;
+  role: string;
+  project_id: string;
+  workspace_id: string;
+  agent_profile_id: string;
+  worker_profile_id: string;
+  worker_capability: string;
+  status: string;
+  updated_at: string | null;
+}
+
+export interface AgentSessionContinuityItem {
+  agent_session_id: string;
+  agent_runtime_id: string;
+  kind: string;
+  status: string;
+  project_id: string;
+  workspace_id: string;
+  thread_id: string;
+  legacy_session_id: string;
+  work_id: string;
+  last_context_frame_id: string;
+  last_recall_frame_id: string;
+  updated_at: string | null;
+}
+
+export interface MemoryNamespaceItem {
+  namespace_id: string;
+  kind: string;
+  project_id: string;
+  workspace_id: string;
+  agent_runtime_id: string;
+  name: string;
+  description: string;
+  memory_scope_ids: string[];
+  updated_at: string | null;
+}
+
+export interface RecallFrameItem {
+  recall_frame_id: string;
+  agent_runtime_id: string;
+  agent_session_id: string;
+  context_frame_id: string;
+  task_id: string;
+  project_id: string;
+  workspace_id: string;
+  query: string;
+  recent_summary: string;
+  memory_namespace_ids: string[];
+  memory_hit_count: number;
+  degraded_reason: string;
+  created_at: string | null;
+}
+
+export interface A2AConversationItem {
+  a2a_conversation_id: string;
+  task_id: string;
+  work_id: string;
+  project_id: string;
+  workspace_id: string;
+  source_agent_runtime_id: string;
+  source_agent_session_id: string;
+  target_agent_runtime_id: string;
+  target_agent_session_id: string;
+  source_agent: string;
+  target_agent: string;
+  context_frame_id: string;
+  request_message_id: string;
+  latest_message_id: string;
+  latest_message_type: string;
+  status: string;
+  message_count: number;
+  trace_id: string;
+  metadata: Record<string, unknown>;
+  updated_at: string | null;
+}
+
+export interface A2AMessageItem {
+  a2a_message_id: string;
+  a2a_conversation_id: string;
+  message_seq: number;
+  task_id: string;
+  work_id: string;
+  message_type: string;
+  direction: string;
+  protocol_message_id: string;
+  source_agent_runtime_id: string;
+  source_agent_session_id: string;
+  target_agent_runtime_id: string;
+  target_agent_session_id: string;
+  from_agent: string;
+  to_agent: string;
+  idempotency_key: string;
+  payload: Record<string, unknown>;
+  trace: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+}
+
 export interface ContextFrameItem {
   context_frame_id: string;
   task_id: string;
@@ -644,6 +744,12 @@ export interface ContextContinuityDocument extends ControlPlaneDocumentBase {
   active_workspace_id: string;
   sessions: ContextSessionItem[];
   frames: ContextFrameItem[];
+  agent_runtimes?: AgentRuntimeItem[];
+  agent_sessions?: AgentSessionContinuityItem[];
+  memory_namespaces?: MemoryNamespaceItem[];
+  recall_frames?: RecallFrameItem[];
+  a2a_conversations?: A2AConversationItem[];
+  a2a_messages?: A2AMessageItem[];
 }
 
 export interface SetupRiskItem {
@@ -928,6 +1034,10 @@ export interface WorkProjectionItem {
   child_work_ids: string[];
   child_work_count: number;
   merge_ready: boolean;
+  a2a_conversation_id?: string;
+  butler_agent_session_id?: string;
+  worker_agent_session_id?: string;
+  a2a_message_count?: number;
   runtime_summary: Record<string, unknown>;
   updated_at: string | null;
   capabilities: ControlPlaneCapability[];

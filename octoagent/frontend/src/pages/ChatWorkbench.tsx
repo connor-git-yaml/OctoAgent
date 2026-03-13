@@ -49,6 +49,41 @@ function readSummaryString(summary: Record<string, unknown>, key: string): strin
   return typeof value === "string" ? value : "";
 }
 
+function readSummaryNumber(summary: Record<string, unknown>, key: string): number {
+  const value = summary[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function formatA2AMessageType(type: string): string {
+  switch (type.trim().toUpperCase()) {
+    case "TASK":
+      return "任务下发";
+    case "UPDATE":
+      return "进度更新";
+    case "RESULT":
+      return "结果回传";
+    case "ERROR":
+      return "错误回传";
+    case "HEARTBEAT":
+      return "心跳";
+    case "CANCEL":
+      return "取消";
+    default:
+      return type || "未记录";
+  }
+}
+
+function formatAgentUri(agentId: string, fallback: string): string {
+  const normalized = agentId.trim();
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized.startsWith("agent://")) {
+    return normalized;
+  }
+  return `agent://${normalized}`;
+}
+
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
   const sessions = snapshot!.resources.sessions.sessions;
@@ -75,6 +110,73 @@ export default function ChatWorkbench() {
     (activeSession
       ? context.frames.find((item) => item.session_id === activeSession.session_id) ?? null
       : null);
+  const a2aConversations = context.a2a_conversations ?? [];
+  const a2aMessages = context.a2a_messages ?? [];
+  const recallFrames = context.recall_frames ?? [];
+  const activeConversationId =
+    readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
+    activeWork?.a2a_conversation_id ||
+    "";
+  const activeA2AConversationRecord =
+    (activeConversationId
+      ? a2aConversations.find((item) => item.a2a_conversation_id === activeConversationId) ?? null
+      : null) ??
+    (activeWork?.work_id
+      ? a2aConversations.find((item) => item.work_id === activeWork.work_id) ?? null
+      : null) ??
+    (taskId ? a2aConversations.find((item) => item.task_id === taskId) ?? null : null);
+  const workDerivedButlerSessionId =
+    readSummaryString(activeWork?.runtime_summary ?? {}, "research_butler_agent_session_id") ||
+    activeWork?.butler_agent_session_id ||
+    "";
+  const workDerivedWorkerSessionId =
+    readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_agent_session_id") ||
+    activeWork?.worker_agent_session_id ||
+    "";
+  const workDerivedMessageCount =
+    readSummaryNumber(activeWork?.runtime_summary ?? {}, "research_a2a_message_count") ||
+    activeWork?.a2a_message_count ||
+    0;
+  const workDerivedLatestMessageType =
+    activeWork != null && workDerivedMessageCount > 0 ? "RESULT" : "";
+  const workDerivedWorkerAgent = formatAgentUri(
+    readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id") ||
+      activeWork?.runtime_id ||
+      activeWork?.selected_worker_type ||
+      "",
+    "Worker"
+  );
+  const hasInternalCollaboration =
+    activeA2AConversationRecord != null || Boolean(activeConversationId || workDerivedWorkerSessionId);
+  const activeConversationSourceAgent =
+    activeA2AConversationRecord?.source_agent ||
+    formatAgentUri(workDerivedButlerSessionId ? "butler.main" : "", "Butler");
+  const activeConversationTargetAgent =
+    activeA2AConversationRecord?.target_agent || workDerivedWorkerAgent;
+  const activeConversationMessageCount =
+    activeA2AConversationRecord?.message_count ?? workDerivedMessageCount;
+  const activeConversationLatestType =
+    activeA2AConversationRecord?.latest_message_type || workDerivedLatestMessageType;
+  const activeConversationWorkerSessionId =
+    activeA2AConversationRecord?.target_agent_session_id || workDerivedWorkerSessionId;
+  const activeA2AMessages =
+    activeA2AConversationRecord == null
+      ? []
+      : [...a2aMessages]
+          .filter(
+            (item) => item.a2a_conversation_id === activeA2AConversationRecord.a2a_conversation_id
+          )
+          .sort((left, right) => right.message_seq - left.message_seq)
+          .slice(0, 3);
+  const activeWorkerSessionId = activeConversationWorkerSessionId;
+  const activeWorkerRecall =
+    activeWorkerSessionId.length > 0
+      ? [...recallFrames]
+          .filter((item) => item.agent_session_id === activeWorkerSessionId)
+          .sort((left, right) =>
+            String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""))
+          )[0] ?? null
+      : null;
   const isRestoringConversation = restoring && messages.length === 0;
   const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
   const defaultRootAgentId = readSummaryString(
@@ -360,6 +462,81 @@ export default function ChatWorkbench() {
                 </Link>
               ) : null}
             </div>
+          </section>
+
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">内部协作</p>
+                <h3>
+                  {hasInternalCollaboration
+                    ? "Butler 正在和 Worker 协作"
+                    : "当前这轮还没有内部委派"}
+                </h3>
+              </div>
+            </div>
+            {hasInternalCollaboration ? (
+              <>
+                <div className="wb-note-stack">
+                  <div className="wb-note">
+                    <strong>当前链路</strong>
+                    <span>
+                      {activeConversationSourceAgent}{" -> "}
+                      {activeConversationTargetAgent}
+                    </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>内部消息</strong>
+                    <span>
+                      {activeConversationMessageCount} 条 / 最新{" "}
+                      {formatA2AMessageType(activeConversationLatestType)}
+                    </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>Worker Session</strong>
+                    <span>{activeConversationWorkerSessionId || "未记录"}</span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>Recall 命中</strong>
+                    <span>{activeWorkerRecall?.memory_hit_count ?? 0}</span>
+                  </div>
+                </div>
+                {activeA2AMessages.length > 0 ? (
+                  <div className="wb-note-stack">
+                    {activeA2AMessages.map((message) => (
+                      <div key={message.a2a_message_id} className="wb-note">
+                        <strong>
+                          {formatA2AMessageType(message.message_type)} · #{message.message_seq}
+                        </strong>
+                        <span>
+                          {message.direction === "inbound"
+                            ? "Worker -> Butler"
+                            : "Butler -> Worker"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {activeA2AMessages.length === 0 && activeA2AConversationRecord == null ? (
+                  <div className="wb-note-stack">
+                    <div className="wb-note">
+                      <strong>消息明细</strong>
+                      <span>当前快照未带回完整 A2A 明细，可去 Advanced 查看完整 runtime truth。</span>
+                    </div>
+                  </div>
+                ) : null}
+                <Link className="wb-button wb-button-tertiary" to="/advanced">
+                  去 Advanced 看完整 runtime truth
+                </Link>
+              </>
+            ) : (
+              <div className="wb-note-stack">
+                <div className="wb-note">
+                  <strong>当前状态</strong>
+                  <span>如果这轮问题需要 Research / Ops / Dev，Butler 会在内部建立独立 A2A 会话。</span>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="wb-panel">

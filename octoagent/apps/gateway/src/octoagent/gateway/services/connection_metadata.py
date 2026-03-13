@@ -29,6 +29,8 @@ TASK_SCOPED_CONTROL_KEYS = frozenset(
         "parent_task_id",
         "parent_work_id",
         "spawned_by",
+        "source_agent_runtime_id",
+        "source_agent_session_id",
         "child_title",
         "worker_plan_id",
         "retry_source_task_id",

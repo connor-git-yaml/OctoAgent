@@ -366,6 +366,36 @@ function formatRelativeStatus(value: string): string {
   return value.replace(/_/g, " ").replace(/-/g, " ");
 }
 
+function formatA2AMessageType(type: string): string {
+  switch (type.trim().toUpperCase()) {
+    case "TASK":
+      return "任务下发";
+    case "UPDATE":
+      return "进度更新";
+    case "RESULT":
+      return "结果回传";
+    case "ERROR":
+      return "错误回传";
+    case "HEARTBEAT":
+      return "心跳";
+    case "CANCEL":
+      return "取消";
+    default:
+      return type || "-";
+  }
+}
+
+function formatA2ADirection(direction: string): string {
+  switch (direction.trim().toLowerCase()) {
+    case "outbound":
+      return "Butler -> Worker";
+    case "inbound":
+      return "Worker -> Butler";
+    default:
+      return direction || "-";
+  }
+}
+
 function formatJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
 }
@@ -1172,6 +1202,34 @@ export default function ControlPlane() {
   const latestContextFrame = context_continuity?.frames?.[0] ?? null;
   const latestMemoryRecall = latestContextFrame?.memory_recall ?? {};
   const latestMemoryCitations = latestContextFrame?.memory_hits.slice(0, 2) ?? [];
+  const contextAgentRuntimes = context_continuity?.agent_runtimes ?? [];
+  const contextAgentSessions = context_continuity?.agent_sessions ?? [];
+  const contextMemoryNamespaces = context_continuity?.memory_namespaces ?? [];
+  const contextRecallFrames = context_continuity?.recall_frames ?? [];
+  const contextA2AConversations = context_continuity?.a2a_conversations ?? [];
+  const contextA2AMessages = context_continuity?.a2a_messages ?? [];
+  const latestA2AConversation =
+    [...contextA2AConversations].sort((left, right) =>
+      String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""))
+    )[0] ?? null;
+  const latestA2AMessage =
+    latestA2AConversation == null
+      ? null
+      : [...contextA2AMessages]
+          .filter(
+            (item) => item.a2a_conversation_id === latestA2AConversation.a2a_conversation_id
+          )
+          .sort((left, right) => right.message_seq - left.message_seq)[0] ?? null;
+  const latestWorkerRecall =
+    latestA2AConversation == null
+      ? null
+      : [...contextRecallFrames]
+          .filter(
+            (item) => item.agent_session_id === latestA2AConversation.target_agent_session_id
+          )
+          .sort((left, right) =>
+            String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""))
+          )[0] ?? null;
   const activeSectionMeta =
     SECTION_LABELS.find((section) => section.id === activeSection) ?? SECTION_LABELS[0];
   const operatorPendingCount = sessions.operator_summary?.total_pending ?? 0;
@@ -1497,6 +1555,62 @@ export default function ControlPlane() {
                   刷新 Context
                 </button>
               </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">多 Agent 主链</p>
+                  <h3>{latestA2AConversation?.message_count ?? 0}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  Runtime {contextAgentRuntimes.length} / Session {contextAgentSessions.length}
+                </span>
+              </div>
+              {latestA2AConversation ? (
+                <>
+                  <p>
+                    最近一条内部委派来自 {latestA2AConversation.source_agent || "Butler"}，
+                    目标是 {latestA2AConversation.target_agent || "Worker"}。
+                  </p>
+                  <div className="meta-grid">
+                    <span>状态 {latestA2AConversation.status}</span>
+                    <span>消息数 {latestA2AConversation.message_count}</span>
+                    <span>
+                      最新消息 {formatA2AMessageType(latestA2AConversation.latest_message_type)}
+                    </span>
+                    <span>
+                      Recall hits {latestWorkerRecall?.memory_hit_count ?? 0}
+                    </span>
+                  </div>
+                  <div className="event-list">
+                    <div className="event-item">
+                      <div>
+                        <strong>Butler Session</strong>
+                        <p>{latestA2AConversation.source_agent_session_id || "未记录"}</p>
+                      </div>
+                    </div>
+                    <div className="event-item">
+                      <div>
+                        <strong>Worker Session</strong>
+                        <p>{latestA2AConversation.target_agent_session_id || "未记录"}</p>
+                      </div>
+                    </div>
+                    <div className="event-item">
+                      <div>
+                        <strong>最近一条 A2A 消息</strong>
+                        <p>
+                          {latestA2AMessage
+                            ? `${formatA2ADirection(latestA2AMessage.direction)} / ${formatA2AMessageType(latestA2AMessage.message_type)}`
+                            : "当前还没有消息明细。"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                  <p>当前 project 里还没有可展示的 Butler{" -> "}Worker 内部委派记录。</p>
+              )}
             </article>
 
             <article className="panel wide">
@@ -2246,6 +2360,69 @@ export default function ControlPlane() {
                   placeholder="搜索 task / thread / requester"
                 />
               </div>
+            </article>
+            <article className="panel">
+              <div className="panel-head">
+                <div>
+                    <p className="eyebrow">Butler{" -> "}Worker 内部会话</p>
+                  <h3>{contextA2AConversations.length}</h3>
+                </div>
+                <span className="tone-chip neutral">
+                  Recall {contextRecallFrames.length} / Namespace {contextMemoryNamespaces.length}
+                </span>
+              </div>
+              {contextA2AConversations.length > 0 ? (
+                <div className="event-list">
+                  {contextA2AConversations.slice(0, 3).map((conversation) => {
+                    const latestMessage =
+                      [...contextA2AMessages]
+                        .filter(
+                          (item) =>
+                            item.a2a_conversation_id === conversation.a2a_conversation_id
+                        )
+                        .sort((left, right) => right.message_seq - left.message_seq)[0] ?? null;
+                    const workerRecall =
+                      [...contextRecallFrames]
+                        .filter(
+                          (item) => item.agent_session_id === conversation.target_agent_session_id
+                        )
+                        .sort((left, right) =>
+                          String(right.created_at ?? "").localeCompare(
+                            String(left.created_at ?? "")
+                          )
+                        )[0] ?? null;
+                    return (
+                      <div key={conversation.a2a_conversation_id} className="event-item">
+                        <div>
+                          <strong>
+                              {conversation.source_agent || "Butler"}{" -> "}
+                              {conversation.target_agent || "Worker"}
+                          </strong>
+                          <p>
+                            {conversation.status} / {conversation.message_count} 条消息 / 最新{" "}
+                            {formatA2AMessageType(conversation.latest_message_type)}
+                          </p>
+                          <p>
+                            Butler Session {conversation.source_agent_session_id || "未记录"} / Worker
+                            Session {conversation.target_agent_session_id || "未记录"}
+                          </p>
+                          <p>
+                            {latestMessage
+                              ? `${formatA2ADirection(latestMessage.direction)} / ${formatA2AMessageType(latestMessage.message_type)}`
+                              : "当前还没有消息明细"}
+                            {workerRecall
+                              ? ` / Recall hits ${workerRecall.memory_hit_count}`
+                              : ""}
+                          </p>
+                        </div>
+                        <small>{formatDateTime(conversation.updated_at)}</small>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                  <p className="muted">当前还没有 Butler{" -> "}Worker 的内部 A2A 会话。</p>
+              )}
             </article>
             {filteredSessions.map((session) => (
               <article key={session.session_id} className="panel">
