@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
   categoryForHint,
@@ -508,6 +509,7 @@ function generateSecretValue(): string {
 
 export default function SettingsCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const location = useLocation();
   const config = snapshot!.resources.config;
   const selector = snapshot!.resources.project_selector;
   const memory = snapshot!.resources.memory;
@@ -546,6 +548,19 @@ export default function SettingsCenter() {
   useEffect(() => {
     setSecretValues({});
   }, [setup.generated_at, config.generated_at]);
+
+  useEffect(() => {
+    if (!location.hash) {
+      return;
+    }
+    const targetId = location.hash.slice(1);
+    requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [location.hash, config.generated_at]);
 
   const groupedHints = Object.values(config.ui_hints)
     .sort((left, right) => left.order - right.order)

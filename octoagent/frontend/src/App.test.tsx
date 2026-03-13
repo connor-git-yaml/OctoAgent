@@ -950,7 +950,7 @@ describe("App workbench routing", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "http://localhost:4100");
     await userEvent.click(screen.getByLabelText("启用 Worker Review"));
-    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
 
     await waitFor(() =>
       expect(
@@ -1217,7 +1217,7 @@ describe("App workbench routing", () => {
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
-    expect(screen.getByText("体验模式")).toBeInTheDocument();
+    expect(screen.getAllByText("体验模式").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenRouter" }));
@@ -1409,6 +1409,36 @@ describe("App workbench routing", () => {
     expect(actionBody).toContain(
       '"context_budget_policy":{"memory_recall":{"post_filter_mode":"none","rerank_mode":"heuristic","min_keyword_overlap":1,"scope_limit":6,"per_scope_limit":4,"max_hits":8}}'
     );
+  });
+
+  it("从带 hash 的 Settings 链接进入时会滚动到 Memory 分区", async () => {
+    window.history.pushState({}, "", "/settings#settings-group-memory");
+
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(buildSnapshot()));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "系统连接与默认能力" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
   });
 
   it("Work 页面会先展示 worker.review 方案，再批准 worker.apply", async () => {
@@ -2872,13 +2902,18 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "当前有记忆数据，但还没有命中可读摘要" });
-    await userEvent.selectOptions(screen.getByLabelText("Layer"), "sor");
-    await userEvent.selectOptions(screen.getByLabelText("Partition"), "contact");
-    await userEvent.selectOptions(screen.getByLabelText("Limit"), "50");
+    await screen.findByRole("heading", { name: "Memory 在工作，只是当前筛选太窄" });
+    expect(screen.getAllByRole("link", { name: "打开 Settings > Memory" })[0]!).toHaveAttribute(
+      "href",
+      "/settings#settings-group-memory"
+    );
+    expect(screen.queryByText("Active Scope")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("记忆类型"), "sor");
+    await userEvent.selectOptions(screen.getByLabelText("主题分区"), "contact");
+    await userEvent.selectOptions(screen.getByLabelText("最多显示"), "50");
     await userEvent.type(screen.getByLabelText("关键词"), "Alice");
     await userEvent.click(screen.getByLabelText("包含历史版本"));
-    await userEvent.click(screen.getByRole("button", { name: "刷新摘要" }));
+    await userEvent.click(screen.getByRole("button", { name: "重新查看" }));
 
     const actionCall = fetchMock.mock.calls.find((call) => {
       const [url, init] = call as FetchArgs;
@@ -2893,6 +2928,70 @@ describe("App workbench routing", () => {
     expect(String(actionCall?.[1]?.body)).toContain('"limit":50');
 
     expect(await screen.findByText("Alice 偏好异步沟通")).toBeInTheDocument();
-    expect(await screen.findByText("Memory 当前存在提醒")).toBeInTheDocument();
+    expect(await screen.findByText("当前有需要注意的情况")).toBeInTheDocument();
+  });
+
+  it("Memory 页面会把增强模式缺失的最小配置直接指给用户", async () => {
+    window.history.pushState({}, "", "/memory");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.config.ui_hints = {
+      "memory.bridge_url": {
+        field_path: "memory.bridge_url",
+        section: "memory-basic",
+        label: "MemU Bridge 地址",
+        description: "",
+        widget: "text",
+        placeholder: "https://memory.example.com",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 10,
+      },
+      "memory.bridge_api_key_env": {
+        field_path: "memory.bridge_api_key_env",
+        section: "memory-basic",
+        label: "MemU API Key 环境变量",
+        description: "",
+        widget: "env-ref",
+        placeholder: "MEMU_API_KEY",
+        help_text: "",
+        sensitive: false,
+        multiline: false,
+        order: 20,
+      },
+    };
+    snapshot.resources.config.current_value = {
+      memory: {
+        backend_mode: "memu",
+        bridge_url: "",
+        bridge_api_key_env: "",
+      },
+    };
+    snapshot.resources.memory.summary = {
+      ...snapshot.resources.memory.summary,
+      sor_current_count: 0,
+      fragment_count: 0,
+      vault_ref_count: 0,
+      pending_replay_count: 0,
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "增强记忆还没配完整" })).toBeInTheDocument();
+    expect(screen.getByText("补齐 MemU Bridge 地址")).toBeInTheDocument();
+    expect(screen.getByText("补齐 MemU API Key 环境变量")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "打开 Settings > Memory" })[0]!).toHaveAttribute(
+      "href",
+      "/settings#settings-group-memory"
+    );
   });
 });
