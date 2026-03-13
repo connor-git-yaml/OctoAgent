@@ -303,7 +303,15 @@ If the proxy is healthy, you should see:
 octo-doctor --live
 ```
 
-If configuration changes do not take effect immediately, restart the runtime:
+To update a managed local instance to the latest `master`, use a single command:
+
+```bash
+octo update
+```
+
+For a managed install, this is the intended operator path. It updates the local source checkout, syncs backend dependencies, rebuilds the frontend, restarts the runtime, and runs verification.
+
+If you only need to apply already-downloaded changes or configuration updates, restart the runtime:
 
 ```bash
 octo restart
@@ -402,6 +410,7 @@ npm run build
 Useful local operator commands:
 
 ```bash
+octo update
 octo-doctor
 octo-doctor --live
 octo restart

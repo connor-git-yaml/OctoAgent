@@ -77,8 +77,16 @@ def _build_runtime_descriptor(
         project_root=str(project_root),
         start_command=start_command,
         verify_url=f"http://127.0.0.1:{port}/ready?profile=core",
-        workspace_sync_command=["uv", "sync"],
-        frontend_build_command=["npm", "run", "build"],
+        workspace_sync_command=[
+            "/bin/bash",
+            "-lc",
+            "if [ -d .git ]; then git pull --ff-only origin master; fi && uv sync",
+        ],
+        frontend_build_command=[
+            "/bin/bash",
+            "-lc",
+            "npm install && npm run build",
+        ],
         environment_overrides=environment_overrides,
         created_at=now,
         updated_at=now,

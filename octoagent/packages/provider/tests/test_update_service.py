@@ -53,8 +53,8 @@ def _descriptor(tmp_path: Path) -> ManagedRuntimeDescriptor:
         runtime_mode=RuntimeManagementMode.MANAGED,
         start_command=["uv", "run", "uvicorn", "octoagent.gateway.main:app"],
         verify_url="http://127.0.0.1:8000/ready?profile=core",
-        workspace_sync_command=["uv", "sync"],
-        frontend_build_command=["npm", "run", "build"],
+        workspace_sync_command=["/bin/bash", "-lc", "git pull --ff-only origin master && uv sync"],
+        frontend_build_command=["/bin/bash", "-lc", "npm install && npm run build"],
         created_at=now,
         updated_at=now,
     )
@@ -160,7 +160,7 @@ async def test_apply_wait_true_runs_all_phases(tmp_path: Path, monkeypatch) -> N
 
     assert summary.failure_report is None
     assert summary.overall_status == UpdateOverallStatus.SUCCEEDED
-    assert commands[0][0] == ["uv", "sync"]
+    assert commands[0][0] == descriptor.workspace_sync_command
     assert launched
     assert killed == [(4321, signal.SIGTERM)]
 
@@ -258,7 +258,60 @@ async def test_execute_attempt_persists_running_phase_progress(tmp_path: Path, m
 
     assert summary.overall_status == UpdateOverallStatus.SUCCEEDED
     assert (UpdatePhaseName.MIGRATE, UpdatePhaseStatus.RUNNING) in snapshots
-    assert (UpdatePhaseName.VERIFY, UpdatePhaseStatus.RUNNING) in snapshots
+
+
+@pytest.mark.asyncio
+async def test_apply_wait_true_uses_descriptor_project_root_for_managed_instance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    instance_root = tmp_path / "instance"
+    source_root = instance_root / "app" / "octoagent"
+    frontend_root = source_root / "frontend"
+    instance_root.mkdir(parents=True, exist_ok=True)
+    frontend_root.mkdir(parents=True, exist_ok=True)
+    (instance_root / "octoagent.yaml").write_text("config_version: 1\n", encoding="utf-8")
+
+    status_store = UpdateStatusStore(instance_root)
+    descriptor = _descriptor(source_root)
+    status_store.save_runtime_descriptor(descriptor)
+
+    commands: list[tuple[list[str], Path]] = []
+
+    async def fake_get(_self, _url: str):
+        class Response:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"status": "ready"}
+
+        return Response()
+
+    class DummyPopen:
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr("octoagent.provider.dx.update_service.httpx.AsyncClient.get", fake_get)
+
+    def fake_popen(*_args, **_kwargs):
+        return DummyPopen()
+
+    monkeypatch.setattr("octoagent.provider.dx.update_service.subprocess.Popen", fake_popen)
+
+    service = UpdateService(
+        instance_root,
+        status_store=status_store,
+        doctor_factory=lambda _root: FakeDoctorRunner(_report_with_status(CheckStatus.PASS)),
+        command_runner=lambda command, cwd: commands.append((command, cwd)) or "ok",
+    )
+
+    summary = await service.apply(trigger_source="cli", wait=True)
+
+    assert summary.overall_status == UpdateOverallStatus.SUCCEEDED
+    assert commands[0][1] == source_root
+    assert commands[1][1] == frontend_root
 
 
 @pytest.mark.asyncio

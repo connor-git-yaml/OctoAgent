@@ -94,6 +94,12 @@ To switch from `echo` mode to a real model provider:
 octo setup
 ```
 
+To update a managed local install later:
+
+```bash
+octo update
+```
+
 ### Contributors
 
 ```bash

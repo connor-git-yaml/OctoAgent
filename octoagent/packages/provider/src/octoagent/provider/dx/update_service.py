@@ -495,11 +495,12 @@ class UpdateService:
         descriptor: ManagedRuntimeDescriptor | None,
     ) -> None:
         descriptor = descriptor or self._require_descriptor(None)
+        workspace_root = Path(descriptor.project_root).resolve()
         steps = self._plan_migration_steps(descriptor)
 
         for step in steps:
             if step.kind == MigrationStepKind.WORKSPACE_SYNC:
-                output = self._command_runner(descriptor.workspace_sync_command, self._root)
+                output = self._command_runner(descriptor.workspace_sync_command, workspace_root)
                 step.status = UpdatePhaseStatus.SUCCEEDED
                 step.summary = output or "workspace sync 完成。"
                 step.applied_at = utc_now()
@@ -510,7 +511,7 @@ class UpdateService:
                 else:
                     raise RuntimeError("未检测到 octoagent.yaml，当前实例无法安全执行 migrate。")
             elif step.kind == MigrationStepKind.FRONTEND_BUILD:
-                frontend_root = self._root / "frontend"
+                frontend_root = workspace_root / "frontend"
                 if frontend_root.exists():
                     output = self._command_runner(descriptor.frontend_build_command, frontend_root)
                     step.status = UpdatePhaseStatus.SUCCEEDED
