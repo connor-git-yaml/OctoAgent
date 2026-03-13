@@ -513,6 +513,14 @@ function buildSnapshot(currentProjectId = "project-default") {
             requested_worker_profile_id: "project-default:ops-root",
             requested_worker_profile_version: 3,
             effective_worker_snapshot_id: "worker-profile:project-default:ops-root:v3",
+            tool_resolution_mode: "profile_first_core",
+            blocked_tools: [
+              {
+                tool_name: "subagents.spawn",
+                status: "unavailable",
+                reason_code: "task_runner_unbound",
+              },
+            ],
             child_work_ids: ["work-1-child-1", "work-1-child-2"],
             child_work_count: 2,
             merge_ready: true,
@@ -1636,7 +1644,7 @@ describe("ControlPlane", () => {
     expect(screen.getByText("tool index selected tools")).toBeInTheDocument();
   });
 
-  it("Delegation section 会显示 Root Agent lineage 并允许从运行态提炼 profile", async () => {
+  it("Delegation section 会显示 Worker 模板 lineage 并允许从运行态提炼 profile", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const snapshot = buildSnapshot();
 
@@ -1654,7 +1662,7 @@ describe("ControlPlane", () => {
             result: {
               action_id: "worker.extract_profile_from_runtime",
               status: "completed",
-              message: "已提炼 Root Agent",
+              message: "已提炼 Worker 模板",
               code: "WORKER_PROFILE_EXTRACTED",
               handled_at: "2026-03-08T09:12:30Z",
               resource_refs: [
@@ -1696,10 +1704,10 @@ describe("ControlPlane", () => {
                 draft_revision: 3,
                 effective_snapshot_id: "worker-profile:project-default:ops-root:v3",
                 editable: true,
-                summary: "已从运行态同步出的 Root Agent。",
+                summary: "已从运行态同步出的 Worker 模板。",
                 static_config: {
                   base_archetype: "ops",
-                  summary: "已从运行态同步出的 Root Agent。",
+                  summary: "已从运行态同步出的 Worker 模板。",
                   model_alias: "main",
                   tool_profile: "minimal",
                   default_tool_groups: ["runtime", "project"],
@@ -1722,6 +1730,15 @@ describe("ControlPlane", () => {
                   latest_work_status: "assigned",
                   latest_target_kind: "acp_runtime",
                   current_selected_tools: ["runtime.inspect", "task.inspect"],
+                  current_tool_resolution_mode: "profile_first_core",
+                  current_blocked_tools: [
+                    {
+                      tool_name: "subagents.spawn",
+                      status: "unavailable",
+                      reason_code: "task_runner_unbound",
+                    },
+                  ],
+                  current_discovery_entrypoints: ["workers.review"],
                   updated_at: "2026-03-08T09:12:00Z",
                 },
                 warnings: [],
@@ -1744,12 +1761,14 @@ describe("ControlPlane", () => {
     expect((await screen.findAllByText(/project-default/)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
 
-    expect(await screen.findByText(/Requested Profile project-default:ops-root/)).toBeInTheDocument();
+    expect(await screen.findByText(/使用的模板 project-default:ops-root/)).toBeInTheDocument();
     expect(
       screen.getByText(/Revision 3 \/ Snapshot worker-profile:project-default:ops-root:v3/)
     ).toBeInTheDocument();
+    expect(screen.getByText(/工具分配 profile_first_core/)).toBeInTheDocument();
+    expect(screen.getByText(/当前不可用工具: subagents\.spawn/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "提炼 Root Agent" }));
+    await userEvent.click(screen.getByRole("button", { name: "提炼模板" }));
 
     await waitFor(() => {
       const extractCall = fetchMock.mock.calls.find((call) =>

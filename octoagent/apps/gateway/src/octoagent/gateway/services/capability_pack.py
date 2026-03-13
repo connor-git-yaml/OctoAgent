@@ -20,16 +20,22 @@ from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import httpx
 from octoagent.core.models import (
+    AgentProfileScope,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
     BundledToolDefinition,
     DynamicToolSelection,
+    EffectiveToolUniverse,
     NormalizedMessage,
     OwnerProfile,
     ProjectBindingType,
     RuntimeKind,
+    ToolAvailabilityExplanation,
     ToolIndexQuery,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileStatus,
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
     WorkerType,
@@ -53,6 +59,7 @@ from octoagent.tooling import (
     ToolBroker,
     ToolIndex,
     ToolProfile,
+    profile_allows,
     reflect_tool_schema,
     tool_contract,
 )
@@ -100,6 +107,18 @@ class _WorkerPlanProposal(BaseModel):
     assignments: list[_WorkerPlanAssignment] = Field(default_factory=list)
     merge_candidate_ids: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _ResolvedWorkerBinding:
+    profile_id: str
+    profile_revision: int
+    worker_type: WorkerType
+    tool_profile: str
+    default_tool_groups: list[str]
+    selected_tools: list[str]
+    source_kind: str
+    profile_name: str
 
 
 _WORK_TERMINAL_VALUES = {
@@ -365,6 +384,70 @@ class CapabilityPackService:
     def get_worker_profile(self, worker_type: WorkerType) -> WorkerCapabilityProfile:
         return self._profile_map.get(worker_type, self._profile_map[WorkerType.GENERAL])
 
+    async def resolve_worker_binding(
+        self,
+        *,
+        requested_profile_id: str = "",
+        fallback_worker_type: WorkerType = WorkerType.GENERAL,
+    ) -> _ResolvedWorkerBinding:
+        await self.startup()
+        normalized_profile_id = requested_profile_id.strip()
+        if normalized_profile_id:
+            builtin_worker_type = self._builtin_worker_type_from_profile_id(normalized_profile_id)
+            if builtin_worker_type is not None:
+                builtin_profile = self.get_worker_profile(builtin_worker_type)
+                return _ResolvedWorkerBinding(
+                    profile_id=normalized_profile_id,
+                    profile_revision=1,
+                    worker_type=builtin_worker_type,
+                    tool_profile=builtin_profile.default_tool_profile,
+                    default_tool_groups=list(builtin_profile.default_tool_groups),
+                    selected_tools=[],
+                    source_kind="builtin_singleton",
+                    profile_name=self._worker_profile_label(builtin_worker_type.value),
+                )
+            stored_profile = await self._stores.agent_context_store.get_worker_profile(
+                normalized_profile_id
+            )
+            if stored_profile is not None and stored_profile.status != WorkerProfileStatus.ARCHIVED:
+                worker_type = self._coerce_worker_type_name(stored_profile.base_archetype)
+                builtin_profile = self.get_worker_profile(worker_type)
+                return _ResolvedWorkerBinding(
+                    profile_id=stored_profile.profile_id,
+                    profile_revision=(
+                        stored_profile.active_revision or stored_profile.draft_revision or 1
+                    ),
+                    worker_type=worker_type,
+                    tool_profile=stored_profile.tool_profile or builtin_profile.default_tool_profile,
+                    default_tool_groups=list(
+                        stored_profile.default_tool_groups or builtin_profile.default_tool_groups
+                    ),
+                    selected_tools=list(stored_profile.selected_tools),
+                    source_kind="worker_profile",
+                    profile_name=stored_profile.name,
+                )
+        builtin_profile = self.get_worker_profile(fallback_worker_type)
+        return _ResolvedWorkerBinding(
+            profile_id=f"singleton:{builtin_profile.worker_type.value}",
+            profile_revision=1,
+            worker_type=builtin_profile.worker_type,
+            tool_profile=builtin_profile.default_tool_profile,
+            default_tool_groups=list(builtin_profile.default_tool_groups),
+            selected_tools=[],
+            source_kind="builtin_fallback",
+            profile_name=self._worker_profile_label(builtin_profile.worker_type.value),
+        )
+
+    async def resolve_worker_type_for_profile(self, profile_id: str) -> WorkerType | None:
+        normalized = profile_id.strip()
+        if not normalized:
+            return None
+        binding = await self.resolve_worker_binding(
+            requested_profile_id=normalized,
+            fallback_worker_type=WorkerType.GENERAL,
+        )
+        return binding.worker_type if binding.profile_id else None
+
     async def select_tools(
         self,
         request: ToolIndexQuery,
@@ -393,6 +476,197 @@ class CapabilityPackService:
             raw_selection,
             pack=pack,
             fallback=fallback,
+        )
+
+    async def resolve_profile_first_tools(
+        self,
+        request: ToolIndexQuery,
+        *,
+        worker_type: WorkerType,
+        requested_profile_id: str = "",
+    ) -> DynamicToolSelection:
+        await self.startup()
+        binding = await self.resolve_worker_binding(
+            requested_profile_id=requested_profile_id,
+            fallback_worker_type=worker_type,
+        )
+        pack = await self.get_pack(
+            project_id=request.project_id,
+            workspace_id=request.workspace_id,
+        )
+        effective_tool_profile = request.tool_profile or binding.tool_profile
+        context_profile = self._coerce_tool_profile(effective_tool_profile)
+        tool_by_name = {tool.tool_name: tool for tool in pack.tools}
+        desired_tools = self._dedupe_preserve_order(
+            [
+                *binding.selected_tools,
+                *self._profile_first_core_tool_names(),
+                *[
+                    tool.tool_name
+                    for tool in pack.tools
+                    if tool.tool_group in binding.default_tool_groups
+                ],
+            ]
+        )
+        mounted_tools: list[ToolAvailabilityExplanation] = []
+        blocked_tools: list[ToolAvailabilityExplanation] = []
+        mounted_names: list[str] = []
+        warnings: list[str] = []
+
+        for tool_name in desired_tools:
+            bundled = tool_by_name.get(tool_name)
+            source_kind = self._resolve_profile_first_source_kind(binding, tool_name)
+            if bundled is None:
+                blocked_tools.append(
+                    ToolAvailabilityExplanation(
+                        tool_name=tool_name,
+                        status="missing",
+                        source_kind=source_kind,
+                        reason_code="tool_not_in_scope_pack",
+                        summary="当前 project / workspace 治理面没有暴露这个工具。",
+                        recommended_action="检查技能治理、MCP 配置或 Root Agent 静态配置。",
+                    )
+                )
+                warnings.append("profile_first_tool_missing_from_pack")
+                continue
+            tool_profile = self._coerce_tool_profile(bundled.tool_profile)
+            if not profile_allows(tool_profile, context_profile):
+                blocked_tools.append(
+                    ToolAvailabilityExplanation(
+                        tool_name=tool_name,
+                        status="blocked",
+                        source_kind=source_kind,
+                        tool_group=bundled.tool_group,
+                        tool_profile=bundled.tool_profile,
+                        reason_code="tool_profile_not_allowed",
+                        summary=(
+                            f"当前 Root Agent 允许的 tool_profile={context_profile.value}，"
+                            f"不足以挂载 {bundled.tool_profile} 工具。"
+                        ),
+                        recommended_action="提升 Root Agent 的 tool_profile，或移除该工具依赖。",
+                        metadata={"entrypoints": list(bundled.entrypoints)},
+                    )
+                )
+                continue
+            if bundled.availability not in {
+                BuiltinToolAvailabilityStatus.AVAILABLE,
+                BuiltinToolAvailabilityStatus.DEGRADED,
+            }:
+                blocked_tools.append(
+                    ToolAvailabilityExplanation(
+                        tool_name=tool_name,
+                        status=bundled.availability.value,
+                        source_kind=source_kind,
+                        tool_group=bundled.tool_group,
+                        tool_profile=bundled.tool_profile,
+                        reason_code=bundled.availability_reason,
+                        summary=bundled.description or bundled.label or tool_name,
+                        recommended_action=bundled.install_hint,
+                        metadata={"entrypoints": list(bundled.entrypoints)},
+                    )
+                )
+                warnings.append("profile_first_tool_unavailable")
+                continue
+            mounted_names.append(tool_name)
+            mounted_tools.append(
+                ToolAvailabilityExplanation(
+                    tool_name=tool_name,
+                    status=(
+                        "degraded"
+                        if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
+                        else "mounted"
+                    ),
+                    source_kind=source_kind,
+                    tool_group=bundled.tool_group,
+                    tool_profile=bundled.tool_profile,
+                    reason_code=bundled.availability_reason,
+                    summary=bundled.description or bundled.label or tool_name,
+                    recommended_action=bundled.install_hint,
+                    metadata={
+                        "entrypoints": list(bundled.entrypoints),
+                        "runtime_kinds": [item.value for item in bundled.runtime_kinds],
+                    },
+                )
+            )
+
+        if not mounted_names:
+            warnings.append("profile_first_empty_fallback_to_static_toolset")
+            for tool_name in self._resolve_fallback_toolset_from_pack(pack, binding.worker_type):
+                bundled = tool_by_name.get(tool_name)
+                if bundled is None:
+                    continue
+                if not profile_allows(self._coerce_tool_profile(bundled.tool_profile), context_profile):
+                    continue
+                if bundled.availability not in {
+                    BuiltinToolAvailabilityStatus.AVAILABLE,
+                    BuiltinToolAvailabilityStatus.DEGRADED,
+                }:
+                    continue
+                mounted_names.append(tool_name)
+                mounted_tools.append(
+                    ToolAvailabilityExplanation(
+                        tool_name=tool_name,
+                        status=(
+                            "degraded"
+                            if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
+                            else "mounted"
+                        ),
+                        source_kind="fallback_toolset",
+                        tool_group=bundled.tool_group,
+                        tool_profile=bundled.tool_profile,
+                        reason_code=bundled.availability_reason,
+                        summary=bundled.description or bundled.label or tool_name,
+                        recommended_action=bundled.install_hint,
+                        metadata={
+                            "entrypoints": list(bundled.entrypoints),
+                            "runtime_kinds": [item.value for item in bundled.runtime_kinds],
+                        },
+                    )
+                )
+
+        discovery_request = request.model_copy(
+            update={
+                "limit": max(6, min(12, request.limit)),
+                "worker_type": binding.worker_type,
+                "tool_profile": context_profile.value,
+                "tool_groups": [],
+            }
+        )
+        discovery = await self._tool_index.select_tools(discovery_request)
+        discovery_entrypoints = self._dedupe_preserve_order(
+            [
+                tool_name
+                for tool_name in mounted_names
+                if tool_name in self._profile_first_discovery_tool_names()
+            ]
+            + [
+                hit.tool_name
+                for hit in discovery.hits
+                if hit.tool_name in mounted_names
+            ]
+        )
+
+        return DynamicToolSelection(
+            selection_id=str(ULID()),
+            query=request,
+            selected_tools=mounted_names,
+            hits=discovery.hits,
+            backend=self._tool_index.backend_name,
+            is_fallback="profile_first_empty_fallback_to_static_toolset" in warnings,
+            warnings=self._dedupe_preserve_order(warnings),
+            resolution_mode="profile_first_core",
+            effective_tool_universe=EffectiveToolUniverse(
+                profile_id=binding.profile_id,
+                profile_revision=binding.profile_revision,
+                worker_type=binding.worker_type.value,
+                tool_profile=context_profile.value,
+                resolution_mode="profile_first_core",
+                selected_tools=mounted_names,
+                discovery_entrypoints=discovery_entrypoints,
+                warnings=self._dedupe_preserve_order(warnings),
+            ),
+            mounted_tools=mounted_tools,
+            blocked_tools=blocked_tools,
         )
 
     async def render_bootstrap_context(
@@ -2333,6 +2607,84 @@ class CapabilityPackService:
                 metadata={"worker_type": "dev"},
             ),
         }
+
+    @staticmethod
+    def _worker_profile_label(worker_type: str) -> str:
+        labels = {
+            "general": "Butler Root Agent",
+            "ops": "Ops Root Agent",
+            "research": "Research Root Agent",
+            "dev": "Dev Root Agent",
+        }
+        return labels.get(worker_type, worker_type)
+
+    @staticmethod
+    def _builtin_worker_type_from_profile_id(profile_id: str) -> WorkerType | None:
+        normalized = profile_id.strip().lower()
+        if not normalized.startswith("singleton:"):
+            return None
+        try:
+            return WorkerType(normalized.split(":", 1)[1])
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _coerce_tool_profile(value: str) -> ToolProfile:
+        try:
+            return ToolProfile(value.strip().lower())
+        except Exception:
+            return ToolProfile.STANDARD
+
+    @staticmethod
+    def _dedupe_preserve_order(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            normalized = value.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
+
+    @staticmethod
+    def _profile_first_core_tool_names() -> list[str]:
+        return [
+            "project.inspect",
+            "task.inspect",
+            "artifact.list",
+            "sessions.list",
+            "session.status",
+            "workers.review",
+            "subagents.spawn",
+            "subagents.list",
+            "subagents.steer",
+            "mcp.tools.list",
+        ]
+
+    @staticmethod
+    def _profile_first_discovery_tool_names() -> set[str]:
+        return {
+            "workers.review",
+            "subagents.spawn",
+            "subagents.list",
+            "subagents.steer",
+            "mcp.tools.list",
+            "mcp.servers.list",
+            "web.search",
+        }
+
+    @classmethod
+    def _resolve_profile_first_source_kind(
+        cls,
+        binding: _ResolvedWorkerBinding,
+        tool_name: str,
+    ) -> str:
+        if tool_name in binding.selected_tools:
+            return "profile_selected"
+        if tool_name in cls._profile_first_core_tool_names():
+            return "profile_first_core"
+        return "default_tool_group"
 
     @staticmethod
     def _split_worker_objectives(objective: str) -> list[str]:

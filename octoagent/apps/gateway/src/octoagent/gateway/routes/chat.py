@@ -30,6 +30,7 @@ async def _enqueue_or_run(
     service,
     task_id: str,
     message: str,
+    dispatch_metadata: dict[str, str] | None = None,
 ) -> None:
     if not (
         hasattr(request.app.state, "llm_service")
@@ -45,6 +46,7 @@ async def _enqueue_or_run(
             task_id,
             message,
             request.app.state.llm_service,
+            dispatch_metadata=dispatch_metadata or {},
         )
     )
     _background_tasks.add(task)
@@ -62,6 +64,12 @@ async def send_chat_message(
     FR-023: 接收消息，创建/复用 Task，返回 stream_url。
     前端使用 EventSource 连接 stream_url 获取流式输出。
     """
+    chat_metadata: dict[str, str] = {}
+    requested_agent_profile_id = str(body.agent_profile_id or "").strip()
+    if requested_agent_profile_id:
+        chat_metadata["agent_profile_id"] = requested_agent_profile_id
+        chat_metadata["requested_worker_profile_id"] = requested_agent_profile_id
+
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
     after_event_id = ""
@@ -80,13 +88,20 @@ async def send_chat_message(
                 sender_id="owner",
                 sender_name="Owner",
                 text=body.message,
+                metadata=chat_metadata,
                 idempotency_key=f"chat-{task_id}",
             )
 
             created_task_id, created = await service.create_task(msg)
             if created:
                 task_id = created_task_id
-                await _enqueue_or_run(request, service, task_id, body.message)
+                await _enqueue_or_run(
+                    request,
+                    service,
+                    task_id,
+                    body.message,
+                    dispatch_metadata=chat_metadata,
+                )
         except Exception:
             # 降级: Task 创建失败时仍返回 task_id，记录日志便于排查
             logger.warning("Task 创建失败，降级返回 task_id", exc_info=True)
@@ -99,8 +114,18 @@ async def send_chat_message(
                     detail=f"Task not found: {task_id}",
                 )
             after_event_id = existing_task.pointers.latest_event_id
-            await service.append_user_message(task_id=task_id, text=body.message)
-            await _enqueue_or_run(request, service, task_id, body.message)
+            await service.append_user_message(
+                task_id=task_id,
+                text=body.message,
+                metadata=chat_metadata,
+            )
+            await _enqueue_or_run(
+                request,
+                service,
+                task_id,
+                body.message,
+                dispatch_metadata=chat_metadata,
+            )
         except HTTPException:
             raise
         except ValueError as exc:

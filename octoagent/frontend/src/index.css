@@ -2251,6 +2251,47 @@ select:focus-visible {
   color: var(--cp-muted);
 }
 
+.wb-agent-workflow-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.wb-agent-workflow-button {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 18px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  border-radius: 22px;
+  background: rgba(246, 248, 250, 0.88);
+  text-align: left;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.wb-agent-workflow-button strong {
+  color: var(--cp-ink);
+  font-size: 1rem;
+}
+
+.wb-agent-workflow-button span {
+  color: var(--cp-muted);
+}
+
+.wb-agent-workflow-button:hover,
+.wb-agent-workflow-button.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
+}
+
 .wb-agent-tablist {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2941,6 +2982,7 @@ select:focus-visible {
   .wb-card-grid-3,
   .wb-settings-layout,
   .wb-butler-summary-grid,
+  .wb-agent-workflow-nav,
   .wb-split,
   .wb-agent-rule-grid,
   .wb-agent-layout,

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .capability import BundledCapabilityPack
+from .capability import BundledCapabilityPack, ToolAvailabilityExplanation
 from .operator_inbox import OperatorInboxItem, OperatorInboxSummary
 from .pipeline import PipelineReplayFrame
 from .agent_context import WorkerProfileOriginKind, WorkerProfileStatus
@@ -252,6 +252,11 @@ class WorkerProfileDynamicContext(BaseModel):
     latest_work_status: str = Field(default="")
     latest_target_kind: str = Field(default="")
     current_selected_tools: list[str] = Field(default_factory=list)
+    current_tool_resolution_mode: str = Field(default="")
+    current_tool_warnings: list[str] = Field(default_factory=list)
+    current_mounted_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    current_blocked_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    current_discovery_entrypoints: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
 
 
@@ -498,9 +503,14 @@ class WorkProjectionItem(BaseModel):
     runtime_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
     requested_worker_profile_id: str = Field(default="")
     requested_worker_profile_version: int = Field(default=0, ge=0)
     effective_worker_snapshot_id: str = Field(default="")
+    tool_resolution_mode: str = Field(default="")
+    mounted_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    blocked_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    tool_resolution_warnings: list[str] = Field(default_factory=list)
     child_work_ids: list[str] = Field(default_factory=list)
     child_work_count: int = Field(default=0, ge=0)
     merge_ready: bool = False

@@ -803,11 +803,18 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "让 Butler 管全局，把 Worker 留给具体工作" })
+      await screen.findByRole("heading", { name: "Butler 与 Worker" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存 Butler 配置" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Butler 设置/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Worker 模板/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /运行中的 Worker/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建 Worker 模板" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /Butler 设置/ }));
+    expect(await screen.findByRole("button", { name: "保存 Butler 配置" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /运行中的 Worker/ }));
+    expect(await screen.findByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
   });
 
   it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
@@ -1145,6 +1152,10 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    expect(
+      await screen.findByRole("heading", { name: "Butler 与 Worker" })
+    ).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("tab", { name: /Butler 设置/ }));
     const nameInput = (await screen.findByLabelText("Butler 名称")) as HTMLInputElement;
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "新的 Butler");
@@ -1378,6 +1389,10 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    expect(
+      await screen.findByRole("heading", { name: "Butler 与 Worker" })
+    ).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("tab", { name: /Butler 设置/ }));
     expect(await screen.findByText("记忆召回预设")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保守召回" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "广覆盖" })).toBeInTheDocument();

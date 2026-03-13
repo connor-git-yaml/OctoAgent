@@ -4,8 +4,11 @@ import { fetchTaskDetail } from "../api/client";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import { useChatStream } from "../hooks/useChatStream";
-import type { SessionProjectionDocument, TaskDetailResponse } from "../types";
-import { formatDateTime } from "../workbench/utils";
+import type {
+  SessionProjectionDocument,
+  TaskDetailResponse,
+} from "../types";
+import { formatWorkerTemplateName } from "../workbench/utils";
 
 function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void {
   if (!taskId || taskIds.includes(taskId)) {
@@ -41,9 +44,16 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
   return taskIds;
 }
 
+function readSummaryString(summary: Record<string, unknown>, key: string): string {
+  const value = summary[key];
+  return typeof value === "string" ? value : "";
+}
+
 export default function ChatWorkbench() {
   const { snapshot, refreshResources } = useWorkbench();
   const sessions = snapshot!.resources.sessions.sessions;
+  const workerProfilesDocument = snapshot!.resources.worker_profiles;
+  const workerProfiles = workerProfilesDocument?.profiles ?? [];
   const restoreTaskIds = resolveRestorableTaskIds(snapshot!.resources.sessions);
   const { messages, sendMessage, streaming, restoring, error, taskId } = useChatStream(
     restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
@@ -67,6 +77,50 @@ export default function ChatWorkbench() {
       : null);
   const isRestoringConversation = restoring && messages.length === 0;
   const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
+  const defaultRootAgentId = readSummaryString(
+    workerProfilesDocument?.summary ?? {},
+    "default_profile_id"
+  );
+  const defaultRootAgent = workerProfiles.find(
+    (profile) => profile.profile_id === defaultRootAgentId
+  );
+  const activeAgentProfileId =
+    activeWork?.requested_worker_profile_id ||
+    activeWork?.agent_profile_id ||
+    activeContextFrame?.agent_profile_id ||
+    defaultRootAgent?.profile_id ||
+    "";
+  const activeRootAgent =
+    workerProfiles.find((profile) => profile.profile_id === activeAgentProfileId) ??
+    defaultRootAgent ??
+    null;
+  const activeWorkerTemplateName = activeRootAgent
+    ? formatWorkerTemplateName(
+        activeRootAgent.name,
+        activeRootAgent.static_config?.base_archetype ?? null
+      )
+    : "";
+  const defaultWorkerTemplateName = defaultRootAgent
+    ? formatWorkerTemplateName(
+        defaultRootAgent.name,
+        defaultRootAgent.static_config?.base_archetype ?? null
+      )
+    : "";
+  const activeToolResolutionMode =
+    activeWork?.tool_resolution_mode ||
+    activeRootAgent?.dynamic_context.current_tool_resolution_mode ||
+    "";
+  const activeMountedTools = activeWork?.mounted_tools ?? activeRootAgent?.dynamic_context.current_mounted_tools ?? [];
+  const activeBlockedTools = activeWork?.blocked_tools ?? activeRootAgent?.dynamic_context.current_blocked_tools ?? [];
+  const activeDiscoveryEntrypoints =
+    activeRootAgent?.dynamic_context.current_discovery_entrypoints ?? [];
+  const activeRootAgentBindingSource = activeWork?.requested_worker_profile_id
+    ? "当前 Work"
+    : activeContextFrame?.agent_profile_id
+      ? "上下文帧"
+      : defaultRootAgent?.profile_id
+        ? "Project 默认"
+        : "未绑定";
   const internalRefs = [
     taskId ? { label: "任务 ID", value: taskId } : null,
     activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
@@ -130,7 +184,9 @@ export default function ChatWorkbench() {
     }
     const text = input;
     setInput("");
-    await sendMessage(text);
+    await sendMessage(text, {
+      agentProfileId: activeRootAgent?.profile_id ?? defaultRootAgent?.profile_id ?? null,
+    });
   }
 
   return (
@@ -178,6 +234,16 @@ export default function ChatWorkbench() {
                 ) : null}
               </div>
             ) : null}
+          </div>
+
+          <div className="wb-inline-banner is-muted">
+            <strong>
+              当前 Worker 模板 {activeRootAgent ? `· ${activeWorkerTemplateName}` : "· 未显式绑定"}
+            </strong>
+            <span>
+              绑定来源 {activeRootAgentBindingSource}
+              {activeToolResolutionMode ? ` / 工具分配 ${activeToolResolutionMode}` : ""}
+            </span>
           </div>
 
           {isRestoringConversation ? (
@@ -245,6 +311,32 @@ export default function ChatWorkbench() {
           <section className="wb-panel">
             <div className="wb-panel-head">
               <div>
+                <p className="wb-card-label">当前 Worker 模板</p>
+                <h3>{activeWorkerTemplateName || "还没有绑定 Worker 模板"}</h3>
+              </div>
+            </div>
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>绑定来源</strong>
+                <span>{activeRootAgentBindingSource}</span>
+              </div>
+              <div className="wb-note">
+                <strong>静态工具边界</strong>
+                <span>{activeRootAgent?.static_config.tool_profile ?? "未记录"}</span>
+              </div>
+              <div className="wb-note">
+                <strong>默认 Worker 模板</strong>
+                <span>{defaultWorkerTemplateName || "还没有默认值"}</span>
+              </div>
+              <Link className="wb-button wb-button-tertiary" to="/agents">
+                去 Agents 调整默认模板
+              </Link>
+            </div>
+          </section>
+
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
                 <p className="wb-card-label">当前任务</p>
                 <h3>{taskDetail?.task.title ?? "等待开始"}</h3>
               </div>
@@ -273,24 +365,48 @@ export default function ChatWorkbench() {
           <section className="wb-panel">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">当前工作</p>
+                <p className="wb-card-label">工具解释</p>
                 <h3>{activeWork?.title ?? "等待 work 生成"}</h3>
               </div>
             </div>
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>运行方式</strong>
-                <span>{activeSession?.runtime_kind ?? "未决"}</span>
+                <strong>挂载中的工具</strong>
+                <span>{activeMountedTools.length > 0 ? activeMountedTools.length : 0}</span>
               </div>
               <div className="wb-note">
-                <strong>子任务</strong>
-                <span>{activeWork?.child_work_count ?? 0}</span>
+                <strong>被阻塞的工具</strong>
+                <span>{activeBlockedTools.length > 0 ? activeBlockedTools.length : 0}</span>
               </div>
               <div className="wb-note">
-                <strong>最新更新时间</strong>
-                <span>{formatDateTime(activeWork?.updated_at)}</span>
+                <strong>发现入口</strong>
+                <span>
+                  {activeDiscoveryEntrypoints.length > 0
+                    ? activeDiscoveryEntrypoints.join(" / ")
+                    : "当前没有额外 discovery 入口"}
+                </span>
               </div>
             </div>
+            <div className="wb-chip-row">
+              {activeMountedTools.slice(0, 6).map((tool) => (
+                <span key={`mounted-${tool.tool_name}`} className="wb-chip">
+                  {tool.tool_name}
+                </span>
+              ))}
+              {activeMountedTools.length === 0 ? (
+                <span className="wb-inline-note">当前还没有 mounted tools 记录。</span>
+              ) : null}
+            </div>
+            {activeBlockedTools.length > 0 ? (
+              <div className="wb-note-stack">
+                {activeBlockedTools.slice(0, 3).map((tool) => (
+                  <div key={`blocked-${tool.tool_name}`} className="wb-note">
+                    <strong>{tool.tool_name}</strong>
+                    <span>{tool.summary || tool.reason_code || tool.status}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section className="wb-panel">

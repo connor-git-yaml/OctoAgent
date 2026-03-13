@@ -34,13 +34,17 @@ export interface UseChatStreamReturn {
   /** 错误信息 */
   error: string | null;
   /** 发送消息 */
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, options?: ChatSendOptions) => Promise<void>;
   /** 当前 task ID */
   taskId: string | null;
 }
 
 export interface ChatRestoreTarget {
   taskIds: string[];
+}
+
+export interface ChatSendOptions {
+  agentProfileId?: string | null;
 }
 
 const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
@@ -208,7 +212,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
 
   /** 发送消息 */
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, options?: ChatSendOptions) => {
       if (!text.trim()) return;
 
       // 添加用户消息
@@ -230,6 +234,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
           body: JSON.stringify({
             message: text,
             task_id: taskId,
+            agent_profile_id: options?.agentProfileId?.trim() || undefined,
           }),
         });
 

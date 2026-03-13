@@ -46,7 +46,9 @@ from .capability import (
     BundledSkillDefinition,
     BundledToolDefinition,
     DynamicToolSelection,
+    EffectiveToolUniverse,
     RuntimeKind,
+    ToolAvailabilityExplanation,
     ToolIndexHit,
     ToolIndexQuery,
     WorkerBootstrapFile,
@@ -350,6 +352,8 @@ __all__ = [
     "ToolIndexQuery",
     "ToolIndexHit",
     "DynamicToolSelection",
+    "EffectiveToolUniverse",
+    "ToolAvailabilityExplanation",
     # Update / Runtime
     "InstallStatus",
     "UpdateTriggerSource",

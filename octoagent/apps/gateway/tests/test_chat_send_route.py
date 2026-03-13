@@ -58,6 +58,30 @@ async def client(test_app) -> AsyncClient:
 
 
 class TestChatSendRoute:
+    async def test_send_chat_with_agent_profile_id_persists_dispatch_metadata(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "使用当前 Root Agent 继续处理",
+                "agent_profile_id": "worker-profile-chat-alpha",
+            },
+        )
+
+        assert resp.status_code == 200
+        task_id = resp.json()["task_id"]
+        await asyncio.sleep(0.6)
+
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
+        assert user_events
+        metadata = user_events[-1]["payload"]["metadata"]
+        assert metadata["agent_profile_id"] == "worker-profile-chat-alpha"
+        assert metadata["requested_worker_profile_id"] == "worker-profile-chat-alpha"
+
     async def test_continue_chat_appends_user_message_and_requeues(
         self, client: AsyncClient
     ) -> None:

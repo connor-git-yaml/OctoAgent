@@ -90,6 +90,37 @@ export function formatRelativeStatus(value?: string | null): string {
   return (value ?? "unknown").replace(/[_-]/g, " ");
 }
 
+const WORKER_TEMPLATE_FALLBACK_NAMES: Record<string, string> = {
+  general: "Butler",
+  ops: "运行保障",
+  research: "调研整理",
+  dev: "开发实现",
+};
+
+export function formatWorkerTemplateName(
+  name?: string | null,
+  baseArchetype?: string | null
+): string {
+  const normalized = (name ?? "")
+    .replace(/\s*Root Agent\s*/gi, " ")
+    .replace(/\s+Root$/i, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized) {
+    return normalized;
+  }
+  const fallback = baseArchetype ? WORKER_TEMPLATE_FALLBACK_NAMES[baseArchetype] : "";
+  return fallback || "未命名模板";
+}
+
+export function formatWorkerTemplateLabel(
+  name?: string | null,
+  baseArchetype?: string | null
+): string {
+  const templateName = formatWorkerTemplateName(name, baseArchetype);
+  return /模板$/.test(templateName) ? templateName : `${templateName} 模板`;
+}
+
 export function formatSupportStatus(status?: ControlPlaneSupportStatus): string {
   switch (status) {
     case "supported":

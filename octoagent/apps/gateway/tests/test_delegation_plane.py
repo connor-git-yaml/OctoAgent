@@ -5,12 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from octoagent.core.models import (
+    AgentProfileScope,
     ContextFrame,
     NormalizedMessage,
     OrchestratorRequest,
     Project,
     ProjectSelectorState,
     SessionContextState,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileStatus,
     Workspace,
     WorkStatus,
 )
@@ -175,6 +179,62 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     assert (
         plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
     )
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_universe(
+    tmp_path: Path,
+) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    profile = WorkerProfile(
+        profile_id="worker-profile-weather-alpha",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-default",
+        name="Weather Root Agent",
+        summary="专门处理需要联网查询的实时信息。",
+        base_archetype="research",
+        model_alias="main",
+        tool_profile="standard",
+        default_tool_groups=["network", "browser", "project"],
+        selected_tools=["web.search"],
+        runtime_kinds=["worker", "subagent"],
+        policy_refs=["default"],
+        tags=["realtime", "web"],
+        status=WorkerProfileStatus.ACTIVE,
+        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        draft_revision=1,
+        active_revision=1,
+    )
+    await store_group.agent_context_store.save_worker_profile(profile)
+    await store_group.conn.commit()
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="帮我查一下深圳今天的天气",
+            thread_id="thread-weather",
+            idempotency_key="delegation-profile-first-weather",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="帮我查一下深圳今天的天气",
+            worker_capability="llm_generation",
+            metadata={"agent_profile_id": profile.profile_id},
+        )
+    )
+
+    assert plan.work.agent_profile_id == profile.profile_id
+    assert plan.work.requested_worker_profile_id == profile.profile_id
+    assert plan.work.selected_worker_type.value == "research"
+    assert plan.tool_selection.resolution_mode == "profile_first_core"
+    assert plan.tool_selection.effective_tool_universe is not None
+    assert plan.tool_selection.effective_tool_universe.profile_id == profile.profile_id
+    assert "web.search" in plan.tool_selection.selected_tools
+    assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.metadata["requested_worker_profile_id"] == profile.profile_id
 
     await store_group.conn.close()
 

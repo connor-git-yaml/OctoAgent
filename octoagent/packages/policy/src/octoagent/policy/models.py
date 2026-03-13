@@ -460,6 +460,10 @@ class ChatSendRequest(BaseModel):
         default=None,
         description="关联的 Task ID（续对话时传入，新对话为 null）",
     )
+    agent_profile_id: str | None = Field(
+        default=None,
+        description="可选的当前 Agent / Root Agent profile ID",
+    )
 
 
 class ChatSendResponse(BaseModel):

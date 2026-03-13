@@ -96,12 +96,14 @@ class DelegationPlaneService:
 
     async def prepare_dispatch(self, request: OrchestratorRequest) -> DelegationPlan:
         project, workspace = await self._resolve_project_context(request)
-        agent_profile_id, context_frame_id = await self._resolve_task_context_refs(
+        inherited_agent_profile_id, context_frame_id = await self._resolve_task_context_refs(
             request.task_id
         )
         task = await self._stores.task_store.get_task(request.task_id)
         if task is None:
             raise RuntimeError(f"task not found for delegation: {request.task_id}")
+        explicit_agent_profile_id = str(request.metadata.get("agent_profile_id", "")).strip()
+        agent_profile_id = explicit_agent_profile_id or inherited_agent_profile_id
         requested_target_kind = str(request.metadata.get("target_kind", "")).strip()
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
@@ -109,6 +111,8 @@ class DelegationPlaneService:
         requested_worker_profile_id = str(
             request.metadata.get("requested_worker_profile_id", "")
         ).strip()
+        if not requested_worker_profile_id:
+            requested_worker_profile_id = agent_profile_id
         try:
             requested_worker_profile_version = int(
                 str(request.metadata.get("requested_worker_profile_version", "0") or "0")
@@ -129,6 +133,7 @@ class DelegationPlaneService:
                 request.worker_capability,
                 requested_target_kind,
                 explicit_worker_type=requested_worker_type is not None,
+                requested_worker_profile_id=requested_worker_profile_id,
             )
             if requested_worker_type is not None or requested_target_kind
             else ""
@@ -258,6 +263,25 @@ class DelegationPlaneService:
                 "route_reason": str(pipeline_run.state_snapshot.get("route_reason", "")),
                 "tool_selection_id": selection.selection_id,
                 "selected_tools": selection.selected_tools,
+                "requested_worker_profile_id": (
+                    selection.effective_tool_universe.profile_id
+                    if selection.effective_tool_universe is not None
+                    else requested_worker_profile_id
+                ),
+                "requested_worker_profile_version": (
+                    selection.effective_tool_universe.profile_revision
+                    if selection.effective_tool_universe is not None
+                    else requested_worker_profile_version
+                ),
+                "effective_worker_snapshot_id": (
+                    self._worker_snapshot_id(
+                        selection.effective_tool_universe.profile_id,
+                        selection.effective_tool_universe.profile_revision,
+                    )
+                    if selection.effective_tool_universe is not None
+                    and selection.effective_tool_universe.profile_id
+                    else effective_worker_snapshot_id
+                ),
                 "pipeline_run_id": pipeline_run.run_id,
                 "metadata": {
                     **work.metadata,
@@ -267,6 +291,7 @@ class DelegationPlaneService:
                         [],
                     ),
                     "tool_selection": selection.model_dump(mode="json"),
+                    "tool_resolution_mode": selection.resolution_mode,
                     "pipeline_status": pipeline_run.status.value,
                     "pipeline_pause_reason": pipeline_run.pause_reason,
                     "requested_tool_profile": request.tool_profile,
@@ -815,9 +840,18 @@ class DelegationPlaneService:
         requested = str(state.get("requested_capability", "")).strip()
         metadata = state.get("metadata", {})
         requested_target = str(metadata.get("target_kind", "")).strip()
+        requested_worker_profile_id = str(
+            metadata.get("requested_worker_profile_id", "")
+            or metadata.get("agent_profile_id", "")
+            or state.get("agent_profile_id", "")
+        ).strip()
         requested_worker_type = self._coerce_worker_type(
             str(metadata.get("requested_worker_type", "")).strip()
         )
+        if requested_worker_type is None and requested_worker_profile_id:
+            requested_worker_type = await self._capability_pack.resolve_worker_type_for_profile(
+                requested_worker_profile_id
+            )
         worker_type = requested_worker_type or self._select_worker_type(
             requested,
             str(state.get("user_text", "")),
@@ -828,6 +862,7 @@ class DelegationPlaneService:
             requested,
             requested_target,
             explicit_worker_type=requested_worker_type is not None,
+            requested_worker_profile_id=requested_worker_profile_id,
         )
         return PipelineNodeOutcome(
             summary=route_reason,
@@ -857,10 +892,16 @@ class DelegationPlaneService:
 
     async def _handle_tool_index_select(self, *, run, node, state):
         worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
-        selection = await self._capability_pack.select_tools(
+        metadata = state.get("metadata", {})
+        requested_worker_profile_id = str(
+            metadata.get("requested_worker_profile_id", "")
+            or metadata.get("agent_profile_id", "")
+            or state.get("agent_profile_id", "")
+        ).strip()
+        selection = await self._capability_pack.resolve_profile_first_tools(
             ToolIndexQuery(
                 query=str(state.get("user_text", "")).strip() or "general task",
-                limit=5,
+                limit=12,
                 tool_groups=[],
                 worker_type=worker_type,
                 tool_profile=str(state.get("tool_profile", "")),
@@ -868,10 +909,14 @@ class DelegationPlaneService:
                 workspace_id=str(state.get("workspace_id", "")),
             ),
             worker_type=worker_type,
+            requested_profile_id=requested_worker_profile_id,
         )
         return PipelineNodeOutcome(
-            summary="tool index selected tools",
-            state_patch={"tool_selection": selection.model_dump(mode="json")},
+            summary="profile-first tool universe resolved",
+            state_patch={
+                "tool_selection": selection.model_dump(mode="json"),
+                "tool_resolution_mode": selection.resolution_mode,
+            },
         )
 
     async def _handle_gate_review(self, *, run, node, state):
@@ -946,10 +991,13 @@ class DelegationPlaneService:
         requested_target: str,
         *,
         explicit_worker_type: bool = False,
+        requested_worker_profile_id: str = "",
     ) -> str:
         parts = [f"worker_type={worker_type.value}"]
         if explicit_worker_type:
             parts.append("worker_type_source=explicit")
+        if requested_worker_profile_id:
+            parts.append(f"profile={requested_worker_profile_id}")
         if requested_capability:
             parts.append(f"requested_capability={requested_capability}")
         if requested_target:
@@ -957,6 +1005,11 @@ class DelegationPlaneService:
         if worker_type == WorkerType.GENERAL:
             parts.append("fallback=single_worker")
         return " | ".join(parts)
+
+    @staticmethod
+    def _worker_snapshot_id(profile_id: str, revision: int | None) -> str:
+        resolved_revision = revision or 1
+        return f"worker-snapshot:{profile_id}:{resolved_revision}"
 
     def _selection_from_run(self, run) -> DynamicToolSelection:
         raw = run.state_snapshot.get("tool_selection")

@@ -26,6 +26,7 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     Task,
+    WorkerProfileStatus,
     Workspace,
 )
 from octoagent.memory import (
@@ -826,6 +827,11 @@ class AgentContextService:
             )
             if existing is not None:
                 return existing, degraded_reasons
+            mirrored = await self._ensure_agent_profile_from_worker_profile(
+                requested_profile_id
+            )
+            if mirrored is not None:
+                return mirrored, degraded_reasons
             degraded_reasons.append("runtime_agent_profile_missing")
         return await self._ensure_agent_profile(project), degraded_reasons
 
@@ -836,6 +842,11 @@ class AgentContextService:
             )
             if existing is not None:
                 return existing
+            mirrored = await self._ensure_agent_profile_from_worker_profile(
+                project.default_agent_profile_id
+            )
+            if mirrored is not None:
+                return mirrored
 
         if project is None:
             profile_id = "agent-profile-system-default"
@@ -893,6 +904,45 @@ class AgentContextService:
                 }
             )
         )
+        return profile
+
+    async def _ensure_agent_profile_from_worker_profile(
+        self,
+        profile_id: str,
+    ) -> AgentProfile | None:
+        worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
+        if worker_profile is None or worker_profile.status == WorkerProfileStatus.ARCHIVED:
+            return None
+        profile = AgentProfile(
+            profile_id=worker_profile.profile_id,
+            scope=worker_profile.scope,
+            project_id=worker_profile.project_id,
+            name=worker_profile.name,
+            persona_summary=(
+                worker_profile.summary.strip()
+                or f"你是 Root Agent「{worker_profile.name}」，负责按既定边界处理当前目标。"
+            ),
+            instruction_overlays=[
+                "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
+                "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
+                *list(worker_profile.instruction_overlays),
+            ],
+            model_alias=worker_profile.model_alias or "main",
+            tool_profile=worker_profile.tool_profile or "standard",
+            policy_refs=list(worker_profile.policy_refs),
+            metadata={
+                "source_worker_profile_id": worker_profile.profile_id,
+                "source_worker_profile_revision": (
+                    worker_profile.active_revision or worker_profile.draft_revision or 0
+                ),
+                "base_archetype": worker_profile.base_archetype,
+                "source_kind": "worker_profile_mirror",
+            },
+            version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
+            created_at=worker_profile.created_at,
+            updated_at=worker_profile.updated_at,
+        )
+        await self._stores.agent_context_store.save_agent_profile(profile)
         return profile
 
     async def _ensure_owner_profile(self) -> OwnerProfile:

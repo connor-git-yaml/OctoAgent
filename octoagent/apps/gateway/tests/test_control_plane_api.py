@@ -14,6 +14,8 @@ from octoagent.core.models import (
     BootstrapSessionStatus,
     ContextFrame,
     DelegationTargetKind,
+    DynamicToolSelection,
+    EffectiveToolUniverse,
     NormalizedMessage,
     OrchestratorRequest,
     OwnerOverlayScope,
@@ -27,6 +29,7 @@ from octoagent.core.models import (
     SecretRefSourceType,
     SecretTargetKind,
     SessionContextState,
+    ToolAvailabilityExplanation,
     ToolIndexQuery,
     Work,
     WorkKind,
@@ -3305,6 +3308,11 @@ class TestControlPlaneApi:
         assert publish_resp.status_code == 200
         publish_payload = publish_resp.json()["result"]["data"]
         assert publish_payload["revision"] == 1
+        mirrored = await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
+            profile_id
+        )
+        assert mirrored is not None
+        assert mirrored.metadata["worker_profile_id"] == profile_id
 
         revisions_resp = await control_plane_client.get(
             f"/api/control/resources/worker-profile-revisions/{profile_id}"
@@ -3314,6 +3322,30 @@ class TestControlPlaneApi:
         assert revisions_payload["summary"]["revision_count"] == 1
         assert revisions_payload["revisions"][0]["change_summary"] == "首次发布 NAS Root Agent"
         assert revisions_payload["revisions"][0]["snapshot_payload"]["name"] == "NAS Root Agent"
+
+        bind_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.bind_default",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile_id": profile_id,
+                },
+            },
+        )
+        assert bind_resp.status_code == 200
+        project = await control_plane_app.state.store_group.project_store.get_default_project()
+        assert project is not None
+        assert project.default_agent_profile_id == profile_id
+        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        assert worker_profiles_resp.status_code == 200
+        summary = worker_profiles_resp.json()["summary"]
+        assert summary["default_profile_id"] == profile_id
 
     async def test_worker_profile_spawn_and_extract_actions(
         self,
@@ -3530,6 +3562,32 @@ class TestControlPlaneApi:
                 selected_tools=["runtime.inspect"],
                 created_at=running_ts,
                 updated_at=running_ts,
+                metadata={
+                    "tool_selection": DynamicToolSelection(
+                        selection_id="selection-running",
+                        query=ToolIndexQuery(query="巡检", limit=6),
+                        selected_tools=["runtime.inspect"],
+                        resolution_mode="profile_first_core",
+                        effective_tool_universe=EffectiveToolUniverse(
+                            profile_id=profile.profile_id,
+                            profile_revision=1,
+                            worker_type="ops",
+                            tool_profile="standard",
+                            resolution_mode="profile_first_core",
+                            selected_tools=["runtime.inspect"],
+                            discovery_entrypoints=["workers.review"],
+                        ),
+                        mounted_tools=[
+                            ToolAvailabilityExplanation(
+                                tool_name="runtime.inspect",
+                                status="mounted",
+                                source_kind="profile_selected",
+                                tool_group="runtime",
+                                tool_profile="minimal",
+                            )
+                        ],
+                    ).model_dump(mode="json")
+                },
             )
         )
         await store_group.work_store.save_work(
@@ -3550,6 +3608,44 @@ class TestControlPlaneApi:
                 created_at=failed_ts,
                 updated_at=failed_ts,
                 completed_at=failed_ts,
+                metadata={
+                    "tool_selection": DynamicToolSelection(
+                        selection_id="selection-failed",
+                        query=ToolIndexQuery(query="巡检", limit=6),
+                        selected_tools=["runtime.inspect", "workers.review"],
+                        warnings=["profile_first_tool_unavailable"],
+                        resolution_mode="profile_first_core",
+                        effective_tool_universe=EffectiveToolUniverse(
+                            profile_id=profile.profile_id,
+                            profile_revision=1,
+                            worker_type="ops",
+                            tool_profile="standard",
+                            resolution_mode="profile_first_core",
+                            selected_tools=["runtime.inspect", "workers.review"],
+                            discovery_entrypoints=["workers.review", "mcp.tools.list"],
+                            warnings=["profile_first_tool_unavailable"],
+                        ),
+                        mounted_tools=[
+                            ToolAvailabilityExplanation(
+                                tool_name="runtime.inspect",
+                                status="mounted",
+                                source_kind="profile_selected",
+                                tool_group="runtime",
+                                tool_profile="minimal",
+                            )
+                        ],
+                        blocked_tools=[
+                            ToolAvailabilityExplanation(
+                                tool_name="subagents.spawn",
+                                status="unavailable",
+                                source_kind="profile_first_core",
+                                tool_group="delegation",
+                                tool_profile="standard",
+                                reason_code="task_runner_unbound",
+                            )
+                        ],
+                    ).model_dump(mode="json")
+                },
             )
         )
         await store_group.conn.commit()
@@ -3571,3 +3667,11 @@ class TestControlPlaneApi:
         assert target["dynamic_context"]["attention_work_count"] == 1
         assert target["dynamic_context"]["latest_work_id"] == "work-root-failed"
         assert target["dynamic_context"]["latest_work_status"] == "failed"
+        assert target["dynamic_context"]["current_tool_resolution_mode"] == "profile_first_core"
+        assert target["dynamic_context"]["current_blocked_tools"][0]["tool_name"] == (
+            "subagents.spawn"
+        )
+        assert target["dynamic_context"]["current_discovery_entrypoints"] == [
+            "workers.review",
+            "mcp.tools.list",
+        ]

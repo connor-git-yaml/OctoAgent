@@ -341,6 +341,22 @@ class LLMService:
 
     @staticmethod
     def _parse_selected_tools(metadata: dict[str, Any]) -> list[str]:
+        tool_selection = metadata.get("tool_selection")
+        if isinstance(tool_selection, dict):
+            mounted_tools = tool_selection.get("mounted_tools")
+            if isinstance(mounted_tools, list):
+                normalized = [str(item).strip() for item in mounted_tools if str(item).strip()]
+                if normalized:
+                    return normalized
+            effective_tool_universe = tool_selection.get("effective_tool_universe")
+            if isinstance(effective_tool_universe, dict):
+                selected_tools = effective_tool_universe.get("selected_tools")
+                if isinstance(selected_tools, list):
+                    normalized = [
+                        str(item).strip() for item in selected_tools if str(item).strip()
+                    ]
+                    if normalized:
+                        return normalized
         raw = metadata.get("selected_tools_json", "[]")
         if isinstance(raw, list):
             return [str(item).strip() for item in raw if str(item).strip()]

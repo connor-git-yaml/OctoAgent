@@ -16,9 +16,13 @@ import type {
   WorkProjectionItem,
   WorkspaceOption,
 } from "../types";
-import { formatDateTime } from "../workbench/utils";
+import {
+  formatDateTime,
+  formatWorkerTemplateName,
+} from "../workbench/utils";
 
 type WorkerCatalogView = "instances" | "templates";
+type AgentWorkspaceView = "butler" | "templates" | "workers";
 type WorkUnitKind = "instance" | "template";
 type WorkAgentStatus = "active" | "syncing" | "attention" | "paused" | "draft";
 type WorkAgentSource = "runtime" | "capability" | "manual";
@@ -175,7 +179,7 @@ const SCOPE_OPTIONS = [
   {
     value: "project",
     label: "项目级默认",
-    description: "同一个 Project 下默认沿用这套主 Agent 设置。",
+    description: "同一个项目下默认沿用这套 Butler 设置。",
   },
   {
     value: "workspace",
@@ -284,11 +288,32 @@ const CATALOG_COPY = {
     description: "这里看现在谁在工作、谁卡住了、谁适合合并或拆分。",
   },
   templates: {
-    label: "Worker 模板",
-    title: "模板决定以后新建 Worker 时的起点",
-    description: "模板不会直接改动当前运行中的实例，只影响以后怎么创建。",
+    label: "实例草案",
+    title: "把当前实例沉淀成新的默认做法",
+    description: "这里只有从实例复制出来的草案。要发布长期默认模板，请回到上面的 Worker 模板。",
   },
 } as const;
+
+const AGENT_WORKSPACE_COPY: Record<
+  AgentWorkspaceView,
+  { label: string; title: string; description: string }
+> = {
+  butler: {
+    label: "Butler 设置",
+    title: "先把默认行为定稳",
+    description: "名称、默认位置、审批和记忆边界都在这里。",
+  },
+  templates: {
+    label: "Worker 模板",
+    title: "再选谁适合处理这类任务",
+    description: "维护可复用模板，发布版本，并设为聊天默认。",
+  },
+  workers: {
+    label: "运行中的 Worker",
+    title: "最后看现在谁在做事",
+    description: "查看实例、拆分合并，并处理当前运行中的工作。",
+  },
+};
 
 const DEFAULT_PERSONA =
   "你是我的 Butler，也是长期协作的 Agent 管家。你要持续维护目标、上下文和节奏，先梳理事实与下一步，再安排合适的 Worker；遇到高风险、不可逆或越权动作时，先停下来向我确认。";
@@ -715,7 +740,7 @@ function formatWorkerProfileStatus(status: string): string {
 function formatWorkerProfileOrigin(originKind: string): string {
   switch (originKind) {
     case "builtin":
-      return "Starter Template";
+      return "系统内置";
     case "custom":
       return "自定义";
     case "cloned":
@@ -1127,6 +1152,8 @@ export default function AgentCenter() {
   const [editorMode, setEditorMode] = useState<"edit" | "create">(
     initialSelection ? "edit" : "create"
   );
+  const [activeWorkspaceView, setActiveWorkspaceView] =
+    useState<AgentWorkspaceView>("templates");
   const [activeCatalog, setActiveCatalog] = useState<WorkerCatalogView>(
     initialSelection?.kind === "template" ? "templates" : "instances"
   );
@@ -1138,7 +1165,7 @@ export default function AgentCenter() {
   const [contextWorkspaceId, setContextWorkspaceId] = useState(selector.current_workspace_id);
   const [searchQuery, setSearchQuery] = useState("");
   const [flashMessage, setFlashMessage] = useState(
-    "先把 Butler 的身份、边界和默认落点定稳，再把具体任务交给合适的 Worker。"
+    "先确认默认配置，再从右侧启动任务或查看当前运行状态。"
   );
   const [selectedRootAgentId, setSelectedRootAgentId] = useState(
     rootAgentProfiles[0]?.profile_id ?? ""
@@ -1442,6 +1469,24 @@ export default function AgentCenter() {
   const selectedRootAgentEditable = selectedRootAgentProfile?.editable ?? true;
   const selectedRootAgentIsBuiltin = selectedRootAgentProfile?.origin_kind === "builtin";
   const selectedRootAgentDisplayStatus = selectedRootAgentProfile?.status ?? "draft";
+  const rootAgentSummary = toRecord(rootAgentProfilesDocument.summary);
+  const defaultRootAgentId = readNestedString(rootAgentSummary, ["default_profile_id"]);
+  const defaultRootAgentName = formatWorkerTemplateName(
+    readNestedString(rootAgentSummary, ["default_profile_name"])
+  );
+  const selectedRootAgentDisplayName = formatWorkerTemplateName(
+    selectedRootAgentProfile?.name ?? rootAgentDraft.name,
+    selectedRootAgentProfile?.static_config.base_archetype ?? rootAgentDraft.baseArchetype
+  );
+  const selectedRootAgentIsDefault =
+    Boolean(selectedRootAgentProfile?.profile_id) &&
+    selectedRootAgentProfile?.profile_id === defaultRootAgentId;
+  const selectedRootAgentMountedTools =
+    selectedRootAgentDynamicContext?.current_mounted_tools ?? [];
+  const selectedRootAgentBlockedTools =
+    selectedRootAgentDynamicContext?.current_blocked_tools ?? [];
+  const selectedRootAgentDiscoveryEntrypoints =
+    selectedRootAgentDynamicContext?.current_discovery_entrypoints ?? [];
 
   function updatePrimary<Key extends keyof PrimaryAgentDraft>(
     key: Key,
@@ -1591,6 +1636,13 @@ export default function AgentCenter() {
     });
   }
 
+  function openWorkspaceView(view: AgentWorkspaceView) {
+    setActiveWorkspaceView(view);
+    if (view === "workers" && activeCatalog !== "instances") {
+      openCatalog("instances");
+    }
+  }
+
   function openCatalog(nextCatalog: WorkerCatalogView) {
     const nextKind = nextCatalog === "instances" ? "instance" : "template";
     setActiveCatalog(nextCatalog);
@@ -1639,6 +1691,7 @@ export default function AgentCenter() {
   }
 
   function handleCreateDraft(kind: WorkUnitKind) {
+    setActiveWorkspaceView(kind === "instance" ? "workers" : "templates");
     setActiveCatalog(kind === "instance" ? "instances" : "templates");
     setEditorMode("create");
     setSelectedWorkAgentId("");
@@ -1647,7 +1700,7 @@ export default function AgentCenter() {
     setFlashMessage(
       kind === "instance"
         ? "先说明这个 Worker 实例要负责什么，再决定它落在哪个 Project 和 Workspace。"
-        : "模板只定义以后新建时的默认做法，不会直接影响已经在运行的实例。"
+        : "草案只用来沉淀新的默认做法，不会直接影响已经在运行的实例。"
     );
   }
 
@@ -1679,8 +1732,8 @@ export default function AgentCenter() {
         createdAgent.kind === "instance"
           ? `已创建实例草案「${createdAgent.name}」。`
           : isForkingSystemTemplate
-            ? `已基于系统模板另存一份自定义模板「${createdAgent.name}」。`
-            : `已创建模板「${createdAgent.name}」。`
+            ? `已基于系统模板另存一份实例草案「${createdAgent.name}」。`
+            : `已创建实例草案「${createdAgent.name}」。`
       );
       return;
     }
@@ -1693,14 +1746,14 @@ export default function AgentCenter() {
     setFlashMessage(
       nextAgent.kind === "instance"
         ? `已更新实例「${nextAgent.name}」。`
-        : `已更新模板「${nextAgent.name}」。`
+        : `已更新实例草案「${nextAgent.name}」。`
     );
   }
 
   function handleResetWorkAgent() {
     if (editorMode === "create") {
       setWorkDraft(buildEmptyWorkDraft(primaryDraft, workDraft.kind));
-      setFlashMessage(workDraft.kind === "instance" ? "已重置实例草案。" : "已重置模板草案。");
+      setFlashMessage(workDraft.kind === "instance" ? "已重置实例草案。" : "已重置草案内容。");
       return;
     }
     if (!selectedWorkAgent) {
@@ -1710,7 +1763,7 @@ export default function AgentCenter() {
     setFlashMessage(
       selectedWorkAgent.kind === "instance"
         ? `已撤回实例「${selectedWorkAgent.name}」的未保存改动。`
-        : `已撤回模板「${selectedWorkAgent.name}」的未保存改动。`
+        : `已撤回草案「${selectedWorkAgent.name}」的未保存改动。`
     );
   }
 
@@ -1759,6 +1812,7 @@ export default function AgentCenter() {
       ...current.filter((agent) => !selectedWorkAgentIds.includes(agent.id)),
     ]);
     setActiveCatalog("instances");
+    setActiveWorkspaceView("workers");
     setSelectedWorkAgentId(mergedAgent.id);
     setSelectedWorkAgentIds([mergedAgent.id]);
     setEditorMode("edit");
@@ -1808,6 +1862,7 @@ export default function AgentCenter() {
       ...current.filter((agent) => agent.id !== selectedWorkAgent.id),
     ]);
     setActiveCatalog("instances");
+    setActiveWorkspaceView("workers");
     setSelectedWorkAgentId(leftAgent.id);
     setSelectedWorkAgentIds([leftAgent.id, rightAgent.id]);
     setEditorMode("edit");
@@ -1819,24 +1874,26 @@ export default function AgentCenter() {
     if (!selectedWorkAgent || selectedWorkAgent.kind !== "instance") {
       return;
     }
+    setActiveWorkspaceView("workers");
     setActiveCatalog("templates");
     setEditorMode("create");
     setSelectedWorkAgentId("");
     setSelectedWorkAgentIds([]);
     setWorkDraft(forkTemplateFromAgent(selectedWorkAgent));
-    setFlashMessage("已把当前实例复制成模板草案。清理掉只属于当前运行态的内容后再保存。");
+    setFlashMessage("已把当前实例复制成草案。清理掉只属于当前运行态的内容后再保存。");
   }
 
   function handleCreateInstanceFromTemplate() {
     if (!selectedWorkAgent || selectedWorkAgent.kind !== "template") {
       return;
     }
+    setActiveWorkspaceView("workers");
     setActiveCatalog("instances");
     setEditorMode("create");
     setSelectedWorkAgentId("");
     setSelectedWorkAgentIds([]);
     setWorkDraft(createInstanceFromTemplate(selectedWorkAgent));
-    setFlashMessage("已按当前模板生成一个新的 Worker 实例草案。");
+    setFlashMessage("已按当前草案生成一个新的 Worker 实例草案。");
   }
 
   async function handleSwitchProjectContext() {
@@ -1878,7 +1935,12 @@ export default function AgentCenter() {
         setContextProjectId(projectId);
         setContextWorkspaceId(workspaceId);
       });
-      setFlashMessage(`当前视角已切到 Root Agent「${profile.name}」所在上下文。`);
+      setFlashMessage(
+        `当前视角已切到模板「${formatWorkerTemplateName(
+          profile.name,
+          profile.static_config.base_archetype
+        )}」所在上下文。`
+      );
     }
   }
 
@@ -1946,10 +2008,11 @@ export default function AgentCenter() {
           ? current.tagsText
           : joinStudioList(archetype.capabilities),
     }));
-    setFlashMessage(`已套用 ${formatWorkerType(rootAgentDraft.baseArchetype)} archetype 的默认配置。`);
+    setFlashMessage(`已套用 ${formatWorkerType(rootAgentDraft.baseArchetype)} 模板的默认配置。`);
   }
 
   async function handleCreateRootAgentDraftFromTemplate(profile: WorkerProfileItem) {
+    setActiveWorkspaceView("templates");
     const name =
       profile.origin_kind === "builtin" ? `${profile.name} Copy` : `${profile.name} 副本`;
     const result = await submitAction("worker_profile.clone", {
@@ -1966,7 +2029,12 @@ export default function AgentCenter() {
       if (nextDraft) {
         setRootAgentDraft(nextDraft);
       }
-      setFlashMessage(`已基于「${profile.name}」创建新的 Root Agent 草稿。`);
+      setFlashMessage(
+        `已基于「${formatWorkerTemplateName(
+          profile.name,
+          profile.static_config.base_archetype
+        )}」创建新的 Worker 模板草稿。`
+      );
     }
     if (payload.review && typeof payload.review === "object") {
       setRootAgentReview(payload.review as RootAgentReviewResult);
@@ -1984,8 +2052,8 @@ export default function AgentCenter() {
     setRootAgentReview(review as RootAgentReviewResult);
     setFlashMessage(
       (review as RootAgentReviewResult).ready
-        ? "Root Agent 检查通过，可以保存或发布。"
-        : "Root Agent 检查已返回，请先处理阻塞项。"
+        ? "模板检查通过，可以保存或发布。"
+        : "模板检查已返回，请先处理阻塞项。"
     );
   }
 
@@ -2015,7 +2083,7 @@ export default function AgentCenter() {
     if (review && typeof review === "object") {
       setRootAgentReview(review as RootAgentReviewResult);
     }
-    setFlashMessage(publish ? "Root Agent 已发布。" : "Root Agent 草稿已保存。");
+    setFlashMessage(publish ? "Worker 模板已发布。" : "Worker 模板草稿已保存。");
   }
 
   async function handleArchiveRootAgent() {
@@ -2026,13 +2094,30 @@ export default function AgentCenter() {
       profile_id: rootAgentDraft.profileId,
     });
     if (result) {
-      setFlashMessage("Root Agent 已归档。");
+      setFlashMessage("Worker 模板已归档。");
+    }
+  }
+
+  async function handleBindRootAgentDefault() {
+    if (!selectedRootAgentProfile) {
+      return;
+    }
+    const result = await submitAction("worker_profile.bind_default", {
+      profile_id: selectedRootAgentProfile.profile_id,
+    });
+    if (result) {
+      setFlashMessage(
+        `已把「${formatWorkerTemplateName(
+          selectedRootAgentProfile.name,
+          selectedRootAgentProfile.static_config.base_archetype
+        )}」设为当前聊天默认 Worker 模板。`
+      );
     }
   }
 
   async function handleSpawnFromRootAgent(profileId: string) {
     if (!rootAgentSpawnObjective.trim()) {
-      setFlashMessage("先给这个 Root Agent 写一个 objective，再启动。");
+      setFlashMessage("先写清楚这次要执行什么，再用模板启动。");
       return;
     }
     const result = await submitAction("worker.spawn_from_profile", {
@@ -2041,14 +2126,14 @@ export default function AgentCenter() {
     });
     if (result) {
       setRootAgentSpawnObjective("");
-      setFlashMessage("已按 Root Agent 创建新任务，稍后去 Work 或 Chat 看执行结果。");
+      setFlashMessage("已按当前模板创建新任务，稍后去 Work 或 Chat 看执行结果。");
     }
   }
 
   async function handleExtractRootAgentFromWork(work: WorkProjectionItem) {
     const result = await submitAction("worker.extract_profile_from_runtime", {
       work_id: work.work_id,
-      name: `${work.title || formatWorkerType(work.selected_worker_type)} Root Agent`,
+      name: `${work.title || formatWorkerType(work.selected_worker_type)} Worker 模板`,
     });
     const payload = result?.data ?? {};
     const nextDraft = buildRootAgentStudioDraftFromReview(payload.review, selector);
@@ -2060,7 +2145,7 @@ export default function AgentCenter() {
       if (nextDraft) {
         setRootAgentDraft(nextDraft);
       }
-      setFlashMessage("已从运行态提炼出新的 Root Agent 草稿。");
+      setFlashMessage("已从当前运行结果提炼出新的 Worker 模板草稿。");
     }
     if (payload.review && typeof payload.review === "object") {
       setRootAgentReview(payload.review as RootAgentReviewResult);
@@ -2068,12 +2153,13 @@ export default function AgentCenter() {
   }
 
   function handleCreateFreshRootAgent() {
+    setActiveWorkspaceView("templates");
     setRootAgentEditorMode("create");
     setSelectedRootAgentId("");
     setRootAgentDraft(buildRootAgentStudioDraft(null, selector));
     setRootAgentReview(null);
     setRootAgentSpawnObjective("");
-    setFlashMessage("开始一个新的 Root Agent 草稿。");
+    setFlashMessage("开始一个新的 Worker 模板草稿。");
   }
 
   function renderPolicyCard(profile: PolicyProfileItem) {
@@ -2096,11 +2182,8 @@ export default function AgentCenter() {
       <section className="wb-hero wb-hero-agent wb-butler-hero">
         <div className="wb-hero-copy">
           <p className="wb-kicker">Agents</p>
-          <h1>让 Butler 管全局，把 Worker 留给具体工作</h1>
-          <p>
-            Butler 负责理解你的目标、维护上下文连续性、安排合适的 Worker，并在关键风险点先请你确认；
-            Worker 实例只处理具体执行，模板只定义以后怎么创建。
-          </p>
+          <h1>Butler 与 Worker</h1>
+          <p>在这里配置 Butler、维护 Worker 模板，并查看当前运行中的 Worker。</p>
           <div className="wb-chip-row">
             <span className="wb-chip">当前项目 {currentProject?.name ?? selector.current_project_id}</span>
             <span className="wb-chip">当前工作区 {currentWorkspace?.name ?? selector.current_workspace_id}</span>
@@ -2118,47 +2201,44 @@ export default function AgentCenter() {
         </div>
 
         <div className="wb-hero-insights">
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">Butler</p>
-            <strong>{savedPrimary.name}</strong>
-            <span>{formatToolProfile(savedPrimary.toolProfile)}</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">运行中的 Worker</p>
-            <strong>{workInstances.length}</strong>
-            <span>活跃 {activeWorkAgents} / 待处理 {attentionWorkAgents}</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">记忆边界</p>
-            <strong>{recallPresetLabel ?? "自定义"}</strong>
-            <span>
-              Vault {primaryDraft.memoryAccessPolicy.allowVault ? "已允许" : "关闭"} / 历史
-              {primaryDraft.memoryAccessPolicy.includeHistory ? "已纳入" : "未纳入"}
-            </span>
-          </article>
-        </div>
+        <article className="wb-hero-metric">
+          <p className="wb-card-label">Butler 配置</p>
+          <strong>{savedPrimary.name}</strong>
+          <span>{formatToolProfile(savedPrimary.toolProfile)}</span>
+        </article>
+        <article className="wb-hero-metric">
+          <p className="wb-card-label">Worker 模板</p>
+          <strong>{rootAgentProfiles.length}</strong>
+          <span>默认模板 {defaultRootAgentName || "未设置"}</span>
+        </article>
+        <article className="wb-hero-metric">
+          <p className="wb-card-label">运行中的 Worker</p>
+          <strong>{workInstances.length}</strong>
+          <span>活跃 {activeWorkAgents} / 待处理 {attentionWorkAgents}</span>
+        </article>
+      </div>
       </section>
 
       <div className="wb-butler-summary-grid">
         <article className="wb-butler-summary-card is-accent">
-          <p className="wb-card-label">Butler 定位</p>
-          <strong>总控、调度、护栏都在这里</strong>
-          <span>这里定义 Butler 的身份、默认落点、审批边界和默认记忆边界。</span>
+          <p className="wb-card-label">Butler 配置</p>
+          <strong>名称、默认位置、审批和记忆边界都在这里</strong>
+          <span>改这里会影响新会话默认怎么工作，不会直接改已经在运行的任务。</span>
         </article>
         <article className="wb-butler-summary-card">
-          <p className="wb-card-label">默认落点</p>
+          <p className="wb-card-label">默认位置</p>
           <strong>{findProjectName(availableProjects, savedPrimary.projectId)}</strong>
           <span>{findWorkspaceName(availableWorkspaces, savedPrimary.workspaceId)}</span>
         </article>
         <article className="wb-butler-summary-card">
-          <p className="wb-card-label">模型与治理</p>
+          <p className="wb-card-label">模型与工具</p>
           <strong>
             {savedPrimary.modelAlias} · {formatToolProfile(savedPrimary.toolProfile)}
           </strong>
           <span>{currentPolicy?.label ?? savedPrimary.policyProfileId}</span>
         </article>
         <article className={`wb-butler-summary-card ${pendingChanges > 0 ? "is-warning" : ""}`}>
-          <p className="wb-card-label">待确认改动</p>
+          <p className="wb-card-label">待保存改动</p>
           <strong>{pendingChanges > 0 ? `${pendingChanges} 处` : "已同步"}</strong>
           <span>{primaryDirty ? "Butler 草案未保存" : "Butler 已同步到底层配置"}</span>
         </article>
@@ -2169,15 +2249,37 @@ export default function AgentCenter() {
         <span>{flashMessage}</span>
       </div>
 
+      <div className="wb-agent-workflow-nav" role="tablist" aria-label="Agents 工作流">
+        {(Object.keys(AGENT_WORKSPACE_COPY) as AgentWorkspaceView[]).map((view) => (
+          <button
+            key={view}
+            type="button"
+            role="tab"
+            aria-selected={activeWorkspaceView === view}
+            className={`wb-agent-workflow-button ${
+              activeWorkspaceView === view ? "is-active" : ""
+            }`}
+            onClick={() => openWorkspaceView(view)}
+          >
+            <strong>{AGENT_WORKSPACE_COPY[view].label}</strong>
+            <span>{AGENT_WORKSPACE_COPY[view].description}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="wb-inline-banner is-muted">
+        <strong>{AGENT_WORKSPACE_COPY[activeWorkspaceView].title}</strong>
+        <span>{AGENT_WORKSPACE_COPY[activeWorkspaceView].description}</span>
+      </div>
+
+      {activeWorkspaceView === "butler" ? (
       <div className="wb-agent-layout">
         <section className="wb-panel wb-butler-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">Butler（主 Agent）</p>
-              <h3>先定义 Butler 的身份、边界和默认落点</h3>
-              <p className="wb-panel-copy">
-                `Agents` 现在就是 Butler 的唯一入口。名称、Persona、审批强度、默认模型和工具权限都在这里统一保存。
-              </p>
+              <p className="wb-card-label">Butler</p>
+              <h3>Butler 设置</h3>
+              <p className="wb-panel-copy">这里决定 Butler 的名称、默认项目、审批方式和记忆边界。</p>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
               <button
@@ -2233,7 +2335,7 @@ export default function AgentCenter() {
             <div className="wb-detail-block">
               <span className="wb-card-label">默认模型</span>
               <strong>{primaryDraft.modelAlias}</strong>
-              <p>{MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "控制 Butler 默认思考档位。"}</p>
+              <p>{MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "控制默认思考档位。"}</p>
             </div>
             <div className="wb-detail-block">
               <span className="wb-card-label">记忆策略</span>
@@ -2295,14 +2397,12 @@ export default function AgentCenter() {
             </label>
             <label className="wb-field wb-field-span-2">
               <span>Persona（角色说明）</span>
-              <small>
-                这会决定 Butler 对外的语气、优先级和调度方式。建议强调“统筹、护栏、分派 Worker”。
-              </small>
+              <small>这会影响 Butler 的语气、处理顺序和默认工作方式。</small>
               <textarea
                 rows={4}
                 className="wb-textarea-prose"
                 value={primaryDraft.personaSummary}
-                placeholder="例如：你是我的 Butler，也是负责长期协作节奏的 Agent 管家。请先梳理现状与下一步，再安排合适的 Worker。"
+                placeholder="例如：你负责先整理现状、提醒风险，再把任务交给合适的 Worker。"
                 onChange={(event) => updatePrimary("personaSummary", event.target.value)}
               />
             </label>
@@ -2350,7 +2450,7 @@ export default function AgentCenter() {
             </div>
 
             <details className="wb-agent-details">
-              <summary>展开 Butler 高级配置</summary>
+              <summary>展开高级配置</summary>
               <div className="wb-agent-option-stack">
                 <div>
                   <p className="wb-card-label">默认模型档位</p>
@@ -2386,7 +2486,7 @@ export default function AgentCenter() {
                     ))}
                   </div>
                   <p className="wb-inline-note">
-                    `standard` 适合大多数 Butler；只有明确需要更宽的工具面时再切 `privileged`。
+                    `standard` 适合大多数场景；只有明确需要更宽的工具面时再切 `privileged`。
                   </p>
                 </div>
 
@@ -2536,11 +2636,9 @@ export default function AgentCenter() {
         <section className="wb-panel wb-butler-side">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">Butler 视角</p>
-              <h3>把当前观察视角、运行提示和工作原则分开管理</h3>
-              <p className="wb-panel-copy">
-                `Agents` 负责 Butler 与 Worker；模型连接、渠道接入和平台级设置继续放在 `Settings`。
-              </p>
+              <p className="wb-card-label">当前状态</p>
+              <h3>切换查看范围并处理常见提醒</h3>
+              <p className="wb-panel-copy">这里只影响你现在看到的 Project 和 Workspace，不会改默认配置。</p>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
               <Link className="wb-button wb-button-secondary" to="/settings">
@@ -2618,22 +2716,22 @@ export default function AgentCenter() {
             <article className="wb-butler-brief-card">
               <div className="wb-butler-brief-head">
                 <div>
-                  <p className="wb-card-label">Butler 守则</p>
-                  <strong>把目标澄清、分派、护栏和收口分开做</strong>
+                  <p className="wb-card-label">使用提示</p>
+                  <strong>先说目标，再看执行细节</strong>
                 </div>
               </div>
               <div className="wb-note-stack">
                 <div className="wb-note">
-                  <strong>先澄清目标</strong>
-                  <span>Butler 先判断目标、上下文和风险，再决定要不要分派 Worker。</span>
+                  <strong>先说明结果</strong>
+                  <span>直接告诉 Butler 你要什么结果，比解释内部流程更有效。</span>
                 </div>
                 <div className="wb-note">
-                  <strong>再委派 Worker</strong>
-                  <span>Research / Dev / Ops 只负责具体执行，Butler 负责拆分、合并、删除和交接。</span>
+                  <strong>高风险会先确认</strong>
+                  <span>涉及高风险动作时，界面会先停下来让你确认。</span>
                 </div>
                 <div className="wb-note">
-                  <strong>关键动作先确认</strong>
-                  <span>高风险动作由 Butler 先拦住，再请你确认，不让具体 Worker 越过护栏。</span>
+                  <strong>执行细节去 Work 看</strong>
+                  <span>想看谁在执行、卡在哪一步，直接去 Work 页面最清楚。</span>
                 </div>
               </div>
             </article>
@@ -2692,15 +2790,17 @@ export default function AgentCenter() {
           </div>
         </section>
       </div>
+      ) : null}
 
+      {activeWorkspaceView === "templates" ? (
       <section className="wb-panel wb-root-agent-hub">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">Root Agent Profiles</p>
-            <h3>把 Root Agent 当成可治理的单例产品对象，而不是一组钉死的 Worker 枚举</h3>
+            <p className="wb-card-label">Worker 模板</p>
+            <h3>在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么</h3>
             <p className="wb-panel-copy">
-              这里直接消费 `worker_profiles` canonical resource，并把 Starter Template、Profile
-              Library、Profile Studio 和运行态 lineage 放在同一张工作台里。
+              左侧选模板，中间改默认配置，右侧看当前运行状态和最近任务。需要追内部链路时，再去
+              Advanced。
             </p>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
@@ -2709,7 +2809,7 @@ export default function AgentCenter() {
               className="wb-button wb-button-primary"
               onClick={handleCreateFreshRootAgent}
             >
-              新建 Root Agent
+              新建 Worker 模板
             </button>
             <Link className="wb-button wb-button-secondary" to="/advanced">
               去 Control Plane
@@ -2721,21 +2821,18 @@ export default function AgentCenter() {
         </div>
 
         <div className="wb-inline-banner is-muted">
-          <strong>当前按 Singleton 模式工作</strong>
+          <strong>当前按单模板模式工作</strong>
           <span>
-            Profile 和运行实例在产品体验里先按单个 Root Agent 理解，但页面会同时显示静态配置、
-            当前 Project / Workspace、运行负载与 revision，方便你决定何时另存、发布或提炼。
+            一个 Worker 模板通常对应你现在看到的默认工作方式。这里会同时展示静态配置、当前
+            Project / Workspace、运行负载和版本记录，方便你决定何时保存、发布或提炼新模板。
           </span>
         </div>
 
         <div className="wb-root-agent-summary-grid">
           <div className="wb-detail-block">
-            <span className="wb-card-label">Root Agent 数</span>
+            <span className="wb-card-label">模板总数</span>
             <strong>{rootAgentProfiles.length}</strong>
-            <p>
-              resource {rootAgentProfilesDocument.status || "pending"} / Starter{" "}
-              {builtinRootAgentProfiles.length} / 自定义 {customRootAgentProfiles.length}
-            </p>
+            <p>内置 {builtinRootAgentProfiles.length} / 自定义 {customRootAgentProfiles.length}</p>
           </div>
           <div className="wb-detail-block">
             <span className="wb-card-label">激活中的 Work</span>
@@ -2743,9 +2840,21 @@ export default function AgentCenter() {
             <p>运行中 {rootAgentRunningWorkCount} / 需关注 {rootAgentAttentionWorkCount}</p>
           </div>
           <div className="wb-detail-block">
+            <span className="wb-card-label">默认 Worker 模板</span>
+            <strong>{defaultRootAgentName || "还没有默认值"}</strong>
+            <p>{defaultRootAgentId || "发布并绑定后会显示在这里"}</p>
+          </div>
+          <div className="wb-detail-block">
             <span className="wb-card-label">当前选中</span>
-            <strong>{(selectedRootAgentProfile?.name ?? rootAgentDraft.name) || "新建草稿"}</strong>
-            <p>{selectedRootAgentProfile?.profile_id ?? "尚未保存 profile_id"}</p>
+            <strong>{selectedRootAgentDisplayName || "新建草稿"}</strong>
+            <p>
+              {selectedRootAgentProfile
+                ? `${formatScope(selectedRootAgentProfile.scope)} / ${findProjectName(
+                    availableProjects,
+                    selectedRootAgentProfile.project_id || selector.current_project_id
+                  )}`
+                : "还没有保存"}
+            </p>
           </div>
           <div className="wb-detail-block">
             <span className="wb-card-label">最近更新时间</span>
@@ -2762,8 +2871,8 @@ export default function AgentCenter() {
             <article className="wb-root-agent-browser-panel">
               <div className="wb-root-agent-browser-head">
                 <div>
-                  <p className="wb-card-label">Starter Templates</p>
-                  <strong>先选起点，再决定是直接复用还是另存为新的 Root Agent</strong>
+                  <p className="wb-card-label">内置模板</p>
+                  <strong>先选一个起点，再决定是否另存为自己的 Worker 模板</strong>
                 </div>
                 <span className="wb-status-pill is-ready">{builtinRootAgentProfiles.length}</span>
               </div>
@@ -2779,7 +2888,12 @@ export default function AgentCenter() {
                   >
                     <div className="wb-root-agent-library-head">
                       <div>
-                        <strong>{profile.name}</strong>
+                        <strong>
+                          {formatWorkerTemplateName(
+                            profile.name,
+                            profile.static_config.base_archetype
+                          )}
+                        </strong>
                         <span>{profile.summary || "系统 archetype 默认配置。"}</span>
                       </div>
                       <span className={`wb-status-pill is-${profile.status}`}>
@@ -2799,15 +2913,15 @@ export default function AgentCenter() {
             <article className="wb-root-agent-browser-panel">
               <div className="wb-root-agent-browser-head">
                 <div>
-                  <p className="wb-card-label">Profile Library</p>
-                  <strong>你已经保存过的 Root Agent</strong>
+                  <p className="wb-card-label">已保存模板</p>
+                  <strong>你已经保存过的 Worker 模板</strong>
                 </div>
                 <span className="wb-status-pill is-active">{customRootAgentProfiles.length}</span>
               </div>
               {customRootAgentProfiles.length === 0 ? (
                 <div className="wb-empty-state">
-                  <strong>还没有自定义 Root Agent</strong>
-                  <span>从左上角的 Starter Template 选一个，或直接点“新建 Root Agent”。</span>
+                  <strong>还没有自定义 Worker 模板</strong>
+                  <span>从左侧选一个内置模板，或直接点“新建 Worker 模板”。</span>
                 </div>
               ) : (
                 <div className="wb-root-agent-library-section">
@@ -2823,7 +2937,12 @@ export default function AgentCenter() {
                       >
                         <div className="wb-root-agent-library-head">
                           <div>
-                            <strong>{profile.name}</strong>
+                            <strong>
+                              {formatWorkerTemplateName(
+                                profile.name,
+                                profile.static_config.base_archetype
+                              )}
+                            </strong>
                             <span>{profile.summary || "当前 profile 没有额外摘要。"}</span>
                           </div>
                           <span
@@ -2839,9 +2958,9 @@ export default function AgentCenter() {
                         <div className="wb-root-agent-library-meta">
                           <span>{findProjectName(availableProjects, profile.project_id || selector.current_project_id)}</span>
                           <span>
-                            rev {profile.active_revision || 0}
+                            版本 {profile.active_revision || 0}
                             {profile.draft_revision > profile.active_revision
-                              ? ` / draft ${profile.draft_revision}`
+                              ? ` / 草稿 ${profile.draft_revision}`
                               : ""}
                           </span>
                         </div>
@@ -2851,6 +2970,9 @@ export default function AgentCenter() {
                           <span className="wb-chip">
                             {formatWorkerType(profile.static_config.base_archetype)}
                           </span>
+                          {profile.profile_id === defaultRootAgentId ? (
+                            <span className="wb-chip is-success">聊天默认</span>
+                          ) : null}
                         </div>
                       </button>
                     );
@@ -2864,16 +2986,19 @@ export default function AgentCenter() {
             <article className="wb-root-agent-studio-panel">
               <div className="wb-root-agent-card-head">
                 <div>
-                  <p className="wb-card-label">Profile Studio</p>
-                  <h3>{(selectedRootAgentProfile?.name ?? rootAgentDraft.name) || "新的 Root Agent 草稿"}</h3>
+                  <p className="wb-card-label">模板编辑</p>
+                  <h3>{selectedRootAgentDisplayName || "新的 Worker 模板草稿"}</h3>
                   <p className="wb-inline-note">
-                    静态配置决定默认行为边界；动态上下文和 runtime lineage 在右侧实时展示。
+                    这里改的是默认配置。右侧会同步显示当前运行状态、版本记录和最近任务。
                   </p>
                 </div>
                 <div className="wb-chip-row">
                   <span className={`wb-status-pill is-${selectedRootAgentDisplayStatus}`}>
                     {formatWorkerProfileStatus(selectedRootAgentDisplayStatus)}
                   </span>
+                  {selectedRootAgentIsDefault ? (
+                    <span className="wb-chip is-success">当前聊天默认</span>
+                  ) : null}
                   {rootAgentDraftDirty ? <span className="wb-chip is-warning">未保存变更</span> : null}
                   <span className="wb-chip">
                     {formatWorkerProfileOrigin(selectedRootAgentProfile?.origin_kind ?? "custom")}
@@ -2884,10 +3009,10 @@ export default function AgentCenter() {
 
               {selectedRootAgentIsBuiltin ? (
                 <div className="wb-inline-banner is-muted">
-                  <strong>当前选中的是 Starter Template</strong>
+                  <strong>当前选中的是内置模板</strong>
                   <span>
-                    你可以直接修改并保存，系统会自动生成新的自定义 Root Agent；也可以先点击“复制成新
-                    Root Agent”保留原模板不动。
+                    你可以直接修改并保存，系统会自动生成新的 Worker 模板；也可以先点击“复制成新模
+                    板”保留原模板不动。
                   </span>
                 </div>
               ) : null}
@@ -2903,7 +3028,7 @@ export default function AgentCenter() {
                   />
                 </label>
                 <label className="wb-field">
-                  <span>Scope</span>
+                  <span>作用范围</span>
                   <select
                     value={rootAgentDraft.scope}
                     onChange={(event) => updateRootAgentDraft("scope", event.target.value)}
@@ -2913,7 +3038,7 @@ export default function AgentCenter() {
                   </select>
                 </label>
                 <label className="wb-field">
-                  <span>Project</span>
+                  <span>所属项目</span>
                   <select
                     value={rootAgentDraft.projectId}
                     disabled={rootAgentDraft.scope !== "project"}
@@ -2927,7 +3052,7 @@ export default function AgentCenter() {
                   </select>
                 </label>
                 <label className="wb-field">
-                  <span>Base Archetype</span>
+                  <span>模板起点</span>
                   <select
                     value={rootAgentDraft.baseArchetype}
                     onChange={(event) => updateRootAgentDraft("baseArchetype", event.target.value)}
@@ -2940,7 +3065,7 @@ export default function AgentCenter() {
                   </select>
                 </label>
                 <label className="wb-field">
-                  <span>Model Alias</span>
+                  <span>模型别名</span>
                   <select
                     value={rootAgentDraft.modelAlias}
                     onChange={(event) => updateRootAgentDraft("modelAlias", event.target.value)}
@@ -2953,7 +3078,7 @@ export default function AgentCenter() {
                   </select>
                 </label>
                 <label className="wb-field">
-                  <span>Tool Profile</span>
+                  <span>工具边界</span>
                   <select
                     value={rootAgentDraft.toolProfile}
                     onChange={(event) => updateRootAgentDraft("toolProfile", event.target.value)}
@@ -2966,7 +3091,7 @@ export default function AgentCenter() {
                   </select>
                 </label>
                 <label className="wb-field wb-field-span-2">
-                  <span>Summary</span>
+                  <span>摘要</span>
                   <textarea
                     className="wb-textarea-prose"
                     value={rootAgentDraft.summary}
@@ -2997,7 +3122,7 @@ export default function AgentCenter() {
                   <small>pin 住 1-3 个关键工具，运行行为会稳定很多。</small>
                 </label>
                 <label className="wb-field">
-                  <span>Runtime Kinds</span>
+                  <span>运行形态</span>
                   <textarea
                     value={rootAgentDraft.runtimeKindsText}
                     onChange={(event) =>
@@ -3007,7 +3132,7 @@ export default function AgentCenter() {
                   />
                 </label>
                 <label className="wb-field">
-                  <span>Policy Refs</span>
+                  <span>策略引用</span>
                   <textarea
                     value={rootAgentDraft.policyRefsText}
                     onChange={(event) =>
@@ -3017,7 +3142,7 @@ export default function AgentCenter() {
                   />
                 </label>
                 <label className="wb-field">
-                  <span>Instruction Overlays</span>
+                  <span>补充指令</span>
                   <textarea
                     value={rootAgentDraft.instructionOverlaysText}
                     onChange={(event) =>
@@ -3100,7 +3225,7 @@ export default function AgentCenter() {
                 <div className="wb-root-agent-token-card">
                   <div className="wb-root-agent-column-head">
                     <strong>标签建议</strong>
-                    <span>标签帮助 Butler 发现和解释这个 Root Agent</span>
+                    <span>标签帮助 Butler 更快找到合适的 Worker 模板</span>
                   </div>
                   <div className="wb-chip-row">
                     {rootAgentSuggestedTags.map((tag) => (
@@ -3121,7 +3246,7 @@ export default function AgentCenter() {
                 <div className="wb-root-agent-review-panel">
                   <div className="wb-root-agent-card-head">
                     <div>
-                      <p className="wb-card-label">Review Result</p>
+                      <p className="wb-card-label">检查结果</p>
                       <strong>
                         {rootAgentReview.ready
                           ? "当前草稿可以保存或发布"
@@ -3137,7 +3262,7 @@ export default function AgentCenter() {
                             : "warning"
                       }`}
                     >
-                      {rootAgentReview.ready ? "ready" : "attention"}
+                      {rootAgentReview.ready ? "通过" : "待处理"}
                     </span>
                   </div>
                   <div className="wb-root-agent-review-grid">
@@ -3204,7 +3329,7 @@ export default function AgentCenter() {
                   onClick={() => void handleSaveRootAgentDraft(true)}
                   disabled={busyActionId === "worker_profile.apply"}
                 >
-                  {selectedRootAgentIsBuiltin ? "另存并发布" : "发布 Revision"}
+                  {selectedRootAgentIsBuiltin ? "另存并发布" : "发布版本"}
                 </button>
                 <button
                   type="button"
@@ -3216,7 +3341,20 @@ export default function AgentCenter() {
                   }
                   disabled={!selectedRootAgentProfile || busyActionId === "worker_profile.clone"}
                 >
-                  复制成新 Root Agent
+                  复制成新模板
+                </button>
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() => void handleBindRootAgentDefault()}
+                  disabled={
+                    !selectedRootAgentProfile ||
+                    selectedRootAgentIsBuiltin ||
+                    selectedRootAgentDisplayStatus !== "active" ||
+                    busyActionId === "worker_profile.bind_default"
+                  }
+                >
+                  {selectedRootAgentIsDefault ? "已是聊天默认" : "设为聊天默认"}
                 </button>
                 <button
                   type="button"
@@ -3228,7 +3366,7 @@ export default function AgentCenter() {
                   }
                   disabled={!selectedRootAgentProfile || busyActionId === "project.select"}
                 >
-                  切到这个 Root Agent 上下文
+                  切到这个模板的上下文
                 </button>
                 <button
                   type="button"
@@ -3240,7 +3378,7 @@ export default function AgentCenter() {
                     busyActionId === "worker_profile.archive"
                   }
                 >
-                  归档当前 Root Agent
+                  归档当前模板
                 </button>
               </div>
             </article>
@@ -3250,11 +3388,11 @@ export default function AgentCenter() {
             <article className="wb-root-agent-runtime-panel">
               <div className="wb-root-agent-card-head">
                 <div>
-                  <p className="wb-card-label">Dynamic Context</p>
+                  <p className="wb-card-label">当前运行状态</p>
                   <strong>
                     {selectedRootAgentProfile
-                      ? "当前运行态投影"
-                      : "先从左侧选一个 Root Agent，或直接保存当前草稿"}
+                      ? "这个模板最近是怎么工作的"
+                      : "先从左侧选一个模板，或先保存当前草稿"}
                   </strong>
                 </div>
                 <span className="wb-chip">
@@ -3265,20 +3403,30 @@ export default function AgentCenter() {
               </div>
               {selectedRootAgentProfile ? (
                 <>
-                  <div className="wb-root-agent-context-grid">
-                    <div className="wb-detail-block">
-                      <span className="wb-card-label">Active Work</span>
-                      <strong>{selectedRootAgentDynamicContext?.active_work_count ?? 0}</strong>
-                      <p>运行中 {selectedRootAgentDynamicContext?.running_work_count ?? 0}</p>
-                    </div>
-                    <div className="wb-detail-block">
-                      <span className="wb-card-label">Attention</span>
-                      <strong>{selectedRootAgentDynamicContext?.attention_work_count ?? 0}</strong>
-                      <p>Target {selectedRootAgentDynamicContext?.latest_target_kind || "-"}</p>
+                    <div className="wb-root-agent-context-grid">
+                      <div className="wb-detail-block">
+                        <span className="wb-card-label">活跃任务</span>
+                        <strong>{selectedRootAgentDynamicContext?.active_work_count ?? 0}</strong>
+                        <p>运行中 {selectedRootAgentDynamicContext?.running_work_count ?? 0}</p>
+                      </div>
+                      <div className="wb-detail-block">
+                        <span className="wb-card-label">需要处理</span>
+                        <strong>{selectedRootAgentDynamicContext?.attention_work_count ?? 0}</strong>
+                        <p>Target {selectedRootAgentDynamicContext?.latest_target_kind || "-"}</p>
+                      </div>
+                      <div className="wb-detail-block">
+                        <span className="wb-card-label">工具分配</span>
+                        <strong>
+                          {selectedRootAgentDynamicContext?.current_tool_resolution_mode || "legacy"}
+                        </strong>
+                      <p>
+                        mounted {selectedRootAgentMountedTools.length} / blocked{" "}
+                        {selectedRootAgentBlockedTools.length}
+                      </p>
                     </div>
                   </div>
                   <div className="wb-key-value-list">
-                    <span>Project / Workspace</span>
+                    <span>项目 / 工作区</span>
                     <strong>
                       {findProjectName(
                         availableProjects,
@@ -3293,20 +3441,20 @@ export default function AgentCenter() {
                           selector.current_workspace_id
                       )}
                     </strong>
-                    <span>Snapshot</span>
+                    <span>快照</span>
                     <strong>{selectedRootAgentProfile.effective_snapshot_id || "-"}</strong>
-                    <span>Latest Work</span>
+                    <span>最近任务</span>
                     <strong>
                       {selectedRootAgentDynamicContext?.latest_work_title ||
                         selectedRootAgentDynamicContext?.latest_work_id ||
                         "-"}
                     </strong>
-                    <span>Latest Task</span>
+                    <span>最近 Task</span>
                     <strong>{selectedRootAgentDynamicContext?.latest_task_id || "-"}</strong>
                   </div>
                   <div className="wb-root-agent-token-stack">
                     <div>
-                      <p className="wb-card-label">当前工具选择</p>
+                      <p className="wb-card-label">当前工具宇宙</p>
                       <div className="wb-chip-row">
                         {(selectedRootAgentDynamicContext?.current_selected_tools ?? []).length > 0 ? (
                           selectedRootAgentDynamicContext!.current_selected_tools.map((tool) => (
@@ -3319,6 +3467,46 @@ export default function AgentCenter() {
                         )}
                       </div>
                     </div>
+                    <div>
+                      <p className="wb-card-label">工具发现入口</p>
+                      <div className="wb-chip-row">
+                        {selectedRootAgentDiscoveryEntrypoints.length > 0 ? (
+                          selectedRootAgentDiscoveryEntrypoints.map((tool) => (
+                            <span key={tool} className="wb-chip">
+                              {formatToolToken(tool, toolLabelByName)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="wb-inline-note">当前没有额外入口提示。</span>
+                        )}
+                      </div>
+                    </div>
+                    {selectedRootAgentMountedTools.length > 0 ? (
+                      <div>
+                        <p className="wb-card-label">已挂载工具</p>
+                        <div className="wb-note-stack">
+                          {selectedRootAgentMountedTools.slice(0, 4).map((tool) => (
+                            <div key={`mounted-${tool.tool_name}`} className="wb-note">
+                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
+                              <span>{tool.summary || tool.source_kind}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {selectedRootAgentBlockedTools.length > 0 ? (
+                      <div>
+                        <p className="wb-card-label">当前被阻塞的工具</p>
+                        <div className="wb-note-stack">
+                          {selectedRootAgentBlockedTools.slice(0, 4).map((tool) => (
+                            <div key={`blocked-${tool.tool_name}`} className="wb-note">
+                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
+                              <span>{tool.summary || tool.reason_code || tool.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {selectedRootAgentCapabilities.length > 0 ? (
                       <div>
                         <p className="wb-card-label">控制面能力</p>
@@ -3346,7 +3534,7 @@ export default function AgentCenter() {
               ) : (
                 <div className="wb-empty-state">
                   <strong>还没有运行态视图</strong>
-                  <span>先选一个已有 Root Agent，或者保存现在的草稿，再回来观察动态上下文。</span>
+                  <span>先选一个已有模板，或者保存现在的草稿，再回来观察运行状态。</span>
                 </div>
               )}
             </article>
@@ -3354,15 +3542,15 @@ export default function AgentCenter() {
             <article className="wb-root-agent-runtime-panel">
               <div className="wb-root-agent-card-head">
                 <div>
-                  <p className="wb-card-label">Launch</p>
-                  <strong>按这个 Root Agent 生成新的执行任务</strong>
+                  <p className="wb-card-label">新建任务</p>
+                  <strong>按这个模板启动一次新的工作</strong>
                 </div>
                 <Link className="wb-button wb-button-tertiary" to="/chat">
                   去 Chat 观察执行
                 </Link>
               </div>
               <label className="wb-field">
-                <span>Objective</span>
+                <span>任务目标</span>
                 <textarea
                   className="wb-textarea-prose"
                   value={rootAgentSpawnObjective}
@@ -3381,7 +3569,7 @@ export default function AgentCenter() {
                       : undefined
                   }
                 >
-                  从这个 Root Agent 启动
+                  用这个模板启动
                 </button>
                 <Link className="wb-button wb-button-secondary" to="/work">
                   去看 Runtime Work
@@ -3392,25 +3580,25 @@ export default function AgentCenter() {
             <article className="wb-root-agent-runtime-panel">
               <div className="wb-root-agent-card-head">
                 <div>
-                  <p className="wb-card-label">Revision History</p>
-                  <strong>发布记录和 effective snapshot</strong>
+                  <p className="wb-card-label">版本记录</p>
+                  <strong>这里看每次发布后的版本和快照</strong>
                 </div>
-                <span className="wb-chip">{selectedRootAgentProfile?.profile_id || "未选中 profile"}</span>
+                <span className="wb-chip">{selectedRootAgentDisplayName || "未选中模板"}</span>
               </div>
               {rootAgentRevisionLoading ? (
                 <div className="wb-empty-state">
-                  <strong>正在加载 revisions</strong>
+                  <strong>正在加载版本记录</strong>
                   <span>稍等一下，马上就好。</span>
                 </div>
               ) : rootAgentRevisionError ? (
                 <div className="wb-inline-banner is-error">
-                  <strong>revisions 加载失败</strong>
+                  <strong>版本记录加载失败</strong>
                   <span>{rootAgentRevisionError}</span>
                 </div>
               ) : rootAgentRevisions.length === 0 ? (
                 <div className="wb-empty-state">
-                  <strong>还没有 revision</strong>
-                  <span>保存草稿后点击“发布 Revision”，这里就会出现可追踪版本。</span>
+                  <strong>还没有版本记录</strong>
+                  <span>保存草稿后点击“发布版本”，这里就会出现可追踪版本。</span>
                 </div>
               ) : (
                 <div className="wb-root-agent-revision-list">
@@ -3418,7 +3606,7 @@ export default function AgentCenter() {
                     <div key={revision.revision_id} className="wb-root-agent-runtime-item">
                       <div className="wb-root-agent-library-head">
                         <div>
-                          <strong>Revision {revision.revision}</strong>
+                          <strong>版本 {revision.revision}</strong>
                           <span>{revision.change_summary || "未填写变更摘要"}</span>
                         </div>
                         <span className="wb-chip">{revision.created_by || "system"}</span>
@@ -3436,15 +3624,15 @@ export default function AgentCenter() {
             <article className="wb-root-agent-runtime-panel">
               <div className="wb-root-agent-card-head">
                 <div>
-                  <p className="wb-card-label">Runtime Lineage</p>
-                  <strong>哪些 Work 是按这个 Root Agent 启动的</strong>
+                  <p className="wb-card-label">最近任务</p>
+                  <strong>这里显示最近哪些任务使用了这个模板</strong>
                 </div>
                 <span className="wb-chip">{selectedRootAgentWorks.length} 个 Work</span>
               </div>
               {selectedRootAgentWorks.length === 0 ? (
                 <div className="wb-empty-state">
                   <strong>当前还没有关联 Work</strong>
-                  <span>发布后从上面的 Launch 区域启动一次，这里就会显示 lineage。</span>
+                  <span>发布后从上面的“新建任务”区域启动一次，这里就会显示最近任务。</span>
                 </div>
               ) : (
                 <div className="wb-root-agent-work-list">
@@ -3458,9 +3646,14 @@ export default function AgentCenter() {
                         <span className={`wb-status-pill is-${work.status}`}>{work.status}</span>
                       </div>
                       <div className="wb-key-value-list">
-                        <span>Requested Profile</span>
-                        <strong>{work.requested_worker_profile_id || "archetype fallback"}</strong>
-                        <span>Revision / Snapshot</span>
+                        <span>Agent / Profile</span>
+                        <strong>
+                          {work.agent_profile_id || "-"} /{" "}
+                          {work.requested_worker_profile_id || "回退到 archetype"}
+                        </strong>
+                        <span>使用的模板</span>
+                        <strong>{work.requested_worker_profile_id || "回退到 archetype"}</strong>
+                        <span>版本 / 快照</span>
                         <strong>
                           {work.requested_worker_profile_version || "-"} /{" "}
                           {work.effective_worker_snapshot_id || "-"}
@@ -3469,6 +3662,8 @@ export default function AgentCenter() {
                         <strong>
                           {formatWorkerType(work.selected_worker_type)} / {work.target_kind || "-"}
                         </strong>
+                        <span>工具分配</span>
+                        <strong>{work.tool_resolution_mode || "legacy"}</strong>
                       </div>
                       <div className="wb-chip-row">
                         {work.selected_tools.length > 0 ? (
@@ -3481,6 +3676,19 @@ export default function AgentCenter() {
                           <span className="wb-inline-note">当前 work 没有 selected tools 记录。</span>
                         )}
                       </div>
+                      {work.blocked_tools && work.blocked_tools.length > 0 ? (
+                        <div className="wb-note-stack">
+                          {work.blocked_tools.slice(0, 2).map((tool) => (
+                            <div
+                              key={`lineage-blocked-${work.work_id}-${tool.tool_name}`}
+                              className="wb-note"
+                            >
+                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
+                              <span>{tool.summary || tool.reason_code || tool.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="wb-inline-actions wb-inline-actions-wrap">
                         <button
                           type="button"
@@ -3488,7 +3696,7 @@ export default function AgentCenter() {
                           onClick={() => void handleExtractRootAgentFromWork(work)}
                           disabled={busyActionId === "worker.extract_profile_from_runtime"}
                         >
-                          从这个运行态提炼新 Root Agent
+                          从这个运行结果提炼模板
                         </button>
                         <Link className="wb-button wb-button-tertiary" to="/work">
                           去 Work 看详情
@@ -3502,14 +3710,16 @@ export default function AgentCenter() {
           </aside>
         </div>
       </section>
+      ) : null}
 
+      {activeWorkspaceView === "workers" ? (
       <section className="wb-panel wb-worker-hub">
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Worker 管理</p>
-            <h3>先看实例，再维护模板</h3>
+            <h3>先看实例，再决定是否沉淀成草案</h3>
             <p className="wb-panel-copy">
-              把“谁在工作”与“以后怎么创建”拆开以后，页面会更容易维护，也更不容易误操作。
+              这里优先处理当前正在运行的 Worker。只有当某个实例值得长期复用时，再把它沉淀成草案。
             </p>
           </div>
         </div>
@@ -3541,21 +3751,21 @@ export default function AgentCenter() {
           <strong>{CATALOG_COPY[activeCatalog].title}</strong>
           <span>
             {activeCatalog === "instances"
-              ? "实例适合看当前负载、归属和合并拆分；模板适合整理以后新建时的默认做法。"
-              : "模板只会作为新建起点。要处理当前工作，请切回运行中的 Worker。"}
+              ? "实例适合看当前负载、归属和合并拆分；需要沉淀经验时，再切到实例草案。"
+              : "这里的草案来自当前实例。要发布长期默认模板，请回到上面的 Worker 模板工作台。"}
           </span>
         </div>
 
         <div className="wb-worker-toolbar">
           <label className="wb-field">
-            <span>{activeCatalog === "instances" ? "搜索实例" : "搜索模板"}</span>
+            <span>{activeCatalog === "instances" ? "搜索实例" : "搜索草案"}</span>
             <input
               type="text"
               value={searchQuery}
               placeholder={
                 activeCatalog === "instances"
                   ? "例如：开发、待处理、Primary Workspace"
-                  : "例如：调研、默认工具、handoff"
+                  : "例如：巡检、默认工具、handoff"
               }
               onChange={(event) => setSearchQuery(event.target.value)}
             />
@@ -3596,14 +3806,14 @@ export default function AgentCenter() {
                   onClick={handleCreateInstanceFromTemplate}
                   disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "template"}
                 >
-                  按当前模板新建实例
+                  按当前草案新建实例
                 </button>
                 <button
                   type="button"
                   className="wb-button wb-button-primary"
                   onClick={() => handleCreateDraft("template")}
                 >
-                  新建 Worker 模板
+                  新建实例草案
                 </button>
               </>
             )}
@@ -3617,7 +3827,7 @@ export default function AgentCenter() {
                 <strong>当前没有匹配内容</strong>
                 <span>
                   试着切换 Project 过滤，或者直接创建一个新的
-                  {activeCatalog === "instances" ? "实例" : "模板"}。
+                  {activeCatalog === "instances" ? "实例" : "草案"}。
                 </span>
               </div>
             ) : (
@@ -3642,7 +3852,7 @@ export default function AgentCenter() {
                               <span>批量选择</span>
                             </label>
                           ) : (
-                            <span className="wb-card-label">模板</span>
+                            <span className="wb-card-label">草案</span>
                           )}
                           <span className={`wb-status-pill is-${badge.tone}`}>{badge.label}</span>
                         </div>
@@ -3706,13 +3916,13 @@ export default function AgentCenter() {
                           <button
                             type="button"
                             className="wb-button wb-button-tertiary wb-button-inline"
-                            onClick={() => {
+                          onClick={() => {
                               setActiveCatalog("instances");
                               setEditorMode("create");
                               setSelectedWorkAgentId("");
                               setSelectedWorkAgentIds([]);
                               setWorkDraft(createInstanceFromTemplate(agent));
-                              setFlashMessage("已按当前模板生成一个新的 Worker 实例草案。");
+                              setFlashMessage("已按当前草案生成一个新的 Worker 实例草案。");
                             }}
                           >
                             用它新建实例
@@ -3728,11 +3938,11 @@ export default function AgentCenter() {
                               setSelectedWorkAgentIds([]);
                               setWorkDraft(forkTemplateFromAgent(agent));
                               setFlashMessage(
-                                "已把当前实例复制成模板草案。清理掉只属于当前运行态的内容后再保存。"
+                                "已把当前实例复制成草案。清理掉只属于当前运行态的内容后再保存。"
                               );
                             }}
                           >
-                            另存为模板
+                            另存为草案
                           </button>
                         )}
                       </div>
@@ -3746,32 +3956,32 @@ export default function AgentCenter() {
           <aside className="wb-worker-editor">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">{editingKind === "instance" ? "实例编辑器" : "模板编辑器"}</p>
+                <p className="wb-card-label">{editingKind === "instance" ? "实例编辑器" : "草案编辑器"}</p>
                 <h3>
                   {editingKind === "instance"
                     ? editorMode === "create"
                       ? "创建新的 Worker 实例"
                       : "调整当前 Worker 实例"
                     : editorMode === "create"
-                      ? "创建新的 Worker 模板"
-                      : "调整当前 Worker 模板"}
+                      ? "创建新的实例草案"
+                      : "调整当前实例草案"}
                 </h3>
               </div>
               <span className="wb-chip">
                 {editorMode === "create"
                   ? editingKind === "instance"
                     ? "新实例草案"
-                    : "新模板草案"
+                    : "新草案"
                   : selectedWorkAgent?.name ?? "未选择"}
               </span>
             </div>
 
             <div className="wb-inline-banner is-muted">
-              <strong>{editingKind === "instance" ? "你正在编辑实例" : "你正在编辑模板"}</strong>
+              <strong>{editingKind === "instance" ? "你正在编辑实例" : "你正在编辑草案"}</strong>
               <span>
                 {editingKind === "instance"
                   ? "实例对应当前分工。这里改的是归属、角色和默认做法，运行指标仅作参考。"
-                  : "模板只影响以后怎么新建。系统模板不会被直接覆盖，保存时会生成你的自定义模板。"}
+                  : "草案来自当前实例，用来沉淀新的默认做法。要发布长期默认模板，请回到上面的 Worker 模板。"}
               </span>
             </div>
 
@@ -3790,7 +4000,7 @@ export default function AgentCenter() {
               </div>
               <div className="wb-detail-block">
                 <span className="wb-card-label">
-                  {editingKind === "instance" ? "当前状态" : "模板用途"}
+                  {editingKind === "instance" ? "当前状态" : "草案用途"}
                 </span>
                 <strong>
                   {editingKind === "instance"
@@ -3830,7 +4040,7 @@ export default function AgentCenter() {
 
             <div className="wb-agent-form-grid">
               <label className="wb-field">
-                <span>{editingKind === "instance" ? "实例名称" : "模板名称"}</span>
+                <span>{editingKind === "instance" ? "实例名称" : "草案名称"}</span>
                 <input
                   type="text"
                   value={workDraft.name}
@@ -3877,7 +4087,7 @@ export default function AgentCenter() {
                 </select>
               </label>
               <label className="wb-field wb-field-span-2">
-                <span>{editingKind === "instance" ? "当前职责说明" : "这个模板适合什么场景"}</span>
+                <span>{editingKind === "instance" ? "当前职责说明" : "这个草案适合什么场景"}</span>
                 <textarea
                   rows={4}
                   className="wb-textarea-prose"
@@ -3993,7 +4203,7 @@ export default function AgentCenter() {
                   onClick={handleForkTemplateFromInstance}
                   disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "instance"}
                 >
-                  另存为模板
+                  另存为草案
                 </button>
               ) : (
                 <button
@@ -4002,7 +4212,7 @@ export default function AgentCenter() {
                   onClick={handleCreateInstanceFromTemplate}
                   disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "template"}
                 >
-                  按模板新建实例
+                  按草案新建实例
                 </button>
               )}
               <button
@@ -4015,13 +4225,14 @@ export default function AgentCenter() {
                     ? "保存实例草案"
                     : "保存实例调整"
                   : editorMode === "create"
-                    ? "保存模板"
-                    : "保存模板调整"}
+                    ? "保存草案"
+                    : "保存草案调整"}
               </button>
             </div>
           </aside>
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

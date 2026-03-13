@@ -48,6 +48,7 @@ import {
   describeFreshnessWorkPath,
   formatFreshnessLimitations,
 } from "../workbench/freshness";
+import { formatWorkerTemplateName } from "../workbench/utils";
 
 const EMPTY_CAPABILITY_PACK: CapabilityPackDocument = {
   contract_version: "1.0.0",
@@ -1135,6 +1136,11 @@ export default function ControlPlane() {
   const rootAgentProfilesDocument: WorkerProfilesDocument =
     worker_profiles ?? EMPTY_ROOT_AGENT_PROFILES;
   const rootAgentProfiles = rootAgentProfilesDocument.profiles ?? [];
+  const rootAgentSummary = rootAgentProfilesDocument.summary ?? {};
+  const defaultRootAgentId =
+    typeof rootAgentSummary.default_profile_id === "string"
+      ? rootAgentSummary.default_profile_id
+      : "";
   const delegationPlane: DelegationPlaneDocument =
     delegation ?? EMPTY_DELEGATION;
   const skillPipelines: SkillPipelineDocument = pipelines ?? EMPTY_PIPELINES;
@@ -1290,8 +1296,15 @@ export default function ControlPlane() {
               </span>
             </article>
             <article className="control-summary-card">
-              <p className="eyebrow">Root Agent</p>
-              <strong>{primaryRootAgentProfile?.name ?? "未接入"}</strong>
+              <p className="eyebrow">默认 Worker 模板</p>
+              <strong>
+                {primaryRootAgentProfile
+                  ? formatWorkerTemplateName(
+                      primaryRootAgentProfile.name,
+                      primaryRootAgentProfile.static_config.base_archetype
+                    )
+                  : "未接入"}
+              </strong>
               <span>
                 {primaryRootAgentProfile
                   ? `运行中 ${rootAgentRunningCount} / 需关注 ${rootAgentAttentionCount}`
@@ -1700,7 +1713,7 @@ export default function ControlPlane() {
             <article className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Canonical Root Agent Profiles</p>
+                  <p className="eyebrow">Worker 模板视图</p>
                   <h3>{rootAgentProfiles.length}</h3>
                 </div>
                 <span className={`tone-chip ${statusTone(rootAgentProfilesDocument.status)}`}>
@@ -1708,14 +1721,14 @@ export default function ControlPlane() {
                 </span>
               </div>
               <p className="muted">
-                这组数据来自 `worker_profiles` canonical resource，用于看 Root Agent 的真实静态配置与动态上下文；
-                它不等同于下方 bundled capability pack 里的 Worker archetypes。
+                这里展示 `worker_profiles` canonical resource 里的模板真相：默认配置、当前运行状态、
+                可用工具和最近任务。下方 bundled capability pack 仍然只代表系统内置 archetype。
               </p>
               {rootAgentProfiles.length === 0 ? (
                 <div className="event-item">
                   <div>
                     <strong>worker_profiles 还没有数据</strong>
-                    <p>等后端把 canonical resource 投进 snapshot 后，这里会直接显示 Root Agent lens。</p>
+                    <p>等后端把 canonical resource 投进 snapshot 后，这里会直接显示模板视图。</p>
                   </div>
                 </div>
               ) : (
@@ -1742,8 +1755,13 @@ export default function ControlPlane() {
                       >
                         <div className="wb-root-agent-card-head">
                           <div>
-                            <p className="wb-card-label">Root Agent Lens</p>
-                            <h3>{profile.name || profile.profile_id}</h3>
+                            <p className="wb-card-label">模板视图</p>
+                            <h3>
+                              {formatWorkerTemplateName(
+                                profile.name,
+                                profile.static_config.base_archetype
+                              )}
+                            </h3>
                             <p className="wb-inline-note">
                               {profile.summary || "当前 profile 没有额外 summary。"}
                             </p>
@@ -1751,6 +1769,9 @@ export default function ControlPlane() {
                           <div className="wb-chip-row">
                             <span className="wb-chip">{formatScope(profile.scope)}</span>
                             <span className="wb-chip">{formatProfileMode(profile.mode)}</span>
+                            {profile.profile_id === defaultRootAgentId ? (
+                              <span className="wb-chip is-success">聊天默认</span>
+                            ) : null}
                             <span className={`tone-chip ${tone}`}>
                               {dynamicContext.latest_work_status || "idle"}
                             </span>
@@ -1823,6 +1844,14 @@ export default function ControlPlane() {
                                 <strong>{dynamicContext.attention_work_count ?? 0}</strong>
                                 <p>Target {dynamicContext.latest_target_kind || "-"}</p>
                               </div>
+                              <div className="wb-detail-block">
+                                <span className="wb-card-label">工具分配</span>
+                                <strong>{dynamicContext.current_tool_resolution_mode || "legacy"}</strong>
+                                <p>
+                                  mounted {(dynamicContext.current_mounted_tools ?? []).length} / blocked{" "}
+                                  {(dynamicContext.current_blocked_tools ?? []).length}
+                                </p>
+                              </div>
                             </div>
                             <div className="wb-key-value-list">
                               <span>Context</span>
@@ -1836,6 +1865,10 @@ export default function ControlPlane() {
                               </strong>
                               <span>Latest Task</span>
                               <strong>{dynamicContext.latest_task_id || "-"}</strong>
+                              <span>Discovery</span>
+                              <strong>
+                                {(dynamicContext.current_discovery_entrypoints ?? []).join(", ") || "none"}
+                              </strong>
                             </div>
                             <div>
                               <p className="wb-card-label">当前选中工具</p>
@@ -1851,6 +1884,18 @@ export default function ControlPlane() {
                                 )}
                               </div>
                             </div>
+                            {(dynamicContext.current_blocked_tools ?? []).length > 0 ? (
+                              <div className="event-list">
+                                {dynamicContext.current_blocked_tools!.slice(0, 2).map((tool) => (
+                                  <div key={`${profile.profile_id}-${tool.tool_name}`} className="event-item">
+                                    <div>
+                                      <strong>{tool.tool_name}</strong>
+                                      <p>{tool.summary || tool.reason_code || tool.status}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
                           </section>
                         </div>
                         {profile.capabilities.length > 0 ? (
@@ -2014,18 +2059,28 @@ export default function ControlPlane() {
                   <span>Pipeline {work.pipeline_run_id || "-"}</span>
                   <span>Children {work.child_work_count}</span>
                   <span>Merge Ready {work.merge_ready ? "yes" : "no"}</span>
+                  <span>Agent {work.agent_profile_id || "-"}</span>
                   <span>
-                    Requested Profile {work.requested_worker_profile_id || "archetype fallback"}
+                    使用的模板 {work.requested_worker_profile_id || "回退到 archetype"}
                   </span>
                   <span>
                     Revision {work.requested_worker_profile_version || "-"} / Snapshot{" "}
                     {work.effective_worker_snapshot_id || "-"}
                   </span>
+                  <span>工具分配 {work.tool_resolution_mode || "legacy"}</span>
                 </div>
                 <p>{work.route_reason || "无 route reason"}</p>
                 <p className="muted">
-                  Selected Tools: {work.selected_tools.join(", ") || "none"}
+                  已选工具: {work.selected_tools.join(", ") || "none"}
                 </p>
+                {(work.blocked_tools?.length ?? 0) > 0 ? (
+                  <p className="muted">
+                    当前不可用工具:{" "}
+                    {work.blocked_tools
+                      ?.map((tool) => `${tool.tool_name}(${tool.reason_code || tool.status})`)
+                      .join(", ") || "none"}
+                  </p>
+                ) : null}
                 {freshnessPath ? <p className="muted">{freshnessPath}</p> : null}
                 {work.runtime_summary &&
                 Object.keys(work.runtime_summary).length > 0 ? (
@@ -2096,12 +2151,12 @@ export default function ControlPlane() {
                     onClick={() =>
                       void submitAction("worker.extract_profile_from_runtime", {
                         work_id: work.work_id,
-                        name: `${work.title || formatWorkerType(work.selected_worker_type)} Root Agent`,
+                        name: `${work.title || formatWorkerType(work.selected_worker_type)} Worker 模板`,
                       })
                     }
                     disabled={busyActionId === "worker.extract_profile_from_runtime"}
                   >
-                    提炼 Root Agent
+                    提炼模板
                   </button>
                 </div>
                 </article>

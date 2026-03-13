@@ -536,6 +536,11 @@ export interface WorkerProfileDynamicContext {
   latest_work_status: string;
   latest_target_kind: string;
   current_selected_tools: string[];
+  current_tool_resolution_mode?: string;
+  current_tool_warnings?: string[];
+  current_mounted_tools?: ToolAvailabilityExplanation[];
+  current_blocked_tools?: ToolAvailabilityExplanation[];
+  current_discovery_entrypoints?: string[];
   updated_at: string | null;
 }
 
@@ -746,6 +751,29 @@ export type BuiltinToolAvailabilityStatus =
   | "unavailable"
   | "install_required";
 
+export interface ToolAvailabilityExplanation {
+  tool_name: string;
+  status: string;
+  source_kind: string;
+  tool_group?: string;
+  tool_profile?: string;
+  reason_code?: string;
+  summary?: string;
+  recommended_action?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface EffectiveToolUniverse {
+  profile_id: string;
+  profile_revision: number;
+  worker_type: string;
+  tool_profile: string;
+  resolution_mode: string;
+  selected_tools: string[];
+  discovery_entrypoints: string[];
+  warnings: string[];
+}
+
 export interface BundledToolDefinition {
   tool_name: string;
   label: string;
@@ -828,9 +856,14 @@ export interface WorkProjectionItem {
   runtime_id: string;
   project_id: string;
   workspace_id: string;
+  agent_profile_id?: string;
   requested_worker_profile_id: string;
   requested_worker_profile_version: number;
   effective_worker_snapshot_id: string;
+  tool_resolution_mode?: string;
+  mounted_tools?: ToolAvailabilityExplanation[];
+  blocked_tools?: ToolAvailabilityExplanation[];
+  tool_resolution_warnings?: string[];
   child_work_ids: string[];
   child_work_count: number;
   merge_ready: boolean;

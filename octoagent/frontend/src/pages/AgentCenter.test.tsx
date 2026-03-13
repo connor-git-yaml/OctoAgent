@@ -250,13 +250,33 @@ function buildSnapshot() {
               latest_work_status: "running",
               latest_target_kind: "worker",
               current_selected_tools: ["runtime.inspect"],
+              current_tool_resolution_mode: "profile_first_core",
+              current_tool_warnings: [],
+              current_mounted_tools: [
+                {
+                  tool_name: "runtime.inspect",
+                  status: "mounted",
+                  source_kind: "profile_selected",
+                  summary: "读取当前运行态。",
+                },
+              ],
+              current_blocked_tools: [
+                {
+                  tool_name: "subagents.spawn",
+                  status: "unavailable",
+                  source_kind: "profile_first_core",
+                  reason_code: "task_runner_unbound",
+                  summary: "当前运行时没有绑定 task runner。",
+                },
+              ],
+              current_discovery_entrypoints: ["workers.review", "mcp.tools.list"],
               updated_at: "2026-03-12T09:10:00Z",
             },
             warnings: [],
             capabilities: [
               {
                 capability_id: "worker.spawn_from_profile",
-                label: "启动 Root Agent",
+                label: "启动 Worker 模板",
                 action_id: "worker.spawn_from_profile",
                 enabled: true,
                 support_status: "supported",
@@ -276,10 +296,10 @@ function buildSnapshot() {
             draft_revision: 1,
             effective_snapshot_id: "worker-profile:singleton:general:v1",
             editable: false,
-            summary: "系统默认 Starter Template。",
+            summary: "系统内置模板。",
             static_config: {
               base_archetype: "general",
-              summary: "系统默认 Starter Template。",
+              summary: "系统内置模板。",
               model_alias: "main",
               tool_profile: "minimal",
               default_tool_groups: ["project", "session"],
@@ -302,13 +322,21 @@ function buildSnapshot() {
               latest_work_status: "idle",
               latest_target_kind: "",
               current_selected_tools: [],
+              current_tool_resolution_mode: "legacy",
+              current_tool_warnings: [],
+              current_mounted_tools: [],
+              current_blocked_tools: [],
+              current_discovery_entrypoints: [],
               updated_at: "2026-03-12T09:00:00Z",
             },
             warnings: ["当前还没有运行中的 work。"],
             capabilities: [],
           },
         ],
-        summary: {},
+        summary: {
+          default_profile_id: "singleton:general",
+          default_profile_name: "Butler",
+        },
       },
       delegation: {
         works: [
@@ -320,16 +348,26 @@ function buildSnapshot() {
             status: "running",
             target_kind: "worker",
             selected_worker_type: "ops",
-            route_reason: "按 Root Agent NAS 管家派发",
+            route_reason: "按 Worker 模板 NAS 管家派发",
             owner_id: "owner",
             selected_tools: ["runtime.inspect"],
             pipeline_run_id: "",
             runtime_id: "runtime.ops",
             project_id: "project-default",
             workspace_id: "workspace-default",
+            agent_profile_id: "project-default:nas-guardian",
             requested_worker_profile_id: "project-default:nas-guardian",
             requested_worker_profile_version: 2,
             effective_worker_snapshot_id: "worker-profile:project-default:nas-guardian:v2",
+            tool_resolution_mode: "profile_first_core",
+            blocked_tools: [
+              {
+                tool_name: "subagents.spawn",
+                status: "unavailable",
+                source_kind: "profile_first_core",
+                summary: "当前运行时没有绑定 task runner。",
+              },
+            ],
             child_work_ids: [],
             child_work_count: 0,
             merge_ready: false,
@@ -351,7 +389,7 @@ describe("AgentCenter", () => {
     vi.clearAllMocks();
   });
 
-  it("worker_profiles 刷新时保留未保存的 Root Agent 草稿", async () => {
+  it("worker_profiles 刷新时保留未保存的 Worker 模板草稿", async () => {
     let snapshot = buildSnapshot();
     const submitAction = vi.fn();
     useWorkbenchMock.mockImplementation(() => ({
@@ -367,10 +405,14 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Root Agent Profiles")).toBeInTheDocument();
-    const summaryField = screen.getByLabelText("Summary") as HTMLTextAreaElement;
+    expect(
+      await screen.findByRole("heading", {
+        name: "在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么",
+      })
+    ).toBeInTheDocument();
+    const summaryField = screen.getByLabelText("摘要") as HTMLTextAreaElement;
     await userEvent.clear(summaryField);
-    await userEvent.type(summaryField, "新的未保存 Root Agent 摘要");
+    await userEvent.type(summaryField, "新的未保存 Worker 模板摘要");
 
     snapshot = buildSnapshot();
     snapshot.resources.worker_profiles.generated_at = "2026-03-12T09:06:00Z";
@@ -382,13 +424,13 @@ describe("AgentCenter", () => {
     );
 
     await waitFor(() => {
-      expect((screen.getByLabelText("Summary") as HTMLTextAreaElement).value).toBe(
-        "新的未保存 Root Agent 摘要"
+      expect((screen.getByLabelText("摘要") as HTMLTextAreaElement).value).toBe(
+        "新的未保存 Worker 模板摘要"
       );
     });
   });
 
-  it("支持在 Profile Studio 中检查、发布并按 Root Agent 启动任务", async () => {
+  it("支持在模板编辑中检查、发布并按 Worker 模板启动任务", async () => {
     const submitAction = vi.fn(async (actionId: string, payload: Record<string, unknown>) => {
       if (actionId === "worker_profile.review") {
         return { data: { review: buildReviewResult() } };
@@ -434,9 +476,13 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Root Agent Profiles")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", {
+        name: "在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么",
+      })
+    ).toBeInTheDocument();
     expect((await screen.findAllByText("NAS 管家")).length).toBeGreaterThan(0);
-    expect(screen.getByText("Runtime Lineage")).toBeInTheDocument();
+    expect(screen.getAllByText("最近任务").length).toBeGreaterThan(0);
 
     await waitFor(() => {
       expect(fetchWorkerProfileRevisionsMock).toHaveBeenCalledWith(
@@ -462,12 +508,12 @@ describe("AgentCenter", () => {
     });
     expect(await screen.findByText("当前草稿可以保存或发布")).toBeInTheDocument();
 
-    await userEvent.clear(screen.getByLabelText("Objective"));
+    await userEvent.clear(screen.getByLabelText("任务目标"));
     await userEvent.type(
-      screen.getByLabelText("Objective"),
+      screen.getByLabelText("任务目标"),
       "检查今晚的家庭备份是否异常，并给出处理建议。"
     );
-    await userEvent.click(screen.getByRole("button", { name: "从这个 Root Agent 启动" }));
+    await userEvent.click(screen.getByRole("button", { name: "用这个模板启动" }));
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith("worker.spawn_from_profile", {
         profile_id: "project-default:nas-guardian",
@@ -475,7 +521,7 @@ describe("AgentCenter", () => {
       });
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "发布 Revision" }));
+    await userEvent.click(screen.getByRole("button", { name: "发布版本" }));
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
         "worker_profile.apply",
@@ -487,7 +533,41 @@ describe("AgentCenter", () => {
     });
   });
 
-  it("当前选中的 Root Agent revision 变化后会自动重拉历史", async () => {
+  it("支持把已发布 Worker 模板绑定为聊天默认，并展示工具解释", async () => {
+    const submitAction = vi.fn(async (actionId: string) => {
+      if (actionId === "worker_profile.bind_default") {
+        return { data: { profile_id: "project-default:nas-guardian", bound: true } };
+      }
+      return { data: {} };
+    });
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction,
+      busyActionId: "",
+    });
+    fetchWorkerProfileRevisionsMock.mockResolvedValue({ revisions: [] });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("默认 Worker 模板")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设为聊天默认" })).toBeInTheDocument();
+    expect(screen.getByText("当前被阻塞的工具")).toBeInTheDocument();
+    expect(screen.getAllByText(/Subagents Spawn/i).length).toBeGreaterThan(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "设为聊天默认" }));
+    await waitFor(() => {
+      expect(submitAction).toHaveBeenCalledWith("worker_profile.bind_default", {
+        profile_id: "project-default:nas-guardian",
+      });
+    });
+  });
+
+  it("当前选中的 Worker 模板 revision 变化后会自动重拉历史", async () => {
     let snapshot = buildSnapshot();
     const submitAction = vi.fn();
     useWorkbenchMock.mockImplementation(() => ({
@@ -503,7 +583,11 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Root Agent Profiles")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", {
+        name: "在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么",
+      })
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(fetchWorkerProfileRevisionsMock).toHaveBeenCalledWith(
         "project-default:nas-guardian"

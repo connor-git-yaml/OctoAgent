@@ -134,6 +134,33 @@ class ToolIndexHit(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ToolAvailabilityExplanation(BaseModel):
+    """单个工具在当前运行里的可用性说明。"""
+
+    tool_name: str = Field(min_length=1)
+    status: str = Field(default="mounted")
+    source_kind: str = Field(default="profile_selected")
+    tool_group: str = Field(default="")
+    tool_profile: str = Field(default="")
+    reason_code: str = Field(default="")
+    summary: str = Field(default="")
+    recommended_action: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EffectiveToolUniverse(BaseModel):
+    """当前运行实际挂载的稳定工具宇宙。"""
+
+    profile_id: str = Field(default="")
+    profile_revision: int = Field(default=0, ge=0)
+    worker_type: str = Field(default="")
+    tool_profile: str = Field(default="")
+    resolution_mode: str = Field(default="tool_index")
+    selected_tools: list[str] = Field(default_factory=list)
+    discovery_entrypoints: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class DynamicToolSelection(BaseModel):
     """动态工具选择结果。"""
 
@@ -144,4 +171,8 @@ class DynamicToolSelection(BaseModel):
     backend: str = Field(default="in_memory")
     is_fallback: bool = False
     warnings: list[str] = Field(default_factory=list)
+    resolution_mode: str = Field(default="tool_index")
+    effective_tool_universe: EffectiveToolUniverse | None = None
+    mounted_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    blocked_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utc_now)

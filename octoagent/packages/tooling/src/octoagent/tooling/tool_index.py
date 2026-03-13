@@ -12,12 +12,22 @@ from ulid import ULID
 
 from .models import ToolMeta, ToolProfile, profile_allows
 
-_TOKEN_SPLIT = re.compile(r"[^a-z0-9_]+")
+_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+")
 _EMBED_DIM = 96
 
 
 def _tokenize(value: str) -> list[str]:
-    return [token for token in _TOKEN_SPLIT.split(value.lower()) if token]
+    tokens: list[str] = []
+    for match in _TOKEN_PATTERN.finditer(value.lower()):
+        token = match.group(0)
+        if not token:
+            continue
+        tokens.append(token)
+        if any("\u4e00" <= char <= "\u9fff" for char in token):
+            if len(token) == 1:
+                continue
+            tokens.extend(token[index : index + 2] for index in range(len(token) - 1))
+    return tokens
 
 
 def _hash_embed(text: str, *, dim: int = _EMBED_DIM) -> list[float]:

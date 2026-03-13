@@ -48,6 +48,7 @@ from octoagent.core.models import (
     DiagnosticsFailureSummary,
     DiagnosticsSubsystemStatus,
     DiagnosticsSummaryDocument,
+    DynamicToolSelection,
     Event,
     EventCausality,
     EventType,
@@ -981,6 +982,14 @@ class ControlPlaneService:
                 )
             )
 
+        default_profile_id = (
+            selected_project.default_agent_profile_id if selected_project is not None else ""
+        )
+        default_profile = next(
+            (item for item in items if item.profile_id == default_profile_id),
+            None,
+        )
+
         return WorkerProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
             active_workspace_id=(
@@ -1018,6 +1027,9 @@ class ControlPlaneService:
                 "attention_count": len(
                     [item for item in items if item.dynamic_context.attention_work_count > 0]
                 ),
+                "default_profile_id": default_profile_id,
+                "default_profile_name": default_profile.name if default_profile is not None else "",
+                "default_profile_scope": default_profile.scope if default_profile is not None else "",
             },
             capabilities=[
                 ControlPlaneCapability(
@@ -1933,6 +1945,46 @@ class ControlPlaneService:
             if work.parent_work_id:
                 child_map[work.parent_work_id].append(work.work_id)
         items = [
+            self._build_work_projection_item(work=work, works=works, child_map=child_map)
+            for work in works
+            if self._matches_selected_scope(
+                item_project_id=work.project_id,
+                item_workspace_id=work.workspace_id,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            )
+        ]
+        summary: dict[str, Any] = {
+            "total": len(items),
+            "by_status": {},
+            "by_worker_type": {},
+        }
+        for item in items:
+            summary["by_status"][item.status] = summary["by_status"].get(item.status, 0) + 1
+            summary["by_worker_type"][item.selected_worker_type] = (
+                summary["by_worker_type"].get(item.selected_worker_type, 0) + 1
+            )
+        return DelegationPlaneDocument(
+            works=items,
+            summary=summary,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="work.refresh",
+                    label="刷新委派视图",
+                    action_id="work.refresh",
+                )
+            ],
+        )
+
+    def _build_work_projection_item(
+        self,
+        *,
+        work: Work,
+        works: list[Work],
+        child_map: dict[str, list[str]],
+    ) -> WorkProjectionItem:
+        selection = self._tool_selection_from_work(work)
+        return (
             WorkProjectionItem(
                 work_id=work.work_id,
                 task_id=work.task_id,
@@ -1948,9 +2000,18 @@ class ControlPlaneService:
                 runtime_id=work.runtime_id,
                 project_id=work.project_id,
                 workspace_id=work.workspace_id,
+                agent_profile_id=work.agent_profile_id,
                 requested_worker_profile_id=work.requested_worker_profile_id,
                 requested_worker_profile_version=work.requested_worker_profile_version,
                 effective_worker_snapshot_id=work.effective_worker_snapshot_id,
+                tool_resolution_mode=(
+                    selection.resolution_mode
+                    if selection is not None
+                    else str(work.metadata.get("tool_resolution_mode", ""))
+                ),
+                mounted_tools=list(selection.mounted_tools) if selection is not None else [],
+                blocked_tools=list(selection.blocked_tools) if selection is not None else [],
+                tool_resolution_warnings=list(selection.warnings) if selection is not None else [],
                 child_work_ids=child_map.get(work.work_id, []),
                 child_work_count=len(child_map.get(work.work_id, [])),
                 merge_ready=self._is_work_merge_ready(work, works),
@@ -2024,34 +2085,6 @@ class ControlPlaneService:
                     ),
                 ],
             )
-            for work in works
-            if self._matches_selected_scope(
-                item_project_id=work.project_id,
-                item_workspace_id=work.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            )
-        ]
-        summary: dict[str, Any] = {
-            "total": len(items),
-            "by_status": {},
-            "by_worker_type": {},
-        }
-        for item in items:
-            summary["by_status"][item.status] = summary["by_status"].get(item.status, 0) + 1
-            summary["by_worker_type"][item.selected_worker_type] = (
-                summary["by_worker_type"].get(item.selected_worker_type, 0) + 1
-            )
-        return DelegationPlaneDocument(
-            works=items,
-            summary=summary,
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="work.refresh",
-                    label="刷新委派视图",
-                    action_id="work.refresh",
-                )
-            ],
         )
 
     async def get_skill_pipeline_document(self) -> SkillPipelineDocument:
@@ -2667,6 +2700,8 @@ class ControlPlaneService:
             return await self._handle_worker_profile_apply(request)
         if action_id == "worker_profile.publish":
             return await self._handle_worker_profile_publish(request)
+        if action_id == "worker_profile.bind_default":
+            return await self._handle_worker_profile_bind_default(request)
         if action_id == "worker.spawn_from_profile":
             return await self._handle_worker_spawn_from_profile(request)
         if action_id == "worker.extract_profile_from_runtime":
@@ -4657,12 +4692,30 @@ class ControlPlaneService:
                 ),
                 actor=request.actor.actor_id,
             )
+            await self._sync_worker_profile_agent_profile(
+                published,
+                revision=revision.revision,
+            )
+            bound_as_default = False
+            should_bind_default = (
+                self._param_bool(request.params, "set_as_default")
+                if "set_as_default" in request.params
+                else bool(
+                    published.scope == AgentProfileScope.PROJECT
+                    and selected_project is not None
+                    and not selected_project.default_agent_profile_id
+                )
+            )
+            if should_bind_default:
+                bound_as_default = await self._bind_worker_profile_as_default(profile=published)
             data["published_revision"] = revision.revision
             data["published"] = changed
             data["status"] = published.status.value
             data["active_revision"] = published.active_revision
             data["draft_revision"] = published.draft_revision
+            data["bound_as_default"] = bound_as_default
             message = "已保存草稿并发布 Root Agent revision。"
+            await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="WORKER_PROFILE_APPLIED",
@@ -4723,6 +4776,24 @@ class ControlPlaneService:
             ),
             actor=request.actor.actor_id,
         )
+        await self._sync_worker_profile_agent_profile(
+            published,
+            revision=revision.revision,
+        )
+        _, selected_project, _, _ = await self._resolve_selection()
+        should_bind_default = (
+            self._param_bool(request.params, "set_as_default")
+            if "set_as_default" in request.params
+            else bool(
+                published.scope == AgentProfileScope.PROJECT
+                and selected_project is not None
+                and not selected_project.default_agent_profile_id
+            )
+        )
+        bound_as_default = False
+        if should_bind_default:
+            bound_as_default = await self._bind_worker_profile_as_default(profile=published)
+        await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="WORKER_PROFILE_PUBLISHED",
@@ -4731,6 +4802,7 @@ class ControlPlaneService:
                 "profile_id": published.profile_id,
                 "revision": revision.revision,
                 "published": changed,
+                "bound_as_default": bound_as_default,
                 "review": review,
             },
             resource_refs=[
@@ -4745,6 +4817,51 @@ class ControlPlaneService:
                     target_type="worker_profile",
                     target_id=published.profile_id,
                     label=published.name,
+                )
+            ],
+        )
+
+    async def _handle_worker_profile_bind_default(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        profile_id = self._param_str(request.params, "profile_id")
+        if not profile_id:
+            raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
+        existing = await self._get_worker_profile_in_scope(profile_id)
+        if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+            raise ControlPlaneActionError(
+                "WORKER_PROFILE_BIND_UNSUPPORTED",
+                "当前只支持把已发布的自定义 Root Agent 绑定为聊天默认。",
+            )
+        if existing.status != WorkerProfileStatus.ACTIVE:
+            raise ControlPlaneActionError(
+                "WORKER_PROFILE_NOT_PUBLISHED",
+                "请先发布 revision，再绑定为默认聊天 Agent。",
+            )
+        revision = existing.active_revision or existing.draft_revision or 1
+        await self._sync_worker_profile_agent_profile(existing, revision=revision)
+        bound = await self._bind_worker_profile_as_default(profile=existing)
+        await self._stores.conn.commit()
+        return self._completed_result(
+            request=request,
+            code="WORKER_PROFILE_BOUND_DEFAULT",
+            message="已绑定为当前 project 的默认聊天 Agent。",
+            data={
+                "profile_id": existing.profile_id,
+                "bound": bound,
+                "revision": revision,
+            },
+            resource_refs=[
+                self._resource_ref("worker_profiles", "worker-profiles:overview"),
+                self._resource_ref("agent_profiles", "agent-profiles:overview"),
+                self._resource_ref("setup_governance", "setup:governance"),
+            ],
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type="worker_profile",
+                    target_id=existing.profile_id,
+                    label=existing.name,
                 )
             ],
         )
@@ -6321,6 +6438,88 @@ class ControlPlaneService:
         resolved_revision = revision or 1
         return f"worker-snapshot:{profile_id}:{resolved_revision}"
 
+    @staticmethod
+    def _tool_selection_from_work(work: Work | None) -> DynamicToolSelection | None:
+        if work is None:
+            return None
+        raw = work.metadata.get("tool_selection", {})
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return DynamicToolSelection.model_validate(raw)
+        except Exception:
+            return None
+
+    def _build_agent_profile_from_worker_profile(
+        self,
+        *,
+        profile: WorkerProfile,
+        revision: int,
+        existing: AgentProfile | None = None,
+    ) -> AgentProfile:
+        metadata = dict(existing.metadata) if existing is not None else {}
+        metadata.update(
+            {
+                "source_kind": "worker_profile_sync",
+                "worker_profile_id": profile.profile_id,
+                "worker_profile_revision": revision,
+                "worker_profile_status": profile.status.value,
+                "worker_base_archetype": profile.base_archetype,
+            }
+        )
+        return AgentProfile(
+            profile_id=profile.profile_id,
+            scope=profile.scope,
+            project_id=profile.project_id,
+            name=profile.name,
+            persona_summary=profile.summary,
+            instruction_overlays=list(profile.instruction_overlays),
+            model_alias=profile.model_alias,
+            tool_profile=profile.tool_profile,
+            policy_refs=list(profile.policy_refs),
+            metadata=metadata,
+            version=max(existing.version if existing is not None else 1, revision or 1),
+            created_at=existing.created_at if existing is not None else profile.created_at,
+            updated_at=datetime.now(tz=UTC),
+        )
+
+    async def _sync_worker_profile_agent_profile(
+        self,
+        profile: WorkerProfile,
+        *,
+        revision: int,
+    ) -> AgentProfile:
+        existing = await self._stores.agent_context_store.get_agent_profile(profile.profile_id)
+        mirrored = self._build_agent_profile_from_worker_profile(
+            profile=profile,
+            revision=revision,
+            existing=existing,
+        )
+        await self._stores.agent_context_store.save_agent_profile(mirrored)
+        return mirrored
+
+    async def _bind_worker_profile_as_default(
+        self,
+        *,
+        profile: WorkerProfile,
+    ) -> bool:
+        if profile.scope != AgentProfileScope.PROJECT or not profile.project_id:
+            return False
+        project = await self._stores.project_store.get_project(profile.project_id)
+        if project is None:
+            return False
+        if project.default_agent_profile_id == profile.profile_id:
+            return False
+        await self._stores.project_store.save_project(
+            project.model_copy(
+                update={
+                    "default_agent_profile_id": profile.profile_id,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        return True
+
     def _build_worker_dynamic_context(
         self,
         works: list[Work],
@@ -6341,6 +6540,7 @@ class ControlPlaneService:
         running_statuses = {"created", "assigned", "running"}
         attention_statuses = {"waiting_input", "waiting_approval", "paused", "escalated", "failed"}
         latest = works[0] if works else None
+        selection = self._tool_selection_from_work(latest)
         active_works = [item for item in works if item.status.value in active_statuses]
         attention_works = [item for item in works if item.status.value in attention_statuses]
         return WorkerProfileDynamicContext(
@@ -6361,9 +6561,26 @@ class ControlPlaneService:
             latest_work_status=latest.status.value if latest is not None else "",
             latest_target_kind=latest.target_kind.value if latest is not None else "",
             current_selected_tools=(
-                list(latest.selected_tools)
+                list(selection.effective_tool_universe.selected_tools)
+                if selection is not None and selection.effective_tool_universe is not None
+                else list(latest.selected_tools)
                 if latest is not None and latest.selected_tools
                 else list(fallback_tools)
+            ),
+            current_tool_resolution_mode=(
+                selection.resolution_mode if selection is not None else ""
+            ),
+            current_tool_warnings=list(selection.warnings) if selection is not None else [],
+            current_mounted_tools=(
+                list(selection.mounted_tools) if selection is not None else []
+            ),
+            current_blocked_tools=(
+                list(selection.blocked_tools) if selection is not None else []
+            ),
+            current_discovery_entrypoints=(
+                list(selection.effective_tool_universe.discovery_entrypoints)
+                if selection is not None and selection.effective_tool_universe is not None
+                else []
             ),
             updated_at=latest.updated_at if latest is not None else None,
         )
@@ -6424,6 +6641,22 @@ class ControlPlaneService:
                     else ControlPlaneSupportStatus.DEGRADED
                 ),
                 reason="归档后不能继续发布 revision。" if is_archived else "",
+            ),
+            ControlPlaneCapability(
+                capability_id="worker_profile.bind_default",
+                label="设为聊天默认",
+                action_id="worker_profile.bind_default",
+                enabled=not is_archived and status == WorkerProfileStatus.ACTIVE,
+                support_status=(
+                    ControlPlaneSupportStatus.SUPPORTED
+                    if (not is_archived and status == WorkerProfileStatus.ACTIVE)
+                    else ControlPlaneSupportStatus.DEGRADED
+                ),
+                reason=(
+                    ""
+                    if (not is_archived and status == WorkerProfileStatus.ACTIVE)
+                    else "只有已发布且未归档的 Root Agent 才能绑定为当前聊天默认。"
+                ),
             ),
             ControlPlaneCapability(
                 capability_id="worker_profile.clone",
@@ -8134,6 +8367,13 @@ class ControlPlaneService:
                     category="root_agents",
                     risk_hint="high",
                     approval_hint="operator",
+                    params_schema={"type": "object", "required": ["profile_id"]},
+                ),
+                definition(
+                    "worker_profile.bind_default",
+                    "设为聊天默认 Root Agent",
+                    category="root_agents",
+                    risk_hint="medium",
                     params_schema={"type": "object", "required": ["profile_id"]},
                 ),
                 definition(
