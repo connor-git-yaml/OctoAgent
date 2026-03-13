@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,6 +29,8 @@ from octoagent.core.models import (
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
+    ClarificationAction,
+    ClarificationDecision,
     DelegationResult,
     DelegationTargetKind,
     DispatchEnvelope,
@@ -71,6 +72,11 @@ from .agent_context import (
     build_agent_session_id,
     build_scope_aware_session_id,
 )
+from .butler_behavior import (
+    build_weather_followup_query,
+    contains_explicit_location,
+    decide_clarification,
+)
 from .capability_pack import CapabilityPackService
 from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
@@ -86,72 +92,6 @@ from .worker_runtime import (
 )
 
 log = structlog.get_logger()
-
-_WEATHER_QUERY_TOKENS = ("天气", "weather", "气温", "温度", "下雨", "降雨", "体感", "穿衣")
-_WEATHER_LOCATION_STOPWORDS = (
-    "今天",
-    "今日",
-    "现在",
-    "此刻",
-    "帮我",
-    "请帮我",
-    "请问",
-    "查一下",
-    "查查",
-    "看一下",
-    "看下",
-    "问下",
-    "问一问",
-    "想知道",
-    "想问",
-    "一下",
-    "会不会",
-    "怎么样",
-    "咋样",
-    "如何",
-    "这里",
-    "这边",
-    "本地",
-    "当地",
-    "我这里",
-)
-_LOCATION_SUFFIX_PATTERN = re.compile(
-    r"[\u4e00-\u9fff]{1,10}(?:省|市|区|县|州|盟|旗|镇|乡|村|岛|湾|港)"
-)
-_EN_LOCATION_PATTERN = re.compile(
-    r"\b(?:in|at|for)\s+[A-Za-z][A-Za-z .'-]{1,40}",
-    re.IGNORECASE,
-)
-_DIRECT_LOCATION_TOKENS = {
-    "北京",
-    "上海",
-    "天津",
-    "重庆",
-    "深圳",
-    "广州",
-    "杭州",
-    "苏州",
-    "南京",
-    "武汉",
-    "成都",
-    "西安",
-    "长沙",
-    "青岛",
-    "厦门",
-    "宁波",
-    "无锡",
-    "香港",
-    "澳门",
-    "台北",
-    "东京",
-    "首尔",
-    "伦敦",
-    "巴黎",
-    "纽约",
-    "洛杉矶",
-    "旧金山",
-    "新加坡",
-}
 
 
 class _InlineReplyLLMService:
@@ -596,6 +536,14 @@ class OrchestratorService:
                 error_message=gate_decision.reason,
             )
 
+        clarification_decision = self._resolve_preflight_clarification(request)
+        if clarification_decision is not None:
+            return await self._dispatch_inline_clarification(
+                request=request,
+                gate_decision=gate_decision,
+                decision=clarification_decision,
+            )
+
         freshness_request = await self._resolve_butler_owned_freshness_request(request)
         if freshness_request is not None:
             return await self._dispatch_butler_owned_freshness(
@@ -658,6 +606,81 @@ class OrchestratorService:
             work_id=work_id,
         )
 
+    def _resolve_preflight_clarification(
+        self,
+        request: OrchestratorRequest,
+    ) -> ClarificationDecision | None:
+        if request.worker_capability not in {"", "llm_generation"}:
+            return None
+        metadata = request.metadata
+        if str(metadata.get("parent_task_id", "")).strip():
+            return None
+        if str(metadata.get("spawned_by", "")).strip():
+            return None
+        requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
+        if requested_worker_type and requested_worker_type != "general":
+            return None
+
+        decision = decide_clarification(request.user_text)
+        if decision.action is ClarificationAction.CLARIFY:
+            return decision
+        return None
+
+    async def _dispatch_inline_clarification(
+        self,
+        *,
+        request: OrchestratorRequest,
+        gate_decision: OrchestratorPolicyDecision,
+        decision: ClarificationDecision,
+    ) -> WorkerResult:
+        route_reason = f"clarification_preflight:{decision.category or 'general'}"
+        await self._write_orch_decision_event(
+            request=request,
+            route_reason=route_reason,
+            gate_decision=gate_decision,
+        )
+        task_service = TaskService(self._stores, self._sse_hub)
+        await task_service.ensure_task_running(
+            request.task_id,
+            trace_id=request.trace_id,
+        )
+        clarification_metadata = {
+            **dict(request.metadata),
+            "final_speaker": "butler",
+            "clarification_decision": decision.action.value,
+            "clarification_category": decision.category,
+            "clarification_needed": decision.metadata.get(
+                "clarification_needed",
+                decision.category,
+            ),
+            "clarification_source_text": request.user_text,
+            "clarification_rationale": decision.rationale,
+            "clarification_missing_inputs": list(decision.missing_inputs),
+            "clarification_missing_inputs_json": json.dumps(
+                decision.missing_inputs,
+                ensure_ascii=False,
+            ),
+            "clarification_fallback_hint": decision.fallback_hint,
+        }
+        await task_service.process_task_with_llm(
+            task_id=request.task_id,
+            user_text=request.user_text,
+            llm_service=_InlineReplyLLMService(decision.followup_prompt),
+            model_alias=request.model_alias,
+            execution_context=None,
+            dispatch_metadata=clarification_metadata,
+            worker_capability="llm_generation",
+            tool_profile="minimal",
+            runtime_context=request.runtime_context,
+        )
+        task_after = await self._stores.task_store.get_task(request.task_id)
+        return self._butler_worker_result(
+            request=request,
+            task_status=task_after.status if task_after is not None else TaskStatus.FAILED,
+            success_summary=f"butler_clarification:{decision.category or 'general'}",
+            dispatch_prefix="butler-clarification",
+        )
+
     def _should_use_butler_owned_freshness(self, request: OrchestratorRequest) -> bool:
         if self._delegation_plane is None:
             return False
@@ -687,7 +710,7 @@ class OrchestratorService:
             return None
         return request.model_copy(
             update={
-                "user_text": self._build_weather_location_followup_query(
+                "user_text": build_weather_followup_query(
                     location_text=request.user_text,
                     original_user_text=followup.original_user_text,
                 ),
@@ -722,7 +745,7 @@ class OrchestratorService:
             worker_type=WorkerType.RESEARCH,
         ):
             return None
-        if not self._contains_explicit_location(request.user_text):
+        if not contains_explicit_location(request.user_text):
             return None
         works = await self._stores.work_store.list_works(task_id=request.task_id)
         if not works:
@@ -731,7 +754,11 @@ class OrchestratorService:
         latest_metadata = latest_work.metadata
         if str(latest_metadata.get("delegation_strategy", "")).strip() != "butler_owned_freshness":
             return None
-        if str(latest_metadata.get("clarification_needed", "")).strip() != "weather_location":
+        clarification_category = (
+            str(latest_metadata.get("clarification_category", "")).strip()
+            or str(latest_metadata.get("clarification_needed", "")).strip()
+        )
+        if clarification_category != "weather_location":
             return None
         if str(latest_metadata.get("freshness_resolution", "")).strip() != "location_required":
             return None
@@ -826,13 +853,25 @@ class OrchestratorService:
             request.task_id,
             trace_id=request.trace_id,
         )
-        if self._requires_freshness_location_clarification(request.user_text):
+        clarification_decision = decide_clarification(request.user_text)
+        if (
+            clarification_decision.action is ClarificationAction.DELEGATE_AFTER_CLARIFICATION
+            and clarification_decision.category == "weather_location"
+        ):
             clarification_metadata = {
                 "delegation_strategy": "butler_owned_freshness",
                 "final_speaker": "butler",
                 "freshness_resolution": "location_required",
+                "clarification_decision": clarification_decision.action.value,
+                "clarification_category": clarification_decision.category,
                 "clarification_needed": "weather_location",
                 "clarification_source_text": request.user_text,
+                "clarification_rationale": clarification_decision.rationale,
+                "clarification_missing_inputs": list(clarification_decision.missing_inputs),
+                "clarification_missing_inputs_json": json.dumps(
+                    clarification_decision.missing_inputs,
+                    ensure_ascii=False,
+                ),
                 "selected_worker_type": "general",
                 "selected_tools": [],
                 "selected_tools_json": "[]",
@@ -841,7 +880,7 @@ class OrchestratorService:
                 task_id=request.task_id,
                 user_text=request.user_text,
                 llm_service=_InlineReplyLLMService(
-                    self._build_missing_location_reply(request.user_text)
+                    clarification_decision.followup_prompt
                 ),
                 model_alias=request.model_alias,
                 execution_context=None,
@@ -1320,68 +1359,6 @@ class OrchestratorService:
             f"原始用户问题：{objective}"
         )
 
-    @classmethod
-    def _requires_freshness_location_clarification(cls, user_text: str) -> bool:
-        normalized = user_text.strip()
-        if not normalized:
-            return False
-        lowered = normalized.lower()
-        if not any(token in lowered for token in _WEATHER_QUERY_TOKENS):
-            return False
-        return not cls._contains_explicit_location(normalized)
-
-    @classmethod
-    def _contains_explicit_location(cls, user_text: str) -> bool:
-        normalized = user_text.strip()
-        if not normalized:
-            return False
-        lowered = normalized.lower()
-        if _LOCATION_SUFFIX_PATTERN.search(normalized) or _EN_LOCATION_PATTERN.search(normalized):
-            return True
-        if any(token in normalized for token in _DIRECT_LOCATION_TOKENS):
-            return True
-
-        weather_anchor = min(
-            (
-                lowered.find(token)
-                for token in _WEATHER_QUERY_TOKENS
-                if lowered.find(token) >= 0
-            ),
-            default=-1,
-        )
-        prefix = normalized if weather_anchor < 0 else normalized[:weather_anchor]
-        for token in _WEATHER_LOCATION_STOPWORDS:
-            prefix = prefix.replace(token, "")
-        prefix = re.sub(r"[，,。？！!?:：\s]", "", prefix)
-        candidates = re.findall(r"[\u4e00-\u9fff]{2,8}", prefix)
-        return any(candidate not in _WEATHER_LOCATION_STOPWORDS for candidate in candidates)
-
-    @staticmethod
-    def _build_missing_location_reply(user_text: str) -> str:
-        question = user_text.strip() or "这条天气问题"
-        return (
-            f"我可以继续帮你查实时天气，但这条问题还缺少**城市 / 区县**信息：{question}\n\n"
-            "你可以直接回我一个城市 / 区县，例如：`深圳`、`北京朝阳区`；"
-            "也可以一次性把完整问题发成 `深圳今天天气怎么样`。\n"
-            "你一补充位置，我就按 Butler -> Research Worker 的受治理链路继续查，不会把它当成“系统没有实时能力”。"
-        )
-
-    @classmethod
-    def _build_weather_location_followup_query(
-        cls,
-        *,
-        location_text: str,
-        original_user_text: str,
-    ) -> str:
-        location = location_text.strip()
-        original = original_user_text.strip() or "今天天气怎么样？"
-        if not location:
-            return original
-        if cls._contains_explicit_location(original):
-            return original
-        normalized_original = re.sub(r"^[，,。？！!?:：\s]+", "", original)
-        return f"{location}，{normalized_original}"
-
     @staticmethod
     def _extract_freshness_followup_metadata(metadata: dict[str, Any]) -> dict[str, str]:
         keys = (
@@ -1471,10 +1448,11 @@ class OrchestratorService:
         request: OrchestratorRequest,
         task_status: TaskStatus,
         success_summary: str = "butler_freshness_synthesized",
+        dispatch_prefix: str = "butler-freshness",
     ) -> WorkerResult:
         if task_status == TaskStatus.SUCCEEDED:
             return WorkerResult(
-                dispatch_id=f"butler-freshness:{request.task_id}",
+                dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id="butler.main",
                 status=WorkerExecutionStatus.SUCCEEDED,
@@ -1485,7 +1463,7 @@ class OrchestratorService:
             )
         if task_status == TaskStatus.CANCELLED:
             return WorkerResult(
-                dispatch_id=f"butler-freshness:{request.task_id}",
+                dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id="butler.main",
                 status=WorkerExecutionStatus.CANCELLED,
@@ -1495,7 +1473,7 @@ class OrchestratorService:
                 tool_profile="minimal",
             )
         return WorkerResult(
-            dispatch_id=f"butler-freshness:{request.task_id}",
+            dispatch_id=f"{dispatch_prefix}:{request.task_id}",
             task_id=request.task_id,
             worker_id="butler.main",
             status=WorkerExecutionStatus.FAILED,

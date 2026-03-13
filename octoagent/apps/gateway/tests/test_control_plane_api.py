@@ -677,6 +677,12 @@ class TestControlPlaneApi:
         assert payload["resources"]["agent_profiles"]["profiles"][0]["profile_id"] == (
             "agent-profile-default"
         )
+        assert (
+            payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+                "source_chain"
+            ][0]
+            == "default_behavior_templates"
+        )
         worker_profile = payload["resources"]["worker_profiles"]["profiles"][0]
         assert worker_profile["profile_id"] == "singleton:general"
         assert worker_profile["mode"] == "singleton"

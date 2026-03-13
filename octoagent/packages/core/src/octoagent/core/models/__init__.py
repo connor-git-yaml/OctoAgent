@@ -55,6 +55,18 @@ from .backup import (
     RestorePlan,
     SensitivityLevel,
 )
+from .behavior import (
+    BehaviorFileChange,
+    BehaviorLayer,
+    BehaviorLayerKind,
+    BehaviorPack,
+    BehaviorPackFile,
+    BehaviorPatchProposal,
+    BehaviorSliceEnvelope,
+    BehaviorVisibility,
+    ClarificationAction,
+    ClarificationDecision,
+)
 from .capability import (
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
@@ -363,6 +375,16 @@ __all__ = [
     "ContextFrame",
     "RecallFrame",
     "ContextResolveResult",
+    "BehaviorLayerKind",
+    "BehaviorVisibility",
+    "ClarificationAction",
+    "BehaviorPackFile",
+    "BehaviorLayer",
+    "BehaviorPack",
+    "ClarificationDecision",
+    "BehaviorSliceEnvelope",
+    "BehaviorFileChange",
+    "BehaviorPatchProposal",
     # Backup / Restore / Export
     "BackupScope",
     "SensitivityLevel",

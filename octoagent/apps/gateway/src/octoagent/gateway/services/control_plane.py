@@ -157,6 +157,7 @@ from pydantic import SecretStr
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
+from .butler_behavior import build_behavior_system_summary
 from .capability_pack import SkillProviderConfig
 from .connection_metadata import merge_control_metadata
 from .mcp_registry import McpServerConfig
@@ -844,6 +845,10 @@ class ControlPlaneService:
                 tool_profile=profile.tool_profile,
                 memory_access_policy=dict(profile.memory_access_policy),
                 context_budget_policy=dict(profile.context_budget_policy),
+                behavior_system=build_behavior_system_summary(
+                    agent_profile=profile,
+                    project_name=selected_project.name if selected_project is not None else "",
+                ),
                 metadata=dict(profile.metadata),
                 updated_at=profile.updated_at,
             )

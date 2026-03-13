@@ -215,6 +215,7 @@ class AgentProfileItem(BaseModel):
     tool_profile: str = Field(default="standard")
     memory_access_policy: dict[str, Any] = Field(default_factory=dict)
     context_budget_policy: dict[str, Any] = Field(default_factory=dict)
+    behavior_system: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None
 

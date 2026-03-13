@@ -55,6 +55,7 @@ from octoagent.memory import (
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
+from .butler_behavior import is_worker_behavior_profile, render_behavior_system_block
 from .connection_metadata import summarize_control_metadata_for_prompt
 from .context_compaction import (
     CompiledTaskContext,
@@ -2061,6 +2062,7 @@ class AgentContextService:
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
                     "在上下文不足时显式说明 degraded reason，但继续给出可执行帮助。",
+                    "遇到缺关键信息的问题时，优先补最关键的 1-2 个条件，不要先给伪完整答案。",
                     "遇到今天、最新、天气、官网、网页资料等依赖实时外部事实的问题时，"
                     "先判断是否缺城市、对象名等关键参数；若系统具备受治理 worker/web/browser 路径，"
                     "不要直接把自己表述成没有实时能力。",
@@ -2086,6 +2088,7 @@ class AgentContextService:
             instruction_overlays=[
                 "默认继承当前 project/workspace 绑定与 owner 偏好。",
                 "回复前先利用 recent summary 与 memory hits 保持上下文连续性。",
+                "当问题缺少真实待办、地点、预算、比较标准等关键输入时，优先先补问再回答。",
                 "遇到今天、最新、天气、官网、网页资料等依赖实时外部事实的问题时，"
                 "先判断是否缺关键参数，并优先通过受治理 worker/tool 路径完成查询。",
             ],
@@ -2566,6 +2569,14 @@ class AgentContextService:
                     f"locale: {ambient_runtime['locale']}\n"
                     f"surface: {ambient_runtime['surface']}\n"
                     f"source: {ambient_runtime['source']}"
+                ),
+            },
+            {
+                "role": "system",
+                "content": render_behavior_system_block(
+                    agent_profile=agent_profile,
+                    project_name=project.name if project is not None else "",
+                    shared_only=is_worker_behavior_profile(agent_profile),
                 ),
             },
         ]

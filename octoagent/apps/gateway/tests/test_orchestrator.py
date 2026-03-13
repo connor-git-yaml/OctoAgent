@@ -702,6 +702,41 @@ class TestOrchestrator:
         finally:
             await store_group.conn.close()
 
+    async def test_under_specified_work_priority_request_clarifies_before_answering(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store_group, task_service, orchestrator = await _build_context(tmp_path)
+
+        try:
+            msg = NormalizedMessage(
+                text="帮我把今天下午的工作拆成 3 个优先级，并给我一个先做什么后做什么的顺序。",
+                idempotency_key="f049-orch-clarify-work-priority",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "butler.main"
+            assert result.summary == "butler_clarification:work_priority_context"
+
+            events = await store_group.event_store.get_events_for_task(task_id)
+            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 1
+            completion = next(
+                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
+            )
+            content = (
+                await store_group.artifact_store.get_artifact_content(
+                    completion.payload["artifact_ref"]
+                )
+            ).decode("utf-8")
+            assert "真实待办 / 日程列表" in content
+            assert "先给我通用版" in content
+            assert "3 个优先级怎么拆" not in content
+        finally:
+            await store_group.conn.close()
+
     async def test_freshness_weather_without_location_clarifies_before_delegation(
         self,
         tmp_path: Path,
@@ -737,7 +772,7 @@ class TestOrchestrator:
                 )
             ).decode("utf-8")
             assert "缺少**城市 / 区县**信息" in content
-            assert "没有实时能力" in content
+            assert "受治理的实时查询链路" in content
 
             works = await store_group.work_store.list_works(task_id=task_id)
             assert len(works) == 1
