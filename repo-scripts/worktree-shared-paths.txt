@@ -1,0 +1,18 @@
+# 这些路径会从主仓库共享到各个 linked worktree。
+# 每行一个相对仓库根目录的路径，支持空行与 # 注释。
+
+AGENTS.local.md
+CLAUDE.local.md
+_references
+_research
+.specify/project-context.md
+.specify/project-context.yaml
+octoagent/.env
+octoagent/.env.litellm
+octoagent/.python-version
+octoagent/.venv
+octoagent/packages/provider/.env
+octoagent/packages/provider/.env.litellm
+
+# 可选：如果你希望所有 worktree 共用前端依赖，再取消这一行注释。
+# octoagent/frontend/node_modules

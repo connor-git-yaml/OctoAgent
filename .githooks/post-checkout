@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+
+if [[ -z "${TOPLEVEL}" || -z "${COMMON_DIR}" ]]; then
+  exit 0
+fi
+
+SOURCE_ROOT="$(cd "${COMMON_DIR}/.." && pwd)"
+
+if [[ "${TOPLEVEL}" == "${SOURCE_ROOT}" ]]; then
+  exit 0
+fi
+
+SYNC_SCRIPT="${SOURCE_ROOT}/repo-scripts/sync-worktree-links.sh"
+
+if [[ ! -x "${SYNC_SCRIPT}" ]]; then
+  exit 0
+fi
+
+if ! "${SYNC_SCRIPT}" "${TOPLEVEL}" >/dev/null; then
+  printf '[post-checkout] worktree 共享软链接同步失败，请手动执行: %s "%s"\n' "${SYNC_SCRIPT}" "${TOPLEVEL}" >&2
+fi
