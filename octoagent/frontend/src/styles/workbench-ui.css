@@ -5,7 +5,7 @@
 .wb-action-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .wb-action-bar,
@@ -21,10 +21,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
   border: 1px solid transparent;
+  font-size: 0.9rem;
   font-weight: 600;
   transition:
     transform 140ms ease,
@@ -65,8 +66,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 14px 18px;
+  gap: 10px;
+  padding: 12px 14px;
 }
 
 .wb-inline-banner.is-error {
@@ -93,10 +94,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -166,12 +167,12 @@
 .wb-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 12px;
+  min-height: 26px;
+  padding: 0 10px;
   border-radius: 999px;
   background: rgba(20, 32, 47, 0.06);
   color: var(--cp-ink);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 600;
 }
 
@@ -189,13 +190,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  padding: 0 14px;
+  min-height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(20, 32, 47, 0.12);
   background: rgba(255, 255, 255, 0.78);
   color: var(--cp-ink);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 600;
   transition:
     transform 120ms ease,
@@ -217,9 +218,9 @@
   display: grid;
   gap: 6px;
   place-items: start;
-  min-height: 200px;
-  padding: 16px;
-  border-radius: 18px;
+  min-height: 160px;
+  padding: 14px;
+  border-radius: 16px;
   border: 1px solid rgba(20, 32, 47, 0.08);
   background: rgba(244, 247, 249, 0.86);
 }
@@ -248,13 +249,13 @@
 .wb-hover-reveal-trigger {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 0 12px;
   border: 1px dashed rgba(20, 32, 47, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--cp-muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -280,11 +281,11 @@
   right: 0;
   z-index: 20;
   display: grid;
-  gap: 10px;
-  width: min(320px, 72vw);
-  padding: 14px;
+  gap: 8px;
+  width: min(300px, 72vw);
+  padding: 12px;
   border: 1px solid rgba(20, 32, 47, 0.12);
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 40px rgba(20, 32, 47, 0.12);
   backdrop-filter: blur(18px);

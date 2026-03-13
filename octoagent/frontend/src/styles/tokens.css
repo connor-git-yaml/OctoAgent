@@ -5,6 +5,7 @@
     "Avenir Next",
     "Segoe UI",
     sans-serif;
+  font-size: 15px;
   line-height: 1.5;
   font-weight: 400;
   color: #17212b;
@@ -26,16 +27,16 @@
   --cp-danger: #b54b2d;
   --cp-warning: #996b1e;
   --cp-success: #187b54;
-  --cp-shadow: 0 24px 60px rgba(23, 33, 43, 0.08);
-  --cp-radius-xl: 28px;
-  --cp-radius-lg: 18px;
-  --cp-radius-md: 12px;
-  --cp-space-1: 6px;
-  --cp-space-2: 10px;
-  --cp-space-3: 14px;
-  --cp-space-4: 18px;
-  --cp-space-5: 24px;
-  --cp-space-6: 32px;
+  --cp-shadow: 0 18px 40px rgba(23, 33, 43, 0.07);
+  --cp-radius-xl: 22px;
+  --cp-radius-lg: 16px;
+  --cp-radius-md: 10px;
+  --cp-space-1: 4px;
+  --cp-space-2: 8px;
+  --cp-space-3: 12px;
+  --cp-space-4: 16px;
+  --cp-space-5: 20px;
+  --cp-space-6: 26px;
   --color-bg: var(--cp-soft);
   --color-border: var(--cp-border);
   --color-text-secondary: var(--cp-muted);
