@@ -93,6 +93,9 @@ octoagent/
 - 每个模块实现前先写 spec，spec 通过 review 后再编码
 - Blueprint (`docs/blueprint.md`) 是所有 spec 的上游依据
 - Spec Driver 运行时策略以 `driver-config.yaml` 为准（或 `.specify/driver-config.yaml`）
+- 正式 Feature 制品根目录统一为 `.specify/features/<feature-id>-<feature-slug>/`，包括 `spec.md`、`plan.md`、`tasks.md`、`research/`、`contracts/`、`verification/`
+- 不再新增、保留或依赖顶层 `specs/` 目录；发现历史遗留引用时，应直接改到 `.specify/features/...` 的正式路径
+- 新增或迁移 Feature 文档时，必须先检查 canonical 位置是否正确；不要额外创建顶层占位目录，也不要用整目录软链代替规范位置
 
 ### 代码规范
 

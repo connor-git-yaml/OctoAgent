@@ -6,7 +6,7 @@
 
 - [x] T001 [P0] 补齐 `.specify/features/045-memory-panel-clarity/spec.md`
 - [x] T002 [P0] 补齐 `.specify/features/045-memory-panel-clarity/plan.md`
-- [x] T003 [P0] 补齐 `.specify/features/045-memory-panel-clarity/tasks.md` 与 `specs/045-memory-panel-clarity/spec.md` redirect
+- [x] T003 [P0] 补齐 `.specify/features/045-memory-panel-clarity/tasks.md`，并统一 Feature 制品落位到 `.specify/features/045-memory-panel-clarity/`
 
 ## Phase 2: 页面重构
 

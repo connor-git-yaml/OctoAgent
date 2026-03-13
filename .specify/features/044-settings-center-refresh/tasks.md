@@ -6,7 +6,7 @@
 
 - [x] T001 [P0] 补齐 `.specify/features/044-settings-center-refresh/spec.md`
 - [x] T002 [P0] 补齐 `.specify/features/044-settings-center-refresh/plan.md`
-- [x] T003 [P0] 补齐 `.specify/features/044-settings-center-refresh/tasks.md` 与 `specs/044-settings-center-refresh/spec.md` redirect
+- [x] T003 [P0] 补齐 `.specify/features/044-settings-center-refresh/tasks.md`，并统一 Feature 制品落位到 `.specify/features/044-settings-center-refresh/`
 
 ## Phase 2: 页面重构
 

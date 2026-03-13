@@ -1,7 +1,7 @@
 # Quality Checklist: Auth Adapter + DX 工具
 
 **Feature**: 003-auth-adapter-dx
-**Spec**: `specs/features/003-auth-adapter-dx/spec.md`
+**Spec**: `.specify/features/003-auth-adapter-dx/spec.md`
 **Checked**: 2026-03-01
 **Checker**: Quality Checklist Sub-Agent
 **Preset**: quality-first | Gate Policy: balanced
