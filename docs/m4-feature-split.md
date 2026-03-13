@@ -28,6 +28,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 039 | Implemented | supervisor-only、Worker governance、message-native A2A 与 durable `A2AConversation / A2AMessage / WorkerSession` 已闭合 |
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
 | 041 | Implemented | ambient facts、Butler-owned freshness delegation、worker private recall、surface truth 与缺城市/环境受限 acceptance 已闭合 |
+| 048 | Draft | `Home / Settings / Chat` 普通用户主路径清晰化：单一主行动、最少必要配置、等待态与折叠式协作进度 |
+| 049 | Draft | Butler 默认 persona 与 clarification-first 行为系统：通用补问策略、behavior pack、Agent 可提案的人格演化机制 |
 
 ## 3. 各 Feature 边界
 
@@ -205,6 +207,41 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - 041 不以专用天气 API 为前提；优先复用现有 `web.search / web.fetch / browser.*`
 - 041 必须保留 runtime truth：谁去查、拿到什么 tool profile、为何降级，都要可解释
 - 041 的最终完成标准不是“research route 命中了”，而是“用户可审计地看到 Butler 委派给 Worker，Worker 以独立 session/memory/recall 完成任务”
+
+## 5.1 2026-03-14 live usage 暴露的下一轮产品化缺口：048 / 049
+
+基于真实用户体验复盘，M4 在运行时闭环之外又暴露出两条不宜继续靠零散 patch 收口的缺口：
+
+### Feature 048：Guided Surface Clarity Refresh
+
+状态：**Draft**
+
+目标：
+
+- 重做 `Home / Settings / Chat` 的普通用户主路径表达
+- 首页先回答“当前状态、影响、下一步”
+- 设置首屏先回答“最少要配置什么”
+- 聊天等待态显示折叠式协作进度，而不是长时间空白
+
+边界：
+
+- 不重做 047 的前端架构层
+- 不修改 039/041 的 runtime truth，只负责把现有事实源翻译成普通用户语言
+
+### Feature 049：Butler Persona & Clarification Behavior System
+
+状态：**Draft**
+
+目标：
+
+- 把缺信息时的补问策略收口为通用 clarification-first 行为系统
+- 用 project-scoped markdown behavior pack 承载 Butler 默认人格与行为
+- 借鉴 OpenClaw 的行为文件体系与 Agent Zero 的 prompt 分层，支持 Agent 提案式人格演化
+
+边界：
+
+- 不为天气/推荐/排期逐个加 case patch
+- 不绕过现有治理直接让 Agent 静默改写核心行为文件
 
 ## 6. 非伪实现门禁
 
