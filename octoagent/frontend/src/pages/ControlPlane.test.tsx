@@ -1296,6 +1296,33 @@ describe("ControlPlane", () => {
     expect(screen.getByText("TaskRunner / Execution runtime")).toBeInTheDocument();
   });
 
+  it("作为高级诊断台不会承担日常配置与聊天引导", async () => {
+    const snapshot = buildSnapshot();
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(jsonResponse(buildEvents()));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(
+      <MemoryRouter>
+        <ControlPlane />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "OctoAgent Control Plane" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/这里保留完整控制能力/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "去 Chat 发起新任务" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "连接真实模型" })).not.toBeInTheDocument();
+  });
+
   it("Dashboard 和 Delegation 会显示实时问题能力与对应 work 路径", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.context_continuity.degraded = {
@@ -1409,7 +1436,7 @@ describe("ControlPlane", () => {
     await userEvent.click(screen.getByRole("button", { name: /Delegation/i }));
 
     expect(await screen.findByText(/Butler 会先接住这条实时问题/)).toBeInTheDocument();
-    expect(screen.getByText(/内部已经建立 A2A 对话和独立 Worker Session/)).toBeInTheDocument();
+    expect(screen.getByText(/内部协作链路已经建立/)).toBeInTheDocument();
   });
 
   it("Dashboard 和 Session Center 会显示 Butler 到 Worker 的内部 A2A 主链", async () => {
@@ -1523,10 +1550,10 @@ describe("ControlPlane", () => {
     expect(String(actionRequest?.[1]?.body)).toContain('"project_id":"project-ops"');
 
     expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[0]).includes("/api/control/resources/project-selector")
-      )
-    ).toBe(true);
+      fetchMock.mock.calls.filter((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/snapshot")
+      ).length
+    ).toBeGreaterThan(1);
   });
 
   it("Operator 快捷动作会走统一 action 语义并回刷 sessions 资源", async () => {

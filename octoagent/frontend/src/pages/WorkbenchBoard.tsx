@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+import { formatWorkStatusTone } from "../domains/work/presentation";
+import {
+  ActionBar,
+  InlineCallout,
+  PageIntro,
+  StatusBadge,
+} from "../ui/primitives";
 import type {
   ControlPlaneCapability,
   WorkProjectionItem,
@@ -157,14 +164,16 @@ function WorkerPlanPanel({
           <p className="wb-card-label">Worker Review</p>
           <h3>{plan.summary || "已生成治理方案"}</h3>
         </div>
-        <button
-          type="button"
-          className="wb-button wb-button-primary"
-          disabled={busyActionId === "worker.apply"}
-          onClick={() => void onApply()}
-        >
-          批准并执行
-        </button>
+        <ActionBar>
+          <button
+            type="button"
+            className="wb-button wb-button-primary"
+            disabled={busyActionId === "worker.apply"}
+            onClick={() => void onApply()}
+          >
+            批准并执行
+          </button>
+        </ActionBar>
       </div>
 
       <div className="wb-note-stack">
@@ -271,9 +280,9 @@ function WorkSection({
                     <strong>{work.title}</strong>
                     <p>{formatWorkSummary(work)}</p>
                   </div>
-                  <span className={`wb-status-pill is-${work.status}`}>
+                  <StatusBadge tone={formatWorkStatusTone(work.status)}>
                     {formatWorkStatus(work.status)}
-                  </span>
+                  </StatusBadge>
                 </div>
 
                 <div className="wb-chip-row">
@@ -320,20 +329,14 @@ function WorkSection({
                 </div>
 
                 {disabledReasons.length > 0 ? (
-                  <div className="wb-inline-banner is-muted">
-                    <strong>当前限制</strong>
-                    <span>{disabledReasons.join("；")}</span>
-                  </div>
+                  <InlineCallout title="当前限制">{disabledReasons.join("；")}</InlineCallout>
                 ) : null}
 
                 {freshnessPath ? (
-                  <div className="wb-inline-banner is-muted">
-                    <strong>实时资料路径</strong>
-                    <span>{freshnessPath}</span>
-                  </div>
+                  <InlineCallout title="实时资料路径">{freshnessPath}</InlineCallout>
                 ) : null}
 
-                <div className="wb-inline-actions wb-inline-actions-wrap">
+                <ActionBar className="wb-inline-actions-wrap">
                   <Link className="wb-button wb-button-tertiary" to={`/tasks/${work.task_id}`}>
                     打开任务
                   </Link>
@@ -358,7 +361,7 @@ function WorkSection({
                       评审 Worker 方案
                     </button>
                   ) : null}
-                </div>
+                </ActionBar>
 
                 {canSplit ? (
                   <div className="wb-split-form">
@@ -382,7 +385,7 @@ function WorkSection({
                       }
                       onClick={() => void onAction(work, "work.split")}
                     >
-                      创建 child works
+                      拆成子工作
                     </button>
                   </div>
                 ) : null}
@@ -520,44 +523,44 @@ export default function WorkbenchBoard() {
 
   return (
     <div className="wb-page">
-      <section className="wb-hero wb-hero-work">
-        <div className="wb-hero-copy">
-          <p className="wb-kicker">Work</p>
-          <h1>{heroTitle}</h1>
-          <p>{heroSummary}</p>
-          <div className="wb-chip-row">
-            {workerTypeEntries.slice(0, 3).map(([workerType, count]) => (
-              <span key={workerType} className="wb-chip">
-                {formatWorkerType(workerType)} {count}
-              </span>
-            ))}
-            {mergeReadyCount > 0 ? (
-              <span className="wb-chip is-success">可合并 {mergeReadyCount}</span>
-            ) : null}
-            {pendingTotal > 0 ? (
-              <span className="wb-chip is-warning">待确认 {pendingTotal}</span>
-            ) : null}
-          </div>
-        </div>
+      <PageIntro
+        kicker="Work"
+        title={heroTitle}
+        summary={heroSummary}
+        actions={
+          <ActionBar>
+            <button
+              type="button"
+              className="wb-button wb-button-secondary"
+              onClick={() => void submitAction("work.refresh", {})}
+              disabled={busyActionId === "work.refresh"}
+            >
+              刷新 Work
+            </button>
+            <Link className="wb-button wb-button-primary" to="/chat">
+              去 Chat 发起新任务
+            </Link>
+          </ActionBar>
+        }
+      />
 
-        <div className="wb-hero-insights">
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">进行中</p>
-            <strong>{buckets.active.length}</strong>
-            <span>包含 created / assigned / running / escalated</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">等待处理</p>
-            <strong>{buckets.waiting.length}</strong>
-            <span>审批、输入或暂停都会集中在这里</span>
-          </article>
-          <article className="wb-hero-metric">
-            <p className="wb-card-label">已结束</p>
-            <strong>{buckets.done.length}</strong>
-            <span>成功、失败、取消和超时都会留痕</span>
-          </article>
-        </div>
-      </section>
+      <div className="wb-card-grid wb-card-grid-3">
+        <article className="wb-card">
+          <p className="wb-card-label">进行中</p>
+          <strong>{buckets.active.length}</strong>
+          <span>包含 created / assigned / running / escalated</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">等待处理</p>
+          <strong>{buckets.waiting.length}</strong>
+          <span>审批、输入或暂停都会集中在这里</span>
+        </article>
+        <article className="wb-card">
+          <p className="wb-card-label">已结束</p>
+          <strong>{buckets.done.length}</strong>
+          <span>成功、失败、取消和超时都会留痕</span>
+        </article>
+      </div>
 
       <div className="wb-split">
         <section className="wb-panel">
@@ -566,19 +569,9 @@ export default function WorkbenchBoard() {
               <p className="wb-card-label">现在最该看</p>
               <h3>优先处理阻塞或升级项</h3>
             </div>
-            <div className="wb-inline-actions">
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={() => void submitAction("work.refresh", {})}
-                disabled={busyActionId === "work.refresh"}
-              >
-                刷新 Work
-              </button>
-              <Link className="wb-button wb-button-primary" to="/chat">
-                去 Chat 发起新任务
-              </Link>
-            </div>
+            <StatusBadge tone={pendingTotal > 0 ? "warning" : "success"}>
+              {pendingTotal > 0 ? `待确认 ${pendingTotal}` : "没有阻塞"}
+            </StatusBadge>
           </div>
 
           {priorityWorks.length === 0 ? (
@@ -599,9 +592,9 @@ export default function WorkbenchBoard() {
                     <p>{formatWorkSummary(work)}</p>
                   </div>
                   <div className="wb-list-meta">
-                    <span className={`wb-status-pill is-${work.status}`}>
+                    <StatusBadge tone={formatWorkStatusTone(work.status)}>
                       {formatWorkStatus(work.status)}
-                    </span>
+                    </StatusBadge>
                     <small>{formatDateTime(work.updated_at)}</small>
                   </div>
                 </Link>
@@ -613,12 +606,10 @@ export default function WorkbenchBoard() {
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">实时问题能力</p>
+              <p className="wb-card-label">实时资料准备度</p>
               <h3>{freshnessReadiness.label}</h3>
             </div>
-            <span className={`wb-status-pill is-${freshnessReadiness.tone}`}>
-              {freshnessReadiness.badge}
-            </span>
+            <StatusBadge tone={freshnessReadiness.tone}>{freshnessReadiness.badge}</StatusBadge>
           </div>
           <p>{freshnessReadiness.summary}</p>
 
@@ -628,7 +619,7 @@ export default function WorkbenchBoard() {
                 <strong>{tool.label}</strong>
                 <span>{tool.summary}</span>
                 <div className="wb-chip-row">
-                  <span className={`wb-status-pill is-${tool.tone}`}>{tool.statusLabel}</span>
+                  <StatusBadge tone={tool.tone}>{tool.statusLabel}</StatusBadge>
                 </div>
               </article>
             ))}
@@ -645,15 +636,13 @@ export default function WorkbenchBoard() {
           </div>
 
           {freshnessReadiness.limitations.length > 0 ? (
-            <div className="wb-inline-banner is-muted">
-              <strong>当前限制</strong>
-              <span>{formatFreshnessLimitations(freshnessReadiness.limitations)}</span>
-            </div>
+            <InlineCallout title="当前限制">
+              {formatFreshnessLimitations(freshnessReadiness.limitations)}
+            </InlineCallout>
           ) : (
-            <div className="wb-inline-banner is-muted">
-              <strong>当前限制</strong>
-              <span>没有发现 freshness 相关降级原因。</span>
-            </div>
+            <InlineCallout title="当前限制">
+              没有发现实时资料链路的降级原因。
+            </InlineCallout>
           )}
 
           <div className="wb-chip-row">

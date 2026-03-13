@@ -1,13 +1,17 @@
 import { createContext, useContext, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import FrontDoorGate from "../FrontDoorGate";
-import { useWorkbenchSnapshot, type WorkbenchSnapshotState } from "../../hooks/useWorkbenchSnapshot";
+import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
 import { formatDateTime } from "../../workbench/utils";
 
-const WorkbenchContext = createContext<WorkbenchSnapshotState | null>(null);
+const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
+
+export function useOptionalWorkbench() {
+  return useContext(WorkbenchContext);
+}
 
 export function useWorkbench() {
-  const value = useContext(WorkbenchContext);
+  const value = useOptionalWorkbench();
   if (!value) {
     throw new Error("useWorkbench 必须在 WorkbenchLayout 中使用");
   }
@@ -23,24 +27,24 @@ function renderNavDescription(path: string): string {
     case "/":
       return "系统状态与下一步";
     case "/chat":
-      return "对话、任务与回复";
+      return "对话与任务进度";
     case "/agents":
-      return "Butler 与 Worker 编排";
+      return "主 Agent 与执行分工";
     case "/work":
       return "运行中的工作与子任务";
     case "/memory":
       return "系统记住了什么";
     case "/settings":
-      return "模型、渠道与 Memory 连接";
+      return "Provider、渠道与安全设置";
     case "/advanced":
-      return "完整控制面与诊断";
+      return "高级诊断与恢复";
     default:
       return "";
   }
 }
 
 export default function WorkbenchLayout() {
-  const workbench = useWorkbenchSnapshot();
+  const workbench = useWorkbenchData();
   const [navOpen, setNavOpen] = useState(false);
 
   if (workbench.loading && workbench.snapshot === null) {
@@ -110,7 +114,7 @@ export default function WorkbenchLayout() {
             <div className="wb-sidebar-card wb-sidebar-brand">
               <p className="wb-kicker">你的工作台</p>
               <h1>OctoAgent</h1>
-              <p>把 Butler、平台连接、对话和运行视图分开管理，常用入口都在这里。</p>
+              <p>把对话、Agent、运行进度和平台连接分开管理，常用入口都在这里。</p>
             </div>
 
           <nav className="wb-nav" aria-label="Workbench Navigation">

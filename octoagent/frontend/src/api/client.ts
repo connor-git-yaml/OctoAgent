@@ -6,43 +6,35 @@ import type {
   ActionRequestEnvelope,
   ActionResultEnvelope,
   BackupBundle,
-  CapabilityPackDocument,
-  ContextContinuityDocument,
   ControlPlaneActionResponse,
   ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
-  DelegationPlaneDocument,
-  DiagnosticsSummaryDocument,
   ExportFilter,
   ExportManifest,
   ImportRunDocument,
   ImportSourceDocument,
   ImportWorkbenchDocument,
   MemoryConsoleDocument,
-  McpProviderCatalogDocument,
   MemoryProposalAuditDocument,
   MemorySubjectHistoryDocument,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
-  SkillPipelineDocument,
-  ProjectSelectorDocument,
   RecoverySummary,
-  SessionProjectionDocument,
   TaskDetailResponse,
   TaskListResponse,
   UpdateAttemptSummary,
   VaultAuthorizationDocument,
   WorkerProfileRevisionsDocument,
-  WorkerProfilesDocument,
-  WizardSessionDocument,
-  ConfigSchemaDocument,
-  AutomationJobDocument,
-  PolicyProfilesDocument,
-  SetupGovernanceDocument,
-  SkillGovernanceDocument,
-  SkillProviderCatalogDocument,
 } from "../types";
+import {
+  CANONICAL_CONTROL_RESOURCE_MANIFEST,
+  type ImportWorkbenchQuery,
+  type MemoryResourceQuery,
+  type SnapshotResourceLoadOptions,
+  type SnapshotResourcePayload,
+  type WorkbenchResourceRoute,
+} from "../platform/contracts";
 
 const BASE_URL = "";
 const FRONT_DOOR_TOKEN_STORAGE_KEY = "octoagent.frontdoorToken";
@@ -60,41 +52,6 @@ const FRONT_DOOR_ERROR_CODES = new Set([
   "FRONT_DOOR_CONFIG_INVALID",
   "FRONT_DOOR_MODE_UNSUPPORTED",
 ]);
-
-type ControlResourceName =
-  | "wizard"
-  | "config"
-  | "project-selector"
-  | "sessions"
-  | "worker-profiles"
-  | "context-frames"
-  | "policy-profiles"
-  | "capability-pack"
-  | "skill-governance"
-  | "skill-provider-catalog"
-  | "mcp-provider-catalog"
-  | "setup-governance"
-  | "delegation"
-  | "pipelines"
-  | "automation"
-  | "diagnostics"
-  | "memory"
-  | "import-workbench";
-
-interface MemoryResourceQuery {
-  projectId?: string;
-  workspaceId?: string;
-  scopeId?: string;
-  partition?: string;
-  layer?: string;
-  query?: string;
-  includeHistory?: boolean;
-  includeVaultRefs?: boolean;
-  limit?: number;
-  status?: string;
-  source?: string;
-  subjectKey?: string;
-}
 
 type ApiErrorPayload = {
   code?: string;
@@ -339,84 +296,32 @@ export async function fetchControlSnapshot(): Promise<ControlPlaneSnapshot> {
   return apiFetch<ControlPlaneSnapshot>("/api/control/snapshot");
 }
 
+type SnapshotControlResourceRoute = Exclude<
+  WorkbenchResourceRoute,
+  "memory" | "import-workbench"
+>;
+
 /** GET /api/control/resources/* -- 单资源刷新 */
 export async function fetchControlResource(
-  resource: "wizard"
-): Promise<WizardSessionDocument>;
-export async function fetchControlResource(
-  resource: "config"
-): Promise<ConfigSchemaDocument>;
-export async function fetchControlResource(
-  resource: "project-selector"
-): Promise<ProjectSelectorDocument>;
-export async function fetchControlResource(
-  resource: "sessions"
-): Promise<SessionProjectionDocument>;
-export async function fetchControlResource(
-  resource: "worker-profiles"
-): Promise<WorkerProfilesDocument>;
-export async function fetchControlResource(
-  resource: "context-frames"
-): Promise<ContextContinuityDocument>;
-export async function fetchControlResource(
-  resource: "policy-profiles"
-): Promise<PolicyProfilesDocument>;
-export async function fetchControlResource(
-  resource: "capability-pack"
-): Promise<CapabilityPackDocument>;
-export async function fetchControlResource(
-  resource: "skill-governance"
-): Promise<SkillGovernanceDocument>;
-export async function fetchControlResource(
-  resource: "skill-provider-catalog"
-): Promise<SkillProviderCatalogDocument>;
-export async function fetchControlResource(
-  resource: "mcp-provider-catalog"
-): Promise<McpProviderCatalogDocument>;
-export async function fetchControlResource(
-  resource: "setup-governance"
-): Promise<SetupGovernanceDocument>;
-export async function fetchControlResource(
-  resource: "delegation"
-): Promise<DelegationPlaneDocument>;
-export async function fetchControlResource(
-  resource: "pipelines"
-): Promise<SkillPipelineDocument>;
-export async function fetchControlResource(
-  resource: "automation"
-): Promise<AutomationJobDocument>;
-export async function fetchControlResource(
-  resource: "diagnostics"
-): Promise<DiagnosticsSummaryDocument>;
-export async function fetchControlResource(
-  resource: "memory"
-): Promise<MemoryConsoleDocument>;
-export async function fetchControlResource(
-  resource: "import-workbench"
-): Promise<ImportWorkbenchDocument>;
-export async function fetchControlResource(
-  resource: ControlResourceName
-): Promise<
-  | WizardSessionDocument
-  | ConfigSchemaDocument
-  | ProjectSelectorDocument
-  | SessionProjectionDocument
-  | WorkerProfilesDocument
-  | ContextContinuityDocument
-  | PolicyProfilesDocument
-  | CapabilityPackDocument
-  | SkillGovernanceDocument
-  | SkillProviderCatalogDocument
-  | McpProviderCatalogDocument
-  | SetupGovernanceDocument
-  | DelegationPlaneDocument
-  | SkillPipelineDocument
-  | AutomationJobDocument
-  | DiagnosticsSummaryDocument
-  | MemoryConsoleDocument
-  | ImportWorkbenchDocument
-> {
-  return apiFetch(`/api/control/resources/${resource}`);
+  resource: SnapshotControlResourceRoute
+): Promise<SnapshotResourcePayload> {
+  const descriptor = CANONICAL_CONTROL_RESOURCE_MANIFEST[resource];
+  return apiFetch<SnapshotResourcePayload>(descriptor.endpointPath);
+}
+
+export async function fetchWorkbenchResource(
+  route: WorkbenchResourceRoute,
+  options: SnapshotResourceLoadOptions = {}
+): Promise<SnapshotResourcePayload> {
+  const descriptor = CANONICAL_CONTROL_RESOURCE_MANIFEST[route];
+  switch (descriptor.queryMode) {
+    case "memory-query":
+      return fetchMemoryConsole(options.memoryQuery ?? {});
+    case "import-query":
+      return fetchImportWorkbench(options.importQuery ?? {});
+    default:
+      return fetchControlResource(route as SnapshotControlResourceRoute);
+  }
 }
 
 export async function fetchWorkerProfileRevisions(
@@ -488,10 +393,9 @@ export async function fetchVaultAuthorization(
   );
 }
 
-export async function fetchImportWorkbench(params: {
-  projectId?: string;
-  workspaceId?: string;
-} = {}): Promise<ImportWorkbenchDocument> {
+export async function fetchImportWorkbench(
+  params: ImportWorkbenchQuery = {}
+): Promise<ImportWorkbenchDocument> {
   return apiFetch<ImportWorkbenchDocument>(
     `/api/control/resources/import-workbench${buildQueryString({
       project_id: params.projectId,

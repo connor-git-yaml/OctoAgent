@@ -1,0 +1,46 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "IBM Plex Sans",
+    "Avenir Next",
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #17212b;
+  background:
+    radial-gradient(circle at top left, rgba(183, 106, 43, 0.2), transparent 30%),
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.14), transparent 24%),
+    linear-gradient(180deg, #f4ede4 0%, #f7f5ef 38%, #edf1ec 100%);
+
+  --cp-ink: #17212b;
+  --cp-muted: #62707c;
+  --cp-soft: #eef2ee;
+  --cp-border: rgba(23, 33, 43, 0.1);
+  --cp-card: rgba(255, 255, 255, 0.84);
+  --cp-card-strong: rgba(255, 255, 255, 0.96);
+  --cp-primary: #b76a2b;
+  --cp-primary-ink: #7a4318;
+  --cp-secondary: #1f6a5b;
+  --cp-secondary-ink: #0f4d43;
+  --cp-danger: #b54b2d;
+  --cp-warning: #996b1e;
+  --cp-success: #187b54;
+  --cp-shadow: 0 24px 60px rgba(23, 33, 43, 0.08);
+  --cp-radius-xl: 28px;
+  --cp-radius-lg: 18px;
+  --cp-radius-md: 12px;
+  --cp-space-1: 6px;
+  --cp-space-2: 10px;
+  --cp-space-3: 14px;
+  --cp-space-4: 18px;
+  --cp-space-5: 24px;
+  --cp-space-6: 32px;
+  --color-bg: var(--cp-soft);
+  --color-border: var(--cp-border);
+  --color-text-secondary: var(--cp-muted);
+  --space-xs: var(--cp-space-1);
+  --space-sm: var(--cp-space-2);
+  --space-md: var(--cp-space-4);
+  --space-lg: var(--cp-space-6);
+}

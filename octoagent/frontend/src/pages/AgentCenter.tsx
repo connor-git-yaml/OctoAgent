@@ -1,17 +1,44 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchWorkerProfileRevisions } from "../api/client";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+import AgentHeroSection from "../domains/agents/AgentHeroSection";
+import {
+  buildCapabilityProviderEntries,
+  buildCapabilitySelectionState,
+  buildRootAgentPayload,
+  buildRootAgentStudioDraftFromReview,
+  buildSkillSelectionPayload,
+  findProjectName,
+  findWorkspaceName,
+  formatTokenLabel,
+  formatWorkerProfileOrigin,
+  formatWorkerProfileStatus,
+  joinStudioList,
+  mergeCapabilitySelectionMetadata,
+  normalizeWorkspaceForProject,
+  parseStudioList,
+  projectSelectOptions,
+  readNestedString,
+  toRecord,
+  TOKEN_LABELS,
+  type CapabilityProviderEntry,
+  type RootAgentReviewResult,
+  uniqueStrings,
+  workspaceSelectOptions,
+} from "../domains/agents/agentCenterData";
+import ButlerWorkspaceSection from "../domains/agents/ButlerWorkspaceSection";
+import TemplateWorkspaceSection from "../domains/agents/TemplateWorkspaceSection";
+import TemplateRuntimeRail from "../domains/agents/TemplateRuntimeRail";
+import { useRootAgentStudio } from "../domains/agents/useRootAgentStudio";
+import WorkerWorkspaceSection from "../domains/agents/WorkerWorkspaceSection";
 import type {
   AgentProfileItem,
   ControlPlaneSnapshot,
   PolicyProfileItem,
   ProjectOption,
   SetupReviewSummary,
-  SkillGovernanceItem,
   WorkerCapabilityProfile,
   WorkerProfileItem,
-  WorkerProfileRevisionItem,
   WorkerProfilesDocument,
   WorkProjectionItem,
   WorkspaceOption,
@@ -100,59 +127,6 @@ interface WorkAgentDraft {
   mergeReadyCount: string;
 }
 
-interface RootAgentStudioDraft {
-  profileId: string;
-  scope: string;
-  projectId: string;
-  name: string;
-  summary: string;
-  baseArchetype: string;
-  modelAlias: string;
-  toolProfile: string;
-  defaultToolGroupsText: string;
-  selectedToolsText: string;
-  runtimeKindsText: string;
-  policyRefsText: string;
-  instructionOverlaysText: string;
-  tagsText: string;
-  metadata: Record<string, unknown>;
-  capabilitySelection: Record<string, boolean>;
-}
-
-interface RootAgentReviewResult {
-  mode: string;
-  can_save: boolean;
-  ready: boolean;
-  warnings: string[];
-  save_errors: string[];
-  blocking_reasons: string[];
-  next_actions: string[];
-  profile: Record<string, unknown>;
-  existing_profile: Record<string, unknown>;
-  source_profile: Record<string, unknown>;
-  diff: {
-    has_changes: boolean;
-    changed_fields: Array<{
-      field: string;
-      before: unknown;
-      after: unknown;
-    }>;
-  };
-}
-
-interface CapabilityProviderEntry {
-  providerId: string;
-  label: string;
-  description: string;
-  selectionItemId: string;
-  kind: "skill" | "mcp";
-  defaultSelected: boolean;
-  enabled: boolean;
-  availability: string;
-  editable: boolean;
-  tags: string[];
-}
-
 const WORKER_TYPE_LABELS: Record<string, string> = {
   general: "Butler",
   ops: "运行保障",
@@ -214,31 +188,6 @@ const TOOL_PROFILE_LABELS: Record<string, string> = {
   minimal: "仅基础工具",
   standard: "常用工具",
   privileged: "扩展工具",
-};
-
-const TOKEN_LABELS: Record<string, string> = {
-  llm_generation: "内容生成",
-  general: "Butler 协调",
-  planner: "任务规划",
-  handoff: "任务交接",
-  memory: "记忆整理",
-  frontend: "前端界面",
-  research: "资料调研",
-  watchdog: "巡检恢复",
-  worker: "Worker 运行",
-  subagent: "子 Agent",
-  project: "项目信息",
-  session: "会话信息",
-  supervision: "审批协助",
-  filesystem: "文件操作",
-  web: "网页访问",
-  "project.inspect": "项目检查",
-  "task.inspect": "任务检查",
-  "artifact.list": "产出清单",
-  "runtime.inspect": "运行检查",
-  "work.inspect": "Work 检查",
-  "agents.list": "Agent 清单",
-  "session.status": "会话状态",
 };
 
 const MODEL_ALIAS_HINTS: Record<string, string> = {
@@ -357,34 +306,6 @@ const EMPTY_ROOT_AGENT_PROFILES: WorkerProfilesDocument = {
   summary: {},
 };
 
-function toRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function readNestedString(
-  source: Record<string, unknown>,
-  path: string[],
-  fallback = ""
-): string {
-  let current: unknown = source;
-  for (const segment of path) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
-      return fallback;
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return typeof current === "string" && current.trim() ? current : fallback;
-}
-
-function uniqueStrings(values: Array<string | null | undefined>): string[] {
-  return values
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean)
-    .filter((item, index, all) => all.indexOf(item) === index);
-}
-
 function parsePositiveInt(
   value: string,
   fallback: number,
@@ -431,132 +352,6 @@ function primaryMemoryRecallFromProfile(profile: AgentProfileItem | null): Prima
       String(raw.per_scope_limit ?? DEFAULT_MEMORY_PER_SCOPE_LIMIT) || DEFAULT_MEMORY_PER_SCOPE_LIMIT,
     maxHits: String(raw.max_hits ?? DEFAULT_MEMORY_MAX_HITS) || DEFAULT_MEMORY_MAX_HITS,
   };
-}
-
-function buildSkillSelectionPayload(items: SkillGovernanceItem[]): Record<string, string[]> {
-  const selected_item_ids: string[] = [];
-  const disabled_item_ids: string[] = [];
-  items.forEach((item) => {
-    if (item.selected && !item.enabled_by_default) {
-      selected_item_ids.push(item.item_id);
-    }
-    if (!item.selected && item.enabled_by_default) {
-      disabled_item_ids.push(item.item_id);
-    }
-  });
-  return {
-    selected_item_ids,
-    disabled_item_ids,
-  };
-}
-
-function readCapabilitySelectionMetadata(
-  metadata: Record<string, unknown>
-): Record<string, unknown> {
-  const preferred = toRecord(metadata.capability_provider_selection);
-  if (Object.keys(preferred).length > 0) {
-    return preferred;
-  }
-  return toRecord(metadata.skill_selection);
-}
-
-function buildCapabilityProviderEntries(
-  snapshot: ControlPlaneSnapshot
-): CapabilityProviderEntry[] {
-  const governanceById = Object.fromEntries(
-    snapshot.resources.skill_governance.items.map((item) => [item.item_id, item])
-  ) as Record<string, SkillGovernanceItem>;
-  const skillEntries = snapshot.resources.skill_provider_catalog.items.map((item) => {
-    const governance = governanceById[item.selection_item_id];
-    return {
-      providerId: item.provider_id,
-      label: item.label,
-      description: item.description,
-      selectionItemId: item.selection_item_id,
-      kind: "skill" as const,
-      defaultSelected: governance?.selected ?? false,
-      enabled: item.enabled,
-      availability: item.availability,
-      editable: item.editable,
-      tags: [item.worker_type, item.model_alias, item.tool_profile],
-    };
-  });
-  const mcpEntries = snapshot.resources.mcp_provider_catalog.items.map((item) => {
-    const governance = governanceById[item.selection_item_id];
-    return {
-      providerId: item.provider_id,
-      label: item.label,
-      description: item.description,
-      selectionItemId: item.selection_item_id,
-      kind: "mcp" as const,
-      defaultSelected: governance?.selected ?? false,
-      enabled: item.enabled,
-      availability: item.status,
-      editable: item.editable,
-      tags: [`tools:${item.tool_count}`, item.enabled ? "enabled" : "disabled"],
-    };
-  });
-  return [...skillEntries, ...mcpEntries];
-}
-
-function buildCapabilitySelectionState(
-  items: CapabilityProviderEntry[],
-  metadata: Record<string, unknown>
-): Record<string, boolean> {
-  const rawSelection = readCapabilitySelectionMetadata(metadata);
-  const selectedItemIds = new Set(
-    readStudioList(rawSelection.selected_item_ids)
-  );
-  const disabledItemIds = new Set(
-    readStudioList(rawSelection.disabled_item_ids)
-  );
-  return Object.fromEntries(
-    items.map((item) => {
-      if (selectedItemIds.has(item.selectionItemId)) {
-        return [item.selectionItemId, true];
-      }
-      if (disabledItemIds.has(item.selectionItemId)) {
-        return [item.selectionItemId, false];
-      }
-      return [item.selectionItemId, item.defaultSelected];
-    })
-  );
-}
-
-function buildCapabilitySelectionPayload(
-  items: CapabilityProviderEntry[],
-  state: Record<string, boolean>
-): Record<string, string[]> {
-  const selected_item_ids: string[] = [];
-  const disabled_item_ids: string[] = [];
-  items.forEach((item) => {
-    const current = state[item.selectionItemId] ?? item.defaultSelected;
-    if (current && !item.defaultSelected) {
-      selected_item_ids.push(item.selectionItemId);
-    }
-    if (!current && item.defaultSelected) {
-      disabled_item_ids.push(item.selectionItemId);
-    }
-  });
-  return {
-    selected_item_ids,
-    disabled_item_ids,
-  };
-}
-
-function mergeCapabilitySelectionMetadata(
-  metadata: Record<string, unknown>,
-  items: CapabilityProviderEntry[],
-  state: Record<string, boolean>
-): Record<string, unknown> {
-  const nextMetadata = { ...metadata };
-  delete nextMetadata.skill_selection;
-  delete nextMetadata.capability_provider_selection;
-  const selection = buildCapabilitySelectionPayload(items, state);
-  if (selection.selected_item_ids.length > 0 || selection.disabled_item_ids.length > 0) {
-    nextMetadata.capability_provider_selection = selection;
-  }
-  return nextMetadata;
 }
 
 function reviewTone(review: SetupReviewSummary): "success" | "warning" | "danger" {
@@ -634,57 +429,6 @@ function buildPrimaryAgentPayload(
   };
 }
 
-function findProjectName(projects: ProjectOption[], projectId: string): string {
-  return projects.find((project) => project.project_id === projectId)?.name ?? projectId;
-}
-
-function findWorkspaceName(workspaces: WorkspaceOption[], workspaceId: string): string {
-  return workspaces.find((workspace) => workspace.workspace_id === workspaceId)?.name ?? workspaceId;
-}
-
-function projectSelectOptions(
-  projects: ProjectOption[],
-  currentProjectId: string
-): Array<{ value: string; label: string }> {
-  const options = projects.map((project) => ({
-    value: project.project_id,
-    label: project.name,
-  }));
-  if (currentProjectId && !options.some((option) => option.value === currentProjectId)) {
-    return [{ value: currentProjectId, label: currentProjectId }, ...options];
-  }
-  return options;
-}
-
-function workspaceSelectOptions(
-  workspaces: WorkspaceOption[],
-  projectId: string,
-  currentWorkspaceId: string
-): Array<{ value: string; label: string }> {
-  const options = workspaces
-    .filter((workspace) => workspace.project_id === projectId)
-    .map((workspace) => ({
-      value: workspace.workspace_id,
-      label: workspace.name,
-    }));
-  if (currentWorkspaceId && !options.some((option) => option.value === currentWorkspaceId)) {
-    return [{ value: currentWorkspaceId, label: currentWorkspaceId }, ...options];
-  }
-  return options;
-}
-
-function normalizeWorkspaceForProject(
-  workspaces: WorkspaceOption[],
-  projectId: string,
-  currentWorkspaceId: string
-): string {
-  const scoped = workspaces.filter((workspace) => workspace.project_id === projectId);
-  if (scoped.some((workspace) => workspace.workspace_id === currentWorkspaceId)) {
-    return currentWorkspaceId;
-  }
-  return scoped[0]?.workspace_id ?? currentWorkspaceId;
-}
-
 function formatWorkerType(workerType: string): string {
   return WORKER_TYPE_LABELS[workerType] ?? workerType;
 }
@@ -719,190 +463,12 @@ function workAgentBadge(agent: WorkAgentItem): { label: string; tone: string } {
   };
 }
 
-function formatTokenLabel(token: string): string {
-  if (TOKEN_LABELS[token]) {
-    return TOKEN_LABELS[token];
-  }
-  return token
-    .replace(/[._-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function formatToolToken(toolName: string, toolLabelByName: Record<string, string>): string {
   return TOKEN_LABELS[toolName] ?? toolLabelByName[toolName] ?? formatTokenLabel(toolName);
 }
 
 function formatScope(scope: string): string {
   return SCOPE_OPTIONS.find((option) => option.value === scope)?.label ?? formatTokenLabel(scope);
-}
-
-function joinStudioList(values: string[]): string {
-  return values.join("\n");
-}
-
-function parseStudioList(value: string): string[] {
-  return value
-    .split(/[\n,]+/g)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .filter((item, index, all) => all.indexOf(item) === index);
-}
-
-function appendStudioListValue(current: string, value: string): string {
-  return joinStudioList(uniqueStrings([...parseStudioList(current), value]));
-}
-
-function readStudioList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return uniqueStrings(
-    value.map((item) => (typeof item === "string" ? item : ""))
-  );
-}
-
-function buildRootAgentStudioDraft(
-  profile: WorkerProfileItem | null,
-  selector: ControlPlaneSnapshot["resources"]["project_selector"],
-  capabilityProviderEntries: CapabilityProviderEntry[],
-  fallbackArchetype = "general"
-): RootAgentStudioDraft {
-  const metadata = profile?.static_config.metadata ?? {};
-  return {
-    profileId: profile?.profile_id ?? "",
-    scope: profile?.scope ?? "project",
-    projectId: profile?.project_id || selector.current_project_id,
-    name: profile?.name ?? "",
-    summary: profile?.summary ?? "",
-    baseArchetype: profile?.static_config.base_archetype ?? fallbackArchetype,
-    modelAlias: profile?.static_config.model_alias ?? "main",
-    toolProfile: profile?.static_config.tool_profile ?? "minimal",
-    defaultToolGroupsText: joinStudioList(profile?.static_config.default_tool_groups ?? []),
-    selectedToolsText: joinStudioList(profile?.static_config.selected_tools ?? []),
-    runtimeKindsText: joinStudioList(profile?.static_config.runtime_kinds ?? []),
-    policyRefsText: joinStudioList(profile?.static_config.policy_refs ?? []),
-    instructionOverlaysText: joinStudioList(profile?.static_config.instruction_overlays ?? []),
-    tagsText: joinStudioList(profile?.static_config.tags ?? []),
-    metadata,
-    capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
-  };
-}
-
-function buildRootAgentStudioDraftFromPayload(
-  profile: Record<string, unknown>,
-  selector: ControlPlaneSnapshot["resources"]["project_selector"],
-  capabilityProviderEntries: CapabilityProviderEntry[],
-  fallbackArchetype = "general"
-): RootAgentStudioDraft {
-  const scope =
-    typeof profile.scope === "string" && profile.scope.trim() ? profile.scope : "project";
-  const projectId =
-    scope === "project" &&
-    typeof profile.project_id === "string" &&
-    profile.project_id.trim()
-      ? profile.project_id
-      : selector.current_project_id;
-  return {
-    profileId:
-      typeof profile.profile_id === "string" && profile.profile_id.trim()
-        ? profile.profile_id
-        : "",
-    scope,
-    projectId: scope === "project" ? projectId : "",
-    name: typeof profile.name === "string" ? profile.name : "",
-    summary: typeof profile.summary === "string" ? profile.summary : "",
-    baseArchetype:
-      typeof profile.base_archetype === "string" && profile.base_archetype.trim()
-        ? profile.base_archetype
-        : fallbackArchetype,
-    modelAlias:
-      typeof profile.model_alias === "string" && profile.model_alias.trim()
-        ? profile.model_alias
-        : "main",
-    toolProfile:
-      typeof profile.tool_profile === "string" && profile.tool_profile.trim()
-        ? profile.tool_profile
-        : "minimal",
-    defaultToolGroupsText: joinStudioList(readStudioList(profile.default_tool_groups)),
-    selectedToolsText: joinStudioList(readStudioList(profile.selected_tools)),
-    runtimeKindsText: joinStudioList(readStudioList(profile.runtime_kinds)),
-    policyRefsText: joinStudioList(readStudioList(profile.policy_refs)),
-    instructionOverlaysText: joinStudioList(readStudioList(profile.instruction_overlays)),
-    tagsText: joinStudioList(readStudioList(profile.tags)),
-    metadata: toRecord(profile.metadata),
-    capabilitySelection: buildCapabilitySelectionState(
-      capabilityProviderEntries,
-      toRecord(profile.metadata)
-    ),
-  };
-}
-
-function buildRootAgentStudioDraftFromReview(
-  review: unknown,
-  selector: ControlPlaneSnapshot["resources"]["project_selector"],
-  capabilityProviderEntries: CapabilityProviderEntry[]
-): RootAgentStudioDraft | null {
-  const profile = toRecord(toRecord(review).profile);
-  if (Object.keys(profile).length === 0) {
-    return null;
-  }
-  return buildRootAgentStudioDraftFromPayload(profile, selector, capabilityProviderEntries);
-}
-
-function buildRootAgentPayload(
-  draft: RootAgentStudioDraft,
-  capabilityProviderEntries: CapabilityProviderEntry[]
-): Record<string, unknown> {
-  return {
-    profile_id: draft.profileId || undefined,
-    scope: draft.scope,
-    project_id: draft.scope === "project" ? draft.projectId : "",
-    name: draft.name,
-    summary: draft.summary,
-    base_archetype: draft.baseArchetype,
-    model_alias: draft.modelAlias,
-    tool_profile: draft.toolProfile,
-    default_tool_groups: parseStudioList(draft.defaultToolGroupsText),
-    selected_tools: parseStudioList(draft.selectedToolsText),
-    runtime_kinds: parseStudioList(draft.runtimeKindsText),
-    policy_refs: parseStudioList(draft.policyRefsText),
-    instruction_overlays: parseStudioList(draft.instructionOverlaysText),
-    tags: parseStudioList(draft.tagsText),
-    metadata: mergeCapabilitySelectionMetadata(
-      draft.metadata,
-      capabilityProviderEntries,
-      draft.capabilitySelection
-    ),
-  };
-}
-
-function formatWorkerProfileStatus(status: string): string {
-  switch (status) {
-    case "draft":
-      return "草稿";
-    case "active":
-      return "已发布";
-    case "archived":
-      return "已归档";
-    default:
-      return formatTokenLabel(status);
-  }
-}
-
-function formatWorkerProfileOrigin(originKind: string): string {
-  switch (originKind) {
-    case "builtin":
-      return "系统内置";
-    case "custom":
-      return "自定义";
-    case "cloned":
-      return "复制而来";
-    case "extracted":
-      return "运行态提炼";
-    default:
-      return formatTokenLabel(originKind);
-  }
 }
 
 function primaryProfileFromSnapshot(snapshot: ControlPlaneSnapshot): AgentProfileItem | null {
@@ -1336,35 +902,33 @@ export default function AgentCenter() {
   const [flashMessage, setFlashMessage] = useState(
     "先确认默认配置，再从右侧启动任务或查看当前运行状态。"
   );
-  const [selectedRootAgentId, setSelectedRootAgentId] = useState(
-    rootAgentProfiles[0]?.profile_id ?? ""
-  );
-  const [rootAgentDraft, setRootAgentDraft] = useState<RootAgentStudioDraft>(() =>
-    buildRootAgentStudioDraft(rootAgentProfiles[0] ?? null, selector, capabilityProviderEntries)
-  );
-  const [rootAgentReview, setRootAgentReview] = useState<RootAgentReviewResult | null>(null);
-  const [rootAgentRevisions, setRootAgentRevisions] = useState<WorkerProfileRevisionItem[]>([]);
-  const [rootAgentRevisionLoading, setRootAgentRevisionLoading] = useState(false);
-  const [rootAgentRevisionError, setRootAgentRevisionError] = useState("");
-  const [rootAgentSpawnObjective, setRootAgentSpawnObjective] = useState("");
-  const [rootAgentEditorMode, setRootAgentEditorMode] = useState<"existing" | "create">(
-    rootAgentProfiles[0] ? "existing" : "create"
-  );
-  const selectedRootAgentProfile =
-    rootAgentProfiles.find((profile) => profile.profile_id === selectedRootAgentId) ?? null;
-  const rootAgentDraftDirty =
-    JSON.stringify(buildRootAgentPayload(rootAgentDraft, capabilityProviderEntries)) !==
-    JSON.stringify(
-      buildRootAgentPayload(
-        buildRootAgentStudioDraft(selectedRootAgentProfile, selector, capabilityProviderEntries),
-        capabilityProviderEntries
-      )
-    );
-  const rootAgentRevisionSyncKey = [
+  const {
     selectedRootAgentId,
-    selectedRootAgentProfile?.active_revision ?? 0,
-    selectedRootAgentProfile?.draft_revision ?? 0,
-  ].join(":");
+    setSelectedRootAgentId,
+    selectedRootAgentProfile,
+    rootAgentDraft,
+    setRootAgentDraft,
+    rootAgentDraftDirty,
+    rootAgentReview,
+    setRootAgentReview,
+    rootAgentRevisions,
+    rootAgentRevisionLoading,
+    rootAgentRevisionError,
+    rootAgentSpawnObjective,
+    setRootAgentSpawnObjective,
+    setRootAgentEditorMode,
+    selectRootAgentProfile,
+    updateRootAgentDraft,
+    updateRootAgentCapabilitySelection,
+    updateRootAgentProject,
+    appendRootAgentDraftValue,
+    resetToFreshRootAgent,
+  } = useRootAgentStudio({
+    rootAgentProfiles,
+    rootAgentProfilesGeneratedAt: rootAgentProfilesDocument.generated_at,
+    selector,
+    capabilityProviderEntries,
+  });
   const deferredSearch = useDeferredValue(searchQuery);
 
   useEffect(() => {
@@ -1395,77 +959,6 @@ export default function AgentCenter() {
   useEffect(() => {
     setPrimaryReview(setup.review);
   }, [setup.generated_at]);
-
-  useEffect(() => {
-    if (rootAgentEditorMode === "create") {
-      return;
-    }
-    const nextSelectedId =
-      rootAgentProfiles.find((profile) => profile.profile_id === selectedRootAgentId)?.profile_id ??
-      rootAgentProfiles.find((profile) => profile.origin_kind !== "builtin")?.profile_id ??
-      rootAgentProfiles[0]?.profile_id ??
-      "";
-    const nextSelectedProfile =
-      rootAgentProfiles.find((profile) => profile.profile_id === nextSelectedId) ?? null;
-    if (nextSelectedProfile === null) {
-      setSelectedRootAgentId("");
-      setRootAgentDraft(buildRootAgentStudioDraft(null, selector, capabilityProviderEntries));
-      setRootAgentReview(null);
-      setRootAgentEditorMode("create");
-      return;
-    }
-    if (nextSelectedId !== selectedRootAgentId) {
-      setSelectedRootAgentId(nextSelectedId);
-    }
-    if (nextSelectedId !== selectedRootAgentId || !rootAgentDraftDirty) {
-      setRootAgentDraft(
-        buildRootAgentStudioDraft(nextSelectedProfile, selector, capabilityProviderEntries)
-      );
-      setRootAgentReview(null);
-    }
-  }, [
-    capabilityProviderEntries,
-    rootAgentEditorMode,
-    rootAgentProfilesDocument.generated_at,
-    selector.current_project_id,
-    selector.current_workspace_id,
-    selectedRootAgentId,
-    rootAgentDraftDirty,
-  ]);
-
-  useEffect(() => {
-    if (!selectedRootAgentId) {
-      setRootAgentRevisions([]);
-      setRootAgentRevisionError("");
-      setRootAgentRevisionLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setRootAgentRevisionLoading(true);
-    setRootAgentRevisionError("");
-    void fetchWorkerProfileRevisions(selectedRootAgentId)
-      .then((document) => {
-        if (cancelled) {
-          return;
-        }
-        setRootAgentRevisions(document.revisions ?? []);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        setRootAgentRevisionError(error instanceof Error ? error.message : "revision 加载失败");
-        setRootAgentRevisions([]);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRootAgentRevisionLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [rootAgentRevisionSyncKey]);
 
   const currentProject =
     availableProjects.find((project) => project.project_id === selector.current_project_id) ?? null;
@@ -2087,6 +1580,26 @@ export default function AgentCenter() {
     setFlashMessage("已按当前草案生成一个新的 Worker 实例草案。");
   }
 
+  function handleCreateInstanceFromAgent(agent: WorkAgentItem) {
+    setActiveWorkspaceView("workers");
+    setActiveCatalog("instances");
+    setEditorMode("create");
+    setSelectedWorkAgentId("");
+    setSelectedWorkAgentIds([]);
+    setWorkDraft(createInstanceFromTemplate(agent));
+    setFlashMessage("已按当前草案生成一个新的 Worker 实例草案。");
+  }
+
+  function handleCreateTemplateFromAgent(agent: WorkAgentItem) {
+    setActiveWorkspaceView("workers");
+    setActiveCatalog("templates");
+    setEditorMode("create");
+    setSelectedWorkAgentId("");
+    setSelectedWorkAgentIds([]);
+    setWorkDraft(forkTemplateFromAgent(agent));
+    setFlashMessage("已把当前实例复制成草案。清理掉只属于当前运行态的内容后再保存。");
+  }
+
   async function handleSwitchProjectContext() {
     const selectedWorkspace =
       availableContextWorkspaces.find(
@@ -2133,58 +1646,6 @@ export default function AgentCenter() {
         )}」所在上下文。`
       );
     }
-  }
-
-  function selectRootAgentProfile(profile: WorkerProfileItem | null) {
-    startTransition(() => {
-      setRootAgentEditorMode(profile ? "existing" : "create");
-      setSelectedRootAgentId(profile?.profile_id ?? "");
-      setRootAgentDraft(buildRootAgentStudioDraft(profile, selector, capabilityProviderEntries));
-      setRootAgentReview(null);
-    });
-  }
-
-  function updateRootAgentDraft<Key extends keyof RootAgentStudioDraft>(
-    key: Key,
-    value: RootAgentStudioDraft[Key]
-  ) {
-    setRootAgentDraft((current) => ({
-      ...current,
-      [key]: value,
-    }));
-  }
-
-  function updateRootAgentCapabilitySelection(itemId: string, selected: boolean) {
-    setRootAgentDraft((current) => ({
-      ...current,
-      capabilitySelection: {
-        ...current.capabilitySelection,
-        [itemId]: selected,
-      },
-    }));
-  }
-
-  function updateRootAgentProject(projectId: string) {
-    setRootAgentDraft((current) => ({
-      ...current,
-      projectId,
-    }));
-  }
-
-  function appendRootAgentDraftValue(
-    key:
-      | "defaultToolGroupsText"
-      | "selectedToolsText"
-      | "runtimeKindsText"
-      | "policyRefsText"
-      | "instructionOverlaysText"
-      | "tagsText",
-    value: string
-  ) {
-    setRootAgentDraft((current) => ({
-      ...current,
-      [key]: appendStudioListValue(current[key], value),
-    }));
   }
 
   function applyRootAgentArchetypeDefaults() {
@@ -2367,11 +1828,7 @@ export default function AgentCenter() {
 
   function handleCreateFreshRootAgent() {
     setActiveWorkspaceView("templates");
-    setRootAgentEditorMode("create");
-    setSelectedRootAgentId("");
-    setRootAgentDraft(buildRootAgentStudioDraft(null, selector, capabilityProviderEntries));
-    setRootAgentReview(null);
-    setRootAgentSpawnObjective("");
+    resetToFreshRootAgent();
     setFlashMessage("开始一个新的 Worker 模板草稿。");
   }
 
@@ -2446,2107 +1903,333 @@ export default function AgentCenter() {
 
   return (
     <div className="wb-page wb-butler-page">
-      <section className="wb-hero wb-hero-agent wb-butler-hero">
-        <div className="wb-hero-copy">
-          <p className="wb-kicker">Agents</p>
-          <h1>Butler 与 Worker</h1>
-          <p>在这里配置 Butler、维护 Worker 模板，并查看当前运行中的 Worker。</p>
-          <div className="wb-chip-row">
-            <span className="wb-chip">当前项目 {currentProject?.name ?? selector.current_project_id}</span>
-            <span className="wb-chip">当前工作区 {currentWorkspace?.name ?? selector.current_workspace_id}</span>
-            <span className={`wb-chip ${reviewTone(primaryReview) === "danger" ? "is-warning" : "is-success"}`}>
-              {reviewTone(primaryReview) === "danger"
-                ? `阻塞 ${primaryReview.blocking_reasons.length}`
-                : primaryReview.ready
-                  ? "配置检查通过"
-                  : `提醒 ${primaryReview.warnings.length}`}
-            </span>
-            <span className={`wb-chip ${pendingChanges > 0 ? "is-warning" : "is-success"}`}>
-              {pendingChanges > 0 ? `待确认改动 ${pendingChanges}` : "当前已同步"}
-            </span>
-          </div>
-        </div>
-
-        <div className="wb-hero-insights">
-        <article className="wb-hero-metric">
-          <p className="wb-card-label">Butler 配置</p>
-          <strong>{savedPrimary.name}</strong>
-          <span>{formatToolProfile(savedPrimary.toolProfile)}</span>
-        </article>
-        <article className="wb-hero-metric">
-          <p className="wb-card-label">Worker 模板</p>
-          <strong>{rootAgentProfiles.length}</strong>
-          <span>默认模板 {defaultRootAgentName || "未设置"}</span>
-        </article>
-        <article className="wb-hero-metric">
-          <p className="wb-card-label">运行中的 Worker</p>
-          <strong>{workInstances.length}</strong>
-          <span>活跃 {activeWorkAgents} / 待处理 {attentionWorkAgents}</span>
-        </article>
-      </div>
-      </section>
-
-      <div className="wb-butler-summary-grid">
-        <article className="wb-butler-summary-card is-accent">
-          <p className="wb-card-label">Butler 配置</p>
-          <strong>名称、默认位置、审批和记忆边界都在这里</strong>
-          <span>改这里会影响新会话默认怎么工作，不会直接改已经在运行的任务。</span>
-        </article>
-        <article className="wb-butler-summary-card">
-          <p className="wb-card-label">默认位置</p>
-          <strong>{findProjectName(availableProjects, savedPrimary.projectId)}</strong>
-          <span>{findWorkspaceName(availableWorkspaces, savedPrimary.workspaceId)}</span>
-        </article>
-        <article className="wb-butler-summary-card">
-          <p className="wb-card-label">模型与工具</p>
-          <strong>
-            {savedPrimary.modelAlias} · {formatToolProfile(savedPrimary.toolProfile)}
-          </strong>
-          <span>{currentPolicy?.label ?? savedPrimary.policyProfileId}</span>
-        </article>
-        <article className={`wb-butler-summary-card ${pendingChanges > 0 ? "is-warning" : ""}`}>
-          <p className="wb-card-label">待保存改动</p>
-          <strong>{pendingChanges > 0 ? `${pendingChanges} 处` : "已同步"}</strong>
-          <span>{primaryDirty ? "Butler 草案未保存" : "Butler 已同步到底层配置"}</span>
-        </article>
-      </div>
-
-      <div className="wb-inline-banner is-muted">
-        <strong>当前提示</strong>
-        <span>{flashMessage}</span>
-      </div>
-
-      <div className="wb-agent-workflow-nav" role="tablist" aria-label="Agents 工作流">
-        {(Object.keys(AGENT_WORKSPACE_COPY) as AgentWorkspaceView[]).map((view) => (
-          <button
-            key={view}
-            type="button"
-            role="tab"
-            aria-selected={activeWorkspaceView === view}
-            className={`wb-agent-workflow-button ${
-              activeWorkspaceView === view ? "is-active" : ""
-            }`}
-            onClick={() => openWorkspaceView(view)}
-          >
-            <strong>{AGENT_WORKSPACE_COPY[view].label}</strong>
-            <span>{AGENT_WORKSPACE_COPY[view].description}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="wb-inline-banner is-muted">
-        <strong>{AGENT_WORKSPACE_COPY[activeWorkspaceView].title}</strong>
-        <span>{AGENT_WORKSPACE_COPY[activeWorkspaceView].description}</span>
-      </div>
+      <AgentHeroSection
+        currentProjectName={currentProject?.name ?? selector.current_project_id}
+        currentWorkspaceName={currentWorkspace?.name ?? selector.current_workspace_id}
+        reviewTone={reviewTone(primaryReview)}
+        primaryReady={primaryReview.ready}
+        primaryBlockingCount={primaryReview.blocking_reasons.length}
+        primaryWarningCount={primaryReview.warnings.length}
+        pendingChanges={pendingChanges}
+        savedPrimaryName={savedPrimary.name}
+        savedPrimaryToolProfileLabel={formatToolProfile(savedPrimary.toolProfile)}
+        rootAgentProfilesCount={rootAgentProfiles.length}
+        defaultRootAgentName={defaultRootAgentName}
+        workInstancesCount={workInstances.length}
+        activeWorkAgents={activeWorkAgents}
+        attentionWorkAgents={attentionWorkAgents}
+        savedPrimaryProjectName={findProjectName(availableProjects, savedPrimary.projectId)}
+        savedPrimaryWorkspaceName={findWorkspaceName(
+          availableWorkspaces,
+          savedPrimary.workspaceId
+        )}
+        savedPrimaryModelAlias={savedPrimary.modelAlias}
+        currentPolicyLabel={currentPolicy?.label ?? savedPrimary.policyProfileId}
+        primaryDirty={primaryDirty}
+        flashMessage={flashMessage}
+        activeWorkspaceView={activeWorkspaceView}
+        workspaceViews={(Object.keys(AGENT_WORKSPACE_COPY) as AgentWorkspaceView[]).map((view) => ({
+          id: view,
+          ...AGENT_WORKSPACE_COPY[view],
+        }))}
+        onOpenWorkspaceView={(viewId) => openWorkspaceView(viewId as AgentWorkspaceView)}
+      />
 
       {activeWorkspaceView === "butler" ? (
-      <div className="wb-agent-layout">
-        <section className="wb-panel wb-butler-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">Butler</p>
-              <h3>Butler 设置</h3>
-              <p className="wb-panel-copy">这里决定 Butler 的名称、默认项目、审批方式和记忆边界。</p>
-            </div>
-            <div className="wb-inline-actions wb-inline-actions-wrap">
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={handleResetPrimary}
-                disabled={!primaryDirty || butlerBusy}
-              >
-                撤回改动
-              </button>
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={() => void handleReviewPrimary()}
-                disabled={butlerBusy}
-              >
-                检查 Butler 变更
-              </button>
-              <button
-                type="button"
-                className="wb-button wb-button-primary"
-                onClick={() => void handleApplyPrimary()}
-                disabled={!primaryDirty || butlerBusy}
-              >
-                保存 Butler 配置
-              </button>
-              <Link className="wb-button wb-button-tertiary" to="/settings">
-                去 Settings 调连接
-              </Link>
-            </div>
-          </div>
-
-          <div
-            className={`wb-inline-banner ${
-              reviewTone(primaryReview) === "danger" ? "is-error" : "is-muted"
-            }`}
-          >
-            <strong>{reviewHeadline(primaryReview)}</strong>
-            <span>{reviewSummary(primaryReview)}</span>
-          </div>
-
-          <div className="wb-stat-grid">
-            <div className="wb-detail-block">
-              <span className="wb-card-label">当前默认 Project</span>
-              <strong>{findProjectName(availableProjects, primaryDraft.projectId)}</strong>
-              <p>{findWorkspaceName(availableWorkspaces, primaryDraft.workspaceId)}</p>
-            </div>
-            <div className="wb-detail-block">
-              <span className="wb-card-label">审批强度</span>
-              <strong>{currentPolicy?.label ?? primaryDraft.policyProfileId}</strong>
-              <p>{formatToolProfile(primaryDraft.toolProfile)}</p>
-            </div>
-            <div className="wb-detail-block">
-              <span className="wb-card-label">默认模型</span>
-              <strong>{primaryDraft.modelAlias}</strong>
-              <p>{MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "控制默认思考档位。"}</p>
-            </div>
-            <div className="wb-detail-block">
-              <span className="wb-card-label">记忆策略</span>
-              <strong>{recallPresetLabel ?? "自定义"}</strong>
-              <p>
-                Vault {primaryDraft.memoryAccessPolicy.allowVault ? "可引用" : "关闭"} / 历史
-                {primaryDraft.memoryAccessPolicy.includeHistory ? "已纳入" : "未纳入"}
-              </p>
-            </div>
-          </div>
-
-          <div className="wb-agent-form-grid">
-            <label className="wb-field">
-              <span>Butler 名称</span>
-              <input
-                type="text"
-                value={primaryDraft.name}
-                onChange={(event) => updatePrimary("name", event.target.value)}
-              />
-            </label>
-            <label className="wb-field">
-              <span>默认生效范围</span>
-              <select
-                value={primaryDraft.scope}
-                onChange={(event) => updatePrimary("scope", event.target.value)}
-              >
-                {SCOPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="wb-field">
-              <span>默认 Project</span>
-              <select
-                value={primaryDraft.projectId}
-                onChange={(event) => updatePrimaryProject(event.target.value)}
-              >
-                {primaryProjectOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="wb-field">
-              <span>默认 Workspace</span>
-              <select
-                value={primaryDraft.workspaceId}
-                onChange={(event) => updatePrimary("workspaceId", event.target.value)}
-              >
-                {primaryWorkspaceOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="wb-field wb-field-span-2">
-              <span>Persona（角色说明）</span>
-              <small>这会影响 Butler 的语气、处理顺序和默认工作方式。</small>
-              <textarea
-                rows={4}
-                className="wb-textarea-prose"
-                value={primaryDraft.personaSummary}
-                placeholder="例如：你负责先整理现状、提醒风险，再把任务交给合适的 Worker。"
-                onChange={(event) => updatePrimary("personaSummary", event.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="wb-butler-stack">
-            <div>
-              <p className="wb-card-label">审批与治理</p>
-              <div className="wb-agent-choice-grid">
-                {policyProfiles.map(renderPolicyCard)}
-              </div>
-            </div>
-
-            <div>
-              <p className="wb-card-label">记忆边界</p>
-              <div className="wb-butler-memory-grid">
-                <label className="wb-butler-toggle-card">
-                  <div>
-                    <strong>允许带回 Vault 引用</strong>
-                    <span>Butler 在 recall 时可以把受控 Vault 引用纳入候选，但仍受权限与审批约束。</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={primaryDraft.memoryAccessPolicy.allowVault}
-                    onChange={(event) =>
-                      updatePrimaryMemoryAccess("allowVault", event.target.checked)
-                    }
-                  />
-                </label>
-
-                <label className="wb-butler-toggle-card">
-                  <div>
-                    <strong>默认包含历史版本</strong>
-                    <span>适合需要看演变过程的项目；如果你更看重简洁上下文，可以先关闭。</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={primaryDraft.memoryAccessPolicy.includeHistory}
-                    onChange={(event) =>
-                      updatePrimaryMemoryAccess("includeHistory", event.target.checked)
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-
-            <details className="wb-agent-details">
-              <summary>展开高级配置</summary>
-              <div className="wb-agent-option-stack">
-                <div>
-                  <p className="wb-card-label">默认模型档位</p>
-                  <div className="wb-chip-row">
-                    {modelAliasOptions.map((alias) => (
-                      <button
-                        key={alias}
-                        type="button"
-                        className={`wb-chip-button ${primaryDraft.modelAlias === alias ? "is-active" : ""}`}
-                        onClick={() => updatePrimary("modelAlias", alias)}
-                      >
-                        {alias}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="wb-inline-note">
-                    {MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "用于决定默认模型档位。"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="wb-card-label">工具范围</p>
-                  <div className="wb-chip-row">
-                    {toolProfileOptions.map((profile) => (
-                      <button
-                        key={profile}
-                        type="button"
-                        className={`wb-chip-button ${primaryDraft.toolProfile === profile ? "is-active" : ""}`}
-                        onClick={() => updatePrimary("toolProfile", profile)}
-                      >
-                        {formatToolProfile(profile)}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="wb-inline-note">
-                    `standard` 适合大多数场景；只有明确需要更宽的工具面时再切 `privileged`。
-                  </p>
-                </div>
-
-                <div className="wb-root-agent-review-panel">
-                  <div className="wb-root-agent-card-head">
-                    <div>
-                      <p className="wb-card-label">Provider 白名单</p>
-                      <strong>给 Butler 圈定默认可用的 Skills / MCP Providers</strong>
-                    </div>
-                    <span className="wb-chip">当前勾选 {selectedPrimaryCapabilityCount}</span>
-                  </div>
-                  {renderCapabilityProviderSection(
-                    "Skills",
-                    skillCapabilityEntries,
-                    primaryDraft.capabilitySelection,
-                    updatePrimaryCapabilitySelection,
-                    "/settings/skills"
-                  )}
-                  {renderCapabilityProviderSection(
-                    "MCP",
-                    mcpCapabilityEntries,
-                    primaryDraft.capabilitySelection,
-                    updatePrimaryCapabilitySelection,
-                    "/settings/mcp"
-                  )}
-                </div>
-
-                <div>
-                  <p className="wb-card-label">记忆召回预设</p>
-                  <div className="wb-chip-row">
-                    {MEMORY_RECALL_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        className={`wb-chip-button ${
-                          detectRecallPreset(primaryDraft.memoryRecall) === preset.label
-                            ? "is-active"
-                            : ""
-                        }`}
-                        onClick={() => applyPrimaryMemoryPreset(preset.id)}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="wb-inline-note">
-                    当前 {recallPresetLabel ?? "自定义"}：{MEMORY_RECALL_PRESETS.find((preset) => preset.label === recallPresetLabel)?.description ?? "已按当前项目做细化。"}
-                  </p>
-                </div>
-
-                <div className="wb-agent-form-grid">
-                  <label className="wb-field">
-                    <span>后过滤策略</span>
-                    <select
-                      value={primaryDraft.memoryRecall.postFilterMode}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            postFilterMode: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      <option value="keyword_overlap">keyword_overlap · 保守过滤</option>
-                      <option value="none">none · 不额外过滤</option>
-                    </select>
-                  </label>
-                  <label className="wb-field">
-                    <span>重排策略</span>
-                    <select
-                      value={primaryDraft.memoryRecall.rerankMode}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            rerankMode: event.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      <option value="heuristic">heuristic · 主题优先</option>
-                      <option value="none">none · 保留原始顺序</option>
-                    </select>
-                  </label>
-                  <label className="wb-field">
-                    <span>最低关键词重叠</span>
-                    <input
-                      type="text"
-                      value={primaryDraft.memoryRecall.minKeywordOverlap}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            minKeywordOverlap: event.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="wb-field">
-                    <span>最多查几个 Scope</span>
-                    <input
-                      type="text"
-                      value={primaryDraft.memoryRecall.scopeLimit}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            scopeLimit: event.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="wb-field">
-                    <span>每个 Scope 最多带回几条</span>
-                    <input
-                      type="text"
-                      value={primaryDraft.memoryRecall.perScopeLimit}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            perScopeLimit: event.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="wb-field">
-                    <span>总命中上限</span>
-                    <input
-                      type="text"
-                      value={primaryDraft.memoryRecall.maxHits}
-                      onChange={(event) =>
-                        setPrimaryDraft((current) => ({
-                          ...current,
-                          memoryRecall: {
-                            ...current.memoryRecall,
-                            maxHits: event.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-
-                <div className="wb-agent-advanced-grid">
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">模型运行方式</span>
-                    <strong>{primaryDraft.llmMode}</strong>
-                    <p>{primaryDraft.primaryProvider}</p>
-                  </div>
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">接入地址</span>
-                    <strong>{primaryDraft.proxyUrl}</strong>
-                    <p>只在排查连接问题时需要关注</p>
-                  </div>
-                </div>
-              </div>
-            </details>
-          </div>
-        </section>
-
-        <section className="wb-panel wb-butler-side">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">当前状态</p>
-              <h3>切换查看范围并处理常见提醒</h3>
-              <p className="wb-panel-copy">这里只影响你现在看到的 Project 和 Workspace，不会改默认配置。</p>
-            </div>
-            <div className="wb-inline-actions wb-inline-actions-wrap">
-              <Link className="wb-button wb-button-secondary" to="/settings">
-                去 Settings
-              </Link>
-              <Link className="wb-button wb-button-tertiary" to="/work">
-                去看 Work
-              </Link>
-            </div>
-          </div>
-
-          <div className="wb-butler-side-stack">
-            <article className="wb-butler-brief-card">
-              <div className="wb-butler-brief-head">
-                <div>
-                  <p className="wb-card-label">当前视角</p>
-                  <strong>切换你正在观察的 Project / Workspace</strong>
-                </div>
-                <span className="wb-chip">不会改 Butler 默认配置</span>
-              </div>
-              <div className="wb-inline-form">
-                <label className="wb-field">
-                  <span>查看哪个 Project</span>
-                  <select
-                    value={contextProjectId}
-                    onChange={(event) => {
-                      setContextProjectId(event.target.value);
-                      setContextWorkspaceId(
-                        normalizeWorkspaceForProject(
-                          availableWorkspaces,
-                          event.target.value,
-                          contextWorkspaceId
-                        )
-                      );
-                    }}
-                  >
-                    {availableProjects.map((project) => (
-                      <option key={project.project_id} value={project.project_id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="wb-field">
-                  <span>查看哪个 Workspace</span>
-                  <select
-                    value={contextWorkspaceId}
-                    onChange={(event) => setContextWorkspaceId(event.target.value)}
-                  >
-                    {availableContextWorkspaces.map((workspace) => (
-                      <option key={workspace.workspace_id} value={workspace.workspace_id}>
-                        {workspace.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  disabled={
-                    busyActionId === "project.select" ||
-                    (contextProjectId === selector.current_project_id &&
-                      contextWorkspaceId === selector.current_workspace_id)
-                  }
-                  onClick={() => void handleSwitchProjectContext()}
-                >
-                  切到这个视角
-                </button>
-              </div>
-            </article>
-
-            <article className="wb-butler-brief-card">
-              <div className="wb-butler-brief-head">
-                <div>
-                  <p className="wb-card-label">使用提示</p>
-                  <strong>先说目标，再看执行细节</strong>
-                </div>
-              </div>
-              <div className="wb-note-stack">
-                <div className="wb-note">
-                  <strong>先说明结果</strong>
-                  <span>直接告诉 Butler 你要什么结果，比解释内部流程更有效。</span>
-                </div>
-                <div className="wb-note">
-                  <strong>高风险会先确认</strong>
-                  <span>涉及高风险动作时，界面会先停下来让你确认。</span>
-                </div>
-                <div className="wb-note">
-                  <strong>执行细节去 Work 看</strong>
-                  <span>想看谁在执行、卡在哪一步，直接去 Work 页面最清楚。</span>
-                </div>
-              </div>
-            </article>
-
-            <article className="wb-butler-brief-card">
-              <div className="wb-butler-brief-head">
-                <div>
-                  <p className="wb-card-label">保存前提醒</p>
-                  <strong>{reviewHeadline(primaryReview)}</strong>
-                </div>
-                <span className={`wb-status-pill is-${reviewTone(primaryReview)}`}>
-                  {reviewTone(primaryReview)}
-                </span>
-              </div>
-              <div className="wb-note-stack">
-                {primaryReview.next_actions.slice(0, 3).map((item) => (
-                  <div key={item} className="wb-note">
-                    <strong>下一步</strong>
-                    <span>{item}</span>
-                  </div>
-                ))}
-                {primaryReview.next_actions.length === 0 ? (
-                  <div className="wb-note">
-                    <strong>当前状态</strong>
-                    <span>没有额外提示，可以继续维护 Worker，或去 Settings 调整平台连接。</span>
-                  </div>
-                ) : null}
-              </div>
-            </article>
-
-            <div className="wb-agent-project-grid">
-              <button
-                type="button"
-                className={`wb-agent-project-card ${projectFilter === "all" ? "is-active" : ""}`}
-                onClick={() => setProjectFilter("all")}
-              >
-                <strong>全部 Project</strong>
-                <span>
-                  实例 {workInstances.length} / 模板 {workTemplates.length}
-                </span>
-              </button>
-              {projectFilterStats.map((project) => (
-                <button
-                  key={project.projectId}
-                  type="button"
-                  className={`wb-agent-project-card ${projectFilter === project.projectId ? "is-active" : ""}`}
-                  onClick={() => setProjectFilter(project.projectId)}
-                >
-                  <strong>{project.name}</strong>
-                  <span>
-                    实例 {project.instanceCount} / 模板 {project.templateCount}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
+        <ButlerWorkspaceSection
+          primaryDirty={primaryDirty}
+          butlerBusy={butlerBusy}
+          draft={primaryDraft}
+          scopeOptions={SCOPE_OPTIONS}
+          primaryProjectOptions={primaryProjectOptions}
+          primaryWorkspaceOptions={primaryWorkspaceOptions}
+          review={{
+            tone: reviewTone(primaryReview),
+            headline: reviewHeadline(primaryReview),
+            summary: reviewSummary(primaryReview),
+            nextActions: primaryReview.next_actions,
+          }}
+          summary={{
+            primaryProjectName: findProjectName(availableProjects, primaryDraft.projectId),
+            primaryWorkspaceName: findWorkspaceName(availableWorkspaces, primaryDraft.workspaceId),
+            currentPolicyLabel: currentPolicy?.label ?? primaryDraft.policyProfileId,
+            primaryToolProfileLabel: formatToolProfile(primaryDraft.toolProfile),
+            primaryModelAliasHint:
+              MODEL_ALIAS_HINTS[primaryDraft.modelAlias] ?? "用于决定默认模型档位。",
+            recallPresetLabel: recallPresetLabel ?? "自定义",
+            recallPresetDescription:
+              MEMORY_RECALL_PRESETS.find((preset) => preset.label === recallPresetLabel)
+                ?.description ?? "已按当前项目做细化。",
+            selectedPrimaryCapabilityCount,
+          }}
+          context={{
+            contextProjectId,
+            contextWorkspaceId,
+            availableProjects,
+            availableContextWorkspaces,
+            canSwitchContext:
+              busyActionId !== "project.select" &&
+              !(
+                contextProjectId === selector.current_project_id &&
+                contextWorkspaceId === selector.current_workspace_id
+              ),
+          }}
+          projectFilter={projectFilter}
+          projectFilterStats={projectFilterStats}
+          totalWorkInstances={workInstances.length}
+          totalWorkTemplates={workTemplates.length}
+          policyCards={policyProfiles.map(renderPolicyCard)}
+          modelAliasButtons={modelAliasOptions.map((alias) => (
+            <button
+              key={alias}
+              type="button"
+              className={`wb-chip-button ${primaryDraft.modelAlias === alias ? "is-active" : ""}`}
+              onClick={() => updatePrimary("modelAlias", alias)}
+            >
+              {alias}
+            </button>
+          ))}
+          toolProfileButtons={toolProfileOptions.map((profile) => (
+            <button
+              key={profile}
+              type="button"
+              className={`wb-chip-button ${primaryDraft.toolProfile === profile ? "is-active" : ""}`}
+              onClick={() => updatePrimary("toolProfile", profile)}
+            >
+              {formatToolProfile(profile)}
+            </button>
+          ))}
+          recallPresetButtons={MEMORY_RECALL_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`wb-chip-button ${
+                detectRecallPreset(primaryDraft.memoryRecall) === preset.label ? "is-active" : ""
+              }`}
+              onClick={() => applyPrimaryMemoryPreset(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+          skillCapabilitySection={renderCapabilityProviderSection(
+            "Skills",
+            skillCapabilityEntries,
+            primaryDraft.capabilitySelection,
+            updatePrimaryCapabilitySelection,
+            "/settings/skills"
+          )}
+          mcpCapabilitySection={renderCapabilityProviderSection(
+            "MCP",
+            mcpCapabilityEntries,
+            primaryDraft.capabilitySelection,
+            updatePrimaryCapabilitySelection,
+            "/settings/mcp"
+          )}
+          onResetPrimary={handleResetPrimary}
+          onReviewPrimary={() => void handleReviewPrimary()}
+          onApplyPrimary={() => void handleApplyPrimary()}
+          onUpdatePrimaryField={updatePrimary}
+          onUpdatePrimaryProject={updatePrimaryProject}
+          onUpdatePrimaryMemoryAccess={updatePrimaryMemoryAccess}
+          onUpdatePrimaryMemoryRecallField={(key, value) =>
+            setPrimaryDraft((current) => ({
+              ...current,
+              memoryRecall: {
+                ...current.memoryRecall,
+                [key]: value,
+              },
+            }))
+          }
+          onContextProjectChange={(projectId) => {
+            setContextProjectId(projectId);
+            setContextWorkspaceId(
+              normalizeWorkspaceForProject(
+                availableWorkspaces,
+                projectId,
+                contextWorkspaceId
+              )
+            );
+          }}
+          onContextWorkspaceChange={setContextWorkspaceId}
+          onSwitchProjectContext={() => void handleSwitchProjectContext()}
+          onSetProjectFilter={setProjectFilter}
+        />
       ) : null}
 
       {activeWorkspaceView === "templates" ? (
-      <section className="wb-panel wb-root-agent-hub">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">Worker 模板</p>
-            <h3>在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么</h3>
-            <p className="wb-panel-copy">
-              左侧选模板，中间改默认配置，右侧看当前运行状态和最近任务。需要追内部链路时，再去
-              Advanced。
-            </p>
-          </div>
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <button
-              type="button"
-              className="wb-button wb-button-primary"
-              onClick={handleCreateFreshRootAgent}
-            >
-              新建 Worker 模板
-            </button>
-            <Link className="wb-button wb-button-secondary" to="/advanced">
-              去 Control Plane
-            </Link>
-            <Link className="wb-button wb-button-tertiary" to="/work">
-              去看 Work
-            </Link>
-          </div>
-        </div>
-
-        <div className="wb-inline-banner is-muted">
-          <strong>当前按单模板模式工作</strong>
-          <span>
-            一个 Worker 模板通常对应你现在看到的默认工作方式。这里会同时展示静态配置、当前
-            Project / Workspace、运行负载和版本记录，方便你决定何时保存、发布或提炼新模板。
-          </span>
-        </div>
-
-        <div className="wb-root-agent-summary-grid">
-          <div className="wb-detail-block">
-            <span className="wb-card-label">模板总数</span>
-            <strong>{rootAgentProfiles.length}</strong>
-            <p>内置 {builtinRootAgentProfiles.length} / 自定义 {customRootAgentProfiles.length}</p>
-          </div>
-          <div className="wb-detail-block">
-            <span className="wb-card-label">激活中的 Work</span>
-            <strong>{rootAgentActiveWorkCount}</strong>
-            <p>运行中 {rootAgentRunningWorkCount} / 需关注 {rootAgentAttentionWorkCount}</p>
-          </div>
-          <div className="wb-detail-block">
-            <span className="wb-card-label">默认 Worker 模板</span>
-            <strong>{defaultRootAgentName || "还没有默认值"}</strong>
-            <p>{defaultRootAgentId || "发布并绑定后会显示在这里"}</p>
-          </div>
-          <div className="wb-detail-block">
-            <span className="wb-card-label">当前选中</span>
-            <strong>{selectedRootAgentDisplayName || "新建草稿"}</strong>
-            <p>
-              {selectedRootAgentProfile
-                ? `${formatScope(selectedRootAgentProfile.scope)} / ${findProjectName(
-                    availableProjects,
-                    selectedRootAgentProfile.project_id || selector.current_project_id
-                  )}`
-                : "还没有保存"}
-            </p>
-          </div>
-          <div className="wb-detail-block">
-            <span className="wb-card-label">最近更新时间</span>
-            <strong>{latestRootAgentUpdate ? formatDateTime(latestRootAgentUpdate) : "未记录"}</strong>
-            <p>
-              上下文 {selectedRootAgentDynamicContext?.active_project_id || selector.current_project_id} /{" "}
-              {selectedRootAgentDynamicContext?.active_workspace_id || selector.current_workspace_id}
-            </p>
-          </div>
-        </div>
-
-        <div className="wb-root-agent-layout">
-          <aside className="wb-root-agent-browser">
-            <article className="wb-root-agent-browser-panel">
-              <div className="wb-root-agent-browser-head">
-                <div>
-                  <p className="wb-card-label">内置模板</p>
-                  <strong>先选一个起点，再决定是否另存为自己的 Worker 模板</strong>
-                </div>
-                <span className="wb-status-pill is-ready">{builtinRootAgentProfiles.length}</span>
-              </div>
-              <div className="wb-root-agent-library-section">
-                {builtinRootAgentProfiles.map((profile) => (
-                  <button
-                    key={profile.profile_id}
-                    type="button"
-                    className={`wb-root-agent-library-item ${
-                      selectedRootAgentId === profile.profile_id ? "is-active" : ""
-                    }`}
-                    onClick={() => selectRootAgentProfile(profile)}
-                  >
-                    <div className="wb-root-agent-library-head">
-                      <div>
-                        <strong>
-                          {formatWorkerTemplateName(
-                            profile.name,
-                            profile.static_config.base_archetype
-                          )}
-                        </strong>
-                        <span>{profile.summary || "系统 archetype 默认配置。"}</span>
-                      </div>
-                      <span className={`wb-status-pill is-${profile.status}`}>
-                        {formatWorkerProfileStatus(profile.status)}
-                      </span>
-                    </div>
-                    <div className="wb-chip-row">
-                      <span className="wb-chip">{formatWorkerProfileOrigin(profile.origin_kind)}</span>
-                      <span className="wb-chip">{formatWorkerType(profile.static_config.base_archetype)}</span>
-                      <span className="wb-chip">{formatToolProfile(profile.static_config.tool_profile)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </article>
-
-            <article className="wb-root-agent-browser-panel">
-              <div className="wb-root-agent-browser-head">
-                <div>
-                  <p className="wb-card-label">已保存模板</p>
-                  <strong>你已经保存过的 Worker 模板</strong>
-                </div>
-                <span className="wb-status-pill is-active">{customRootAgentProfiles.length}</span>
-              </div>
-              {customRootAgentProfiles.length === 0 ? (
-                <div className="wb-empty-state">
-                  <strong>还没有自定义 Worker 模板</strong>
-                  <span>从左侧选一个内置模板，或直接点“新建 Worker 模板”。</span>
-                </div>
-              ) : (
-                <div className="wb-root-agent-library-section">
-                  {customRootAgentProfiles.map((profile) => {
-                    const isSelected = selectedRootAgentId === profile.profile_id;
-                    const hasAttention = profile.dynamic_context.attention_work_count > 0;
-                    return (
-                      <button
-                        key={profile.profile_id}
-                        type="button"
-                        className={`wb-root-agent-library-item ${isSelected ? "is-active" : ""}`}
-                        onClick={() => selectRootAgentProfile(profile)}
-                      >
-                        <div className="wb-root-agent-library-head">
-                          <div>
-                            <strong>
-                              {formatWorkerTemplateName(
-                                profile.name,
-                                profile.static_config.base_archetype
-                              )}
-                            </strong>
-                            <span>{profile.summary || "当前 profile 没有额外摘要。"}</span>
-                          </div>
-                          <span
-                            className={`wb-status-pill is-${
-                              hasAttention ? "warning" : profile.status
-                            }`}
-                          >
-                            {hasAttention
-                              ? `提醒 ${profile.dynamic_context.attention_work_count}`
-                              : formatWorkerProfileStatus(profile.status)}
-                          </span>
-                        </div>
-                        <div className="wb-root-agent-library-meta">
-                          <span>{findProjectName(availableProjects, profile.project_id || selector.current_project_id)}</span>
-                          <span>
-                            版本 {profile.active_revision || 0}
-                            {profile.draft_revision > profile.active_revision
-                              ? ` / 草稿 ${profile.draft_revision}`
-                              : ""}
-                          </span>
-                        </div>
-                        <div className="wb-chip-row">
-                          <span className="wb-chip">{formatWorkerProfileOrigin(profile.origin_kind)}</span>
-                          <span className="wb-chip">{formatScope(profile.scope)}</span>
-                          <span className="wb-chip">
-                            {formatWorkerType(profile.static_config.base_archetype)}
-                          </span>
-                          {profile.profile_id === defaultRootAgentId ? (
-                            <span className="wb-chip is-success">聊天默认</span>
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </article>
-          </aside>
-
-          <section className="wb-root-agent-studio">
-            <article className="wb-root-agent-studio-panel">
-              <div className="wb-root-agent-card-head">
-                <div>
-                  <p className="wb-card-label">模板编辑</p>
-                  <h3>{selectedRootAgentDisplayName || "新的 Worker 模板草稿"}</h3>
-                  <p className="wb-inline-note">
-                    这里改的是默认配置。右侧会同步显示当前运行状态、版本记录和最近任务。
-                  </p>
-                </div>
-                <div className="wb-chip-row">
-                  <span className={`wb-status-pill is-${selectedRootAgentDisplayStatus}`}>
-                    {formatWorkerProfileStatus(selectedRootAgentDisplayStatus)}
-                  </span>
-                  {selectedRootAgentIsDefault ? (
-                    <span className="wb-chip is-success">当前聊天默认</span>
-                  ) : null}
-                  {rootAgentDraftDirty ? <span className="wb-chip is-warning">未保存变更</span> : null}
-                  <span className="wb-chip">
-                    {formatWorkerProfileOrigin(selectedRootAgentProfile?.origin_kind ?? "custom")}
-                  </span>
-                  <span className="wb-chip">{formatScope(rootAgentDraft.scope)}</span>
-                </div>
-              </div>
-
-              {selectedRootAgentIsBuiltin ? (
-                <div className="wb-inline-banner is-muted">
-                  <strong>当前选中的是内置模板</strong>
-                  <span>
-                    你可以直接修改并保存，系统会自动生成新的 Worker 模板；也可以先点击“复制成新模
-                    板”保留原模板不动。
-                  </span>
-                </div>
-              ) : null}
-
-              <div className="wb-root-agent-studio-form">
-                <label className="wb-field">
-                  <span>名称</span>
-                  <input
-                    type="text"
-                    value={rootAgentDraft.name}
-                    onChange={(event) => updateRootAgentDraft("name", event.target.value)}
-                    placeholder="例如：家庭 NAS 管家"
-                  />
-                </label>
-                <label className="wb-field">
-                  <span>作用范围</span>
-                  <select
-                    value={rootAgentDraft.scope}
-                    onChange={(event) => updateRootAgentDraft("scope", event.target.value)}
-                  >
-                    <option value="project">项目级默认</option>
-                    <option value="system">系统级默认</option>
-                  </select>
-                </label>
-                <label className="wb-field">
-                  <span>所属项目</span>
-                  <select
-                    value={rootAgentDraft.projectId}
-                    disabled={rootAgentDraft.scope !== "project"}
-                    onChange={(event) => updateRootAgentProject(event.target.value)}
-                  >
-                    {rootAgentProjectOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="wb-field">
-                  <span>模板起点</span>
-                  <select
-                    value={rootAgentDraft.baseArchetype}
-                    onChange={(event) => updateRootAgentDraft("baseArchetype", event.target.value)}
-                  >
-                    {capabilityWorkerProfiles.map((profile) => (
-                      <option key={profile.worker_type} value={profile.worker_type}>
-                        {formatWorkerType(profile.worker_type)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="wb-field">
-                  <span>模型别名</span>
-                  <select
-                    value={rootAgentDraft.modelAlias}
-                    onChange={(event) => updateRootAgentDraft("modelAlias", event.target.value)}
-                  >
-                    {modelAliasOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="wb-field">
-                  <span>工具边界</span>
-                  <select
-                    value={rootAgentDraft.toolProfile}
-                    onChange={(event) => updateRootAgentDraft("toolProfile", event.target.value)}
-                  >
-                    {toolProfileOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {formatToolProfile(option)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="wb-field wb-field-span-2">
-                  <span>摘要</span>
-                  <textarea
-                    className="wb-textarea-prose"
-                    value={rootAgentDraft.summary}
-                    onChange={(event) => updateRootAgentDraft("summary", event.target.value)}
-                    placeholder="说明它长期负责什么、边界在哪里、什么时候应该叫它出场。"
-                  />
-                </label>
-                <label className="wb-field">
-                  <span>默认工具组</span>
-                  <textarea
-                    value={rootAgentDraft.defaultToolGroupsText}
-                    onChange={(event) =>
-                      updateRootAgentDraft("defaultToolGroupsText", event.target.value)
-                    }
-                    placeholder="每行一个 tool_group，例如 web、memory、project"
-                  />
-                  <small>这里写 tool group，不是具体 tool name。</small>
-                </label>
-                <label className="wb-field">
-                  <span>固定工具</span>
-                  <textarea
-                    value={rootAgentDraft.selectedToolsText}
-                    onChange={(event) =>
-                      updateRootAgentDraft("selectedToolsText", event.target.value)
-                    }
-                    placeholder="每行一个 tool，例如 web.search"
-                  />
-                  <small>pin 住 1-3 个关键工具，运行行为会稳定很多。</small>
-                </label>
-                <label className="wb-field">
-                  <span>运行形态</span>
-                  <textarea
-                    value={rootAgentDraft.runtimeKindsText}
-                    onChange={(event) =>
-                      updateRootAgentDraft("runtimeKindsText", event.target.value)
-                    }
-                    placeholder="例如 worker、subagent"
-                  />
-                </label>
-                <label className="wb-field">
-                  <span>策略引用</span>
-                  <textarea
-                    value={rootAgentDraft.policyRefsText}
-                    onChange={(event) =>
-                      updateRootAgentDraft("policyRefsText", event.target.value)
-                    }
-                    placeholder="例如 default"
-                  />
-                </label>
-                <label className="wb-field">
-                  <span>补充指令</span>
-                  <textarea
-                    value={rootAgentDraft.instructionOverlaysText}
-                    onChange={(event) =>
-                      updateRootAgentDraft("instructionOverlaysText", event.target.value)
-                    }
-                    placeholder="每行一句补充指令，例如：优先解释风险，不直接执行高危操作。"
-                  />
-                </label>
-                <label className="wb-field">
-                  <span>Tags</span>
-                  <textarea
-                    value={rootAgentDraft.tagsText}
-                    onChange={(event) => updateRootAgentDraft("tagsText", event.target.value)}
-                    placeholder="每行一个标签，例如 nas、router、finance"
-                  />
-                </label>
-              </div>
-
-              <div className="wb-root-agent-token-grid">
-                <div className="wb-root-agent-token-card">
-                  <div className="wb-root-agent-column-head">
-                    <strong>推荐工具组</strong>
-                    <button
-                      type="button"
-                      className="wb-button wb-button-tertiary"
-                      onClick={applyRootAgentArchetypeDefaults}
-                    >
-                      套用 archetype 默认值
-                    </button>
-                  </div>
-                  <div className="wb-chip-row">
-                    {rootAgentSuggestedToolGroups.map((toolGroup) => (
-                      <button
-                        key={toolGroup}
-                        type="button"
-                        className="wb-chip-button"
-                        onClick={() => appendRootAgentDraftValue("defaultToolGroupsText", toolGroup)}
-                      >
-                        {formatTokenLabel(toolGroup)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="wb-root-agent-token-card">
-                  <div className="wb-root-agent-column-head">
-                    <strong>推荐固定工具</strong>
-                    <span>优先 pin 关键能力</span>
-                  </div>
-                  <div className="wb-chip-row">
-                    {rootAgentSuggestedTools.map((tool) => (
-                      <button
-                        key={tool}
-                        type="button"
-                        className="wb-chip-button"
-                        onClick={() => appendRootAgentDraftValue("selectedToolsText", tool)}
-                      >
-                        {formatToolToken(tool, toolLabelByName)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="wb-root-agent-token-card">
-                  <div className="wb-root-agent-column-head">
-                    <strong>运行形态</strong>
-                    <span>和 Agent Zero / OpenClaw 一样，先把运行边界说清楚</span>
-                  </div>
-                  <div className="wb-chip-row">
-                    {rootAgentSuggestedRuntimeKinds.map((kind) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        className="wb-chip-button"
-                        onClick={() => appendRootAgentDraftValue("runtimeKindsText", kind)}
-                      >
-                        {formatTokenLabel(kind)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="wb-root-agent-token-card">
-                  <div className="wb-root-agent-column-head">
-                    <strong>标签建议</strong>
-                    <span>标签帮助 Butler 更快找到合适的 Worker 模板</span>
-                  </div>
-                  <div className="wb-chip-row">
-                    {rootAgentSuggestedTags.map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        className="wb-chip-button"
-                        onClick={() => appendRootAgentDraftValue("tagsText", tag)}
-                      >
-                        {formatTokenLabel(tag)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="wb-root-agent-review-panel">
-                <div className="wb-root-agent-card-head">
-                  <div>
-                    <p className="wb-card-label">Provider 白名单</p>
-                    <strong>给这个 Worker 模板圈定允许调用的能力 Provider</strong>
-                  </div>
-                  <span className="wb-chip">当前勾选 {selectedRootAgentCapabilityCount}</span>
-                </div>
-                {renderCapabilityProviderSection(
-                  "Skills",
-                  skillCapabilityEntries,
-                  rootAgentDraft.capabilitySelection,
-                  updateRootAgentCapabilitySelection,
-                  "/settings/skills"
-                )}
-                {renderCapabilityProviderSection(
-                  "MCP",
-                  mcpCapabilityEntries,
-                  rootAgentDraft.capabilitySelection,
-                  updateRootAgentCapabilitySelection,
-                  "/settings/mcp"
-                )}
-              </div>
-
-              {rootAgentReview ? (
-                <div className="wb-root-agent-review-panel">
-                  <div className="wb-root-agent-card-head">
-                    <div>
-                      <p className="wb-card-label">检查结果</p>
-                      <strong>
-                        {rootAgentReview.ready
-                          ? "当前草稿可以保存或发布"
-                          : "先处理阻塞项，再继续发布"}
-                      </strong>
-                    </div>
-                    <span
-                      className={`wb-status-pill is-${
-                        rootAgentReview.ready
-                          ? "success"
-                          : rootAgentReview.save_errors.length > 0
-                            ? "danger"
-                            : "warning"
-                      }`}
-                    >
-                      {rootAgentReview.ready ? "通过" : "待处理"}
-                    </span>
-                  </div>
-                  <div className="wb-root-agent-review-grid">
-                    <div className="wb-note-stack">
-                      {rootAgentReview.save_errors.map((item) => (
-                        <div key={item} className="wb-note">
-                          <strong>保存失败</strong>
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                      {rootAgentReview.blocking_reasons.map((item) => (
-                        <div key={item} className="wb-note">
-                          <strong>阻塞项</strong>
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                      {rootAgentReview.warnings.map((item) => (
-                        <div key={item} className="wb-note">
-                          <strong>提醒</strong>
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="wb-note-stack">
-                      {rootAgentReview.next_actions.map((item) => (
-                        <div key={item} className="wb-note">
-                          <strong>下一步</strong>
-                          <span>{item}</span>
-                        </div>
-                      ))}
-                      {rootAgentReviewDiff.length > 0 ? (
-                        <div className="wb-note">
-                          <strong>变更字段</strong>
-                          <span>
-                            {rootAgentReviewDiff.map((item) => formatTokenLabel(item.field)).join("、")}
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={() => void handleReviewRootAgentDraft()}
-                  disabled={busyActionId === "worker_profile.review"}
-                >
-                  检查草稿
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => void handleSaveRootAgentDraft(false)}
-                  disabled={busyActionId === "worker_profile.apply"}
-                >
-                  {selectedRootAgentIsBuiltin ? "另存草稿" : "保存草稿"}
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => void handleSaveRootAgentDraft(true)}
-                  disabled={busyActionId === "worker_profile.apply"}
-                >
-                  {selectedRootAgentIsBuiltin ? "另存并发布" : "发布版本"}
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={() =>
-                    selectedRootAgentProfile
-                      ? void handleCreateRootAgentDraftFromTemplate(selectedRootAgentProfile)
-                      : undefined
-                  }
-                  disabled={!selectedRootAgentProfile || busyActionId === "worker_profile.clone"}
-                >
-                  复制成新模板
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={() => void handleBindRootAgentDefault()}
-                  disabled={
-                    !selectedRootAgentProfile ||
-                    selectedRootAgentIsBuiltin ||
-                    selectedRootAgentDisplayStatus !== "active" ||
-                    busyActionId === "worker_profile.bind_default"
-                  }
-                >
-                  {selectedRootAgentIsDefault ? "已是聊天默认" : "设为聊天默认"}
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={() =>
-                    selectedRootAgentProfile
-                      ? void handleSwitchToRootAgentContext(selectedRootAgentProfile)
-                      : undefined
-                  }
-                  disabled={!selectedRootAgentProfile || busyActionId === "project.select"}
-                >
-                  切到这个模板的上下文
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={() => void handleArchiveRootAgent()}
-                  disabled={
-                    !rootAgentDraft.profileId ||
-                    !selectedRootAgentEditable ||
-                    busyActionId === "worker_profile.archive"
-                  }
-                >
-                  归档当前模板
-                </button>
-              </div>
-            </article>
-          </section>
-
-          <aside className="wb-root-agent-runtime-rail">
-            <article className="wb-root-agent-runtime-panel">
-              <div className="wb-root-agent-card-head">
-                <div>
-                  <p className="wb-card-label">当前运行状态</p>
-                  <strong>
-                    {selectedRootAgentProfile
-                      ? "这个模板最近是怎么工作的"
-                      : "先从左侧选一个模板，或先保存当前草稿"}
-                  </strong>
-                </div>
-                <span className="wb-chip">
-                  {selectedRootAgentDynamicContext?.updated_at
-                    ? formatDateTime(selectedRootAgentDynamicContext.updated_at)
-                    : "尚未刷新"}
-                </span>
-              </div>
-              {selectedRootAgentProfile ? (
-                <>
-                    <div className="wb-root-agent-context-grid">
-                      <div className="wb-detail-block">
-                        <span className="wb-card-label">活跃任务</span>
-                        <strong>{selectedRootAgentDynamicContext?.active_work_count ?? 0}</strong>
-                        <p>运行中 {selectedRootAgentDynamicContext?.running_work_count ?? 0}</p>
-                      </div>
-                      <div className="wb-detail-block">
-                        <span className="wb-card-label">需要处理</span>
-                        <strong>{selectedRootAgentDynamicContext?.attention_work_count ?? 0}</strong>
-                        <p>Target {selectedRootAgentDynamicContext?.latest_target_kind || "-"}</p>
-                      </div>
-                      <div className="wb-detail-block">
-                        <span className="wb-card-label">工具分配</span>
-                        <strong>
-                          {selectedRootAgentDynamicContext?.current_tool_resolution_mode || "legacy"}
-                        </strong>
-                      <p>
-                        mounted {selectedRootAgentMountedTools.length} / blocked{" "}
-                        {selectedRootAgentBlockedTools.length}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="wb-key-value-list">
-                    <span>项目 / 工作区</span>
-                    <strong>
-                      {findProjectName(
-                        availableProjects,
-                        selectedRootAgentDynamicContext?.active_project_id ||
-                          selectedRootAgentProfile.project_id ||
-                          selector.current_project_id
-                      )}{" "}
-                      /{" "}
-                      {findWorkspaceName(
-                        availableWorkspaces,
-                        selectedRootAgentDynamicContext?.active_workspace_id ||
-                          selector.current_workspace_id
-                      )}
-                    </strong>
-                    <span>快照</span>
-                    <strong>{selectedRootAgentProfile.effective_snapshot_id || "-"}</strong>
-                    <span>最近任务</span>
-                    <strong>
-                      {selectedRootAgentDynamicContext?.latest_work_title ||
-                        selectedRootAgentDynamicContext?.latest_work_id ||
-                        "-"}
-                    </strong>
-                    <span>最近 Task</span>
-                    <strong>{selectedRootAgentDynamicContext?.latest_task_id || "-"}</strong>
-                  </div>
-                  <div className="wb-root-agent-token-stack">
-                    <div>
-                      <p className="wb-card-label">当前工具宇宙</p>
-                      <div className="wb-chip-row">
-                        {(selectedRootAgentDynamicContext?.current_selected_tools ?? []).length > 0 ? (
-                          selectedRootAgentDynamicContext!.current_selected_tools.map((tool) => (
-                            <span key={tool} className="wb-chip">
-                              {formatToolToken(tool, toolLabelByName)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="wb-inline-note">还没有记录 selected tools。</span>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="wb-card-label">工具发现入口</p>
-                      <div className="wb-chip-row">
-                        {selectedRootAgentDiscoveryEntrypoints.length > 0 ? (
-                          selectedRootAgentDiscoveryEntrypoints.map((tool) => (
-                            <span key={tool} className="wb-chip">
-                              {formatToolToken(tool, toolLabelByName)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="wb-inline-note">当前没有额外入口提示。</span>
-                        )}
-                      </div>
-                    </div>
-                    {selectedRootAgentMountedTools.length > 0 ? (
-                      <div>
-                        <p className="wb-card-label">已挂载工具</p>
-                        <div className="wb-note-stack">
-                          {selectedRootAgentMountedTools.slice(0, 4).map((tool) => (
-                            <div key={`mounted-${tool.tool_name}`} className="wb-note">
-                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
-                              <span>{tool.summary || tool.source_kind}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {selectedRootAgentBlockedTools.length > 0 ? (
-                      <div>
-                        <p className="wb-card-label">当前被阻塞的工具</p>
-                        <div className="wb-note-stack">
-                          {selectedRootAgentBlockedTools.slice(0, 4).map((tool) => (
-                            <div key={`blocked-${tool.tool_name}`} className="wb-note">
-                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
-                              <span>{tool.summary || tool.reason_code || tool.status}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {selectedRootAgentCapabilities.length > 0 ? (
-                      <div>
-                        <p className="wb-card-label">控制面能力</p>
-                        <div className="wb-chip-row">
-                          {selectedRootAgentCapabilities.map((capability) => (
-                            <span key={capability.capability_id} className="wb-chip">
-                              {capability.label}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                  {selectedRootAgentWarnings.length > 0 ? (
-                    <div className="wb-note-stack">
-                      {selectedRootAgentWarnings.map((warning) => (
-                        <div key={warning} className="wb-note">
-                          <strong>提醒</strong>
-                          <span>{warning}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="wb-empty-state">
-                  <strong>还没有运行态视图</strong>
-                  <span>先选一个已有模板，或者保存现在的草稿，再回来观察运行状态。</span>
-                </div>
-              )}
-            </article>
-
-            <article className="wb-root-agent-runtime-panel">
-              <div className="wb-root-agent-card-head">
-                <div>
-                  <p className="wb-card-label">新建任务</p>
-                  <strong>按这个模板启动一次新的工作</strong>
-                </div>
-                <Link className="wb-button wb-button-tertiary" to="/chat">
-                  去 Chat 观察执行
-                </Link>
-              </div>
-              <label className="wb-field">
-                <span>任务目标</span>
-                <textarea
-                  className="wb-textarea-prose"
-                  value={rootAgentSpawnObjective}
-                  onChange={(event) => setRootAgentSpawnObjective(event.target.value)}
-                  placeholder="例如：检查家庭 NAS 备份是否异常，并给出今天的处理建议。"
-                />
-              </label>
-              <div className="wb-inline-actions wb-inline-actions-wrap">
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  disabled={!selectedRootAgentProfile || busyActionId === "worker.spawn_from_profile"}
-                  onClick={() =>
-                    selectedRootAgentProfile
-                      ? void handleSpawnFromRootAgent(selectedRootAgentProfile.profile_id)
-                      : undefined
-                  }
-                >
-                  用这个模板启动
-                </button>
-                <Link className="wb-button wb-button-secondary" to="/work">
-                  去看 Runtime Work
-                </Link>
-              </div>
-            </article>
-
-            <article className="wb-root-agent-runtime-panel">
-              <div className="wb-root-agent-card-head">
-                <div>
-                  <p className="wb-card-label">版本记录</p>
-                  <strong>这里看每次发布后的版本和快照</strong>
-                </div>
-                <span className="wb-chip">{selectedRootAgentDisplayName || "未选中模板"}</span>
-              </div>
-              {rootAgentRevisionLoading ? (
-                <div className="wb-empty-state">
-                  <strong>正在加载版本记录</strong>
-                  <span>稍等一下，马上就好。</span>
-                </div>
-              ) : rootAgentRevisionError ? (
-                <div className="wb-inline-banner is-error">
-                  <strong>版本记录加载失败</strong>
-                  <span>{rootAgentRevisionError}</span>
-                </div>
-              ) : rootAgentRevisions.length === 0 ? (
-                <div className="wb-empty-state">
-                  <strong>还没有版本记录</strong>
-                  <span>保存草稿后点击“发布版本”，这里就会出现可追踪版本。</span>
-                </div>
-              ) : (
-                <div className="wb-root-agent-revision-list">
-                  {rootAgentRevisions.map((revision) => (
-                    <div key={revision.revision_id} className="wb-root-agent-runtime-item">
-                      <div className="wb-root-agent-library-head">
-                        <div>
-                          <strong>版本 {revision.revision}</strong>
-                          <span>{revision.change_summary || "未填写变更摘要"}</span>
-                        </div>
-                        <span className="wb-chip">{revision.created_by || "system"}</span>
-                      </div>
-                      <div className="wb-root-agent-library-meta">
-                        <span>{revision.created_at ? formatDateTime(revision.created_at) : "未记录时间"}</span>
-                        <span>{String(revision.snapshot_payload.profile_id || revision.revision_id)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </article>
-
-            <article className="wb-root-agent-runtime-panel">
-              <div className="wb-root-agent-card-head">
-                <div>
-                  <p className="wb-card-label">最近任务</p>
-                  <strong>这里显示最近哪些任务使用了这个模板</strong>
-                </div>
-                <span className="wb-chip">{selectedRootAgentWorks.length} 个 Work</span>
-              </div>
-              {selectedRootAgentWorks.length === 0 ? (
-                <div className="wb-empty-state">
-                  <strong>当前还没有关联 Work</strong>
-                  <span>发布后从上面的“新建任务”区域启动一次，这里就会显示最近任务。</span>
-                </div>
-              ) : (
-                <div className="wb-root-agent-work-list">
-                  {selectedRootAgentWorks.map((work) => (
-                    <div key={work.work_id} className="wb-root-agent-runtime-item">
-                      <div className="wb-root-agent-library-head">
-                        <div>
-                          <strong>{work.title || work.work_id}</strong>
-                          <span>{work.route_reason || formatWorkerType(work.selected_worker_type)}</span>
-                        </div>
-                        <span className={`wb-status-pill is-${work.status}`}>{work.status}</span>
-                      </div>
-                      <div className="wb-key-value-list">
-                        <span>Agent / Profile</span>
-                        <strong>
-                          {work.agent_profile_id || "-"} /{" "}
-                          {work.requested_worker_profile_id || "回退到 archetype"}
-                        </strong>
-                        <span>使用的模板</span>
-                        <strong>{work.requested_worker_profile_id || "回退到 archetype"}</strong>
-                        <span>版本 / 快照</span>
-                        <strong>
-                          {work.requested_worker_profile_version || "-"} /{" "}
-                          {work.effective_worker_snapshot_id || "-"}
-                        </strong>
-                        <span>Worker / Target</span>
-                        <strong>
-                          {formatWorkerType(work.selected_worker_type)} / {work.target_kind || "-"}
-                        </strong>
-                        <span>工具分配</span>
-                        <strong>{work.tool_resolution_mode || "legacy"}</strong>
-                      </div>
-                      <div className="wb-chip-row">
-                        {work.selected_tools.length > 0 ? (
-                          work.selected_tools.map((tool) => (
-                            <span key={tool} className="wb-chip">
-                              {formatToolToken(tool, toolLabelByName)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="wb-inline-note">当前 work 没有 selected tools 记录。</span>
-                        )}
-                      </div>
-                      {work.blocked_tools && work.blocked_tools.length > 0 ? (
-                        <div className="wb-note-stack">
-                          {work.blocked_tools.slice(0, 2).map((tool) => (
-                            <div
-                              key={`lineage-blocked-${work.work_id}-${tool.tool_name}`}
-                              className="wb-note"
-                            >
-                              <strong>{formatToolToken(tool.tool_name, toolLabelByName)}</strong>
-                              <span>{tool.summary || tool.reason_code || tool.status}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="wb-inline-actions wb-inline-actions-wrap">
-                        <button
-                          type="button"
-                          className="wb-button wb-button-secondary"
-                          onClick={() => void handleExtractRootAgentFromWork(work)}
-                          disabled={busyActionId === "worker.extract_profile_from_runtime"}
-                        >
-                          从这个运行结果提炼模板
-                        </button>
-                        <Link className="wb-button wb-button-tertiary" to="/work">
-                          去 Work 看详情
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </article>
-          </aside>
-        </div>
-      </section>
+        <TemplateWorkspaceSection
+          rootAgentProfilesCount={rootAgentProfiles.length}
+          builtinRootAgentProfiles={builtinRootAgentProfiles}
+          customRootAgentProfiles={customRootAgentProfiles}
+          rootAgentActiveWorkCount={rootAgentActiveWorkCount}
+          rootAgentRunningWorkCount={rootAgentRunningWorkCount}
+          rootAgentAttentionWorkCount={rootAgentAttentionWorkCount}
+          defaultRootAgentName={defaultRootAgentName}
+          defaultRootAgentId={defaultRootAgentId}
+          selectedRootAgentDisplayName={selectedRootAgentDisplayName}
+          selectedRootAgentSummaryLabel={
+            selectedRootAgentProfile
+              ? `${formatScope(selectedRootAgentProfile.scope)} / ${findProjectName(
+                  availableProjects,
+                  selectedRootAgentProfile.project_id || selector.current_project_id
+                )}`
+              : "还没有保存"
+          }
+          latestRootAgentUpdateLabel={latestRootAgentUpdate ? formatDateTime(latestRootAgentUpdate) : "未记录"}
+          latestRootAgentContextLabel={`上下文 ${
+            selectedRootAgentDynamicContext?.active_project_id || selector.current_project_id
+          } / ${selectedRootAgentDynamicContext?.active_workspace_id || selector.current_workspace_id}`}
+          selectedRootAgentId={selectedRootAgentId}
+          selectedRootAgentProfile={selectedRootAgentProfile}
+          selectedRootAgentDisplayStatus={selectedRootAgentDisplayStatus}
+          selectedRootAgentDisplayStatusLabel={formatWorkerProfileStatus(selectedRootAgentDisplayStatus)}
+          selectedRootAgentIsDefault={selectedRootAgentIsDefault}
+          rootAgentDraftDirty={rootAgentDraftDirty}
+          selectedRootAgentOriginLabel={formatWorkerProfileOrigin(
+            selectedRootAgentProfile?.origin_kind ?? "custom"
+          )}
+          selectedRootAgentScopeLabel={formatScope(rootAgentDraft.scope)}
+          selectedRootAgentIsBuiltin={selectedRootAgentIsBuiltin}
+          selectedRootAgentEditable={selectedRootAgentEditable}
+          selectedRootAgentCapabilityCount={selectedRootAgentCapabilityCount}
+          rootAgentDraft={rootAgentDraft}
+          capabilityWorkerProfiles={capabilityWorkerProfiles}
+          rootAgentProjectOptions={rootAgentProjectOptions}
+          modelAliasOptions={modelAliasOptions}
+          toolProfileOptions={toolProfileOptions}
+          rootAgentSuggestedToolGroups={rootAgentSuggestedToolGroups}
+          rootAgentSuggestedTools={rootAgentSuggestedTools}
+          rootAgentSuggestedRuntimeKinds={rootAgentSuggestedRuntimeKinds}
+          rootAgentSuggestedTags={rootAgentSuggestedTags}
+          rootAgentReview={rootAgentReview}
+          rootAgentReviewDiff={rootAgentReviewDiff}
+          busyActionId={busyActionId}
+          skillCapabilitySection={renderCapabilityProviderSection(
+            "Skills",
+            skillCapabilityEntries,
+            rootAgentDraft.capabilitySelection,
+            updateRootAgentCapabilitySelection,
+            "/settings/skills"
+          )}
+          mcpCapabilitySection={renderCapabilityProviderSection(
+            "MCP",
+            mcpCapabilityEntries,
+            rootAgentDraft.capabilitySelection,
+            updateRootAgentCapabilitySelection,
+            "/settings/mcp"
+          )}
+          runtimeRail={
+            <TemplateRuntimeRail
+              selectedRootAgentProfile={selectedRootAgentProfile}
+              selectedRootAgentDynamicContext={selectedRootAgentDynamicContext}
+              selectedRootAgentMountedTools={selectedRootAgentMountedTools}
+              selectedRootAgentBlockedTools={selectedRootAgentBlockedTools}
+              selectedRootAgentDiscoveryEntrypoints={selectedRootAgentDiscoveryEntrypoints}
+              selectedRootAgentCapabilities={selectedRootAgentCapabilities}
+              selectedRootAgentWarnings={selectedRootAgentWarnings}
+              selectedRootAgentDisplayName={selectedRootAgentDisplayName}
+              selectedRootAgentWorks={selectedRootAgentWorks}
+              rootAgentSpawnObjective={rootAgentSpawnObjective}
+              rootAgentRevisionLoading={rootAgentRevisionLoading}
+              rootAgentRevisionError={rootAgentRevisionError}
+              rootAgentRevisions={rootAgentRevisions}
+              busyActionId={busyActionId}
+              availableProjects={availableProjects}
+              availableWorkspaces={availableWorkspaces}
+              selectorProjectId={selector.current_project_id}
+              selectorWorkspaceId={selector.current_workspace_id}
+              onSpawnObjectiveChange={setRootAgentSpawnObjective}
+              onSpawnFromRootAgent={(profileId) => void handleSpawnFromRootAgent(profileId)}
+              onExtractRootAgentFromWork={(work) => void handleExtractRootAgentFromWork(work)}
+              formatDateTime={formatDateTime}
+              formatWorkerType={formatWorkerType}
+              formatToolToken={formatToolToken}
+              findProjectName={findProjectName}
+              findWorkspaceName={findWorkspaceName}
+              toolLabelByName={toolLabelByName}
+            />
+          }
+          onCreateFreshRootAgent={handleCreateFreshRootAgent}
+          onSelectRootAgentProfile={selectRootAgentProfile}
+          onUpdateRootAgentDraft={updateRootAgentDraft}
+          onUpdateRootAgentProject={updateRootAgentProject}
+          onApplyRootAgentArchetypeDefaults={applyRootAgentArchetypeDefaults}
+          onAppendRootAgentDraftValue={appendRootAgentDraftValue}
+          onReviewRootAgentDraft={() => void handleReviewRootAgentDraft()}
+          onSaveRootAgentDraft={(publish) => void handleSaveRootAgentDraft(publish)}
+          onCreateRootAgentDraftFromTemplate={(profile) =>
+            void handleCreateRootAgentDraftFromTemplate(profile)
+          }
+          onBindRootAgentDefault={() => void handleBindRootAgentDefault()}
+          onSwitchToRootAgentContext={(profile) => void handleSwitchToRootAgentContext(profile)}
+          onArchiveRootAgent={() => void handleArchiveRootAgent()}
+          formatWorkerTemplateName={formatWorkerTemplateName}
+          formatWorkerProfileStatus={formatWorkerProfileStatus}
+          formatWorkerProfileOrigin={formatWorkerProfileOrigin}
+          formatWorkerType={formatWorkerType}
+          formatToolProfile={formatToolProfile}
+          formatScope={formatScope}
+          formatTokenLabel={formatTokenLabel}
+          formatToolToken={formatToolToken}
+          findProjectName={findProjectName}
+          availableProjects={availableProjects}
+          toolLabelByName={toolLabelByName}
+        />
       ) : null}
 
       {activeWorkspaceView === "workers" ? (
-      <section className="wb-panel wb-worker-hub">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">Worker 管理</p>
-            <h3>先看实例，再决定是否沉淀成草案</h3>
-            <p className="wb-panel-copy">
-              这里优先处理当前正在运行的 Worker。只有当某个实例值得长期复用时，再把它沉淀成草案。
-            </p>
-          </div>
-        </div>
-
-        <div className="wb-agent-tablist" role="tablist" aria-label="Worker 管理视图">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeCatalog === "instances"}
-            className={`wb-agent-tab ${activeCatalog === "instances" ? "is-active" : ""}`}
-            onClick={() => openCatalog("instances")}
-          >
-            <strong>{CATALOG_COPY.instances.label}</strong>
-            <span>{CATALOG_COPY.instances.description}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeCatalog === "templates"}
-            className={`wb-agent-tab ${activeCatalog === "templates" ? "is-active" : ""}`}
-            onClick={() => openCatalog("templates")}
-          >
-            <strong>{CATALOG_COPY.templates.label}</strong>
-            <span>{CATALOG_COPY.templates.description}</span>
-          </button>
-        </div>
-
-        <div className="wb-inline-banner is-muted">
-          <strong>{CATALOG_COPY[activeCatalog].title}</strong>
-          <span>
-            {activeCatalog === "instances"
-              ? "实例适合看当前负载、归属和合并拆分；需要沉淀经验时，再切到实例草案。"
-              : "这里的草案来自当前实例。要发布长期默认模板，请回到上面的 Worker 模板工作台。"}
-          </span>
-        </div>
-
-        <div className="wb-worker-toolbar">
-          <label className="wb-field">
-            <span>{activeCatalog === "instances" ? "搜索实例" : "搜索草案"}</span>
-            <input
-              type="text"
-              value={searchQuery}
-              placeholder={
-                activeCatalog === "instances"
-                  ? "例如：开发、待处理、Primary Workspace"
-                  : "例如：巡检、默认工具、handoff"
-              }
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-          </label>
-
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            {activeCatalog === "instances" ? (
-              <>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={handleMergeWorkAgents}
-                  disabled={selectedWorkAgentIds.length < 2}
-                >
-                  合并选中实例
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={handleSplitWorkAgent}
-                  disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "instance"}
-                >
-                  拆分当前实例
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => handleCreateDraft("instance")}
-                >
-                  新建 Worker 实例
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={handleCreateInstanceFromTemplate}
-                  disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "template"}
-                >
-                  按当前草案新建实例
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => handleCreateDraft("template")}
-                >
-                  新建实例草案
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="wb-worker-hub-layout">
-          <div className="wb-worker-browser">
-            {visibleCatalogItems.length === 0 ? (
-              <div className="wb-empty-state">
-                <strong>当前没有匹配内容</strong>
-                <span>
-                  试着切换 Project 过滤，或者直接创建一个新的
-                  {activeCatalog === "instances" ? "实例" : "草案"}。
-                </span>
-              </div>
-            ) : (
-              <div className="wb-agent-list">
-                {visibleCatalogItems.map((agent) => {
-                  const badge = workAgentBadge(agent);
-                  const isActive = selectedWorkAgentId === agent.id && editorMode === "edit";
-                  return (
-                    <article
-                      key={agent.id}
-                      className={`wb-agent-runtime-card ${isActive ? "is-active" : ""}`}
-                    >
-                      <div className="wb-worker-card-head">
-                        <div className="wb-worker-card-leading">
-                          {agent.kind === "instance" ? (
-                            <label className="wb-agent-check">
-                              <input
-                                type="checkbox"
-                                checked={selectedWorkAgentIds.includes(agent.id)}
-                                onChange={() => toggleWorkAgentSelection(agent.id)}
-                              />
-                              <span>批量选择</span>
-                            </label>
-                          ) : (
-                            <span className="wb-card-label">草案</span>
-                          )}
-                          <span className={`wb-status-pill is-${badge.tone}`}>{badge.label}</span>
-                        </div>
-                        <span className="wb-card-label">{formatWorkerType(agent.workerType)}</span>
-                      </div>
-
-                      <div className="wb-worker-card-body">
-                        <strong>{agent.name}</strong>
-                        <p>{agent.summary}</p>
-                        <div className="wb-chip-row">
-                          <span className="wb-chip">
-                            {formatProjectWorkspace(
-                              availableProjects,
-                              availableWorkspaces,
-                              agent.projectId,
-                              agent.workspaceId
-                            )}
-                          </span>
-                          <span className="wb-chip">{formatAutonomy(agent.autonomy)}</span>
-                          <span className="wb-chip">{formatToolProfile(agent.toolProfile)}</span>
-                        </div>
-                        <div className="wb-chip-row">
-                          {agent.tags.map((tag) => (
-                            <span key={tag} className="wb-chip is-warning">
-                              {formatTokenLabel(tag)}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="wb-agent-runtime-meta">
-                          {agent.kind === "instance" ? (
-                            <>
-                              <span>当前任务 {agent.taskCount}</span>
-                              <span>等待 {agent.waitingCount}</span>
-                              <span>适合合并 {agent.mergeReadyCount}</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>默认工具 {agent.selectedTools.length}</span>
-                              <span>
-                                同类型实例{" "}
-                                {workInstances.filter((item) => item.workerType === agent.workerType).length}
-                              </span>
-                              <span>{WORK_AGENT_SOURCE_LABELS[agent.source]}</span>
-                            </>
-                          )}
-                          <span>
-                            {agent.lastUpdated ? `更新于 ${formatDateTime(agent.lastUpdated)}` : "尚未保存"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="wb-worker-card-actions">
-                        <button
-                          type="button"
-                          className="wb-button wb-button-secondary wb-button-inline"
-                          onClick={() => selectWorkAgent(agent)}
-                        >
-                          {agent.kind === "instance" ? "查看与修改实例" : "查看与修改模板"}
-                        </button>
-                        {agent.kind === "template" ? (
-                          <button
-                            type="button"
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                          onClick={() => {
-                              setActiveCatalog("instances");
-                              setEditorMode("create");
-                              setSelectedWorkAgentId("");
-                              setSelectedWorkAgentIds([]);
-                              setWorkDraft(createInstanceFromTemplate(agent));
-                              setFlashMessage("已按当前草案生成一个新的 Worker 实例草案。");
-                            }}
-                          >
-                            用它新建实例
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="wb-button wb-button-tertiary wb-button-inline"
-                            onClick={() => {
-                              setActiveCatalog("templates");
-                              setEditorMode("create");
-                              setSelectedWorkAgentId("");
-                              setSelectedWorkAgentIds([]);
-                              setWorkDraft(forkTemplateFromAgent(agent));
-                              setFlashMessage(
-                                "已把当前实例复制成草案。清理掉只属于当前运行态的内容后再保存。"
-                              );
-                            }}
-                          >
-                            另存为草案
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <aside className="wb-worker-editor">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">{editingKind === "instance" ? "实例编辑器" : "草案编辑器"}</p>
-                <h3>
-                  {editingKind === "instance"
-                    ? editorMode === "create"
-                      ? "创建新的 Worker 实例"
-                      : "调整当前 Worker 实例"
-                    : editorMode === "create"
-                      ? "创建新的实例草案"
-                      : "调整当前实例草案"}
-                </h3>
-              </div>
-              <span className="wb-chip">
-                {editorMode === "create"
-                  ? editingKind === "instance"
-                    ? "新实例草案"
-                    : "新草案"
-                  : selectedWorkAgent?.name ?? "未选择"}
-              </span>
-            </div>
-
-            <div className="wb-inline-banner is-muted">
-              <strong>{editingKind === "instance" ? "你正在编辑实例" : "你正在编辑草案"}</strong>
-              <span>
-                {editingKind === "instance"
-                  ? "实例对应当前分工。这里改的是归属、角色和默认做法，运行指标仅作参考。"
-                  : "草案来自当前实例，用来沉淀新的默认做法。要发布长期默认模板，请回到上面的 Worker 模板。"}
-              </span>
-            </div>
-
-            <div className="wb-stat-grid">
-              <div className="wb-detail-block">
-                <span className="wb-card-label">归属位置</span>
-                <strong>
-                  {formatProjectWorkspace(
-                    availableProjects,
-                    availableWorkspaces,
-                    workDraft.projectId,
-                    workDraft.workspaceId
-                  )}
-                </strong>
-                <p>{formatWorkerType(workDraft.workerType)}</p>
-              </div>
-              <div className="wb-detail-block">
-                <span className="wb-card-label">
-                  {editingKind === "instance" ? "当前状态" : "草案用途"}
-                </span>
-                <strong>
-                  {editingKind === "instance"
-                    ? WORK_AGENT_STATUS_LABELS[workDraft.status]
-                    : WORK_AGENT_SOURCE_LABELS[workDraft.source]}
-                </strong>
-                <p>{formatAutonomy(workDraft.autonomy)}</p>
-              </div>
-              {editingKind === "instance" ? (
-                <>
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">当前任务量</span>
-                    <strong>{workDraft.taskCount}</strong>
-                    <p>等待中 {workDraft.waitingCount}</p>
-                  </div>
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">适合合并</span>
-                    <strong>{workDraft.mergeReadyCount}</strong>
-                    <p>用于判断是否需要收口同类实例</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">同类型实例</span>
-                    <strong>{selectedTemplateUsageCount}</strong>
-                    <p>当前正在使用相近角色的实例数量</p>
-                  </div>
-                  <div className="wb-detail-block">
-                    <span className="wb-card-label">默认工具</span>
-                    <strong>{workDraft.selectedTools.length}</strong>
-                    <p>保存后会作为新建时的默认勾选</p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="wb-agent-form-grid">
-              <label className="wb-field">
-                <span>{editingKind === "instance" ? "实例名称" : "草案名称"}</span>
-                <input
-                  type="text"
-                  value={workDraft.name}
-                  onChange={(event) => updateWorkDraft("name", event.target.value)}
-                />
-              </label>
-              <label className="wb-field">
-                <span>负责角色</span>
-                <select
-                  value={workDraft.workerType}
-                  onChange={(event) => updateWorkerType(event.target.value)}
-                >
-                  {["general", "research", "dev", "ops"].map((workerType) => (
-                    <option key={workerType} value={workerType}>
-                      {formatWorkerType(workerType)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wb-field">
-                <span>归属 Project</span>
-                <select
-                  value={workDraft.projectId}
-                  onChange={(event) => updateWorkProject(event.target.value)}
-                >
-                  {workProjectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wb-field">
-                <span>归属 Workspace</span>
-                <select
-                  value={workDraft.workspaceId}
-                  onChange={(event) => updateWorkDraft("workspaceId", event.target.value)}
-                >
-                  {workWorkspaceOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>{editingKind === "instance" ? "当前职责说明" : "这个草案适合什么场景"}</span>
-                <textarea
-                  rows={4}
-                  className="wb-textarea-prose"
-                  value={workDraft.summary}
-                  onChange={(event) => updateWorkDraft("summary", event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="wb-agent-option-stack">
-              <div>
-                <p className="wb-card-label">处理方式</p>
-                <div className="wb-agent-choice-grid">
-                  {AUTONOMY_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`wb-agent-choice-card ${workDraft.autonomy === option.value ? "is-active" : ""}`}
-                      onClick={() => updateWorkDraft("autonomy", option.value)}
-                    >
-                      <strong>{option.label}</strong>
-                      <span>{option.description}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="wb-card-label">职责标签</p>
-                <div className="wb-chip-row">
-                  {recommendedTags.map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      className={`wb-chip-button ${workDraft.tags.includes(tag) ? "is-active" : ""}`}
-                      onClick={() => toggleDraftToken("tags", tag)}
-                    >
-                      {formatTokenLabel(tag)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="wb-card-label">默认工具</p>
-                <div className="wb-chip-row">
-                  {recommendedTools.map((tool) => (
-                    <button
-                      key={tool}
-                      type="button"
-                      className={`wb-chip-button ${workDraft.selectedTools.includes(tool) ? "is-active" : ""}`}
-                      onClick={() => toggleDraftToken("selectedTools", tool)}
-                    >
-                      {formatToolToken(tool, toolLabelByName)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <details className="wb-agent-details">
-                <summary>展开高级配置</summary>
-                <div className="wb-agent-option-stack">
-                  <div>
-                    <p className="wb-card-label">思考档位</p>
-                    <div className="wb-chip-row">
-                      {modelAliasOptions.map((alias) => (
-                        <button
-                          key={alias}
-                          type="button"
-                          className={`wb-chip-button ${workDraft.modelAlias === alias ? "is-active" : ""}`}
-                          onClick={() => updateWorkDraft("modelAlias", alias)}
-                        >
-                          {alias}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="wb-inline-note">
-                      {MODEL_ALIAS_HINTS[workDraft.modelAlias] ?? "用于决定默认模型档位。"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="wb-card-label">工具范围</p>
-                    <div className="wb-chip-row">
-                      {toolProfileOptions.map((profile) => (
-                        <button
-                          key={profile}
-                          type="button"
-                          className={`wb-chip-button ${workDraft.toolProfile === profile ? "is-active" : ""}`}
-                          onClick={() => updateWorkDraft("toolProfile", profile)}
-                        >
-                          {formatToolProfile(profile)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <div className="wb-inline-actions wb-inline-actions-wrap">
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={handleResetWorkAgent}
-              >
-                撤回编辑
-              </button>
-              {editingKind === "instance" ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={handleForkTemplateFromInstance}
-                  disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "instance"}
-                >
-                  另存为草案
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={handleCreateInstanceFromTemplate}
-                  disabled={!selectedWorkAgent || selectedWorkAgent.kind !== "template"}
-                >
-                  按草案新建实例
-                </button>
-              )}
-              <button
-                type="button"
-                className="wb-button wb-button-primary"
-                onClick={handleSaveWorkAgent}
-              >
-                {editingKind === "instance"
-                  ? editorMode === "create"
-                    ? "保存实例草案"
-                    : "保存实例调整"
-                  : editorMode === "create"
-                    ? "保存草案"
-                    : "保存草案调整"}
-              </button>
-            </div>
-          </aside>
-        </div>
-      </section>
+        <WorkerWorkspaceSection
+          activeCatalog={activeCatalog}
+          catalogCopy={CATALOG_COPY}
+          searchQuery={searchQuery}
+          selectedWorkAgentId={selectedWorkAgentId}
+          selectedWorkAgentIds={selectedWorkAgentIds}
+          visibleCatalogItems={visibleCatalogItems}
+          editorMode={editorMode}
+          editingKind={editingKind}
+          selectedWorkAgent={selectedWorkAgent}
+          workDraft={workDraft}
+          workInstances={workInstances}
+          selectedTemplateUsageCount={selectedTemplateUsageCount}
+          recommendedTags={recommendedTags}
+          recommendedTools={recommendedTools}
+          toolLabelByName={toolLabelByName}
+          modelAliasOptions={modelAliasOptions}
+          toolProfileOptions={toolProfileOptions}
+          workProjectOptions={workProjectOptions}
+          workWorkspaceOptions={workWorkspaceOptions}
+          availableProjects={availableProjects}
+          availableWorkspaces={availableWorkspaces}
+          autonomyOptions={AUTONOMY_OPTIONS}
+          modelAliasHints={MODEL_ALIAS_HINTS}
+          workAgentStatusLabels={WORK_AGENT_STATUS_LABELS}
+          workAgentSourceLabels={WORK_AGENT_SOURCE_LABELS}
+          onOpenCatalog={openCatalog}
+          onSearchQueryChange={setSearchQuery}
+          onMergeWorkAgents={handleMergeWorkAgents}
+          onSplitWorkAgent={handleSplitWorkAgent}
+          onCreateDraft={handleCreateDraft}
+          onCreateInstanceFromCurrentTemplate={handleCreateInstanceFromTemplate}
+          onToggleWorkAgentSelection={toggleWorkAgentSelection}
+          onSelectWorkAgent={selectWorkAgent}
+          onCreateInstanceFromTemplate={handleCreateInstanceFromAgent}
+          onSaveTemplateFromInstance={handleCreateTemplateFromAgent}
+          onUpdateWorkField={updateWorkDraft}
+          onUpdateWorkProject={updateWorkProject}
+          onUpdateWorkerType={updateWorkerType}
+          onToggleDraftToken={toggleDraftToken}
+          onResetWorkAgent={handleResetWorkAgent}
+          onForkTemplateFromInstance={handleForkTemplateFromInstance}
+          onSaveWorkAgent={handleSaveWorkAgent}
+          formatDateTime={formatDateTime}
+          formatWorkerType={formatWorkerType}
+          formatAutonomy={formatAutonomy}
+          formatToolProfile={formatToolProfile}
+          formatProjectWorkspace={formatProjectWorkspace}
+          formatTokenLabel={formatTokenLabel}
+          formatToolToken={formatToolToken}
+          workAgentBadge={workAgentBadge}
+        />
       ) : null}
     </div>
   );

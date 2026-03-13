@@ -295,12 +295,11 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Butler 正在和 Worker 协作")).toBeInTheDocument();
-    expect(screen.getByText(/agent:\/\/butler\.main -> agent:\/\/worker\.llm\.research/)).toBeInTheDocument();
+    expect(await screen.findByText("OctoAgent 已拆给专门角色继续处理")).toBeInTheDocument();
+    expect(screen.getByText("主助手 -> Research Worker")).toBeInTheDocument();
     expect(screen.getByText("3 条 / 最新 结果回传")).toBeInTheDocument();
-    expect(screen.getByText("agent-session-worker-research-1")).toBeInTheDocument();
     expect(screen.getByText("结果回传 · #3")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "去 Advanced 看完整 runtime truth" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开 Advanced 诊断" })).toBeInTheDocument();
   });
 
   it("当前会话的 A2A 不在全局快照里时仍会展示最小内部协作态", async () => {
@@ -401,10 +400,9 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Butler 正在和 Worker 协作")).toBeInTheDocument();
-    expect(screen.getByText(/agent:\/\/butler\.main -> agent:\/\/worker\.llm\.research/)).toBeInTheDocument();
+    expect(await screen.findByText("OctoAgent 已拆给专门角色继续处理")).toBeInTheDocument();
+    expect(screen.getByText("主助手 -> Research Worker")).toBeInTheDocument();
     expect(screen.getByText("2 条 / 最新 结果回传")).toBeInTheDocument();
-    expect(screen.getByText("agent-session-worker-research-2")).toBeInTheDocument();
-    expect(screen.getByText(/当前快照未带回完整 A2A 明细/)).toBeInTheDocument();
+    expect(screen.getByText(/当前只显示协作摘要/)).toBeInTheDocument();
   });
 });

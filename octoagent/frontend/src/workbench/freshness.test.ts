@@ -132,7 +132,7 @@ describe("freshness helpers", () => {
 
     expect(isFreshnessRelevantWork(work)).toBe(true);
     expect(describeFreshnessWorkPath(work)).toContain("Butler 会先接住这条实时问题");
-    expect(describeFreshnessWorkPath(work)).toContain("内部已经建立 A2A 对话和独立 Worker Session");
+    expect(describeFreshnessWorkPath(work)).toContain("内部协作链路已经建立");
     expect(describeFreshnessWorkPath(work)).toContain("Research Worker 会按标准工具面取证");
   });
 

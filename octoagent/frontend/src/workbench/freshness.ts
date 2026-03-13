@@ -328,10 +328,10 @@ export function describeFreshnessWorkPath(work: WorkProjectionItem): string {
     );
     const linkageSummary =
       hasA2AConversation && hasWorkerSession
-        ? "内部已经建立 A2A 对话和独立 Worker Session"
-        : "内部会按 A2A 对话转给独立 Worker Session";
+        ? "内部协作链路已经建立"
+        : "系统会把问题继续转给专门的协作角色";
     const messageSummary =
-      messageCount > 0 ? `当前已记录 ${messageCount} 条内部 A2A 消息。` : "";
+      messageCount > 0 ? `当前已记录 ${messageCount} 条内部协作记录。` : "";
     const statusSummary = researchChildStatus ? `Research 子任务${researchChildStatus}。` : "";
     return `Butler 会先接住这条实时问题，再把它交给内层 Research Worker。${linkageSummary}，Research Worker 会按${toolSummary}取证。${routeSummary}。${messageSummary}${statusSummary}最终仍由 Butler 汇总回复用户。`;
   }

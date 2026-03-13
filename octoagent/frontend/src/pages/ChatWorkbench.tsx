@@ -3,7 +3,22 @@ import { Link } from "react-router-dom";
 import { fetchTaskDetail } from "../api/client";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+import {
+  formatAgentRoleLabel,
+  formatCollaborationDirectionLabel,
+  formatDiscoveryEntrypointLabel,
+  formatTaskStatusLabel,
+  formatTaskStatusTone,
+  formatToolBoundaryLabel,
+} from "../domains/chat/presentation";
 import { useChatStream } from "../hooks/useChatStream";
+import {
+  ActionBar,
+  HoverReveal,
+  InlineCallout,
+  PageIntro,
+  StatusBadge,
+} from "../ui/primitives";
 import type {
   SessionProjectionDocument,
   TaskDetailResponse,
@@ -94,7 +109,8 @@ export default function ChatWorkbench() {
     restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
   );
   const [input, setInput] = useState("");
-  const [showInternalRefs, setShowInternalRefs] = useState(false);
+  const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
+  const [showCollaborationTechRefs, setShowCollaborationTechRefs] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const context = snapshot!.resources.context_continuity;
   const memory = snapshot!.resources.memory;
@@ -223,6 +239,20 @@ export default function ChatWorkbench() {
       : defaultRootAgent?.profile_id
         ? "Project 默认"
         : "未绑定";
+  const conversationRolePath = hasInternalCollaboration
+    ? `${formatAgentRoleLabel(activeConversationSourceAgent)} -> ${formatAgentRoleLabel(activeConversationTargetAgent)}`
+    : "";
+  const collaborationTechRefs = [
+    activeConversationId
+      ? { label: "协作链路 ID", value: activeConversationId }
+      : null,
+    activeConversationWorkerSessionId
+      ? { label: "专门角色会话", value: activeConversationWorkerSessionId }
+      : null,
+  ].filter((item): item is { label: string; value: string } => Boolean(item));
+  const taskStatusLabel = formatTaskStatusLabel(taskDetail?.task.status ?? "");
+  const taskStatusTone = formatTaskStatusTone(taskDetail?.task.status ?? "");
+  const collaborationStatusTone = hasInternalCollaboration ? "success" : "draft";
   const internalRefs = [
     taskId ? { label: "任务 ID", value: taskId } : null,
     activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
@@ -293,13 +323,20 @@ export default function ChatWorkbench() {
 
   return (
     <div className="wb-page">
-      <section className="wb-hero wb-hero-compact">
-        <div>
-          <p className="wb-kicker">Chat</p>
-          <h1>在这里直接和 OctoAgent 对话</h1>
-          <p>发送消息后，你可以同时看到回复、任务状态和相关工作进度。</p>
-        </div>
-      </section>
+      <PageIntro
+        kicker="Chat"
+        title="在这里直接和 OctoAgent 对话"
+        summary="发送消息后，你可以同时看到回复、任务状态和相关工作进度。"
+        compact
+        actions={
+          <div className="wb-chip-row">
+            <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge>
+            <StatusBadge tone={collaborationStatusTone}>
+              {hasInternalCollaboration ? "已转交专门角色" : "主助手直接处理"}
+            </StatusBadge>
+          </div>
+        }
+      />
 
       <div className="wb-chat-layout">
         <section className={`wb-panel wb-chat-panel ${isEmptyConversation ? "is-empty" : ""}`}>
@@ -309,44 +346,30 @@ export default function ChatWorkbench() {
               <h3>{activeSession?.title ?? (taskId ? "对话进行中" : "还没有开始对话")}</h3>
             </div>
             {internalRefs.length > 0 ? (
-              <div
-                className="wb-hover-reveal"
-                onMouseEnter={() => setShowInternalRefs(true)}
-                onMouseLeave={() => setShowInternalRefs(false)}
+              <HoverReveal
+                label="技术详情"
+                expanded={showSessionInternalRefs}
+                onToggle={setShowSessionInternalRefs}
+                ariaLabel="当前会话技术详情"
               >
-                <button
-                  type="button"
-                  className="wb-hover-reveal-trigger"
-                  aria-expanded={showInternalRefs}
-                  onClick={() => setShowInternalRefs((current) => !current)}
-                  onFocus={() => setShowInternalRefs(true)}
-                  onBlur={() => setShowInternalRefs(false)}
-                >
-                  内部标识
-                </button>
-                {showInternalRefs ? (
-                  <div className="wb-hover-reveal-card" role="note" aria-label="当前会话内部标识">
-                    {internalRefs.map((item) => (
-                      <div key={item.label} className="wb-hover-reveal-row">
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
-                      </div>
-                    ))}
+                {internalRefs.map((item) => (
+                  <div key={item.label} className="wb-hover-reveal-row">
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
                   </div>
-                ) : null}
-              </div>
+                ))}
+              </HoverReveal>
             ) : null}
           </div>
 
-          <div className="wb-inline-banner is-muted">
-            <strong>
-              当前 Worker 模板 {activeRootAgent ? `· ${activeWorkerTemplateName}` : "· 未显式绑定"}
-            </strong>
-            <span>
-              绑定来源 {activeRootAgentBindingSource}
-              {activeToolResolutionMode ? ` / 工具分配 ${activeToolResolutionMode}` : ""}
-            </span>
-          </div>
+          <InlineCallout
+            title={`当前分工模板${activeRootAgent ? ` · ${activeWorkerTemplateName}` : " · 未显式绑定"}`}
+          >
+            来源 {activeRootAgentBindingSource}
+            {activeToolResolutionMode
+              ? ` / ${formatToolBoundaryLabel(activeToolResolutionMode)}`
+              : ""}
+          </InlineCallout>
 
           {isRestoringConversation ? (
             <div className="wb-chat-empty-stage is-restoring">
@@ -361,7 +384,11 @@ export default function ChatWorkbench() {
                 <strong>从这里发出第一条消息</strong>
                 <span>比如告诉 OctoAgent 你要完成什么，它会开始创建任务并返回结果。</span>
               </div>
-              {error ? <div className="wb-inline-banner is-error">{error}</div> : null}
+              {error ? (
+                <InlineCallout title="刚才没有发送成功" tone="error">
+                  {error}
+                </InlineCallout>
+              ) : null}
               <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
                 <input
                   type="text"
@@ -387,7 +414,11 @@ export default function ChatWorkbench() {
                 ))}
               </div>
 
-              {error ? <div className="wb-inline-banner is-error">{error}</div> : null}
+              {error ? (
+                <InlineCallout title="刚才没有发送成功" tone="error">
+                  {error}
+                </InlineCallout>
+              ) : null}
 
               <form className="wb-chat-form" onSubmit={handleSubmit}>
                 <input
@@ -423,17 +454,19 @@ export default function ChatWorkbench() {
                 <span>{activeRootAgentBindingSource}</span>
               </div>
               <div className="wb-note">
-                <strong>静态工具边界</strong>
+                <strong>默认工具范围</strong>
                 <span>{activeRootAgent?.static_config.tool_profile ?? "未记录"}</span>
               </div>
               <div className="wb-note">
                 <strong>默认 Worker 模板</strong>
                 <span>{defaultWorkerTemplateName || "还没有默认值"}</span>
               </div>
+            </div>
+            <ActionBar>
               <Link className="wb-button wb-button-tertiary" to="/agents">
                 去 Agents 调整默认模板
               </Link>
-            </div>
+            </ActionBar>
           </section>
 
           <section className="wb-panel">
@@ -442,12 +475,9 @@ export default function ChatWorkbench() {
                 <p className="wb-card-label">当前任务</p>
                 <h3>{taskDetail?.task.title ?? "等待开始"}</h3>
               </div>
+              <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge>
             </div>
             <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>状态</strong>
-                <span>{taskDetail?.task.status ?? "尚未创建"}</span>
-              </div>
               <div className="wb-note">
                 <strong>事件数</strong>
                 <span>{taskDetail?.events.length ?? 0}</span>
@@ -456,51 +486,64 @@ export default function ChatWorkbench() {
                 <strong>结果附件</strong>
                 <span>{taskDetail?.artifacts.length ?? 0}</span>
               </div>
-              {taskId ? (
+            </div>
+            {taskId ? (
+              <ActionBar>
                 <Link className="wb-button wb-button-tertiary" to={`/tasks/${taskId}`}>
                   打开任务详情
                 </Link>
-              ) : null}
-            </div>
+              </ActionBar>
+            ) : null}
           </section>
 
           <section className="wb-panel">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">内部协作</p>
+                <p className="wb-card-label">协作分工</p>
                 <h3>
                   {hasInternalCollaboration
-                    ? "Butler 正在和 Worker 协作"
-                    : "当前这轮还没有内部委派"}
+                    ? "OctoAgent 已拆给专门角色继续处理"
+                    : "当前这轮先由主 Agent 直接处理"}
                 </h3>
               </div>
+              <StatusBadge tone={collaborationStatusTone}>
+                {hasInternalCollaboration ? "内部协作中" : "直连处理"}
+              </StatusBadge>
             </div>
             {hasInternalCollaboration ? (
               <>
                 <div className="wb-note-stack">
                   <div className="wb-note">
-                    <strong>当前链路</strong>
-                    <span>
-                      {activeConversationSourceAgent}{" -> "}
-                      {activeConversationTargetAgent}
-                    </span>
+                    <strong>当前负责角色</strong>
+                    <span>{conversationRolePath}</span>
                   </div>
                   <div className="wb-note">
-                    <strong>内部消息</strong>
+                    <strong>最近协作进展</strong>
                     <span>
                       {activeConversationMessageCount} 条 / 最新{" "}
                       {formatA2AMessageType(activeConversationLatestType)}
                     </span>
                   </div>
                   <div className="wb-note">
-                    <strong>Worker Session</strong>
-                    <span>{activeConversationWorkerSessionId || "未记录"}</span>
-                  </div>
-                  <div className="wb-note">
-                    <strong>Recall 命中</strong>
+                    <strong>已参考的背景片段</strong>
                     <span>{activeWorkerRecall?.memory_hit_count ?? 0}</span>
                   </div>
                 </div>
+                {collaborationTechRefs.length > 0 ? (
+                  <HoverReveal
+                    label="协作技术详情"
+                    expanded={showCollaborationTechRefs}
+                    onToggle={setShowCollaborationTechRefs}
+                    ariaLabel="当前协作技术详情"
+                  >
+                    {collaborationTechRefs.map((item) => (
+                      <div key={item.label} className="wb-hover-reveal-row">
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </HoverReveal>
+                ) : null}
                 {activeA2AMessages.length > 0 ? (
                   <div className="wb-note-stack">
                     {activeA2AMessages.map((message) => (
@@ -508,59 +551,53 @@ export default function ChatWorkbench() {
                         <strong>
                           {formatA2AMessageType(message.message_type)} · #{message.message_seq}
                         </strong>
-                        <span>
-                          {message.direction === "inbound"
-                            ? "Worker -> Butler"
-                            : "Butler -> Worker"}
-                        </span>
+                        <span>{formatCollaborationDirectionLabel(message.direction)}</span>
                       </div>
                     ))}
                   </div>
                 ) : null}
                 {activeA2AMessages.length === 0 && activeA2AConversationRecord == null ? (
-                  <div className="wb-note-stack">
-                    <div className="wb-note">
-                      <strong>消息明细</strong>
-                      <span>当前快照未带回完整 A2A 明细，可去 Advanced 查看完整 runtime truth。</span>
-                    </div>
-                  </div>
+                  <InlineCallout title="当前只显示协作摘要">
+                    当前快照还没有带回完整协作明细，需要时可去 Advanced 查看详细诊断。
+                  </InlineCallout>
                 ) : null}
-                <Link className="wb-button wb-button-tertiary" to="/advanced">
-                  去 Advanced 看完整 runtime truth
-                </Link>
+                <ActionBar>
+                  <Link className="wb-button wb-button-tertiary" to="/advanced">
+                    打开 Advanced 诊断
+                  </Link>
+                </ActionBar>
               </>
             ) : (
-              <div className="wb-note-stack">
-                <div className="wb-note">
-                  <strong>当前状态</strong>
-                  <span>如果这轮问题需要 Research / Ops / Dev，Butler 会在内部建立独立 A2A 会话。</span>
-                </div>
-              </div>
+              <InlineCallout title="当前先由主助手直接处理">
+                如果这轮问题需要实时检索、运维或开发，系统会自动转给更适合的角色继续处理。
+              </InlineCallout>
             )}
           </section>
 
           <section className="wb-panel">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">工具解释</p>
+                <p className="wb-card-label">当前可用工具</p>
                 <h3>{activeWork?.title ?? "等待 work 生成"}</h3>
               </div>
             </div>
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>挂载中的工具</strong>
+                <strong>当前可用</strong>
                 <span>{activeMountedTools.length > 0 ? activeMountedTools.length : 0}</span>
               </div>
               <div className="wb-note">
-                <strong>被阻塞的工具</strong>
+                <strong>暂时不可用</strong>
                 <span>{activeBlockedTools.length > 0 ? activeBlockedTools.length : 0}</span>
               </div>
               <div className="wb-note">
-                <strong>发现入口</strong>
+                <strong>补充资料入口</strong>
                 <span>
                   {activeDiscoveryEntrypoints.length > 0
-                    ? activeDiscoveryEntrypoints.join(" / ")
-                    : "当前没有额外 discovery 入口"}
+                    ? activeDiscoveryEntrypoints
+                        .map((item) => formatDiscoveryEntrypointLabel(item))
+                        .join(" / ")
+                    : "当前没有额外资料入口"}
                 </span>
               </div>
             </div>
@@ -571,7 +608,7 @@ export default function ChatWorkbench() {
                 </span>
               ))}
               {activeMountedTools.length === 0 ? (
-                <span className="wb-inline-note">当前还没有 mounted tools 记录。</span>
+                <span className="wb-inline-note">当前还没有可用工具记录。</span>
               ) : null}
             </div>
             {activeBlockedTools.length > 0 ? (

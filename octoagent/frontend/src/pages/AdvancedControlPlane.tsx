@@ -1,5 +1,1 @@
-import ControlPlane from "./ControlPlane";
-
-export default function AdvancedControlPlane() {
-  return <ControlPlane />;
-}
+export { default } from "../domains/advanced";

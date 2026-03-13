@@ -1,0 +1,52 @@
+.wb-route-fallback {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--cp-space-5);
+}
+
+.wb-route-fallback-card {
+  display: grid;
+  gap: 14px;
+  width: min(560px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--cp-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.wb-route-fallback-card h1 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  letter-spacing: -0.04em;
+  color: var(--cp-ink);
+}
+
+.wb-route-fallback-card p {
+  margin: 0;
+  color: var(--cp-muted);
+}
+
+.wb-advanced-stack {
+  gap: var(--cp-space-4);
+}
+
+.wb-advanced-actions {
+  align-items: flex-start;
+}
+
+.wb-advanced-console-toggle {
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .wb-advanced-actions {
+    flex-direction: column;
+  }
+
+  .wb-advanced-console-toggle {
+    width: 100%;
+  }
+}

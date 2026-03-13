@@ -1,0 +1,311 @@
+.wb-topbar-actions,
+.wb-hero-actions,
+.wb-inline-form,
+.wb-inline-actions,
+.wb-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-action-bar,
+.wb-hero-actions {
+  flex-wrap: wrap;
+}
+
+.wb-inline-actions-wrap {
+  flex-wrap: wrap;
+}
+
+.wb-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.wb-button:hover {
+  transform: translateY(-1px);
+}
+
+.wb-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+  transform: none;
+  box-shadow: none;
+}
+
+.wb-button-primary {
+  background: linear-gradient(135deg, #1f6a5b, #2f8b72);
+  color: white;
+  box-shadow: 0 16px 28px rgba(31, 106, 91, 0.24);
+}
+
+.wb-button-secondary {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(20, 32, 47, 0.1);
+  color: var(--cp-ink);
+}
+
+.wb-button-tertiary {
+  background: rgba(20, 32, 47, 0.04);
+  color: var(--cp-ink);
+}
+
+.wb-inline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+}
+
+.wb-inline-banner.is-error {
+  border-color: rgba(194, 65, 12, 0.22);
+  background: rgba(255, 240, 233, 0.92);
+}
+
+.wb-inline-banner.is-muted {
+  background: rgba(247, 250, 251, 0.9);
+}
+
+.wb-callout-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.wb-callout-copy span {
+  line-height: 1.55;
+}
+
+.wb-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(20, 32, 47, 0.08);
+  color: var(--cp-ink);
+}
+
+.wb-status-pill.is-ready,
+.wb-status-pill.is-success,
+.wb-status-pill.is-ok,
+.wb-status-pill.is-succeeded,
+.wb-status-pill.is-completed {
+  background: rgba(21, 128, 61, 0.14);
+  color: var(--cp-success);
+}
+
+.wb-status-pill.is-running,
+.wb-status-pill.is-created {
+  background: rgba(15, 118, 110, 0.16);
+  color: var(--cp-secondary);
+}
+
+.wb-status-pill.is-warning,
+.wb-status-pill.is-waiting_approval,
+.wb-status-pill.is-waiting_input,
+.wb-status-pill.is-paused,
+.wb-status-pill.is-escalated {
+  background: rgba(221, 107, 32, 0.16);
+  color: var(--cp-primary-ink);
+}
+
+.wb-status-pill.is-failed,
+.wb-status-pill.is-rejected,
+.wb-status-pill.is-danger,
+.wb-status-pill.is-cancelled,
+.wb-status-pill.is-timed_out {
+  background: rgba(194, 65, 12, 0.14);
+  color: var(--cp-danger);
+}
+
+.wb-status-pill.is-active {
+  background: rgba(21, 128, 61, 0.12);
+  color: var(--cp-success);
+}
+
+.wb-status-pill.is-syncing {
+  background: rgba(15, 118, 110, 0.16);
+  color: var(--cp-secondary);
+}
+
+.wb-status-pill.is-attention {
+  background: rgba(221, 107, 32, 0.16);
+  color: var(--cp-primary-ink);
+}
+
+.wb-status-pill.is-draft {
+  background: rgba(20, 32, 47, 0.08);
+  color: var(--cp-muted);
+}
+
+.wb-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(20, 32, 47, 0.06);
+  color: var(--cp-ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.wb-chip.is-success {
+  background: rgba(21, 128, 61, 0.12);
+  color: var(--cp-success);
+}
+
+.wb-chip.is-warning {
+  background: rgba(221, 107, 32, 0.14);
+  color: var(--cp-primary-ink);
+}
+
+.wb-chip-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 32, 47, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--cp-ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.wb-chip-button:hover {
+  transform: translateY(-1px);
+}
+
+.wb-chip-button.is-active {
+  border-color: rgba(221, 107, 32, 0.24);
+  background: rgba(221, 107, 32, 0.1);
+  color: var(--cp-primary-ink);
+}
+
+.wb-empty-state {
+  display: grid;
+  gap: 6px;
+  place-items: start;
+  min-height: 200px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: rgba(244, 247, 249, 0.86);
+}
+
+.wb-chat-empty-card {
+  width: min(100%, 720px);
+  place-items: center;
+  text-align: center;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 249, 0.9));
+}
+
+.wb-chat-restore-card {
+  background:
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.12), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 248, 0.92));
+}
+
+.wb-hover-reveal {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+.wb-hover-reveal-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px dashed rgba(20, 32, 47, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--cp-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.wb-hover-reveal-trigger:hover,
+.wb-hover-reveal-trigger:focus-visible,
+.wb-hover-reveal-trigger[aria-expanded="true"] {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--cp-secondary-ink);
+  transform: translateY(-1px);
+}
+
+.wb-hover-reveal-card {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 10px;
+  width: min(320px, 72vw);
+  padding: 14px;
+  border: 1px solid rgba(20, 32, 47, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 40px rgba(20, 32, 47, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.wb-hover-reveal-row {
+  display: grid;
+  gap: 4px;
+}
+
+.wb-hover-reveal-row span {
+  color: var(--cp-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-hover-reveal-row strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  word-break: break-all;
+}

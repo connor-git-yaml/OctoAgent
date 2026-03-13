@@ -881,6 +881,118 @@ describe("App workbench routing", () => {
     expect(await screen.findByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
   });
 
+  it("Advanced 路由默认先展示高级概览，再按需展开 legacy 控制台", async () => {
+    window.history.pushState({}, "", "/advanced");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(buildSnapshot()));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            events: [],
+          })
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "高级诊断与恢复" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "OctoAgent Control Plane" })
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "打开详细控制台" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "OctoAgent Control Plane" })
+    ).toBeInTheDocument();
+  });
+
+  it("黄金路径 smoke 覆盖 Home / Chat / Agents / Settings / Memory / Advanced / Work", async () => {
+    const snapshot = buildSnapshot();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            events: [],
+          })
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    const routeChecks = [
+      {
+        path: "/",
+        assertRoute: async () => {
+          expect(await screen.findByText("建议下一步")).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/chat",
+        assertRoute: async () => {
+          expect(
+            await screen.findByRole("heading", { name: "在这里直接和 OctoAgent 对话" })
+          ).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/agents",
+        assertRoute: async () => {
+          expect(await screen.findByRole("heading", { name: "Butler 与 Worker" })).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/settings",
+        assertRoute: async () => {
+          expect(await screen.findByRole("heading", { name: "系统连接与默认能力" })).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/memory",
+        assertRoute: async () => {
+          expect(await screen.findByText("筛选与刷新")).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/advanced",
+        assertRoute: async () => {
+          expect(await screen.findByRole("heading", { name: "高级诊断与恢复" })).toBeInTheDocument();
+        },
+      },
+      {
+        path: "/work",
+        assertRoute: async () => {
+          expect(await screen.findByText("现在最该看")).toBeInTheDocument();
+        },
+      },
+    ] satisfies Array<{ path: string; assertRoute: () => Promise<void> }>;
+
+    for (const route of routeChecks) {
+      window.history.pushState({}, "", route.path);
+      const view = render(<App />);
+      await route.assertRoute();
+      view.unmount();
+    }
+
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[0]).includes("/api/control/snapshot")
+      )
+    ).toBe(true);
+  });
+
   it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
     window.history.pushState({}, "", "/settings");
 
@@ -2340,9 +2452,9 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("Chat Planner Work")).toBeInTheDocument();
     expect(await screen.findByText("当前 task 的上下文摘要。")).toBeInTheDocument();
     expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "内部标识" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "技术详情" })).toBeInTheDocument();
     expect(screen.queryByText("任务 ID")).not.toBeInTheDocument();
-    await userEvent.hover(screen.getByRole("button", { name: "内部标识" }));
+    await userEvent.hover(screen.getByRole("button", { name: "技术详情" }));
     expect(await screen.findByText("任务 ID")).toBeInTheDocument();
     expect(screen.getByText("task-chat-1")).toBeInTheDocument();
     expect(screen.getByText("会话 ID")).toBeInTheDocument();
@@ -2755,7 +2867,7 @@ describe("App workbench routing", () => {
 
     const textarea = await screen.findByLabelText("拆分成子目标");
     await userEvent.type(textarea, "整理依赖\n补测试");
-    await userEvent.click(screen.getByRole("button", { name: "创建 child works" }));
+    await userEvent.click(screen.getByRole("button", { name: "拆成子工作" }));
 
     expect(await screen.findByText("拆分失败")).toBeInTheDocument();
     expect(textarea).toHaveValue("整理依赖\n补测试");
@@ -3006,7 +3118,10 @@ describe("App workbench routing", () => {
     expect(String(actionCall?.[1]?.body)).toContain('"include_history":true');
     expect(String(actionCall?.[1]?.body)).toContain('"limit":50');
 
-    expect(await screen.findByText("Alice 偏好异步沟通")).toBeInTheDocument();
+    const inspectorHeading = await screen.findByRole("heading", { name: "Alice" });
+    const inspectorSection = inspectorHeading.closest("section");
+    expect(inspectorSection).not.toBeNull();
+    expect(within(inspectorSection!).getByText("Alice 偏好异步沟通")).toBeInTheDocument();
     expect(await screen.findByText("当前有需要注意的情况")).toBeInTheDocument();
   });
 

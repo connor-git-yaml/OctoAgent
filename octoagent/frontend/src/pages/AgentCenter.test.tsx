@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -117,6 +117,35 @@ function buildSnapshot() {
         },
       },
       skill_governance: {
+        items: [],
+      },
+      skill_provider_catalog: {
+        generated_at: "2026-03-12T09:00:00Z",
+        items: [
+          {
+            provider_id: "workers.review",
+            label: "Worker Review",
+            description: "内置检查能力",
+            source_kind: "builtin",
+            editable: false,
+            removable: false,
+            enabled: true,
+            availability: "available",
+            trust_level: "trusted",
+            model_alias: "main",
+            worker_type: "general",
+            tool_profile: "minimal",
+            tools_allowed: [],
+            selection_item_id: "skill:workers.review",
+            prompt_template: "",
+            install_hint: "",
+            warnings: [],
+            details: {},
+          },
+        ],
+      },
+      mcp_provider_catalog: {
+        generated_at: "2026-03-12T09:00:00Z",
         items: [],
       },
       policy_profiles: {
@@ -387,6 +416,45 @@ function buildSnapshot() {
 describe("AgentCenter", () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("支持在 Butler、Worker 模板和运行中的 Worker 三个工作区之间切换", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+    fetchWorkerProfileRevisionsMock.mockResolvedValue({ revisions: [] });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "在这里维护 Butler 会调用的 Worker 模板，并查看它们最近做了什么",
+      })
+    ).toBeInTheDocument();
+
+    const workflowTabs = screen.getByRole("tablist", { name: "Agents 工作流" });
+
+    await userEvent.click(within(workflowTabs).getByRole("tab", { name: /Butler 设置/ }));
+    expect(await screen.findByRole("heading", { name: "Butler 设置" })).toBeInTheDocument();
+
+    await userEvent.click(within(workflowTabs).getByRole("tab", { name: /运行中的 Worker/ }));
+    expect(
+      await screen.findByRole("heading", { name: "先看实例，再决定是否沉淀成草案" })
+    ).toBeInTheDocument();
+    expect(
+      within(workflowTabs).getByRole("tab", { name: /运行中的 Worker/ })
+    ).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.click(within(workflowTabs).getByRole("tab", { name: /Worker 模板/ }));
+    expect(
+      await screen.findByRole("button", { name: "新建 Worker 模板" })
+    ).toBeInTheDocument();
   });
 
   it("worker_profiles 刷新时保留未保存的 Worker 模板草稿", async () => {
