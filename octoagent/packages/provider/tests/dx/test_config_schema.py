@@ -71,6 +71,15 @@ def test_parse_full_config() -> None:
     assert config.runtime.llm_mode == "litellm"
 
 
+def test_model_alias_normalizes_routed_provider_model_string() -> None:
+    alias = ModelAlias(
+        provider="openrouter",
+        model="qwen/qwen3.5-9b",
+    )
+
+    assert alias.model == "openrouter/qwen/qwen3.5-9b"
+
+
 def test_default_values() -> None:
     """缺省字段使用默认值"""
     config = OctoAgentConfig(updated_at="2026-03-04")

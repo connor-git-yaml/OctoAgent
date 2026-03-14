@@ -200,6 +200,27 @@ def test_generate_litellm_config_omits_unsupported_thinking_config(tmp_path: Pat
     assert "thinking" not in params
 
 
+def test_generate_litellm_config_normalizes_routed_provider_model_string(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(
+        providers=[_make_provider("openrouter")],
+        aliases={
+            "cheap": ModelAlias(
+                provider="openrouter",
+                model="qwen/qwen3.5-9b",
+                thinking_level="low",
+            )
+        },
+    )
+
+    generate_litellm_config(config, tmp_path)
+    data = _parse_litellm(tmp_path / "litellm-config.yaml")
+    params = data["model_list"][0]["litellm_params"]
+
+    assert params["model"] == "openrouter/qwen/qwen3.5-9b"
+
+
 # ---------------------------------------------------------------------------
 # 多 Provider 场景
 # ---------------------------------------------------------------------------

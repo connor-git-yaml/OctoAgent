@@ -729,7 +729,9 @@ def alias_set(
     try:
         save_config(updated, project_root)
         thinking_hint = f"  thinking={thinking_level}" if thinking_level else ""
-        console.print(f"[green]别名 '{alias}' 已更新：{provider} / {model}{thinking_hint}[/green]")
+        console.print(
+            f"[green]别名 '{alias}' 已更新：{provider} / {alias_obj.model}{thinking_hint}[/green]"
+        )
         _auto_sync(updated, project_root)
     except Exception as exc:
         err_console.print(f"[red]错误：写入 octoagent.yaml 失败：{exc}[/red]")

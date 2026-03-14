@@ -15,7 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from octoagent.provider.dx.config_schema import (
     ConfigParseError,
     CredentialLeakError,
@@ -23,7 +22,6 @@ from octoagent.provider.dx.config_schema import (
     OctoAgentConfig,
     ProviderEntry,
     ProviderNotFoundError,
-    RuntimeConfig,
 )
 from octoagent.provider.dx.config_wizard import (
     load_config,
@@ -33,7 +31,6 @@ from octoagent.provider.dx.config_wizard import (
     wizard_update_model,
     wizard_update_provider,
 )
-
 
 # ---------------------------------------------------------------------------
 # 测试夹具
@@ -235,6 +232,17 @@ def test_wizard_update_model_overwrite_existing() -> None:
         ModelAlias(provider="openrouter", model="openrouter/gpt4", description="更新后"),
     )
     assert config.model_aliases["main"].model == "openrouter/gpt4"
+
+
+def test_wizard_update_model_normalizes_routed_provider_model_string() -> None:
+    config = _make_config()
+    config = wizard_update_model(
+        config,
+        "cheap",
+        ModelAlias(provider="openrouter", model="qwen/qwen3.5-9b", description="轻量模型"),
+    )
+
+    assert config.model_aliases["cheap"].model == "openrouter/qwen/qwen3.5-9b"
 
 
 # ---------------------------------------------------------------------------

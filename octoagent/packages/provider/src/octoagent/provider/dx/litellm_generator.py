@@ -18,7 +18,11 @@ import structlog
 import yaml
 
 from ..reasoning_support import supports_reasoning
-from .config_schema import THINKING_BUDGET_TOKENS, OctoAgentConfig
+from .config_schema import (
+    THINKING_BUDGET_TOKENS,
+    OctoAgentConfig,
+    normalize_provider_model_string,
+)
 from .config_wizard import _atomic_write
 
 log = structlog.get_logger()
@@ -58,12 +62,16 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
         if provider_entry is None:
             log.warning("provider_not_found_skip", alias=alias_key, provider=alias_val.provider)
             continue
+        normalized_model = normalize_provider_model_string(
+            provider_entry.id,
+            alias_val.model,
+        )
         litellm_params: dict = {
-            "model": alias_val.model,
+            "model": normalized_model,
             "api_key": f"os.environ/{provider_entry.api_key_env}",
         }
         if alias_val.thinking_level is not None and supports_reasoning(
-            provider_entry.id, alias_val.model
+            provider_entry.id, normalized_model
         ):
             budget = THINKING_BUDGET_TOKENS[alias_val.thinking_level]
             litellm_params["thinking"] = {"type": "enabled", "budget_tokens": budget}
@@ -72,7 +80,7 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
                 "skip_unsupported_reasoning_config",
                 alias=alias_key,
                 provider=provider_entry.id,
-                model=alias_val.model,
+                model=normalized_model,
                 thinking_level=alias_val.thinking_level,
             )
         # OAuth Provider：注入 api_base 和 headers（如 openai-codex → chatgpt.com/backend-api）

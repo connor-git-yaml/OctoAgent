@@ -27,6 +27,10 @@ _YAML_HEADER = (
 
 _ENV_NAME_PATTERN = r"^[A-Z][A-Z0-9_]*$"
 _OPTIONAL_ENV_NAME_PATTERN = r"^$|^[A-Z][A-Z0-9_]*$"
+_ROUTED_PROVIDER_MODEL_PREFIXES: dict[str, str] = {
+    "openrouter": "openrouter",
+    "github": "github",
+}
 
 # ---------------------------------------------------------------------------
 # 辅助错误类型
@@ -56,6 +60,28 @@ class CredentialLeakError(ValueError):
 
 class ProviderNotFoundError(KeyError):
     """引用了不存在的 Provider ID"""
+
+
+def normalize_provider_model_string(provider_id: str, model_name: str) -> str:
+    """将用户输入的模型名规范化为 provider-aware LiteLLM 字符串。
+
+    目标不是猜所有 provider 的私有写法，而是把明确需要 provider 前缀的 routed
+    providers 统一收口，避免 UI/CLI 里输入裸模型名后运行时才 404。
+    """
+
+    provider = str(provider_id).strip().lower()
+    model = str(model_name).strip()
+    if not provider or not model:
+        return model
+
+    required_prefix = _ROUTED_PROVIDER_MODEL_PREFIXES.get(provider)
+    if not required_prefix:
+        return model
+
+    normalized_prefix = f"{required_prefix}/"
+    if model.lower().startswith(normalized_prefix):
+        return model
+    return f"{required_prefix}/{model}"
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +158,11 @@ class ModelAlias(BaseModel):
             "xhigh=32000, high=16000, medium=8000, low=1024 tokens。"
         ),
     )
+
+    @model_validator(mode="after")
+    def _normalize_model_string(self) -> ModelAlias:
+        self.model = normalize_provider_model_string(self.provider, self.model)
+        return self
 
 
 # ---------------------------------------------------------------------------
