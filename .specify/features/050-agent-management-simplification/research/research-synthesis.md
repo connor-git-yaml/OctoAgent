@@ -118,3 +118,20 @@
 3. 最后对齐编辑控件和迁移边界
 
 只要做到这三步，`Agents` 页面就能从“开发者工作台”变成“普通用户可理解的 Agent 管理中心”。
+
+## 7. 实施后跟进建议
+
+050 落地后，一个额外结论已经很明确：当前前端仍然需要从 `worker_profiles`、`summary.default_profile_id`、`origin_kind`、`scope/project_id` 里拼出三种产品对象：
+
+- 主 Agent
+- 已创建 Agent
+- 内置模板
+
+这说明现有 control-plane canonical 资源还偏底层。后续如果继续扩展 Agent 管理，建议补一个更贴近产品语义的 `agent-management` 资源，至少直接提供：
+
+- 当前项目主 Agent
+- 当前项目普通 Agent 列表
+- 可用于创建的 builtin templates
+- `can_establish_main_agent` / `main_agent_source_kind` 一类迁移提示
+
+这样可以减少前端 adapter 复杂度，也能降低未来在 Chat / Agents / Settings 之间重复推导同一套语义的风险。

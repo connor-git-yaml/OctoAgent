@@ -520,4 +520,121 @@ describe("ChatWorkbench", () => {
     expect(await screen.findByText("我还在这里。")).toBeInTheDocument();
     expect(screen.getByText("当前这轮先由主 Agent 直接处理")).toBeInTheDocument();
   });
+
+  it("当前 task 存在时会刷新会话、工作和上下文资源", async () => {
+    const snapshot = buildSnapshot();
+    const refreshResources = vi.fn().mockResolvedValue(undefined);
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "thread-chat-refresh",
+        thread_id: "thread-chat-refresh",
+        task_id: "task-chat-refresh",
+        title: "刷新中的聊天",
+        latest_message_summary: "继续整理上下文",
+        status: "RUNNING",
+        channel: "web",
+        latest_event_at: "2026-03-09T10:09:00Z",
+        execution_summary: {
+          work_id: "work-chat-refresh",
+        },
+      },
+    ];
+    snapshot.resources.context_continuity.frames = [
+      {
+        context_frame_id: "context-refresh",
+        task_id: "task-chat-refresh",
+        session_id: "thread-chat-refresh",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        agent_profile_id: "agent-profile-default",
+        recent_summary: "这是当前 task 的上下文摘要。",
+        memory_hit_count: 1,
+        memory_hits: [],
+        memory_recall: {},
+        budget: {},
+        source_refs: [],
+        degraded_reason: "",
+        created_at: "2026-03-09T10:08:00Z",
+      },
+    ];
+    snapshot.resources.delegation.works = [
+      {
+        work_id: "work-chat-refresh",
+        task_id: "task-chat-refresh",
+        parent_work_id: "",
+        title: "Chat Planner Work",
+        status: "running",
+        target_kind: "worker",
+        selected_worker_type: "general",
+        route_reason: "delegation_strategy=butler_owned_freshness",
+        owner_id: "butler.main",
+        selected_tools: [],
+        pipeline_run_id: "",
+        runtime_id: "butler.main",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        requested_worker_profile_id: "",
+        requested_worker_profile_version: 0,
+        effective_worker_snapshot_id: "",
+        child_work_ids: [],
+        child_work_count: 0,
+        merge_ready: false,
+        runtime_summary: {},
+        updated_at: "2026-03-09T10:09:00Z",
+        capabilities: [],
+      },
+    ];
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-refresh", role: "agent", content: "已为你整理出一版发布计划。" }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-refresh",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-refresh",
+        title: "Chat Task",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
+    expect(screen.getByText("Chat Planner Work")).toBeInTheDocument();
+    expect(screen.getByText("当前对话的背景摘要可以正常查看。")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(refreshResources).toHaveBeenCalledWith([
+        {
+          resource_type: "sessions",
+          resource_id: "sessions:overview",
+          schema_version: 1,
+        },
+        {
+          resource_type: "delegation_plane",
+          resource_id: "delegation:overview",
+          schema_version: 1,
+        },
+        {
+          resource_type: "context_continuity",
+          resource_id: "context:overview",
+          schema_version: 1,
+        },
+      ]);
+    });
+  });
 });

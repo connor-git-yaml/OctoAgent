@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -826,7 +826,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "可以开始使用" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "先连接真实模型" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
@@ -867,18 +867,11 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Butler 与 Worker" })
+      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Butler 设置/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Worker 模板/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /运行中的 Worker/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新建 Worker 模板" })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("tab", { name: /Butler 设置/ }));
-    expect(await screen.findByRole("button", { name: "保存 Butler 配置" })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("tab", { name: /运行中的 Worker/ }));
-    expect(await screen.findByRole("button", { name: "新建 Worker 实例" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "新建 Agent" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "当前项目默认会先用这一个" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "按职责拆开的辅助 Agent" })).toBeInTheDocument();
   });
 
   it("Advanced 路由默认先展示高级概览，再按需展开 legacy 控制台", async () => {
@@ -950,14 +943,16 @@ describe("App workbench routing", () => {
       {
         path: "/agents",
         assertRoute: async () => {
-          expect(await screen.findByRole("heading", { name: "Butler 与 Worker" })).toBeInTheDocument();
+          expect(
+            await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
+          ).toBeInTheDocument();
         },
       },
       {
         path: "/settings",
         assertRoute: async () => {
           expect(
-            await screen.findByRole("heading", { name: "模型连接、渠道入口与 Memory" })
+            await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" })
           ).toBeInTheDocument();
         },
       },
@@ -1276,14 +1271,130 @@ describe("App workbench routing", () => {
     ).toBeInTheDocument();
   });
 
-  it("Agents 页执行 setup.review 时保留未提交的 Butler 草稿", async () => {
+  it("Agents 页在保存失败时会保留未提交的 Agent 草稿", async () => {
     window.history.pushState({}, "", "/agents");
 
-    const snapshot = buildSnapshot();
-    const refreshedSetup = {
-      ...snapshot.resources.setup_governance,
-      generated_at: "2026-03-09T10:01:00Z",
-      updated_at: "2026-03-09T10:01:00Z",
+    const snapshot = buildSnapshot() as any;
+    snapshot.resources.capability_pack.pack.tools = [
+      {
+        tool_name: "project.inspect",
+        label: "项目检查",
+        tool_group: "project",
+        availability: "available",
+      },
+      {
+        tool_name: "runtime.inspect",
+        label: "运行检查",
+        tool_group: "runtime",
+        availability: "available",
+      },
+    ];
+    snapshot.resources.worker_profiles = {
+      generated_at: "2026-03-09T10:00:00Z",
+      profiles: [
+        {
+          profile_id: "project-default:main",
+          name: "默认主 Agent",
+          scope: "project",
+          project_id: "project-default",
+          mode: "singleton",
+          origin_kind: "custom",
+          status: "active",
+          active_revision: 2,
+          draft_revision: 2,
+          effective_snapshot_id: "worker-profile:project-default:main:v2",
+          editable: true,
+          summary: "负责默认聊天入口。",
+          static_config: {
+            base_archetype: "general",
+            summary: "负责默认聊天入口。",
+            model_alias: "main",
+            tool_profile: "standard",
+            default_tool_groups: ["project"],
+            selected_tools: ["project.inspect"],
+            runtime_kinds: ["worker"],
+            policy_refs: ["default"],
+            instruction_overlays: [],
+            tags: [],
+            capabilities: ["planner"],
+            metadata: {},
+          },
+          dynamic_context: {
+            active_project_id: "project-default",
+            active_workspace_id: "workspace-default",
+            active_work_count: 0,
+            running_work_count: 0,
+            attention_work_count: 0,
+            latest_work_id: "",
+            latest_task_id: "",
+            latest_work_title: "",
+            latest_work_status: "idle",
+            latest_target_kind: "",
+            current_selected_tools: ["project.inspect"],
+            current_tool_resolution_mode: "profile_first_core",
+            current_tool_warnings: [],
+            current_mounted_tools: [],
+            current_blocked_tools: [],
+            current_discovery_entrypoints: [],
+            updated_at: "2026-03-09T10:00:00Z",
+          },
+          warnings: [],
+          capabilities: [],
+        },
+        {
+          profile_id: "singleton:general",
+          name: "Butler Root Agent",
+          scope: "system",
+          project_id: "",
+          mode: "singleton",
+          origin_kind: "builtin",
+          status: "active",
+          active_revision: 1,
+          draft_revision: 1,
+          effective_snapshot_id: "worker-profile:singleton:general:v1",
+          editable: false,
+          summary: "适合主入口。",
+          static_config: {
+            base_archetype: "general",
+            summary: "适合主入口。",
+            model_alias: "main",
+            tool_profile: "standard",
+            default_tool_groups: ["project"],
+            selected_tools: ["project.inspect"],
+            runtime_kinds: ["worker"],
+            policy_refs: ["default"],
+            instruction_overlays: [],
+            tags: [],
+            capabilities: ["planner"],
+            metadata: {},
+          },
+          dynamic_context: {
+            active_project_id: "project-default",
+            active_workspace_id: "workspace-default",
+            active_work_count: 0,
+            running_work_count: 0,
+            attention_work_count: 0,
+            latest_work_id: "",
+            latest_task_id: "",
+            latest_work_title: "",
+            latest_work_status: "idle",
+            latest_target_kind: "",
+            current_selected_tools: ["project.inspect"],
+            current_tool_resolution_mode: "profile_first_core",
+            current_tool_warnings: [],
+            current_mounted_tools: [],
+            current_blocked_tools: [],
+            current_discovery_entrypoints: [],
+            updated_at: "2026-03-09T10:00:00Z",
+          },
+          warnings: [],
+          capabilities: [],
+        },
+      ],
+      summary: {
+        default_profile_id: "project-default:main",
+        default_profile_name: "默认主 Agent",
+      },
     };
 
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
@@ -1292,35 +1403,45 @@ describe("App workbench routing", () => {
         return Promise.resolve(jsonResponse(snapshot));
       }
       if (url.includes("/api/control/actions") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            result: {
+        const body = String(init.body ?? "");
+        if (body.includes('"action_id":"worker_profile.review"')) {
+          return Promise.resolve(
+            jsonResponse({
               contract_version: "1.0.0",
-              request_id: "req-setup-review-only",
-              correlation_id: "req-setup-review-only",
-              action_id: "setup.review",
-              status: "completed",
-              code: "SETUP_REVIEW_READY",
-              message: "配置检查已完成。",
-              data: {
-                review: refreshedSetup.review,
-              },
-              resource_refs: [
-                {
-                  resource_type: "setup_governance",
-                  resource_id: "setup:governance",
-                  schema_version: 1,
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-worker-profile-review",
+                correlation_id: "req-worker-profile-review",
+                action_id: "worker_profile.review",
+                status: "completed",
+                code: "WORKER_PROFILE_REVIEW_READY",
+                message: "检查完成。",
+                data: {
+                  review: {
+                    can_save: true,
+                    ready: true,
+                    warnings: [],
+                    blocking_reasons: [],
+                    next_actions: ["可以保存。"],
+                  },
                 },
-              ],
-              target_refs: [],
-              handled_at: "2026-03-09T10:01:00Z",
+                resource_refs: [],
+                target_refs: [],
+                handled_at: "2026-03-09T10:01:00Z",
+              },
+            })
+          );
+        }
+        return Promise.resolve(
+          jsonResponse(
+            {
+              error: {
+                message: "保存失败",
+              },
             },
-          })
+            500
+          )
         );
-      }
-      if (url.includes("/api/control/resources/setup-governance")) {
-        return Promise.resolve(jsonResponse(refreshedSetup));
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -1328,16 +1449,16 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Butler 与 Worker" })
+      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
     ).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("tab", { name: /Butler 设置/ }));
-    const nameInput = (await screen.findByLabelText("Butler 名称")) as HTMLInputElement;
+    await userEvent.click((await screen.findAllByRole("button", { name: "编辑主 Agent" }))[0]!);
+    const nameInput = (await screen.findByLabelText(/名称/)) as HTMLInputElement;
     await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, "新的 Butler");
-    await userEvent.click(screen.getByRole("button", { name: "检查 Butler 变更" }));
+    await userEvent.type(nameInput, "新的主 Agent");
+    await userEvent.click(screen.getByRole("button", { name: "保存主 Agent" }));
 
-    await screen.findByText(/配置检查已完成/);
-    expect(nameInput.value).toBe("新的 Butler");
+    await screen.findByText("刚才的操作没有成功。");
+    expect(nameInput.value).toBe("新的主 Agent");
   });
 
   it("设置页会在体验模式下展示多 Provider 管理和别名编辑器", async () => {
@@ -1497,34 +1618,129 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("已授权")).toBeInTheDocument();
   });
 
-  it("Agents 页会把 Butler 记忆边界和召回策略提交到 setup.review", async () => {
+  it("Agents 页会把结构化模型和工具选择提交到 worker_profile.review", async () => {
     window.history.pushState({}, "", "/agents");
 
-    const snapshot = buildSnapshot();
-    snapshot.resources.setup_governance.agent_governance.details = {
-      active_agent_profile: {
-        profile_id: "agent-profile-default",
-        scope: "project",
-        project_id: "project-default",
-        name: "默认主 Agent",
-        persona_summary: "适合首次使用。",
-        model_alias: "main",
-        tool_profile: "standard",
-        memory_access_policy: {
-          allow_vault: false,
-          include_history: false,
-        },
-        context_budget_policy: {
-          memory_recall: {
-            post_filter_mode: "keyword_overlap",
-            rerank_mode: "heuristic",
-            min_keyword_overlap: 1,
-            scope_limit: 4,
-            per_scope_limit: 3,
-            max_hits: 4,
+    const snapshot = buildSnapshot() as any;
+    snapshot.resources.capability_pack.pack.tools = [
+      {
+        tool_name: "project.inspect",
+        label: "项目检查",
+        tool_group: "project",
+        availability: "available",
+      },
+      {
+        tool_name: "runtime.inspect",
+        label: "运行检查",
+        tool_group: "runtime",
+        availability: "available",
+      },
+    ];
+    snapshot.resources.worker_profiles = {
+      generated_at: "2026-03-09T10:00:00Z",
+      profiles: [
+        {
+          profile_id: "project-default:main",
+          name: "默认主 Agent",
+          scope: "project",
+          project_id: "project-default",
+          mode: "singleton",
+          origin_kind: "custom",
+          status: "active",
+          active_revision: 2,
+          draft_revision: 2,
+          effective_snapshot_id: "worker-profile:project-default:main:v2",
+          editable: true,
+          summary: "负责默认聊天入口。",
+          static_config: {
+            base_archetype: "general",
+            summary: "负责默认聊天入口。",
+            model_alias: "main",
+            tool_profile: "standard",
+            default_tool_groups: ["project"],
+            selected_tools: ["project.inspect"],
+            runtime_kinds: ["worker"],
+            policy_refs: ["default"],
+            instruction_overlays: [],
+            tags: [],
+            capabilities: ["planner"],
+            metadata: {},
           },
+          dynamic_context: {
+            active_project_id: "project-default",
+            active_workspace_id: "workspace-default",
+            active_work_count: 0,
+            running_work_count: 0,
+            attention_work_count: 0,
+            latest_work_id: "",
+            latest_task_id: "",
+            latest_work_title: "",
+            latest_work_status: "idle",
+            latest_target_kind: "",
+            current_selected_tools: ["project.inspect"],
+            current_tool_resolution_mode: "profile_first_core",
+            current_tool_warnings: [],
+            current_mounted_tools: [],
+            current_blocked_tools: [],
+            current_discovery_entrypoints: [],
+            updated_at: "2026-03-09T10:00:00Z",
+          },
+          warnings: [],
+          capabilities: [],
         },
-        updated_at: "2026-03-09T10:00:00Z",
+        {
+          profile_id: "singleton:general",
+          name: "Butler Root Agent",
+          scope: "system",
+          project_id: "",
+          mode: "singleton",
+          origin_kind: "builtin",
+          status: "active",
+          active_revision: 1,
+          draft_revision: 1,
+          effective_snapshot_id: "worker-profile:singleton:general:v1",
+          editable: false,
+          summary: "适合主入口。",
+          static_config: {
+            base_archetype: "general",
+            summary: "适合主入口。",
+            model_alias: "main",
+            tool_profile: "standard",
+            default_tool_groups: ["project"],
+            selected_tools: ["project.inspect"],
+            runtime_kinds: ["worker"],
+            policy_refs: ["default"],
+            instruction_overlays: [],
+            tags: [],
+            capabilities: ["planner"],
+            metadata: {},
+          },
+          dynamic_context: {
+            active_project_id: "project-default",
+            active_workspace_id: "workspace-default",
+            active_work_count: 0,
+            running_work_count: 0,
+            attention_work_count: 0,
+            latest_work_id: "",
+            latest_task_id: "",
+            latest_work_title: "",
+            latest_work_status: "idle",
+            latest_target_kind: "",
+            current_selected_tools: ["project.inspect"],
+            current_tool_resolution_mode: "profile_first_core",
+            current_tool_warnings: [],
+            current_mounted_tools: [],
+            current_blocked_tools: [],
+            current_discovery_entrypoints: [],
+            updated_at: "2026-03-09T10:00:00Z",
+          },
+          warnings: [],
+          capabilities: [],
+        },
+      ],
+      summary: {
+        default_profile_id: "project-default:main",
+        default_profile_name: "默认主 Agent",
       },
     };
 
@@ -1534,19 +1750,48 @@ describe("App workbench routing", () => {
         return Promise.resolve(jsonResponse(snapshot));
       }
       if (url.includes("/api/control/actions") && init?.method === "POST") {
+        const body = String(init.body ?? "");
+        if (body.includes('"action_id":"worker_profile.review"')) {
+          return Promise.resolve(
+            jsonResponse({
+              contract_version: "1.0.0",
+              result: {
+                contract_version: "1.0.0",
+                request_id: "req-worker-profile-review",
+                correlation_id: "req-worker-profile-review",
+                action_id: "worker_profile.review",
+                status: "completed",
+                code: "WORKER_PROFILE_REVIEW_READY",
+                message: "检查完成。",
+                data: {
+                  review: {
+                    can_save: true,
+                    ready: true,
+                    warnings: [],
+                    blocking_reasons: [],
+                    next_actions: ["可以保存。"],
+                  },
+                },
+                resource_refs: [],
+                target_refs: [],
+                handled_at: "2026-03-09T10:01:00Z",
+              },
+            })
+          );
+        }
         return Promise.resolve(
           jsonResponse({
             contract_version: "1.0.0",
             result: {
               contract_version: "1.0.0",
-              request_id: "req-memory-settings-review",
-              correlation_id: "req-memory-settings-review",
-              action_id: "setup.review",
+              request_id: "req-worker-profile-apply",
+              correlation_id: "req-worker-profile-apply",
+              action_id: "worker_profile.apply",
               status: "completed",
-              code: "SETUP_REVIEW_READY",
-              message: "配置检查已完成。",
+              code: "WORKER_PROFILE_APPLIED",
+              message: "已保存。",
               data: {
-                review: snapshot.resources.setup_governance.review,
+                profile_id: "project-default:main",
               },
               resource_refs: [],
               target_refs: [],
@@ -1561,29 +1806,28 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "Butler 与 Worker" })
+      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
     ).toBeInTheDocument();
-    await userEvent.click(await screen.findByRole("tab", { name: /Butler 设置/ }));
-    expect(await screen.findByText("记忆召回预设")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保守召回" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "广覆盖" })).toBeInTheDocument();
+    await userEvent.click((await screen.findAllByRole("button", { name: "编辑主 Agent" }))[0]!);
+    await userEvent.click(screen.getByRole("checkbox", { name: /运行检查/ }));
+    await userEvent.click(screen.getByRole("button", { name: "保存主 Agent" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "广覆盖" }));
-    await userEvent.click(screen.getByLabelText(/允许带回 Vault 引用/));
-    await userEvent.click(screen.getByLabelText(/默认包含历史版本/));
-    await userEvent.click(screen.getByRole("button", { name: "检查 Butler 变更" }));
-
-    await screen.findByText(/配置检查已完成/);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"worker_profile.review"')
+        )
+      ).toBe(true)
+    );
 
     const actionBody = fetchMock.mock.calls
       .filter((call) => String((call as FetchArgs)[0]).includes("/api/control/actions"))
       .map((call) => String((call as FetchArgs)[1]?.body ?? ""))
-      .find((body) => body.includes('"action_id":"setup.review"'));
+      .find((body) => body.includes('"action_id":"worker_profile.review"'));
 
-    expect(actionBody).toContain('"memory_access_policy":{"allow_vault":true,"include_history":true}');
-    expect(actionBody).toContain(
-      '"context_budget_policy":{"memory_recall":{"post_filter_mode":"none","rerank_mode":"heuristic","min_keyword_overlap":1,"scope_limit":6,"per_scope_limit":4,"max_hits":8}}'
-    );
+    expect(actionBody).toContain('"default_tool_groups":["project"]');
+    expect(actionBody).toContain('"selected_tools":["project.inspect","runtime.inspect"]');
+    expect(actionBody).toContain('"base_archetype":"general"');
   });
 
   it("从带 hash 的 Settings 链接进入时会滚动到 Memory 分区", async () => {
@@ -1610,7 +1854,7 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "模型连接、渠道入口与 Memory" })
+      await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" })
     ).toBeInTheDocument();
 
     await waitFor(() => {
@@ -2189,14 +2433,15 @@ describe("App workbench routing", () => {
 
     const { container } = render(<App />);
 
-    await screen.findByRole("heading", { name: "可以开始使用" });
+    await screen.findByRole("heading", { name: "先连接真实模型" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Project"), "project-ops");
     await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-ops");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
 
     const projectPanelLabels = screen.getAllByText("当前 Project");
-    const projectPanel =
-      projectPanelLabels[projectPanelLabels.length - 1]?.closest("section") ?? null;
+    const projectPanel = (projectPanelLabels[
+      projectPanelLabels.length - 1
+    ]?.closest("section") as HTMLElement | null) ?? null;
     expect(projectPanel).not.toBeNull();
     await waitFor(() =>
       expect(
@@ -2207,9 +2452,9 @@ describe("App workbench routing", () => {
     const summaryGrid = container.querySelector<HTMLElement>(".wb-card-grid.wb-card-grid-4");
     expect(summaryGrid).not.toBeNull();
 
-    const pendingCard = within(summaryGrid!).getByText("待你确认").closest("article");
-    const workCard = within(summaryGrid!).getByText("当前工作").closest("article");
-    const memoryCard = within(summaryGrid!).getByText("记忆摘要").closest("article");
+    const pendingCard = within(summaryGrid!).getByText("待处理事项").closest("article");
+    const workCard = within(summaryGrid!).getByText("正在进行").closest("article");
+    const memoryCard = screen.getByText("已保存的长期结论").closest(".wb-note") as HTMLElement | null;
 
     expect(pendingCard).not.toBeNull();
     expect(workCard).not.toBeNull();
@@ -2280,7 +2525,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "可以开始使用" });
+    await screen.findByRole("heading", { name: "先连接真实模型" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-analysis");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
 
@@ -2292,190 +2537,6 @@ describe("App workbench routing", () => {
     expect(String(actionCall?.[1]?.body)).toContain('"project_id":"project-default"');
     expect(String(actionCall?.[1]?.body)).toContain('"workspace_id":"workspace-analysis"');
     expect(await screen.findByText("workspace-analysis")).toBeInTheDocument();
-  });
-
-  it("聊天发送后会回刷 sessions、delegation 和 context 摘要", async () => {
-    window.history.pushState({}, "", "/chat");
-
-    class FakeEventSource {
-      static CLOSED = 2;
-      static instances: FakeEventSource[] = [];
-      readyState = 1;
-      onopen: ((this: EventSource, ev: Event) => void) | null = null;
-      onerror:
-        | ((this: EventSource, ev: Event) => void)
-        | null = null;
-      onmessage:
-        | ((this: EventSource, ev: MessageEvent) => void)
-        | null = null;
-      listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-
-      constructor() {
-        FakeEventSource.instances.push(this);
-      }
-
-      addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        current.push(listener);
-        this.listeners.set(type, current);
-      }
-
-      removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        this.listeners.set(
-          type,
-          current.filter((item) => item !== listener)
-        );
-      }
-
-      emit(type: string, payload: unknown): void {
-        const event = {
-          data: JSON.stringify(payload),
-        } as MessageEvent;
-        for (const listener of this.listeners.get(type) ?? []) {
-          listener(event);
-        }
-      }
-
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-    }
-
-    vi.stubGlobal("EventSource", FakeEventSource);
-
-    const snapshot = buildSnapshot();
-    const nextSessions = {
-      ...snapshot.resources.sessions,
-      sessions: [buildSession("task-chat-1", "work-chat-1")],
-    };
-    const nextDelegation = {
-      ...snapshot.resources.delegation,
-      works: [buildWork("work-chat-1", "running", { title: "Chat Planner Work" })],
-      summary: { by_status: { running: 1 } },
-    };
-    const nextContext = {
-      ...snapshot.resources.context_continuity,
-      degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-      frames: [
-        {
-          context_frame_id: "context-other",
-          task_id: "task-other",
-          session_id: "thread-task-other",
-          project_id: "project-default",
-          workspace_id: "workspace-default",
-          agent_profile_id: "agent-profile-default",
-          recent_summary: "别的任务的摘要。",
-          memory_hit_count: 0,
-          memory_hits: [],
-          memory_recall: {},
-          budget: {},
-          source_refs: [],
-          degraded_reason: "",
-          created_at: "2026-03-09T10:08:00Z",
-        },
-        {
-          context_frame_id: "context-1",
-          task_id: "task-chat-1",
-          session_id: "thread-task-chat-1",
-          project_id: "project-default",
-          workspace_id: "workspace-default",
-          agent_profile_id: "agent-profile-default",
-          recent_summary: "当前 task 的上下文摘要。",
-          memory_hit_count: 1,
-          memory_hits: [],
-          memory_recall: {},
-          budget: {},
-          source_refs: [],
-          degraded_reason: "",
-          created_at: "2026-03-09T10:07:00Z",
-        },
-      ],
-    };
-
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/chat/send") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            task_id: "task-chat-1",
-            stream_url: "/api/stream/task/task-chat-1",
-          })
-        );
-      }
-      if (url.includes("/api/tasks/task-chat-1")) {
-        return Promise.resolve(jsonResponse(buildTaskDetail("task-chat-1", "Chat Task")));
-      }
-      if (url.includes("/api/control/resources/sessions")) {
-        return Promise.resolve(jsonResponse(nextSessions));
-      }
-      if (url.includes("/api/control/resources/delegation")) {
-        return Promise.resolve(jsonResponse(nextDelegation));
-      }
-      if (url.includes("/api/control/resources/context-frames")) {
-        return Promise.resolve(jsonResponse(nextContext));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("从这里发出第一条消息")).toBeInTheDocument();
-    expect(document.querySelector(".wb-chat-panel.is-empty")).not.toBeNull();
-    expect(document.querySelector(".wb-chat-form.is-empty")).not.toBeNull();
-
-    const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
-    await userEvent.type(input, "帮我整理发布计划");
-    await userEvent.click(screen.getByRole("button", { name: "发送" }));
-
-    await waitFor(() => {
-      expect(FakeEventSource.instances).toHaveLength(1);
-    });
-    await act(async () => {
-      FakeEventSource.instances[0]?.emit("MODEL_CALL_COMPLETED", {
-        event_id: "evt-model-completed",
-        task_id: "task-chat-1",
-        task_seq: 3,
-        ts: "2026-03-09T10:05:30Z",
-        type: "MODEL_CALL_COMPLETED",
-        actor: "system",
-        payload: {
-          response_summary: "已为你整理出一版发布计划。",
-        },
-        final: false,
-      });
-    });
-
-    expect(await screen.findByText("Chat Task")).toBeInTheDocument();
-    expect(await screen.findByText("Chat Planner Work")).toBeInTheDocument();
-    expect(await screen.findByText("当前 task 的上下文摘要。")).toBeInTheDocument();
-    expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "技术详情" })).toBeInTheDocument();
-    expect(screen.queryByText("任务 ID")).not.toBeInTheDocument();
-    await userEvent.hover(screen.getByRole("button", { name: "技术详情" }));
-    expect(await screen.findByText("任务 ID")).toBeInTheDocument();
-    expect(screen.getByText("task-chat-1")).toBeInTheDocument();
-    expect(screen.getByText("会话 ID")).toBeInTheDocument();
-    expect(screen.getByText("thread-task-chat-1")).toBeInTheDocument();
-    expect(screen.queryByText("别的任务的摘要。")).not.toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[0]).includes("/api/control/resources/sessions")
-      )
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[0]).includes("/api/control/resources/delegation")
-      )
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[0]).includes("/api/control/resources/context-frames")
-      )
-    ).toBe(true);
   });
 
   it("重新进入 Chat 时会恢复当前聚焦会话的历史消息", async () => {
@@ -2548,129 +2609,6 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("这周先锁定范围，再排发布时间表。")).toBeInTheDocument();
     expect(screen.queryByText("这是中间 skill 的内部摘要。")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "历史对话" })).toBeInTheDocument();
-  });
-
-  it("聊天流会忽略中间 skill 失败事件并等待最终回复", async () => {
-    window.history.pushState({}, "", "/chat");
-
-    class FakeEventSource {
-      static CLOSED = 2;
-      static instances: FakeEventSource[] = [];
-      readyState = 1;
-      onopen: ((this: EventSource, ev: Event) => void) | null = null;
-      onerror:
-        | ((this: EventSource, ev: Event) => void)
-        | null = null;
-      onmessage:
-        | ((this: EventSource, ev: MessageEvent) => void)
-        | null = null;
-      listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-
-      constructor() {
-        FakeEventSource.instances.push(this);
-      }
-
-      addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        current.push(listener);
-        this.listeners.set(type, current);
-      }
-
-      removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        this.listeners.set(
-          type,
-          current.filter((item) => item !== listener)
-        );
-      }
-
-      emit(type: string, payload: unknown): void {
-        const event = {
-          data: JSON.stringify(payload),
-        } as MessageEvent;
-        for (const listener of this.listeners.get(type) ?? []) {
-          listener(event);
-        }
-      }
-
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-    }
-
-    vi.stubGlobal("EventSource", FakeEventSource);
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(buildSnapshot()));
-      }
-      if (url.includes("/api/chat/send") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            task_id: "task-chat-stream-filter",
-            stream_url: "/api/stream/task/task-chat-stream-filter",
-          })
-        );
-      }
-      if (url.includes("/api/tasks/task-chat-stream-filter")) {
-        return Promise.resolve(
-          jsonResponse(buildTaskDetail("task-chat-stream-filter", "过滤内部事件"))
-        );
-      }
-      if (url.includes("/api/control/resources/sessions")) {
-        return Promise.resolve(jsonResponse(buildSnapshot().resources.sessions));
-      }
-      if (url.includes("/api/control/resources/delegation")) {
-        return Promise.resolve(jsonResponse(buildSnapshot().resources.delegation));
-      }
-      if (url.includes("/api/control/resources/context-frames")) {
-        return Promise.resolve(jsonResponse(buildSnapshot().resources.context_continuity));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
-    await userEvent.type(input, "今天天气怎么样？");
-    await userEvent.click(screen.getByRole("button", { name: "发送" }));
-
-    await waitFor(() => {
-      expect(FakeEventSource.instances).toHaveLength(1);
-    });
-
-    await act(async () => {
-      FakeEventSource.instances[0]?.emit("MODEL_CALL_FAILED", {
-        event_id: "evt-hidden-failure",
-        task_id: "task-chat-stream-filter",
-        task_seq: 2,
-        ts: "2026-03-09T10:05:10Z",
-        type: "MODEL_CALL_FAILED",
-        actor: "system",
-        payload: {
-          skill_id: "chat.general.inline",
-          error: "temporary upstream failure",
-        },
-        final: false,
-      });
-      FakeEventSource.instances[0]?.emit("MODEL_CALL_COMPLETED", {
-        event_id: "evt-final-completed",
-        task_id: "task-chat-stream-filter",
-        task_seq: 3,
-        ts: "2026-03-09T10:05:30Z",
-        type: "MODEL_CALL_COMPLETED",
-        actor: "system",
-        payload: {
-          response_summary: "深圳今天晴，约 20 摄氏度。",
-        },
-        final: false,
-      });
-    });
-
-    expect(await screen.findByText("深圳今天晴，约 20 摄氏度。")).toBeInTheDocument();
-    expect(screen.queryByText("本次回复失败，请重试。")).not.toBeInTheDocument();
-    expect(screen.queryByText("本次回复没有成功完成，请稍后重试。")).not.toBeInTheDocument();
   });
 
   it("重新进入 Chat 时会优先恢复最近的 Web 会话", async () => {

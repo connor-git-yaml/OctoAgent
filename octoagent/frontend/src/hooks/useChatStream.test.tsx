@@ -19,7 +19,7 @@ describe("useChatStream", () => {
     window.sessionStorage.clear();
   });
 
-  it("可见失败事件会覆盖处理中占位消息", async () => {
+  function installFakeEventSource() {
     class FakeEventSource {
       static CLOSED = 2;
       static instances: FakeEventSource[] = [];
@@ -66,6 +66,11 @@ describe("useChatStream", () => {
     }
 
     vi.stubGlobal("EventSource", FakeEventSource);
+    return FakeEventSource;
+  }
+
+  it("可见失败事件会覆盖处理中占位消息", async () => {
+    const FakeEventSource = installFakeEventSource();
     frontDoorRequestMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -115,6 +120,68 @@ describe("useChatStream", () => {
     expect(result.current.messages[result.current.messages.length - 1]?.content).toBe(
       "这次卡在当前工具或运行环境上了，不是你不会问。稍后重试，或先检查联网和后台连接。"
     );
+    expect(result.current.messages[result.current.messages.length - 1]?.isStreaming).toBe(false);
+  });
+
+  it("内部 skill 失败事件不会盖掉最终回复", async () => {
+    const FakeEventSource = installFakeEventSource();
+    frontDoorRequestMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          task_id: "task-chat-hidden-failure",
+          stream_url: "/api/stream/task/task-chat-hidden-failure",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    const { result } = renderHook(() => useChatStream());
+
+    await act(async () => {
+      await result.current.sendMessage("帮我查一下深圳天气");
+    });
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    await act(async () => {
+      FakeEventSource.instances[0]?.emit("MODEL_CALL_FAILED", {
+        event_id: "evt-hidden-failure",
+        task_id: "task-chat-hidden-failure",
+        task_seq: 2,
+        ts: "2026-03-09T10:05:10Z",
+        type: "MODEL_CALL_FAILED",
+        actor: "system",
+        payload: {
+          skill_id: "chat.general.inline",
+          error: "temporary upstream failure",
+        },
+        final: false,
+      });
+      FakeEventSource.instances[0]?.emit("MODEL_CALL_COMPLETED", {
+        event_id: "evt-final-completed",
+        task_id: "task-chat-hidden-failure",
+        task_seq: 3,
+        ts: "2026-03-09T10:05:30Z",
+        type: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        payload: {
+          response_summary: "深圳今天晴，约 20 摄氏度。",
+        },
+        final: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages[result.current.messages.length - 1]?.content).toBe(
+        "深圳今天晴，约 20 摄氏度。"
+      );
+    });
+    expect(result.current.error).toBeNull();
     expect(result.current.messages[result.current.messages.length - 1]?.isStreaming).toBe(false);
   });
 });

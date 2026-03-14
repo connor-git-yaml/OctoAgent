@@ -2237,6 +2237,143 @@
     rgba(248, 250, 251, 0.96);
 }
 
+.wb-agent-management-page,
+.wb-agent-management-layout,
+.wb-agent-summary-grid,
+.wb-agent-editor-shell,
+.wb-agent-template-grid,
+.wb-agent-editor-grid,
+.wb-agent-check-grid,
+.wb-agent-tool-browser {
+  display: grid;
+  gap: var(--cp-space-4);
+}
+
+.wb-agent-management-layout {
+  grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
+  align-items: start;
+}
+
+.wb-agent-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wb-agent-card,
+.wb-agent-template-card,
+.wb-agent-option-card,
+.wb-agent-tool-row {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.92)),
+    rgba(255, 255, 255, 0.9);
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.wb-agent-card.is-main {
+  border-color: rgba(31, 106, 91, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(244, 248, 246, 0.93));
+}
+
+.wb-agent-template-card,
+.wb-agent-option-card,
+.wb-agent-tool-row {
+  text-align: left;
+}
+
+.wb-agent-template-card:hover,
+.wb-agent-option-card:hover,
+.wb-agent-tool-row:hover,
+.wb-agent-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.18);
+  box-shadow: 0 16px 28px rgba(20, 32, 47, 0.08);
+}
+
+.wb-agent-card-topline,
+.wb-agent-card-meta,
+.wb-agent-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.wb-agent-card-topline {
+  justify-content: space-between;
+}
+
+.wb-agent-card-body {
+  display: grid;
+  gap: 6px;
+}
+
+.wb-agent-card-body strong,
+.wb-agent-template-card strong,
+.wb-agent-option-copy strong,
+.wb-agent-tool-row strong {
+  font-size: 1rem;
+  color: var(--cp-ink);
+}
+
+.wb-agent-card-body p,
+.wb-agent-template-card p,
+.wb-agent-option-copy p,
+.wb-agent-tool-row p {
+  margin: 0;
+  color: var(--cp-muted);
+}
+
+.wb-agent-card-meta,
+.wb-agent-tool-row small,
+.wb-agent-option-copy small {
+  color: var(--cp-muted);
+  font-size: 0.82rem;
+}
+
+.wb-agent-card-actions {
+  margin-top: 2px;
+}
+
+.wb-agent-template-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.wb-agent-editor-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-agent-check-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.wb-agent-option-card,
+.wb-agent-tool-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.wb-agent-option-card input,
+.wb-agent-tool-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.wb-agent-tool-browser {
+  max-height: 340px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
 .wb-agent-runtime-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2797,7 +2934,10 @@
   .wb-work-detail-grid,
   .wb-stat-grid,
   .wb-toolbar-grid,
-  .wb-memory-layout {
+  .wb-memory-layout,
+  .wb-agent-management-layout,
+  .wb-agent-summary-grid,
+  .wb-agent-editor-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -2861,7 +3001,10 @@
   .wb-memory-head,
   .wb-inline-banner,
   .wb-chat-form,
-  .wb-toggle-row {
+  .wb-toggle-row,
+  .wb-agent-card-topline,
+  .wb-agent-card-meta,
+  .wb-agent-card-actions {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -2897,7 +3040,9 @@
   }
 
   .wb-agent-project-grid,
-  .wb-agent-list {
+  .wb-agent-list,
+  .wb-agent-template-grid,
+  .wb-agent-check-grid {
     grid-template-columns: 1fr;
   }
 
