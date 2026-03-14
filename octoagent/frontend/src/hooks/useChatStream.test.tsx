@@ -132,6 +132,48 @@ describe("useChatStream", () => {
     expect(result.current.messages).toEqual([]);
   });
 
+  it("恢复历史对话时不会因为 restoreTarget 对象重新创建而卡在 restoring", async () => {
+    window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-restore-1");
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-restore-1",
+        title: "恢复中的对话",
+        status: "SUCCEEDED",
+      },
+      events: [
+        {
+          event_id: "evt-user-restore",
+          task_id: "task-restore-1",
+          task_seq: 1,
+          ts: "2026-03-14T10:00:00Z",
+          type: "USER_MESSAGE",
+          actor: "user",
+          payload: { text: "帮我恢复最近聊天" },
+        },
+        {
+          event_id: "evt-agent-restore",
+          task_id: "task-restore-1",
+          task_seq: 2,
+          ts: "2026-03-14T10:00:01Z",
+          type: "MODEL_CALL_COMPLETED",
+          actor: "system",
+          payload: { response_summary: "已经恢复最近一轮对话。" },
+        },
+      ],
+      artifacts: [],
+    });
+
+    const { result } = renderHook(() => useChatStream({ taskIds: ["task-restore-1"] }));
+
+    await waitFor(() => {
+      expect(result.current.restoring).toBe(false);
+      expect(result.current.messages).toHaveLength(2);
+    });
+    expect(result.current.messages[0]?.content).toBe("帮我恢复最近聊天");
+    expect(result.current.messages[1]?.content).toBe("已经恢复最近一轮对话。");
+    expect(fetchTaskDetailMock).toHaveBeenCalledTimes(1);
+  });
+
   it("可见失败事件会覆盖处理中占位消息", async () => {
     const FakeEventSource = installFakeEventSource();
     frontDoorRequestMock.mockResolvedValue(

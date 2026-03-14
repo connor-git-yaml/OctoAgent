@@ -6,6 +6,7 @@ interface HoverRevealProps {
   expanded: boolean;
   onToggle: (expanded: boolean) => void;
   ariaLabel: string;
+  triggerClassName?: string;
 }
 
 export default function HoverReveal({
@@ -14,6 +15,7 @@ export default function HoverReveal({
   expanded,
   onToggle,
   ariaLabel,
+  triggerClassName,
 }: HoverRevealProps) {
   return (
     <div
@@ -23,7 +25,7 @@ export default function HoverReveal({
     >
       <button
         type="button"
-        className="wb-hover-reveal-trigger"
+        className={`wb-hover-reveal-trigger${triggerClassName ? ` ${triggerClassName}` : ""}`}
         aria-expanded={expanded}
         onClick={() => onToggle(!expanded)}
         onFocus={() => onToggle(true)}

@@ -125,6 +125,7 @@ class TaskRunner:
             running = list(self._running_jobs.items())
             self._running_jobs.clear()
 
+        task_service = TaskService(self._stores, self._sse_hub)
         for task_id, running_job in running:
             self._cancellation_registry.cancel(task_id)
             running_job.task.cancel()
@@ -140,6 +141,10 @@ class TaskRunner:
                 await self._stores.task_job_store.mark_failed(
                     task_id,
                     "runner_shutdown_cancelled",
+                )
+                await task_service.mark_running_task_failed_for_recovery(
+                    task_id,
+                    reason="实例重启或停止时取消了当前执行，请重新发起这条请求。",
                 )
                 await self._mark_execution_terminal(
                     task_id=task_id,

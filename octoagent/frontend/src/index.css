@@ -2645,6 +2645,13 @@
   gap: 10px;
 }
 
+.wb-chat-head-actions .wb-button,
+.wb-chat-head-actions .wb-hover-reveal-trigger {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 0.88rem;
+}
+
 .wb-chat-activity {
   padding: 14px 16px;
   border-radius: 18px;
@@ -2923,8 +2930,8 @@
 
 .wb-message-card.is-user {
   border-top-right-radius: 8px;
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
-  color: #fff;
+  background: linear-gradient(135deg, #0d766b, #19b9ab);
+  color: rgba(255, 255, 255, 0.98);
 }
 
 .wb-message-card.is-agent {
@@ -2944,11 +2951,35 @@
 .wb-message-content {
   font-size: 0.98rem;
   line-height: 1.7;
+  color: inherit;
+}
+
+.wb-message-card.is-user .wb-message-role {
+  color: rgba(255, 255, 255, 0.96);
+  opacity: 1;
+}
+
+.wb-message-card.is-user .wb-message-content,
+.wb-message-card.is-user .wb-markdown,
+.wb-message-card.is-user .wb-markdown h1,
+.wb-message-card.is-user .wb-markdown h2,
+.wb-message-card.is-user .wb-markdown h3,
+.wb-message-card.is-user .wb-markdown p,
+.wb-message-card.is-user .wb-markdown ul,
+.wb-message-card.is-user .wb-markdown ol,
+.wb-message-card.is-user .wb-markdown li,
+.wb-message-card.is-user .wb-markdown-paragraph {
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.wb-message-card.is-user .wb-markdown strong {
+  color: #ffffff;
 }
 
 .wb-markdown {
   display: grid;
   gap: 10px;
+  color: inherit;
 }
 
 .wb-markdown > :first-child {
@@ -3010,11 +3041,31 @@
   text-underline-offset: 2px;
 }
 
+.wb-message-card.is-user .wb-markdown code {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.wb-message-card.is-user .wb-markdown pre {
+  background: rgba(8, 38, 46, 0.24);
+}
+
+.wb-message-card.is-user .wb-markdown pre code {
+  background: transparent;
+}
+
 .wb-message-loading {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  font-weight: 600;
+}
+
+.wb-message-loading-head {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-weight: 600;
 }
 
 .wb-message-loading-dots {
@@ -3035,6 +3086,191 @@
 
 .wb-message-loading-dots span:nth-child(3) {
   animation-delay: 0.32s;
+}
+
+.wb-message-activity {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+    rgba(248, 251, 250, 0.92);
+}
+
+.wb-message-activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-message-activity-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.wb-message-activity-line {
+  position: absolute;
+  top: 24px;
+  left: 5px;
+  width: 2px;
+  height: calc(100% + 10px);
+  border-radius: 999px;
+  background: rgba(20, 32, 47, 0.12);
+}
+
+.wb-message-activity-line[aria-hidden="true"] {
+  display: none;
+}
+
+.wb-message-activity-dot {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  margin-top: 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 5px rgba(20, 32, 47, 0.04);
+}
+
+.wb-message-activity-dot.is-success {
+  background: var(--cp-success);
+}
+
+.wb-message-activity-dot.is-warning {
+  background: var(--cp-warning);
+}
+
+.wb-message-activity-dot.is-danger {
+  background: var(--cp-danger);
+}
+
+.wb-message-activity-dot.is-running {
+  background: var(--cp-secondary);
+}
+
+.wb-message-activity-dot.is-draft {
+  background: rgba(20, 32, 47, 0.36);
+}
+
+.wb-message-activity-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.wb-message-activity-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-message-activity-head strong {
+  font-size: 0.92rem;
+}
+
+.wb-message-activity-copy > span {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: rgba(20, 32, 47, 0.78);
+}
+
+.wb-message-trace-trigger {
+  justify-content: flex-start;
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.wb-message-trace {
+  display: grid;
+  gap: 10px;
+  min-width: min(420px, 80vw);
+}
+
+.wb-message-trace-title {
+  font-size: 0.92rem;
+  color: var(--cp-ink);
+}
+
+.wb-message-trace-list {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-message-trace-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.wb-message-trace-line {
+  position: absolute;
+  top: 22px;
+  left: 4px;
+  width: 2px;
+  height: calc(100% + 10px);
+  border-radius: 999px;
+  background: rgba(20, 32, 47, 0.12);
+}
+
+.wb-message-trace-line[aria-hidden="true"] {
+  display: none;
+}
+
+.wb-message-trace-dot {
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgba(20, 32, 47, 0.04);
+}
+
+.wb-message-trace-dot.is-success {
+  background: var(--cp-success);
+}
+
+.wb-message-trace-dot.is-warning {
+  background: var(--cp-warning);
+}
+
+.wb-message-trace-dot.is-danger {
+  background: var(--cp-danger);
+}
+
+.wb-message-trace-dot.is-running {
+  background: var(--cp-secondary);
+}
+
+.wb-message-trace-dot.is-draft {
+  background: rgba(20, 32, 47, 0.36);
+}
+
+.wb-message-trace-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wb-message-trace-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-message-trace-head strong {
+  font-size: 0.88rem;
+}
+
+.wb-message-trace-copy > span {
+  color: rgba(20, 32, 47, 0.74);
+  font-size: 0.86rem;
+  line-height: 1.55;
 }
 
 @keyframes wb-message-dot {

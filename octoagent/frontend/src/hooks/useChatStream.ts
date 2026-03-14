@@ -13,7 +13,7 @@ import {
   fetchTaskDetail,
   frontDoorRequest,
 } from "../api/client";
-import type { SSEEventData } from "../types";
+import type { SSEEventData, TaskDetailResponse } from "../types";
 import {
   AGENT_STREAM_PLACEHOLDER,
   buildMessagesFromTaskDetail,
@@ -26,6 +26,8 @@ import {
 } from "./chatStreamHelpers";
 import type { ChatMessage, ChatRestoreTarget, ChatSendOptions } from "./chatStreamTypes";
 export type { ChatMessage, ChatRestoreTarget, ChatSendOptions, MessageRole } from "./chatStreamTypes";
+
+const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
 
 /** Hook 返回值 */
 export interface UseChatStreamReturn {
@@ -71,6 +73,25 @@ function normalizeTaskId(taskId: string | null | undefined): string | null {
   const normalized = taskId.trim();
   return normalized ? normalized : null;
 }
+
+async function fetchTaskDetailWithTimeout(taskId: string): Promise<TaskDetailResponse> {
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      fetchTaskDetail(taskId),
+      new Promise<TaskDetailResponse>((_, reject) => {
+        timer = window.setTimeout(() => {
+          reject(new Error("RESTORE_TIMEOUT"));
+        }, RESTORE_TASK_DETAIL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer != null) {
+      window.clearTimeout(timer);
+    }
+  }
+}
+
 export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -317,7 +338,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
       try {
         for (const candidateTaskId of candidateTaskIds) {
           try {
-            const detail = await fetchTaskDetail(candidateTaskId);
+            const detail = await fetchTaskDetailWithTimeout(candidateTaskId);
             if (cancelled) {
               return;
             }
@@ -355,7 +376,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     return () => {
       cancelled = true;
     };
-  }, [messages.length, restoreTarget, restoreTaskIdSignature, streaming, suppressedRestoreSignature, taskId]);
+  }, [messages.length, restoreTaskIdSignature, streaming, suppressedRestoreSignature, taskId]);
 
   useEffect(() => {
     persistTaskId(taskId);

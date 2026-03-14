@@ -6,7 +6,7 @@ import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } from "../domains/chat/presentation";
 import { useChatStream } from "../hooks/useChatStream";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
-import type { SessionProjectionDocument, TaskDetailResponse, WorkProjectionItem } from "../types";
+import type { SessionProjectionDocument, TaskDetailResponse, TaskEvent, WorkProjectionItem } from "../types";
 
 const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
 
@@ -113,7 +113,7 @@ function formatActorSummary(actor: string, workTitle: string, status: string, la
     return "这轮已经停止，不会再继续往下执行。";
   }
   if (normalizedStatus === "SUCCEEDED" || normalizedMessageType === "RESULT") {
-    return "结果已经交回主助手，正在整理成你能直接用的答复。";
+    return "这轮查询已经完成，但主助手还在整理最终答复。";
   }
   if (normalizedActor.includes("research")) {
     return workTitle ? `正在查资料：${workTitle}` : "正在查资料和核对事实。";
@@ -142,7 +142,7 @@ function formatActivityStateLabel(status: string, latestMessageType: string): st
     case "WAITING_APPROVAL":
       return "等你确认";
     case "SUCCEEDED":
-      return "已回传";
+      return "已完成";
     case "FAILED":
       return "失败";
     case "CANCELLED":
@@ -152,7 +152,7 @@ function formatActivityStateLabel(status: string, latestMessageType: string): st
       return "准备中";
     default:
       if (normalizedMessageType === "RESULT") {
-        return "已回传";
+        return "已完成";
       }
       if (normalizedMessageType === "TASK") {
         return "已接手";
@@ -186,6 +186,228 @@ interface ChatActivityItem {
   stateLabel: string;
   tone: "success" | "warning" | "danger" | "running" | "draft";
   summary: string;
+  traceTitle?: string;
+  traceEntries?: Array<{
+    id: string;
+    label: string;
+    summary: string;
+    stateLabel?: string;
+    tone?: "success" | "warning" | "danger" | "running" | "draft";
+  }>;
+}
+
+function summarizeText(value: string, maxLength = 120): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function readPayloadString(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function payloadMatchesWork(event: TaskEvent, workId: string): boolean {
+  if (!workId) {
+    return false;
+  }
+  const payload = event.payload ?? {};
+  const payloadWorkId = readPayloadString(payload, "work_id");
+  if (payloadWorkId === workId) {
+    return true;
+  }
+  const sessionId = readPayloadString(payload, "session_id");
+  if (sessionId.includes(workId)) {
+    return true;
+  }
+  const sourceSessionId = readPayloadString(payload, "source_agent_session_id");
+  if (sourceSessionId.includes(workId)) {
+    return true;
+  }
+  const targetSessionId = readPayloadString(payload, "target_agent_session_id");
+  if (targetSessionId.includes(workId)) {
+    return true;
+  }
+  return false;
+}
+
+function summarizeToolList(toolNames: string[], limit = 4): string {
+  if (toolNames.length === 0) {
+    return "这轮没有挂出额外工具。";
+  }
+  const visible = toolNames.slice(0, limit);
+  const suffix =
+    toolNames.length > limit ? `，另外还有 ${toolNames.length - limit} 个工具` : "";
+  return `${visible.join("、")}${suffix}`;
+}
+
+function buildToolTraceEntries(workEvents: TaskEvent[]): NonNullable<ChatActivityItem["traceEntries"]> {
+  const relevant = workEvents.filter((event) => {
+    const eventType = String(event.type);
+    return (
+      eventType === "TOOL_CALL_STARTED" ||
+      eventType === "TOOL_CALL_COMPLETED" ||
+      eventType === "TOOL_CALL_FAILED"
+    );
+  });
+  const latestByName = new Map<
+    string,
+    {
+      toolName: string;
+      argsSummary: string;
+      stateLabel: string;
+      tone: "success" | "warning" | "danger" | "running" | "draft";
+      summary: string;
+      taskSeq: number;
+    }
+  >();
+
+  for (const event of relevant) {
+    const eventType = String(event.type);
+    const payload = event.payload ?? {};
+    const toolName = readPayloadString(payload, "tool_name");
+    if (!toolName) {
+      continue;
+    }
+    const existing = latestByName.get(toolName);
+    if (existing && existing.taskSeq > event.task_seq) {
+      continue;
+    }
+    const argsSummary = summarizeText(readPayloadString(payload, "args_summary"), 96);
+    if (eventType === "TOOL_CALL_STARTED") {
+      latestByName.set(toolName, {
+        toolName,
+        argsSummary,
+        stateLabel: "调用中",
+        tone: "running",
+        summary: argsSummary ? `参数：${argsSummary}` : "这次调用还没返回结果。",
+        taskSeq: event.task_seq,
+      });
+      continue;
+    }
+    if (eventType === "TOOL_CALL_FAILED") {
+      const errorMessage = summarizeText(readPayloadString(payload, "error_message"), 96);
+      latestByName.set(toolName, {
+        toolName,
+        argsSummary,
+        stateLabel: "失败",
+        tone: "danger",
+        summary: errorMessage || "这次工具调用失败了。",
+        taskSeq: event.task_seq,
+      });
+      continue;
+    }
+    const outputSummary = summarizeText(readPayloadString(payload, "output_summary"), 96);
+    latestByName.set(toolName, {
+      toolName,
+      argsSummary,
+      stateLabel: "已返回",
+      tone: "success",
+      summary: outputSummary || (argsSummary ? `参数：${argsSummary}` : "工具已返回结果。"),
+      taskSeq: event.task_seq,
+    });
+  }
+
+  return [...latestByName.values()]
+    .sort((left, right) => right.taskSeq - left.taskSeq)
+    .slice(0, 4)
+    .map((item) => ({
+      id: `tool-${item.toolName}`,
+      label: item.toolName,
+      stateLabel: item.stateLabel,
+      tone: item.tone,
+      summary: item.summary,
+    }));
+}
+
+function buildButlerTraceEntries(
+  work: WorkProjectionItem,
+  workEvents: TaskEvent[],
+  latestMessageType: string
+): ChatActivityItem["traceEntries"] {
+  const entries: NonNullable<ChatActivityItem["traceEntries"]> = [];
+  entries.push({
+    id: `${work.work_id}-dispatch`,
+    label: "委派主题",
+    stateLabel: "已发送",
+    tone: "running",
+    summary: summarizeText(work.title || "Butler 已把这轮问题交给内部角色处理。", 120),
+  });
+  entries.push({
+    id: `${work.work_id}-tools`,
+    label: "允许工具",
+    stateLabel: "已挂载",
+    tone: "draft",
+    summary: summarizeToolList(ensureArray(work.selected_tools)),
+  });
+  const latestInbound = [...workEvents]
+    .reverse()
+    .find((event) => ["A2A_MESSAGE_RECEIVED", "WORKER_RETURNED"].includes(String(event.type)));
+  if (latestInbound) {
+    const inboundType = String(latestInbound.type);
+    const messageType = readPayloadString(latestInbound.payload, "message_type");
+    const latestLabel =
+      inboundType === "WORKER_RETURNED"
+        ? "Worker 返回"
+        : `最近回执 · ${messageType || latestMessageType || "UPDATE"}`;
+    const latestSummary =
+      inboundType === "WORKER_RETURNED"
+        ? summarizeText(readPayloadString(latestInbound.payload, "summary") || "内部角色已经返回结果。", 120)
+        : summarizeText(
+            messageType === "RESULT"
+              ? "内部结果已经返回主助手，主助手还在继续整理。"
+              : "内部角色还在继续推进，主助手会根据回执更新下一步。",
+            120
+          );
+    entries.push({
+      id: `${work.work_id}-latest`,
+      label: latestLabel,
+      stateLabel: messageType === "RESULT" ? "已收到" : "处理中",
+      tone: messageType === "RESULT" ? "success" : "running",
+      summary: latestSummary,
+    });
+  }
+  return entries;
+}
+
+function buildWorkerTraceEntries(
+  work: WorkProjectionItem,
+  workEvents: TaskEvent[]
+): ChatActivityItem["traceEntries"] {
+  const entries: NonNullable<ChatActivityItem["traceEntries"]> = [
+    {
+      id: `${work.work_id}-scope`,
+      label: "当前处理",
+      stateLabel: formatActivityStateLabel(resolveWorkStatus(work), ""),
+      tone: formatActivityTone(resolveWorkStatus(work), ""),
+      summary: summarizeText(work.title || "正在处理这轮查询。", 120),
+    },
+  ];
+  entries.push(...buildToolTraceEntries(workEvents));
+  const returnedEvent = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "WORKER_RETURNED");
+  if (returnedEvent) {
+    const status = readPayloadString(returnedEvent.payload, "status").toUpperCase();
+    entries.push({
+      id: `${work.work_id}-returned`,
+      label: "返回主助手",
+      stateLabel:
+        status === "SUCCEEDED" ? "已完成" : status === "FAILED" ? "失败" : "处理中",
+      tone:
+        status === "SUCCEEDED" ? "success" : status === "FAILED" ? "danger" : "running",
+      summary: summarizeText(
+        readPayloadString(returnedEvent.payload, "summary") || "内部角色已把这轮处理状态回传给主助手。",
+        120
+      ),
+    });
+  }
+  return entries;
 }
 
 function buildButlerActivity(
@@ -221,7 +443,7 @@ function buildButlerActivity(
       actor: "主助手",
       stateLabel: "整理中",
       tone: "running",
-      summary: "专门角色的结果已经回来，主助手正在整理成最终回复。",
+      summary: "内部结果已经拿到，但主助手还在整理、核对并收口最终回复。",
     };
   }
   if (hasInternalCollaboration) {
@@ -285,6 +507,7 @@ export default function ChatWorkbench() {
   );
   const [input, setInput] = useState("");
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
+  const [showRestoreEscape, setShowRestoreEscape] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
 
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
@@ -297,7 +520,9 @@ export default function ChatWorkbench() {
       ? (activeSession.execution_summary as Record<string, unknown>)
       : null;
   const activeWorkId = typeof activeExecutionSummary?.work_id === "string" ? activeExecutionSummary.work_id : "";
-  const activeWork = delegationWorks.find((item) => item.work_id === activeWorkId) ?? null;
+  const latestTaskWork =
+    sortWorksByUpdate(delegationWorks.filter((item) => item.task_id === taskId))[0] ?? null;
+  const activeWork = delegationWorks.find((item) => item.work_id === activeWorkId) ?? latestTaskWork;
   const activeContextFrame =
     contextFrames.find((item) => item.task_id === taskId) ??
     (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
@@ -341,27 +566,42 @@ export default function ChatWorkbench() {
 
   const relatedWorks = sortWorksByUpdate(
     delegationWorks.filter((item) => {
-      if (!taskId) {
+      if (!activeWork?.work_id) {
         return false;
       }
-      if (item.task_id === taskId) {
+      if (item.work_id === activeWork.work_id) {
         return true;
       }
-      if (activeWork?.work_id && item.parent_work_id === activeWork.work_id) {
+      if (item.parent_work_id === activeWork.work_id) {
         return true;
       }
-      return Boolean(activeWork?.child_work_ids.includes(item.work_id));
+      return false;
     })
   );
-  const workerActivities = relatedWorks
-    .map((work) => buildWorkerActivity(work, activeConversationLatestType))
-    .filter((item): item is ChatActivityItem => item != null);
+  const workEvents = ensureArray(taskDetail?.events).filter((event) =>
+    activeWork?.work_id ? payloadMatchesWork(event, activeWork.work_id) : false
+  );
+  const workerActivities: ChatActivityItem[] = relatedWorks.reduce<ChatActivityItem[]>((items, work) => {
+      const activity = buildWorkerActivity(work, activeConversationLatestType);
+      if (!activity) {
+        return items;
+      }
+      items.push({
+        ...activity,
+        traceTitle: `${activity.actor} 的处理轨迹`,
+        traceEntries: buildWorkerTraceEntries(
+          work,
+          workEvents.filter((event) => payloadMatchesWork(event, work.work_id))
+        ),
+      });
+      return items;
+    }, []);
   const fallbackWorkerActor = activeA2AConversationRecord?.target_agent
     ? formatAgentRoleLabel(activeA2AConversationRecord.target_agent)
     : activeWork
       ? formatAgentRoleLabel(resolveWorkActor(activeWork))
       : "";
-  const fallbackWorkerActivity =
+  const fallbackWorkerActivity: ChatActivityItem[] =
     hasInternalCollaboration &&
     workerActivities.length === 0 &&
     fallbackWorkerActor !== "主助手" &&
@@ -387,12 +627,40 @@ export default function ChatWorkbench() {
           },
         ]
       : [];
-  const activityItems = taskId
-    ? [buildButlerActivity(normalizedTaskStatus, streaming, hasInternalCollaboration, activeConversationLatestType), ...workerActivities.slice(0, 2), ...fallbackWorkerActivity]
+  const activityItems: ChatActivityItem[] = taskId
+    ? [
+        {
+          ...buildButlerActivity(
+            normalizedTaskStatus,
+            streaming,
+            hasInternalCollaboration,
+            activeConversationLatestType
+          ),
+          traceTitle: "主助手的委派轨迹",
+          traceEntries: activeWork
+            ? buildButlerTraceEntries(activeWork, workEvents, activeConversationLatestType)
+            : [],
+        },
+        ...workerActivities.slice(0, 2),
+        ...fallbackWorkerActivity,
+      ]
     : [];
-  const shouldShowActivityRail =
+  const isRestoringConversation = restoring && messages.length === 0;
+  const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
+  const shouldShowInlineActivity =
     Boolean(taskId) &&
     (streaming || !hasLoadedTaskStatus || !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus));
+  const loadingLabel = hasInternalCollaboration ? "正在整理回复" : "正在处理这条消息";
+  const activeStreamingMessageId =
+    [...messages]
+      .reverse()
+      .find((message) => message.role === "agent" && message.isStreaming)?.id ?? null;
+  const shouldShowSyntheticProgressBubble =
+    shouldShowInlineActivity &&
+    activityItems.length > 0 &&
+    !activeStreamingMessageId &&
+    !isRestoringConversation &&
+    !isEmptyConversation;
   const taskStatusLabel = formatTaskStatusLabel(normalizedTaskStatus);
   const taskStatusTone = formatTaskStatusTone(normalizedTaskStatus);
   const conversationTitle =
@@ -408,8 +676,19 @@ export default function ChatWorkbench() {
     activeConversationWorkerSessionId ? { label: "执行会话", value: activeConversationWorkerSessionId } : null,
     activeContextFrame?.context_frame_id ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id } : null,
   ].filter((item): item is { label: string; value: string } => Boolean(item));
-  const isRestoringConversation = restoring && messages.length === 0;
-  const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
+
+  useEffect(() => {
+    if (!isRestoringConversation) {
+      setShowRestoreEscape(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setShowRestoreEscape(true);
+    }, 1600);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isRestoringConversation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -538,7 +817,7 @@ export default function ChatWorkbench() {
             {taskId || messages.length > 0 ? (
               <button
                 type="button"
-                className="wb-button wb-button-tertiary"
+                className="wb-button wb-button-secondary wb-button-inline"
                 onClick={() => void resetConversation()}
               >
                 开始新对话
@@ -546,7 +825,7 @@ export default function ChatWorkbench() {
             ) : null}
             {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}
             {taskId ? (
-              <Link className="wb-button wb-button-tertiary" to={`/tasks/${taskId}`}>
+              <Link className="wb-button wb-button-secondary wb-button-inline" to={`/tasks/${taskId}`}>
                 打开任务
               </Link>
             ) : null}
@@ -556,6 +835,7 @@ export default function ChatWorkbench() {
                 expanded={showSessionInternalRefs}
                 onToggle={setShowSessionInternalRefs}
                 ariaLabel="当前会话技术详情"
+                triggerClassName="wb-button-inline"
               >
                 {techRefs.map((item) => (
                   <div key={item.label} className="wb-hover-reveal-row">
@@ -568,29 +848,23 @@ export default function ChatWorkbench() {
           </div>
         </div>
 
-        {shouldShowActivityRail && activityItems.length > 0 ? (
-          <section className="wb-chat-activity" aria-label="当前处理进度">
-            <div className="wb-chat-activity-list">
-              {activityItems.map((item, index) => (
-                <div key={item.id} className="wb-chat-activity-item">
-                  <div className="wb-chat-activity-line" aria-hidden={index === activityItems.length - 1} />
-                  <span className={`wb-chat-activity-dot is-${item.tone}`} aria-hidden="true" />
-                  <div className="wb-chat-activity-copy">
-                    <strong>{item.actor}</strong>
-                    <span>{item.summary}</span>
-                  </div>
-                  <StatusBadge tone={item.tone}>{item.stateLabel}</StatusBadge>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         {isRestoringConversation ? (
           <div className="wb-chat-empty-stage is-restoring">
             <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-card">
               <strong>正在恢复最近对话</strong>
               <span>稍等，我们在读取历史消息和当前任务状态。</span>
+              {showRestoreEscape ? (
+                <div className="wb-action-bar wb-chat-restore-actions">
+                  <span>如果这一步还没结束，你可以先直接开始一段新对话。</span>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-secondary wb-button-inline"
+                    onClick={() => void resetConversation()}
+                  >
+                    直接开始新对话
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : isEmptyConversation ? (
@@ -625,8 +899,29 @@ export default function ChatWorkbench() {
           <>
             <div className="wb-chat-messages">
               {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  loadingLabel={loadingLabel}
+                  activityItems={
+                    message.id === activeStreamingMessageId && shouldShowInlineActivity
+                      ? activityItems
+                      : []
+                  }
+                />
               ))}
+              {shouldShowSyntheticProgressBubble ? (
+                <MessageBubble
+                  message={{
+                    id: "agent-progress-stage",
+                    role: "agent",
+                    content: "",
+                    isStreaming: true,
+                  }}
+                  loadingLabel={loadingLabel}
+                  activityItems={activityItems}
+                />
+              ) : null}
             </div>
 
             {error ? (

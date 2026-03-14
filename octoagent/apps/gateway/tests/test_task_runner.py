@@ -176,6 +176,52 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.conn.close()
 
+    async def test_shutdown_marks_running_task_failed_instead_of_leaving_task_running(
+        self, tmp_path: Path
+    ) -> None:
+        store_group = await create_store_group(
+            str(tmp_path / "runner-shutdown.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        llm_service = CancellableLLMService()
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=llm_service,
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="runner shutdown",
+            idempotency_key="runner-shutdown-001",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+
+        await runner.enqueue(task_id, msg.text)
+        await asyncio.wait_for(llm_service.started.wait(), timeout=2.0)
+
+        await runner.shutdown()
+
+        task = await task_service.get_task(task_id)
+        job = await store_group.task_job_store.get_job(task_id)
+        session = await runner.get_execution_session(task_id)
+
+        assert task is not None
+        assert task.status == "FAILED"
+        assert job is not None
+        assert job.status == "FAILED"
+        assert job.last_error == "runner_shutdown_cancelled"
+        assert session is not None
+        assert session.state == ExecutionSessionState.FAILED
+        assert llm_service.cancelled.is_set()
+
+        await store_group.conn.close()
+
     async def test_enqueue_notifies_completion(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "runner-notify.db"),

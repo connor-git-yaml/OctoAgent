@@ -249,7 +249,7 @@ export default function WorkbenchLayout() {
               </span>
               <button
                 type="button"
-                className="wb-button wb-button-secondary"
+                className="wb-button wb-button-secondary wb-button-inline"
                 onClick={() => void workbench.refreshSnapshot()}
               >
                 刷新

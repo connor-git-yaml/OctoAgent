@@ -240,6 +240,16 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 248, 0.92));
 }
 
+.wb-chat-restore-actions {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.wb-chat-restore-actions span {
+  color: var(--cp-muted);
+  font-size: 0.84rem;
+}
+
 .wb-hover-reveal {
   position: relative;
   display: inline-flex;
@@ -264,6 +274,11 @@
     background 160ms ease,
     color 160ms ease,
     transform 160ms ease;
+}
+
+.wb-hover-reveal-trigger.wb-button-inline {
+  min-height: 36px;
+  padding: 0 12px;
 }
 
 .wb-hover-reveal-trigger:hover,

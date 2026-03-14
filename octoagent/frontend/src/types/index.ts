@@ -13,15 +13,26 @@ export type TaskStatus =
   | "CANCELLED"
   | "REJECTED";
 
-export type EventType =
+export type KnownEventType =
   | "TASK_CREATED"
   | "USER_MESSAGE"
   | "MODEL_CALL_STARTED"
   | "MODEL_CALL_COMPLETED"
   | "MODEL_CALL_FAILED"
+  | "TOOL_CALL_STARTED"
+  | "TOOL_CALL_COMPLETED"
+  | "TOOL_CALL_FAILED"
+  | "A2A_MESSAGE_SENT"
+  | "A2A_MESSAGE_RECEIVED"
+  | "WORK_STATUS_CHANGED"
+  | "WORKER_RETURNED"
+  | "EXECUTION_STATUS_CHANGED"
+  | "SESSION_STATUS_CHANGED"
   | "STATE_TRANSITION"
   | "ARTIFACT_CREATED"
   | "ERROR";
+
+export type EventType = KnownEventType | (string & {});
 
 export interface RequesterInfo {
   channel: string;
