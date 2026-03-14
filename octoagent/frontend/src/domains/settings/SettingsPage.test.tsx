@@ -231,6 +231,21 @@ function buildSettingsSnapshot() {
       project_selector: {
         current_project_id: "project-default",
         current_workspace_id: "workspace-default",
+        available_projects: [
+          {
+            project_id: "project-default",
+            slug: "default",
+            name: "Default Project",
+          },
+        ],
+        available_workspaces: [
+          {
+            workspace_id: "workspace-default",
+            project_id: "project-default",
+            slug: "primary",
+            name: "Primary Workspace",
+          },
+        ],
       },
       memory: {
         backend_state: "ready",
@@ -346,8 +361,9 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("还没有 Provider")).toBeInTheDocument();
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "先把真实模型接起来" })).toBeInTheDocument();
-    expect(screen.getByText("先按这 3 步走通一次")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
+    expect(screen.getByText("现在只管这 3 件事")).toBeInTheDocument();
+    expect(screen.getByText("这些事情现在不用急")).toBeInTheDocument();
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
     expect(screen.getByText("octo config memory local")).toBeInTheDocument();
 
@@ -406,9 +422,36 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "配置已经够用，先保存再验证" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "先保存当前修改" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "现在已经可以回聊天验证" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存后回聊天验证" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
+  });
+
+  it("echo-ready 状态下仍把连接真实模型作为首屏主动作", () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.setup_governance.review = {
+      ...snapshot.resources.setup_governance.review,
+      ready: true,
+      blocking_reasons: [],
+      next_actions: ['检查已通过，可以点击“保存配置”。'],
+    };
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "连接真实模型" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("体验模式可用")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "回聊天验证" })).not.toBeInTheDocument();
   });
 
   it("Memory 配置会按 command transport 收敛字段和 CLI 提示", () => {

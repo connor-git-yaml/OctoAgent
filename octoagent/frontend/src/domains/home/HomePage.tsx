@@ -2,18 +2,38 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { PageIntro } from "../../ui/primitives";
-import { formatDateTime, getValueAtPath } from "../../workbench/utils";
-import { computeReadinessLabel } from "./readiness";
+import type { OperatorInboxItem, WorkProjectionItem } from "../../types";
+import { getValueAtPath } from "../../workbench/utils";
 
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
-const READY_DIAGNOSTIC_STATUSES = new Set(["ready", "ok"]);
-const READY_CHANNEL_STATUSES = new Set(["ready", "ok", "healthy", "enabled", "connected"]);
+const READY_DIAGNOSTIC_STATUSES = new Set(["ready", "ok", "healthy"]);
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: "Telegram",
   web: "Web",
   wechat: "微信",
   wechat_import: "微信导入",
 };
+const OPERATOR_KIND_LABELS: Record<string, string> = {
+  approval: "审批",
+  alert: "提醒",
+  retryable_failure: "可重试失败",
+  pairing_request: "协作请求",
+};
+const WORKER_LABELS: Record<string, string> = {
+  general: "Butler",
+  research: "Research",
+  ops: "Ops",
+  dev: "Dev",
+};
+
+interface HomePrimaryState {
+  title: string;
+  summary: string;
+  primaryActionLabel: string;
+  primaryActionTo: string;
+  secondaryActionLabel?: string;
+  secondaryActionTo?: string;
+}
 
 function firstStringValue(record: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
@@ -33,6 +53,34 @@ function firstBooleanValue(record: Record<string, unknown>, keys: string[]): boo
     }
   }
   return null;
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 1)}…`;
+}
+
+function looksTechnicalSummary(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return [
+    "web.search",
+    "websearch",
+    "mcp.",
+    "tool_name:",
+    "task_id:",
+    "json",
+    "response_artifact_ref:",
+    "runtime.",
+  ].some((pattern) => normalized.includes(pattern));
 }
 
 function formatChannelStatusText(status: string): string {
@@ -83,68 +131,161 @@ function summarizeChannelEntry(key: string, value: unknown): string {
   return `${label}状态未记录`;
 }
 
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
+function buildRemoteEntrySummary(channelSummaryEntries: Array<[string, unknown]>): string {
+  if (channelSummaryEntries.length === 0) {
+    return "现在先用 Web 就够了；Telegram 之类的远程入口可以后面再配。";
   }
-  return `${value.slice(0, maxLength - 1)}…`;
+  const userFacingEntries = channelSummaryEntries
+    .map(([key, value]) => summarizeChannelEntry(key, value))
+    .slice(0, 2);
+  return `${userFacingEntries.join("；")}。先用 Web 也不受影响。`;
 }
 
-function buildImpactSummary(
-  diagnosticsStatus: string,
-  contextDegraded: boolean,
-  channelSummaryEntries: Array<[string, unknown]>
-): string {
-  if (!READY_DIAGNOSTIC_STATUSES.has(diagnosticsStatus.trim().toLowerCase())) {
-    return "当前运行环境有降级，实时查询、外部连接或后台能力可能受影响。";
+function buildAvailabilityImpact(options: {
+  usingEchoMode: boolean;
+  setupReady: boolean;
+  diagnosticsStatus: string;
+}): string {
+  if (options.usingEchoMode) {
+    return "现在还能先体验页面和流程，但实时查询和专门角色协作不会稳定工作。";
   }
-  if (contextDegraded) {
-    return "当前背景摘要还在补齐，但不影响继续聊天和追问。";
+  if (!options.setupReady) {
+    return "当前配置还没完全收口；先补齐阻塞项，再开始会更稳。";
   }
-  const hasUsableChannel = channelSummaryEntries.some(([, value]) => {
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (typeof value === "string") {
-      return READY_CHANNEL_STATUSES.has(value.trim().toLowerCase());
-    }
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const record = value as Record<string, unknown>;
-      const connected = firstBooleanValue(record, ["connected", "ready"]);
-      if (connected != null) {
-        return connected;
-      }
-      const enabled = firstBooleanValue(record, ["enabled"]);
-      if (enabled != null) {
-        return enabled;
-      }
-      const status = firstStringValue(record, ["status", "state"]);
-      if (status) {
-        return READY_CHANNEL_STATUSES.has(status.trim().toLowerCase());
-      }
-    }
-    return false;
-  });
-  if (hasUsableChannel) {
-    return "常用入口已经准备好，需要时也可以从外部渠道进入。";
+  if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
+    return "普通聊天还能继续，但联网查询、外部连接或后台能力可能会变慢或失败。";
   }
-  if (channelSummaryEntries.length > 0) {
-    return "已经看到了外部渠道配置，但连接或授权可能还没走完；先用 Web 也不受影响。";
+  return "普通聊天、联网查询和 Butler / Worker 协作都已经可以直接开始。";
+}
+
+function buildSessionSummary(summary: string): string {
+  const normalized = normalizeWhitespace(summary);
+  if (!normalized) {
+    return "打开这条记录，就能继续回到上一次对话。";
   }
-  return "当前先用 Web 即可；外部渠道可以后面再慢慢补。";
+  if (looksTechnicalSummary(normalized)) {
+    return "这条记录包含较多技术细节，打开后再继续查看会更清楚。";
+  }
+  return truncateText(normalized, 96);
+}
+
+function buildEchoModeGuidance(options: {
+  setupReady: boolean;
+  nextActions: string[];
+  blockingReasons: string[];
+}): { status: string; nextStep: string } {
+  if (options.setupReady) {
+    return {
+      status: "当前配置已经可以保存，但还没有切到真实模型。",
+      nextStep: "打开 Settings，连接 Provider 并切到真实模型后，再回来发第一条真实消息。",
+    };
+  }
+  return {
+    status: options.blockingReasons[0] ?? "当前还没有接入真实模型。",
+    nextStep: options.nextActions[0] ?? "先到设置里接入一个真实模型。",
+  };
+}
+
+function formatOperatorKind(kind: string): string {
+  return OPERATOR_KIND_LABELS[kind] ?? "待处理事项";
+}
+
+function formatOperatorLead(item: OperatorInboxItem): string {
+  const title = item.title.trim();
+  if (title) {
+    return `${formatOperatorKind(item.kind)}：${title}`;
+  }
+  return formatOperatorKind(item.kind);
+}
+
+function formatWorkSummary(work: WorkProjectionItem): string {
+  const workerLabel = WORKER_LABELS[work.selected_worker_type] ?? "专门角色";
+  if (work.status.toLowerCase() === "running") {
+    return `这项工作还在由 ${workerLabel} 处理中。`;
+  }
+  return `这项工作目前状态是 ${work.status.toLowerCase()}。`;
+}
+
+function buildPrimaryState(options: {
+  usingEchoMode: boolean;
+  setupReady: boolean;
+  diagnosticsStatus: string;
+  operatorItems: OperatorInboxItem[];
+  activeWorks: WorkProjectionItem[];
+}): HomePrimaryState {
+  if (options.usingEchoMode) {
+    return {
+      title: "先连上一个真实模型",
+      summary: "现在还是体验模式。先完成模型连接后，再来体验实时查询和专门角色协作。",
+      primaryActionLabel: "去设置完成连接",
+      primaryActionTo: "/settings",
+      secondaryActionLabel: "先看看聊天页",
+      secondaryActionTo: "/chat",
+    };
+  }
+
+  if (!options.setupReady) {
+    return {
+      title: "还差几项设置才能稳定开始",
+      summary: "先把阻塞项补齐，再开始第一次真实对话会更顺。",
+      primaryActionLabel: "回到设置检查",
+      primaryActionTo: "/settings",
+    };
+  }
+
+  if (options.operatorItems.length > 0) {
+    return {
+      title: `有 ${options.operatorItems.length} 项事情需要你处理`,
+      summary: "这些事项不会挡住所有对话，但会影响部分任务、连接或失败恢复。",
+      primaryActionLabel: "去看待处理事项",
+      primaryActionTo: "/work",
+      secondaryActionLabel: "继续进入聊天",
+      secondaryActionTo: "/chat",
+    };
+  }
+
+  if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
+    return {
+      title: "现在可以继续用，但外部能力受影响",
+      summary: "普通对话还能继续；联网查询、外部连接或后台能力可能变慢或失败。",
+      primaryActionLabel: "直接进入聊天",
+      primaryActionTo: "/chat",
+      secondaryActionLabel: "查看详细诊断",
+      secondaryActionTo: "/advanced",
+    };
+  }
+
+  if (options.activeWorks.length > 0) {
+    return {
+      title: `有 ${options.activeWorks.length} 项事情还在处理中`,
+      summary: "你可以继续聊天，也可以先去 Work 看当前进度。",
+      primaryActionLabel: "继续进入聊天",
+      primaryActionTo: "/chat",
+      secondaryActionLabel: "查看当前工作",
+      secondaryActionTo: "/work",
+    };
+  }
+
+  return {
+    title: "现在可以直接开始聊天",
+    summary: "模型、当前项目和主助手都已经准备好。发第一条消息就行。",
+    primaryActionLabel: "进入聊天",
+    primaryActionTo: "/chat",
+    secondaryActionLabel: "打开设置",
+    secondaryActionTo: "/settings",
+  };
 }
 
 export default function HomePage() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const selector = snapshot!.resources.project_selector;
-  const wizard = snapshot!.resources.wizard;
   const diagnostics = snapshot!.resources.diagnostics;
   const sessions = snapshot!.resources.sessions;
-  const memory = snapshot!.resources.memory;
   const context = snapshot!.resources.context_continuity;
   const setup = snapshot!.resources.setup_governance;
   const config = snapshot!.resources.config;
   const delegation = snapshot!.resources.delegation;
+
   const currentProject =
     selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
     null;
@@ -153,12 +294,9 @@ export default function HomePage() {
   const availableWorkspaces = selector.available_workspaces.filter(
     (item) => item.project_id === selectedProjectId
   );
-  const activeWorkCount = delegation.works.filter((item) =>
-    ACTIVE_WORK_STATUSES.has(item.status)
-  ).length;
-  const pendingCount = sessions.operator_summary?.total_pending ?? 0;
-  const channelSummaryEntries = Object.entries(diagnostics.channel_summary ?? {}).filter(
-    ([, value]) => Boolean(value)
+  const operatorItems = (sessions.operator_items ?? []).filter((item) => item.state === "pending");
+  const activeWorks = delegation.works.filter((item) =>
+    ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
   );
   const latestSession = useMemo(
     () =>
@@ -172,48 +310,27 @@ export default function HomePage() {
       .trim()
       .toLowerCase() || "echo";
   const usingEchoMode = runtimeMode === "echo";
-  const readiness = computeReadinessLabel({
+  const channelSummaryEntries = Object.entries(diagnostics.channel_summary ?? {}).filter(
+    ([, value]) => Boolean(value)
+  );
+  const primaryState = buildPrimaryState({
     usingEchoMode,
     setupReady: setup.review.ready,
-    wizardStatus: wizard.status,
     diagnosticsStatus: diagnostics.overall_status,
-    pendingCount,
-    activeWorkCount,
+    operatorItems,
+    activeWorks,
   });
-  const channelSummaryText =
-    channelSummaryEntries.length > 0
-      ? channelSummaryEntries.map(([key, value]) => summarizeChannelEntry(key, value)).join("；")
-      : "当前还没有启用外部渠道，先用 Web 即可。";
-  const impactSummary = buildImpactSummary(
-    diagnostics.overall_status,
-    context.degraded.is_degraded,
-    channelSummaryEntries
-  );
-  const topNextAction =
-    setup.review.next_actions[0] ??
-    (setup.review.ready
-      ? "现在可以直接回聊天发第一条消息。"
-      : "先去设置页处理阻塞项。");
-  const pendingSummary =
-    pendingCount > 0
-      ? `审批 ${sessions.operator_summary?.approvals ?? 0} / 协作请求 ${
-          sessions.operator_summary?.pairing_requests ?? 0
-        }`
-      : "现在没有需要你确认的事项。";
-  const activeWorkSummary =
-    activeWorkCount > 0
-      ? `历史累计 ${delegation.works.length} / 最近更新 ${formatDateTime(delegation.updated_at)}`
-      : delegation.works.length > 0
-        ? `历史累计 ${delegation.works.length} / 当前没有进行中的任务`
-        : "还没有运行中的任务。";
-  const latestSessionTitle = latestSession?.title?.trim() || "还没有最近记录";
+  const echoModeGuidance = buildEchoModeGuidance({
+    setupReady: setup.review.ready,
+    nextActions: setup.review.next_actions,
+    blockingReasons: setup.review.blocking_reasons,
+  });
+  const showContextSwitcher =
+    selector.available_projects.length > 1 || availableWorkspaces.length > 1;
+  const latestSessionTitle = latestSession?.title?.trim() || "还没有最近对话";
   const latestSessionSummary = latestSession?.latest_message_summary?.trim()
-    ? truncateText(latestSession.latest_message_summary.trim(), 80)
-    : "发一条消息后，这里会显示最近一次结果。";
-  const heroSecondaryAction =
-    readiness.primaryActionTo === "/chat" ? "/settings" : "/chat";
-  const heroSecondaryLabel =
-    readiness.primaryActionTo === "/chat" ? "打开设置" : "进入聊天";
+    ? buildSessionSummary(latestSession.latest_message_summary)
+    : "发一条消息后，这里会显示你最近一次对话。";
 
   useEffect(() => {
     setSelectedProjectId(selector.current_project_id);
@@ -231,257 +348,253 @@ export default function HomePage() {
     <div className="wb-page">
       <PageIntro
         kicker="Home"
-        title={readiness.label}
-        summary={readiness.summary}
+        title={primaryState.title}
+        summary={primaryState.summary}
         actions={
           <>
-            <Link className="wb-button wb-button-primary" to={readiness.primaryActionTo}>
-              {readiness.primaryActionLabel}
+            <Link className="wb-button wb-button-primary" to={primaryState.primaryActionTo}>
+              {primaryState.primaryActionLabel}
             </Link>
-            <Link className="wb-button wb-button-secondary" to={heroSecondaryAction}>
-              {heroSecondaryLabel}
-            </Link>
-            <Link className="wb-button wb-button-secondary" to="/advanced">
-              查看诊断
-            </Link>
+            {primaryState.secondaryActionLabel && primaryState.secondaryActionTo ? (
+              <Link className="wb-button wb-button-secondary" to={primaryState.secondaryActionTo}>
+                {primaryState.secondaryActionLabel}
+              </Link>
+            ) : null}
           </>
         }
       />
 
-      <div className="wb-card-grid wb-card-grid-4">
-        <article className={`wb-card wb-card-accent is-${readiness.tone}`}>
-          <p className="wb-card-label">最重要的一步</p>
-          <strong>{readiness.label}</strong>
-          <span>{topNextAction}</span>
-          <Link className="wb-button wb-button-tertiary" to={readiness.primaryActionTo}>
-            {readiness.primaryActionLabel}
-          </Link>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">待处理事项</p>
-          <strong>{pendingCount}</strong>
-          <span>{pendingSummary}</span>
-          <Link className="wb-button wb-button-tertiary" to="/work">
-            去看待处理工作
-          </Link>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">正在进行</p>
-          <strong>{activeWorkCount}</strong>
-          <span>{activeWorkSummary}</span>
-          <Link className="wb-button wb-button-tertiary" to="/work">
-            查看当前工作
-          </Link>
-        </article>
-        <article className="wb-card">
-          <p className="wb-card-label">最近一次对话</p>
-          <strong>{latestSessionTitle}</strong>
-          <span>{latestSessionSummary}</span>
-          {latestSession?.task_id ? (
-            <Link className="wb-button wb-button-tertiary" to={`/tasks/${latestSession.task_id}`}>
-              打开这条记录
-            </Link>
-          ) : (
-            <Link className="wb-button wb-button-tertiary" to="/chat">
-              进入聊天
-            </Link>
-          )}
-        </article>
-      </div>
-
       <div className="wb-split">
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">建议下一步</p>
-              <h3>按这条顺序先走通一次</h3>
+              <p className="wb-card-label">现在先做什么</p>
+              <h3>
+                {usingEchoMode || !setup.review.ready
+                  ? "先把这一步补上"
+                  : operatorItems.length > 0
+                    ? "现在需要你处理的事情"
+                    : activeWorks.length > 0
+                      ? "当前还有这些事在跑"
+                      : "你现在可以直接这样开始"}
+              </h3>
             </div>
           </div>
-          <div className="wb-note-stack">
-            <div className="wb-note">
-              <strong>现在先做什么</strong>
-              <span>{topNextAction}</span>
-            </div>
-            {setup.review.blocking_reasons.slice(0, 2).map((item) => (
-              <div key={item} className="wb-note">
-                <strong>为什么现在先做这一步</strong>
-                <span>{item}</span>
+
+          {usingEchoMode ? (
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>当前状态</strong>
+                <span>{echoModeGuidance.status}</span>
               </div>
-            ))}
-          </div>
-          <div className="wb-action-list">
-            <button
-              type="button"
-              className="wb-action-card"
-              onClick={() => void submitAction("wizard.refresh", {})}
-              disabled={busyActionId === "wizard.refresh"}
-            >
-              <strong>重新检查当前状态</strong>
-              <span>把配置、诊断和后续步骤重新确认一遍。</span>
-            </button>
-            <Link className="wb-action-card" to={readiness.primaryActionTo}>
-              <strong>{readiness.primaryActionLabel}</strong>
-              <span>{readiness.summary}</span>
-            </Link>
-            <Link className="wb-action-card" to="/chat">
-              <strong>发第一条消息</strong>
-              <span>如果已经准备好，直接开始对话，看 Butler 和 Worker 是否正常协作。</span>
-            </Link>
-            <Link className="wb-action-card" to="/work">
-              <strong>查看任务和待处理事项</strong>
-              <span>这里集中看进行中的工作、待确认事项和最近完成的记录。</span>
-            </Link>
-            <Link className="wb-action-card" to="/advanced">
-              <strong>查看详细诊断</strong>
-              <span>只有遇到异常或想看更深层信息时，再来这里。</span>
-            </Link>
-          </div>
-        </section>
-
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">当前 Project</p>
-              <h3>{currentProject?.name ?? selector.current_project_id}</h3>
-            </div>
-          </div>
-          <p className="wb-panel-copy">
-            当前 workspace: <strong>{selector.current_workspace_id}</strong>
-          </p>
-          {selector.fallback_reason ? (
-            <p className="wb-panel-copy wb-copy-warning">{selector.fallback_reason}</p>
-          ) : null}
-          <div className="wb-inline-form">
-            <label className="wb-field">
-              <span>切换 Project</span>
-              <select
-                value={selectedProjectId}
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-              >
-                {selector.available_projects.map((project) => (
-                  <option key={project.project_id} value={project.project_id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="wb-field">
-              <span>切换 Workspace</span>
-              <select
-                value={selectedWorkspaceId}
-                onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-                disabled={availableWorkspaces.length === 0}
-              >
-                {availableWorkspaces.map((workspace) => (
-                  <option key={workspace.workspace_id} value={workspace.workspace_id}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="wb-button wb-button-secondary"
-              disabled={
-                busyActionId === "project.select" ||
-                (selectedProjectId === selector.current_project_id &&
-                  selectedWorkspaceId === selector.current_workspace_id)
-              }
-              onClick={() =>
-                void submitAction("project.select", {
-                  project_id: selectedProjectId,
-                  workspace_id: selectedWorkspaceId,
-                })
-              }
-            >
-              切换
-            </button>
-          </div>
-        </section>
-      </div>
-
-      <div className="wb-split">
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">最近会话</p>
-              <h3>最近发生了什么</h3>
-            </div>
-            <Link className="wb-button wb-button-tertiary" to="/work">
-              查看 Work
-            </Link>
-          </div>
-          <div className="wb-list">
-            {sessions.sessions.slice(0, 4).map((session) => (
-              <Link key={session.session_id} to={`/tasks/${session.task_id}`} className="wb-list-row">
-                <div>
-                  <strong>{session.title}</strong>
-                  <p>{session.latest_message_summary}</p>
-                </div>
-                <div className="wb-list-meta">
-                  <span className={`wb-status-pill is-${session.status.toLowerCase()}`}>
-                    {session.status}
-                  </span>
-                  <small>{formatDateTime(session.latest_event_at)}</small>
-                </div>
+              <div className="wb-note">
+                <strong>下一步</strong>
+                <span>{echoModeGuidance.nextStep}</span>
+              </div>
+              <Link className="wb-button wb-button-secondary" to="/settings">
+                去设置页处理
               </Link>
-            ))}
-          </div>
+            </div>
+          ) : !setup.review.ready ? (
+            <div className="wb-note-stack">
+              {(setup.review.next_actions.length > 0
+                ? setup.review.next_actions
+                : ["先到设置里接入一个真实模型。"]
+              )
+                .slice(0, 2)
+                .map((item) => (
+                  <div key={item} className="wb-note">
+                    <strong>下一步</strong>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              {setup.review.blocking_reasons.slice(0, 2).map((item) => (
+                <div key={item} className="wb-note">
+                  <strong>为什么现在先做这一步</strong>
+                  <span>{item}</span>
+                </div>
+              ))}
+              <Link className="wb-button wb-button-secondary" to="/settings">
+                去设置页处理
+              </Link>
+            </div>
+          ) : operatorItems.length > 0 ? (
+            <div className="wb-note-stack">
+              {operatorItems.slice(0, 3).map((item) => (
+                <div key={item.item_id} className="wb-note">
+                  <strong>{formatOperatorLead(item)}</strong>
+                  <span>{item.summary}</span>
+                </div>
+              ))}
+              <Link className="wb-button wb-button-secondary" to="/work">
+                去看待处理事项
+              </Link>
+            </div>
+          ) : activeWorks.length > 0 ? (
+            <div className="wb-note-stack">
+              {activeWorks.slice(0, 3).map((work) => (
+                <div key={work.work_id} className="wb-note">
+                  <strong>{work.title}</strong>
+                  <span>{formatWorkSummary(work)}</span>
+                </div>
+              ))}
+              <Link className="wb-button wb-button-secondary" to="/work">
+                查看当前工作
+              </Link>
+            </div>
+          ) : (
+            <div className="wb-note-stack">
+              <div className="wb-note">
+                <strong>“帮我把今天下午的工作拆成 3 个优先级，并给我执行顺序。”</strong>
+                <span>让 Butler 先帮你把任务收口成一个可执行顺序。</span>
+              </div>
+              <div className="wb-note">
+                <strong>“深圳今天天气怎么样？我今天穿什么比较合适？”</strong>
+                <span>用实时查询和内部协作链直接体验联网能力。</span>
+              </div>
+              <div className="wb-note">
+                <strong>“帮我整理这周最重要的 3 件事，并告诉我先做什么。”</strong>
+                <span>先从你自己的日常问题开始，比看设置卡片更能感受到系统价值。</span>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">当前提醒</p>
-              <h3>先看这三件事</h3>
+              <p className="wb-card-label">如果你现在直接开始</p>
+              <h3>你会感受到的影响</h3>
             </div>
           </div>
           <div className="wb-note-stack">
             <div className="wb-note">
-              <strong>渠道入口</strong>
-              <span>{channelSummaryText}</span>
-            </div>
-            <div className="wb-note">
-              <strong>当前影响</strong>
-              <span>{impactSummary}</span>
-            </div>
-            <div className="wb-note">
-              <strong>最近一次结果</strong>
+              <strong>聊天会不会被挡住</strong>
               <span>
-                {latestSession
-                  ? `最近一次对话是“${latestSessionTitle}”。${latestSessionSummary}`
-                  : "还没有最近结果。发一条消息后，这里会开始显示。"}
+                {usingEchoMode
+                  ? "现在还能体验页面和对话流程，但回答不会代表真实能力。"
+                  : !setup.review.ready
+                    ? "基础对话可能还能继续，但先补齐设置会更稳。"
+                    : "你现在可以直接开始对话，不需要先看控制台。"}
               </span>
             </div>
-          </div>
-        </section>
-
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">背景记忆</p>
-              <h3>系统已经替你记住了多少</h3>
-            </div>
-          </div>
-          <div className="wb-note-stack">
             <div className="wb-note">
-              <strong>已保存的长期结论</strong>
-              <span>{memory.summary.sor_current_count}</span>
+              <strong>哪些能力可能受影响</strong>
+              <span>
+                {buildAvailabilityImpact({
+                  usingEchoMode,
+                  setupReady: setup.review.ready,
+                  diagnosticsStatus: diagnostics.overall_status,
+                })}
+              </span>
             </div>
             <div className="wb-note">
-              <strong>可继续沿用的背景片段</strong>
-              <span>{context.frames.length}</span>
+              <strong>远程入口</strong>
+              <span>{buildRemoteEntrySummary(channelSummaryEntries)}</span>
             </div>
             <div className="wb-note">
-              <strong>当前状态</strong>
+              <strong>这轮背景会不会断掉</strong>
               <span>
                 {context.degraded.is_degraded
-                  ? "当前只保留了基础背景摘要，继续聊天没问题，稍后会再慢慢补齐。"
-                  : "这轮对话的背景已经连上了，你继续追问时不用重复交代。"}
+                  ? "当前只保留了基础背景摘要，继续聊天没问题，系统会慢慢把更完整的背景补齐。"
+                  : "这轮对话背景已经连上了，继续追问时一般不用重复交代。"}
               </span>
             </div>
           </div>
         </section>
+      </div>
+
+      <div className="wb-split">
+        <section className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">最近一次对话</p>
+              <h3>{latestSessionTitle}</h3>
+            </div>
+          </div>
+          <div className="wb-note-stack">
+            <div className="wb-note">
+              <strong>你上次发的是</strong>
+              <span>{latestSessionSummary}</span>
+            </div>
+            {latestSession?.task_id ? (
+              <Link className="wb-button wb-button-secondary" to={`/tasks/${latestSession.task_id}`}>
+                打开这条记录
+              </Link>
+            ) : (
+              <Link className="wb-button wb-button-secondary" to="/chat">
+                进入聊天
+              </Link>
+            )}
+          </div>
+        </section>
+
+        {showContextSwitcher ? (
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">切换工作上下文</p>
+                <h3>只有你真的有多个上下文时，才需要在这里切换</h3>
+              </div>
+            </div>
+            <p className="wb-panel-copy">
+              当前项目 <strong>{currentProject?.name ?? selector.current_project_id}</strong>，当前
+              workspace <strong>{selector.current_workspace_id}</strong>。
+            </p>
+            {selector.fallback_reason ? (
+              <p className="wb-panel-copy wb-copy-warning">{selector.fallback_reason}</p>
+            ) : null}
+            <div className="wb-inline-form">
+              {selector.available_projects.length > 1 ? (
+                <label className="wb-field">
+                  <span>切换 Project</span>
+                  <select
+                    value={selectedProjectId}
+                    onChange={(event) => setSelectedProjectId(event.target.value)}
+                  >
+                    {selector.available_projects.map((project) => (
+                      <option key={project.project_id} value={project.project_id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {availableWorkspaces.length > 1 ? (
+                <label className="wb-field">
+                  <span>切换 Workspace</span>
+                  <select
+                    value={selectedWorkspaceId}
+                    onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+                  >
+                    {availableWorkspaces.map((workspace) => (
+                      <option key={workspace.workspace_id} value={workspace.workspace_id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                disabled={
+                  busyActionId === "project.select" ||
+                  (selectedProjectId === selector.current_project_id &&
+                    selectedWorkspaceId === selector.current_workspace_id)
+                }
+                onClick={() =>
+                  void submitAction("project.select", {
+                    project_id: selectedProjectId,
+                    workspace_id: selectedWorkspaceId,
+                  })
+                }
+              >
+                切换
+              </button>
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );

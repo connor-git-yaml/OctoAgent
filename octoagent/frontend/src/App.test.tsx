@@ -826,7 +826,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "先连接真实模型" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
@@ -929,7 +929,9 @@ describe("App workbench routing", () => {
       {
         path: "/",
         assertRoute: async () => {
-          expect(await screen.findByText("建议下一步")).toBeInTheDocument();
+          expect(
+            await screen.findByRole("heading", { name: "先连上一个真实模型" })
+          ).toBeInTheDocument();
         },
       },
       {
@@ -2431,37 +2433,22 @@ describe("App workbench routing", () => {
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
-    const { container } = render(<App />);
+    render(<App />);
 
-    await screen.findByRole("heading", { name: "先连接真实模型" });
+    await screen.findByRole("heading", { name: "先连上一个真实模型" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Project"), "project-ops");
-    await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-ops");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
 
-    const projectPanelLabels = screen.getAllByText("当前 Project");
-    const projectPanel = (projectPanelLabels[
-      projectPanelLabels.length - 1
-    ]?.closest("section") as HTMLElement | null) ?? null;
-    expect(projectPanel).not.toBeNull();
     await waitFor(() =>
-      expect(
-        within(projectPanel!).getByRole("heading", { name: "Ops Project" })
-      ).toBeInTheDocument()
+      expect(screen.getAllByText("Ops Project").length).toBeGreaterThan(0)
     );
-
-    const summaryGrid = container.querySelector<HTMLElement>(".wb-card-grid.wb-card-grid-4");
-    expect(summaryGrid).not.toBeNull();
-
-    const pendingCard = within(summaryGrid!).getByText("待处理事项").closest("article");
-    const workCard = within(summaryGrid!).getByText("正在进行").closest("article");
-    const memoryCard = screen.getByText("已保存的长期结论").closest(".wb-note") as HTMLElement | null;
-
-    expect(pendingCard).not.toBeNull();
-    expect(workCard).not.toBeNull();
-    expect(memoryCard).not.toBeNull();
-    expect(within(pendingCard!).getByText("4")).toBeInTheDocument();
-    expect(within(workCard!).getByText("1")).toBeInTheDocument();
-    expect(within(memoryCard!).getByText("8")).toBeInTheDocument();
+    expect(screen.getAllByText("Ops Primary").length).toBeGreaterThan(0);
+    const actionCall = fetchMock.mock.calls.find((call) => {
+      const [url, init] = call as FetchArgs;
+      return String(url).includes("/api/control/actions") && init?.method === "POST";
+    }) as FetchArgs | undefined;
+    expect(String(actionCall?.[1]?.body)).toContain('"project_id":"project-ops"');
+    expect(String(actionCall?.[1]?.body)).toContain('"workspace_id":"workspace-ops"');
     expect(
       fetchMock.mock.calls.filter((call) =>
         String((call as FetchArgs)[0]).includes("/api/control/snapshot")
@@ -2525,7 +2512,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先连接真实模型" });
+    await screen.findByRole("heading", { name: "先连上一个真实模型" });
     await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-analysis");
     await userEvent.click(screen.getByRole("button", { name: "切换" }));
 
