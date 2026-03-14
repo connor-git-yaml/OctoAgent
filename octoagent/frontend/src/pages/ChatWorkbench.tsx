@@ -3,27 +3,10 @@ import { Link } from "react-router-dom";
 import { fetchTaskDetail } from "../api/client";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
-import {
-  formatAgentRoleLabel,
-  formatCollaborationDirectionLabel,
-  formatDiscoveryEntrypointLabel,
-  formatTaskStatusLabel,
-  formatTaskStatusTone,
-  formatToolBoundaryLabel,
-} from "../domains/chat/presentation";
+import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } from "../domains/chat/presentation";
 import { useChatStream } from "../hooks/useChatStream";
-import {
-  ActionBar,
-  HoverReveal,
-  InlineCallout,
-  PageIntro,
-  StatusBadge,
-} from "../ui/primitives";
-import type {
-  SessionProjectionDocument,
-  TaskDetailResponse,
-} from "../types";
-import { formatWorkerTemplateName } from "../workbench/utils";
+import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
+import type { SessionProjectionDocument, TaskDetailResponse, WorkProjectionItem } from "../types";
 
 const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
 
@@ -43,6 +26,7 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
   const webSessions = sessionItems.filter((item) => item.channel === "web");
   const candidates = webSessions.length > 0 ? webSessions : sessionItems;
   const taskIds: string[] = [];
+
   if (sessions.focused_session_id) {
     const focused = candidates.find((item) => item.session_id === sessions.focused_session_id);
     if (focused) {
@@ -71,148 +55,212 @@ function readSummaryString(summary: Record<string, unknown>, key: string): strin
   return typeof value === "string" ? value : "";
 }
 
-function readSummaryNumber(summary: Record<string, unknown>, key: string): number {
-  const value = summary[key];
-  return typeof value === "number" ? value : 0;
+function sortWorksByUpdate(works: WorkProjectionItem[]): WorkProjectionItem[] {
+  return [...works].sort((left, right) =>
+    String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? ""))
+  );
 }
 
-function formatA2AMessageType(type: string): string {
-  switch (type.trim().toUpperCase()) {
-    case "TASK":
-      return "任务下发";
-    case "UPDATE":
-      return "进度更新";
-    case "RESULT":
-      return "结果回传";
-    case "ERROR":
-      return "错误回传";
-    case "HEARTBEAT":
-      return "心跳";
-    case "CANCEL":
-      return "取消";
-    default:
-      return type || "未记录";
-  }
-}
-
-function formatAgentUri(agentId: string, fallback: string): string {
+function resolveAgentUri(agentId: string, fallback: string): string {
   const normalized = agentId.trim();
   if (!normalized) {
     return fallback;
   }
-  if (normalized.startsWith("agent://")) {
-    return normalized;
-  }
-  return `agent://${normalized}`;
+  return normalized.startsWith("agent://") ? normalized : `agent://${normalized}`;
 }
 
-interface UserFacingProgressEvent {
-  title: string;
+function resolveWorkActor(work: WorkProjectionItem): string {
+  return resolveAgentUri(
+    readSummaryString(work.runtime_summary, "research_worker_id") ||
+      work.runtime_id ||
+      work.selected_worker_type ||
+      "",
+    "worker"
+  );
+}
+
+function resolveWorkStatus(work: WorkProjectionItem): string {
+  return (
+    readSummaryString(work.runtime_summary, "research_worker_status") ||
+    work.status ||
+    ""
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function formatActorSummary(actor: string, workTitle: string, status: string, latestMessageType: string): string {
+  const normalizedActor = actor.trim().toLowerCase();
+  const normalizedStatus = status.trim().toUpperCase();
+  const normalizedMessageType = latestMessageType.trim().toUpperCase();
+
+  if (normalizedStatus === "WAITING_INPUT") {
+    return "还差一条关键信息，这轮才能继续。";
+  }
+  if (normalizedStatus === "WAITING_APPROVAL") {
+    return "这一步需要你点一次确认，系统才会继续。";
+  }
+  if (normalizedStatus === "FAILED") {
+    return "这轮没有拿到可用结果，主助手会继续处理影响。";
+  }
+  if (normalizedStatus === "CANCELLED") {
+    return "这轮已经停止，不会再继续往下执行。";
+  }
+  if (normalizedStatus === "SUCCEEDED" || normalizedMessageType === "RESULT") {
+    return "结果已经交回主助手，正在整理成你能直接用的答复。";
+  }
+  if (normalizedActor.includes("research")) {
+    return workTitle ? `正在查资料：${workTitle}` : "正在查资料和核对事实。";
+  }
+  if (normalizedActor.includes("ops")) {
+    return workTitle ? `正在执行或检查：${workTitle}` : "正在检查系统状态和执行步骤。";
+  }
+  if (normalizedActor.includes("dev")) {
+    return workTitle ? `正在实现或验证：${workTitle}` : "正在改代码和验证实现。";
+  }
+  if (normalizedActor.includes("butler")) {
+    return "正在理解问题、安排下一步，并整理最终回复。";
+  }
+  return workTitle ? `正在处理：${workTitle}` : "正在处理这轮任务。";
+}
+
+function formatActivityStateLabel(status: string, latestMessageType: string): string {
+  const normalizedStatus = status.trim().toUpperCase();
+  const normalizedMessageType = latestMessageType.trim().toUpperCase();
+
+  switch (normalizedStatus) {
+    case "RUNNING":
+      return "进行中";
+    case "WAITING_INPUT":
+      return "等你补充";
+    case "WAITING_APPROVAL":
+      return "等你确认";
+    case "SUCCEEDED":
+      return "已回传";
+    case "FAILED":
+      return "失败";
+    case "CANCELLED":
+      return "已取消";
+    case "QUEUED":
+    case "CREATED":
+      return "准备中";
+    default:
+      if (normalizedMessageType === "RESULT") {
+        return "已回传";
+      }
+      if (normalizedMessageType === "TASK") {
+        return "已接手";
+      }
+      return "处理中";
+  }
+}
+
+function formatActivityTone(status: string, latestMessageType: string): "success" | "warning" | "danger" | "running" | "draft" {
+  const normalizedStatus = status.trim().toUpperCase();
+  const normalizedMessageType = latestMessageType.trim().toUpperCase();
+
+  if (normalizedStatus === "WAITING_INPUT" || normalizedStatus === "WAITING_APPROVAL") {
+    return "warning";
+  }
+  if (normalizedStatus === "FAILED") {
+    return "danger";
+  }
+  if (normalizedStatus === "SUCCEEDED" || normalizedMessageType === "RESULT") {
+    return "success";
+  }
+  if (normalizedStatus === "CANCELLED") {
+    return "draft";
+  }
+  return "running";
+}
+
+interface ChatActivityItem {
+  id: string;
+  actor: string;
+  stateLabel: string;
+  tone: "success" | "warning" | "danger" | "running" | "draft";
   summary: string;
 }
 
-function buildProgressStage(
+function buildButlerActivity(
+  taskStatus: string,
   streaming: boolean,
   hasInternalCollaboration: boolean,
-  latestMessageType: string,
-  targetAgent: string,
-  error: string | null
-): { title: string; summary: string } | null {
-  if (error) {
+  latestMessageType: string
+): ChatActivityItem {
+  const normalizedStatus = taskStatus.trim().toUpperCase();
+  const normalizedMessageType = latestMessageType.trim().toUpperCase();
+
+  if (normalizedStatus === "WAITING_INPUT") {
     return {
-      title: "这轮处理没有顺利完成",
-      summary: error,
+      id: "butler",
+      actor: "主助手",
+      stateLabel: "等你补充",
+      tone: "warning",
+      summary: "主助手已经识别到还差关键信息，补一句就能继续。",
+    };
+  }
+  if (normalizedStatus === "WAITING_APPROVAL") {
+    return {
+      id: "butler",
+      actor: "主助手",
+      stateLabel: "等你确认",
+      tone: "warning",
+      summary: "这一步需要你确认，系统才会继续往下执行。",
+    };
+  }
+  if (hasInternalCollaboration && normalizedMessageType === "RESULT") {
+    return {
+      id: "butler",
+      actor: "主助手",
+      stateLabel: "整理中",
+      tone: "running",
+      summary: "专门角色的结果已经回来，主助手正在整理成最终回复。",
     };
   }
   if (hasInternalCollaboration) {
-    const targetLabel = formatAgentRoleLabel(targetAgent);
-    switch (latestMessageType.trim().toUpperCase()) {
-      case "RESULT":
-        return {
-          title: streaming
-            ? `${targetLabel} 已回传结果，主助手正在整理回复`
-            : "这轮协作已经完成",
-          summary: streaming
-            ? "专门角色已经把资料和结论交回来了，主助手正在把它收口成最终答复。"
-            : "这轮消息已经通过内部协作完成，你可以继续追问同一个话题。",
-        };
-      case "ERROR":
-        return {
-          title: `${targetLabel} 这轮没有拿到可用结果`,
-          summary: "主助手会解释影响，或改用别的方式继续处理。",
-        };
-      case "UPDATE":
-      case "HEARTBEAT":
-        return {
-          title: `${targetLabel} 还在处理中`,
-          summary: "系统没有卡住，它正在继续查资料、整理证据或推进内部步骤。",
-        };
-      case "TASK":
-      default:
-        return {
-          title: `已委托 ${targetLabel} 继续处理`,
-          summary: "这轮问题需要更多资料或专门能力，主助手已经把任务交给更适合的角色。",
-        };
-    }
-  }
-  if (streaming) {
     return {
-      title: "主助手正在处理这条消息",
-      summary: "通常几秒内会给你回复；如果需要专门角色或外部资料，这里会继续显示进度。",
+      id: "butler",
+      actor: "主助手",
+      stateLabel: "协调中",
+      tone: "running",
+      summary: "主助手正在协调内部角色、补充上下文和收口结果。",
     };
   }
-  return null;
+  if (streaming || normalizedStatus === "RUNNING" || normalizedStatus === "QUEUED") {
+    return {
+      id: "butler",
+      actor: "主助手",
+      stateLabel: "进行中",
+      tone: "running",
+      summary: "主助手正在直接处理这条消息。",
+    };
+  }
+  return {
+    id: "butler",
+    actor: "主助手",
+    stateLabel: "准备中",
+    tone: "draft",
+    summary: "这轮对话已经进入处理流程，稍后会继续推进。",
+  };
 }
 
-function formatCuratedProgressEvent(
-  messageType: string,
-  direction: string,
-  targetAgent: string
-): UserFacingProgressEvent {
-  const targetLabel = formatAgentRoleLabel(targetAgent);
-  switch (messageType.trim().toUpperCase()) {
-    case "TASK":
-      return {
-        title: `已委托 ${targetLabel}`,
-        summary:
-          direction === "outbound"
-            ? "主助手已经把这轮任务交给更适合的角色。"
-            : `${targetLabel} 已收到新的内部任务。`,
-      };
-    case "UPDATE":
-      return {
-        title: "内部进度有更新",
-        summary:
-          direction === "inbound"
-            ? `${targetLabel} 刚回传了一次处理中进展。`
-            : "主助手刚补充了新的要求或上下文。",
-      };
-    case "RESULT":
-      return {
-        title: `${targetLabel} 已回传结果`,
-        summary: "主助手会基于这批结果整理成你能直接使用的答复。",
-      };
-    case "ERROR":
-      return {
-        title: `${targetLabel} 这轮没有拿到结果`,
-        summary: "主助手会说明影响，并尽量给你一个清晰的下一步。",
-      };
-    case "HEARTBEAT":
-      return {
-        title: `${targetLabel} 还在继续`,
-        summary: "系统仍在运行，没有卡死在中途。",
-      };
-    case "CANCEL":
-      return {
-        title: "内部协作已取消",
-        summary: "主助手会改用别的路径继续处理，或直接告诉你影响。",
-      };
-    default:
-      return {
-        title: "内部协作有新的变化",
-        summary: "系统正在继续推进这轮处理。",
-      };
+function buildWorkerActivity(
+  work: WorkProjectionItem,
+  fallbackLatestMessageType: string
+): ChatActivityItem | null {
+  const actor = formatAgentRoleLabel(resolveWorkActor(work));
+  if (actor === "主助手") {
+    return null;
   }
+  const status = resolveWorkStatus(work);
+  return {
+    id: work.work_id,
+    actor,
+    stateLabel: formatActivityStateLabel(status, fallbackLatestMessageType),
+    tone: formatActivityTone(status, fallbackLatestMessageType),
+    summary: formatActorSummary(actor, work.title, status, fallbackLatestMessageType),
+  };
 }
 
 export default function ChatWorkbench() {
@@ -221,22 +269,20 @@ export default function ChatWorkbench() {
   const sessions = ensureArray(sessionDocument?.sessions);
   const workerProfilesDocument = snapshot!.resources.worker_profiles;
   const workerProfiles = ensureArray(workerProfilesDocument?.profiles);
+  const delegationWorks = ensureArray(snapshot!.resources.delegation.works);
+  const context = snapshot!.resources.context_continuity;
+  const contextFrames = ensureArray(context.frames);
+  const a2aConversations = ensureArray(context.a2a_conversations);
   const restoreTaskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
   const { messages, sendMessage, streaming, restoring, error, taskId } = useChatStream(
     restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
   );
   const [input, setInput] = useState("");
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
-  const [showCollaborationTechRefs, setShowCollaborationTechRefs] = useState(false);
-  const [showProgressDetails, setShowProgressDetails] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
-  const context = snapshot!.resources.context_continuity;
-  const memory = snapshot!.resources.memory;
-  const delegationWorks = ensureArray(snapshot!.resources.delegation.works);
-  const contextFrames = ensureArray(context.frames);
-  const a2aConversations = ensureArray(context.a2a_conversations);
-  const a2aMessages = ensureArray(context.a2a_messages);
-  const recallFrames = ensureArray(context.recall_frames);
+
+  const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
+  const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
   const activeExecutionSummary =
     activeSession?.execution_summary &&
@@ -244,17 +290,17 @@ export default function ChatWorkbench() {
     !Array.isArray(activeSession.execution_summary)
       ? (activeSession.execution_summary as Record<string, unknown>)
       : null;
-  const activeWorkId =
-    typeof activeExecutionSummary?.work_id === "string"
-      ? (activeExecutionSummary.work_id as string)
-      : "";
-  const activeWork =
-    delegationWorks.find((item) => item.work_id === activeWorkId) ?? null;
+  const activeWorkId = typeof activeExecutionSummary?.work_id === "string" ? activeExecutionSummary.work_id : "";
+  const activeWork = delegationWorks.find((item) => item.work_id === activeWorkId) ?? null;
   const activeContextFrame =
     contextFrames.find((item) => item.task_id === taskId) ??
-    (activeSession
-      ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null
-      : null);
+    (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
+  const activeAgentProfileId =
+    activeWork?.requested_worker_profile_id ||
+    activeWork?.agent_profile_id ||
+    activeContextFrame?.agent_profile_id ||
+    defaultRootAgent?.profile_id ||
+    "";
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
     activeWork?.a2a_conversation_id ||
@@ -267,174 +313,101 @@ export default function ChatWorkbench() {
       ? a2aConversations.find((item) => item.work_id === activeWork.work_id) ?? null
       : null) ??
     (taskId ? a2aConversations.find((item) => item.task_id === taskId) ?? null : null);
-  const workDerivedButlerSessionId =
-    readSummaryString(activeWork?.runtime_summary ?? {}, "research_butler_agent_session_id") ||
-    activeWork?.butler_agent_session_id ||
-    "";
-  const workDerivedWorkerSessionId =
+
+  const hasInternalCollaboration =
+    activeA2AConversationRecord != null ||
+    Boolean(activeConversationId || readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id"));
+  const activeConversationLatestType = activeA2AConversationRecord?.latest_message_type || "";
+  const activeConversationWorkerSessionId =
+    activeA2AConversationRecord?.target_agent_session_id ||
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_agent_session_id") ||
     activeWork?.worker_agent_session_id ||
     "";
-  const workDerivedMessageCount =
-    readSummaryNumber(activeWork?.runtime_summary ?? {}, "research_a2a_message_count") ||
-    activeWork?.a2a_message_count ||
-    0;
-  const workDerivedLatestMessageType =
-    activeWork != null && workDerivedMessageCount > 0 ? "RESULT" : "";
-  const workDerivedWorkerAgent = formatAgentUri(
-    readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id") ||
-      activeWork?.runtime_id ||
-      activeWork?.selected_worker_type ||
-      "",
-    "Worker"
-  );
-  const hasInternalCollaboration =
-    activeA2AConversationRecord != null || Boolean(activeConversationId || workDerivedWorkerSessionId);
-  const activeConversationSourceAgent =
-    activeA2AConversationRecord?.source_agent ||
-    formatAgentUri(workDerivedButlerSessionId ? "butler.main" : "", "Butler");
-  const activeConversationTargetAgent =
-    activeA2AConversationRecord?.target_agent || workDerivedWorkerAgent;
-  const activeConversationMessageCount =
-    activeA2AConversationRecord?.message_count ?? workDerivedMessageCount;
-  const activeConversationLatestType =
-    activeA2AConversationRecord?.latest_message_type || workDerivedLatestMessageType;
-  const activeConversationWorkerSessionId =
-    activeA2AConversationRecord?.target_agent_session_id || workDerivedWorkerSessionId;
-  const activeA2AMessages =
-    activeA2AConversationRecord == null
-      ? []
-      : [...a2aMessages]
-          .filter(
-            (item) => item.a2a_conversation_id === activeA2AConversationRecord.a2a_conversation_id
-          )
-          .sort((left, right) => right.message_seq - left.message_seq)
-          .slice(0, 3);
-  const progressStage = buildProgressStage(
-    streaming,
-    hasInternalCollaboration,
-    activeConversationLatestType,
-    activeConversationTargetAgent,
-    error
-  );
-  const progressEvents =
-    activeA2AMessages.length > 0
-      ? activeA2AMessages.map((message) =>
-          formatCuratedProgressEvent(
-            message.message_type,
-            message.direction,
-            activeConversationTargetAgent
-          )
-        )
-      : hasInternalCollaboration
-        ? [
-            formatCuratedProgressEvent(
-              activeConversationLatestType || "TASK",
-              "outbound",
-              activeConversationTargetAgent
-            ),
-          ]
-        : [];
-  const activeWorkerSessionId = activeConversationWorkerSessionId;
-  const activeWorkerRecall =
-    activeWorkerSessionId.length > 0
-      ? [...recallFrames]
-          .filter((item) => item.agent_session_id === activeWorkerSessionId)
-          .sort((left, right) =>
-            String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""))
-          )[0] ?? null
-      : null;
-  const isRestoringConversation = restoring && messages.length === 0;
-  const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
-  const defaultRootAgentId = readSummaryString(
-    workerProfilesDocument?.summary ?? {},
-    "default_profile_id"
-  );
-  const defaultRootAgent = workerProfiles.find(
-    (profile) => profile.profile_id === defaultRootAgentId
-  );
-  const activeAgentProfileId =
-    activeWork?.requested_worker_profile_id ||
-    activeWork?.agent_profile_id ||
-    activeContextFrame?.agent_profile_id ||
-    defaultRootAgent?.profile_id ||
-    "";
-  const activeRootAgent =
-    workerProfiles.find((profile) => profile.profile_id === activeAgentProfileId) ??
-    defaultRootAgent ??
-    null;
-  const activeWorkerTemplateName = activeRootAgent
-    ? formatWorkerTemplateName(
-        activeRootAgent.name,
-        activeRootAgent.static_config?.base_archetype ?? null
-      )
-    : "";
-  const defaultWorkerTemplateName = defaultRootAgent
-    ? formatWorkerTemplateName(
-        defaultRootAgent.name,
-        defaultRootAgent.static_config?.base_archetype ?? null
-      )
-    : "";
-  const activeToolResolutionMode =
-    activeWork?.tool_resolution_mode ||
-    activeRootAgent?.dynamic_context.current_tool_resolution_mode ||
-    "";
-  const activeMountedTools =
-    activeWork?.mounted_tools ?? activeRootAgent?.dynamic_context?.current_mounted_tools ?? [];
-  const activeBlockedTools =
-    activeWork?.blocked_tools ?? activeRootAgent?.dynamic_context?.current_blocked_tools ?? [];
-  const activeDiscoveryEntrypoints =
-    activeRootAgent?.dynamic_context?.current_discovery_entrypoints ?? [];
-  const fallbackMountedTools = activeRootAgent?.dynamic_context?.current_mounted_tools ?? [];
-  const fallbackBlockedTools = activeRootAgent?.dynamic_context?.current_blocked_tools ?? [];
-  const normalizedMountedTools = Array.isArray(activeMountedTools)
-    ? activeMountedTools
-    : fallbackMountedTools;
-  const normalizedBlockedTools = Array.isArray(activeBlockedTools)
-    ? activeBlockedTools
-    : fallbackBlockedTools;
-  const activeRootAgentBindingSource = activeWork?.requested_worker_profile_id
-    ? "当前 Work"
-    : activeContextFrame?.agent_profile_id
-      ? "上下文帧"
-      : defaultRootAgent?.profile_id
-        ? "Project 默认"
-        : "未绑定";
-  const conversationRolePath = hasInternalCollaboration
-    ? `${formatAgentRoleLabel(activeConversationSourceAgent)} -> ${formatAgentRoleLabel(activeConversationTargetAgent)}`
-    : "";
-  const collaborationTechRefs = [
-    activeConversationId
-      ? { label: "协作链路 ID", value: activeConversationId }
-      : null,
-    activeConversationWorkerSessionId
-      ? { label: "专门角色会话", value: activeConversationWorkerSessionId }
-      : null,
-  ].filter((item): item is { label: string; value: string } => Boolean(item));
-  const taskStatusLabel = formatTaskStatusLabel(taskDetail?.task?.status ?? "");
-  const taskStatusTone = formatTaskStatusTone(taskDetail?.task?.status ?? "");
-  const collaborationStatusTone = hasInternalCollaboration ? "success" : "draft";
-  const taskStatus = String(taskDetail?.task?.status ?? "").trim().toUpperCase();
-  const hasLoadedTaskStatus = taskStatus.length > 0;
+  const normalizedTaskStatus = String(taskDetail?.task?.status ?? activeSession?.status ?? "").trim().toUpperCase();
+  const hasLoadedTaskStatus = normalizedTaskStatus.length > 0;
   const shouldPollLiveState =
     Boolean(taskId) &&
     (streaming ||
       (hasLoadedTaskStatus &&
-        !TERMINAL_TASK_STATUSES.has(taskStatus) &&
+        !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus) &&
         (hasInternalCollaboration ||
-          ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(taskStatus))));
-  const shouldShowProgress = Boolean(progressStage);
-  const internalRefs = [
+          ["QUEUED", "RUNNING", "WAITING_APPROVAL", "WAITING_INPUT"].includes(normalizedTaskStatus))));
+
+  const relatedWorks = sortWorksByUpdate(
+    delegationWorks.filter((item) => {
+      if (!taskId) {
+        return false;
+      }
+      if (item.task_id === taskId) {
+        return true;
+      }
+      if (activeWork?.work_id && item.parent_work_id === activeWork.work_id) {
+        return true;
+      }
+      return Boolean(activeWork?.child_work_ids.includes(item.work_id));
+    })
+  );
+  const workerActivities = relatedWorks
+    .map((work) => buildWorkerActivity(work, activeConversationLatestType))
+    .filter((item): item is ChatActivityItem => item != null);
+  const fallbackWorkerActor = activeA2AConversationRecord?.target_agent
+    ? formatAgentRoleLabel(activeA2AConversationRecord.target_agent)
+    : activeWork
+      ? formatAgentRoleLabel(resolveWorkActor(activeWork))
+      : "";
+  const fallbackWorkerActivity =
+    hasInternalCollaboration &&
+    workerActivities.length === 0 &&
+    fallbackWorkerActor !== "主助手" &&
+    fallbackWorkerActor
+      ? [
+          {
+            id: "worker-fallback",
+            actor: fallbackWorkerActor,
+            stateLabel: formatActivityStateLabel(
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+            tone: formatActivityTone(
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+            summary: formatActorSummary(
+              fallbackWorkerActor,
+              activeWork?.title ?? "",
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+          },
+        ]
+      : [];
+  const activityItems = taskId
+    ? [buildButlerActivity(normalizedTaskStatus, streaming, hasInternalCollaboration, activeConversationLatestType), ...workerActivities.slice(0, 2), ...fallbackWorkerActivity]
+    : [];
+  const shouldShowActivityRail =
+    Boolean(taskId) &&
+    (streaming || !hasLoadedTaskStatus || !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus));
+  const taskStatusLabel = formatTaskStatusLabel(normalizedTaskStatus);
+  const taskStatusTone = formatTaskStatusTone(normalizedTaskStatus);
+  const conversationTitle =
+    taskDetail?.task?.title ||
+    activeSession?.title ||
+    activeSession?.latest_message_summary ||
+    (taskId ? "这轮对话正在处理中" : "开始一段对话");
+  const techRefs = [
     taskId ? { label: "任务 ID", value: taskId } : null,
     activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
     activeWork?.work_id ? { label: "Work ID", value: activeWork.work_id } : null,
-    activeContextFrame?.context_frame_id
-      ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id }
-      : null,
+    activeConversationId ? { label: "协作链路 ID", value: activeConversationId } : null,
+    activeConversationWorkerSessionId ? { label: "执行会话", value: activeConversationWorkerSessionId } : null,
+    activeContextFrame?.context_frame_id ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id } : null,
   ].filter((item): item is { label: string; value: string } => Boolean(item));
+  const isRestoringConversation = restoring && messages.length === 0;
+  const isEmptyConversation = messages.length === 0 && !isRestoringConversation;
 
   useEffect(() => {
     let cancelled = false;
+
     async function loadDetail() {
       if (!taskId) {
         setTaskDetail(null);
@@ -451,6 +424,7 @@ export default function ChatWorkbench() {
         }
       }
     }
+
     void loadDetail();
     return () => {
       cancelled = true;
@@ -533,42 +507,42 @@ export default function ChatWorkbench() {
     const text = input;
     setInput("");
     await sendMessage(text, {
-      agentProfileId: activeRootAgent?.profile_id ?? defaultRootAgent?.profile_id ?? null,
+      agentProfileId: activeAgentProfileId || null,
     });
   }
 
   return (
-    <div className="wb-page">
-      <PageIntro
-        kicker="Chat"
-        title="在这里直接和 OctoAgent 对话"
-        summary="发送消息后，你可以同时看到回复、任务状态和相关工作进度。"
-        compact
-        actions={
-          <div className="wb-chip-row">
-            <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge>
-            <StatusBadge tone={collaborationStatusTone}>
-              {hasInternalCollaboration ? "已转交专门角色" : "主助手直接处理"}
-            </StatusBadge>
+    <div className="wb-page wb-chat-page">
+      <section
+        className={`wb-panel wb-chat-panel wb-chat-shell ${isEmptyConversation ? "is-empty" : ""}`}
+      >
+        <div className="wb-panel-head wb-chat-head">
+          <div className="wb-chat-head-copy">
+            <p className="wb-card-label">Chat</p>
+            <h3>{conversationTitle}</h3>
+            <p className="wb-chat-head-summary">
+              {isEmptyConversation
+                ? "直接告诉 OctoAgent 你想完成什么。"
+                : hasLoadedTaskStatus
+                  ? `当前状态：${taskStatusLabel}`
+                  : "这轮对话已经进入处理流程。"}
+            </p>
           </div>
-        }
-      />
-
-      <div className="wb-chat-layout">
-        <section className={`wb-panel wb-chat-panel ${isEmptyConversation ? "is-empty" : ""}`}>
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">对话</p>
-              <h3>{activeSession?.title ?? (taskId ? "对话进行中" : "还没有开始对话")}</h3>
-            </div>
-            {internalRefs.length > 0 ? (
+          <div className="wb-chat-head-actions">
+            {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}
+            {taskId ? (
+              <Link className="wb-button wb-button-tertiary" to={`/tasks/${taskId}`}>
+                打开任务
+              </Link>
+            ) : null}
+            {techRefs.length > 0 ? (
               <HoverReveal
                 label="技术详情"
                 expanded={showSessionInternalRefs}
                 onToggle={setShowSessionInternalRefs}
                 ariaLabel="当前会话技术详情"
               >
-                {internalRefs.map((item) => (
+                {techRefs.map((item) => (
                   <div key={item.label} className="wb-hover-reveal-row">
                     <span>{item.label}</span>
                     <strong>{item.value}</strong>
@@ -577,341 +551,94 @@ export default function ChatWorkbench() {
               </HoverReveal>
             ) : null}
           </div>
+        </div>
 
-          <InlineCallout
-            title={`当前分工模板${activeRootAgent ? ` · ${activeWorkerTemplateName}` : " · 未显式绑定"}`}
-          >
-            来源 {activeRootAgentBindingSource}
-            {activeToolResolutionMode
-              ? ` / ${formatToolBoundaryLabel(activeToolResolutionMode)}`
-              : ""}
-          </InlineCallout>
-
-          {isRestoringConversation ? (
-            <div className="wb-chat-empty-stage is-restoring">
-              <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-card">
-                <strong>正在恢复最近对话</strong>
-                <span>稍等，我们正在读取历史消息、任务状态和相关上下文。</span>
-              </div>
-            </div>
-          ) : isEmptyConversation ? (
-            <div className="wb-chat-empty-stage">
-              <div className="wb-empty-state wb-chat-empty-card">
-                <strong>从这里发出第一条消息</strong>
-                <span>比如告诉 OctoAgent 你要完成什么，它会开始创建任务并返回结果。</span>
-              </div>
-              {error ? (
-                <InlineCallout title="刚才没有发送成功" tone="error">
-                  {error}
-                </InlineCallout>
-              ) : null}
-              <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="告诉 OctoAgent 你现在要做什么"
-                  disabled={streaming}
-                />
-                <button
-                  type="submit"
-                  className="wb-button wb-button-primary"
-                  disabled={streaming || !input.trim()}
-                >
-                  {streaming ? "发送中" : "发送"}
-                </button>
-              </form>
-            </div>
-          ) : (
-            <>
-              <div className="wb-chat-messages">
-                {messages.map((message) => (
-                  <MessageBubble key={message.id} message={message} />
-                ))}
-              </div>
-
-              {shouldShowProgress && progressStage ? (
-                <>
-                  <InlineCallout title={progressStage.title}>{progressStage.summary}</InlineCallout>
-                  <HoverReveal
-                    label="查看内部协作进度"
-                    expanded={showProgressDetails}
-                    onToggle={setShowProgressDetails}
-                    ariaLabel="当前内部协作进度"
-                  >
-                    <div className="wb-note-stack">
-                      {progressEvents.map((item, index) => (
-                        <div key={`${item.title}-${index}`} className="wb-note">
-                          <strong>{item.title}</strong>
-                          <span>{item.summary}</span>
-                        </div>
-                      ))}
-                      {progressEvents.length === 0 ? (
-                        <div className="wb-note">
-                          <strong>主助手已接手</strong>
-                          <span>这轮消息已经进入处理流程，稍后会继续补上内部进展。</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </HoverReveal>
-                </>
-              ) : null}
-
-              {error ? (
-                <InlineCallout title="刚才没有发送成功" tone="error">
-                  {error}
-                </InlineCallout>
-              ) : null}
-
-              <form className="wb-chat-form" onSubmit={handleSubmit}>
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="告诉 OctoAgent 你现在要做什么"
-                  disabled={streaming}
-                />
-                <button
-                  type="submit"
-                  className="wb-button wb-button-primary"
-                  disabled={streaming || !input.trim()}
-                >
-                  {streaming ? "发送中" : "发送"}
-                </button>
-              </form>
-            </>
-          )}
-        </section>
-
-        <aside className="wb-chat-sidebar">
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">当前 Worker 模板</p>
-                <h3>{activeWorkerTemplateName || "还没有绑定 Worker 模板"}</h3>
-              </div>
-            </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>绑定来源</strong>
-                <span>{activeRootAgentBindingSource}</span>
-              </div>
-              <div className="wb-note">
-                <strong>默认工具范围</strong>
-                <span>{activeRootAgent?.static_config?.tool_profile ?? "未记录"}</span>
-              </div>
-              <div className="wb-note">
-                <strong>默认 Worker 模板</strong>
-                <span>{defaultWorkerTemplateName || "还没有默认值"}</span>
-              </div>
-            </div>
-            <ActionBar>
-              <Link className="wb-button wb-button-tertiary" to="/agents">
-                去 Agents 调整默认模板
-              </Link>
-            </ActionBar>
-          </section>
-
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">当前任务</p>
-                <h3>{taskDetail?.task?.title ?? "等待开始"}</h3>
-              </div>
-              <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge>
-            </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>事件数</strong>
-                <span>{taskDetail?.events.length ?? 0}</span>
-              </div>
-              <div className="wb-note">
-                <strong>结果附件</strong>
-                <span>{taskDetail?.artifacts.length ?? 0}</span>
-              </div>
-            </div>
-            {taskId ? (
-              <ActionBar>
-                <Link className="wb-button wb-button-tertiary" to={`/tasks/${taskId}`}>
-                  打开任务详情
-                </Link>
-              </ActionBar>
-            ) : null}
-          </section>
-
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">协作分工</p>
-                <h3>
-                  {hasInternalCollaboration
-                    ? "OctoAgent 已拆给专门角色继续处理"
-                    : "当前这轮先由主 Agent 直接处理"}
-                </h3>
-              </div>
-              <StatusBadge tone={collaborationStatusTone}>
-                {hasInternalCollaboration ? "内部协作中" : "直连处理"}
-              </StatusBadge>
-            </div>
-            {hasInternalCollaboration ? (
-              <>
-                <div className="wb-note-stack">
-                  <div className="wb-note">
-                    <strong>当前负责角色</strong>
-                    <span>{conversationRolePath}</span>
+        {shouldShowActivityRail && activityItems.length > 0 ? (
+          <section className="wb-chat-activity" aria-label="当前处理进度">
+            <div className="wb-chat-activity-list">
+              {activityItems.map((item, index) => (
+                <div key={item.id} className="wb-chat-activity-item">
+                  <div className="wb-chat-activity-line" aria-hidden={index === activityItems.length - 1} />
+                  <span className={`wb-chat-activity-dot is-${item.tone}`} aria-hidden="true" />
+                  <div className="wb-chat-activity-copy">
+                    <strong>{item.actor}</strong>
+                    <span>{item.summary}</span>
                   </div>
-                  <div className="wb-note">
-                    <strong>最近协作进展</strong>
-                    <span>
-                      {activeConversationMessageCount} 条 / 最新{" "}
-                      {formatA2AMessageType(activeConversationLatestType)}
-                    </span>
-                  </div>
-                  <div className="wb-note">
-                    <strong>已参考的背景片段</strong>
-                    <span>{activeWorkerRecall?.memory_hit_count ?? 0}</span>
-                  </div>
+                  <StatusBadge tone={item.tone}>{item.stateLabel}</StatusBadge>
                 </div>
-                {collaborationTechRefs.length > 0 ? (
-                  <HoverReveal
-                    label="协作技术详情"
-                    expanded={showCollaborationTechRefs}
-                    onToggle={setShowCollaborationTechRefs}
-                    ariaLabel="当前协作技术详情"
-                  >
-                    {collaborationTechRefs.map((item) => (
-                      <div key={item.label} className="wb-hover-reveal-row">
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
-                      </div>
-                    ))}
-                  </HoverReveal>
-                ) : null}
-                {activeA2AMessages.length > 0 ? (
-                  <div className="wb-note-stack">
-                    {activeA2AMessages.map((message) => {
-                      const item = formatCuratedProgressEvent(
-                        message.message_type,
-                        message.direction,
-                        activeConversationTargetAgent
-                      );
-                      return (
-                        <div key={message.a2a_message_id} className="wb-note">
-                          <strong>{item.title}</strong>
-                          <span>{item.summary}</span>
-                          <small>
-                            {formatA2AMessageType(message.message_type)} · #
-                            {message.message_seq} ·{" "}
-                            {formatCollaborationDirectionLabel(message.direction)}
-                          </small>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {activeA2AMessages.length === 0 && activeA2AConversationRecord == null ? (
-                  <InlineCallout title="当前只显示协作摘要">
-                    当前快照还没有带回完整协作明细，需要时可去 Advanced 查看详细诊断。
-                  </InlineCallout>
-                ) : null}
-                <ActionBar>
-                  <Link className="wb-button wb-button-tertiary" to="/advanced">
-                    打开 Advanced 诊断
-                  </Link>
-                </ActionBar>
-              </>
-            ) : (
-              <InlineCallout title="当前先由主助手直接处理">
-                如果这轮问题需要实时检索、运维或开发，系统会自动转给更适合的角色继续处理。
-              </InlineCallout>
-            )}
-          </section>
-
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">当前可用工具</p>
-                <h3>{activeWork?.title ?? "等待 work 生成"}</h3>
-              </div>
-            </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>当前可用</strong>
-                <span>{normalizedMountedTools.length > 0 ? normalizedMountedTools.length : 0}</span>
-              </div>
-              <div className="wb-note">
-                <strong>暂时不可用</strong>
-                <span>{normalizedBlockedTools.length > 0 ? normalizedBlockedTools.length : 0}</span>
-              </div>
-              <div className="wb-note">
-                <strong>补充资料入口</strong>
-                <span>
-                  {activeDiscoveryEntrypoints.length > 0
-                    ? activeDiscoveryEntrypoints
-                        .map((item) => formatDiscoveryEntrypointLabel(item))
-                        .join(" / ")
-                    : "当前没有额外资料入口"}
-                </span>
-              </div>
-            </div>
-            <div className="wb-chip-row">
-              {normalizedMountedTools.slice(0, 6).map((tool) => (
-                <span key={`mounted-${tool.tool_name}`} className="wb-chip">
-                  {tool.tool_name}
-                </span>
               ))}
-              {normalizedMountedTools.length === 0 ? (
-                <span className="wb-inline-note">当前还没有可用工具记录。</span>
-              ) : null}
             </div>
-            {normalizedBlockedTools.length > 0 ? (
-              <div className="wb-note-stack">
-                {normalizedBlockedTools.slice(0, 3).map((tool) => (
-                  <div key={`blocked-${tool.tool_name}`} className="wb-note">
-                    <strong>{tool.tool_name}</strong>
-                    <span>{tool.summary || tool.reason_code || tool.status}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </section>
+        ) : null}
 
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">记忆与上下文</p>
-                <h3>当前对话的相关背景</h3>
-              </div>
+        {isRestoringConversation ? (
+          <div className="wb-chat-empty-stage is-restoring">
+            <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-card">
+              <strong>正在恢复最近对话</strong>
+              <span>稍等，我们在读取历史消息和当前任务状态。</span>
             </div>
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>当前记录</strong>
-                <span>{memory.summary.sor_current_count}</span>
-              </div>
-              <div className="wb-note">
-                <strong>上下文片段</strong>
-                <span>{context.frames.length}</span>
-              </div>
-              <div className="wb-note">
-                <strong>上下文状态</strong>
-                <span>
-                  {context.degraded.is_degraded
-                    ? "当前只显示基础背景信息，但不影响继续对话。"
-                    : "当前对话的背景摘要可以正常查看。"}
-                </span>
-              </div>
-              <div className="wb-note">
-                <strong>继续追问时</strong>
-                <span>
-                  {activeContextFrame
-                    ? "这轮对话已经整理过背景和上下文，你继续追问时不用从头再讲。"
-                    : "当前还没有形成稳定背景，继续多聊几轮后这里会逐步补齐。"}
-                </span>
-              </div>
+          </div>
+        ) : isEmptyConversation ? (
+          <div className="wb-chat-empty-stage">
+            <div className="wb-empty-state wb-chat-empty-card">
+              <strong>开始第一条消息</strong>
+              <span>比如直接告诉 OctoAgent 你今天要完成什么，它会从这里接手。</span>
             </div>
-          </section>
-        </aside>
-      </div>
+            {error ? (
+              <InlineCallout title="刚才没有发送成功" tone="error">
+                {error}
+              </InlineCallout>
+            ) : null}
+            <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
+              <input
+                type="text"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="告诉 OctoAgent 你现在要做什么"
+                disabled={streaming}
+              />
+              <button
+                type="submit"
+                className="wb-button wb-button-primary"
+                disabled={streaming || !input.trim()}
+              >
+                {streaming ? "发送中" : "发送"}
+              </button>
+            </form>
+          </div>
+        ) : (
+          <>
+            <div className="wb-chat-messages">
+              {messages.map((message) => (
+                <MessageBubble key={message.id} message={message} />
+              ))}
+            </div>
+
+            {error ? (
+              <InlineCallout title="刚才没有发送成功" tone="error">
+                {error}
+              </InlineCallout>
+            ) : null}
+
+            <form className="wb-chat-form" onSubmit={handleSubmit}>
+              <input
+                type="text"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="告诉 OctoAgent 你现在要做什么"
+                disabled={streaming}
+              />
+              <button
+                type="submit"
+                className="wb-button wb-button-primary"
+                disabled={streaming || !input.trim()}
+              >
+                {streaming ? "发送中" : "发送"}
+              </button>
+            </form>
+          </>
+        )}
+      </section>
     </div>
   );
 }

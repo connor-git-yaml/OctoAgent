@@ -6,6 +6,7 @@
  */
 
 import type { ChatMessage } from "../../hooks/useChatStream";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -14,15 +15,27 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const roleLabel = isUser ? "你" : "OctoAgent";
-  const content = message.content || (message.isStreaming ? "正在思考..." : "暂无回复内容");
+  const hasContent = Boolean(message.content?.trim());
+  const showLoadingState = message.isStreaming && !isUser;
+  const content = hasContent ? message.content : message.isStreaming ? "" : "暂无回复内容";
 
   return (
     <div className={`wb-message ${isUser ? "is-user" : "is-agent"}`}>
       <div className={`wb-message-card ${isUser ? "is-user" : "is-agent"}`}>
         <div className="wb-message-role">{roleLabel}</div>
         <div className="wb-message-content">
-          {content}
-          {message.isStreaming ? <span className="wb-message-cursor" aria-hidden="true" /> : null}
+          {showLoadingState ? (
+            <div className="wb-message-loading" aria-live="polite">
+              <span>正在整理回复</span>
+              <span className="wb-message-loading-dots" aria-hidden="true">
+                <span>.</span>
+                <span>.</span>
+                <span>.</span>
+              </span>
+            </div>
+          ) : (
+            <MarkdownContent content={content} />
+          )}
         </div>
         {message.hasApproval ? (
           <div className={`wb-message-approval ${isUser ? "is-user" : "is-agent"}`}>

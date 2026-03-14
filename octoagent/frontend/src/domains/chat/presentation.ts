@@ -4,14 +4,20 @@ export function formatTaskStatusLabel(status: string): string {
       return "排队中";
     case "RUNNING":
       return "进行中";
+    case "WAITING_INPUT":
+      return "等你补充";
+    case "WAITING_APPROVAL":
+      return "等你确认";
+    case "PAUSED":
+      return "已暂停";
     case "SUCCEEDED":
       return "已完成";
     case "FAILED":
       return "失败";
     case "CANCELLED":
       return "已取消";
-    case "WAITING_APPROVAL":
-      return "等待确认";
+    case "REJECTED":
+      return "已拒绝";
     default:
       return status || "尚未创建";
   }
@@ -23,11 +29,16 @@ export function formatTaskStatusTone(status: string): string {
       return "success";
     case "RUNNING":
       return "running";
+    case "QUEUED":
+      return "draft";
+    case "WAITING_INPUT":
     case "WAITING_APPROVAL":
       return "warning";
     case "FAILED":
+    case "REJECTED":
       return "danger";
     case "CANCELLED":
+    case "PAUSED":
       return "draft";
     default:
       return "draft";

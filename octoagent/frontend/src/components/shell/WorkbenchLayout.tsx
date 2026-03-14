@@ -1,5 +1,5 @@
 import { createContext, useContext, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import FrontDoorGate from "../FrontDoorGate";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
 import { formatDateTime, getValueAtPath } from "../../workbench/utils";
@@ -100,6 +100,7 @@ function renderNavDescription(path: string): string {
 export default function WorkbenchLayout() {
   const workbench = useWorkbenchData();
   const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
 
   if (workbench.loading && workbench.snapshot === null) {
     return (
@@ -171,6 +172,9 @@ export default function WorkbenchLayout() {
     diagnosticsStatus: diagnostics.overall_status,
     activeWorkCount,
   });
+  const suppressChatSetupReviewBanner =
+    location.pathname === "/chat" &&
+    workbench.lastAction?.code === "SETUP_REVIEW_READY";
 
   return (
     <WorkbenchContext.Provider value={workbench}>
@@ -260,7 +264,7 @@ export default function WorkbenchLayout() {
             </div>
           ) : null}
 
-          {workbench.lastAction ? (
+          {workbench.lastAction && !suppressChatSetupReviewBanner ? (
             <div className="wb-inline-banner is-muted">
               <strong>{formatActionResult(workbench.lastAction)}</strong>
               <span>{formatDateTime(workbench.lastAction.handled_at)}</span>

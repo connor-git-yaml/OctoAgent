@@ -43,12 +43,7 @@ function buildSnapshot(): any {
             static_config: {
               tool_profile: "standard",
             },
-            dynamic_context: {
-              current_tool_resolution_mode: "profile_first_core",
-              current_mounted_tools: [],
-              current_blocked_tools: [],
-              current_discovery_entrypoints: ["workers.review"],
-            },
+            dynamic_context: {},
           },
         ],
       },
@@ -119,7 +114,100 @@ describe("ChatWorkbench", () => {
     });
   });
 
-  it("发送后会立刻显示处理中反馈和折叠式进度入口", async () => {
+  it("继续当前会话时会沿用当前 work 绑定的 profile_id", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.worker_profiles.profiles.push({
+      profile_id: "project-default:ops-root",
+      name: "Ops Root",
+      summary: "运维专用 Root Agent。",
+      static_config: {
+        tool_profile: "ops",
+      },
+      dynamic_context: {},
+    });
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "thread-chat-ops",
+        thread_id: "thread-chat-ops",
+        task_id: "task-chat-ops",
+        latest_message_summary: "继续看今天的机器状态",
+        execution_summary: {
+          work_id: "work-chat-ops",
+        },
+      },
+    ];
+    snapshot.resources.delegation.works = [
+      {
+        work_id: "work-chat-ops",
+        task_id: "task-chat-ops",
+        parent_work_id: "",
+        title: "查看机器状态",
+        status: "running",
+        target_kind: "worker",
+        selected_worker_type: "ops",
+        route_reason: "delegation_strategy=follow_active_profile",
+        owner_id: "butler.main",
+        selected_tools: [],
+        pipeline_run_id: "",
+        runtime_id: "butler.main",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        agent_profile_id: "project-default:ops-root",
+        requested_worker_profile_id: "project-default:ops-root",
+        requested_worker_profile_version: 1,
+        effective_worker_snapshot_id: "worker-snapshot:ops-root:1",
+        child_work_ids: [],
+        child_work_count: 0,
+        merge_ready: false,
+        runtime_summary: {},
+        updated_at: "2026-03-09T10:03:00Z",
+        capabilities: [],
+      },
+    ];
+
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-ops", role: "agent", content: "我继续看一下。" }],
+      sendMessage,
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-ops",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-ops",
+        title: "继续看今天的机器状态",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.type(
+      screen.getByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      "继续检查今天的错误日志"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志", {
+        agentProfileId: "project-default:ops-root",
+      });
+    });
+  });
+
+  it("发送后会展示简洁的处理中运行条，而不是旧的折叠协作入口", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
       refreshResources: vi.fn().mockResolvedValue(undefined),
@@ -155,11 +243,12 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("主助手正在处理这条消息")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看内部协作进度" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("当前处理进度")).toBeInTheDocument();
+    expect(screen.getByText("主助手")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看内部协作进度" })).not.toBeInTheDocument();
   });
 
-  it("会在侧栏展示当前 Butler 到 Worker 的内部协作链", async () => {
+  it("会用运行条展示当前参与处理的 Agent，并移除旧侧栏模块", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -198,6 +287,8 @@ describe("ChatWorkbench", () => {
           delegation_strategy: "butler_owned_freshness",
           research_a2a_conversation_id: "a2a-weather-1",
           research_worker_agent_session_id: "agent-session-worker-research-1",
+          research_worker_id: "worker.llm.research",
+          research_worker_status: "RUNNING",
         },
         updated_at: "2026-03-09T10:03:00Z",
         capabilities: [],
@@ -236,74 +327,13 @@ describe("ChatWorkbench", () => {
         target_agent: "agent://worker.llm.research",
         context_frame_id: "context-1",
         request_message_id: "a2a-message-1",
-        latest_message_id: "a2a-message-3",
-        latest_message_type: "RESULT",
-        status: "completed",
-        message_count: 3,
+        latest_message_id: "a2a-message-2",
+        latest_message_type: "UPDATE",
+        status: "running",
+        message_count: 2,
         trace_id: "trace-a2a",
         metadata: {},
         updated_at: "2026-03-09T10:03:30Z",
-      },
-    ];
-    snapshot.resources.context_continuity.a2a_messages = [
-      {
-        a2a_message_id: "a2a-message-1",
-        a2a_conversation_id: "a2a-weather-1",
-        message_seq: 1,
-        task_id: "task-chat-1-child",
-        work_id: "work-chat-1-child",
-        message_type: "TASK",
-        direction: "outbound",
-        protocol_message_id: "dispatch-1",
-        source_agent_runtime_id: "runtime-butler-default",
-        source_agent_session_id: "agent-session-butler-default",
-        target_agent_runtime_id: "runtime-worker-research-1",
-        target_agent_session_id: "agent-session-worker-research-1",
-        from_agent: "agent://butler.main",
-        to_agent: "agent://worker.llm.research",
-        idempotency_key: "a2a-message-1",
-        payload: {},
-        trace: {},
-        metadata: {},
-        created_at: "2026-03-09T10:03:00Z",
-      },
-      {
-        a2a_message_id: "a2a-message-3",
-        a2a_conversation_id: "a2a-weather-1",
-        message_seq: 3,
-        task_id: "task-chat-1-child",
-        work_id: "work-chat-1-child",
-        message_type: "RESULT",
-        direction: "inbound",
-        protocol_message_id: "dispatch-1-result",
-        source_agent_runtime_id: "runtime-worker-research-1",
-        source_agent_session_id: "agent-session-worker-research-1",
-        target_agent_runtime_id: "runtime-butler-default",
-        target_agent_session_id: "agent-session-butler-default",
-        from_agent: "agent://worker.llm.research",
-        to_agent: "agent://butler.main",
-        idempotency_key: "a2a-message-3",
-        payload: {},
-        trace: {},
-        metadata: {},
-        created_at: "2026-03-09T10:03:30Z",
-      },
-    ];
-    snapshot.resources.context_continuity.recall_frames = [
-      {
-        recall_frame_id: "recall-worker-1",
-        agent_runtime_id: "runtime-worker-research-1",
-        agent_session_id: "agent-session-worker-research-1",
-        context_frame_id: "context-1",
-        task_id: "task-chat-1-child",
-        project_id: "project-default",
-        workspace_id: "workspace-default",
-        query: "深圳今天天气怎么样",
-        recent_summary: "Research Worker 已整理天气证据。",
-        memory_namespace_ids: ["memory/project-default"],
-        memory_hit_count: 2,
-        degraded_reason: "",
-        created_at: "2026-03-09T10:03:25Z",
       },
     ];
 
@@ -312,7 +342,7 @@ describe("ChatWorkbench", () => {
       refreshResources: vi.fn().mockResolvedValue(undefined),
     });
     useChatStreamMock.mockReturnValue({
-      messages: [{ id: "msg-1", role: "assistant", content: "深圳今天晴。" }],
+      messages: [{ id: "msg-1", role: "agent", content: "我正在查。" }],
       sendMessage: vi.fn().mockResolvedValue(undefined),
       streaming: false,
       restoring: false,
@@ -323,7 +353,7 @@ describe("ChatWorkbench", () => {
       task: {
         task_id: "task-chat-1",
         title: "深圳今天天气怎么样",
-        status: "SUCCEEDED",
+        status: "RUNNING",
       },
       events: [],
       artifacts: [],
@@ -335,18 +365,21 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("OctoAgent 已拆给专门角色继续处理")).toBeInTheDocument();
-    expect(screen.getByText("这轮协作已经完成")).toBeInTheDocument();
-    expect(screen.getByText("主助手 -> Research Worker")).toBeInTheDocument();
-    expect(screen.getByText("3 条 / 最新 结果回传")).toBeInTheDocument();
-    expect(screen.getByText("Research Worker 已回传结果")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "打开 Advanced 诊断" })).toBeInTheDocument();
-    expect(screen.queryByText("Butler 已经把天气查询转给 Research Worker。")).not.toBeInTheDocument();
-    await new Promise((resolve) => window.setTimeout(resolve, 1500));
-    expect(fetchTaskDetailMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByLabelText("当前处理进度")).toBeInTheDocument();
+    expect(screen.getByText("主助手")).toBeInTheDocument();
+    expect(screen.getByText("Research Worker")).toBeInTheDocument();
+    expect(screen.getByText("正在查资料：深圳今天天气怎么样")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开任务" })).toHaveAttribute(
+      "href",
+      "/tasks/task-chat-1"
+    );
+    expect(screen.queryByText("当前可用工具")).not.toBeInTheDocument();
+    expect(screen.queryByText("记忆与上下文")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前任务")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前 Worker 模板")).not.toBeInTheDocument();
   });
 
-  it("当前会话的 A2A 不在全局快照里时仍会展示最小内部协作态", async () => {
+  it("任务完成后不再展示内部协作运行条", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -365,7 +398,7 @@ describe("ChatWorkbench", () => {
         task_id: "task-chat-2",
         parent_work_id: "",
         title: "深圳今天天气怎么样",
-        status: "running",
+        status: "succeeded",
         target_kind: "worker",
         selected_worker_type: "general",
         route_reason: "delegation_strategy=butler_owned_freshness",
@@ -381,38 +414,39 @@ describe("ChatWorkbench", () => {
         child_work_ids: [],
         child_work_count: 0,
         merge_ready: false,
-        a2a_conversation_id: "",
-        butler_agent_session_id: "",
-        worker_agent_session_id: "",
-        a2a_message_count: 0,
         runtime_summary: {
           delegation_strategy: "butler_owned_freshness",
-          research_a2a_conversation_id: "a2a-weather-missing-from-snapshot",
-          research_butler_agent_session_id: "agent-session-butler-default",
+          research_a2a_conversation_id: "a2a-weather-2",
           research_worker_agent_session_id: "agent-session-worker-research-2",
           research_worker_id: "worker.llm.research",
-          research_a2a_message_count: 2,
           research_worker_status: "SUCCEEDED",
         },
         updated_at: "2026-03-09T10:05:00Z",
         capabilities: [],
       },
     ];
-    snapshot.resources.context_continuity.recall_frames = [
+    snapshot.resources.context_continuity.a2a_conversations = [
       {
-        recall_frame_id: "recall-worker-2",
-        agent_runtime_id: "runtime-worker-research-2",
-        agent_session_id: "agent-session-worker-research-2",
-        context_frame_id: "context-2",
+        a2a_conversation_id: "a2a-weather-2",
         task_id: "task-chat-2-child",
+        work_id: "work-chat-2-child",
         project_id: "project-default",
         workspace_id: "workspace-default",
-        query: "深圳今天天气怎么样",
-        recent_summary: "Research Worker 已整理天气证据。",
-        memory_namespace_ids: ["memory/project-default"],
-        memory_hit_count: 1,
-        degraded_reason: "",
-        created_at: "2026-03-09T10:05:20Z",
+        source_agent_runtime_id: "runtime-butler-default",
+        source_agent_session_id: "agent-session-butler-default",
+        target_agent_runtime_id: "runtime-worker-research-2",
+        target_agent_session_id: "agent-session-worker-research-2",
+        source_agent: "agent://butler.main",
+        target_agent: "agent://worker.llm.research",
+        context_frame_id: "context-2",
+        request_message_id: "a2a-message-1",
+        latest_message_id: "a2a-message-3",
+        latest_message_type: "RESULT",
+        status: "completed",
+        message_count: 3,
+        trace_id: "trace-a2a",
+        metadata: {},
+        updated_at: "2026-03-09T10:05:30Z",
       },
     ];
 
@@ -421,7 +455,7 @@ describe("ChatWorkbench", () => {
       refreshResources: vi.fn().mockResolvedValue(undefined),
     });
     useChatStreamMock.mockReturnValue({
-      messages: [{ id: "msg-2", role: "assistant", content: "深圳今天晴。" }],
+      messages: [{ id: "msg-2", role: "agent", content: "深圳今天晴。" }],
       sendMessage: vi.fn().mockResolvedValue(undefined),
       streaming: false,
       restoring: false,
@@ -444,65 +478,25 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("OctoAgent 已拆给专门角色继续处理")).toBeInTheDocument();
-    expect(screen.getByText("主助手 -> Research Worker")).toBeInTheDocument();
-    expect(screen.getByText("2 条 / 最新 结果回传")).toBeInTheDocument();
-    expect(screen.getByText(/当前只显示协作摘要/)).toBeInTheDocument();
+    expect(await screen.findByText("深圳今天晴。")).toBeInTheDocument();
+    expect(screen.queryByLabelText("当前处理进度")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开任务" })).toBeInTheDocument();
   });
 
-  it("session 缺少 execution_summary 时也不会白屏", async () => {
-    const snapshot = buildSnapshot();
-    snapshot.resources.sessions.sessions = [
-      {
-        session_id: "thread-chat-missing-summary",
-        thread_id: "thread-chat-missing-summary",
-        task_id: "task-chat-missing-summary",
-        latest_message_summary: "帮我继续看刚才那条天气结果",
-      },
-    ];
-
+  it("会按 markdown 渲染主消息内容", async () => {
     useWorkbenchMock.mockReturnValue({
-      snapshot,
+      snapshot: buildSnapshot(),
       refreshResources: vi.fn().mockResolvedValue(undefined),
     });
     useChatStreamMock.mockReturnValue({
-      messages: [{ id: "msg-missing-summary", role: "agent", content: "我来继续帮你看。" }],
-      sendMessage: vi.fn().mockResolvedValue(undefined),
-      streaming: false,
-      restoring: false,
-      error: null,
-      taskId: "task-chat-missing-summary",
-    });
-    fetchTaskDetailMock.mockResolvedValue({
-      task: {
-        task_id: "task-chat-missing-summary",
-        title: "帮我继续看刚才那条天气结果",
-        status: "RUNNING",
-      },
-      events: [],
-      artifacts: [],
-    });
-
-    render(
-      <MemoryRouter>
-        <ChatWorkbench />
-      </MemoryRouter>
-    );
-
-    expect(await screen.findByText("我来继续帮你看。")).toBeInTheDocument();
-    expect(screen.getByText("当前这轮先由主 Agent 直接处理")).toBeInTheDocument();
-  });
-
-  it("sessions 资源文档暂时缺少 sessions 数组时也不会白屏", async () => {
-    const snapshot = buildSnapshot();
-    delete snapshot.resources.sessions.sessions;
-
-    useWorkbenchMock.mockReturnValue({
-      snapshot,
-      refreshResources: vi.fn().mockResolvedValue(undefined),
-    });
-    useChatStreamMock.mockReturnValue({
-      messages: [{ id: "msg-missing-sessions", role: "agent", content: "我还在这里。" }],
+      messages: [
+        {
+          id: "msg-markdown",
+          role: "agent",
+          content: "如果你默认还是 **深圳**，那你今天穿：\n\n- **白天**：长袖衬衫\n- **下装**：长裤",
+          isStreaming: false,
+        },
+      ],
       sendMessage: vi.fn().mockResolvedValue(undefined),
       streaming: false,
       restoring: false,
@@ -517,8 +511,11 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("我还在这里。")).toBeInTheDocument();
-    expect(screen.getByText("当前这轮先由主 Agent 直接处理")).toBeInTheDocument();
+    expect(await screen.findByText("深圳")).toBeInTheDocument();
+    expect(screen.getByText("白天")).toBeInTheDocument();
+    const list = screen.getByRole("list");
+    expect(list).toBeInTheDocument();
+    expect(list.textContent).toContain("长裤");
   });
 
   it("当前 task 存在时会刷新会话、工作和上下文资源", async () => {
