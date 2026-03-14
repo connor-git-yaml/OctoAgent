@@ -80,7 +80,8 @@ class SkillProviderConfig(BaseModel):
     enabled: bool = True
     model_alias: str = Field(default="main")
     worker_type: str = Field(default="general")
-    tool_profile: str = Field(default="minimal")
+    tool_profile: str = Field(default="standard")
+    permission_mode: str = Field(default="inherit")
     tools_allowed: list[str] = Field(default_factory=list)
     prompt_template: str = Field(min_length=1)
     install_hint: str = Field(default="")
@@ -353,6 +354,7 @@ class CapabilityPackService:
                 ),
                 description=manifest.description or "",
                 model_alias=manifest.model_alias,
+                permission_mode=manifest.permission_mode.value,
                 worker_types=self._resolve_skill_worker_types(manifest),
                 tools_allowed=list(manifest.tools_allowed),
                 pipeline_templates=["delegation:preflight"],
@@ -698,11 +700,13 @@ class CapabilityPackService:
                 if hit.tool_name in mounted_names
             ]
         )
+        recommended_tools = list(discovery_entrypoints or mounted_names[:6])
 
         return DynamicToolSelection(
             selection_id=str(ULID()),
             query=request,
             selected_tools=mounted_names,
+            recommended_tools=recommended_tools,
             hits=discovery.hits,
             backend=self._tool_index.backend_name,
             is_fallback="profile_first_empty_fallback_to_static_toolset" in warnings,
@@ -715,6 +719,7 @@ class CapabilityPackService:
                 tool_profile=context_profile.value,
                 resolution_mode="profile_first_core",
                 selected_tools=mounted_names,
+                recommended_tools=recommended_tools,
                 discovery_entrypoints=discovery_entrypoints,
                 warnings=self._dedupe_preserve_order(warnings),
             ),
@@ -2542,7 +2547,7 @@ class CapabilityPackService:
                 worker_type=WorkerType.GENERAL,
                 capabilities=["llm_generation", "general"],
                 default_model_alias="main",
-                default_tool_profile="minimal",
+                default_tool_profile="standard",
                 default_tool_groups=[
                     "project",
                     "artifact",
@@ -2561,7 +2566,7 @@ class CapabilityPackService:
                 worker_type=WorkerType.OPS,
                 capabilities=["ops", "runtime", "automation", "recovery"],
                 default_model_alias="main",
-                default_tool_profile="minimal",
+                default_tool_profile="standard",
                 default_tool_groups=[
                     "runtime",
                     "session",
@@ -2577,7 +2582,7 @@ class CapabilityPackService:
                 worker_type=WorkerType.RESEARCH,
                 capabilities=["research", "analysis", "summarize"],
                 default_model_alias="main",
-                default_tool_profile="minimal",
+                default_tool_profile="standard",
                 default_tool_groups=[
                     "project",
                     "artifact",
@@ -2596,7 +2601,7 @@ class CapabilityPackService:
                 worker_type=WorkerType.DEV,
                 capabilities=["dev", "code", "patch", "test"],
                 default_model_alias="main",
-                default_tool_profile="minimal",
+                default_tool_profile="standard",
                 default_tool_groups=[
                     "project",
                     "artifact",
@@ -2870,11 +2875,8 @@ class CapabilityPackService:
         *,
         objective: str,
     ) -> str:
-        if worker_type == WorkerType.DEV:
-            return ToolProfile.STANDARD.value
-        if cls._requires_standard_web_access(objective, worker_type):
-            return ToolProfile.STANDARD.value
-        return ToolProfile.MINIMAL.value
+        del worker_type, objective
+        return ToolProfile.STANDARD.value
 
     def _build_worker_assignment(
         self,
@@ -3079,6 +3081,39 @@ class CapabilityPackService:
             return False
         return enabled_by_default
 
+    @staticmethod
+    def _skill_item_state(
+        *,
+        item_id: str,
+        enabled_by_default: bool,
+        selected_item_ids: set[str],
+        disabled_item_ids: set[str],
+    ) -> tuple[bool, bool]:
+        if item_id in selected_item_ids:
+            return True, True
+        if item_id in disabled_item_ids:
+            return False, True
+        return enabled_by_default, False
+
+    def _resolve_mcp_mount_policy(self, server_name: str) -> str:
+        if self._mcp_registry is None:
+            return "explicit"
+        return self._mcp_registry.get_mount_policy(server_name)
+
+    def _mcp_tool_enabled_by_default(
+        self,
+        *,
+        server_name: str,
+        tool_profile: str,
+    ) -> bool:
+        mount_policy = self._resolve_mcp_mount_policy(server_name)
+        normalized_profile = str(tool_profile).strip().lower() or "standard"
+        if mount_policy == "auto_all":
+            return True
+        if mount_policy == "auto_readonly":
+            return normalized_profile == ToolProfile.MINIMAL.value
+        return False
+
     async def _filter_pack_for_scope(
         self,
         pack: BundledCapabilityPack,
@@ -3100,32 +3135,30 @@ class CapabilityPackService:
         ) = await self._resolve_profile_skill_selection(
             profile_id=profile_id,
         )
-        if (
-            not project_selected_item_ids
-            and not project_disabled_item_ids
-            and not profile_selected_item_ids
-            and not profile_disabled_item_ids
-        ):
-            return pack
 
-        def is_selected(item_id: str, *, enabled_by_default: bool) -> bool:
-            project_selected = self._skill_item_selected(
+        def selection_state(
+            item_id: str,
+            *,
+            enabled_by_default: bool,
+        ) -> tuple[bool, bool]:
+            project_selected, project_explicit = self._skill_item_state(
                 item_id=item_id,
                 enabled_by_default=enabled_by_default,
                 selected_item_ids=project_selected_item_ids,
                 disabled_item_ids=project_disabled_item_ids,
             )
-            return self._skill_item_selected(
+            profile_selected, profile_explicit = self._skill_item_state(
                 item_id=item_id,
                 enabled_by_default=project_selected,
                 selected_item_ids=profile_selected_item_ids,
                 disabled_item_ids=profile_disabled_item_ids,
             )
+            return profile_selected, project_explicit or profile_explicit
 
         skills = [
             skill
             for skill in pack.skills
-            if is_selected(item_id=f"skill:{skill.skill_id}", enabled_by_default=True)
+            if selection_state(item_id=f"skill:{skill.skill_id}", enabled_by_default=True)[0]
         ]
         governed_skill_tool_names = {
             tool_name
@@ -3142,20 +3175,28 @@ class CapabilityPackService:
 
         tools: list[BundledToolDefinition] = []
         for tool in pack.tools:
-            if tool.tool_group == "mcp":
+            if tool.tool_group == "mcp" and str(tool.metadata.get("source", "")).strip() == "mcp":
                 server_name = str(tool.metadata.get("mcp_server_name", "")).strip() or "mcp"
-                include = is_selected(
+                include, explicitly_selected = selection_state(
                     item_id=f"mcp:{server_name}",
-                    enabled_by_default=False,
+                    enabled_by_default=self._mcp_tool_enabled_by_default(
+                        server_name=server_name,
+                        tool_profile=tool.tool_profile,
+                    ),
                 )
+                if include and not explicitly_selected:
+                    include = self._mcp_tool_enabled_by_default(
+                        server_name=server_name,
+                        tool_profile=tool.tool_profile,
+                    )
             else:
                 include = True
                 if tool.tool_name in governed_skill_tool_names:
                     include = tool.tool_name in enabled_skill_tool_names
-                include = is_selected(
+                include = selection_state(
                     item_id=f"skill:{tool.tool_name}",
                     enabled_by_default=include,
-                )
+                )[0]
             if include:
                 tools.append(tool)
 
@@ -3183,6 +3224,11 @@ class CapabilityPackService:
         filtered_selected_tools = [
             tool_name for tool_name in selection.selected_tools if tool_name in allowed_tool_names
         ]
+        filtered_recommended_tools = [
+            tool_name
+            for tool_name in selection.recommended_tools
+            if tool_name in allowed_tool_names
+        ]
         warnings = list(selection.warnings)
         is_fallback = selection.is_fallback
 
@@ -3194,6 +3240,8 @@ class CapabilityPackService:
             is_fallback = True
         elif not filtered_selected_tools and selection.selected_tools:
             warnings.append("tool_selection_empty_after_skill_governance")
+        if not filtered_recommended_tools:
+            filtered_recommended_tools = list(filtered_selected_tools)
 
         deduped_warnings: list[str] = []
         for warning in warnings:
@@ -3202,6 +3250,7 @@ class CapabilityPackService:
         return selection.model_copy(
             update={
                 "selected_tools": filtered_selected_tools,
+                "recommended_tools": filtered_recommended_tools,
                 "hits": filtered_hits,
                 "warnings": deduped_warnings,
                 "is_fallback": is_fallback,
@@ -3295,10 +3344,11 @@ class CapabilityPackService:
             if not config.enabled or config.provider_id in existing_ids:
                 continue
             try:
-                tool_profile = ToolProfile(str(config.tool_profile).strip().lower() or "minimal")
+                tool_profile = ToolProfile(str(config.tool_profile).strip().lower() or "standard")
             except ValueError:
-                tool_profile = ToolProfile.MINIMAL
+                tool_profile = ToolProfile.STANDARD
             worker_type = str(config.worker_type).strip().lower() or "general"
+            permission_mode = str(config.permission_mode).strip().lower() or "inherit"
             self._skill_registry.register(
                 SkillManifest(
                     skill_id=config.provider_id,
@@ -3306,6 +3356,7 @@ class CapabilityPackService:
                     output_model=_BuiltinSkillOutput,
                     description=config.description or config.label,
                     model_alias=config.model_alias or "main",
+                    permission_mode=permission_mode,
                     tools_allowed=list(config.tools_allowed),
                     tool_profile=tool_profile,
                     metadata={
@@ -3314,6 +3365,7 @@ class CapabilityPackService:
                         "source_kind": "custom",
                         "provider_id": config.provider_id,
                         "install_hint": config.install_hint,
+                        "permission_mode": permission_mode,
                         **dict(config.metadata),
                     },
                 ),

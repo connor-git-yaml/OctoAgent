@@ -712,13 +712,19 @@ class OrchestratorService:
                 route_reason,
                 f"tool_resolution={selection.resolution_mode}",
             )
+        recommended_tools = (
+            list(selection.recommended_tools)
+            if selection is not None and selection.recommended_tools
+            else list(selected_tools)
+        )
         updated_metadata = {
             **metadata,
             "single_loop_executor": True,
             "single_loop_executor_mode": f"butler_{worker_type.value}",
             "selected_worker_type": worker_type.value,
             "selected_tools": selected_tools,
-            "selected_tools_json": json.dumps(selected_tools, ensure_ascii=False),
+            "recommended_tools": recommended_tools,
+            "selected_tools_json": json.dumps(recommended_tools, ensure_ascii=False),
             "tool_selection": (
                 selection.model_dump(mode="json") if selection is not None else {}
             ),

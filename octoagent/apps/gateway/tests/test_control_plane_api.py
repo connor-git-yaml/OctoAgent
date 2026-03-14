@@ -1550,7 +1550,6 @@ class TestControlPlaneApi:
                         "description": "快速摘要 provider",
                         "model_alias": "main",
                         "worker_type": "research",
-                        "tool_profile": "minimal",
                         "tools_allowed": ["project.inspect", "artifact.list"],
                         "prompt_template": "你负责输出简短摘要与下一步。",
                     }
@@ -1566,6 +1565,8 @@ class TestControlPlaneApi:
         skill_items = skill_catalog_resp.json()["items"]
         custom_skill = next(item for item in skill_items if item["provider_id"] == "custom-brief")
         assert custom_skill["enabled"] is True
+        assert custom_skill["tool_profile"] == "standard"
+        assert custom_skill["permission_mode"] == "inherit"
 
         mcp_save_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -1595,6 +1596,7 @@ class TestControlPlaneApi:
         mcp_items = mcp_catalog_resp.json()["items"]
         custom_mcp = next(item for item in mcp_items if item["provider_id"] == "custom-mcp")
         assert custom_mcp["enabled"] is True
+        assert custom_mcp["mount_policy"] == "auto_readonly"
 
         skill_delete_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -2389,8 +2391,7 @@ class TestControlPlaneApi:
             "research",
             "dev",
         }
-        assert {item["tool_profile"] for item in worker_plan["assignments"]} >= {
-            "minimal",
+        assert {item["tool_profile"] for item in worker_plan["assignments"]} == {
             "standard",
         }
 
@@ -2427,8 +2428,7 @@ class TestControlPlaneApi:
 
         assert len(child_works) >= 2
         assert {item.selected_worker_type.value for item in child_works} >= {"research", "dev"}
-        assert {str(item.metadata.get("requested_tool_profile", "")) for item in child_works} >= {
-            "minimal",
+        assert {str(item.metadata.get("requested_tool_profile", "")) for item in child_works} == {
             "standard",
         }
 

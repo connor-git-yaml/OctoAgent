@@ -18,6 +18,7 @@ from .models import (
     SkillOutputEnvelope,
     ToolCallSpec,
     ToolFeedbackMessage,
+    resolve_effective_tool_allowlist,
 )
 
 log = structlog.get_logger(__name__)
@@ -66,11 +67,19 @@ class LiteLLMSkillClient:
     async def _get_tool_schemas(
         self,
         manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
         *,
         responses_api: bool,
     ) -> list[dict[str, Any]]:
         """从 ToolBroker 获取工具 schema，转换为目标 API 的工具格式。"""
-        if not self._tool_broker or not manifest.tools_allowed:
+        if not self._tool_broker:
+            return []
+        allowed_tool_names = resolve_effective_tool_allowlist(
+            permission_mode=manifest.permission_mode,
+            tools_allowed=list(manifest.tools_allowed),
+            metadata=execution_context.metadata,
+        )
+        if not allowed_tool_names:
             return []
         try:
             all_tools = await self._tool_broker.discover()
@@ -78,7 +87,7 @@ class LiteLLMSkillClient:
             return []
         result = []
         for tool_meta in all_tools:
-            if tool_meta.name in manifest.tools_allowed:
+            if tool_meta.name in allowed_tool_names:
                 if responses_api:
                     result.append(
                         {
@@ -484,7 +493,11 @@ class LiteLLMSkillClient:
                 }
             )
 
-        tools = await self._get_tool_schemas(manifest, responses_api=use_responses_api)
+        tools = await self._get_tool_schemas(
+            manifest,
+            execution_context,
+            responses_api=use_responses_api,
+        )
 
         log.debug(
             "litellm_skill_client_generate",

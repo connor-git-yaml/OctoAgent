@@ -305,6 +305,9 @@ class DelegationPlaneService:
                     "pipeline_status": pipeline_run.status.value,
                     "pipeline_pause_reason": pipeline_run.pause_reason,
                     "requested_tool_profile": request.tool_profile,
+                    "recommended_tools": list(
+                        selection.recommended_tools or selection.selected_tools
+                    ),
                 },
                 "updated_at": datetime.now(tz=UTC),
                 "completed_at": (
@@ -358,7 +361,13 @@ class DelegationPlaneService:
                 "pipeline_run_id": pipeline_run.run_id,
                 "selected_worker_type": updated_work.selected_worker_type.value,
                 "selected_tools": list(selection.selected_tools),
-                "selected_tools_json": json.dumps(selection.selected_tools, ensure_ascii=False),
+                "recommended_tools": list(
+                    selection.recommended_tools or selection.selected_tools
+                ),
+                "selected_tools_json": json.dumps(
+                    selection.recommended_tools or selection.selected_tools,
+                    ensure_ascii=False,
+                ),
                 "target_kind": updated_work.target_kind.value,
                 "tool_selection_id": selection.selection_id,
                 "agent_profile_id": updated_work.agent_profile_id,
@@ -688,7 +697,17 @@ class DelegationPlaneService:
             "pipeline_run_id": run.run_id,
             "selected_worker_type": work.selected_worker_type.value,
             "selected_tools": list(work.selected_tools),
-            "selected_tools_json": json.dumps(work.selected_tools, ensure_ascii=False),
+            "recommended_tools": list(
+                state.get("recommended_tools", work.selected_tools)
+                if isinstance(state, dict)
+                else work.selected_tools
+            ),
+            "selected_tools_json": json.dumps(
+                state.get("recommended_tools", work.selected_tools)
+                if isinstance(state, dict)
+                else work.selected_tools,
+                ensure_ascii=False,
+            ),
             "target_kind": work.target_kind.value,
             "tool_selection_id": work.tool_selection_id,
             "agent_profile_id": work.agent_profile_id,

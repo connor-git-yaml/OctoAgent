@@ -30,6 +30,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 041 | Implemented | ambient facts、Butler-owned freshness delegation、worker private recall、surface truth 与缺城市/环境受限 acceptance 已闭合 |
 | 048 | Draft | `Home / Settings / Chat` 普通用户主路径清晰化：单一主行动、最少必要配置、等待态与折叠式协作进度 |
 | 049 | Implemented | Butler behavior workspace 与 agentic decision runtime：少量显式 md、runtime hints、`ButlerDecision`、Web 只读 behavior 面 + CLI `ls/show/init` |
+| 052 | Implemented | tooling/MCP/skills 默认权限面放宽：trusted local `standard` baseline、MCP `auto_readonly`、skill `permission_mode=inherit`、`recommended_tools` 合同升级 |
 
 ## 3. 各 Feature 边界
 

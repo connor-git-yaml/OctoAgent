@@ -66,6 +66,7 @@ class BundledSkillDefinition(BaseModel):
     label: str = Field(default="")
     description: str = Field(default="")
     model_alias: str = Field(default="main")
+    permission_mode: str = Field(default="restrict")
     worker_types: list[WorkerType] = Field(default_factory=list)
     tools_allowed: list[str] = Field(default_factory=list)
     pipeline_templates: list[str] = Field(default_factory=list)
@@ -157,6 +158,7 @@ class EffectiveToolUniverse(BaseModel):
     tool_profile: str = Field(default="")
     resolution_mode: str = Field(default="tool_index")
     selected_tools: list[str] = Field(default_factory=list)
+    recommended_tools: list[str] = Field(default_factory=list)
     discovery_entrypoints: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -167,6 +169,7 @@ class DynamicToolSelection(BaseModel):
     selection_id: str = Field(min_length=1)
     query: ToolIndexQuery
     selected_tools: list[str] = Field(default_factory=list)
+    recommended_tools: list[str] = Field(default_factory=list)
     hits: list[ToolIndexHit] = Field(default_factory=list)
     backend: str = Field(default="in_memory")
     is_fallback: bool = False

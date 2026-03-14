@@ -8,6 +8,7 @@ from octoagent.skills.manifest import SkillManifest
 from octoagent.skills.models import (
     ErrorCategory,
     SkillOutputEnvelope,
+    SkillPermissionMode,
     SkillRunStatus,
 )
 from octoagent.skills.runner import SkillRunner
@@ -167,6 +168,103 @@ async def test_runner_disallowed_tool(
 
     assert result.status == SkillRunStatus.FAILED
     assert result.error_category == ErrorCategory.TOOL_EXECUTION_ERROR
+
+
+async def test_runner_inherit_mode_uses_runtime_mounted_tools(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    manifest = echo_manifest.model_copy(
+        update={
+            "permission_mode": SkillPermissionMode.INHERIT,
+            "tools_allowed": [],
+        }
+    )
+    client = QueueModelClient(
+        [
+            SkillOutputEnvelope(
+                content="call tool",
+                complete=False,
+                tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "hello"}}],
+            ),
+            SkillOutputEnvelope(content="done", complete=True),
+        ]
+    )
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+    context = execution_context.model_copy(
+        update={
+            "metadata": {
+                "tool_selection": {
+                    "mounted_tools": [{"tool_name": "system.echo"}],
+                }
+            }
+        }
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED
+    assert tool_broker.calls == [("system.echo", {"text": "hello"})]
+
+
+async def test_runner_restrict_mode_does_not_expand_from_runtime_metadata(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    manifest = echo_manifest.model_copy(
+        update={
+            "permission_mode": SkillPermissionMode.RESTRICT,
+            "tools_allowed": ["system.echo"],
+        }
+    )
+    client = QueueModelClient(
+        [
+            SkillOutputEnvelope(
+                content="call tool",
+                complete=False,
+                tool_calls=[{"tool_name": "system.file_read", "arguments": {"path": "a"}}],
+            ),
+            SkillOutputEnvelope(
+                content="call tool",
+                complete=False,
+                tool_calls=[{"tool_name": "system.file_read", "arguments": {"path": "b"}}],
+            ),
+            SkillOutputEnvelope(
+                content="call tool",
+                complete=False,
+                tool_calls=[{"tool_name": "system.file_read", "arguments": {"path": "c"}}],
+            ),
+            SkillOutputEnvelope(
+                content="call tool",
+                complete=False,
+                tool_calls=[{"tool_name": "system.file_read", "arguments": {"path": "d"}}],
+            ),
+        ]
+    )
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+    context = execution_context.model_copy(
+        update={
+            "metadata": {
+                "tool_selection": {
+                    "mounted_tools": [{"tool_name": "system.file_read"}],
+                }
+            }
+        }
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.TOOL_EXECUTION_ERROR
+    assert tool_broker.calls == []
 
 
 async def test_runner_loop_detected(

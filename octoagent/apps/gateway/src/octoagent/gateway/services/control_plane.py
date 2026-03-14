@@ -1797,6 +1797,14 @@ class ControlPlaneService:
             )
 
         mcp_tools: dict[str, list[Any]] = defaultdict(list)
+        mcp_configs = {}
+        mcp_registry = (
+            None
+            if self._capability_pack_service is None
+            else self._capability_pack_service.mcp_registry
+        )
+        if mcp_registry is not None:
+            mcp_configs = {item.name: item for item in mcp_registry.list_configs()}
         for tool in capability_pack.pack.tools:
             if tool.tool_group != "mcp":
                 continue
@@ -1812,13 +1820,19 @@ class ControlPlaneService:
             elif any(item.availability.value != "available" for item in tools):
                 availability = "degraded"
                 missing_requirements.append("部分 MCP tools 当前处于降级状态。")
+            config = mcp_configs.get(server_name)
+            mount_policy = (
+                str(config.mount_policy).strip().lower()
+                if config is not None
+                else "auto_readonly"
+            )
             items.append(
                 SkillGovernanceItem(
                     item_id=f"mcp:{server_name}",
                     label=f"MCP / {server_name}",
                     source_kind="mcp",
                     scope="project",
-                    enabled_by_default=False,
+                    enabled_by_default=mount_policy in {"auto_readonly", "auto_all"},
                     selected=False,
                     availability=availability,
                     trust_level="external",
@@ -1826,6 +1840,7 @@ class ControlPlaneService:
                     install_hint=install_hints[0] if install_hints else "",
                     details={
                         "server_name": server_name,
+                        "mount_policy": mount_policy,
                         "tool_count": len(tools),
                         "tools": [item.tool_name for item in tools],
                     },
@@ -1927,7 +1942,13 @@ class ControlPlaneService:
                     worker_type=(
                         skill.worker_types[0].value if skill.worker_types else "general"
                     ),
-                    tool_profile=str(metadata.get("tool_profile", "minimal")),
+                    tool_profile=str(metadata.get("tool_profile", "standard")),
+                    permission_mode=str(
+                        metadata.get(
+                            "permission_mode",
+                            config.permission_mode if config is not None else "restrict",
+                        )
+                    ),
                     tools_allowed=list(skill.tools_allowed),
                     selection_item_id=selection_item_id,
                     prompt_template=config.prompt_template if config is not None else "",
@@ -1964,6 +1985,7 @@ class ControlPlaneService:
                     model_alias=config.model_alias,
                     worker_type=config.worker_type,
                     tool_profile=config.tool_profile,
+                    permission_mode=config.permission_mode,
                     tools_allowed=list(config.tools_allowed),
                     selection_item_id=f"skill:{config.provider_id}",
                     prompt_template=config.prompt_template,
@@ -2039,6 +2061,7 @@ class ControlPlaneService:
                     args=list(config.args),
                     cwd=config.cwd,
                     env=dict(config.env),
+                    mount_policy=str(config.mount_policy).strip().lower() or "auto_readonly",
                     tool_count=record.tool_count if record is not None else 0,
                     selection_item_id=f"mcp:{config.name}",
                     install_hint=governance_item.install_hint if governance_item else "",
@@ -3840,11 +3863,17 @@ class ControlPlaneService:
                 "SKILL_PROVIDER_WORKER_TYPE_INVALID",
                 "worker_type 不合法",
             )
-        tool_profile = self._param_str(raw, "tool_profile", default="minimal").lower()
+        tool_profile = self._param_str(raw, "tool_profile", default="standard").lower()
+        permission_mode = self._param_str(raw, "permission_mode", default="inherit").lower()
         if tool_profile not in {"minimal", "standard", "privileged"}:
             raise ControlPlaneActionError(
                 "SKILL_PROVIDER_TOOL_PROFILE_INVALID",
                 "tool_profile 不合法",
+            )
+        if permission_mode not in {"inherit", "restrict"}:
+            raise ControlPlaneActionError(
+                "SKILL_PROVIDER_PERMISSION_MODE_INVALID",
+                "permission_mode 不合法",
             )
 
         config = SkillProviderConfig.model_validate(
@@ -3856,6 +3885,7 @@ class ControlPlaneService:
                 "model_alias": self._param_str(raw, "model_alias", default="main") or "main",
                 "worker_type": worker_type,
                 "tool_profile": tool_profile,
+                "permission_mode": permission_mode,
                 "tools_allowed": tools_allowed,
                 "prompt_template": prompt_template,
                 "install_hint": self._param_str(raw, "install_hint"),
@@ -3925,6 +3955,12 @@ class ControlPlaneService:
         command = self._param_str(raw, "command")
         if not command:
             raise ControlPlaneActionError("MCP_PROVIDER_COMMAND_REQUIRED", "command 不能为空")
+        mount_policy = self._param_str(raw, "mount_policy", default="auto_readonly").lower()
+        if mount_policy not in {"explicit", "auto_readonly", "auto_all"}:
+            raise ControlPlaneActionError(
+                "MCP_PROVIDER_MOUNT_POLICY_INVALID",
+                "mount_policy 不合法",
+            )
         config = McpServerConfig.model_validate(
             {
                 "name": provider_id,
@@ -3937,6 +3973,7 @@ class ControlPlaneService:
                 },
                 "cwd": self._param_str(raw, "cwd"),
                 "enabled": self._param_bool(raw, "enabled", default=True),
+                "mount_policy": mount_policy,
             }
         )
         self._capability_pack_service.mcp_registry.save_config(config)

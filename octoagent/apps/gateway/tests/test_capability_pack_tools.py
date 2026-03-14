@@ -419,6 +419,100 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
         await store_group.conn.close()
 
 
+async def test_capability_pack_honors_mcp_mount_policy_defaults(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    tool_broker = ToolBroker(event_store=store_group.event_store)
+    capability_pack = CapabilityPackService(
+        project_root=tmp_path,
+        store_group=store_group,
+        tool_broker=tool_broker,
+    )
+    mcp_registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=tool_broker,
+        server_configs=[
+            McpServerConfig(
+                name="readonly",
+                command="/bin/echo",
+                args=["readonly"],
+                mount_policy="auto_readonly",
+            ),
+            McpServerConfig(
+                name="explicit",
+                command="/bin/echo",
+                args=["explicit"],
+                mount_policy="explicit",
+            ),
+            McpServerConfig(
+                name="all",
+                command="/bin/echo",
+                args=["all"],
+                mount_policy="auto_all",
+            ),
+        ],
+    )
+    capability_pack.bind_mcp_registry(mcp_registry)
+
+    try:
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="readonly", tool_profile="minimal"
+            )
+            is True
+        )
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="readonly", tool_profile="standard"
+            )
+            is False
+        )
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="readonly", tool_profile="privileged"
+            )
+            is False
+        )
+
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="explicit", tool_profile="minimal"
+            )
+            is False
+        )
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="explicit", tool_profile="standard"
+            )
+            is False
+        )
+
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="all", tool_profile="minimal"
+            )
+            is True
+        )
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="all", tool_profile="standard"
+            )
+            is True
+        )
+        assert (
+            capability_pack._mcp_tool_enabled_by_default(
+                server_name="all", tool_profile="privileged"
+            )
+            is True
+        )
+    finally:
+        await store_group.conn.close()
+
+
 async def test_web_search_tool_returns_parsed_results(
     tmp_path: Path,
     monkeypatch,
@@ -944,6 +1038,9 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
         assert {item.parent_work_id for item in child_works} == {plan.work.work_id}
         assert {item.selected_worker_type.value for item in child_works} == {"research"}
         assert {item.target_kind.value for item in child_works} == {"subagent"}
+
+        for child in split_payload["children"]:
+            await task_runner.cancel_task(str(child["task_id"]))
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -1011,10 +1108,7 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
         assert payload["proposal_kind"] == "split"
         assert len(payload["assignments"]) >= 2
         assert {item["worker_type"] for item in payload["assignments"]} >= {"research", "dev"}
-        assert {item["tool_profile"] for item in payload["assignments"]} >= {
-            "minimal",
-            "standard",
-        }
+        assert {item["tool_profile"] for item in payload["assignments"]} == {"standard"}
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -1374,7 +1468,7 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
 
         assert result.is_error is False
         payload = json.loads(result.output)
-        assert payload["tool_profile"] == "minimal"
+        assert payload["tool_profile"] == "standard"
         assert payload["worker_type"] == "research"
 
         child_works = []
@@ -1386,7 +1480,7 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
 
         assert len(child_works) == 1
         child = child_works[0]
-        assert child.metadata["requested_tool_profile"] == "minimal"
+        assert child.metadata["requested_tool_profile"] == "standard"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

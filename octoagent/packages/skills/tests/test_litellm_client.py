@@ -6,7 +6,12 @@ import json
 from typing import Any
 
 import pytest
-from octoagent.skills import SkillExecutionContext, SkillManifest, ToolFeedbackMessage
+from octoagent.skills import (
+    SkillExecutionContext,
+    SkillManifest,
+    SkillPermissionMode,
+    ToolFeedbackMessage,
+)
 from octoagent.skills.litellm_client import LiteLLMSkillClient
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
 from pydantic import BaseModel, Field
@@ -35,6 +40,19 @@ class _FakeToolBroker:
                 side_effect_level=SideEffectLevel.NONE,
                 tool_profile=ToolProfile.MINIMAL,
                 tool_group="project",
+            ),
+            ToolMeta(
+                name="artifact.list",
+                description="列出当前 artifact",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer"},
+                    },
+                },
+                side_effect_level=SideEffectLevel.NONE,
+                tool_profile=ToolProfile.MINIMAL,
+                tool_group="artifact",
             )
         ]
 
@@ -360,5 +378,99 @@ async def test_litellm_skill_client_merges_system_history_into_responses_instruc
         {
             "role": "user",
             "content": [{"type": "input_text", "text": "继续回答当前问题"}],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_litellm_skill_client_inherit_mode_uses_runtime_mounted_tools(
+    monkeypatch,
+) -> None:
+    captures: list[dict[str, Any]] = []
+    payloads = [
+        [
+            'data: {"type":"response.output_text.delta","delta":"收到。"}',
+            "data: "
+            + json.dumps(
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "model": "gpt-5.4",
+                        "usage": {
+                            "input_tokens": 6,
+                            "output_tokens": 2,
+                            "total_tokens": 8,
+                        },
+                        "output": [
+                            {
+                                "type": "message",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "收到。",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    ]
+
+    monkeypatch.setattr(
+        "octoagent.skills.litellm_client.httpx.AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(payloads, captures, **kwargs),
+    )
+
+    client = LiteLLMSkillClient(
+        proxy_url="http://proxy.local",
+        master_key="secret",
+        tool_broker=_FakeToolBroker(),
+        responses_model_aliases={"main"},
+    )
+    manifest = SkillManifest(
+        skill_id="chat.general.inline",
+        input_model=_SkillIO,
+        output_model=_SkillIO,
+        model_alias="main",
+        description="你可以调用工具。",
+        permission_mode=SkillPermissionMode.INHERIT,
+        tools_allowed=["project.inspect"],
+        tool_profile=ToolProfile.MINIMAL,
+    )
+    context = SkillExecutionContext(
+        task_id="task-inherit",
+        trace_id="trace-inherit",
+        caller="test",
+        metadata={
+            "tool_selection": {
+                "mounted_tools": [
+                    {"tool_name": "artifact.list"},
+                ]
+            }
+        },
+    )
+
+    result = await client.generate(
+        manifest=manifest,
+        execution_context=context,
+        prompt="看看当前有哪些 artifact",
+        feedback=[],
+        attempt=1,
+        step=1,
+    )
+
+    assert result.complete is True
+    assert captures[0]["json"]["tools"] == [
+        {
+            "type": "function",
+            "name": "artifact__list",
+            "description": "列出当前 artifact",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+            },
         }
     ]

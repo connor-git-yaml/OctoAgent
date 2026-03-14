@@ -27,6 +27,13 @@ class ErrorCategory(StrEnum):
     INPUT_VALIDATION_ERROR = "input_validation_error"
 
 
+class SkillPermissionMode(StrEnum):
+    """Skill 工具权限模式。"""
+
+    INHERIT = "inherit"
+    RESTRICT = "restrict"
+
+
 class RetryPolicy(BaseModel):
     """重试策略。"""
 
@@ -109,6 +116,7 @@ class SkillManifestModel(BaseModel):
     skill_id: str = Field(min_length=1)
     version: str = Field(default="0.1.0", min_length=1)
     model_alias: str = Field(default="main", min_length=1)
+    permission_mode: SkillPermissionMode = Field(default=SkillPermissionMode.RESTRICT)
     tools_allowed: list[str] = Field(default_factory=list)
     tool_profile: ToolProfile = Field(default=ToolProfile.STANDARD)
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
@@ -117,3 +125,68 @@ class SkillManifestModel(BaseModel):
     description: str | None = Field(default=None)
     description_md: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def extract_mounted_tool_names(metadata: dict[str, Any] | None) -> list[str]:
+    """从 runtime metadata 中提取当前实际挂载的工具名。"""
+
+    if not isinstance(metadata, dict):
+        return []
+
+    tool_selection = metadata.get("tool_selection")
+    if isinstance(tool_selection, dict):
+        mounted_tools = tool_selection.get("mounted_tools")
+        if isinstance(mounted_tools, list):
+            normalized: list[str] = []
+            for item in mounted_tools:
+                if isinstance(item, dict):
+                    tool_name = str(item.get("tool_name", "")).strip()
+                else:
+                    tool_name = str(item).strip()
+                if tool_name and tool_name not in normalized:
+                    normalized.append(tool_name)
+            if normalized:
+                return normalized
+        effective_tool_universe = tool_selection.get("effective_tool_universe")
+        if isinstance(effective_tool_universe, dict):
+            selected_tools = effective_tool_universe.get("selected_tools")
+            if isinstance(selected_tools, list):
+                normalized = [
+                    str(item).strip() for item in selected_tools if str(item).strip()
+                ]
+                if normalized:
+                    return normalized
+
+    raw = metadata.get("selected_tools_json", "[]")
+    if isinstance(raw, list):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, str):
+        import json
+
+        try:
+            payload = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return []
+        if isinstance(payload, list):
+            return [str(item).strip() for item in payload if str(item).strip()]
+    return []
+
+
+def resolve_effective_tool_allowlist(
+    *,
+    permission_mode: SkillPermissionMode | str,
+    tools_allowed: list[str],
+    metadata: dict[str, Any] | None,
+) -> list[str]:
+    """根据 permission mode 和 runtime metadata 解析本轮真实工具白名单。"""
+
+    try:
+        mode = SkillPermissionMode(str(permission_mode).strip().lower() or "restrict")
+    except ValueError:
+        mode = SkillPermissionMode.RESTRICT
+    if mode == SkillPermissionMode.RESTRICT:
+        return [str(item).strip() for item in tools_allowed if str(item).strip()]
+    inherited = extract_mounted_tool_names(metadata)
+    if inherited:
+        return inherited
+    return [str(item).strip() for item in tools_allowed if str(item).strip()]

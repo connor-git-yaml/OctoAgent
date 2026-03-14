@@ -6,7 +6,6 @@
 """
 
 import asyncio
-import json
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -19,7 +18,14 @@ from octoagent.provider import (
     ModelCallResult,
     TokenUsage,
 )
-from octoagent.skills import SkillExecutionContext, SkillManifest, SkillRunner, SkillRunStatus
+from octoagent.skills import (
+    SkillExecutionContext,
+    SkillManifest,
+    SkillPermissionMode,
+    SkillRunner,
+    SkillRunStatus,
+    extract_mounted_tool_names,
+)
 from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
 
@@ -303,6 +309,7 @@ class LLMService:
                 selected_tools,
                 single_loop_executor=single_loop_executor,
             ),
+            permission_mode=SkillPermissionMode.INHERIT,
             tools_allowed=selected_tools,
             tool_profile=profile,
         )
@@ -355,32 +362,7 @@ class LLMService:
 
     @staticmethod
     def _parse_selected_tools(metadata: dict[str, Any]) -> list[str]:
-        tool_selection = metadata.get("tool_selection")
-        if isinstance(tool_selection, dict):
-            mounted_tools = tool_selection.get("mounted_tools")
-            if isinstance(mounted_tools, list):
-                normalized = [str(item).strip() for item in mounted_tools if str(item).strip()]
-                if normalized:
-                    return normalized
-            effective_tool_universe = tool_selection.get("effective_tool_universe")
-            if isinstance(effective_tool_universe, dict):
-                selected_tools = effective_tool_universe.get("selected_tools")
-                if isinstance(selected_tools, list):
-                    normalized = [
-                        str(item).strip() for item in selected_tools if str(item).strip()
-                    ]
-                    if normalized:
-                        return normalized
-        raw = metadata.get("selected_tools_json", "[]")
-        if isinstance(raw, list):
-            return [str(item).strip() for item in raw if str(item).strip()]
-        try:
-            payload = json.loads(str(raw or "[]"))
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(payload, list):
-            return []
-        return [str(item).strip() for item in payload if str(item).strip()]
+        return extract_mounted_tool_names(metadata)
 
     @staticmethod
     def _coerce_messages(

@@ -34,6 +34,7 @@ from .models import (
     SkillRunStatus,
     ToolCallSpec,
     ToolFeedbackMessage,
+    resolve_effective_tool_allowlist,
 )
 from .protocols import StructuredModelClientProtocol
 
@@ -302,11 +303,16 @@ class SkillRunner:
         skip_remaining_tools: bool,
     ) -> list[ToolFeedbackMessage]:
         results: list[ToolFeedbackMessage] = []
+        allowed_tool_names = resolve_effective_tool_allowlist(
+            permission_mode=manifest.permission_mode,
+            tools_allowed=list(manifest.tools_allowed),
+            metadata=execution_context.metadata,
+        )
 
         for call in tool_calls:
-            if manifest.tools_allowed and call.tool_name not in manifest.tools_allowed:
+            if allowed_tool_names and call.tool_name not in allowed_tool_names:
                 raise SkillToolExecutionError(
-                    f"工具 '{call.tool_name}' 不在 tools_allowed 白名单中"
+                    f"工具 '{call.tool_name}' 不在当前 skill 可用工具集合中"
                 )
 
             await self._call_hook("before_tool_execute", call.tool_name, call.arguments)

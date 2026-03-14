@@ -34,6 +34,7 @@ class McpServerConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     cwd: str = Field(default="")
     enabled: bool = True
+    mount_policy: str = Field(default="auto_readonly")
 
 
 class McpToolRecord(BaseModel):
@@ -177,6 +178,15 @@ class McpRegistryService:
         if server_name:
             return [item for item in tools if item.server_name == server_name]
         return tools
+
+    def get_mount_policy(self, server_name: str) -> str:
+        config = self._find_server_config(server_name)
+        if config is None:
+            return "explicit"
+        normalized = str(config.mount_policy).strip().lower() or "auto_readonly"
+        if normalized in {"explicit", "auto_readonly", "auto_all"}:
+            return normalized
+        return "explicit"
 
     def registered_tool_count(self) -> int:
         return len(self._tool_records)
@@ -391,6 +401,7 @@ class McpRegistryService:
                 "annotations": {}
                 if tool.annotations is None
                 else tool.annotations.model_dump(mode="json", by_alias=True),
+                "mount_policy": self.get_mount_policy(config.name),
                 "entrypoints": ["agent_runtime", "web"],
                 "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
                 "output_schema": tool.outputSchema,

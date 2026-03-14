@@ -241,6 +241,7 @@ class ToolIndex:
             selection_id=str(ULID()),
             query=request,
             selected_tools=selected_tools,
+            recommended_tools=list(selected_tools),
             hits=hits,
             backend=self._backend.backend_name,
             is_fallback=is_fallback,
