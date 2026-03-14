@@ -611,8 +611,15 @@ describe("ChatWorkbench", () => {
     );
 
     expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
-    expect(screen.getByText("Chat Planner Work")).toBeInTheDocument();
-    expect(screen.getByText("当前对话的背景摘要可以正常查看。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chat Task" })).toBeInTheDocument();
+    expect(screen.getByText("主助手正在直接处理这条消息。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开任务" })).toHaveAttribute(
+      "href",
+      "/tasks/task-chat-refresh"
+    );
+    expect(screen.queryByText("当前可用工具")).not.toBeInTheDocument();
+    expect(screen.queryByText("记忆与上下文")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前任务")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(refreshResources).toHaveBeenCalledWith([
