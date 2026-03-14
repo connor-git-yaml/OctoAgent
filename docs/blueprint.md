@@ -2957,6 +2957,7 @@ M3 核心对象关系（2026-03-08 补充）：
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
 - [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、Butler-owned freshness delegation 主链、缺城市显式追问、backend unavailable 降级、worker private recall runtime、message-native 返回链与 runtime truth surface）
+- [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为“当前项目主 Agent + 已创建 Agent 列表 + 模板创建流”，并将结构化编辑控件替代技术字段编辑主路径）
 
 M4 约束：
 
