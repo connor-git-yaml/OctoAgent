@@ -399,7 +399,18 @@ describe("AgentCenter", () => {
     expect(screen.getByRole("heading", { name: "当前项目默认会先用这一个" })).toBeInTheDocument();
     expect(screen.getByText("家庭主 Agent")).toBeInTheDocument();
     expect(screen.getByText("NAS 巡检")).toBeInTheDocument();
-    expect(screen.queryByText("通用协作 模板")).not.toBeInTheDocument();
+
+    const projectAgentSection = screen
+      .getByRole("heading", { name: "按职责拆开的辅助 Agent" })
+      .closest("section") as HTMLElement | null;
+    const builtinLaneSection = screen
+      .getByRole("heading", { name: "Chat 仍可能委派这些专项 lane" })
+      .closest("section") as HTMLElement | null;
+
+    expect(projectAgentSection).not.toBeNull();
+    expect(builtinLaneSection).not.toBeNull();
+    expect(within(projectAgentSection!).queryByText("通用协作 模板")).not.toBeInTheDocument();
+    expect(within(builtinLaneSection!).getByText("通用协作 模板")).toBeInTheDocument();
   });
 
   it("点击新建 Agent 后才展示模板选择，并进入结构化编辑页", async () => {
@@ -716,6 +727,9 @@ describe("AgentCenter", () => {
     );
 
     expect(await screen.findByText("当前还在使用 通用协作 模板")).toBeInTheDocument();
+    expect(screen.getByText("当前项目还没有自己的主 Agent")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chat 仍可能委派这些专项 lane" })).toBeInTheDocument();
+    expect(screen.getByText("资料调研 模板")).toBeInTheDocument();
 
     await userEvent.click((await screen.findAllByRole("button", { name: "建立主 Agent" }))[0]);
     const nameInput = await screen.findByLabelText(/名称/);
@@ -856,5 +870,23 @@ describe("AgentCenter", () => {
       await screen.findByText(/当前聚焦会话属于「工作项目 \/ Work Workspace」/)
     ).toBeInTheDocument();
     expect(screen.getByText(/不会反向改写那个会话/)).toBeInTheDocument();
+  });
+
+  it("会把系统内建运行时模板单独展示，避免和项目 Agent 列表混淆", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Chat 仍可能委派这些专项 lane" })).toBeInTheDocument();
+    expect(screen.getByText("通用协作 模板")).toBeInTheDocument();
+    expect(screen.getByText("资料调研 模板")).toBeInTheDocument();
   });
 });

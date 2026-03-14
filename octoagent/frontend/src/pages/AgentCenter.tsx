@@ -528,6 +528,16 @@ export default function AgentCenter() {
             </span>
           </div>
         ) : null}
+
+        {agentView.mainAgent.status !== "ready" ? (
+          <div className="wb-inline-banner is-muted">
+            <strong>当前项目还没有自己的主 Agent</strong>
+            <span>
+              Chat 这时仍会先回退到系统内建的 Butler / Research / Dev / Ops 运行时 lane。
+              这些是系统 fallback 与专项委派能力，不等于你已经在当前项目里创建了同名 Agent。
+            </span>
+          </div>
+        ) : null}
       </section>
 
       <div className="wb-agent-management-layout">
@@ -581,6 +591,29 @@ export default function AgentCenter() {
                 )}
               </div>
             )}
+          </section>
+
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">系统内建运行时</p>
+                <h3>Chat 仍可能委派这些专项 lane</h3>
+                <p className="wb-panel-copy">
+                  它们是系统内建 runtime template，用来承接 Research / Dev / Ops 这类专项工作。
+                  这些条目不是当前项目已创建的 Agent，因此不会出现在上面的项目列表里。
+                </p>
+              </div>
+              <span className="wb-chip">{agentView.builtinTemplates.length} 个模板</span>
+            </div>
+
+            <div className="wb-note-stack">
+              {agentView.builtinTemplates.map((template) => (
+                <div key={template.templateId} className="wb-note">
+                  <strong>{template.name}</strong>
+                  <span>{template.summary}</span>
+                </div>
+              ))}
+            </div>
           </section>
         </div>
 
@@ -653,7 +686,9 @@ export default function AgentCenter() {
                 </div>
                 {agentView.mainAgentTemplate ? (
                   <small className="wb-inline-note">
-                    当前系统默认起点：{formatAgentArchetype(agentView.mainAgentTemplate.static_config.base_archetype)}
+                    当前系统默认起点：
+                    {formatAgentArchetype(agentView.mainAgentTemplate.static_config.base_archetype)}
+                    。如需看专项 fallback lane，左侧“系统内建运行时”会显示完整列表。
                   </small>
                 ) : null}
               </div>
