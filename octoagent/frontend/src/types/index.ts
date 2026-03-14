@@ -502,6 +502,8 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   focused_session_id: string;
   focused_thread_id: string;
   new_conversation_token: string;
+  new_conversation_project_id: string;
+  new_conversation_workspace_id: string;
   sessions: SessionProjectionItem[];
   summary?: SessionProjectionSummary | null;
   operator_summary: OperatorInboxSummary | null;

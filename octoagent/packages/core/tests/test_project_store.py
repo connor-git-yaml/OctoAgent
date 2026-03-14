@@ -118,6 +118,33 @@ class TestProjectStore:
         assert resolved is not None
         assert resolved.workspace_id == beta_workspace.workspace_id
 
+    async def test_resolve_workspace_for_scope_supports_workspace_scoped_chat_scope(self, core_db):
+        store = SqliteProjectStore(core_db)
+        project = Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+        workspace = Workspace(
+            workspace_id="workspace-default-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Primary Workspace",
+            root_path="/tmp/default",
+        )
+
+        await store.create_project(project)
+        await store.create_workspace(workspace)
+        await core_db.commit()
+
+        resolved = await store.resolve_workspace_for_scope(
+            "workspace:workspace-default-primary:chat:web:thread-alpha"
+        )
+
+        assert resolved is not None
+        assert resolved.workspace_id == workspace.workspace_id
+
     async def test_save_and_read_migration_run(self, core_db):
         store = SqliteProjectStore(core_db)
         run = ProjectMigrationRun(

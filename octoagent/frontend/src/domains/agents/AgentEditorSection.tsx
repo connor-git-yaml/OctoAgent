@@ -253,7 +253,7 @@ export default function AgentEditorSection({
               </option>
             ))}
           </select>
-          <small>切换顶部 Project 后，就会看到那个项目自己的 Agent 列表。</small>
+          <small>这里决定的是这个 Agent 属于哪个项目的默认定义；已存在会话不会因此改绑。</small>
         </label>
 
         <label className="wb-field wb-field-span-2">

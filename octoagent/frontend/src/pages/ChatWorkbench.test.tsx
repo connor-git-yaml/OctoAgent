@@ -31,6 +31,38 @@ function buildSnapshot(): any {
         focused_session_id: "",
         focused_thread_id: "",
         new_conversation_token: "",
+        new_conversation_project_id: "",
+        new_conversation_workspace_id: "",
+      },
+      project_selector: {
+        current_project_id: "project-default",
+        current_workspace_id: "workspace-default",
+        available_projects: [
+          {
+            project_id: "project-default",
+            slug: "default",
+            name: "默认项目",
+          },
+          {
+            project_id: "project-ops",
+            slug: "ops",
+            name: "运维项目",
+          },
+        ],
+        available_workspaces: [
+          {
+            workspace_id: "workspace-default",
+            project_id: "project-default",
+            slug: "primary",
+            name: "默认空间",
+          },
+          {
+            workspace_id: "workspace-ops",
+            project_id: "project-ops",
+            slug: "ops",
+            name: "运维空间",
+          },
+        ],
       },
       worker_profiles: {
         summary: {
@@ -293,6 +325,101 @@ describe("ChatWorkbench", () => {
     await userEvent.click(screen.getByRole("button", { name: "开始新对话" }));
 
     expect(resetConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("会显示待创建新会话的项目起点", () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.new_conversation_token = "token-new";
+    snapshot.resources.sessions.new_conversation_project_id = "project-ops";
+    snapshot.resources.sessions.new_conversation_workspace_id = "workspace-ops";
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: null,
+    });
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("新会话起点已冻结")).toBeInTheDocument();
+    expect(screen.getByText("会话项目 运维项目")).toBeInTheDocument();
+    expect(screen.getByText("Workspace 运维空间")).toBeInTheDocument();
+    expect(
+      screen.getByText(/这段新对话会从 运维项目 \/ 运维空间 创建/)
+    ).toBeInTheDocument();
+  });
+
+  it("会明确提示当前会话绑定的项目与顶部选择不同", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-ops",
+        thread_id: "thread-ops",
+        task_id: "task-ops",
+        parent_task_id: "",
+        parent_work_id: "",
+        title: "运维排障",
+        status: "RUNNING",
+        channel: "web",
+        requester_id: "owner",
+        project_id: "project-ops",
+        workspace_id: "workspace-ops",
+        runtime_kind: "worker",
+        lane: "running",
+        latest_message_summary: "继续排查磁盘告警",
+        latest_event_at: "2026-03-14T10:00:00Z",
+        execution_summary: {},
+        capabilities: [],
+        detail_refs: {},
+      },
+    ];
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-ops", role: "agent", content: "正在排查。", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-ops",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-ops",
+        title: "运维排障",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Session Bound")).toBeInTheDocument();
+    expect(screen.getByText("会话项目 运维项目")).toBeInTheDocument();
+    expect(screen.getByText("顶部选择 默认项目 / 默认空间")).toBeInTheDocument();
+    expect(
+      screen.getByText(/当前会话继续沿用 运维项目 \/ 运维空间/)
+    ).toBeInTheDocument();
   });
 
   it("恢复状态停留较久时会给出直接开始新对话的出口", async () => {

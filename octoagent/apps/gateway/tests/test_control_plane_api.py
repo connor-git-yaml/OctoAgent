@@ -3074,6 +3074,8 @@ class TestControlPlaneApi:
         assert focus_result["data"] == {
             "session_id": expected_session_id,
             "thread_id": "thread-session-authority",
+            "project_id": workspace.project_id,
+            "workspace_id": workspace.workspace_id,
         }
 
         focused_sessions = await control_plane_client.get("/api/control/resources/sessions")
@@ -3275,6 +3277,8 @@ class TestControlPlaneApi:
         assert new_result["data"]["previous_session_id"] == session_id
         assert new_result["data"]["previous_task_id"] == task_id
         assert new_result["data"]["new_conversation_token"]
+        assert new_result["data"]["project_id"] == workspace.project_id
+        assert new_result["data"]["workspace_id"] == workspace.workspace_id
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200
@@ -3282,6 +3286,8 @@ class TestControlPlaneApi:
         assert payload["focused_session_id"] == ""
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
+        assert payload["new_conversation_project_id"] == workspace.project_id
+        assert payload["new_conversation_workspace_id"] == workspace.workspace_id
 
     async def test_session_projection_exposes_lane_summary_and_unfocus(
         self,
@@ -3333,6 +3339,12 @@ class TestControlPlaneApi:
         assert any(item["capability_id"] == "session.unfocus" for item in payload["capabilities"])
         focused = next(item for item in payload["sessions"] if item["session_id"] == session_id)
         assert focused["lane"] in {"queue", "running"}
+
+        selector_resp = await control_plane_client.get("/api/control/resources/project-selector")
+        assert selector_resp.status_code == 200
+        selector_payload = selector_resp.json()
+        assert selector_payload["current_project_id"] == focused["project_id"]
+        assert selector_payload["current_workspace_id"] == focused["workspace_id"]
 
         unfocus_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -3475,6 +3487,8 @@ class TestControlPlaneApi:
         assert reset_result["data"]["reset_session_context"] is True
         assert reset_result["data"]["reset_agent_session_count"] >= 1
         assert reset_result["data"]["new_conversation_token"]
+        assert reset_result["data"]["project_id"] == project.project_id
+        assert reset_result["data"]["workspace_id"] == workspace.workspace_id
 
         session_state = await store_group.agent_context_store.get_session_context(
             "thread-reset-legacy"
@@ -3505,6 +3519,8 @@ class TestControlPlaneApi:
         assert payload["focused_session_id"] == ""
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == reset_result["data"]["new_conversation_token"]
+        assert payload["new_conversation_project_id"] == project.project_id
+        assert payload["new_conversation_workspace_id"] == workspace.workspace_id
 
     async def test_backup_create_and_restore_plan_actions_refresh_diagnostics(
         self,

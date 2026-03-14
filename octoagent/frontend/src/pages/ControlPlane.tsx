@@ -1767,6 +1767,12 @@ export default function ControlPlane({
             onResumeSession={(session) =>
               void submitAction("session.resume", { task_id: session.task_id })
             }
+            projectNameForId={(projectId) =>
+              availableProjects.find((item) => item.project_id === projectId)?.name ?? projectId
+            }
+            workspaceNameForId={(workspaceId) =>
+              availableWorkspaces.find((item) => item.workspace_id === workspaceId)?.name ?? workspaceId
+            }
             formatDateTime={formatDateTime}
             formatA2ADirection={formatA2ADirection}
             formatA2AMessageType={formatA2AMessageType}

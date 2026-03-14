@@ -73,6 +73,10 @@ export default function SettingsProviderSection({
             <p className="wb-panel-copy">
               没配真实模型时，系统会先自动回退。你只需要在这里补 Provider、API Key 或 OAuth。
             </p>
+            <div className="wb-chip-row">
+              <span className="wb-chip">平台级</span>
+              <span className="wb-chip">会影响新的默认模型路由</span>
+            </div>
           </div>
         </div>
 

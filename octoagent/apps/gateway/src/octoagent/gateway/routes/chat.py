@@ -10,13 +10,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from octoagent.core.models import RuntimeControlContext
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
+from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 
 from ..deps import get_store_group
+from ..services.runtime_control import RUNTIME_CONTEXT_JSON_KEY, encode_runtime_context
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +74,65 @@ def _chat_send_failure(
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _resolve_project_root(request: Request) -> Path:
+    return Path(getattr(request.app.state, "project_root", Path.cwd()))
+
+
+async def _resolve_chat_scope_snapshot(
+    body: ChatSendRequest,
+    request: Request,
+    store_group,
+) -> tuple[str, str, str]:
+    project_id = str(body.project_id or "").strip()
+    workspace_id = str(body.workspace_id or "").strip()
+    new_conversation_token = str(body.new_conversation_token or "").strip()
+
+    state = ControlPlaneStateStore(_resolve_project_root(request)).load()
+    if new_conversation_token and new_conversation_token == state.new_conversation_token:
+        project_id = state.new_conversation_project_id.strip() or project_id
+        workspace_id = state.new_conversation_workspace_id.strip() or workspace_id
+    elif not body.task_id:
+        project_id = project_id or state.selected_project_id.strip()
+        workspace_id = workspace_id or state.selected_workspace_id.strip()
+
+    project = await store_group.project_store.get_project(project_id) if project_id else None
+    workspace = (
+        await store_group.project_store.get_workspace(workspace_id) if workspace_id else None
+    )
+    if workspace is not None and project is None:
+        project = await store_group.project_store.get_project(workspace.project_id)
+    if project is None and workspace is None:
+        return new_conversation_token, "", ""
+    if project is None:
+        raise _chat_send_failure(
+            status_code=400,
+            code="CHAT_SCOPE_INVALID",
+            message="指定的 project/workspace 无法解析到有效 project。",
+        )
+    if workspace is not None and workspace.project_id != project.project_id:
+        raise _chat_send_failure(
+            status_code=400,
+            code="CHAT_SCOPE_INVALID",
+            message="workspace 不属于指定 project。",
+        )
+    if workspace is None:
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+    return (
+        new_conversation_token,
+        project.project_id,
+        workspace.workspace_id if workspace is not None else "",
+    )
+
+
+def _build_workspace_scoped_chat_scope_id(
+    *,
+    workspace_id: str,
+    channel: str,
+    thread_id: str,
+) -> str:
+    return f"workspace:{workspace_id}:chat:{channel}:{thread_id}"
+
+
 @router.post("/api/chat/send", response_model=ChatSendResponse)
 async def send_chat_message(
     body: ChatSendRequest,
@@ -86,6 +149,15 @@ async def send_chat_message(
     if requested_agent_profile_id:
         chat_control_metadata["agent_profile_id"] = requested_agent_profile_id
         chat_control_metadata["requested_worker_profile_id"] = requested_agent_profile_id
+    new_conversation_token, project_id, workspace_id = await _resolve_chat_scope_snapshot(
+        body,
+        request,
+        store_group,
+    )
+    if project_id:
+        chat_control_metadata["project_id"] = project_id
+    if workspace_id:
+        chat_control_metadata["workspace_id"] = workspace_id
 
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
@@ -101,6 +173,15 @@ async def send_chat_message(
         msg = NormalizedMessage(
             channel="web",
             thread_id=task_id,
+            scope_id=(
+                _build_workspace_scoped_chat_scope_id(
+                    workspace_id=workspace_id,
+                    channel="web",
+                    thread_id=task_id,
+                )
+                if workspace_id
+                else ""
+            ),
             sender_id="owner",
             sender_name="Owner",
             text=body.message,
@@ -120,13 +201,30 @@ async def send_chat_message(
             ) from exc
         if created:
             task_id = created_task_id
+            dispatch_metadata = dict(chat_control_metadata)
+            dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
+                RuntimeControlContext(
+                    task_id=task_id,
+                    surface="web",
+                    scope_id=msg.scope_id,
+                    thread_id=msg.thread_id,
+                    project_id=project_id,
+                    workspace_id=workspace_id,
+                    agent_profile_id=requested_agent_profile_id,
+                    metadata=(
+                        {"new_conversation_token": new_conversation_token}
+                        if new_conversation_token
+                        else {}
+                    ),
+                )
+            )
             try:
                 await _enqueue_or_run(
                     request,
                     service,
                     task_id,
                     body.message,
-                    dispatch_metadata=chat_control_metadata,
+                    dispatch_metadata=dispatch_metadata,
                 )
             except Exception as exc:
                 logger.warning("chat_send_enqueue_failed", exc_info=True)
@@ -150,12 +248,25 @@ async def send_chat_message(
                 text=body.message,
                 control_metadata=chat_control_metadata,
             )
+            dispatch_metadata = dict(chat_control_metadata)
+            if project_id or workspace_id:
+                dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
+                    RuntimeControlContext(
+                        task_id=task_id,
+                        surface="web",
+                        thread_id=existing_task.thread_id,
+                        scope_id=existing_task.scope_id,
+                        project_id=project_id,
+                        workspace_id=workspace_id,
+                        agent_profile_id=requested_agent_profile_id,
+                    )
+                )
             await _enqueue_or_run(
                 request,
                 service,
                 task_id,
                 body.message,
-                dispatch_metadata=chat_control_metadata,
+                dispatch_metadata=dispatch_metadata,
             )
         except HTTPException:
             raise

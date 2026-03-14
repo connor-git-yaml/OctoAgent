@@ -115,9 +115,11 @@ export default function SettingsOverview({
           <div className="wb-chip-row">
             <span className="wb-chip">{minimumStatusValue}</span>
             <span className="wb-chip">
-              当前上下文 {currentProject?.name ?? selector.current_project_id} /{" "}
+              当前项目默认 {currentProject?.name ?? selector.current_project_id} /{" "}
               {currentWorkspace?.name ?? selector.current_workspace_id}
             </span>
+            <span className="wb-chip">Providers / Memory = 平台级</span>
+            <span className="wb-chip">Behavior Files = 项目默认</span>
             <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`} role="status">
               {statusChipLabel}
             </span>
@@ -163,6 +165,33 @@ export default function SettingsOverview({
               保存配置
             </button>
           )}
+        </div>
+      </section>
+
+      <section className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">作用域说明</p>
+            <h3>这里改的是平台设置和项目默认，不是某一条会话本身</h3>
+          </div>
+        </div>
+        <div className="wb-note-stack">
+          <div className="wb-note">
+            <strong>平台级</strong>
+            <span>Models & Providers、Memory bridge 会影响整个平台默认运行面。</span>
+          </div>
+          <div className="wb-note">
+            <strong>项目默认</strong>
+            <span>
+              Behavior Files 会影响当前项目后续新会话的默认行为，但不会反向改写旧会话。
+            </span>
+          </div>
+          <div className="wb-note">
+            <strong>已有会话</strong>
+            <span>
+              已经创建的会话会继续沿用自己的 session-scoped project / workspace 绑定。
+            </span>
+          </div>
         </div>
       </section>
 

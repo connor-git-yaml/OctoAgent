@@ -103,6 +103,10 @@ function buildSnapshot(options?: {
           },
         ],
       },
+      sessions: {
+        focused_session_id: "",
+        sessions: [],
+      },
       worker_profiles: {
         generated_at: "2026-03-14T10:05:00Z",
         profiles: [
@@ -808,5 +812,49 @@ describe("AgentCenter", () => {
 
     expect(await screen.findByText("工作主 Agent")).toBeInTheDocument();
     expect(screen.queryByText("家庭主 Agent")).not.toBeInTheDocument();
+  });
+
+  it("会提示当前聚焦会话属于别的项目，不会被这里的默认 Agent 配置回写", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions = {
+      focused_session_id: "session-work",
+      sessions: [
+        {
+          session_id: "session-work",
+          thread_id: "thread-work",
+          task_id: "task-work",
+          parent_task_id: "",
+          parent_work_id: "",
+          title: "工作排障",
+          status: "RUNNING",
+          channel: "web",
+          requester_id: "owner",
+          project_id: "project-work",
+          workspace_id: "project-work-workspace",
+          runtime_kind: "worker",
+          latest_message_summary: "继续处理工作项目问题",
+          latest_event_at: "2026-03-14T10:00:00Z",
+          execution_summary: {},
+          capabilities: [],
+          detail_refs: {},
+        },
+      ],
+    };
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByText(/当前聚焦会话属于「工作项目 \/ Work Workspace」/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/不会反向改写那个会话/)).toBeInTheDocument();
   });
 });

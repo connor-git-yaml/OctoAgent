@@ -464,6 +464,18 @@ class ChatSendRequest(BaseModel):
         default=None,
         description="可选的当前 Agent / Root Agent profile ID",
     )
+    new_conversation_token: str | None = Field(
+        default=None,
+        description="可选的新会话 token，用于消费 session.new 冻结的会话起点。",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description="可选的 project ID；新会话首条消息可显式传入。",
+    )
+    workspace_id: str | None = Field(
+        default=None,
+        description="可选的 workspace ID；新会话首条消息可显式传入。",
+    )
 
 
 class ChatSendResponse(BaseModel):

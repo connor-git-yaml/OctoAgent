@@ -127,7 +127,15 @@ class TaskService:
         now = datetime.now(UTC)
         task_id = str(ULID())
         trace_id = f"trace-{task_id}"
-        scope_id = message.scope_id or f"chat:{message.channel}:{message.thread_id}"
+        input_metadata = normalize_input_metadata(message.metadata)
+        control_metadata = normalize_control_metadata(message.control_metadata)
+        workspace_id = str(control_metadata.get("workspace_id", "")).strip()
+        derived_scope_id = (
+            f"workspace:{workspace_id}:chat:{message.channel}:{message.thread_id}"
+            if workspace_id
+            else ""
+        )
+        scope_id = message.scope_id or derived_scope_id or f"chat:{message.channel}:{message.thread_id}"
 
         # 先构建 Task 与初始事件，后续单事务提交（避免 task 与 events 分离落盘）
         task = Task(
@@ -167,8 +175,6 @@ class TaskService:
 
         # USER_MESSAGE 事件
         text_preview = message.text[:MESSAGE_PREVIEW_LENGTH]
-        input_metadata = normalize_input_metadata(message.metadata)
-        control_metadata = normalize_control_metadata(message.control_metadata)
         event_2_id = str(ULID())
         event_2 = Event(
             event_id=event_2_id,

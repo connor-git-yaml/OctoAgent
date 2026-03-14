@@ -29,6 +29,8 @@ interface SessionCenterSectionProps {
   onExportSession: (session: SessionProjectionItem) => void;
   onInterruptSession: (session: SessionProjectionItem) => void;
   onResumeSession: (session: SessionProjectionItem) => void;
+  projectNameForId: (projectId: string) => string;
+  workspaceNameForId: (workspaceId: string) => string;
   formatDateTime: (value?: string | null) => string;
   formatA2ADirection: (value: string) => string;
   formatA2AMessageType: (value: string) => string;
@@ -56,6 +58,8 @@ export default function SessionCenterSection({
   onExportSession,
   onInterruptSession,
   onResumeSession,
+  projectNameForId,
+  workspaceNameForId,
   formatDateTime,
   formatA2ADirection,
   formatA2AMessageType,
@@ -90,6 +94,16 @@ export default function SessionCenterSection({
       count: sessionSummary?.history_sessions ?? 0,
     },
   ];
+
+  function formatScopedLabel(kind: "project" | "workspace", id: string, resolved: string): string {
+    if (!id) {
+      return `${kind === "project" ? "Project" : "Workspace"}: -`;
+    }
+    if (!resolved || resolved === id) {
+      return `${kind === "project" ? "Project" : "Workspace"}: ${id}`;
+    }
+    return `${kind === "project" ? "Project" : "Workspace"}: ${resolved} (${id})`;
+  }
 
   return (
     <section className="stack-section">
@@ -223,6 +237,16 @@ export default function SessionCenterSection({
             <span>Task: {session.task_id}</span>
             <span>Channel: {session.channel}</span>
             <span>Requester: {session.requester_id}</span>
+            <span>
+              {formatScopedLabel("project", session.project_id, projectNameForId(session.project_id))}
+            </span>
+            <span>
+              {formatScopedLabel(
+                "workspace",
+                session.workspace_id,
+                workspaceNameForId(session.workspace_id)
+              )}
+            </span>
             <span>Updated: {formatDateTime(session.latest_event_at)}</span>
             <span>Runtime: {session.runtime_kind || "-"}</span>
             <span>Parent Task: {session.parent_task_id || "-"}</span>

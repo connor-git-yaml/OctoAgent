@@ -47,6 +47,20 @@ export interface UseChatStreamReturn {
   taskId: string | null;
 }
 
+export interface ChatSessionScopeSnapshot {
+  activeProjectId?: string | null;
+  activeWorkspaceId?: string | null;
+  newConversationToken?: string | null;
+  newConversationProjectId?: string | null;
+  newConversationWorkspaceId?: string | null;
+}
+
+interface PendingConversationScope {
+  token: string;
+  projectId: string;
+  workspaceId: string;
+}
+
 function makeControlActionRequest(
   actionId: string,
   params: Record<string, unknown>
@@ -74,6 +88,20 @@ function normalizeTaskId(taskId: string | null | undefined): string | null {
   return normalized ? normalized : null;
 }
 
+function buildPendingConversationScope(
+  snapshot: ChatSessionScopeSnapshot | null | undefined
+): PendingConversationScope | null {
+  const token = String(snapshot?.newConversationToken ?? "").trim();
+  if (!token) {
+    return null;
+  }
+  return {
+    token,
+    projectId: String(snapshot?.newConversationProjectId ?? "").trim(),
+    workspaceId: String(snapshot?.newConversationWorkspaceId ?? "").trim(),
+  };
+}
+
 async function fetchTaskDetailWithTimeout(taskId: string): Promise<TaskDetailResponse> {
   let timer: number | null = null;
   try {
@@ -92,12 +120,17 @@ async function fetchTaskDetailWithTimeout(taskId: string): Promise<TaskDetailRes
   }
 }
 
-export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): UseChatStreamReturn {
+export function useChatStream(
+  restoreTarget: ChatRestoreTarget | null = null,
+  sessionScope: ChatSessionScopeSnapshot | null = null
+): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(() => readStoredTaskId());
+  const [pendingConversationScope, setPendingConversationScope] =
+    useState<PendingConversationScope | null>(() => buildPendingConversationScope(sessionScope));
   const [suppressedRestoreSignature, setSuppressedRestoreSignature] = useState<string | null>(
     null
   );
@@ -127,11 +160,8 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
   }, []);
 
   const requestNewConversation = useCallback(async (currentTaskId: string | null) => {
-    await executeControlAction(
-      makeControlActionRequest(
-        "session.new",
-        currentTaskId ? { task_id: currentTaskId } : {}
-      )
+    return await executeControlAction(
+      makeControlActionRequest("session.new", currentTaskId ? { task_id: currentTaskId } : {})
     );
   }, []);
 
@@ -154,6 +184,12 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         setError(null);
         setRestoring(false);
         setSuppressedRestoreSignature(null);
+        const effectiveProjectId =
+          pendingConversationScope?.projectId ||
+          String(sessionScope?.activeProjectId ?? "").trim();
+        const effectiveWorkspaceId =
+          pendingConversationScope?.workspaceId ||
+          String(sessionScope?.activeWorkspaceId ?? "").trim();
         const resp = await frontDoorRequest("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -161,6 +197,12 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
             message: text,
             task_id: taskId,
             agent_profile_id: options?.agentProfileId?.trim() || undefined,
+            new_conversation_token:
+              !taskId && pendingConversationScope?.token
+                ? pendingConversationScope.token
+                : undefined,
+            project_id: !taskId && effectiveProjectId ? effectiveProjectId : undefined,
+            workspace_id: !taskId && effectiveWorkspaceId ? effectiveWorkspaceId : undefined,
           }),
         });
 
@@ -171,6 +213,9 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         const data = await resp.json();
         const newTaskId = data.task_id;
         setTaskId(newTaskId);
+        if (!taskId) {
+          setPendingConversationScope(null);
+        }
         void requestSessionFocus(newTaskId).catch(() => {
           // 这里不阻断聊天主链，focus 同步失败只影响 restore/focus 体验。
         });
@@ -295,7 +340,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         setStreaming(false);
       }
     },
-    [taskId, closeStream, requestSessionFocus]
+    [taskId, closeStream, pendingConversationScope, requestSessionFocus, sessionScope]
   );
 
   const resetConversation = useCallback(async () => {
@@ -309,11 +354,33 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     setTaskId(null);
     persistTaskId(null);
     try {
-      await requestNewConversation(currentTaskId);
+      const result = await requestNewConversation(currentTaskId);
+      const resultData =
+        result && typeof result === "object" && result.data && typeof result.data === "object"
+          ? result.data
+          : {};
+      const nextScope = {
+        newConversationToken: String(resultData.new_conversation_token ?? ""),
+        newConversationProjectId: String(resultData.project_id ?? ""),
+        newConversationWorkspaceId: String(resultData.workspace_id ?? ""),
+      };
+      setPendingConversationScope(buildPendingConversationScope(nextScope));
     } catch {
       setError("本地已切到新对话，但服务端还没确认新的会话起点。");
     }
   }, [closeStream, requestNewConversation, restoreTaskIdSignature, taskId]);
+
+  useEffect(() => {
+    if (taskId) {
+      return;
+    }
+    setPendingConversationScope(buildPendingConversationScope(sessionScope));
+  }, [
+    sessionScope?.newConversationToken,
+    sessionScope?.newConversationProjectId,
+    sessionScope?.newConversationWorkspaceId,
+    taskId,
+  ]);
 
   // 组件卸载时清理
   useEffect(() => {

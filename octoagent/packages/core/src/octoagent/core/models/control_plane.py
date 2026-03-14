@@ -210,6 +210,8 @@ class SessionProjectionDocument(ControlPlaneDocument):
     focused_session_id: str = Field(default="")
     focused_thread_id: str = Field(default="")
     new_conversation_token: str = Field(default="")
+    new_conversation_project_id: str = Field(default="")
+    new_conversation_workspace_id: str = Field(default="")
     sessions: list[SessionProjectionItem] = Field(default_factory=list)
     summary: SessionProjectionSummary = Field(default_factory=SessionProjectionSummary)
     operator_summary: OperatorInboxSummary | None = None
@@ -1078,4 +1080,6 @@ class ControlPlaneState(BaseModel):
     focused_session_id: str = Field(default="")
     focused_thread_id: str = Field(default="")
     new_conversation_token: str = Field(default="")
+    new_conversation_project_id: str = Field(default="")
+    new_conversation_workspace_id: str = Field(default="")
     updated_at: datetime = Field(default_factory=_utc_now)

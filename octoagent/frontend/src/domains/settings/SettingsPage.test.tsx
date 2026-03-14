@@ -615,7 +615,12 @@ describe("SettingsPage", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "Butler 默认行为现在来自显式文件与运行时 hints" })
+      screen.getByRole("heading", { name: "当前项目默认行为现在来自显式文件与运行时 hints" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Providers / Memory = 平台级")).toBeInTheDocument();
+    expect(screen.getByText("Behavior Files = 项目默认")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "这里改的是平台设置和项目默认，不是某一条会话本身" })
     ).toBeInTheDocument();
     expect(
       screen.getAllByText(

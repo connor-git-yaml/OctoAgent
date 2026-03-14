@@ -666,6 +666,10 @@ export default function SettingsPage() {
           <div>
             <p className="wb-card-label">Memory</p>
             <h3>平台级 Memory 后端与 bridge 连接</h3>
+            <div className="wb-chip-row">
+              <span className="wb-chip">平台级</span>
+              <span className="wb-chip">影响默认 recall 执行面</span>
+            </div>
           </div>
         </div>
 
@@ -773,7 +777,11 @@ export default function SettingsPage() {
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">Behavior Files</p>
-              <h3>Butler 默认行为现在来自显式文件与运行时 hints</h3>
+              <h3>当前项目默认行为现在来自显式文件与运行时 hints</h3>
+              <div className="wb-chip-row">
+                <span className="wb-chip">项目默认</span>
+                <span className="wb-chip">影响后续新会话</span>
+              </div>
             </div>
           </div>
 
@@ -804,7 +812,8 @@ export default function SettingsPage() {
             <strong>当前页面先提供只读 operator 视图</strong>
             <span>
               你可以先在这里确认 effective source、共享范围和决策 contract；文件编辑当前仍建议走
-              CLI，避免 Web 和本地文件系统各维护一套真相。
+              CLI，避免 Web 和本地文件系统各维护一套真相。已存在的会话会继续沿用自己的
+              session-scoped project / workspace 绑定。
             </span>
           </div>
 

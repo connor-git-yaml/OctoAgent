@@ -251,7 +251,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 051：Session-Native Agent Runtime & Recall Loop
 
-状态：**In Progress**
+状态：**Implemented**
 
 目标：
 
@@ -267,6 +267,18 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - Slice D 已完成：compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义
 - Slice E 已完成：`AgentSessionTurn` replay/sanitize 投影已进入预算驱动裁剪链；`single_loop_executor` 也已从 general Butler 扩到显式 `research/dev/ops` worker lens；后续只剩可选增强，而非主缺口
 
+### Feature 053：Session-Scoped Project Activation
+
+状态：**Implemented**
+
+本轮已经做实：
+
+- `session.new` 会冻结当前 `project_id/workspace_id`，并把 snapshot 进入 `ControlPlaneState / SessionProjectionDocument`
+- `session.focus / session.reset` 会恢复目标会话自己的 project/workspace 到当前 selector，不再把会话 project 漂回 surface 选择
+- chat 首条消息会透传 `new_conversation_token + project_id + workspace_id`，并把新 task scope durable 地写成 `workspace:<workspace_id>:chat:<channel>:<thread_id>`
+- `ProjectStore.resolve_workspace_for_scope()` 已支持 workspace-scoped chat scope
+- Web `useChatStream / ChatWorkbench` 已支持 pending new conversation project snapshot 的消费与刷新恢复
+
 ## 6. 非伪实现门禁
 
 当前 M4 波次必须满足以下门禁，否则不能视为完成：
@@ -281,6 +293,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 8. `WorkerSession` 不得继续退化为 loop/backoff/tool_profile 一类运行态对象；它必须是完整的 internal conversation / memory / recall carrier。
 9. 049 必须把默认行为主路径从代码特判迁移到 `behavior files + runtime hints + ButlerDecision`；天气/推荐/排期等问题不得继续扩张为新的硬编码分类树。
 10. 051 必须继续把 `AgentSession`、tool universe、memory recall 收口到 agent-native 主链；不能长期停留在弱引用 session 和 system-prefetch-only recall 上。
+11. 053 之后，project 激活主路径必须是 session-scoped snapshot；`session.new / focus / reset` 与 chat 首条消息不得再退回 surface-selected project 语义。
 
 ## 7. 移入 M5 的内容
 

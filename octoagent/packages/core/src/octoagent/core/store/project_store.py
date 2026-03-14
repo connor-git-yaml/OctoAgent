@@ -560,6 +560,12 @@ class SqliteProjectStore:
     ) -> Workspace | None:
         default_project = await self.get_default_project()
         if scope_id:
+            if scope_id.startswith("workspace:"):
+                workspace_id = scope_id.split(":", 2)[1].strip()
+                if workspace_id:
+                    direct_workspace = await self.get_workspace(workspace_id)
+                    if direct_workspace is not None:
+                        return direct_workspace
             placeholders = ",".join("?" for _ in binding_types)
             values: list[str] = [binding_type.value for binding_type in binding_types]
             values.append(scope_id)

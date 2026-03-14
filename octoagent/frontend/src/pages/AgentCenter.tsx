@@ -15,6 +15,7 @@ import {
   buildToolOptions,
   deriveAgentManagementView,
   formatAgentArchetype,
+  formatProjectName,
   formatTokenLabel,
   parseAgentReview,
   type AgentCardViewModel,
@@ -172,6 +173,33 @@ export default function AgentCenter() {
   );
   const skillEntries = capabilityProviderEntries.filter((entry) => entry.kind === "skill");
   const mcpEntries = capabilityProviderEntries.filter((entry) => entry.kind === "mcp");
+  const sessionsDocument =
+    (snapshot!.resources as {
+      sessions?: {
+        focused_session_id?: string;
+        sessions?: Array<{
+          session_id: string;
+          project_id: string;
+          workspace_id: string;
+        }>;
+      };
+    }).sessions ?? null;
+  const focusedSession =
+    sessionsDocument?.focused_session_id && Array.isArray(sessionsDocument.sessions)
+      ? sessionsDocument.sessions.find(
+          (item) => item.session_id === sessionsDocument.focused_session_id
+        ) ?? null
+      : null;
+  const focusedSessionProjectName = focusedSession?.project_id
+    ? formatProjectName(snapshot!.resources.project_selector.available_projects, focusedSession.project_id)
+    : "";
+  const focusedSessionWorkspaceName = focusedSession?.workspace_id
+    ? snapshot!.resources.project_selector.available_workspaces.find(
+        (item) => item.workspace_id === focusedSession.workspace_id
+      )?.name ?? focusedSession.workspace_id
+    : "";
+  const focusedSessionDiffersFromCurrentProject =
+    Boolean(focusedSession?.project_id) && focusedSession?.project_id !== agentView.currentProjectId;
 
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -186,8 +214,18 @@ export default function AgentCenter() {
     setEditorState(null);
     setShowTemplatePicker(false);
     setReview(null);
-    setFlashMessage(`现在看到的是「${agentView.currentProjectName}」自己的 Agent 列表。`);
-  }, [agentView.currentProjectId, agentView.currentProjectName]);
+    setFlashMessage(
+      focusedSessionDiffersFromCurrentProject
+        ? `当前聚焦会话属于「${focusedSessionProjectName} / ${focusedSessionWorkspaceName}」；这里改的是「${agentView.currentProjectName}」的默认 Agent 定义。`
+        : `现在看到的是「${agentView.currentProjectName}」自己的默认 Agent 定义与已创建 Agent。`
+    );
+  }, [
+    agentView.currentProjectId,
+    agentView.currentProjectName,
+    focusedSessionDiffersFromCurrentProject,
+    focusedSessionProjectName,
+    focusedSessionWorkspaceName,
+  ]);
 
   function openMainEditor() {
     const draft =
@@ -218,8 +256,8 @@ export default function AgentCenter() {
       });
       setFlashMessage(
         agentView.mainAgentProfile
-          ? "主 Agent 的修改会影响当前项目默认聊天入口。"
-          : "先把当前项目自己的主 Agent 建起来，后面聊天默认就会稳定指向它。"
+          ? "主 Agent 的修改会影响当前项目后续新会话的默认聊天入口。"
+          : "先把当前项目自己的主 Agent 建起来，后面新的会话默认就会稳定指向它。"
       );
     });
   }
@@ -433,7 +471,7 @@ export default function AgentCenter() {
             <p className="wb-kicker">Agents</p>
             <h1>当前项目的 Agent 管理</h1>
             <p className="wb-panel-copy">
-              先把主 Agent 定稳，再把其他 Agent 按职责拆开。模板只在新建时出现，不会混进已创建列表。
+              这里维护的是当前项目的默认 Agent 定义。先把主 Agent 定稳，再把其他 Agent 按职责拆开。
             </p>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
@@ -458,7 +496,7 @@ export default function AgentCenter() {
             <strong>主 Agent</strong>
             <span>
               {agentView.mainAgent.status === "ready"
-                ? "已经建立完成，可以直接编辑。"
+                ? "已经建立完成，会作为这个项目后续新会话的默认入口。"
                 : "还在沿用系统模板，建议先建立项目自己的主 Agent。"}
             </span>
           </div>
@@ -466,12 +504,30 @@ export default function AgentCenter() {
             <strong>已创建 Agent</strong>
             <span>{agentView.projectAgents.length} 个，按项目职责拆开管理。</span>
           </div>
+          <div className="wb-note">
+            <strong>已有会话</strong>
+            <span>
+              已经运行中的会话会继续沿用自己的 project / session 绑定，不会因为这里修改而被回写。
+            </span>
+          </div>
         </div>
 
         <div className="wb-inline-banner is-muted">
           <strong>{flashMessage}</strong>
-          <span>如果你要管理别的项目，先在顶部切到对应 Project。</span>
+          <span>
+            这里影响的是当前项目的默认配置；如果你要管理别的项目，先切到对应 Project，再编辑它自己的 Agent。
+          </span>
         </div>
+
+        {focusedSessionDiffersFromCurrentProject ? (
+          <div className="wb-inline-banner is-muted">
+            <strong>当前聚焦会话仍在别的项目里运行</strong>
+            <span>
+              该会话属于 {focusedSessionProjectName} / {focusedSessionWorkspaceName}。你现在编辑的是
+              {agentView.currentProjectName} 的默认 Agent 定义，不会反向改写那个会话。
+            </span>
+          </div>
+        ) : null}
       </section>
 
       <div className="wb-agent-management-layout">
@@ -496,7 +552,7 @@ export default function AgentCenter() {
                 <p className="wb-card-label">已创建 Agent</p>
                 <h3>按职责拆开的辅助 Agent</h3>
                 <p className="wb-panel-copy">
-                  这些 Agent 只属于当前项目。需要新的分工时再创建，不要把模板和正式 Agent 混在一起。
+                  这些 Agent 只属于当前项目默认定义。需要新的分工时再创建，不要把模板和正式 Agent 混在一起。
                 </p>
               </div>
               <span className="wb-chip">{agentView.projectAgents.length} 个</span>

@@ -174,6 +174,61 @@ describe("useChatStream", () => {
     expect(fetchTaskDetailMock).toHaveBeenCalledTimes(1);
   });
 
+  it("新对话首条消息会携带 session-scoped project 快照", async () => {
+    const FakeEventSource = installFakeEventSource();
+    executeControlActionMock.mockResolvedValueOnce({
+      data: {
+        new_conversation_token: "token-project-alpha",
+        project_id: "project-alpha",
+        workspace_id: "workspace-alpha",
+      },
+    });
+    frontDoorRequestMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          task_id: "task-chat-project-alpha",
+          stream_url: "/api/stream/task/task-chat-project-alpha",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    const { result } = renderHook(() =>
+      useChatStream(null, {
+        activeProjectId: "project-default",
+        activeWorkspaceId: "workspace-default",
+      })
+    );
+
+    await act(async () => {
+      await result.current.resetConversation();
+    });
+
+    await act(async () => {
+      await result.current.sendMessage("开始 alpha project 的新对话");
+    });
+
+    expect(frontDoorRequestMock).toHaveBeenCalledWith(
+      "/api/chat/send",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(String),
+      })
+    );
+    const [, request] = frontDoorRequestMock.mock.calls[0]!;
+    const payload = JSON.parse(String(request.body));
+    expect(payload.new_conversation_token).toBe("token-project-alpha");
+    expect(payload.project_id).toBe("project-alpha");
+    expect(payload.workspace_id).toBe("workspace-alpha");
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+  });
+
   it("可见失败事件会覆盖处理中占位消息", async () => {
     const FakeEventSource = installFakeEventSource();
     frontDoorRequestMock.mockResolvedValue(

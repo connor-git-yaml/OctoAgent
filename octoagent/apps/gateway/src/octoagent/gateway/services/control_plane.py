@@ -669,6 +669,8 @@ class ControlPlaneService:
             focused_session_id=focused_session_id,
             focused_thread_id=focused_thread_id,
             new_conversation_token=state.new_conversation_token,
+            new_conversation_project_id=state.new_conversation_project_id,
+            new_conversation_workspace_id=state.new_conversation_workspace_id,
             sessions=session_items,
             summary=session_summary,
             operator_summary=operator_summary,
@@ -4454,15 +4456,41 @@ class ControlPlaneService:
 
     async def _handle_session_focus(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
         session = await self._resolve_session_projection_target(request)
-        state = self._state_store.load().model_copy(
+        current_state = self._state_store.load()
+        state = current_state.model_copy(
             update={
                 "focused_session_id": session.session_id,
                 "focused_thread_id": session.thread_id,
                 "new_conversation_token": "",
+                "new_conversation_project_id": "",
+                "new_conversation_workspace_id": "",
+                "selected_project_id": session.project_id or current_state.selected_project_id,
+                "selected_workspace_id": (
+                    session.workspace_id or current_state.selected_workspace_id
+                ),
                 "updated_at": datetime.now(tz=UTC),
             }
         )
         self._state_store.save(state)
+        if session.project_id:
+            project = await self._stores.project_store.get_project(session.project_id)
+            workspace = (
+                await self._stores.project_store.get_workspace(session.workspace_id)
+                if session.workspace_id
+                else None
+            )
+            if project is not None:
+                if workspace is None or workspace.project_id != project.project_id:
+                    workspace = await self._stores.project_store.get_primary_workspace(
+                        project.project_id
+                    )
+                await self._sync_web_project_selector_state(
+                    project=project,
+                    workspace=workspace,
+                    source="session_focus",
+                )
+                await self._sync_policy_engine_for_project(project)
+                await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="SESSION_FOCUSED",
@@ -4470,6 +4498,8 @@ class ControlPlaneService:
             data={
                 "session_id": session.session_id,
                 "thread_id": session.thread_id,
+                "project_id": session.project_id,
+                "workspace_id": session.workspace_id,
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[
@@ -4521,12 +4551,19 @@ class ControlPlaneService:
             allow_empty=True,
             use_focused_when_empty=True,
         )
+        _, selected_project, selected_workspace, _ = await self._resolve_selection()
         token = str(ULID())
         state = self._state_store.load().model_copy(
             update={
                 "focused_session_id": "",
                 "focused_thread_id": "",
                 "new_conversation_token": token,
+                "new_conversation_project_id": (
+                    selected_project.project_id if selected_project is not None else ""
+                ),
+                "new_conversation_workspace_id": (
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -4543,6 +4580,10 @@ class ControlPlaneService:
             message="已切换到新的会话起点",
             data={
                 "new_conversation_token": token,
+                "project_id": selected_project.project_id if selected_project is not None else "",
+                "workspace_id": (
+                    selected_workspace.workspace_id if selected_workspace is not None else ""
+                ),
                 "previous_session_id": target.session_id if target is not None else "",
                 "previous_thread_id": target.thread_id if target is not None else "",
                 "previous_task_id": target.task_id if target is not None else "",
@@ -4630,15 +4671,41 @@ class ControlPlaneService:
             reset_agent_sessions += 1
 
         token = str(ULID())
-        state = self._state_store.load().model_copy(
+        current_state = self._state_store.load()
+        state = current_state.model_copy(
             update={
                 "focused_session_id": "",
                 "focused_thread_id": "",
                 "new_conversation_token": token,
+                "new_conversation_project_id": session.project_id,
+                "new_conversation_workspace_id": session.workspace_id,
+                "selected_project_id": session.project_id or current_state.selected_project_id,
+                "selected_workspace_id": (
+                    session.workspace_id or current_state.selected_workspace_id
+                ),
                 "updated_at": now,
             }
         )
         self._state_store.save(state)
+        if session.project_id:
+            project = await self._stores.project_store.get_project(session.project_id)
+            workspace = (
+                await self._stores.project_store.get_workspace(session.workspace_id)
+                if session.workspace_id
+                else None
+            )
+            if project is not None:
+                if workspace is None or workspace.project_id != project.project_id:
+                    workspace = await self._stores.project_store.get_primary_workspace(
+                        project.project_id
+                    )
+                await self._sync_web_project_selector_state(
+                    project=project,
+                    workspace=workspace,
+                    source="session_reset",
+                )
+                await self._sync_policy_engine_for_project(project)
+                await self._stores.conn.commit()
 
         return self._completed_result(
             request=request,
@@ -4651,6 +4718,8 @@ class ControlPlaneService:
                 "reset_session_context": reset_context,
                 "reset_agent_session_count": reset_agent_sessions,
                 "new_conversation_token": token,
+                "project_id": session.project_id,
+                "workspace_id": session.workspace_id,
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[

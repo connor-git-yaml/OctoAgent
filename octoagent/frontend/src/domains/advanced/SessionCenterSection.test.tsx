@@ -67,6 +67,12 @@ describe("SessionCenterSection", () => {
           onExportSession={onExportSession}
           onInterruptSession={onInterruptSession}
           onResumeSession={onResumeSession}
+          projectNameForId={(projectId) =>
+            projectId === "project-default" ? "Default Project" : projectId
+          }
+          workspaceNameForId={(workspaceId) =>
+            workspaceId === "workspace-default" ? "Primary Workspace" : workspaceId
+          }
           formatDateTime={(value) => value ?? "-"}
           formatA2ADirection={(value) => value}
           formatA2AMessageType={(value) => value}
@@ -77,6 +83,8 @@ describe("SessionCenterSection", () => {
     );
 
     expect(screen.getByText("Focused")).toBeInTheDocument();
+    expect(screen.getByText("Project: Default Project (project-default)")).toBeInTheDocument();
+    expect(screen.getByText("Workspace: Primary Workspace (workspace-default)")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "开始新对话" }));
     expect(onNewSession).toHaveBeenCalledWith(session);

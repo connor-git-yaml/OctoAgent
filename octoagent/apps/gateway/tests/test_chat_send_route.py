@@ -8,10 +8,12 @@ from pathlib import Path
 import octoagent.gateway.services.task_service as task_service_module
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from octoagent.core.models import ControlPlaneState, Project, Workspace
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
+from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 
 
 @pytest_asyncio.fixture
@@ -42,6 +44,7 @@ async def test_app(tmp_path: Path):
     app.state.sse_hub = sse_hub
     app.state.llm_service = llm_service
     app.state.task_runner = task_runner
+    app.state.project_root = tmp_path
 
     yield app
 
@@ -82,6 +85,67 @@ class TestChatSendRoute:
         metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["agent_profile_id"] == "worker-profile-chat-alpha"
         assert metadata["requested_worker_profile_id"] == "worker-profile-chat-alpha"
+
+    async def test_new_chat_consumes_pending_session_project_snapshot(
+        self,
+        client: AsyncClient,
+        test_app,
+        tmp_path: Path,
+    ) -> None:
+        project = Project(
+            project_id="project-chat-alpha",
+            slug="chat-alpha",
+            name="Chat Alpha",
+        )
+        workspace = Workspace(
+            workspace_id="workspace-chat-alpha-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Chat Alpha Primary",
+            root_path=str(tmp_path / "chat-alpha"),
+        )
+        await test_app.state.store_group.project_store.create_project(project)
+        await test_app.state.store_group.project_store.create_workspace(workspace)
+        await test_app.state.store_group.conn.commit()
+        ControlPlaneStateStore(tmp_path).save(
+            ControlPlaneState(
+                selected_project_id=project.project_id,
+                selected_workspace_id=workspace.workspace_id,
+                new_conversation_token="token-chat-alpha",
+                new_conversation_project_id=project.project_id,
+                new_conversation_workspace_id=workspace.workspace_id,
+            )
+        )
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "在 alpha project 里开始新任务",
+                "new_conversation_token": "token-chat-alpha",
+            },
+        )
+
+        assert resp.status_code == 200
+        task_id = resp.json()["task_id"]
+        await asyncio.sleep(0.6)
+
+        task = await test_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.scope_id.startswith(f"workspace:{workspace.workspace_id}:chat:web:")
+        resolved_workspace = (
+            await test_app.state.store_group.project_store.resolve_workspace_for_scope(task.scope_id)
+        )
+        assert resolved_workspace is not None
+        assert resolved_workspace.workspace_id == workspace.workspace_id
+
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
+        assert user_events
+        metadata = user_events[-1]["payload"]["control_metadata"]
+        assert metadata["project_id"] == project.project_id
+        assert metadata["workspace_id"] == workspace.workspace_id
 
     async def test_continue_chat_appends_user_message_and_requeues(
         self, client: AsyncClient
