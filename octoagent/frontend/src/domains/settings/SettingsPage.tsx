@@ -36,6 +36,9 @@ const MEMORY_HTTP_BASIC_FIELDS = new Set([
   "memory.bridge_timeout_seconds",
 ]);
 
+const DEFAULT_GATEWAY_PROXY_URL = "http://localhost:4000";
+const DEFAULT_GATEWAY_MASTER_KEY_ENV = "LITELLM_MASTER_KEY";
+
 const MEMORY_COMMAND_BASIC_FIELDS = new Set([
   "memory.backend_mode",
   "memory.bridge_transport",
@@ -124,27 +127,70 @@ export default function SettingsPage() {
     }))
     .filter((item) => item.value.trim());
   const savedEnvNames = envPresence(providerRuntimeDetails);
-  const masterKeyHint = config.ui_hints["runtime.master_key_env"];
-  const proxyUrlHint = config.ui_hints["runtime.litellm_proxy_url"];
+  const gatewayProxyUrl =
+    String(
+      fieldState["runtime.litellm_proxy_url"] ??
+        getValueAtPath(config.current_value, "runtime.litellm_proxy_url") ??
+        DEFAULT_GATEWAY_PROXY_URL
+    );
+  const normalizedGatewayProxyUrl = gatewayProxyUrl.trim() || DEFAULT_GATEWAY_PROXY_URL;
+  const gatewayMasterKeyEnvInput =
+    String(
+      fieldState["runtime.master_key_env"] ??
+        getValueAtPath(config.current_value, "runtime.master_key_env") ??
+        DEFAULT_GATEWAY_MASTER_KEY_ENV
+    );
+  const gatewayMasterKeyEnv =
+    gatewayMasterKeyEnvInput.trim() || DEFAULT_GATEWAY_MASTER_KEY_ENV;
+
+  function buildManagedProviderDraft(secretStateOverride?: Record<string, string>) {
+    const nextSecretValues = {
+      ...secretValues,
+      ...(secretStateOverride ?? {}),
+    };
+    if (
+      activeProviders.length > 0 &&
+      !savedEnvNames.has(gatewayMasterKeyEnv) &&
+      !nextSecretValues[gatewayMasterKeyEnv]?.trim()
+    ) {
+      nextSecretValues[gatewayMasterKeyEnv] = generateSecretValue();
+    }
+    return {
+      fieldState: {
+        ...fieldState,
+        "runtime.llm_mode": activeProviders.length > 0 ? "litellm" : "echo",
+        "runtime.litellm_proxy_url": normalizedGatewayProxyUrl,
+        "runtime.master_key_env": gatewayMasterKeyEnv,
+        model_aliases: stringifyAliasDrafts(aliasDrafts),
+      },
+      secretValues: nextSecretValues,
+    };
+  }
 
   function buildSetupDraft(secretStateOverride?: Record<string, string>) {
-    const normalizedFieldState = {
-      ...fieldState,
-      model_aliases: stringifyAliasDrafts(aliasDrafts),
-    };
+    const managedDraft = buildManagedProviderDraft(secretStateOverride);
     const result = buildConfigPayload(
       config.current_value,
       config.ui_hints,
-      normalizedFieldState
+      managedDraft.fieldState
     );
     setFieldErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
       return null;
     }
+    if (
+      managedDraft.secretValues[gatewayMasterKeyEnv]?.trim() &&
+      secretValues[gatewayMasterKeyEnv] !== managedDraft.secretValues[gatewayMasterKeyEnv]
+    ) {
+      setSecretValues((state) => ({
+        ...state,
+        [gatewayMasterKeyEnv]: managedDraft.secretValues[gatewayMasterKeyEnv]!,
+      }));
+    }
     return {
       config: result.config,
       secret_values: Object.fromEntries(
-        Object.entries(secretStateOverride ?? secretValues).filter(([, value]) => value.trim())
+        Object.entries(managedDraft.secretValues).filter(([, value]) => value.trim())
       ),
     };
   }
@@ -195,7 +241,6 @@ export default function SettingsPage() {
         updateAliases(buildDefaultAliasDrafts("openai-codex"));
       }
     }
-    updateFieldValue("runtime.llm_mode", "litellm");
     const oauthProvider =
       providerDrafts.find((item) => item.id === "openai-codex") ??
       buildProviderPreset("openai-codex");
@@ -215,21 +260,7 @@ export default function SettingsPage() {
   }
 
   async function handleQuickConnect() {
-    const masterKeyEnv = String(
-      fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"
-    );
-    const nextSecretValues = { ...secretValues };
-    if (
-      !nextSecretValues[masterKeyEnv]?.trim() &&
-      !savedEnvNames.has(masterKeyEnv)
-    ) {
-      nextSecretValues[masterKeyEnv] = generateSecretValue();
-      setSecretValues((state) => ({
-        ...state,
-        [masterKeyEnv]: nextSecretValues[masterKeyEnv],
-      }));
-    }
-    const draft = buildSetupDraft(nextSecretValues);
+    const draft = buildSetupDraft();
     if (!draft) {
       return;
     }
@@ -261,15 +292,7 @@ export default function SettingsPage() {
     }
   }
 
-  const runtimeMode =
-    String(
-      fieldState["runtime.llm_mode"] ??
-        getValueAtPath(config.current_value, "runtime.llm_mode") ??
-        "echo"
-    )
-      .trim()
-      .toLowerCase() || "echo";
-  const usingEchoMode = runtimeMode === "echo";
+  const usingEchoMode = activeProviders.length === 0;
   const connectBusy =
     busyActionId === "setup.review" ||
     busyActionId === "setup.apply" ||
@@ -444,7 +467,6 @@ export default function SettingsPage() {
       if (existingIndex >= 0) {
         updateProviderAt(existingIndex, { enabled: true });
         moveProviderToFront(existingIndex);
-        updateFieldValue("runtime.llm_mode", "litellm");
         return;
       }
     }
@@ -461,7 +483,6 @@ export default function SettingsPage() {
         : buildProviderPreset(providerId);
     const nextProviders = [...providerDrafts, preset];
     updateProviders(nextProviders);
-    updateFieldValue("runtime.llm_mode", "litellm");
     if (aliasDrafts.length === 0) {
       updateAliases(buildDefaultAliasDrafts(preset.id));
     }
@@ -526,7 +547,6 @@ export default function SettingsPage() {
         usingEchoMode={usingEchoMode}
         review={review}
         selector={selector}
-        setup={setup}
         providerDraftCount={providerDrafts.length}
         activeProvidersCount={activeProviders.length}
         aliasDraftCount={aliasDrafts.length}
@@ -542,18 +562,14 @@ export default function SettingsPage() {
 
       <SettingsProviderSection
         usingEchoMode={usingEchoMode}
-        fieldState={fieldState}
         providerDrafts={providerDrafts}
         aliasDrafts={aliasDrafts}
         defaultProvider={defaultProvider}
         providerRuntimeDetails={providerRuntimeDetails}
         providerSelectOptions={providerSelectOptions}
-        proxyUrlHint={proxyUrlHint}
-        masterKeyHint={masterKeyHint}
         secretValues={secretValues}
         savedEnvNames={savedEnvNames}
         connectBusy={connectBusy}
-        onFieldValueChange={updateFieldValue}
         onSecretValueChange={updateSecretValue}
         onAddProviderDraft={addProviderDraft}
         onUpdateProviderAt={updateProviderAt}
@@ -735,11 +751,11 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="wb-note">
-              <strong>当前模式</strong>
+              <strong>当前状态</strong>
               <span>
                 {usingEchoMode
-                  ? "你现在处于体验模式，可以先完成页面和渠道配置。"
-                  : "你正在准备接入真实模型，请先确认 Provider 和 alias。"}
+                  ? "当前还没有连接真实模型；没配好前系统会先自动回退。"
+                  : "当前会优先使用你配置好的 Provider 和模型别名。"}
               </span>
             </div>
             {review.agent_autonomy_risks.length > 0 ? (
@@ -775,7 +791,7 @@ export default function SettingsPage() {
                 onClick={() => void handleQuickConnect()}
                 disabled={connectBusy}
               >
-                {usingEchoMode ? "连接并启用真实模型" : "保存并重新连接"}
+                {usingEchoMode ? "连接真实模型" : "保存并刷新连接"}
               </button>
               <button
                 type="button"

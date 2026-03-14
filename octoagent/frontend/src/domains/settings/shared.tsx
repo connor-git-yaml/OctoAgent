@@ -140,7 +140,7 @@ export function groupLabel(groupId: string): { title: string; description: strin
     case "models":
       return {
         title: "Providers",
-        description: "配置模型 Provider、LiteLLM 和别名路由。",
+        description: "配置模型 Provider 和别名路由。",
       };
     case "channels":
       return {

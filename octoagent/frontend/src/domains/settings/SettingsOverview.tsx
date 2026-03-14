@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import type {
   ProjectSelectorDocument,
-  SetupGovernanceDocument,
   SetupReviewSummary,
 } from "../../types";
 
@@ -9,7 +8,6 @@ interface SettingsOverviewProps {
   usingEchoMode: boolean;
   review: SetupReviewSummary;
   selector: ProjectSelectorDocument;
-  setup: SetupGovernanceDocument;
   providerDraftCount: number;
   activeProvidersCount: number;
   aliasDraftCount: number;
@@ -27,7 +25,6 @@ export default function SettingsOverview({
   usingEchoMode,
   review,
   selector,
-  setup,
   providerDraftCount,
   activeProvidersCount,
   aliasDraftCount,
@@ -50,12 +47,12 @@ export default function SettingsOverview({
       (item) => item.workspace_id === selector.current_workspace_id
     ) ?? null;
   const primaryTitle = usingEchoMode
-    ? "先连上一个真实模型"
+    ? "先连上至少一个模型 Provider"
     : review.ready
       ? "现在已经可以回聊天验证"
       : `还差 ${Math.max(reviewBlockingCount, 1)} 项才能稳定开始`;
   const primarySummary = usingEchoMode
-    ? "现在还是体验模式。先接上一个真实模型，再回来发第一次真实消息。"
+    ? "还没有连接真实模型。先添加一个 Provider，并补 API Key 或 OAuth；没配好前系统会先自动回退。"
     : review.ready
       ? "当前配置已经够用。先保存这次修改，再回聊天页验证 Butler 的真实回复。"
       : "不用一次看完所有配置。先补齐阻塞项，再回来慢慢扩展其他能力。";
@@ -66,11 +63,11 @@ export default function SettingsOverview({
       : "先检查阻塞项";
   const checklistItems = usingEchoMode
     ? [
+        review.next_actions[0] ?? "先添加一个 Provider，并填好密钥或完成 OAuth。",
         echoReady
-          ? "当前配置已经可以保存，但还没有切到真实模型。"
-          : review.next_actions[0] ?? "先添加一个 Provider，并填好密钥或完成 OAuth。",
-        "把 LLM 模式切到真实模型，并完成需要的密钥或 OAuth 连接。",
-        "连接成功后，回聊天页发第一条真实消息。",
+          ? "现在可以先保存这次配置；保存后系统会自动开始使用真实模型。"
+          : "补好 API Key 或完成 OAuth 连接后，保存配置。",
+        "回聊天页发第一条真实消息，确认真实模型已经接管回复。",
       ]
     : review.ready
       ? [
@@ -88,18 +85,18 @@ export default function SettingsOverview({
     `记忆增强：当前 ${memoryLabel} 已经是可用状态；第一次真实对话不依赖你现在就把它调到最优。`,
     "Agent 能力与 Provider 绑定：后面需要扩展时，再去 Agents > Providers 处理也来得及。",
   ];
-  const minimumStatusValue = usingEchoMode ? "体验模式" : "真实模型模式";
+  const minimumStatusValue = usingEchoMode ? "未连接真实模型" : "已连接真实模型";
   const minimumStatusHint = usingEchoMode
-    ? "当前只能先体验页面和流程。"
+    ? "没配好前系统会先自动回退。"
     : "当前已经接入真实模型链路。";
   const nextValidationHint = usingEchoMode
-    ? "连接真实模型后，再回聊天页发第一条真实消息。"
+    ? "配好后保存配置，再回聊天页发第一条真实消息。"
     : review.ready
       ? "保存后直接回聊天页发第一条消息。"
-      : "先在当前页做一次检查，再决定保存或一键接入。";
+      : "先在当前页做一次检查，再决定保存。";
   const statusChipLabel = usingEchoMode
     ? echoReady
-      ? "体验模式可用"
+      ? "可以先保存"
       : `还差 ${reviewBlockingCount} 项`
     : review.ready
       ? "可以回聊天验证"
@@ -210,8 +207,8 @@ export default function SettingsOverview({
             <div className="wb-note">
               <strong>当前基础状态</strong>
               <span>
-                {minimumStatusHint} 当前 Memory 状态是 {memoryStatus}，provider runtime 是{" "}
-                {setup.provider_runtime.status}。
+                {minimumStatusHint} 当前 Memory 状态是 {memoryStatus}，模型连接会跟着你保存的
+                Provider 自动更新。
               </span>
             </div>
           </div>

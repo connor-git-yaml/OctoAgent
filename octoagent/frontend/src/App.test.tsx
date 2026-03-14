@@ -938,7 +938,7 @@ describe("App workbench routing", () => {
         path: "/chat",
         assertRoute: async () => {
           expect(
-            await screen.findByRole("heading", { name: "在这里直接和 OctoAgent 对话" })
+            await screen.findByRole("heading", { name: "开始一段对话" })
           ).toBeInTheDocument();
         },
       },
@@ -954,7 +954,7 @@ describe("App workbench routing", () => {
         path: "/settings",
         assertRoute: async () => {
           expect(
-            await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" })
+            await screen.findByRole("heading", { name: "先添加可用的模型 Provider" })
           ).toBeInTheDocument();
         },
       },
@@ -995,7 +995,7 @@ describe("App workbench routing", () => {
   it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
     window.history.pushState({}, "", "/settings");
 
-    const nextSnapshot = buildSnapshot("http://localhost:4100");
+    const nextSnapshot = buildSnapshot();
     nextSnapshot.resources.skill_governance.items[0] = {
       ...nextSnapshot.resources.skill_governance.items[0],
       selected: false,
@@ -1120,10 +1120,9 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
-    const input = (await screen.findAllByDisplayValue("http://localhost:4000"))[0];
-    await userEvent.clear(input);
-    await userEvent.type(input, "http://localhost:4100");
+    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
+    expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
     expect(await screen.findByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
 
@@ -1146,7 +1145,19 @@ describe("App workbench routing", () => {
       actionBodies.some((body) => body.includes('"action_id":"setup.apply"'))
     ).toBe(true);
     expect(
-      actionBodies.some((body) => body.includes("http://localhost:4100"))
+      actionBodies.some((body) => body.includes('"id":"openai"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"llm_mode":"litellm"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"litellm_proxy_url":"http://localhost:4000"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"master_key_env":"LITELLM_MASTER_KEY"'))
+    ).toBe(true);
+    expect(
+      actionBodies.some((body) => body.includes('"LITELLM_MASTER_KEY":"'))
     ).toBe(true);
     expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
@@ -1258,8 +1269,8 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
-    await userEvent.click(screen.getAllByRole("button", { name: "连接并启用真实模型" })[0]);
+    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    await userEvent.click(screen.getAllByRole("button", { name: "连接真实模型" })[0]);
 
     await waitFor(() =>
       expect(
@@ -1463,14 +1474,14 @@ describe("App workbench routing", () => {
     expect(nameInput.value).toBe("新的主 Agent");
   });
 
-  it("设置页会在体验模式下展示多 Provider 管理和别名编辑器", async () => {
+  it("设置页会在未连接真实模型时展示 Provider 提醒和别名编辑器", async () => {
     window.history.pushState({}, "", "/settings");
 
     const snapshot = buildSnapshot() as any;
     snapshot.resources.setup_governance.review = {
       ready: false,
       risk_level: "warning",
-      warnings: ["当前处于体验模式。"],
+      warnings: ["当前还没有连接真实模型。"],
       blocking_reasons: ["agent_profile_name_missing"],
       next_actions: ["先填写主 Agent 名称，再重新保存。"],
       provider_runtime_risks: [
@@ -1478,9 +1489,9 @@ describe("App workbench routing", () => {
           risk_id: "provider_missing",
           severity: "warning",
           title: "还没有可用 Provider",
-          summary: "当前处于体验模式，还没有接入真实模型；你仍然可以先用 Web 跑通基础流程。",
+          summary: "当前还没有连接真实模型；没配好前系统会先自动回退。",
           blocking: false,
-          recommended_action: "如果你只是先体验本地 Web，可暂时保留为空。",
+          recommended_action: "先添加一个 Provider，并填 API Key 或完成 OAuth。",
           source_ref: "config:octoagent",
         },
       ],
@@ -1510,12 +1521,15 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
-    expect(screen.getByText("你现在处于体验模式，可以先完成页面和渠道配置。")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    expect(screen.getByText("还没有连接真实模型")).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
-    expect(screen.getAllByText("体验模式").length).toBeGreaterThan(0);
+    expect(screen.queryByText("体验模式")).not.toBeInTheDocument();
+    expect(screen.getByText("Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。")).toBeInTheDocument();
+    expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
+    expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenRouter" }));
@@ -1605,7 +1619,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" });
+    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
     await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
 
@@ -1856,7 +1870,7 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "先确定接入模式，再管理多个 Provider" })
+      await screen.findByRole("heading", { name: "先添加可用的模型 Provider" })
     ).toBeInTheDocument();
 
     await waitFor(() => {

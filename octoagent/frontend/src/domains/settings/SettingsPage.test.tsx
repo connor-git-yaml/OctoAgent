@@ -361,10 +361,16 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("还没有 Provider")).toBeInTheDocument();
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先添加可用的模型 Provider" })).toBeInTheDocument();
     expect(screen.getByText("现在只管这 3 件事")).toBeInTheDocument();
     expect(screen.getByText("这些事情现在不用急")).toBeInTheDocument();
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
+    expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
     expect(screen.getByText("octo config memory local")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
@@ -372,6 +378,38 @@ describe("SettingsPage", () => {
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
     expect(screen.getByDisplayValue("main")).toBeInTheDocument();
     expect(screen.getByDisplayValue("cheap")).toBeInTheDocument();
+  });
+
+  it("保存时会自动补齐内部 LiteLLM 运行配置", async () => {
+    const snapshot = buildSettingsSnapshot();
+    const submitAction = vi.fn().mockResolvedValue({
+      data: {
+        review: snapshot.resources.setup_governance.review,
+      },
+    });
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
+
+    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+
+    await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
+
+    const draft = submitAction.mock.calls[0][1].draft;
+    expect(draft.config.runtime.llm_mode).toBe("litellm");
+    expect(draft.config.runtime.litellm_proxy_url).toBe("http://localhost:4000");
+    expect(draft.config.runtime.master_key_env).toBe("LITELLM_MASTER_KEY");
+    expect(draft.secret_values.LITELLM_MASTER_KEY).toBeTruthy();
   });
 
   it("支持触发 OpenAI Auth 连接动作", async () => {
@@ -403,7 +441,15 @@ describe("SettingsPage", () => {
 
   it("review 已就绪时仍优先要求先保存当前修改", () => {
     const snapshot = buildSettingsSnapshot();
-    snapshot.resources.config.current_value.runtime.llm_mode = "litellm";
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "openrouter",
+        name: "OpenRouter",
+        auth_type: "api_key",
+        api_key_env: "OPENROUTER_API_KEY",
+        enabled: true,
+      },
+    ] as unknown as never[];
     snapshot.resources.setup_governance.review = {
       ...snapshot.resources.setup_governance.review,
       ready: true,
@@ -427,7 +473,7 @@ describe("SettingsPage", () => {
     expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
   });
 
-  it("echo-ready 状态下仍把连接真实模型作为首屏主动作", () => {
+  it("未连接真实模型时仍把连接真实模型作为首屏主动作", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.setup_governance.review = {
       ...snapshot.resources.setup_governance.review,
@@ -447,10 +493,10 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "连接真实模型" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "连接真实模型" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("体验模式可用")).toBeInTheDocument();
+    expect(screen.getByText("可以先保存")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "回聊天验证" })).not.toBeInTheDocument();
   });
 
@@ -504,7 +550,6 @@ describe("SettingsPage", () => {
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {
     const snapshot = buildSettingsSnapshot();
-    snapshot.resources.config.current_value.runtime.llm_mode = "litellm";
     snapshot.resources.config.current_value.providers = [
       {
         id: "openrouter",

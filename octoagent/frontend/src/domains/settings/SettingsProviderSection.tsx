@@ -1,6 +1,4 @@
-import type { ConfigFieldHint } from "../../types";
 import {
-  generateSecretValue,
   providerStatus,
   reasoningSupportCopy,
   reasoningSupportStateForAlias,
@@ -16,18 +14,14 @@ interface ProviderOption {
 
 interface SettingsProviderSectionProps {
   usingEchoMode: boolean;
-  fieldState: Record<string, string | boolean>;
   providerDrafts: ProviderDraftItem[];
   aliasDrafts: ModelAliasDraftItem[];
   defaultProvider: ProviderDraftItem;
   providerRuntimeDetails: ProviderRuntimeDetails;
   providerSelectOptions: ProviderOption[];
-  proxyUrlHint?: ConfigFieldHint;
-  masterKeyHint?: ConfigFieldHint;
   secretValues: Record<string, string>;
   savedEnvNames: Set<string>;
   connectBusy: boolean;
-  onFieldValueChange: (fieldPath: string, value: string | boolean) => void;
   onSecretValueChange: (envName: string, value: string) => void;
   onAddProviderDraft: (providerId: string) => void;
   onUpdateProviderAt: (index: number, patch: Partial<ProviderDraftItem>) => void;
@@ -42,18 +36,14 @@ interface SettingsProviderSectionProps {
 
 export default function SettingsProviderSection({
   usingEchoMode,
-  fieldState,
   providerDrafts,
   aliasDrafts,
   defaultProvider,
   providerRuntimeDetails,
   providerSelectOptions,
-  proxyUrlHint,
-  masterKeyHint,
   secretValues,
   savedEnvNames,
   connectBusy,
-  onFieldValueChange,
   onSecretValueChange,
   onAddProviderDraft,
   onUpdateProviderAt,
@@ -65,122 +55,52 @@ export default function SettingsProviderSection({
   onRemoveAliasDraft,
   onOpenAIOAuthConnect,
 }: SettingsProviderSectionProps) {
+  const activeProvidersCount = providerDrafts.filter((item) => item.enabled).length;
+  const connectionSummary = usingEchoMode
+    ? "还没有连接真实模型。先添加 1 个 Provider，并填 API Key 或完成 OAuth。没配好前，系统会先自动回退。"
+    : `当前已启用 ${activeProvidersCount} 个 Provider。保存后，新的模型别名和聊天会优先使用它们。`;
+  const defaultProviderSummary = usingEchoMode
+    ? "配好之后，系统会自动从第一个启用的 Provider 开始路由，不需要你手动切换模式。"
+    : `当前默认 Provider 是 ${defaultProvider.name || defaultProvider.id}。新的推荐别名会优先引用它。`;
+
   return (
     <>
       <section id="settings-group-models" className="wb-panel">
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Models & Providers</p>
-            <h3>先确定接入模式，再管理多个 Provider</h3>
+            <h3>先添加可用的模型 Provider</h3>
             <p className="wb-panel-copy">
-              `Settings` 只处理平台连接层。模型别名会引用这里的 Provider 和真实模型名。
+              没配真实模型时，系统会先自动回退。你只需要在这里补 Provider、API Key 或 OAuth。
             </p>
           </div>
-        </div>
-
-        <div className="wb-settings-mode-row">
-          <button
-            type="button"
-            className={`wb-mode-card ${usingEchoMode ? "is-active" : ""}`}
-            onClick={() => onFieldValueChange("runtime.llm_mode", "echo")}
-          >
-            <span className="wb-card-label">体验模式</span>
-            <strong>先跑通页面和任务流</strong>
-            <p>不依赖真实模型，适合先检查控制台和交互。</p>
-          </button>
-          <button
-            type="button"
-            className={`wb-mode-card ${!usingEchoMode ? "is-active" : ""}`}
-            onClick={() => onFieldValueChange("runtime.llm_mode", "litellm")}
-          >
-            <span className="wb-card-label">真实模型模式</span>
-            <strong>通过 LiteLLM 连接 Provider</strong>
-            <p>支持多个 Provider 并存，别名按 provider + model 路由。</p>
-          </button>
         </div>
 
         <div className="wb-provider-layout">
           <div className="wb-provider-card">
             <div className="wb-provider-card-head">
               <div>
-                <p className="wb-card-label">Gateway</p>
-                <strong>LiteLLM 运行参数</strong>
+                <p className="wb-card-label">连接状态</p>
+                <strong>{usingEchoMode ? "还没有连接真实模型" : "真实模型连接已准备好"}</strong>
               </div>
-              <span className={`wb-status-pill ${usingEchoMode ? "is-draft" : "is-ready"}`}>
-                {usingEchoMode ? "Echo" : "LiteLLM"}
+              <span className={`wb-status-pill ${usingEchoMode ? "is-warning" : "is-ready"}`}>
+                {usingEchoMode ? "自动回退中" : "已启用"}
               </span>
             </div>
 
             <div className="wb-note">
-              <strong>当前默认接入</strong>
-              <span>
-                {usingEchoMode
-                  ? "当前仍是体验模式。需要真实模型时，再启用 LiteLLM 并补齐 Provider。"
-                  : `默认 Provider 为 ${defaultProvider.name || defaultProvider.id}。新的推荐别名会优先引用它。`}
-              </span>
+              <strong>现在会发生什么</strong>
+              <span>{connectionSummary}</span>
             </div>
-
-            <div className="wb-form-grid">
-              <label className="wb-field">
-                <span>LiteLLM 代理地址</span>
-                <input
-                  type="text"
-                  value={String(fieldState["runtime.litellm_proxy_url"] ?? "")}
-                  placeholder={proxyUrlHint?.placeholder ?? "http://localhost:4000"}
-                  onChange={(event) =>
-                    onFieldValueChange("runtime.litellm_proxy_url", event.target.value)
-                  }
-                />
-                <small>{proxyUrlHint?.description || "通常保持本地默认地址即可。"}</small>
-              </label>
-              <label className="wb-field">
-                <span>{masterKeyHint?.label ?? "LiteLLM Master Key 环境变量名"}</span>
-                <input
-                  type="text"
-                  value={String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")}
-                  onChange={(event) =>
-                    onFieldValueChange("runtime.master_key_env", event.target.value)
-                  }
-                />
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>LiteLLM Master Key 值</span>
-                <input
-                  type="password"
-                  value={
-                    secretValues[
-                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                    ] ?? ""
-                  }
-                  placeholder={
-                    savedEnvNames.has(
-                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY")
-                    )
-                      ? "本地已存在值；重新输入才会覆盖"
-                      : "生成或输入一串随机长字符串"
-                  }
-                  onChange={(event) =>
-                    onSecretValueChange(
-                      String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                      event.target.value
-                    )
-                  }
-                />
-                <div className="wb-inline-actions wb-inline-actions-wrap">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary wb-button-inline"
-                    onClick={() =>
-                      onSecretValueChange(
-                        String(fieldState["runtime.master_key_env"] ?? "LITELLM_MASTER_KEY"),
-                        generateSecretValue()
-                      )
-                    }
-                  >
-                    生成随机 Master Key
-                  </button>
-                </div>
-              </label>
+            <div className="wb-note">
+              <strong>默认会先用谁</strong>
+              <span>{defaultProviderSummary}</span>
+            </div>
+            <div className="wb-note">
+              <strong>这些参数你不用管</strong>
+              <span>
+                Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。
+              </span>
             </div>
           </div>
 
