@@ -1243,6 +1243,42 @@ class TestOrchestrator:
         finally:
             await store_group.conn.close()
 
+    async def test_single_loop_executor_supports_explicit_research_worker_lens(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        llm_service = _SingleLoopLLMService()
+        store_group, task_service, orchestrator = await _build_context(
+            tmp_path,
+            llm_service=llm_service,
+        )
+
+        try:
+            msg = NormalizedMessage(
+                text="查一下 Alpha 最近的公开资料并汇总关键变化",
+                idempotency_key="f051-single-loop-research-001",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(
+                task_id=task_id,
+                user_text=msg.text,
+                metadata={"requested_worker_type": "research"},
+            )
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "worker.llm.default"
+
+            assert len(llm_service.calls) == 1
+            metadata = llm_service.calls[0]["metadata"]
+            assert isinstance(metadata, dict)
+            assert metadata["single_loop_executor"] is True
+            assert metadata["selected_worker_type"] == "research"
+            assert metadata["single_loop_executor_mode"] == "butler_research"
+            assert "decision_phase" not in metadata
+        finally:
+            await store_group.conn.close()
+
     async def test_model_butler_decision_uses_recent_conversation_context_for_followup(
         self,
         tmp_path: Path,

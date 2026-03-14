@@ -150,11 +150,15 @@ fallback 只做护栏和兼容，不再替代产品主路径。
 
 - Slice A 已完成：`BehaviorWorkspace` 已具备 budget / truncation / optional user-local overlay，`ToolUniverseHints` 已进入 ButlerDecision preflight
 - Slice B 已完成：`AgentSession` 除了正式 `recent_transcript / rolling_summary` 外，现已补齐 `AgentSessionTurn` store；`user / assistant / tool_call / tool_result / context_summary` 会写入 `agent_session_turns`，`RecentConversation`、`session.export`、`session.reset` 都优先消费该 store
-- Slice C 已完成：Butler chat 默认切到 `agent-led hint-first` memory runtime；在 `planner_enabled` profile 下，`ButlerDecision + RecallPlan` 已收口成统一 `ButlerLoopPlan`，direct-answer 路径会把 recall 计划以前置 `precomputed_recall_plan` 注入主调用，避免再额外触发独立 recall planner phase；当 MemU backend 可用时，执行面继续通过 `MemorySearchOptions` contract 下发 `expanded_queries / focus_terms / rerank_mode / post_filter_mode`；Worker 保留 `detailed_prefetch`
+- Slice C 已完成：Butler chat 默认切到 `agent-led hint-first` memory runtime；在 `planner_enabled` profile 下，`ButlerDecision + RecallPlan` 已收口成统一 `ButlerLoopPlan`，direct-answer 路径会把 recall 计划以前置 `precomputed_recall_plan` 注入主调用，避免再额外触发独立 recall planner phase；当 MemU backend 可用时，执行面继续通过 `MemorySearchOptions` contract 下发 `expanded_queries / focus_terms / rerank_mode / post_filter_mode`；Worker 默认也已切到 `hint-first` runtime，只在显式 profile override 下保留 `detailed_prefetch`
+- Session 生命周期入口已补齐到产品面：Session Center 现已暴露 `session.new / session.reset / session.unfocus`，并提供 `全部 / 运行中 / 队列 / 历史` lane 过滤；不再只有 Chat 页能走新的会话 lifecycle
 - Slice D 已完成：compatibility fallback 已收缩为 guardrail / parse failure / migration path，只保留天气缺地点边界与天气 follow-up 恢复语义
-- Slice E 已完成：定向回归、文档、blueprint 已同步；`AgentSessionTurn` replay/sanitize 投影与默认 general Butler 单循环执行器已接入主链
+- Slice E 已完成：定向回归、文档、blueprint 已同步；`AgentSessionTurn` replay/sanitize 投影现已进入预算驱动裁剪链，且默认 `single_loop_executor` 已扩到 general + explicit worker lens（research/dev/ops）
 
 当前状态：
 
 1. transcript replay/sanitize 已正式从 `agent_session_turns` 重建，并统一供 `SessionReplay` / `RecentConversation` / recall planning 使用。
-2. 默认 general Butler 已进入单循环主执行器：主模型调用直接带着已挂载工具运行，`ButlerDecision` 与 `RecallPlan` 辅助调用只保留给 compatibility / explicit delegation 路径。
+2. transcript replay 已改成 budget-driven trim：完整 replay 先从 turn store 重建，再由 `_fit_prompt_budget()` 决定保留多少 dialogue/tool exchange，而不是写死固定窗口。
+3. Worker 默认 recall 现在对 `research / dev / general` archetype 开启 planner；`hint_first` 也允许直接进入 `RecallPlan` 主链。
+4. 默认 Butler 已进入单循环主执行器，并支持显式 `requested_worker_type=research/dev/ops` 的 worker lens；`ButlerDecision` 与 `RecallPlan` 辅助调用只保留给 compatibility / explicit delegation 路径。
+5. Behavior workspace 现在除了 `ls/show/init`，还补齐了 `edit/diff/apply` CLI 主路径与 Settings 提示。

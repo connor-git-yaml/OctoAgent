@@ -40,6 +40,7 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     Task,
+    WorkerProfile,
     WorkerProfileStatus,
     Workspace,
 )
@@ -113,6 +114,24 @@ def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, 
     return raw if isinstance(raw, dict) else {}
 
 
+def _default_worker_memory_recall_preferences(
+    worker_profile: WorkerProfile | None,
+) -> dict[str, Any]:
+    if worker_profile is None:
+        return {}
+    archetype = str(worker_profile.base_archetype or "").strip().lower()
+    # 对齐 Agent Zero / OpenClaw：worker 默认只拿 recall runtime hints，具体检索交回主循环。
+    preferences: dict[str, Any] = {
+        "prefetch_mode": "hint_first",
+        "planner_enabled": archetype in {"research", "dev", "general"},
+    }
+    if archetype in {"research", "dev", "general"}:
+        preferences.update({"scope_limit": 4, "per_scope_limit": 4, "max_hits": 8})
+    else:
+        preferences.update({"scope_limit": 3, "per_scope_limit": 3, "max_hits": 6})
+    return preferences
+
+
 def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
     prefs = _memory_recall_preferences(agent_profile)
     raw = prefs.get("planner_enabled", False)
@@ -136,7 +155,7 @@ def _resolve_memory_prefetch_mode(
         or agent_runtime.role is AgentRuntimeRole.WORKER
         or is_worker_behavior_profile(agent_profile)
     ):
-        return "detailed_prefetch"
+        return "hint_first"
     return "agent_led_hint_first"
 
 
@@ -517,6 +536,7 @@ class AgentContextService:
             session_replay=session_replay,
             memory_hits=memory_hits,
             memory_scope_ids=memory_scope_ids,
+            memory_prefetch_mode=str(memory_recall.get("prefetch_mode", "")).strip().lower(),
             worker_capability=worker_capability,
             dispatch_metadata=dispatch_metadata,
             runtime_context=runtime_context,
@@ -1315,6 +1335,8 @@ class AgentContextService:
     @staticmethod
     def _normalize_session_transcript_entries(
         raw_entries: Any,
+        *,
+        limit: int | None = _SESSION_TRANSCRIPT_LIMIT,
     ) -> list[dict[str, str]]:
         if not isinstance(raw_entries, list):
             return []
@@ -1333,7 +1355,9 @@ class AgentContextService:
                     "task_id": str(item.get("task_id", "")).strip(),
                 }
             )
-        return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+        if limit is None:
+            return normalized
+        return normalized[-limit:]
 
     @classmethod
     def _agent_session_transcript_entries(
@@ -1509,8 +1533,11 @@ class AgentContextService:
 
         dropped_orphan_tool_calls = sum(len(items) for items in pending_tool_calls.values())
         return SessionReplayProjection(
-            transcript_entries=self._normalize_session_transcript_entries(transcript_entries),
-            tool_exchange_lines=tool_exchange_lines[-4:],
+            transcript_entries=self._normalize_session_transcript_entries(
+                transcript_entries,
+                limit=None,
+            ),
+            tool_exchange_lines=tool_exchange_lines,
             latest_context_summary=(
                 latest_context_summary
                 or (resolved_session.rolling_summary.strip() if resolved_session is not None else "")
@@ -1534,7 +1561,7 @@ class AgentContextService:
     ) -> str:
         dialogue_lines = [
             f"- {str(item.get('role', '')).strip()}: {str(item.get('content', '')).strip()}"
-            for item in replay.transcript_entries[-6:]
+            for item in replay.transcript_entries
             if str(item.get("content", "")).strip()
         ]
         sanitize_notes: list[str] = []
@@ -1556,6 +1583,44 @@ class AgentContextService:
             f"latest_context_summary: {replay.latest_context_summary or 'N/A'}\n"
             f"latest_model_reply_preview: {replay.latest_model_reply_preview or 'N/A'}\n"
             f"sanitize_notes: {', '.join(sanitize_notes) or 'none'}"
+        )
+
+    @staticmethod
+    def _trim_session_replay_projection(
+        replay: SessionReplayProjection | None,
+        *,
+        dialogue_limit: int | None,
+        tool_limit: int | None,
+        include_summary: bool,
+        include_reply_preview: bool,
+    ) -> SessionReplayProjection | None:
+        if replay is None:
+            return None
+        transcript_entries = list(replay.transcript_entries)
+        tool_exchange_lines = list(replay.tool_exchange_lines)
+        if dialogue_limit is not None:
+            transcript_entries = transcript_entries[-dialogue_limit:]
+        if tool_limit is not None:
+            tool_exchange_lines = tool_exchange_lines[-tool_limit:]
+        latest_context_summary = replay.latest_context_summary if include_summary else ""
+        latest_model_reply_preview = (
+            replay.latest_model_reply_preview if include_reply_preview else ""
+        )
+        if (
+            not transcript_entries
+            and not tool_exchange_lines
+            and not latest_context_summary
+            and not latest_model_reply_preview
+        ):
+            return None
+        return SessionReplayProjection(
+            transcript_entries=transcript_entries,
+            tool_exchange_lines=tool_exchange_lines,
+            latest_context_summary=latest_context_summary,
+            latest_model_reply_preview=latest_model_reply_preview,
+            source=replay.source,
+            dropped_orphan_tool_calls=replay.dropped_orphan_tool_calls,
+            dropped_orphan_tool_results=replay.dropped_orphan_tool_results,
         )
 
     async def _append_agent_session_turn(
@@ -2779,13 +2844,14 @@ class AgentContextService:
             existing = await self._stores.agent_context_store.get_agent_profile(
                 requested_profile_id
             )
-            if existing is not None:
-                return existing, degraded_reasons
             mirrored = await self._ensure_agent_profile_from_worker_profile(
-                requested_profile_id
+                requested_profile_id,
+                existing_profile=existing,
             )
             if mirrored is not None:
                 return mirrored, degraded_reasons
+            if existing is not None:
+                return existing, degraded_reasons
             degraded_reasons.append("runtime_agent_profile_missing")
         return await self._ensure_agent_profile(project), degraded_reasons
 
@@ -2865,10 +2931,28 @@ class AgentContextService:
     async def _ensure_agent_profile_from_worker_profile(
         self,
         profile_id: str,
+        *,
+        existing_profile: AgentProfile | None = None,
     ) -> AgentProfile | None:
         worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
         if worker_profile is None or worker_profile.status == WorkerProfileStatus.ARCHIVED:
             return None
+        merged_memory_recall = {
+            **_default_worker_memory_recall_preferences(worker_profile),
+            **(
+                dict(_memory_recall_preferences(existing_profile))
+                if existing_profile is not None
+                else {}
+            ),
+        }
+        context_budget_policy = (
+            {
+                **dict(existing_profile.context_budget_policy),
+                "memory_recall": merged_memory_recall,
+            }
+            if existing_profile is not None
+            else {"memory_recall": merged_memory_recall}
+        )
         profile = AgentProfile(
             profile_id=worker_profile.profile_id,
             scope=worker_profile.scope,
@@ -2886,13 +2970,18 @@ class AgentContextService:
             model_alias=worker_profile.model_alias or "main",
             tool_profile=worker_profile.tool_profile or "standard",
             policy_refs=list(worker_profile.policy_refs),
+            context_budget_policy=context_budget_policy,
             metadata={
+                **(dict(existing_profile.metadata) if existing_profile is not None else {}),
                 "source_worker_profile_id": worker_profile.profile_id,
                 "source_worker_profile_revision": (
                     worker_profile.active_revision or worker_profile.draft_revision or 0
                 ),
                 "base_archetype": worker_profile.base_archetype,
                 "source_kind": "worker_profile_mirror",
+                "memory_recall_default_mode": str(
+                    merged_memory_recall.get("prefetch_mode", "")
+                ).strip(),
             },
             version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
             created_at=worker_profile.created_at,
@@ -3456,6 +3545,7 @@ class AgentContextService:
         session_replay: SessionReplayProjection | None,
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
+        memory_prefetch_mode: str,
         worker_capability: str | None,
         dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
@@ -3466,6 +3556,7 @@ class AgentContextService:
             surface=task.requester.channel or "chat",
         )
         is_worker_profile = is_worker_behavior_profile(agent_profile)
+        include_detailed_recall = memory_prefetch_mode == "detailed_prefetch"
         runtime_hints = build_runtime_hint_bundle(
             user_text=current_user_text,
             surface=task.requester.channel or "chat",
@@ -3611,18 +3702,18 @@ class AgentContextService:
                     "role": "system",
                     "content": self._render_memory_runtime_block(
                         memory_scope_ids=memory_scope_ids,
-                        include_detailed_recall=is_worker_profile,
+                        include_detailed_recall=include_detailed_recall,
                     ),
                 }
             )
-        if memory_hits or (memory_scope_ids and not is_worker_profile):
+        if memory_hits or (memory_scope_ids and not include_detailed_recall):
             blocks.append(
                 {
                     "role": "system",
                     "content": self._render_memory_recall_block(
                         memory_hits=memory_hits,
                         memory_scope_ids=memory_scope_ids,
-                        include_preview=is_worker_profile,
+                        include_preview=include_detailed_recall,
                     ),
                 }
             )
@@ -3738,6 +3829,7 @@ class AgentContextService:
         session_replay: SessionReplayProjection | None,
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
+        memory_prefetch_mode: str,
         worker_capability: str | None,
         dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
@@ -3759,6 +3851,44 @@ class AgentContextService:
             dict.fromkeys([len(memory_hits), min(len(memory_hits), 2), 1 if memory_hits else 0, 0])
         )
         include_runtime_options = [True, False]
+        replay_options = [
+            self._trim_session_replay_projection(
+                session_replay,
+                dialogue_limit=None,
+                tool_limit=None,
+                include_summary=True,
+                include_reply_preview=True,
+            ),
+            self._trim_session_replay_projection(
+                session_replay,
+                dialogue_limit=8,
+                tool_limit=6,
+                include_summary=True,
+                include_reply_preview=True,
+            ),
+            self._trim_session_replay_projection(
+                session_replay,
+                dialogue_limit=6,
+                tool_limit=4,
+                include_summary=True,
+                include_reply_preview=True,
+            ),
+            self._trim_session_replay_projection(
+                session_replay,
+                dialogue_limit=4,
+                tool_limit=3,
+                include_summary=True,
+                include_reply_preview=False,
+            ),
+            self._trim_session_replay_projection(
+                session_replay,
+                dialogue_limit=3,
+                tool_limit=2,
+                include_summary=False,
+                include_reply_preview=False,
+            ),
+            None,
+        ]
 
         best_result: tuple[
             list[dict[str, str]],
@@ -3771,59 +3901,64 @@ class AgentContextService:
         best_tokens: int | None = None
 
         for include_runtime_context in include_runtime_options:
-            for memory_limit in memory_limits:
-                trimmed_hits = memory_hits[:memory_limit]
-                for summary_limit in summary_limits:
-                    trimmed_summary = (
-                        truncate_chars(recent_summary, summary_limit) if summary_limit > 0 else ""
-                    )
-                    blocks, block_reasons = self._build_system_blocks(
-                        project=project,
-                        workspace=workspace,
-                        task=task,
-                        current_user_text=compiled.latest_user_text or task.title,
-                        agent_profile=agent_profile,
-                        owner_profile=owner_profile,
-                        owner_overlay=owner_overlay,
-                        bootstrap=bootstrap,
-                        recent_summary=trimmed_summary,
-                        session_replay=session_replay,
-                        memory_hits=trimmed_hits,
-                        memory_scope_ids=memory_scope_ids,
-                        worker_capability=worker_capability,
-                        dispatch_metadata=dispatch_metadata,
-                        runtime_context=runtime_context,
-                        include_runtime_context=include_runtime_context,
-                    )
-                    system_tokens = estimate_messages_tokens(blocks)
-                    delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])
-                    if best_tokens is None or delivery_tokens < best_tokens:
-                        best_result = (
-                            blocks,
-                            trimmed_summary,
-                            trimmed_hits,
-                            list(block_reasons),
-                            system_tokens,
-                            delivery_tokens,
+            for trimmed_replay in replay_options:
+                for memory_limit in memory_limits:
+                    trimmed_hits = memory_hits[:memory_limit]
+                    for summary_limit in summary_limits:
+                        trimmed_summary = (
+                            truncate_chars(recent_summary, summary_limit)
+                            if summary_limit > 0
+                            else ""
                         )
-                        best_tokens = delivery_tokens
-                    if delivery_tokens <= self._budget_config.max_input_tokens:
-                        reasons: list[str] = []
-                        if (
-                            trimmed_summary != recent_summary
-                            or len(trimmed_hits) != len(memory_hits)
-                            or not include_runtime_context
-                        ):
-                            reasons.append("context_budget_trimmed")
-                        reasons.extend(block_reasons)
-                        return (
-                            blocks,
-                            trimmed_summary,
-                            trimmed_hits,
-                            list(dict.fromkeys(reasons)),
-                            system_tokens,
-                            delivery_tokens,
+                        blocks, block_reasons = self._build_system_blocks(
+                            project=project,
+                            workspace=workspace,
+                            task=task,
+                            current_user_text=compiled.latest_user_text or task.title,
+                            agent_profile=agent_profile,
+                            owner_profile=owner_profile,
+                            owner_overlay=owner_overlay,
+                            bootstrap=bootstrap,
+                            recent_summary=trimmed_summary,
+                            session_replay=trimmed_replay,
+                            memory_hits=trimmed_hits,
+                            memory_scope_ids=memory_scope_ids,
+                            memory_prefetch_mode=memory_prefetch_mode,
+                            worker_capability=worker_capability,
+                            dispatch_metadata=dispatch_metadata,
+                            runtime_context=runtime_context,
+                            include_runtime_context=include_runtime_context,
                         )
+                        system_tokens = estimate_messages_tokens(blocks)
+                        delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])
+                        if best_tokens is None or delivery_tokens < best_tokens:
+                            best_result = (
+                                blocks,
+                                trimmed_summary,
+                                trimmed_hits,
+                                list(block_reasons),
+                                system_tokens,
+                                delivery_tokens,
+                            )
+                            best_tokens = delivery_tokens
+                        if delivery_tokens <= self._budget_config.max_input_tokens:
+                            reasons: list[str] = []
+                            if (
+                                trimmed_summary != recent_summary
+                                or len(trimmed_hits) != len(memory_hits)
+                                or trimmed_replay != session_replay
+                                or not include_runtime_context
+                            ):
+                                reasons.append("context_budget_trimmed")
+                            reasons.extend(block_reasons)
+                            return (
+                                blocks,
+                                trimmed_summary,
+                                trimmed_hits,
+                                list(dict.fromkeys(reasons)),
+                                system_tokens,
+                                delivery_tokens,
+                            )
 
         if best_result is None:
             return [], "", [], ["context_budget_trimmed"], 0, compiled.delivery_tokens

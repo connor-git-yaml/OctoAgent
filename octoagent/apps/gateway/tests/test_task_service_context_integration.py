@@ -1139,7 +1139,7 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
     await store_group.conn.close()
 
 
-async def test_task_service_worker_context_uses_private_namespace_recall(
+async def test_task_service_worker_context_defaults_to_private_namespace_hint_first_recall(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1277,24 +1277,24 @@ async def test_task_service_worker_context_uses_private_namespace_recall(
         },
     )
 
-    assert len(memory_calls) == 1
-    assert set(worker_private_scope_ids).issubset(set(memory_calls[0]["scope_ids"]))
-    assert {
-        "chat:web:thread-alpha",
-        "memory/project-alpha",
-    }.issubset(set(memory_calls[0]["scope_ids"]))
+    assert memory_calls == []
 
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
     assert len(frames) == 1
     frame = frames[0]
-    assert frame.memory_hits[0]["record_id"] == "memory-worker-1"
-    assert frame.memory_hits[0]["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
-    assert frame.memory_hits[0]["recall_provenance"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+    assert frame.memory_hits == []
     assert frame.budget["memory_recall"]["recall_owner_role"] == AgentRuntimeRole.WORKER.value
     assert any(
         item["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
         for item in frame.budget["memory_recall"]["scope_entries"]
     )
+    assert frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
+    assert frame.budget["memory_recall"]["agent_led_recall_expected"] is True
+    assert frame.budget["memory_recall"]["available_tools"] == [
+        "memory.search",
+        "memory.recall",
+        "memory.read",
+    ]
 
     runtime = await store_group.agent_context_store.get_agent_runtime(frame.agent_runtime_id)
     assert runtime is not None
@@ -1356,15 +1356,373 @@ async def test_task_service_worker_context_uses_private_namespace_recall(
     assert isinstance(prompt, list)
     joined = "\n".join(str(item.get("content", "")) for item in prompt)
     assert "MemoryRuntime:" in joined
-    assert "mode: detailed_prefetch" in joined
-    assert "MemoryRecall:" in joined
-    assert "Worker 私有记忆记录了上次调研偏好与检索策略" in joined
-    assert "preview: 优先先查官网和权威资料，再给 Butler 汇总。" in joined
+    assert "mode: hint_first" in joined
+    assert "MemoryRecallHints:" in joined
+    assert "当前未预取详细命中" in joined
+    assert "memory.recall / memory.search / memory.read" in joined
 
     await store_group.conn.close()
 
 
-async def test_task_service_worker_private_writeback_grows_runtime_memory(
+async def test_task_service_worker_context_enables_planned_recall_by_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-worker-planned-recall.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    worker_profile = WorkerProfile(
+        profile_id="worker-profile-alpha-research",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-alpha",
+        name="Alpha Research Worker",
+        summary="负责处理需要检索与调研的任务。",
+        base_archetype="research",
+        model_alias="main",
+        tool_profile="standard",
+        default_tool_groups=["network"],
+        selected_tools=["web.search"],
+        runtime_kinds=["worker"],
+        policy_refs=["default"],
+        tags=["research"],
+        status=WorkerProfileStatus.ACTIVE,
+        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        draft_revision=1,
+        active_revision=1,
+    )
+    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.conn.commit()
+
+    memory_calls: list[dict[str, object]] = []
+    worker_runtime_id = build_agent_runtime_id(
+        role=AgentRuntimeRole.WORKER,
+        project_id="project-alpha",
+        workspace_id="workspace-alpha",
+        agent_profile_id=worker_profile.profile_id,
+        worker_profile_id=worker_profile.profile_id,
+        worker_capability="research",
+    )
+    worker_agent_session_id = build_agent_session_id(
+        agent_runtime_id=worker_runtime_id,
+        kind=AgentSessionKind.WORKER_INTERNAL,
+        legacy_session_id="worker-thread-alpha",
+        work_id="work-alpha-2",
+        task_id="worker-task-alpha-2",
+    )
+    worker_private_scope_ids = build_private_memory_scope_ids(
+        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        agent_runtime_id=worker_runtime_id,
+        agent_session_id=worker_agent_session_id,
+    )
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        memory_calls.append(
+            {
+                "scope_ids": list(scope_ids),
+                "query": query,
+                "policy": policy.model_dump(mode="json") if policy is not None else {},
+                "hook_options": (
+                    hook_options.model_dump(mode="json") if hook_options is not None else {}
+                ),
+            }
+        )
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-worker-plan-1",
+                    layer=MemoryLayer.FRAGMENT,
+                    scope_id=worker_private_scope_ids[0],
+                    partition=MemoryPartition.WORK,
+                    summary="Worker 私有记忆保留了上次 Alpha 调研的有效检索策略。",
+                    subject_key="worker-research-preference",
+                    search_query=query,
+                    citation=f"memory://{worker_private_scope_ids[0]}/fragment/worker-research-preference",
+                    content_preview="优先先查官网和权威资料，再给 Butler 汇总。",
+                    metadata={"source": "worker-planned-test"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "连续性", "里程碑"],
+                candidate_count=1,
+                filtered_count=0,
+                delivered_count=1,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = PlannerAwareLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="继续处理 Alpha 的官网调研任务",
+        idempotency_key="f051-worker-planned-recall-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    runtime_context = RuntimeControlContext(
+        task_id=task_id,
+        trace_id=f"trace-{task_id}",
+        surface="web",
+        scope_id="chat:web:thread-alpha",
+        thread_id="thread-alpha",
+        session_id="worker-thread-alpha",
+        project_id="project-alpha",
+        workspace_id="workspace-alpha",
+        work_id="work-alpha-2",
+        agent_profile_id=worker_profile.profile_id,
+        worker_capability="research",
+        metadata={
+            "agent_runtime_id": worker_runtime_id,
+            "agent_session_id": worker_agent_session_id,
+            "parent_agent_session_id": "butler-session-alpha",
+        },
+    )
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        worker_capability="research",
+        runtime_context=runtime_context,
+        dispatch_metadata={
+            **(await service.get_latest_user_metadata(task_id)),
+            "requested_worker_profile_id": worker_profile.profile_id,
+            "parent_agent_session_id": "butler-session-alpha",
+            "work_id": "work-alpha-2",
+        },
+    )
+
+    assert len(llm_service.calls) == 2
+    planner_prompt = llm_service.calls[0]["prompt_or_messages"]
+    final_prompt = llm_service.calls[1]["prompt_or_messages"]
+    assert isinstance(planner_prompt, list)
+    assert isinstance(final_prompt, list)
+    planner_joined = "\n".join(str(item.get("content", "")) for item in planner_prompt)
+    final_joined = "\n".join(str(item.get("content", "")) for item in final_prompt)
+    assert "RecallPlanningContext:" in planner_joined
+    assert "mode: hint_first" in final_joined
+    assert "Worker 私有记忆保留了上次 Alpha 调研的有效检索策略" in final_joined
+
+    assert len(memory_calls) == 1
+    assert memory_calls[0]["query"] == "Alpha continuity constraints milestone plan"
+    assert memory_calls[0]["policy"]["allow_vault"] is False
+    assert memory_calls[0]["hook_options"]["focus_terms"] == ["Alpha", "连续性", "里程碑"]
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
+    assert frame.budget["memory_recall"]["agent_led_recall_executed"] is True
+    assert frame.budget["memory_recall"]["recall_plan"]["query"] == (
+        "Alpha continuity constraints milestone plan"
+    )
+    assert frame.memory_hits[0]["record_id"] == "memory-worker-plan-1"
+
+    await store_group.conn.close()
+
+
+async def test_task_service_worker_context_respects_explicit_detailed_prefetch_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-worker-detailed-prefetch.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    worker_profile = WorkerProfile(
+        profile_id="worker-profile-alpha-research",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-alpha",
+        name="Alpha Research Worker",
+        summary="负责处理需要检索与调研的任务。",
+        base_archetype="research",
+        model_alias="main",
+        tool_profile="standard",
+        default_tool_groups=["network"],
+        selected_tools=["web.search"],
+        runtime_kinds=["worker"],
+        policy_refs=["default"],
+        tags=["research"],
+        status=WorkerProfileStatus.ACTIVE,
+        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        draft_revision=1,
+        active_revision=1,
+    )
+    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id=worker_profile.profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name=worker_profile.name,
+            persona_summary="显式覆盖成 detailed prefetch。",
+            context_budget_policy={
+                "memory_recall": {
+                    "prefetch_mode": "detailed_prefetch",
+                    "planner_enabled": False,
+                }
+            },
+            metadata={"source_kind": "worker_profile_mirror"},
+        )
+    )
+    await store_group.conn.commit()
+
+    memory_calls: list[dict[str, object]] = []
+    worker_runtime_id = build_agent_runtime_id(
+        role=AgentRuntimeRole.WORKER,
+        project_id="project-alpha",
+        workspace_id="workspace-alpha",
+        agent_profile_id=worker_profile.profile_id,
+        worker_profile_id=worker_profile.profile_id,
+        worker_capability="research",
+    )
+    worker_agent_session_id = build_agent_session_id(
+        agent_runtime_id=worker_runtime_id,
+        kind=AgentSessionKind.WORKER_INTERNAL,
+        legacy_session_id="worker-thread-alpha",
+        work_id="work-alpha-2",
+        task_id="worker-task-alpha-2",
+    )
+    worker_private_scope_ids = build_private_memory_scope_ids(
+        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        agent_runtime_id=worker_runtime_id,
+        agent_session_id=worker_agent_session_id,
+    )
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        _ = policy, per_scope_limit, max_hits, hook_options
+        memory_calls.append({"scope_ids": list(scope_ids), "query": query})
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-worker-override-1",
+                    layer=MemoryLayer.FRAGMENT,
+                    scope_id=worker_private_scope_ids[0],
+                    partition=MemoryPartition.WORK,
+                    summary="显式覆盖后重新回到 detailed prefetch。",
+                    subject_key="worker-research-override",
+                    search_query=query,
+                    citation=f"memory://{worker_private_scope_ids[0]}/fragment/worker-research-override",
+                    content_preview="这次会在 prompt 里直接注入 recall。",
+                    metadata={"source": "worker-override-test"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="继续处理 Alpha 的官网调研任务",
+        idempotency_key="f051-worker-detailed-prefetch-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    runtime_context = RuntimeControlContext(
+        task_id=task_id,
+        trace_id=f"trace-{task_id}",
+        surface="web",
+        scope_id="chat:web:thread-alpha",
+        thread_id="thread-alpha",
+        session_id="worker-thread-alpha",
+        project_id="project-alpha",
+        workspace_id="workspace-alpha",
+        work_id="work-alpha-2",
+        agent_profile_id=worker_profile.profile_id,
+        worker_capability="research",
+        metadata={
+            "agent_runtime_id": worker_runtime_id,
+            "agent_session_id": worker_agent_session_id,
+            "parent_agent_session_id": "butler-session-alpha",
+        },
+    )
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        worker_capability="research",
+        runtime_context=runtime_context,
+        dispatch_metadata={
+            **(await service.get_latest_user_metadata(task_id)),
+            "requested_worker_profile_id": worker_profile.profile_id,
+            "parent_agent_session_id": "butler-session-alpha",
+            "work_id": "work-alpha-2",
+        },
+    )
+
+    assert len(memory_calls) == 1
+    assert set(worker_private_scope_ids).issubset(set(memory_calls[0]["scope_ids"]))
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.budget["memory_recall"]["prefetch_mode"] == "detailed_prefetch"
+    assert frame.memory_hits[0]["record_id"] == "memory-worker-override-1"
+
+    prompt = llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "mode: detailed_prefetch" in joined
+    assert "MemoryRecall:" in joined
+    assert "显式覆盖后重新回到 detailed prefetch" in joined
+
+    await store_group.conn.close()
+
+
+async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hints_across_sessions(
     tmp_path: Path,
 ) -> None:
     store_group = await create_store_group(
@@ -1512,11 +1870,6 @@ async def test_task_service_worker_private_writeback_grows_runtime_memory(
         work_id="work-alpha-2",
         task_id="worker-task-alpha-2",
     )
-    second_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
-        agent_runtime_id=worker_runtime_id,
-        agent_session_id=second_agent_session_id,
-    )
     _second_task_id, second_frame = await run_worker_turn(
         work_id="work-alpha-2",
         agent_session_id=second_agent_session_id,
@@ -1525,18 +1878,28 @@ async def test_task_service_worker_private_writeback_grows_runtime_memory(
     )
 
     assert second_frame.agent_session_id == second_agent_session_id
+    assert second_frame.memory_hits == []
     assert second_frame.budget["memory_recall"]["recall_owner_role"] == AgentRuntimeRole.WORKER.value
+    assert second_frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
     assert any(
-        hit["scope_id"] == second_private_scope_ids[1]
-        and hit["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
-        and "alpha-official-root" in hit["summary"]
-        for hit in second_frame.memory_hits
+        entry["scope_id"] == first_private_scope_ids[1]
+        and entry["scope_kind"] == "runtime_private"
+        and entry["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+        for entry in second_frame.budget["memory_recall"]["scope_entries"]
     )
+
+    prompt = llm_service.calls[-1]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "MemoryRuntime:" in joined
+    assert "mode: hint_first" in joined
+    assert "MemoryRecallHints:" in joined
+    assert "当前未预取详细命中" in joined
 
     await store_group.conn.close()
 
 
-async def test_task_service_worker_tool_writeback_commits_sor_and_recall_across_sessions(
+async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runtime_memory_hints(
     tmp_path: Path,
 ) -> None:
     store_group = await create_store_group(
@@ -1773,21 +2136,30 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_recall_across_
         work_id="work-alpha-tool-2",
         task_id="worker-tool-task-2",
     )
+    second_llm_service = RecordingLLMService()
     _second_task_id, second_frame = await run_worker_turn(
         work_id="work-alpha-tool-2",
         agent_session_id=second_agent_session_id,
         text="agent-zero-playbook",
         idempotency_key="f038-worker-tool-writeback-002",
-        llm_service=RecordingLLMService(),
+        llm_service=second_llm_service,
     )
 
+    assert second_frame.memory_hits == []
+    assert second_frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
     assert any(
-        hit["layer"] == MemoryLayer.SOR.value
-        and hit["scope_id"] == first_private_scope_ids[1]
-        and hit["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
-        and "agent-zero-playbook" in (hit["summary"] + hit["content_preview"])
-        for hit in second_frame.memory_hits
+        entry["scope_id"] == first_private_scope_ids[1]
+        and entry["scope_kind"] == "runtime_private"
+        and entry["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+        for entry in second_frame.budget["memory_recall"]["scope_entries"]
     )
+    prompt = second_llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "MemoryRuntime:" in joined
+    assert "mode: hint_first" in joined
+    assert "MemoryRecallHints:" in joined
+    assert "memory.recall / memory.search / memory.read" in joined
 
     await store_group.conn.close()
 

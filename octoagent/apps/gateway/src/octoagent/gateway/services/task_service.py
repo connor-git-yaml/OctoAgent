@@ -982,7 +982,8 @@ class TaskService:
             runtime_context=runtime_context,
         )
         if (
-            planning_context.prefetch_mode != "agent_led_hint_first"
+            planning_context.prefetch_mode
+            not in {"agent_led_hint_first", "hint_first"}
             or not planning_context.planner_enabled
             or not planning_context.memory_scope_ids
             or not planning_context.query.strip()
@@ -1579,7 +1580,7 @@ class TaskService:
     def _build_delayed_recall_plan(frame) -> dict[str, Any]:
         memory_recall = dict(frame.budget.get("memory_recall", {}))
         prefetch_mode = str(memory_recall.get("prefetch_mode", "")).strip().lower()
-        if prefetch_mode == "agent_led_hint_first" and not bool(
+        if prefetch_mode in {"hint_first", "agent_led_hint_first"} and not bool(
             memory_recall.get("agent_led_recall_executed", False)
         ):
             return {
@@ -1631,7 +1632,11 @@ class TaskService:
         pending_replay_count = int(memory_recall.get("pending_replay_count", 0) or 0)
         if pending_replay_count > 0:
             schedule_reasons.append("memory_sync_backlog")
-        schedule_reasons.extend(degraded_reasons)
+        schedule_reasons.extend(
+            item
+            for item in degraded_reasons
+            if item == "prompt_budget_trimmed" or item.startswith("memory_")
+        )
         schedule_reason = "; ".join(dict.fromkeys(item for item in schedule_reasons if item))
         return {
             "enabled": bool(query and scope_ids and schedule_reason),

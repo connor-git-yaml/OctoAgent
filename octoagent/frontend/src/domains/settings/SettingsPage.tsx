@@ -376,6 +376,24 @@ export default function SettingsPage() {
       summary: "为当前作用域生成核心文件模板。",
       command: "octo behavior init",
     },
+    {
+      key: "edit-agents",
+      title: "准备并编辑 AGENTS.md",
+      summary: "materialize 当前 project override，并交给本机编辑器处理。",
+      command: "octo behavior edit AGENTS",
+    },
+    {
+      key: "diff-agents",
+      title: "查看 override diff",
+      summary: "比较当前 override 相对下层来源的差异。",
+      command: "octo behavior diff AGENTS",
+    },
+    {
+      key: "apply-agents",
+      title: "应用 reviewed proposal",
+      summary: "把外部提案文件写回 behavior workspace。",
+      command: "octo behavior apply AGENTS --from /path/to/proposal.md",
+    },
   ];
   const memoryBridgeUrl = String(
     fieldState["memory.bridge_url"] ??

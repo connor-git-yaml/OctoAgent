@@ -2842,7 +2842,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
 - [~] Feature 033：Agent Profile + Bootstrap + Context Continuity（Butler 主链已接入 profile / context frame / recent context / memory retrieval；Worker runtime continuity 与独立 session 仍待补齐）
-- [~] Feature 038：Agent Memory Recall Optimization（project-scoped recall 主链已打通；agent-private namespace / worker recall runtime / namespace-aware MemU index 仍待补齐）
+- [~] Feature 038：Agent Memory Recall Optimization（project-scoped recall 主链、agent-private namespace、worker hint-first recall runtime 与 namespace-aware MemU contract 已打通；仍待更细粒度 user-facing evidence）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
 2026-03-08 进展：
@@ -2931,7 +2931,7 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - 用户可以为 project 选择默认 `AgentProfile` / `WorkerProfile`，并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
 - Butler 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
 - 用户可以在 Web 或 CLI 中查看并编辑当前 project 的核心 behavior files（至少 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md`），并看到每次运行的 effective behavior source
-- 当前阶段 Web 先提供只读 `Behavior Files` operator 视图；CLI 提供 `octo behavior ls/show/init` 作为 canonical 管理入口
+- 当前阶段 Web 提供 `Behavior Files` operator 视图；CLI 提供 `octo behavior ls/show/init/edit/diff/apply` 作为 canonical 管理入口
 - Telegram 与 Web 都可以完成最基本的控制命令：approve、model 切换、skill 调用、subagent/work 控制、状态查询
 - Web 管理台可以完成 provider/channel 配置、device pairing、agents / memory / permissions / secrets 管理、任务查看、backup/restore dry-run、memory 浏览与证据追溯，不再依赖终端作为唯一操作面
 - 用户可以在正式的 session/chat center 中完成 ButlerSession / WorkerSession 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
@@ -2974,8 +2974,8 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
 - [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、Butler-owned freshness delegation 主链、缺城市显式追问、backend unavailable 降级、worker private recall runtime、message-native 返回链与 runtime truth surface）
-- [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web 只读 behavior 视图、CLI `octo behavior ls/show/init`，并把 Butler bounded direct tooling 与 hint-first memory runtime 接回主链）
-- [x] Feature 051：Session-Native Agent Runtime & Recall Loop（`behavior budget + ToolUniverseHints` 已落地；`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store，`user / assistant / tool_call / tool_result / context_summary` 会落到 `agent_session_turns`，`RecentConversation / session.export / session.reset` 都优先消费该 store；控制面已新增 `session.new / session.reset`，Web Chat 的 `开始新对话` 也改成服务端 lifecycle 动作；Butler chat 默认切到 `agent-led hint-first` memory runtime，并已把 `ButlerDecision + RecallPlan` 收口为统一 `ButlerLoopPlan`；`AgentSessionTurn` 现在还会生成正式 replay/sanitize 投影，负责 turn 去重、tool pairing 修复、orphan tool call 清理，并统一注入 `SessionReplay` / `RecentConversation`；默认 general Butler 路径已切到 `single_loop_executor`，主模型调用直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环，不再额外触发 `butler-decision` 或 `memory-recall-planning` 辅助 phase；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；Worker 保留 `detailed_prefetch`；compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义）
+- [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web behavior 视图、CLI `octo behavior ls/show/init/edit/diff/apply`，并把 Butler bounded direct tooling 与 hint-first memory runtime 接回主链）
+- [x] Feature 051：Session-Native Agent Runtime & Recall Loop（`behavior budget + ToolUniverseHints` 已落地；`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store，`user / assistant / tool_call / tool_result / context_summary` 会落到 `agent_session_turns`，`RecentConversation / session.export / session.reset` 都优先消费该 store；控制面已新增 `session.new / session.reset / session.unfocus`，Session Center 已提供 `全部 / 运行中 / 队列 / 历史` lane 视图；Butler chat 默认切到 `agent-led hint-first` memory runtime，并已把 `ButlerDecision + RecallPlan` 收口为统一 `ButlerLoopPlan`；Worker 默认切到 planner-capable `hint-first` runtime，仅在显式 profile override 下保留 `detailed_prefetch`；`AgentSessionTurn` 现在还会生成正式 replay/sanitize 投影，并进入预算驱动裁剪链；默认 `single_loop_executor` 已从 general Butler 扩到显式 `research/dev/ops` worker lens，主模型调用直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环，不再额外触发 `butler-decision` 或 `memory-recall-planning` 辅助 phase；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义）
 - [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为“当前项目主 Agent + 已创建 Agent 列表 + 模板创建流”，并将结构化编辑控件替代技术字段编辑主路径）
 
 M4 约束：

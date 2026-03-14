@@ -3283,6 +3283,81 @@ class TestControlPlaneApi:
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
 
+    async def test_session_projection_exposes_lane_summary_and_unfocus(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        task_id = await _create_task(
+            control_plane_app,
+            text="review current running session",
+            thread_id="thread-session-unfocus",
+        )
+        task = await control_plane_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        workspace = (
+            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
+                task.scope_id
+            )
+        )
+        assert workspace is not None
+        session_id = build_scope_aware_session_id(
+            task,
+            project_id=workspace.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+
+        focus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.focus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": session_id,
+                },
+            },
+        )
+        assert focus_resp.status_code == 200
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        assert payload["summary"]["total_sessions"] >= 1
+        assert payload["summary"]["queued_sessions"] + payload["summary"]["running_sessions"] >= 1
+        assert payload["summary"]["focused_sessions"] == 1
+        assert any(item["capability_id"] == "session.unfocus" for item in payload["capabilities"])
+        focused = next(item for item in payload["sessions"] if item["session_id"] == session_id)
+        assert focused["lane"] in {"queue", "running"}
+
+        unfocus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.unfocus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {},
+            },
+        )
+        assert unfocus_resp.status_code == 200
+        unfocus_result = unfocus_resp.json()["result"]
+        assert unfocus_result["code"] == "SESSION_UNFOCUSED"
+        assert unfocus_result["data"]["previous_session_id"] == session_id
+
+        after_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert after_resp.status_code == 200
+        after_payload = after_resp.json()
+        assert after_payload["focused_session_id"] == ""
+        assert after_payload["summary"]["focused_sessions"] == 0
+
     async def test_session_reset_clears_continuity_and_closes_agent_sessions(
         self,
         control_plane_app,

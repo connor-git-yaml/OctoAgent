@@ -4,18 +4,28 @@ import type {
   A2AMessageItem,
   RecallFrameItem,
   SessionProjectionItem,
+  SessionProjectionSummary,
 } from "../../types";
+
+type SessionLaneFilter = "all" | "running" | "queue" | "history";
 
 interface SessionCenterSectionProps {
   sessionFilter: string;
   onSessionFilterChange: (value: string) => void;
+  sessionLane: SessionLaneFilter;
+  onSessionLaneChange: (value: SessionLaneFilter) => void;
+  sessionSummary: SessionProjectionSummary | null;
   contextA2AConversations: A2AConversationItem[];
   contextA2AMessages: A2AMessageItem[];
   contextRecallFrames: RecallFrameItem[];
   contextMemoryNamespaceCount: number;
   filteredSessions: SessionProjectionItem[];
+  focusedSessionId: string;
   busyActionId: string | null;
+  onNewSession: (session: SessionProjectionItem | null) => void;
   onFocusSession: (session: SessionProjectionItem) => void;
+  onUnfocusSession: () => void;
+  onResetSession: (session: SessionProjectionItem) => void;
   onExportSession: (session: SessionProjectionItem) => void;
   onInterruptSession: (session: SessionProjectionItem) => void;
   onResumeSession: (session: SessionProjectionItem) => void;
@@ -29,13 +39,20 @@ interface SessionCenterSectionProps {
 export default function SessionCenterSection({
   sessionFilter,
   onSessionFilterChange,
+  sessionLane,
+  onSessionLaneChange,
+  sessionSummary,
   contextA2AConversations,
   contextA2AMessages,
   contextRecallFrames,
   contextMemoryNamespaceCount,
   filteredSessions,
+  focusedSessionId,
   busyActionId,
+  onNewSession,
   onFocusSession,
+  onUnfocusSession,
+  onResetSession,
   onExportSession,
   onInterruptSession,
   onResumeSession,
@@ -45,6 +62,35 @@ export default function SessionCenterSection({
   formatJson,
   statusTone,
 }: SessionCenterSectionProps) {
+  const focusedSession =
+    filteredSessions.find((session) => session.session_id === focusedSessionId) ?? null;
+  const laneOptions: Array<{
+    value: SessionLaneFilter;
+    label: string;
+    count: number;
+  }> = [
+    {
+      value: "all",
+      label: "全部",
+      count: sessionSummary?.total_sessions ?? filteredSessions.length,
+    },
+    {
+      value: "running",
+      label: "运行中",
+      count: sessionSummary?.running_sessions ?? 0,
+    },
+    {
+      value: "queue",
+      label: "队列",
+      count: sessionSummary?.queued_sessions ?? 0,
+    },
+    {
+      value: "history",
+      label: "历史",
+      count: sessionSummary?.history_sessions ?? 0,
+    },
+  ];
+
   return (
     <section className="stack-section">
       <article className="panel">
@@ -53,12 +99,44 @@ export default function SessionCenterSection({
             <p className="eyebrow">Session Center</p>
             <h3>会话与执行投影</h3>
           </div>
-          <input
-            className="search-input"
-            value={sessionFilter}
-            onChange={(event) => onSessionFilterChange(event.target.value)}
-            placeholder="搜索 task / thread / requester"
-          />
+          <div className="action-row">
+            <input
+              className="search-input"
+              value={sessionFilter}
+              onChange={(event) => onSessionFilterChange(event.target.value)}
+              placeholder="搜索 task / thread / requester"
+            />
+            <div className="action-row">
+              {laneOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={option.value === sessionLane ? "secondary-button" : "ghost-button"}
+                  onClick={() => onSessionLaneChange(option.value)}
+                >
+                  {option.label} {option.count}
+                </button>
+              ))}
+            </div>
+            {focusedSessionId ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={onUnfocusSession}
+                disabled={busyActionId === "session.unfocus"}
+              >
+                取消聚焦
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onNewSession(focusedSession)}
+              disabled={busyActionId === "session.new"}
+            >
+              开始新对话
+            </button>
+          </div>
         </div>
       </article>
 
@@ -133,7 +211,12 @@ export default function SessionCenterSection({
               <p className="eyebrow">{session.thread_id}</p>
               <h3>{session.title || session.task_id}</h3>
             </div>
-            <span className={`tone-chip ${statusTone(session.status)}`}>{session.status}</span>
+            <div className="action-row">
+              {session.session_id === focusedSessionId ? (
+                <span className="tone-chip neutral">Focused</span>
+              ) : null}
+              <span className={`tone-chip ${statusTone(session.status)}`}>{session.status}</span>
+            </div>
           </div>
           <p>{session.latest_message_summary || "暂无消息摘要"}</p>
           <div className="meta-grid">
@@ -144,8 +227,8 @@ export default function SessionCenterSection({
             <span>Runtime: {session.runtime_kind || "-"}</span>
             <span>Parent Task: {session.parent_task_id || "-"}</span>
           </div>
-          {session.execution_summary &&
-          Object.keys(session.execution_summary).length > 0 ? (
+            {session.execution_summary &&
+            Object.keys(session.execution_summary).length > 0 ? (
             <pre className="json-preview">{formatJson(session.execution_summary)}</pre>
           ) : null}
           <div className="action-row">
@@ -164,6 +247,14 @@ export default function SessionCenterSection({
               disabled={busyActionId === "session.export"}
             >
               导出
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => onResetSession(session)}
+              disabled={busyActionId === "session.reset"}
+            >
+              重置 continuity
             </button>
             <button
               type="button"

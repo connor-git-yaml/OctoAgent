@@ -469,11 +469,20 @@ export interface SessionProjectionItem {
   project_id: string;
   workspace_id: string;
   runtime_kind: string;
+  lane?: string;
   latest_message_summary: string;
   latest_event_at: string | null;
   execution_summary: Record<string, unknown>;
   capabilities: ControlPlaneCapability[];
   detail_refs: Record<string, string>;
+}
+
+export interface SessionProjectionSummary {
+  total_sessions: number;
+  running_sessions: number;
+  queued_sessions: number;
+  history_sessions: number;
+  focused_sessions: number;
 }
 
 export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
@@ -483,6 +492,7 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   focused_thread_id: string;
   new_conversation_token: string;
   sessions: SessionProjectionItem[];
+  summary?: SessionProjectionSummary | null;
   operator_summary: OperatorInboxSummary | null;
   operator_items: OperatorInboxItem[];
 }

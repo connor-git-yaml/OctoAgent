@@ -1416,6 +1416,14 @@ describe("App workbench routing", () => {
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(snapshot));
       }
+      if (url.includes("/api/control/events")) {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            events: [],
+          })
+        );
+      }
       if (url.includes("/api/control/actions") && init?.method === "POST") {
         const body = String(init.body ?? "");
         if (body.includes('"action_id":"worker_profile.review"')) {

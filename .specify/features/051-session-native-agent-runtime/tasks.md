@@ -34,6 +34,7 @@
 - 控制面已新增 `session.new / session.reset`
 - Web Chat 已补齐 `开始新对话` 主路径：调用服务端 `session.new` 后，下一次发送会创建新的 task/thread，并回写 `session.focus`
 - `session.reset` 现已同步清空 `agent_session_turns`
+- Session Center 已补齐 `开始新对话 / 重置 continuity` 入口，并直接走 control action
 
 ## T005 - Agent-led recall runtime
 
@@ -45,8 +46,8 @@
 - Butler direct-answer 路径会把 recall 计划作为 `precomputed_recall_plan` 注入主调用，不再额外触发独立 recall planner phase
 - `RecallEvidenceBundle` 已写回 `memory_recall` budget，并以 artifact/source refs 保留 planner 审计链
 - 当 MemU backend 可用时，plan-driven recall 已验证会优先复用高级 backend search path
-- Worker runtime 继续保留 `detailed_prefetch`，确保专业 worker recall 不退化
-- delayed recall 在 `agent_led_hint_first` 下不再被系统自动调度
+- Worker runtime 默认已切到 `hint-first`，仅在显式 profile override 下保留 `detailed_prefetch`
+- delayed recall 在 `hint_first / agent_led_hint_first` 下都不再被系统自动调度
 - 若本轮已执行 plan-driven recall，delayed recall 会继续按 degraded/backend 状态决定是否补跑
 - `MemorySearchOptions` 已把 `expanded_queries / focus_terms / subject_hint / rerank_mode / post_filter_mode / min_keyword_overlap` 下发到 MemU `command/http` recall 执行面
 
@@ -82,3 +83,40 @@
 - 主模型调用会直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环
 - 这条主路径不再额外触发 `ButlerDecision` 或 `memory_recall_planning` 辅助 phase
 - `ButlerDecision / ButlerLoopPlan` 保留给 compatibility / explicit delegation / legacy preflight 路径
+
+## T010 - Phase 2 TODO List: Worker planner-enabled recall
+
+- 状态：已完成
+- Worker 默认 mirror profile 现在对 `research / dev / general` archetype 开启 `planner_enabled=true`
+- `hint_first` 也允许进入 `RecallPlan` 规划链，不再只有 `agent_led_hint_first` 能走 planner
+- 显式 `detailed_prefetch` override 仍可关闭 planner，并回到旧式 prompt 注入 recall
+
+## T011 - Phase 2 TODO List: Session 生命周期产品面
+
+- 状态：已完成
+- Session projection 增加 `lane` 与 `summary(total/running/queue/history/focused)` 元数据
+- Control Plane 新增 `session.unfocus`
+- Session Center 现在提供 `全部 / 运行中 / 队列 / 历史` lane 过滤，以及 `取消聚焦 / 开始新对话 / 重置 continuity`
+
+## T012 - Phase 2 TODO List: Transcript replay budget-driven trim
+
+- 状态：已完成
+- `SessionReplay` 不再固定只注入最近 `6/4` 条 dialogue/tool lines
+- replay projection 先保留完整 turn-store 投影，再在 `_fit_prompt_budget()` 中按预算逐级裁剪
+- replay trim 不再误触发 delayed recall materialization
+
+## T013 - Phase 2 TODO List: single-loop 扩到 worker lens
+
+- 状态：已完成
+- `single_loop_executor` 不再只覆盖 general Butler
+- 显式 `requested_worker_type=research/dev/ops` 时，Butler 可借对应 worker lens 直接进入单循环工具执行
+- `ToolIndexQuery` 与 skill description 已同步使用真实 worker type
+
+## T014 - Phase 2 TODO List: Behavior files edit/diff/apply
+
+- 状态：已完成
+- CLI 新增 `octo behavior edit/show/diff/apply`
+- `edit` 会 materialize 可编辑目标文件并尽量调用本机编辑器
+- `diff` 比较当前 override 相对下层来源的差异
+- `apply` 支持把 reviewed proposal 写回目标 behavior file
+- Settings 页已同步展示 `edit / diff / apply` CLI 入口

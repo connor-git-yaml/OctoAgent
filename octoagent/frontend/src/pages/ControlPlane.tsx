@@ -65,6 +65,8 @@ import {
   refreshWorkbenchSnapshotResources,
 } from "../platform/queries";
 
+type SessionLaneFilter = "all" | "running" | "queue" | "history";
+
 const EMPTY_CAPABILITY_PACK: CapabilityPackDocument = {
   contract_version: "1.0.0",
   resource_type: "capability_pack",
@@ -494,6 +496,25 @@ function sessionMatches(item: SessionProjectionItem, keyword: string): boolean {
   return haystack.includes(keyword.toLowerCase());
 }
 
+function resolveSessionLane(item: SessionProjectionItem): Exclude<SessionLaneFilter, "all"> {
+  const lane = String(item.lane ?? "").trim().toLowerCase();
+  if (lane === "running" || lane === "queue" || lane === "history") {
+    return lane;
+  }
+  const status = String(item.status).trim().toUpperCase();
+  if (status === "RUNNING") {
+    return "running";
+  }
+  if (["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"].includes(status)) {
+    return "history";
+  }
+  return "queue";
+}
+
+function sessionMatchesLane(item: SessionProjectionItem, lane: SessionLaneFilter): boolean {
+  return lane === "all" ? true : resolveSessionLane(item) === lane;
+}
+
 function statusTone(status: string): string {
   const normalized = status.toLowerCase();
   if (normalized.includes("unavailable")) {
@@ -559,6 +580,7 @@ export default function ControlPlane({
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResultEnvelope | null>(null);
   const [sessionFilter, setSessionFilter] = useState("");
+  const [sessionLane, setSessionLane] = useState<SessionLaneFilter>("all");
   const deferredSessionFilter = useDeferredValue(sessionFilter);
   const [configDraft, setConfigDraft] = useState("{}");
   const [configDirty, setConfigDirty] = useState(false);
@@ -924,8 +946,11 @@ export default function ControlPlane({
     void refreshImportDetails(fallbackSourceId, fallbackRunId);
   }, [activeSection, snapshot?.resources.imports.generated_at]);
 
-  const filteredSessions = (snapshot?.resources.sessions.sessions ?? []).filter((item) =>
-    sessionMatches(item, deferredSessionFilter)
+  const allSessions = snapshot?.resources.sessions.sessions ?? [];
+  const filteredSessions = allSessions.filter(
+    (item) =>
+      sessionMatches(item, deferredSessionFilter) &&
+      sessionMatchesLane(item, sessionLane)
   );
 
   async function bootControlPlane() {
@@ -1699,16 +1724,34 @@ export default function ControlPlane({
           <SessionCenterSection
             sessionFilter={sessionFilter}
             onSessionFilterChange={setSessionFilter}
+            sessionLane={sessionLane}
+            onSessionLaneChange={setSessionLane}
+            sessionSummary={snapshot?.resources.sessions.summary ?? null}
             contextA2AConversations={contextA2AConversations}
             contextA2AMessages={contextA2AMessages}
             contextRecallFrames={contextRecallFrames}
             contextMemoryNamespaceCount={contextMemoryNamespaces.length}
             filteredSessions={filteredSessions}
+            focusedSessionId={snapshot?.resources.sessions.focused_session_id ?? ""}
             busyActionId={busyActionId}
+            onNewSession={(session) =>
+              void submitAction("session.new", {
+                session_id: session?.session_id,
+                thread_id: session?.thread_id,
+              })
+            }
             onFocusSession={(session) =>
               void submitAction("session.focus", {
                 session_id: session.session_id,
                 thread_id: session.thread_id,
+              })
+            }
+            onUnfocusSession={() => void submitAction("session.unfocus", {})}
+            onResetSession={(session) =>
+              void submitAction("session.reset", {
+                session_id: session.session_id,
+                thread_id: session.thread_id,
+                task_id: session.task_id,
               })
             }
             onExportSession={(session) =>

@@ -79,6 +79,7 @@ from octoagent.core.models import (
     RecallFrameItem,
     SessionProjectionDocument,
     SessionProjectionItem,
+    SessionProjectionSummary,
     SetupGovernanceDocument,
     SetupGovernanceSection,
     SetupReviewSummary,
@@ -650,6 +651,10 @@ class ControlPlaneService:
             state=state,
             session_items=session_items,
         )
+        session_summary = self._build_session_projection_summary(
+            session_items=session_items,
+            focused_session_id=focused_session_id,
+        )
         operator_summary = None
         operator_items = []
         if self._operator_inbox_service is not None:
@@ -665,6 +670,7 @@ class ControlPlaneService:
             focused_thread_id=focused_thread_id,
             new_conversation_token=state.new_conversation_token,
             sessions=session_items,
+            summary=session_summary,
             operator_summary=operator_summary,
             operator_items=operator_items,
             capabilities=[
@@ -677,6 +683,16 @@ class ControlPlaneService:
                     capability_id="session.focus",
                     label="聚焦会话",
                     action_id="session.focus",
+                ),
+                ControlPlaneCapability(
+                    capability_id="session.unfocus",
+                    label="取消聚焦",
+                    action_id="session.unfocus",
+                ),
+                ControlPlaneCapability(
+                    capability_id="session.reset",
+                    label="重置 continuity",
+                    action_id="session.reset",
                 ),
                 ControlPlaneCapability(
                     capability_id="session.export",
@@ -759,6 +775,7 @@ class ControlPlaneService:
                             latest_metadata.get("target_kind", ""),
                         )
                     ),
+                    lane=self._session_lane_for_status(latest.status),
                     latest_message_summary=latest_message,
                     latest_event_at=latest.updated_at,
                     execution_summary=execution_summary,
@@ -775,6 +792,36 @@ class ControlPlaneService:
             reverse=True,
         )
         return session_items
+
+    @staticmethod
+    def _session_lane_for_status(status: TaskStatus) -> str:
+        if status is TaskStatus.RUNNING:
+            return "running"
+        if status in {
+            TaskStatus.SUCCEEDED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.REJECTED,
+        }:
+            return "history"
+        return "queue"
+
+    def _build_session_projection_summary(
+        self,
+        *,
+        session_items: list[SessionProjectionItem],
+        focused_session_id: str,
+    ) -> SessionProjectionSummary:
+        running_sessions = sum(1 for item in session_items if item.lane == "running")
+        history_sessions = sum(1 for item in session_items if item.lane == "history")
+        queued_sessions = sum(1 for item in session_items if item.lane == "queue")
+        return SessionProjectionSummary(
+            total_sessions=len(session_items),
+            running_sessions=running_sessions,
+            queued_sessions=queued_sessions,
+            history_sessions=history_sessions,
+            focused_sessions=1 if focused_session_id.strip() else 0,
+        )
 
     def _resolve_projected_focus(
         self,
@@ -3133,6 +3180,8 @@ class ControlPlaneService:
             )
         if action_id == "session.focus":
             return await self._handle_session_focus(request)
+        if action_id == "session.unfocus":
+            return await self._handle_session_unfocus(request)
         if action_id == "session.new":
             return await self._handle_session_new(request)
         if action_id == "session.reset":
@@ -4390,6 +4439,43 @@ class ControlPlaneService:
                 ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
                 ControlPlaneTargetRef(target_type="thread", target_id=session.thread_id),
             ],
+        )
+
+    async def _handle_session_unfocus(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        state = self._state_store.load()
+        previous_session_id = state.focused_session_id.strip()
+        previous_thread_id = state.focused_thread_id.strip()
+        self._state_store.save(
+            state.model_copy(
+                update={
+                    "focused_session_id": "",
+                    "focused_thread_id": "",
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        target_refs: list[ControlPlaneTargetRef] = []
+        if previous_session_id:
+            target_refs.append(
+                ControlPlaneTargetRef(target_type="session", target_id=previous_session_id)
+            )
+        if previous_thread_id:
+            target_refs.append(
+                ControlPlaneTargetRef(target_type="thread", target_id=previous_thread_id)
+            )
+        return self._completed_result(
+            request=request,
+            code="SESSION_UNFOCUSED",
+            message="已取消当前聚焦会话",
+            data={
+                "previous_session_id": previous_session_id,
+                "previous_thread_id": previous_thread_id,
+            },
+            resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+            target_refs=target_refs,
         )
 
     async def _handle_session_new(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -9238,6 +9324,7 @@ class ControlPlaneService:
                 definition("capability.refresh", "刷新能力包", category="capability"),
                 definition("work.refresh", "刷新委派视图", category="delegation"),
                 definition("session.focus", "聚焦会话", category="sessions"),
+                definition("session.unfocus", "取消聚焦会话", category="sessions"),
                 definition("session.new", "开始新对话", category="sessions"),
                 definition("session.reset", "重置会话 continuity", category="sessions"),
                 definition("session.export", "导出会话", category="sessions"),

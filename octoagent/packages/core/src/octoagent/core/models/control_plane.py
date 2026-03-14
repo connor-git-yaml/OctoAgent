@@ -188,11 +188,20 @@ class SessionProjectionItem(BaseModel):
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
     runtime_kind: str = Field(default="")
+    lane: str = Field(default="queue")
     latest_message_summary: str = Field(default="")
     latest_event_at: datetime | None = None
     execution_summary: dict[str, Any] = Field(default_factory=dict)
     capabilities: list[ControlPlaneCapability] = Field(default_factory=list)
     detail_refs: dict[str, str] = Field(default_factory=dict)
+
+
+class SessionProjectionSummary(BaseModel):
+    total_sessions: int = 0
+    running_sessions: int = 0
+    queued_sessions: int = 0
+    history_sessions: int = 0
+    focused_sessions: int = 0
 
 
 class SessionProjectionDocument(ControlPlaneDocument):
@@ -202,6 +211,7 @@ class SessionProjectionDocument(ControlPlaneDocument):
     focused_thread_id: str = Field(default="")
     new_conversation_token: str = Field(default="")
     sessions: list[SessionProjectionItem] = Field(default_factory=list)
+    summary: SessionProjectionSummary = Field(default_factory=SessionProjectionSummary)
     operator_summary: OperatorInboxSummary | None = None
     operator_items: list[OperatorInboxItem] = Field(default_factory=list)
 

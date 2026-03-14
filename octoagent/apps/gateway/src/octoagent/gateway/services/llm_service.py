@@ -428,9 +428,14 @@ class LLMService:
     ) -> str:
         tool_list = ", ".join(selected_tools)
         if single_loop_executor:
+            worker_lens = (
+                f" 当前回合按 {worker_type} worker 视角挂载工具。"
+                if worker_type != "general"
+                else ""
+            )
             return (
                 "你是 OctoAgent 的主 Butler。"
-                f" 当前回合直接挂载以下受治理工具：{tool_list}。"
+                f"{worker_lens} 当前回合直接挂载以下受治理工具：{tool_list}。"
                 " 你需要在同一轮主执行链里自己决定是否调用工具、如何收集证据、以及何时直接回答。"
                 " 不要先输出一段“计划说明”再等待下轮；"
                 " 需要工具时直接调用，证据足够后直接给出最终答复。"

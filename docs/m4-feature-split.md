@@ -246,7 +246,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `RuntimeHintBundle + RecentConversation + ButlerDecision preflight` 已进入 Butler 主链
 - generic `delegate_research / delegate_ops` 已成为可执行预路由，不再只停留在 decision contract
 - deterministic 场景树已收口为 compatibility fallback，并带 provenance
-- Web 已提供 `Settings -> Behavior Files` 只读 operator 视图；CLI 已提供 `octo behavior ls/show/init`
+- Web 已提供 `Settings -> Behavior Files` operator 视图；CLI 已提供 `octo behavior ls/show/init/edit/diff/apply`
 
 ### Feature 051：Session-Native Agent Runtime & Recall Loop
 
@@ -261,10 +261,10 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 当前计划：
 
 - Slice A `behavior budget + tool universe hints` 已完成
-- Slice B phase 2 已完成：`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store；`user / assistant / tool_call / tool_result / context_summary` 会写入 `agent_session_turns`，`RecentConversation / session.export / session.reset` 已优先消费该 store
-- Slice C phase 2 已完成：Butler chat 默认改成 `agent-led hint-first`；`planner_enabled` profile 下的 `ButlerDecision + RecallPlan` 已收口为统一 `ButlerLoopPlan`，direct-answer 路径会把 recall 计划作为 `precomputed_recall_plan` 注入主调用；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；Worker 保持 `detailed_prefetch`
+- Slice B phase 2 已完成：`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store；`user / assistant / tool_call / tool_result / context_summary` 会写入 `agent_session_turns`，`RecentConversation / session.export / session.reset` 已优先消费该 store；Session Center 也已补齐 `session.unfocus` 与 `全部 / 运行中 / 队列 / 历史` lane 视图
+- Slice C phase 2 已完成：Butler chat 默认改成 `agent-led hint-first`；`planner_enabled` profile 下的 `ButlerDecision + RecallPlan` 已收口为统一 `ButlerLoopPlan`，direct-answer 路径会把 recall 计划作为 `precomputed_recall_plan` 注入主调用；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；Worker 默认也切到 planner-capable `hint-first` runtime，仅在显式 profile override 下保留 `detailed_prefetch`
 - Slice D 已完成：compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义
-- Slice E 已完成：`AgentSessionTurn` replay/sanitize 投影与默认 general Butler `single_loop_executor` 已接回主链；后续只剩可选增强，而非主缺口
+- Slice E 已完成：`AgentSessionTurn` replay/sanitize 投影已进入预算驱动裁剪链；`single_loop_executor` 也已从 general Butler 扩到显式 `research/dev/ops` worker lens；后续只剩可选增强，而非主缺口
 
 ## 6. 非伪实现门禁
 

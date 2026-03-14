@@ -629,6 +629,8 @@ describe("SettingsPage", () => {
     ).toBeGreaterThan(0);
     expect(screen.getByText("octo behavior ls")).toBeInTheDocument();
     expect(screen.getByText("octo behavior show AGENTS")).toBeInTheDocument();
+    expect(screen.getByText("octo behavior edit AGENTS")).toBeInTheDocument();
+    expect(screen.getByText("octo behavior diff AGENTS")).toBeInTheDocument();
   });
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {

@@ -680,7 +680,11 @@ class OrchestratorService:
         metadata = dict(request.metadata)
         if self._metadata_flag(metadata, "single_loop_executor"):
             return request
-        selection = await self._resolve_single_loop_tool_selection(request)
+        worker_type = self._resolve_single_loop_worker_type(request)
+        selection = await self._resolve_single_loop_tool_selection(
+            request,
+            worker_type=worker_type,
+        )
         if selection is not None:
             await TaskService(self._stores, self._sse_hub).append_structured_event(
                 task_id=request.task_id,
@@ -701,7 +705,7 @@ class OrchestratorService:
         selected_tools = list(selection.selected_tools) if selection is not None else []
         route_reason = self._join_route_reason(
             request.route_reason,
-            "single_loop_executor=butler_main",
+            f"single_loop_executor=butler_{worker_type.value}",
         )
         if selection is not None:
             route_reason = self._join_route_reason(
@@ -711,8 +715,8 @@ class OrchestratorService:
         updated_metadata = {
             **metadata,
             "single_loop_executor": True,
-            "single_loop_executor_mode": "butler_main",
-            "selected_worker_type": "general",
+            "single_loop_executor_mode": f"butler_{worker_type.value}",
+            "selected_worker_type": worker_type.value,
             "selected_tools": selected_tools,
             "selected_tools_json": json.dumps(selected_tools, ensure_ascii=False),
             "tool_selection": (
@@ -734,13 +738,31 @@ class OrchestratorService:
         )
 
     def _is_single_loop_butler_eligible(self, request: OrchestratorRequest) -> bool:
-        return self._is_butler_decision_eligible(request) and bool(
-            getattr(self._llm_service, "supports_single_loop_executor", False)
-        )
+        if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
+            return False
+        if request.worker_capability not in {"", "llm_generation"}:
+            return False
+        metadata = request.metadata
+        if str(metadata.get("parent_task_id", "")).strip():
+            return False
+        if str(metadata.get("spawned_by", "")).strip():
+            return False
+        requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
+        return requested_worker_type in {"", "general", "research", "dev", "ops"}
+
+    @staticmethod
+    def _resolve_single_loop_worker_type(request: OrchestratorRequest) -> WorkerType:
+        requested_worker_type = str(request.metadata.get("requested_worker_type", "")).strip()
+        try:
+            return WorkerType(requested_worker_type or WorkerType.GENERAL.value)
+        except ValueError:
+            return WorkerType.GENERAL
 
     async def _resolve_single_loop_tool_selection(
         self,
         request: OrchestratorRequest,
+        *,
+        worker_type: WorkerType,
     ):
         if self._delegation_plane is None:
             return None
@@ -755,23 +777,29 @@ class OrchestratorService:
             task=task,
             surface=task.requester.channel or "chat",
         )
-        agent_profile, _ = await agent_context_service._resolve_agent_profile(
-            project=project,
-            requested_profile_id=str(request.metadata.get("agent_profile_id", "")).strip(),
+        requested_profile_id = (
+            str(request.metadata.get("requested_worker_profile_id", "")).strip()
+            or str(request.metadata.get("agent_profile_id", "")).strip()
         )
+        if worker_type is WorkerType.GENERAL and not requested_profile_id:
+            agent_profile, _ = await agent_context_service._resolve_agent_profile(
+                project=project,
+                requested_profile_id="",
+            )
+            requested_profile_id = agent_profile.profile_id
         try:
             return await self._delegation_plane.capability_pack.resolve_profile_first_tools(
                 ToolIndexQuery(
                     query=request.user_text.strip() or "general request",
                     limit=12,
                     tool_groups=[],
-                    worker_type=WorkerType.GENERAL,
+                    worker_type=worker_type,
                     tool_profile=str(request.tool_profile).strip() or "standard",
                     project_id=project.project_id if project is not None else "",
                     workspace_id=workspace.workspace_id if workspace is not None else "",
                 ),
-                worker_type=WorkerType.GENERAL,
-                requested_profile_id=agent_profile.profile_id,
+                worker_type=worker_type,
+                requested_profile_id=requested_profile_id,
             )
         except Exception:
             return None
