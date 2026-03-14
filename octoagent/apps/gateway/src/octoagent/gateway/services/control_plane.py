@@ -6799,18 +6799,56 @@ class ControlPlaneService:
                 field_path="memory.backend_mode",
                 section="memory-basic",
                 label="Memory 运行方式",
-                description="先决定是只用本地记忆，还是接入远端 MemU bridge。",
+                description="先决定只用本地记忆，还是启用 MemU 检索层。",
                 widget="select",
-                help_text="首次使用建议先选 local_only；准备做跨会话检索和高级回放时再切到 memu。",
+                help_text=(
+                    "首次使用建议先选 local_only；"
+                    "需要 MemU 时，再决定走本地命令还是 HTTP bridge。"
+                ),
                 order=32,
+            ),
+            "memory.bridge_transport": ConfigFieldHint(
+                field_path="memory.bridge_transport",
+                section="memory-basic",
+                label="MemU 连接方式",
+                description=(
+                    "command 适合本机直接调用 OpenClaw 风格脚本；"
+                    "http 适合连接远端 bridge。"
+                ),
+                widget="select",
+                help_text="如果 MemU 和 Gateway 在同机，优先选 command，减少部署复杂度。",
+                order=34,
             ),
             "memory.bridge_url": ConfigFieldHint(
                 field_path="memory.bridge_url",
                 section="memory-basic",
-                label="MemU Bridge 地址",
+                label="MemU HTTP 地址",
                 placeholder="https://memory.example.com",
-                help_text="只在 memu 模式下需要；这里填 bridge 的基础 URL。",
-                order=34,
+                help_text="仅在 http transport 下需要；这里填 bridge 的基础 URL。",
+                order=36,
+            ),
+            "memory.bridge_command": ConfigFieldHint(
+                field_path="memory.bridge_command",
+                section="memory-basic",
+                label="MemU 本地命令",
+                placeholder="uv run python scripts/memu_bridge.py",
+                help_text="仅在 command transport 下需要；命令会自动追加 health/query 等子命令。",
+                order=38,
+            ),
+            "memory.bridge_command_cwd": ConfigFieldHint(
+                field_path="memory.bridge_command_cwd",
+                section="memory-basic",
+                label="命令工作目录",
+                placeholder="/path/to/memu-project",
+                help_text="可选。命令依赖本地虚拟环境或脚本相对路径时再填写。",
+                order=40,
+            ),
+            "memory.bridge_command_timeout_seconds": ConfigFieldHint(
+                field_path="memory.bridge_command_timeout_seconds",
+                section="memory-basic",
+                label="命令超时（秒）",
+                help_text="仅在 command transport 下生效；本机检索通常 10-20 秒就够。",
+                order=42,
             ),
             "memory.bridge_api_key_env": ConfigFieldHint(
                 field_path="memory.bridge_api_key_env",
@@ -6818,15 +6856,15 @@ class ControlPlaneService:
                 label="MemU API Key 环境变量",
                 widget="env-ref",
                 sensitive=True,
-                help_text="只填环境变量名，不要直接粘贴真实 API Key。",
-                order=36,
+                help_text="仅在 http transport 且 bridge 需要鉴权时填写；只填环境变量名。",
+                order=44,
             ),
             "memory.bridge_timeout_seconds": ConfigFieldHint(
                 field_path="memory.bridge_timeout_seconds",
                 section="memory-basic",
-                label="Bridge 超时（秒）",
-                help_text="网络较慢时可以适度调高；一般 5-10 秒就够。",
-                order=38,
+                label="HTTP 超时（秒）",
+                help_text="仅在 http transport 下生效；网络较慢时可以适度调高。",
+                order=46,
             ),
             "providers": ConfigFieldHint(
                 field_path="providers",

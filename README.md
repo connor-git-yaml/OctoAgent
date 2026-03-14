@@ -94,6 +94,17 @@ To switch from `echo` mode to a real model provider:
 octo setup
 ```
 
+Memory works in `local_only` mode by default. If you later want MemU, the product now supports both a local command path and a remote HTTP bridge:
+
+```bash
+octo config memory show
+octo config memory local
+octo config memory memu-command --command "uv run python scripts/memu_bridge.py"
+octo config memory memu-http --bridge-url "https://memory.example.com"
+```
+
+The Web `Settings > Memory` screen uses the same three modes: local memory, MemU via local command, and MemU via HTTP bridge.
+
 To update a managed local install later:
 
 ```bash

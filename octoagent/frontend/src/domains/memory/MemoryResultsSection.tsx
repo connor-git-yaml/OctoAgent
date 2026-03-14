@@ -1,26 +1,25 @@
 import { Link } from "react-router-dom";
-import type { MemoryConsoleDocument, MemoryRecordProjection } from "../../types";
+import type { MemoryConsoleDocument } from "../../types";
 import { formatDateTime } from "../../workbench/utils";
 import {
-  describeRecord,
+  type MemoryDisplayRecord,
   formatLayerLabel,
   formatPartitionLabel,
-  formatRecordStatus,
-  formatRecordTitle,
-  metadataPreviewEntries,
 } from "./shared";
 
 interface MemoryResultsSectionProps {
   memory: MemoryConsoleDocument;
+  records: MemoryDisplayRecord[];
   selectedRecordId: string;
   hasStoredRecords: boolean;
   busyActionId: string | null;
   onResetFilters: () => Promise<void>;
-  onSelectRecord: (record: MemoryRecordProjection) => void;
+  onSelectRecord: (record: MemoryDisplayRecord) => void;
 }
 
 export default function MemoryResultsSection({
   memory,
+  records,
   selectedRecordId,
   hasStoredRecords,
   busyActionId,
@@ -32,7 +31,7 @@ export default function MemoryResultsSection({
       <div className="wb-panel-head">
         <div>
           <p className="wb-card-label">现在记住了什么</p>
-          <h3>{memory.records.length} 条可读记忆</h3>
+          <h3>{records.length} 条可读记忆</h3>
         </div>
         <div className="wb-chip-row">
           <span className="wb-chip">需授权 {memory.summary.vault_ref_count}</span>
@@ -40,7 +39,7 @@ export default function MemoryResultsSection({
         </div>
       </div>
 
-      {memory.records.length === 0 ? (
+      {records.length === 0 ? (
         <div className="wb-empty-state">
           <strong>{hasStoredRecords ? "当前视图没有命中可读记忆" : "当前还没有可读记忆"}</strong>
           <span>
@@ -64,8 +63,8 @@ export default function MemoryResultsSection({
         </div>
       ) : (
         <div className="wb-record-list">
-          {memory.records.map((record) => {
-            const metadataEntries = metadataPreviewEntries(record);
+          {records.map((displayRecord) => {
+            const { record } = displayRecord;
             const isSelected = record.record_id === selectedRecordId;
 
             return (
@@ -81,13 +80,16 @@ export default function MemoryResultsSection({
                       {record.requires_vault_authorization ? (
                         <span className="wb-chip is-warning">需授权</span>
                       ) : null}
+                      {displayRecord.derivedTypeLabel ? (
+                        <span className="wb-chip">{displayRecord.derivedTypeLabel}</span>
+                      ) : null}
                     </div>
-                    <strong>{formatRecordTitle(record)}</strong>
-                    <p>{describeRecord(record)}</p>
+                    <strong>{displayRecord.title}</strong>
+                    <p>{displayRecord.summary}</p>
                   </div>
                   <div className="wb-list-meta">
                     <span className={`wb-status-pill is-${record.status.toLowerCase()}`}>
-                      {formatRecordStatus(record)}
+                      {displayRecord.statusLabel}
                     </span>
                     <small>{formatDateTime(record.updated_at ?? record.created_at)}</small>
                   </div>
@@ -98,11 +100,14 @@ export default function MemoryResultsSection({
                   {record.version !== null ? (
                     <span className="wb-chip">版本 {record.version}</span>
                   ) : null}
+                  {displayRecord.confidenceLabel ? (
+                    <span className="wb-chip">置信度 {displayRecord.confidenceLabel}</span>
+                  ) : null}
                 </div>
 
-                {metadataEntries.length > 0 ? (
+                {displayRecord.metadataPreview.length > 0 ? (
                   <div className="wb-key-value-list">
-                    {metadataEntries.map(([key, value]) => (
+                    {displayRecord.metadataPreview.map(([key, value]) => (
                       <div key={`${record.record_id}-${key}`} className="wb-key-value-item">
                         <span>{key}</span>
                         <strong>{value}</strong>
@@ -115,8 +120,8 @@ export default function MemoryResultsSection({
                   <button
                     type="button"
                     className="wb-button wb-button-tertiary wb-button-inline"
-                    aria-label={`查看 ${formatRecordTitle(record)} 详情`}
-                    onClick={() => onSelectRecord(record)}
+                    aria-label={`查看 ${displayRecord.title} 详情`}
+                    onClick={() => onSelectRecord(displayRecord)}
                   >
                     {isSelected ? "正在查看" : "查看详情"}
                   </button>

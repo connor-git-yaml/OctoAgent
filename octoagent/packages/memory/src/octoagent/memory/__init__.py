@@ -1,6 +1,13 @@
 """OctoAgent Memory 包公共导出。"""
 
-from .backends import HttpMemUBridge, MemoryBackend, MemUBackend, MemUBridge, SqliteMemoryBackend
+from .backends import (
+    CommandMemUBridge,
+    HttpMemUBridge,
+    MemoryBackend,
+    MemUBackend,
+    MemUBridge,
+    SqliteMemoryBackend,
+)
 from .enums import (
     SENSITIVE_PARTITIONS,
     MemoryLayer,
@@ -90,6 +97,7 @@ from .store import (
 __all__ = [
     "MemUBackend",
     "MemUBridge",
+    "CommandMemUBridge",
     "HttpMemUBridge",
     "MemoryBackend",
     "SENSITIVE_PARTITIONS",

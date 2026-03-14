@@ -14,7 +14,7 @@ vi.mock("../../components/shell/WorkbenchLayout", () => ({
   useWorkbench: () => mockWorkbench,
 }));
 
-function buildMemorySnapshot() {
+function buildMemorySnapshot(): any {
   return {
     resources: {
       memory: {
@@ -32,7 +32,7 @@ function buildMemorySnapshot() {
           limit: 50,
         },
         summary: {
-          sor_current_count: 1,
+          sor_current_count: 2,
           fragment_count: 1,
           vault_ref_count: 0,
           pending_replay_count: 1,
@@ -84,9 +84,33 @@ function buildMemorySnapshot() {
             requires_vault_authorization: false,
             retrieval_backend: "memu",
           },
+          {
+            record_id: "record-internal",
+            layer: "sor",
+            project_id: "project-default",
+            workspace_id: "workspace-default",
+            scope_id: "scope-contact",
+            partition: "work",
+            subject_key: "worker_tool:bash:artifact-7",
+            summary:
+              "tool_name: bash\noutput_summary: rg -n MemoryPage\nartifact_ref: artifact-7\ntask_id: task-123",
+            status: "current",
+            version: 1,
+            created_at: "2026-03-09T10:15:00Z",
+            updated_at: "2026-03-09T10:16:00Z",
+            evidence_refs: [{ type: "artifact", id: "artifact-7" }],
+            derived_refs: [],
+            proposal_refs: [],
+            metadata: {
+              source: "agent_context.worker_tool_writeback",
+              tool_name: "bash",
+            },
+            requires_vault_authorization: false,
+            retrieval_backend: "memu",
+          },
         ],
         available_scopes: ["scope-contact"],
-        available_partitions: ["contact"],
+        available_partitions: ["contact", "work"],
         available_layers: ["sor", "fragment"],
         warnings: [],
         updated_at: "2026-03-13T16:00:00Z",
@@ -199,5 +223,57 @@ describe("MemoryPage", () => {
     const bobInspector = bobHeading.closest("section");
     expect(bobInspector).not.toBeNull();
     expect(within(bobInspector!).getByText("Bob 需要每周汇总。")).toBeInTheDocument();
+  });
+
+  it("会过滤内部技术写回记录并展示派生细节", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.records.push({
+      record_id: "record-derived",
+      layer: "derived",
+      project_id: "project-default",
+      workspace_id: "workspace-default",
+      scope_id: "scope-contact",
+      partition: "contact",
+      subject_key: "Alice 协作偏好",
+      summary: "",
+      status: "derived",
+      version: null,
+      created_at: "2026-03-09T10:20:00Z",
+      updated_at: null,
+      evidence_refs: [{ type: "fragment", id: "fragment-1" }],
+      derived_refs: ["record-derived"],
+      proposal_refs: [],
+      metadata: {
+        derived_type: "tom",
+        confidence: 0.82,
+        belief: "更偏好异步",
+      },
+      requires_vault_authorization: false,
+      retrieval_backend: "memu",
+    });
+    snapshot.resources.memory.available_layers.push("derived");
+
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "3 条可读记忆" })).toBeInTheDocument();
+    expect(screen.queryByText(/worker_tool:bash:artifact-7/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "查看 Alice 协作偏好 详情" }));
+
+    const derivedHeading = await screen.findByRole("heading", { name: "Alice 协作偏好" });
+    const derivedInspector = derivedHeading.closest("section");
+    expect(derivedInspector).not.toBeNull();
+    expect(within(derivedInspector!).getByText("ToM 判断 · 置信度 82%")).toBeInTheDocument();
+    expect(within(derivedInspector!).getByText("更偏好异步")).toBeInTheDocument();
   });
 });

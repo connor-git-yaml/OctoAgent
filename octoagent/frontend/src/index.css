@@ -1552,6 +1552,45 @@
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.wb-settings-cli-grid {
+  display: grid;
+  gap: var(--cp-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.wb-cli-snippet {
+  gap: 10px;
+  border: 1px solid rgba(20, 32, 47, 0.08);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 245, 0.9));
+}
+
+.wb-cli-snippet.is-active {
+  border-color: rgba(31, 106, 91, 0.24);
+  background:
+    radial-gradient(circle at top right, rgba(31, 106, 91, 0.16), transparent 42%),
+    linear-gradient(145deg, rgba(19, 34, 44, 0.96), rgba(33, 57, 51, 0.94));
+}
+
+.wb-cli-snippet.is-active strong,
+.wb-cli-snippet.is-active span {
+  color: rgba(248, 250, 252, 0.96);
+}
+
+.wb-cli-snippet-code {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .wb-settings-section-nav {
   display: flex;
   flex-wrap: wrap;

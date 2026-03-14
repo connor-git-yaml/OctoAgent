@@ -175,11 +175,29 @@ class MemoryConfig(BaseModel):
 
     backend_mode: Literal["local_only", "memu"] = Field(
         default="local_only",
-        description="Memory 后端模式：local_only 使用本地 SQLite 元数据；memu 连接远端 MemU bridge。",
+        description="Memory 后端模式：local_only 使用本地 SQLite 元数据；memu 启用增强检索。",
+    )
+    bridge_transport: Literal["http", "command"] = Field(
+        default="http",
+        description="MemU transport：http 连接远端 bridge；command 调用本地 bridge 命令。",
     )
     bridge_url: str = Field(
         default="",
         description="MemU bridge 基础地址，例如 https://memory.example.com",
+    )
+    bridge_command: str = Field(
+        default="",
+        description="本地 MemU bridge 命令，例如 uv run python scripts/memu_bridge.py",
+    )
+    bridge_command_cwd: str = Field(
+        default="",
+        description="执行本地 MemU bridge 命令时的工作目录（可选）",
+    )
+    bridge_command_timeout_seconds: float = Field(
+        default=15.0,
+        ge=1.0,
+        le=120.0,
+        description="执行本地 MemU bridge 命令的超时时间（秒）",
     )
     bridge_api_key_env: str = Field(
         default="",
@@ -614,10 +632,14 @@ def build_config_schema_document(
             },
             "memory": {
                 "title": "Memory",
-                "description": "配置本地 Memory 模式或远端 MemU bridge。",
+                "description": "配置本地 Memory 模式或增强检索的 transport。",
                 "fields": [
                     "memory.backend_mode",
+                    "memory.bridge_transport",
                     "memory.bridge_url",
+                    "memory.bridge_command",
+                    "memory.bridge_command_cwd",
+                    "memory.bridge_command_timeout_seconds",
                     "memory.bridge_api_key_env",
                     "memory.bridge_timeout_seconds",
                     "memory.bridge_api_key_header",
@@ -748,12 +770,41 @@ def build_config_schema_document(
                 "choices": ["local_only", "memu"],
                 "default": active_memory.backend_mode,
             },
+            "memory.bridge_transport": {
+                "label": "MemU 接入方式",
+                "input": "choice",
+                "required": True,
+                "recommended": True,
+                "choices": ["http", "command"],
+                "default": active_memory.bridge_transport,
+            },
             "memory.bridge_url": {
                 "label": "MemU Bridge 地址",
                 "input": "text",
                 "required": False,
                 "recommended": False,
                 "default": active_memory.bridge_url,
+            },
+            "memory.bridge_command": {
+                "label": "MemU 本地命令",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_command,
+            },
+            "memory.bridge_command_cwd": {
+                "label": "本地命令工作目录",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.bridge_command_cwd,
+            },
+            "memory.bridge_command_timeout_seconds": {
+                "label": "本地命令超时时间（秒）",
+                "input": "text",
+                "required": False,
+                "recommended": True,
+                "default": active_memory.bridge_command_timeout_seconds,
             },
             "memory.bridge_api_key_env": {
                 "label": "MemU API Key 环境变量名",

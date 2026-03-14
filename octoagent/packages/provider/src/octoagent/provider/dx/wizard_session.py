@@ -490,7 +490,11 @@ class WizardSessionService:
                         "display_name": f"{provider.name} API Key",
                     }
                 )
-        if config.memory.backend_mode == "memu" and config.memory.bridge_api_key_env:
+        if (
+            config.memory.backend_mode == "memu"
+            and config.memory.bridge_transport == "http"
+            and config.memory.bridge_api_key_env
+        ):
             targets.append(
                 {
                     "target_kind": "memory",

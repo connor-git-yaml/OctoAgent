@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import type {
-  MemoryRecordProjection,
   OperatorActionKind,
   OperatorInboxItem,
   RecoverySummary,
@@ -13,6 +12,7 @@ import MemoryHeroSection from "./MemoryHeroSection";
 import MemoryInspectorSection from "./MemoryInspectorSection";
 import MemoryResultsSection from "./MemoryResultsSection";
 import {
+  buildMemoryDisplayRecords,
   buildMemoryNarrative,
   fieldLabel,
   formatLayerLabel,
@@ -38,6 +38,7 @@ export default function MemoryPage() {
   );
   const [limitDraft, setLimitDraft] = useState(String(memory.filters.limit || 50));
   const [selectedRecordId, setSelectedRecordId] = useState("");
+  const displayRecords = buildMemoryDisplayRecords(memory.records);
 
   useEffect(() => {
     setQueryDraft(memory.filters.query);
@@ -49,15 +50,17 @@ export default function MemoryPage() {
   }, [memory.filters]);
 
   useEffect(() => {
-    if (memory.records.length === 0) {
+    if (displayRecords.length === 0) {
       setSelectedRecordId("");
       return;
     }
-    const hasSelectedRecord = memory.records.some((record) => record.record_id === selectedRecordId);
+    const hasSelectedRecord = displayRecords.some(
+      (record) => record.record.record_id === selectedRecordId
+    );
     if (!hasSelectedRecord) {
-      setSelectedRecordId(memory.records[0]!.record_id);
+      setSelectedRecordId(displayRecords[0]!.record.record_id);
     }
-  }, [memory.records, selectedRecordId]);
+  }, [displayRecords, selectedRecordId]);
 
   const layerOptions = uniqueOptions([
     "",
@@ -76,23 +79,31 @@ export default function MemoryPage() {
   const memoryConfig = readConfigSection(readConfigSection(config.current_value).memory);
   const memoryMode =
     String(memoryConfig.backend_mode ?? "local_only").trim().toLowerCase() || "local_only";
+  const bridgeTransport =
+    String(memoryConfig.bridge_transport ?? "").trim().toLowerCase() ||
+    (String(memoryConfig.bridge_command ?? "").trim() ? "command" : "http");
   const bridgeUrl = String(memoryConfig.bridge_url ?? "").trim();
+  const bridgeCommand = String(memoryConfig.bridge_command ?? "").trim();
   const bridgeApiKeyEnv = String(memoryConfig.bridge_api_key_env ?? "").trim();
   const missingSetupItems =
     memoryMode === "memu"
       ? [
-          !bridgeUrl
+          bridgeTransport === "http" && !bridgeUrl
             ? fieldLabel(config.ui_hints, "memory.bridge_url", "MemU Bridge 地址")
             : "",
-          !bridgeApiKeyEnv
+          bridgeTransport === "http" && !bridgeApiKeyEnv
             ? fieldLabel(config.ui_hints, "memory.bridge_api_key_env", "MemU API Key 环境变量")
+            : "",
+          bridgeTransport === "command" && !bridgeCommand
+            ? fieldLabel(config.ui_hints, "memory.bridge_command", "MemU 本地命令")
             : "",
         ].filter(Boolean)
       : [];
   const narrative: MemoryNarrative = buildMemoryNarrative(
     memory,
     memoryMode,
-    missingSetupItems
+    missingSetupItems,
+    displayRecords.length
   );
   const operatorItems = sessions.operator_items ?? [];
   const operatorSummary = sessions.operator_summary;
@@ -106,7 +117,7 @@ export default function MemoryPage() {
     sessions.focused_session_id ||
     "未选中会话";
   const selectedRecord =
-    memory.records.find((record) => record.record_id === selectedRecordId) ?? null;
+    displayRecords.find((record) => record.record.record_id === selectedRecordId) ?? null;
 
   async function handleOperatorAction(item: OperatorInboxItem, kind: OperatorActionKind) {
     const mapped = mapQuickAction(item, kind);
@@ -175,8 +186,8 @@ export default function MemoryPage() {
     });
   }
 
-  function handleSelectRecord(record: MemoryRecordProjection) {
-    setSelectedRecordId(record.record_id);
+  function handleSelectRecord(record: (typeof displayRecords)[number]) {
+    setSelectedRecordId(record.record.record_id);
   }
 
   return (
@@ -236,6 +247,7 @@ export default function MemoryPage() {
       <div className="wb-memory-layout">
         <MemoryResultsSection
           memory={memory}
+          records={displayRecords}
           selectedRecordId={selectedRecordId}
           hasStoredRecords={narrative.hasStoredRecords}
           busyActionId={busyActionId}

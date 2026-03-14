@@ -39,6 +39,8 @@ const METADATA_LABELS: Record<string, string> = {
   channel: "渠道",
   category: "分类",
   topic: "主题",
+  derived_type: "派生类型",
+  confidence: "置信度",
 };
 
 const OPERATOR_KIND_LABELS: Record<string, string> = {
@@ -52,6 +54,17 @@ export interface MemoryGuideItem {
   title: string;
   summary: string;
   state: "done" | "todo" | "optional";
+}
+
+export interface MemoryDisplayRecord {
+  record: MemoryRecordProjection;
+  title: string;
+  summary: string;
+  statusLabel: string;
+  derivedTypeLabel: string;
+  confidenceLabel: string;
+  metadataPreview: Array<[string, string]>;
+  metadataDetails: Array<[string, string]>;
 }
 
 export interface MemoryNarrative {
@@ -71,6 +84,224 @@ export interface MemoryNarrative {
   hasBacklog: boolean;
   totalStoredRecords: number;
   memoryWarnings: string[];
+}
+
+const DERIVED_TYPE_LABELS: Record<string, string> = {
+  summary: "摘要",
+  relation: "关系判断",
+  entity: "实体归纳",
+  topic: "主题归纳",
+  tom: "ToM 判断",
+};
+
+const PLACEHOLDER_SUMMARY_PATTERNS = [
+  /\bmemory updated\b/i,
+  /\bsensitive memory\b/i,
+  /\bhealth note updated\b/i,
+  /\bworker tool evidence writeback\b/i,
+];
+
+const INTERNAL_RECORD_SOURCES = new Set([
+  "agent_context.worker_tool_writeback",
+  "before_compaction_flush",
+  "context_compaction",
+]);
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateValue(value: string, limit = 160): string {
+  if (value.length <= limit) {
+    return value;
+  }
+  return `${value.slice(0, limit - 1)}…`;
+}
+
+function readRecordSource(record: MemoryRecordProjection): string {
+  const value = record.metadata.source;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function formatDerivedTypeLabel(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  return DERIVED_TYPE_LABELS[normalized] ?? value.trim();
+}
+
+function isPlaceholderSummary(record: MemoryRecordProjection, summary: string): boolean {
+  if (!summary) {
+    return true;
+  }
+  if (
+    record.layer === "vault" &&
+    record.requires_vault_authorization &&
+    /^vault:\/\/.+/i.test(summary)
+  ) {
+    return true;
+  }
+  return PLACEHOLDER_SUMMARY_PATTERNS.some((pattern) => pattern.test(summary));
+}
+
+function isTechnicalSubjectKey(subjectKey: string): boolean {
+  const normalized = subjectKey.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.startsWith("worker_tool:") ||
+    normalized.startsWith("memory.") ||
+    normalized.startsWith("operator.") ||
+    normalized.startsWith("system.")
+  );
+}
+
+function isTechnicalSummary(summary: string): boolean {
+  const normalized = summary.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    (normalized.includes("tool_name:") && normalized.includes("output_summary:")) ||
+    normalized.includes("response_artifact_ref:") ||
+    normalized.includes("task_id:")
+  );
+}
+
+function shouldHideRecord(record: MemoryRecordProjection): boolean {
+  const source = readRecordSource(record);
+  if (INTERNAL_RECORD_SOURCES.has(source)) {
+    return true;
+  }
+  if (isTechnicalSubjectKey(record.subject_key)) {
+    return true;
+  }
+  if (isTechnicalSummary(record.summary)) {
+    return true;
+  }
+  return false;
+}
+
+function formatMetadataValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return truncateValue(normalizeWhitespace(value), 180);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  if (typeof value === "boolean") {
+    return value ? "是" : "否";
+  }
+  try {
+    return truncateValue(JSON.stringify(value, null, 0), 180);
+  } catch {
+    return truncateValue(String(value), 180);
+  }
+}
+
+function buildMetadataEntries(
+  record: MemoryRecordProjection,
+  limit?: number
+): Array<[string, string]> {
+  const entries = Object.entries(record.metadata)
+    .filter(([key, value]) => {
+      const formatted = formatMetadataValue(value);
+      if (!formatted) {
+        return false;
+      }
+      return !key.endsWith("_id") && !key.endsWith("_ref") && !key.endsWith("_refs");
+    })
+    .map(([key, value]) => [METADATA_LABELS[key] ?? key, formatMetadataValue(value)] as [string, string]);
+  if (typeof limit === "number") {
+    return entries.slice(0, limit);
+  }
+  return entries;
+}
+
+function buildRecordTitle(record: MemoryRecordProjection): string {
+  const subjectKey = record.subject_key.trim();
+  if (record.layer === "derived") {
+    if (subjectKey) {
+      return subjectKey;
+    }
+    const derivedTypeLabel = formatDerivedTypeLabel(record.metadata.derived_type);
+    if (derivedTypeLabel) {
+      return derivedTypeLabel;
+    }
+  }
+  if (subjectKey && !isTechnicalSubjectKey(subjectKey)) {
+    return subjectKey;
+  }
+  if (record.layer === "vault") {
+    return `${formatPartitionLabel(record.partition)}受控记忆`;
+  }
+  if (record.layer === "fragment") {
+    return `${formatPartitionLabel(record.partition)}待整理片段`;
+  }
+  if (record.layer === "derived") {
+    return `${formatPartitionLabel(record.partition)}派生记忆`;
+  }
+  if (record.layer === "sor") {
+    return `${formatPartitionLabel(record.partition)}现行结论`;
+  }
+  return formatRecordTitle(record);
+}
+
+function buildRecordSummary(record: MemoryRecordProjection): string {
+  const summary = normalizeWhitespace(record.summary);
+  if (summary && !isPlaceholderSummary(record, summary) && !isTechnicalSummary(summary)) {
+    return summary;
+  }
+  if (record.layer === "vault") {
+    return `这条记录关联 ${formatPartitionLabel(record.partition)} 类受控记忆，查看原文仍需授权。`;
+  }
+  if (record.layer === "derived") {
+    const derivedTypeLabel = formatDerivedTypeLabel(record.metadata.derived_type);
+    return derivedTypeLabel
+      ? `这是一条${derivedTypeLabel}，由已有记忆进一步归纳得出。`
+      : "这是一条从已有记忆进一步归纳出的派生结论。";
+  }
+  if (record.layer === "fragment") {
+    return "这是一条尚未整理成现行结论的记忆片段。";
+  }
+  if (record.layer === "sor") {
+    return `这是一条 ${formatPartitionLabel(record.partition)} 类现行结论，系统暂未生成更友好的摘要。`;
+  }
+  return describeRecord(record);
+}
+
+function buildConfidenceLabel(record: MemoryRecordProjection): string {
+  const value = record.metadata.confidence;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "";
+  }
+  const ratio = Math.max(0, Math.min(1, value));
+  return `${Math.round(ratio * 100)}%`;
+}
+
+export function buildMemoryDisplayRecords(
+  records: MemoryRecordProjection[]
+): MemoryDisplayRecord[] {
+  return records
+    .filter((record) => !shouldHideRecord(record))
+    .map((record) => ({
+      record,
+      title: buildRecordTitle(record),
+      summary: buildRecordSummary(record),
+      statusLabel: formatRecordStatus(record),
+      derivedTypeLabel: formatDerivedTypeLabel(record.metadata.derived_type),
+      confidenceLabel: buildConfidenceLabel(record),
+      metadataPreview: buildMetadataEntries(record, 4),
+      metadataDetails: buildMetadataEntries(record),
+    }));
 }
 
 export function formatLayerLabel(layer: string): string {
@@ -142,15 +373,13 @@ export function uniqueOptions(values: Array<string | undefined>): string[] {
 export function metadataPreviewEntries(
   record: MemoryRecordProjection
 ): Array<[string, string]> {
-  return Object.entries(record.metadata)
-    .filter(([key, value]) => {
-      if (value === null || value === undefined || String(value).trim() === "") {
-        return false;
-      }
-      return !key.endsWith("_id") && !key.endsWith("_ref") && !key.endsWith("_refs");
-    })
-    .slice(0, 4)
-    .map(([key, value]) => [METADATA_LABELS[key] ?? key, String(value)]);
+  return buildMetadataEntries(record, 4);
+}
+
+export function metadataDetailEntries(
+  record: MemoryRecordProjection
+): Array<[string, string]> {
+  return buildMetadataEntries(record);
 }
 
 export function formatRecoveryTime(value: string | null | undefined): string {
@@ -259,7 +488,8 @@ export function mapQuickAction(
 export function buildMemoryNarrative(
   memory: MemoryConsoleDocument,
   memoryMode: string,
-  missingSetupItems: string[]
+  missingSetupItems: string[],
+  visibleRecordCount = memory.records.length
 ): MemoryNarrative {
   const retrievalLabel = formatRetrievalLabel(memory.retrieval_backend, memoryMode);
   const usingFallback =
@@ -274,7 +504,7 @@ export function buildMemoryNarrative(
   const hasStoredRecords = totalStoredRecords > 0;
   const hasBacklog =
     memory.summary.fragment_count > 0 || memory.summary.pending_replay_count > 0;
-  const hasVisibleRecords = memory.records.length > 0;
+  const hasVisibleRecords = visibleRecordCount > 0;
   const memoryWarnings = uniqueOptions(memory.warnings.map(normalizeMemoryWarning));
 
   const hasActiveFilters =
@@ -321,11 +551,11 @@ export function buildMemoryNarrative(
       ? "增强记忆已经配置过，但这次暂时回退到了本地路径。已有结论还能看，跨会话检索可能暂时不完整。"
       : "当前结果可能不完整，但已有数据不会丢。建议先检查 Settings 里的 Memory 配置，再决定是否打开 Advanced 排查。";
     nextActionSummary =
-      "优先检查 Memory 设置里的模式、Bridge 地址和 API Key 环境变量；如果提醒还在，再去 Advanced 看运行诊断。";
+      "优先检查 Memory 设置里的模式、接入方式，以及 Bridge 地址 / 本地命令 / API Key 是否匹配；如果提醒还在，再去 Advanced 看运行诊断。";
     guideItems.push(
       {
         title: "先确认 Memory 设置",
-        summary: "打开 Settings > Memory，确认当前模式、Bridge 地址和 API Key 环境变量是否仍然正确。",
+        summary: "打开 Settings > Memory，确认当前模式、接入方式和最小配置是否仍然正确。",
         state: "todo",
       },
       {
@@ -398,7 +628,7 @@ export function buildMemoryNarrative(
         summary:
           memoryMode === "memu"
             ? "当前已经处于增强记忆模式。只有在需要调优时，再回到 Settings 微调。"
-            : "如果你需要更稳定的跨会话检索，再到 Settings > Memory 切到增强记忆并补齐两项配置。",
+            : "如果你需要更稳定的跨会话检索，再到 Settings > Memory 切到增强记忆并补齐最小配置。",
         state: memoryMode === "memu" ? "done" : "optional",
       }
     );

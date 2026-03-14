@@ -239,7 +239,15 @@ export function optionLabelForHint(hint: ConfigFieldHint, option: string): strin
       return "local_only · 只用本地记忆";
     }
     if (option === "memu") {
-      return "memu · 连接远端 MemU bridge";
+      return "memu · 启用 MemU 检索层";
+    }
+  }
+  if (hint.field_path === "memory.bridge_transport") {
+    if (option === "http") {
+      return "http · 远端 bridge";
+    }
+    if (option === "command") {
+      return "command · 本地命令";
     }
   }
   return option;
@@ -253,7 +261,7 @@ export function buildFieldGuide(
     return {
       title: "安全建议",
       description:
-        "这里仍然只填环境变量名。如果你的 bridge 暂时不需要鉴权，可以先留空。",
+        "这里只有在 HTTP bridge 需要鉴权时才填写，而且仍然只填环境变量名。如果暂时不需要鉴权，可以留空。",
     };
   }
   if (hint.widget === "env-ref") {
@@ -275,21 +283,57 @@ export function buildFieldGuide(
     return {
       title: "怎么选",
       description:
-        "如果你只是想让系统先能记住聊天和工作过程，保持 local_only 就够了。只有明确要接远端 MemU bridge 时，再切到 memu。",
+        "如果你只是想先让系统记住聊天和工作过程，保持 local_only 就够了。只有明确要接 MemU 时，再切到 memu。",
+    };
+  }
+  if (hint.field_path === "memory.bridge_transport") {
+    return {
+      title: "推荐顺序",
+      description:
+        "同机部署优先选 command，它更接近 OpenClaw 的用法，也少一层独立服务。只有 MemU 在别的机器或容器里时，再选 http。",
     };
   }
   if (hint.field_path === "memory.bridge_url") {
     return {
       title: "这里填什么",
       description:
-        "这里只填 bridge 的基础地址，不要自己拼 `/memory/search` 之类的接口路径。常见写法是 https://memory.example.com。",
+        "这里只填 HTTP bridge 的基础地址，不要自己拼 `/memory/search` 之类的接口路径。常见写法是 https://memory.example.com。",
+      exampleLabel: "示例",
+      example: "https://memory.example.com",
+    };
+  }
+  if (hint.field_path === "memory.bridge_command") {
+    return {
+      title: "这里填什么",
+      description:
+        "这里填本地可执行命令本身，例如 `uv run python scripts/memu_bridge.py`。系统会在后面自动追加 `health`、`query` 之类的子命令。",
+      exampleLabel: "示例",
+      example: "uv run python scripts/memu_bridge.py",
+    };
+  }
+  if (hint.field_path === "memory.bridge_command_cwd") {
+    return {
+      title: "什么时候需要",
+      description:
+        "只有当命令依赖项目内相对路径、虚拟环境或本地模型权重目录时才需要填写。否则留空即可。",
+    };
+  }
+  if (hint.field_path === "memory.bridge_command_timeout_seconds") {
+    return {
+      title: "推荐范围",
+      description:
+        "本地命令通常 10-20 秒足够。如果命令内部还要做扩写或 rerank，可以略微调高，但不建议超过 30 秒。",
+      actions: [
+        { label: "恢复 15 秒", value: "15" },
+        { label: "改成 20 秒", value: "20" },
+      ],
     };
   }
   if (hint.field_path === "memory.bridge_timeout_seconds") {
     return {
       title: "推荐范围",
       description:
-        "一般 5 秒足够；如果 bridge 在异地或经常冷启动，可以调到 8-10 秒。不是越大越好，过大只会让失败反馈更慢。",
+        "这是 HTTP bridge 的超时。一般 5 秒足够；如果 bridge 在异地或经常冷启动，可以调到 8-10 秒。不是越大越好，过大只会让失败反馈更慢。",
       actions: [
         { label: "恢复 5 秒", value: DEFAULT_MEMORY_TIMEOUT },
         { label: "改成 8 秒", value: "8" },
@@ -318,7 +362,11 @@ export function buildFieldGuide(
     if (
       hint.field_path !== "memory.bridge_url" &&
       hint.field_path !== "memory.bridge_api_key_env" &&
-      hint.field_path !== "memory.bridge_timeout_seconds"
+      hint.field_path !== "memory.bridge_timeout_seconds" &&
+      hint.field_path !== "memory.bridge_transport" &&
+      hint.field_path !== "memory.bridge_command" &&
+      hint.field_path !== "memory.bridge_command_cwd" &&
+      hint.field_path !== "memory.bridge_command_timeout_seconds"
     ) {
       return null;
     }

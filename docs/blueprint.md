@@ -1239,6 +1239,10 @@ WriteProposal:
 - governance 仍由 SQLite + arbitration 控制
 - MemU 承担检索、索引、增量同步和后续 chat import / knowledge update 的主要执行负载
 - MemU 不可用时自动降级回 SQLite-only search
+- `MemUBackend` transport 必须同时支持本地 `command` 与远端 `http`
+- 当 MemU 与 Gateway 同机部署时，默认优先 `command` 路径，不强制要求独立 bridge 服务
+- 本地 `command` 路径允许包裹 OpenClaw 风格的 MemU 脚本链，只要求 embedding / rerank / expanding 等模型与本地运行时，不额外引入常驻服务复杂度
+- Web `Settings > Memory` 与 `octo config memory *` 必须共享同一套 `local_only / memu(command) / memu(http)` 配置语义，避免 Web 与 CLI 漂移
 
 M3 产品化集成约束（2026-03-07）：
 - `MemUBackend` 不应被视为纯外挂检索器，而应作为 Memory engine 的首选实现之一，与 `search_memory()` / `get_memory()` / `before_compaction_flush()` 共用同一治理边界
@@ -2848,6 +2852,8 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - Feature 031 原范围已完成：M3 已具备正式的 acceptance matrix、migration rehearsal、front-door boundary 与 release report；随后由 Feature 033 关闭 context continuity gate，M3 现已完成最终签收。
 - 2026-03-09 设计复核新增 Feature 033：当时主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；该补位已完成，不再作为当前 blocker。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
+- 2026-03-14 产品化纠偏：`/memory` 必须先经过用户态 display model，再展示 current memory / vault refs / derived 结果；不得把 raw projection、技术写回或占位摘要直接暴露给用户。
+- 2026-03-14 配置纠偏：Memory 设置必须显式支持 `local_only`、`memu + command`、`memu + http` 三条路径；同机默认优先 command，本地 MemU 不应被描述成“必须另起独立服务”。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 message-native A2A 主链。
 - 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、Butler-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
@@ -2945,8 +2951,8 @@ M3 核心对象关系（2026-03-08 补充）：
 - 033 与 038 均已作为 M3 carry-forward 完成；它们服务 M4，但不改写当前 M4 feature 编号面
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
-- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；已接入 setup readiness、worker review/apply、context degraded 提示，以及 `memory -> operator -> export/recovery` guided 主路径；仍待更细粒度 context evidence）
-- [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义）
+- [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；已接入 setup readiness、worker review/apply、context degraded 提示，以及 `memory -> operator -> export/recovery` guided 主路径；`/memory` 已补齐用户态 display model、internal writeback 过滤与派生信息可读化；仍待更细粒度 context evidence）
+- [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义；Memory 配置已统一成 `local / memu-command / memu-http` 三条 operator path）
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）

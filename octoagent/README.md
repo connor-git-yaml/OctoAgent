@@ -280,6 +280,40 @@ Important sections:
 - `front_door`
   - controls whether the owner-facing APIs stay loopback-only or require bearer / trusted proxy protection
 
+### Memory configuration model
+
+OctoAgent treats Memory as local-first.
+
+- `local_only`
+  - the default mode
+  - uses the built-in SQLite / Vault / SoR path
+  - does not require a separate MemU service
+- `memu + command`
+  - recommended when MemU runs on the same machine
+  - matches the OpenClaw-style local wrapper pattern
+  - only needs a local command, optional working directory, and command timeout
+- `memu + http`
+  - intended for a remote or separately managed MemU bridge
+  - needs a bridge URL, optional API key env name, and HTTP timeout
+
+The Web `Settings > Memory` page and the CLI use the same config contract.
+
+Useful commands:
+
+```bash
+octo config memory show
+octo config memory local
+octo config memory memu-command --command "uv run python scripts/memu_bridge.py"
+octo config memory memu-command --command "uv run python scripts/memu_bridge.py" --cwd "/path/to/memu"
+octo config memory memu-http --bridge-url "https://memory.example.com" --api-key-env MEMU_API_KEY
+```
+
+At the product level, the important rule is:
+
+- basic Memory should already work without extra deployment
+- MemU is an enhancement layer, not a requirement for first use
+- when MemU is local, prefer `command` over introducing an extra standalone bridge service
+
 ### Credentials and secrets
 
 Do **not** store raw API keys in `octoagent.yaml`.

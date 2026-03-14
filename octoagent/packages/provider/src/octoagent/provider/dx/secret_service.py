@@ -448,7 +448,11 @@ class SecretService:
                     provider_id=provider.id,
                 )
             )
-        if config.memory.backend_mode == "memu" and config.memory.bridge_api_key_env:
+        if (
+            config.memory.backend_mode == "memu"
+            and config.memory.bridge_transport == "http"
+            and config.memory.bridge_api_key_env
+        ):
             targets.append(
                 _TargetSpec(
                     target_kind=SecretTargetKind.MEMORY,

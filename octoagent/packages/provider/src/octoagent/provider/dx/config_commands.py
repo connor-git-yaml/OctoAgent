@@ -86,6 +86,84 @@ def _load_or_none(project_root: Path) -> OctoAgentConfig | None:
         return None
 
 
+def _load_or_default(project_root: Path) -> OctoAgentConfig:
+    """读取配置；若尚未初始化则返回最小默认配置。"""
+    loaded = _load_or_none(project_root)
+    if loaded is not None:
+        return loaded
+    if (project_root / "octoagent.yaml").exists():
+        raise SystemExit(1)
+    return OctoAgentConfig(updated_at=date.today().isoformat())
+
+
+def _resolve_required_value(
+    value: str | None,
+    *,
+    prompt_text: str,
+    error_message: str,
+    default: str | None = None,
+) -> str:
+    """解析必填 CLI 参数；缺失时在 TTY 下交互提示。"""
+    resolved = (value or "").strip()
+    if resolved:
+        return resolved
+    if sys.stdin.isatty():
+        prompted = click.prompt(prompt_text, default=default, type=str)
+        return prompted.strip()
+    raise click.ClickException(error_message)
+
+
+def _print_memory_summary(config: OctoAgentConfig) -> None:
+    """输出 Memory 配置摘要。"""
+    memory = config.memory
+    console.print("[bold]Memory[/bold]:")
+    console.print(f"  backend_mode:       {memory.backend_mode}")
+    if memory.backend_mode != "memu":
+        console.print("  transport:          local sqlite / vault")
+        return
+    console.print(f"  bridge_transport:   {memory.bridge_transport}")
+    if memory.bridge_transport == "command":
+        console.print(f"  bridge_command:     {memory.bridge_command or '-'}")
+        console.print(f"  bridge_command_cwd: {memory.bridge_command_cwd or '-'}")
+        console.print(
+            f"  command_timeout:    {memory.bridge_command_timeout_seconds:g} 秒"
+        )
+        return
+    console.print(f"  bridge_url:         {memory.bridge_url or '-'}")
+    console.print(f"  bridge_api_key_env: {memory.bridge_api_key_env or '-'}")
+    console.print(f"  http_timeout:       {memory.bridge_timeout_seconds:g} 秒")
+
+
+def _save_memory_patch(
+    project_root: Path,
+    *,
+    patch: dict[str, object],
+    success_message: str,
+) -> None:
+    """写入 Memory 配置并输出摘要。"""
+    config = _load_or_default(project_root)
+    next_memory = config.memory.model_copy(update=patch)
+    updated = config.model_copy(
+        update={
+            "memory": next_memory,
+            "updated_at": date.today().isoformat(),
+        }
+    )
+
+    try:
+        save_config(updated, project_root)
+    except Exception as exc:
+        err_console.print(f"[red]错误：写入 octoagent.yaml 失败：{exc}[/red]")
+        raise SystemExit(1) from exc
+
+    console.print(f"[green]{success_message}[/green]")
+    _print_memory_summary(updated)
+    if updated.providers:
+        _auto_sync(updated, project_root)
+    else:
+        console.print("[dim]当前没有 Provider，跳过 litellm-config.yaml 同步。[/dim]")
+
+
 def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
     """自动触发同步并打印简短摘要（FR-007）"""
     try:
@@ -176,6 +254,9 @@ def _show_summary(yaml_path: str | None) -> None:
     console.print(f"  llm_mode:          {cfg.runtime.llm_mode}")
     console.print(f"  litellm_proxy_url: {cfg.runtime.litellm_proxy_url}")
     console.print(f"  master_key_env:    {cfg.runtime.master_key_env}")
+
+    console.print()
+    _print_memory_summary(cfg)
 
     console.print()
     console.print("配置来源: octoagent.yaml（优先级高于 .env）")
@@ -653,6 +734,131 @@ def alias_set(
     except Exception as exc:
         err_console.print(f"[red]错误：写入 octoagent.yaml 失败：{exc}[/red]")
         raise SystemExit(1) from exc
+
+
+# ---------------------------------------------------------------------------
+# config memory 子组
+# ---------------------------------------------------------------------------
+
+
+@config.group("memory")
+def memory_group() -> None:
+    """管理 Memory 后端与 MemU 连接方式"""
+
+
+@memory_group.command("show")
+@click.pass_context
+def memory_show(ctx: click.Context) -> None:
+    """显示当前 Memory 配置摘要。"""
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
+    config = _load_or_none(project_root)
+
+    console.print()
+    console.print("[bold]Memory 配置摘要[/bold]")
+    console.print("══════════════════════════════════════════════")
+    if config is None:
+        if (project_root / "octoagent.yaml").exists():
+            raise SystemExit(1)
+        console.print("[yellow]尚未找到 octoagent.yaml，以下是默认 Memory 配置。[/yellow]")
+        config = OctoAgentConfig(updated_at=date.today().isoformat())
+    _print_memory_summary(config)
+    console.print("══════════════════════════════════════════════")
+
+
+@memory_group.command("local")
+@click.pass_context
+def memory_local(ctx: click.Context) -> None:
+    """切回本地记忆模式。"""
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
+    _save_memory_patch(
+        project_root,
+        patch={"backend_mode": "local_only"},
+        success_message="已切换为本地 Memory 模式。",
+    )
+
+
+@memory_group.command("memu-http")
+@click.option("--bridge-url", default=None, help="MemU HTTP bridge 基础地址")
+@click.option(
+    "--api-key-env",
+    default=None,
+    help="HTTP bridge 的 API Key 环境变量名（可选）",
+)
+@click.option("--timeout", type=float, default=None, help="HTTP 请求超时（秒）")
+@click.pass_context
+def memory_memu_http(
+    ctx: click.Context,
+    bridge_url: str | None,
+    api_key_env: str | None,
+    timeout: float | None,
+) -> None:
+    """配置 MemU HTTP bridge。"""
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
+    resolved_url = _resolve_required_value(
+        bridge_url,
+        prompt_text="MemU HTTP bridge 地址",
+        error_message="缺少 --bridge-url，且当前终端无法交互输入。",
+        default="https://memory.example.com",
+    )
+    if timeout is not None and timeout <= 0:
+        raise click.ClickException("--timeout 必须大于 0。")
+
+    patch: dict[str, object] = {
+        "backend_mode": "memu",
+        "bridge_transport": "http",
+        "bridge_url": resolved_url,
+    }
+    if api_key_env is not None:
+        patch["bridge_api_key_env"] = api_key_env.strip()
+    if timeout is not None:
+        patch["bridge_timeout_seconds"] = timeout
+    _save_memory_patch(
+        project_root,
+        patch=patch,
+        success_message="已更新为 MemU HTTP bridge 配置。",
+    )
+
+
+@memory_group.command("memu-command")
+@click.option("--command", "command_value", default=None, help="本地 MemU bridge 命令")
+@click.option("--cwd", default=None, help="执行命令时的工作目录")
+@click.option("--timeout", type=float, default=None, help="命令执行超时（秒）")
+@click.pass_context
+def memory_memu_command(
+    ctx: click.Context,
+    command_value: str | None,
+    cwd: str | None,
+    timeout: float | None,
+) -> None:
+    """配置 MemU 本地命令桥接。"""
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
+    resolved_command = _resolve_required_value(
+        command_value,
+        prompt_text="MemU 本地命令",
+        error_message="缺少 --command，且当前终端无法交互输入。",
+        default="uv run python scripts/memu_bridge.py",
+    )
+    if timeout is not None and timeout <= 0:
+        raise click.ClickException("--timeout 必须大于 0。")
+
+    patch: dict[str, object] = {
+        "backend_mode": "memu",
+        "bridge_transport": "command",
+        "bridge_command": resolved_command,
+    }
+    if cwd is not None:
+        patch["bridge_command_cwd"] = cwd.strip()
+    if timeout is not None:
+        patch["bridge_command_timeout_seconds"] = timeout
+    _save_memory_patch(
+        project_root,
+        patch=patch,
+        success_message="已更新为 MemU 本地命令配置。",
+    )
 
 
 # ---------------------------------------------------------------------------

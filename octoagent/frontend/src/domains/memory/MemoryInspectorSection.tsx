@@ -1,18 +1,16 @@
 import { Link } from "react-router-dom";
-import type { MemoryConsoleDocument, MemoryRecordProjection } from "../../types";
+import type { MemoryConsoleDocument } from "../../types";
 import { formatDateTime } from "../../workbench/utils";
 import {
-  describeRecord,
+  type MemoryDisplayRecord,
   formatLayerLabel,
   formatPartitionLabel,
-  formatRecordStatus,
-  formatRecordTitle,
-  metadataPreviewEntries,
+  metadataDetailEntries,
 } from "./shared";
 
 interface MemoryInspectorSectionProps {
   memory: MemoryConsoleDocument;
-  selectedRecord: MemoryRecordProjection | null;
+  selectedRecord: MemoryDisplayRecord | null;
   layerOptions: string[];
   partitionOptions: string[];
   retrievalLabel: string;
@@ -25,7 +23,8 @@ export default function MemoryInspectorSection({
   partitionOptions,
   retrievalLabel,
 }: MemoryInspectorSectionProps) {
-  const metadataEntries = selectedRecord ? metadataPreviewEntries(selectedRecord) : [];
+  const rawRecord = selectedRecord?.record ?? null;
+  const metadataEntries = rawRecord ? metadataDetailEntries(rawRecord) : [];
 
   return (
     <div className="wb-section-stack">
@@ -33,51 +32,84 @@ export default function MemoryInspectorSection({
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">记忆详情</p>
-            <h3>{selectedRecord ? formatRecordTitle(selectedRecord) : "选择一条记录后再查看详情"}</h3>
+            <h3>{selectedRecord ? selectedRecord.title : "选择一条记录后再查看详情"}</h3>
           </div>
         </div>
 
-        {selectedRecord ? (
+        {selectedRecord && rawRecord ? (
           <div className="wb-note-stack">
             <div className="wb-note">
               <strong>摘要</strong>
-              <span>{describeRecord(selectedRecord)}</span>
+              <span>{selectedRecord.summary}</span>
             </div>
             <div className="wb-note">
               <strong>当前状态</strong>
               <span>
-                {formatRecordStatus(selectedRecord)} · {formatLayerLabel(selectedRecord.layer)} ·{" "}
-                {formatPartitionLabel(selectedRecord.partition)}
+                {selectedRecord.statusLabel} · {formatLayerLabel(rawRecord.layer)} ·{" "}
+                {formatPartitionLabel(rawRecord.partition)}
               </span>
             </div>
             <div className="wb-note">
               <strong>时间线</strong>
               <span>
-                创建于 {formatDateTime(selectedRecord.created_at)}，最近更新{" "}
-                {formatDateTime(selectedRecord.updated_at ?? selectedRecord.created_at)}
+                创建于 {formatDateTime(rawRecord.created_at)}，最近更新{" "}
+                {formatDateTime(rawRecord.updated_at ?? rawRecord.created_at)}
               </span>
             </div>
+            {selectedRecord.derivedTypeLabel || selectedRecord.confidenceLabel ? (
+              <div className="wb-note">
+                <strong>派生信息</strong>
+                <span>
+                  {selectedRecord.derivedTypeLabel || "未标注类型"}
+                  {selectedRecord.confidenceLabel
+                    ? ` · 置信度 ${selectedRecord.confidenceLabel}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
             <div className="wb-note">
               <strong>证据与引用</strong>
               <span>
-                证据 {selectedRecord.evidence_refs.length} · proposal {selectedRecord.proposal_refs.length} ·
-                derived {selectedRecord.derived_refs.length}
+                证据 {rawRecord.evidence_refs.length} · proposal {rawRecord.proposal_refs.length} ·
+                derived {rawRecord.derived_refs.length}
               </span>
             </div>
             <div className="wb-note">
               <strong>访问级别</strong>
               <span>
-                {selectedRecord.requires_vault_authorization
+                {rawRecord.requires_vault_authorization
                   ? "这条记录关联受控内容，进一步读取原文仍需授权。"
                   : "这条记录当前可以直接阅读。"}
               </span>
             </div>
+            {rawRecord.evidence_refs.length > 0 ||
+            rawRecord.proposal_refs.length > 0 ||
+            rawRecord.derived_refs.length > 0 ? (
+              <div className="wb-note">
+                <strong>关联标识</strong>
+                <span>
+                  {[
+                    ...rawRecord.evidence_refs
+                      .map((item) =>
+                        typeof item.id === "string"
+                          ? item.id
+                          : typeof item.ref_id === "string"
+                            ? item.ref_id
+                            : ""
+                      )
+                      .filter(Boolean),
+                    ...rawRecord.proposal_refs,
+                    ...rawRecord.derived_refs,
+                  ].join(" · ") || "当前没有可展示的关联标识。"}
+                </span>
+              </div>
+            ) : null}
             {metadataEntries.length > 0 ? (
               <div className="wb-note">
                 <strong>补充信息</strong>
                 <div className="wb-key-value-list">
                   {metadataEntries.map(([key, value]) => (
-                    <div key={`${selectedRecord.record_id}-${key}`} className="wb-key-value-item">
+                    <div key={`${rawRecord.record_id}-${key}`} className="wb-key-value-item">
                       <span>{key}</span>
                       <strong>{value}</strong>
                     </div>

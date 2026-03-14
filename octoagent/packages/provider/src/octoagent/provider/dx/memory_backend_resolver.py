@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import httpx
-from pydantic import SecretStr
 from octoagent.core.models import (
     Project,
     ProjectBinding,
@@ -16,6 +15,7 @@ from octoagent.core.models import (
     Workspace,
 )
 from octoagent.memory import (
+    CommandMemUBridge,
     DerivedMemoryQuery,
     HttpMemUBridge,
     MemoryAccessPolicy,
@@ -34,6 +34,7 @@ from octoagent.memory import (
     MemorySyncResult,
     MemUBackend,
 )
+from pydantic import SecretStr
 
 from .backup_service import resolve_project_root
 from .config_wizard import load_config
@@ -94,6 +95,35 @@ class MemoryBackendResolver:
             workspace=workspace,
             binding_key=binding.binding_key,
         )
+        transport = self._resolve_binding_transport(binding)
+        if transport == "command":
+            command = str(
+                binding.metadata.get("command", "") or binding.metadata.get("bridge_command", "")
+            ).strip()
+            if not command:
+                return MemUBackend(
+                    _StaticMemUBridge(
+                        self._unavailable_status(
+                            project=project,
+                            workspace=workspace,
+                            binding_key=binding.binding_key,
+                            code="MEMU_BRIDGE_COMMAND_MISSING",
+                            message="MemU command binding 缺少 command。",
+                        )
+                    )
+                )
+            return MemUBackend(
+                CommandMemUBridge(
+                    command=command,
+                    cwd=str(binding.metadata.get("cwd", "") or ""),
+                    project_id=project.project_id,
+                    workspace_id=workspace.workspace_id if workspace is not None else "",
+                    project_binding=binding_ref,
+                    timeout_seconds=float(binding.metadata.get("timeout_seconds", 15.0) or 15.0),
+                    environ=dict(self._environ),
+                )
+            )
+
         if not base_url:
             return MemUBackend(
                 _StaticMemUBridge(
@@ -185,6 +215,36 @@ class MemoryBackendResolver:
                 )
             )
 
+        transport = self._resolve_yaml_transport(memory)
+        if transport == "command":
+            command = str(memory.bridge_command or "").strip()
+            if not command:
+                return MemUBackend(
+                    _StaticMemUBridge(
+                        self._unavailable_status(
+                            project=project,
+                            workspace=workspace,
+                            binding_key="octoagent.yaml",
+                            code="MEMU_BRIDGE_COMMAND_MISSING",
+                            message=(
+                                "octoagent.yaml.memory.bridge_command 为空，"
+                                "无法连接本地 MemU command bridge。"
+                            ),
+                        )
+                    )
+                )
+            return MemUBackend(
+                CommandMemUBridge(
+                    command=command,
+                    cwd=str(memory.bridge_command_cwd or ""),
+                    project_id=project.project_id,
+                    workspace_id=workspace.workspace_id if workspace is not None else "",
+                    project_binding=binding_ref,
+                    timeout_seconds=float(memory.bridge_command_timeout_seconds or 15.0),
+                    environ=dict(self._environ),
+                )
+            )
+
         base_url = str(memory.bridge_url or "").strip()
         if not base_url:
             return MemUBackend(
@@ -231,6 +291,28 @@ class MemoryBackendResolver:
                 client_factory=self._client_factory,
             )
         )
+
+    @staticmethod
+    def _resolve_binding_transport(binding: ProjectBinding) -> str:
+        transport = str(binding.metadata.get("transport", "") or "").strip().lower()
+        if transport in {"http", "command"}:
+            return transport
+        command = str(
+            binding.metadata.get("command", "")
+            or binding.metadata.get("bridge_command", "")
+        ).strip()
+        if command:
+            return "command"
+        return "http"
+
+    @staticmethod
+    def _resolve_yaml_transport(memory) -> str:
+        transport = str(getattr(memory, "bridge_transport", "") or "").strip().lower()
+        if transport in {"http", "command"}:
+            return transport
+        if str(getattr(memory, "bridge_command", "") or "").strip():
+            return "command"
+        return "http"
 
     def _resolve_yaml_api_key(
         self,

@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { categoryForHint, getValueAtPath } from "../../workbench/utils";
-import type {
-  ConfigFieldHint,
-  SetupReviewSummary,
-} from "../../types";
+import type { ConfigFieldHint, SetupReviewSummary } from "../../types";
 import SettingsHintFields from "./SettingsHintFields";
 import SettingsOverview from "./SettingsOverview";
 import SettingsProviderSection from "./SettingsProviderSection";
@@ -30,6 +27,36 @@ import {
   type ModelAliasDraftItem,
   type ProviderDraftItem,
 } from "./shared";
+
+const MEMORY_HTTP_BASIC_FIELDS = new Set([
+  "memory.backend_mode",
+  "memory.bridge_transport",
+  "memory.bridge_url",
+  "memory.bridge_api_key_env",
+  "memory.bridge_timeout_seconds",
+]);
+
+const MEMORY_COMMAND_BASIC_FIELDS = new Set([
+  "memory.backend_mode",
+  "memory.bridge_transport",
+  "memory.bridge_command",
+  "memory.bridge_command_cwd",
+  "memory.bridge_command_timeout_seconds",
+]);
+
+function resolveMemoryLabel(memoryMode: string, memoryTransport: string): string {
+  if (memoryMode !== "memu") {
+    return "本地记忆";
+  }
+  return memoryTransport === "command" ? "MemU 本地命令" : "MemU HTTP bridge";
+}
+
+function resolveMemorySummary(memoryMode: string, memoryTransport: string): string {
+  if (memoryMode !== "memu") {
+    return "SQLite / Vault 本地优先";
+  }
+  return memoryTransport === "command" ? "OpenClaw 风格本地桥接" : "远端检索与回放";
+}
 
 export default function SettingsPage() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
@@ -256,7 +283,93 @@ export default function SettingsPage() {
     )
       .trim()
       .toLowerCase() || "local_only";
+  const memoryTransport =
+    String(
+      fieldState["memory.bridge_transport"] ??
+        getValueAtPath(config.current_value, "memory.bridge_transport") ??
+        "http"
+    )
+      .trim()
+      .toLowerCase() || "http";
+  const usingMemu = memoryMode === "memu";
+  const usingCommandTransport = usingMemu && memoryTransport === "command";
+  const usingHttpTransport = usingMemu && memoryTransport !== "command";
+  const visibleMemoryBasicHints = memoryBasicHints.filter((hint) => {
+    if (!usingMemu) {
+      return hint.field_path === "memory.backend_mode";
+    }
+    if (usingCommandTransport) {
+      return MEMORY_COMMAND_BASIC_FIELDS.has(hint.field_path);
+    }
+    return MEMORY_HTTP_BASIC_FIELDS.has(hint.field_path);
+  });
+  const visibleMemoryAdvancedHints = usingHttpTransport ? memoryAdvancedHints : [];
+  const memoryLabel = resolveMemoryLabel(memoryMode, memoryTransport);
+  const memorySummaryLabel = resolveMemorySummary(memoryMode, memoryTransport);
+  const memoryBridgeUrl = String(
+    fieldState["memory.bridge_url"] ??
+      getValueAtPath(config.current_value, "memory.bridge_url") ??
+      ""
+  ).trim();
+  const memoryBridgeCommand = String(
+    fieldState["memory.bridge_command"] ??
+      getValueAtPath(config.current_value, "memory.bridge_command") ??
+      ""
+  ).trim();
+  const memoryBridgeCommandCwd = String(
+    fieldState["memory.bridge_command_cwd"] ??
+      getValueAtPath(config.current_value, "memory.bridge_command_cwd") ??
+      ""
+  ).trim();
+  const memoryBridgeApiKeyEnv = String(
+    fieldState["memory.bridge_api_key_env"] ??
+      getValueAtPath(config.current_value, "memory.bridge_api_key_env") ??
+      ""
+  ).trim();
+  const memoryHttpTimeout = String(
+    fieldState["memory.bridge_timeout_seconds"] ??
+      getValueAtPath(config.current_value, "memory.bridge_timeout_seconds") ??
+      "5"
+  ).trim();
+  const memoryCommandTimeout = String(
+    fieldState["memory.bridge_command_timeout_seconds"] ??
+      getValueAtPath(config.current_value, "memory.bridge_command_timeout_seconds") ??
+      "15"
+  ).trim();
   const reviewNextActions = review.next_actions.slice(0, 3);
+  const memoryCliSnippets = [
+    {
+      key: "local",
+      title: "本地记忆",
+      summary: "不接 MemU，先让本地 SQLite / Vault 跑通。",
+      active: !usingMemu,
+      command: "octo config memory local",
+    },
+    {
+      key: "command",
+      title: "MemU 本地命令",
+      summary: "适合同机部署，直接复用 OpenClaw 风格脚本链路。",
+      active: usingCommandTransport,
+      command: [
+        "octo config memory memu-command",
+        `--command "${memoryBridgeCommand || "uv run python scripts/memu_bridge.py"}"`,
+        ...(memoryBridgeCommandCwd ? [`--cwd "${memoryBridgeCommandCwd}"`] : []),
+        `--timeout ${memoryCommandTimeout || "15"}`,
+      ].join(" "),
+    },
+    {
+      key: "http",
+      title: "MemU HTTP bridge",
+      summary: "适合远端容器或单独部署的 MemU 服务。",
+      active: usingHttpTransport,
+      command: [
+        "octo config memory memu-http",
+        `--bridge-url "${memoryBridgeUrl || "https://memory.example.com"}"`,
+        ...(memoryBridgeApiKeyEnv ? [`--api-key-env ${memoryBridgeApiKeyEnv}`] : []),
+        `--timeout ${memoryHttpTimeout || "5"}`,
+      ].join(" "),
+    },
+  ];
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
     setFieldState((state) => ({
@@ -418,7 +531,7 @@ export default function SettingsPage() {
         activeProvidersCount={activeProviders.length}
         aliasDraftCount={aliasDrafts.length}
         defaultProviderId={defaultProvider.id}
-        memoryLabel={memoryMode === "memu" ? "MemU bridge" : "本地记忆"}
+        memoryLabel={memoryLabel}
         memoryStatus={memory.backend_state || memory.status}
         onQuickConnect={() => void handleQuickConnect()}
         onReview={() => void handleReview()}
@@ -477,8 +590,8 @@ export default function SettingsPage() {
         <div className="wb-card-grid wb-card-grid-4">
           <article className="wb-card">
             <p className="wb-card-label">当前模式</p>
-            <strong>{memoryMode === "memu" ? "MemU bridge" : "本地记忆"}</strong>
-            <span>{memoryMode === "memu" ? "远端检索与回放" : "本地优先"}</span>
+            <strong>{memoryLabel}</strong>
+            <span>{memorySummaryLabel}</span>
           </article>
           <article className="wb-card">
             <p className="wb-card-label">后端健康</p>
@@ -505,11 +618,36 @@ export default function SettingsPage() {
         ) : (
           <div className="wb-inline-banner is-muted">
             <strong>推荐做法</strong>
-            <span>首次使用先保持本地记忆；只有需要远端检索后端时再切到 MemU bridge。</span>
+            <span>
+              {!usingMemu
+                ? "首次使用先保持本地记忆；要接 MemU 时优先评估本地 command 链路。"
+                : usingCommandTransport
+                  ? "当前走本地命令链路，适合复用 MemU 的 embedding / rerank / expanding 模型配置。"
+                  : "当前走 HTTP bridge，适合远端容器或跨机器部署。"}
+            </span>
           </div>
         )}
 
-        {memoryBasicHints.length > 0 ? (
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">命令行</p>
+            <h3>Web 和 CLI 走同一套 Memory 配置</h3>
+          </div>
+        </div>
+        <div className="wb-settings-cli-grid">
+          {memoryCliSnippets.map((snippet) => (
+            <article
+              key={snippet.key}
+              className={`wb-note wb-cli-snippet ${snippet.active ? "is-active" : ""}`}
+            >
+              <strong>{snippet.title}</strong>
+              <span>{snippet.summary}</span>
+              <pre className="wb-cli-snippet-code">{snippet.command}</pre>
+            </article>
+          ))}
+        </div>
+
+        {visibleMemoryBasicHints.length > 0 ? (
           <>
             <div className="wb-panel-head">
               <div>
@@ -518,7 +656,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <SettingsHintFields
-              hints={memoryBasicHints}
+              hints={visibleMemoryBasicHints}
               schema={config.schema}
               fieldState={fieldState}
               fieldErrors={fieldErrors}
@@ -528,16 +666,16 @@ export default function SettingsPage() {
           </>
         ) : null}
 
-        {memoryAdvancedHints.length > 0 ? (
+        {visibleMemoryAdvancedHints.length > 0 ? (
           <>
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">高阶连接</p>
-                <h3>仅在 bridge 协议不一致时调整</h3>
+                <h3>仅在 HTTP bridge 协议不一致时调整</h3>
               </div>
             </div>
             <SettingsHintFields
-              hints={memoryAdvancedHints}
+              hints={visibleMemoryAdvancedHints}
               schema={config.schema}
               fieldState={fieldState}
               fieldErrors={fieldErrors}

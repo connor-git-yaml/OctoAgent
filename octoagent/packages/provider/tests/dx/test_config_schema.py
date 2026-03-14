@@ -86,6 +86,9 @@ def test_default_values() -> None:
     assert config.channels.telegram.mode == "webhook"
     assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
     assert config.memory.backend_mode == "local_only"
+    assert config.memory.bridge_transport == "http"
+    assert config.memory.bridge_command == ""
+    assert config.memory.bridge_command_timeout_seconds == 15.0
     assert config.memory.bridge_timeout_seconds == 5.0
     assert config.memory.bridge_search_path == "/memory/search"
 
@@ -271,6 +274,10 @@ def test_build_config_schema_document_exposes_memory_defaults_and_secret_target(
     config = _make_config(
         memory=MemoryConfig(
             backend_mode="memu",
+            bridge_transport="command",
+            bridge_command="uv run python scripts/memu_bridge.py",
+            bridge_command_cwd="/tmp/memu",
+            bridge_command_timeout_seconds=18.0,
             bridge_url="https://memory.example.com",
             bridge_api_key_env="MEMU_API_KEY",
             bridge_timeout_seconds=8.0,
@@ -281,11 +288,24 @@ def test_build_config_schema_document_exposes_memory_defaults_and_secret_target(
     document = build_config_schema_document(config)
     memory_section = document.ui_hints["sections"]["memory"]
     memory_backend = document.ui_hints["fields"]["memory.backend_mode"]
+    memory_transport = document.ui_hints["fields"]["memory.bridge_transport"]
     memory_secret = document.ui_hints["fields"]["memory.bridge_api_key_env"]["secret_target"]
 
     assert "memory.backend_mode" in memory_section["fields"]
+    assert "memory.bridge_transport" in memory_section["fields"]
+    assert "memory.bridge_command" in memory_section["fields"]
     assert "memory.bridge_search_path" in memory_section["fields"]
     assert memory_backend["default"] == "memu"
+    assert memory_transport["default"] == "command"
+    assert (
+        document.ui_hints["fields"]["memory.bridge_command"]["default"]
+        == "uv run python scripts/memu_bridge.py"
+    )
+    assert document.ui_hints["fields"]["memory.bridge_command_cwd"]["default"] == "/tmp/memu"
+    assert (
+        document.ui_hints["fields"]["memory.bridge_command_timeout_seconds"]["default"]
+        == 18.0
+    )
     assert document.ui_hints["fields"]["memory.bridge_timeout_seconds"]["default"] == 8.0
     assert document.ui_hints["fields"]["memory.bridge_search_path"]["default"] == "/memory/query"
     assert memory_secret["target_kind"] == "memory"

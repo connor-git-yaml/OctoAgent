@@ -32,6 +32,7 @@ function buildSettingsSnapshot() {
               type: "object",
               properties: {
                 backend_mode: { type: "string", enum: ["local_only", "memu"] },
+                bridge_transport: { type: "string", enum: ["http", "command"] },
               },
             },
           },
@@ -109,6 +110,102 @@ function buildSettingsSnapshot() {
             multiline: false,
             order: 6,
           },
+          "memory.bridge_transport": {
+            field_path: "memory.bridge_transport",
+            section: "memory-basic",
+            label: "MemU 连接方式",
+            description: "",
+            widget: "select",
+            placeholder: "",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 7,
+          },
+          "memory.bridge_url": {
+            field_path: "memory.bridge_url",
+            section: "memory-basic",
+            label: "MemU HTTP 地址",
+            description: "",
+            widget: "text",
+            placeholder: "https://memory.example.com",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 8,
+          },
+          "memory.bridge_api_key_env": {
+            field_path: "memory.bridge_api_key_env",
+            section: "memory-basic",
+            label: "MemU API Key 环境变量",
+            description: "",
+            widget: "env-ref",
+            placeholder: "",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 9,
+          },
+          "memory.bridge_timeout_seconds": {
+            field_path: "memory.bridge_timeout_seconds",
+            section: "memory-basic",
+            label: "HTTP 超时（秒）",
+            description: "",
+            widget: "text",
+            placeholder: "5",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 10,
+          },
+          "memory.bridge_command": {
+            field_path: "memory.bridge_command",
+            section: "memory-basic",
+            label: "MemU 本地命令",
+            description: "",
+            widget: "text",
+            placeholder: "uv run python scripts/memu_bridge.py",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 11,
+          },
+          "memory.bridge_command_cwd": {
+            field_path: "memory.bridge_command_cwd",
+            section: "memory-basic",
+            label: "命令工作目录",
+            description: "",
+            widget: "text",
+            placeholder: "/path/to/memu-project",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 12,
+          },
+          "memory.bridge_command_timeout_seconds": {
+            field_path: "memory.bridge_command_timeout_seconds",
+            section: "memory-basic",
+            label: "命令超时（秒）",
+            description: "",
+            widget: "text",
+            placeholder: "15",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 13,
+          },
+          "memory.bridge_search_path": {
+            field_path: "memory.bridge_search_path",
+            section: "memory-advanced",
+            label: "检索路径",
+            description: "",
+            widget: "text",
+            placeholder: "/memory/search",
+            help_text: "",
+            sensitive: false,
+            multiline: false,
+            order: 14,
+          },
         },
         current_value: {
           runtime: {
@@ -120,6 +217,14 @@ function buildSettingsSnapshot() {
           model_aliases: {},
           memory: {
             backend_mode: "local_only",
+            bridge_transport: "http",
+            bridge_url: "",
+            bridge_api_key_env: "",
+            bridge_timeout_seconds: 5,
+            bridge_command: "",
+            bridge_command_cwd: "",
+            bridge_command_timeout_seconds: 15,
+            bridge_search_path: "/memory/search",
           },
         },
       },
@@ -244,6 +349,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "先把真实模型接起来" })).toBeInTheDocument();
     expect(screen.getByText("先按这 3 步走通一次")).toBeInTheDocument();
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
+    expect(screen.getByText("octo config memory local")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
@@ -303,6 +409,36 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "配置已经够用，先保存再验证" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "先保存当前修改" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
+  });
+
+  it("Memory 配置会按 command transport 收敛字段和 CLI 提示", () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.memory.backend_mode = "memu";
+    snapshot.resources.config.current_value.memory.bridge_transport = "command";
+    snapshot.resources.config.current_value.memory.bridge_command =
+      "uv run python scripts/memu_bridge.py";
+    snapshot.resources.config.current_value.memory.bridge_command_cwd = "/tmp/memu";
+    snapshot.resources.config.current_value.memory.bridge_command_timeout_seconds = 18;
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByDisplayValue("uv run python scripts/memu_bridge.py")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("/tmp/memu")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("18")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("https://memory.example.com")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("/memory/search")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/octo config memory memu-command --command "uv run python scripts\/memu_bridge.py"/)
+    ).toBeInTheDocument();
   });
 
   it("把 Agent 能力管理入口迁到 Agents 页面", async () => {

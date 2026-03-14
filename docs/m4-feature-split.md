@@ -22,8 +22,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 |---|---|---|
 | 032 | Implemented | Built-in tools、graph/subagent runtime、child work split/merge、runtime truth |
 | 034 | Implemented | 主 Agent / Worker 多轮上下文压缩与 memory flush 审计链 |
-| 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced`，已接入 setup readiness、worker review/apply、context degraded |
-| 036 | Implemented | Guided Setup Governance：`setup-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` |
+| 035 | In Progress | Guided Workbench：`Home / Chat / Work / Memory / Settings / Advanced`，已接入 setup readiness、worker review/apply、context degraded；`/memory` 已补齐用户态 display model |
+| 036 | Implemented | Guided Setup Governance：`setup-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save`，并已把 Memory 配置统一成 `local / memu-command / memu-http` |
 | 037 | Implemented | Runtime control context hardening，解决 selector drift 与 lineage 漂移 |
 | 039 | Implemented | supervisor-only、Worker governance、message-native A2A 与 durable `A2AConversation / A2AMessage / WorkerSession` 已闭合 |
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
@@ -69,6 +69,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `Home` / `SettingsCenter` / `ChatWorkbench` / `WorkbenchBoard` / `MemoryCenter`
 - `AdvancedControlPlane` 收编旧控制面
 - 仍直接消费 canonical control-plane resources/actions，不新增平行 backend
+- `/memory` 已补齐用户态 display model，过滤 internal writeback / 占位摘要，并把 derived 信息改写成可读表达
 
 后续增强：
 
@@ -93,6 +94,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `skills.selection.save`
 - `SettingsCenter` 的 skills 默认范围保存
 - `octo init / octo project edit --apply-wizard / octo onboard` 对 canonical `setup.review / setup.apply` 的 CLI adapter
+- `Settings > Memory` 与 `octo config memory show/local/memu-command/memu-http` 的统一配置语义
 
 ### Feature 037：Runtime Context Hardening
 
