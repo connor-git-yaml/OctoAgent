@@ -23,6 +23,7 @@ from ..models import (
     MemoryMaintenanceCommand,
     MemoryMaintenanceRun,
     MemorySearchHit,
+    MemorySearchOptions,
     MemorySyncBatch,
     MemorySyncResult,
     SorRecord,
@@ -115,12 +116,16 @@ class HttpMemUBridge:
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]:
         payload = {
             "scope_id": scope_id,
             "query": query,
             "limit": limit,
             "policy": policy.model_dump(mode="json") if policy is not None else None,
+            "search_options": (
+                search_options.model_dump(mode="json") if search_options is not None else None
+            ),
         }
         try:
             raw = await self._request_json("POST", self._search_path, payload)

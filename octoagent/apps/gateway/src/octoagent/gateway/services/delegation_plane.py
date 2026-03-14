@@ -87,6 +87,10 @@ class DelegationPlaneService:
     def pipeline_engine(self) -> SkillPipelineEngine:
         return self._pipeline_engine
 
+    @property
+    def capability_pack(self) -> CapabilityPackService:
+        return self._capability_pack
+
     def bind_dispatch_scheduler(
         self,
         scheduler: Callable[[DispatchEnvelope], Awaitable[bool]],

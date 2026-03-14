@@ -18,6 +18,8 @@ from octoagent.core.models import (
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
+    AgentSessionTurn,
+    AgentSessionTurnKind,
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
@@ -682,6 +684,18 @@ class TestControlPlaneApi:
                 "source_chain"
             ][0]
             == "default_behavior_templates"
+        )
+        assert (
+            "direct_answer"
+            in payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+                "decision_modes"
+            ]
+        )
+        assert (
+            "effective_location_hint"
+            in payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+                "runtime_hint_fields"
+            ]
         )
         worker_profile = payload["resources"]["worker_profiles"]["profiles"][0]
         assert worker_profile["profile_id"] == "singleton:general"
@@ -3197,6 +3211,225 @@ class TestControlPlaneApi:
             item["task_id"] for item in export_resp.json()["result"]["data"]["tasks"]
         }
         assert exported_task_ids == {ambiguous_sessions[0]["task_id"]}
+
+    async def test_session_new_uses_server_side_token_to_suppress_restore(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        task_id = await _create_task(
+            control_plane_app,
+            text="start a fresh chat lifecycle",
+            thread_id="thread-session-new",
+        )
+        task = await control_plane_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        workspace = (
+            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
+                task.scope_id
+            )
+        )
+        assert workspace is not None
+        session_id = build_scope_aware_session_id(
+            task,
+            project_id=workspace.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+
+        focus_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.focus",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": session_id,
+                },
+            },
+        )
+        assert focus_resp.status_code == 200
+
+        new_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.new",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "task_id": task_id,
+                },
+            },
+        )
+
+        assert new_resp.status_code == 200
+        new_result = new_resp.json()["result"]
+        assert new_result["code"] == "SESSION_NEW_READY"
+        assert new_result["data"]["previous_session_id"] == session_id
+        assert new_result["data"]["previous_task_id"] == task_id
+        assert new_result["data"]["new_conversation_token"]
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        assert payload["focused_session_id"] == ""
+        assert payload["focused_thread_id"] == ""
+        assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
+
+    async def test_session_reset_clears_continuity_and_closes_agent_sessions(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+        task_id = await _create_task(
+            control_plane_app,
+            text="legacy continuity reset",
+            thread_id="thread-reset-legacy",
+            scope_id="scope-control",
+        )
+        await store_group.agent_context_store.save_agent_runtime(
+            AgentRuntime(
+                agent_runtime_id="runtime-reset-legacy",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                agent_profile_id="agent-profile-default",
+                role=AgentRuntimeRole.BUTLER,
+                name="Reset Legacy Runtime",
+            )
+        )
+        await store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="agent-session-reset-legacy",
+                agent_runtime_id="runtime-reset-legacy",
+                kind=AgentSessionKind.BUTLER_MAIN,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                thread_id="thread-reset-legacy",
+                legacy_session_id="thread-reset-legacy",
+                recent_transcript=[
+                    {
+                        "role": "user",
+                        "content": "旧上下文还挂在 legacy session id 上。",
+                        "task_id": task_id,
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "需要把 continuity 清掉。",
+                        "task_id": task_id,
+                    },
+                ],
+                rolling_summary="需要清空旧 continuity。",
+                metadata={
+                    "recent_transcript": [
+                        {
+                            "role": "user",
+                            "content": "旧上下文还挂在 legacy session id 上。",
+                            "task_id": task_id,
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "需要把 continuity 清掉。",
+                            "task_id": task_id,
+                        },
+                    ],
+                    "latest_model_reply_summary": "需要把 continuity 清掉。",
+                },
+            )
+        )
+        await store_group.agent_context_store.save_agent_session_turn(
+            AgentSessionTurn(
+                agent_session_turn_id="agent-session-turn-reset-legacy",
+                agent_session_id="agent-session-reset-legacy",
+                task_id=task_id,
+                turn_seq=1,
+                kind=AgentSessionTurnKind.TOOL_RESULT,
+                role="tool",
+                tool_name="web.search",
+                summary="旧 continuity 里还包含一条 tool result。",
+            )
+        )
+        await store_group.agent_context_store.save_session_context(
+            SessionContextState(
+                session_id="thread-reset-legacy",
+                agent_runtime_id="runtime-reset-legacy",
+                agent_session_id="agent-session-reset-legacy",
+                thread_id="thread-reset-legacy",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                task_ids=[task_id],
+                recent_turn_refs=[task_id],
+                recent_artifact_refs=["artifact-reset-legacy"],
+                rolling_summary="旧 continuity 还没有被清空。",
+                summary_artifact_id="artifact-reset-legacy-summary",
+            )
+        )
+        await store_group.conn.commit()
+
+        reset_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.reset",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": "thread-reset-legacy",
+                },
+            },
+        )
+
+        assert reset_resp.status_code == 200
+        reset_result = reset_resp.json()["result"]
+        assert reset_result["code"] == "SESSION_RESET"
+        assert reset_result["data"]["thread_id"] == "thread-reset-legacy"
+        assert reset_result["data"]["reset_session_context"] is True
+        assert reset_result["data"]["reset_agent_session_count"] >= 1
+        assert reset_result["data"]["new_conversation_token"]
+
+        session_state = await store_group.agent_context_store.get_session_context(
+            "thread-reset-legacy"
+        )
+        assert session_state is not None
+        assert session_state.rolling_summary == ""
+        assert session_state.recent_turn_refs == []
+        assert session_state.recent_artifact_refs == []
+        assert session_state.summary_artifact_id == ""
+
+        agent_session = await store_group.agent_context_store.get_agent_session(
+            "agent-session-reset-legacy"
+        )
+        assert agent_session is not None
+        assert agent_session.status.value == "closed"
+        assert agent_session.recent_transcript == []
+        assert agent_session.rolling_summary == ""
+        assert agent_session.closed_at is not None
+        session_turns = await store_group.agent_context_store.list_agent_session_turns(
+            agent_session_id="agent-session-reset-legacy",
+            limit=20,
+        )
+        assert session_turns == []
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        assert payload["focused_session_id"] == ""
+        assert payload["focused_thread_id"] == ""
+        assert payload["new_conversation_token"] == reset_result["data"]["new_conversation_token"]
 
     async def test_backup_create_and_restore_plan_actions_refresh_diagnostics(
         self,

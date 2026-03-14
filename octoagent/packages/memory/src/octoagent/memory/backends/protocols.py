@@ -19,6 +19,7 @@ from ..models import (
     MemoryMaintenanceCommand,
     MemoryMaintenanceRun,
     MemorySearchHit,
+    MemorySearchOptions,
     MemorySyncBatch,
     MemorySyncResult,
     SorRecord,
@@ -47,6 +48,7 @@ class MemoryBackend(Protocol):
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]:
         """执行 memory search。"""
         ...

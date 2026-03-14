@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
+from octoagent.core.behavior_workspace import (
+    BEHAVIOR_FILE_BUDGETS,
+    BEHAVIOR_OVERLAY_ORDER,
+    resolve_behavior_workspace,
+)
+from octoagent.core.behavior_workspace import (
+    build_default_behavior_pack_files as build_default_behavior_workspace_pack_files,
+)
 from octoagent.core.models import (
     AgentProfile,
     BehaviorLayer,
@@ -12,9 +22,17 @@ from octoagent.core.models import (
     BehaviorPack,
     BehaviorPackFile,
     BehaviorSliceEnvelope,
-    BehaviorVisibility,
+    BehaviorWorkspace,
+    ButlerDecision,
+    ButlerDecisionMode,
+    ButlerLoopPlan,
     ClarificationAction,
     ClarificationDecision,
+    DynamicToolSelection,
+    RecallPlan,
+    RecallPlanMode,
+    RuntimeHintBundle,
+    ToolUniverseHints,
 )
 
 _WEATHER_QUERY_TOKENS = ("天气", "weather", "气温", "温度", "下雨", "降雨", "体感", "穿衣")
@@ -44,6 +62,18 @@ _WEATHER_LOCATION_STOPWORDS = (
     "本地",
     "当地",
     "我这里",
+    "你",
+    "你直接",
+    "你直接去",
+    "直接",
+    "直接去",
+    "websearch",
+    "web search",
+    "web",
+    "search",
+    "搜索",
+    "联网",
+    "实时",
 )
 _LOCATION_SUFFIX_PATTERN = re.compile(
     r"[\u4e00-\u9fff]{1,10}(?:省|市|区|县|州|盟|旗|镇|乡|村|岛|湾|港)"
@@ -127,31 +157,60 @@ _TECHNICAL_CONTEXT_TOKENS = (
     "部署",
     "测试",
 )
+_EXPLICIT_WEB_SEARCH_TOKENS = (
+    "websearch",
+    "web search",
+    "web_search",
+    "联网",
+    "上网查",
+    "搜一下",
+    "搜索一下",
+    "直接查",
+    "直接去 websearch",
+    "直接去 web search",
+)
 
 
 def contains_explicit_location(user_text: str) -> bool:
+    return bool(extract_explicit_location(user_text))
+
+
+def extract_explicit_location(user_text: str) -> str:
     normalized = user_text.strip()
     if not normalized:
-        return False
-    lowered = normalized.lower()
-    if _LOCATION_SUFFIX_PATTERN.search(normalized) or _EN_LOCATION_PATTERN.search(normalized):
-        return True
-    if any(token in normalized for token in _DIRECT_LOCATION_TOKENS):
-        return True
+        return ""
 
-    weather_anchor = min(
-        (lowered.find(token) for token in _WEATHER_QUERY_TOKENS if lowered.find(token) >= 0),
-        default=-1,
+    for match in _LOCATION_SUFFIX_PATTERN.finditer(normalized):
+        location = match.group(0).strip()
+        if location:
+            return location
+
+    direct_matches = sorted(
+        (token for token in _DIRECT_LOCATION_TOKENS if token in normalized),
+        key=len,
+        reverse=True,
     )
-    if weather_anchor < 0:
-        return False
+    if direct_matches:
+        return direct_matches[0]
 
-    prefix = normalized if weather_anchor < 0 else normalized[:weather_anchor]
-    for token in _WEATHER_LOCATION_STOPWORDS:
-        prefix = prefix.replace(token, "")
-    prefix = re.sub(r"[，,。？！!?:：\s]", "", prefix)
-    candidates = re.findall(r"[\u4e00-\u9fff]{2,8}", prefix)
-    return any(candidate not in _WEATHER_LOCATION_STOPWORDS for candidate in candidates)
+    english_match = _EN_LOCATION_PATTERN.search(normalized)
+    if english_match:
+        location = re.sub(r"^(?:in|at|for)\s+", "", english_match.group(0), flags=re.IGNORECASE)
+        return location.strip()
+
+    compact = re.sub(r"[，,。？！!?:：\s]", "", normalized)
+    lowered = compact.lower()
+    if not compact or len(compact) > 12:
+        return ""
+    if not re.fullmatch(r"[\u4e00-\u9fff]{2,12}", compact):
+        return ""
+    if any(token in normalized for token in _WEATHER_QUERY_TOKENS):
+        return ""
+    if any(token in lowered for token in _EXPLICIT_WEB_SEARCH_TOKENS):
+        return ""
+    if any(token in compact for token in _WEATHER_LOCATION_STOPWORDS):
+        return ""
+    return compact
 
 
 def is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
@@ -166,8 +225,19 @@ def resolve_behavior_pack(
     *,
     agent_profile: AgentProfile,
     project_name: str = "",
+    project_slug: str = "",
+    project_root: Path | None = None,
 ) -> BehaviorPack:
     metadata = dict(agent_profile.metadata)
+    filesystem_pack = _resolve_filesystem_behavior_pack(
+        agent_profile=agent_profile,
+        project_name=project_name,
+        project_slug=project_slug,
+        project_root=project_root,
+    )
+    if filesystem_pack is not None:
+        return filesystem_pack
+
     raw_pack = metadata.get("behavior_pack")
     if isinstance(raw_pack, dict):
         try:
@@ -189,8 +259,8 @@ def resolve_behavior_pack(
         project_name=project_name,
     )
     source_chain = ["default_behavior_templates"]
-    if agent_profile.scope.value == "project" and project_name:
-        source_chain.append(f"project:{project_name}")
+    if agent_profile.scope.value == "project" and project_slug:
+        source_chain.append(f"project:{project_slug}")
     clarification_policy = {
         "max_clarification_turns": 2,
         "prefer_single_question": True,
@@ -205,7 +275,11 @@ def resolve_behavior_pack(
         files=files,
         layers=build_behavior_layers(files),
         clarification_policy=clarification_policy,
-        metadata={"resolved_from": "default_templates"},
+        metadata={
+            "resolved_from": "default_templates",
+            "overlay_order": list(BEHAVIOR_OVERLAY_ORDER),
+            "file_budgets": dict(BEHAVIOR_FILE_BUDGETS),
+        },
     )
 
 
@@ -214,98 +288,11 @@ def build_default_behavior_pack_files(
     agent_profile: AgentProfile,
     project_name: str = "",
 ) -> list[BehaviorPackFile]:
-    is_worker_profile = is_worker_behavior_profile(agent_profile)
-    project_label = project_name.strip() or agent_profile.name.strip() or "当前项目"
-    return [
-        BehaviorPackFile(
-            file_id="AGENTS.md",
-            title="Worker 总约束" if is_worker_profile else "Butler 总约束",
-            path_hint="behavior/AGENTS.md",
-            layer=BehaviorLayerKind.ROLE,
-            visibility=BehaviorVisibility.SHARED,
-            share_with_workers=True,
-            content=(
-                (
-                    f"你是 OctoAgent 的 Root Agent「{agent_profile.name.strip() or 'Worker'}」。"
-                    "优先在既定职责、工具边界和 project 约束内处理当前目标，"
-                    "不承担 Butler 的总控职责。"
-                )
-                if is_worker_profile
-                else (
-                    "你是 OctoAgent 的 Butler。"
-                    "先帮助用户理解现状、边界和下一步，再决定回答、补问或委派。"
-                )
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="SOUL.md",
-            title="Butler 个性",
-            path_hint="behavior/SOUL.md",
-            layer=BehaviorLayerKind.COMMUNICATION,
-            visibility=BehaviorVisibility.PRIVATE,
-            content=(
-                "语气要像长期协作助手，不装懂，不堆内部术语。先给结论，再给理由；"
-                "当信息不足时，先承认缺口，再给下一步。"
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="USER.md",
-            title="Owner 基础偏好",
-            path_hint="behavior/USER.md",
-            layer=BehaviorLayerKind.COMMUNICATION,
-            visibility=BehaviorVisibility.PRIVATE,
-            content=(
-                "用户优先关心：现在发生了什么、这对我有什么影响、我下一步该做什么。"
-                "除非进入 Advanced/诊断区，否则不要默认展开系统内部实现。"
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="PROJECT.md",
-            title="Project 语境",
-            path_hint="behavior/PROJECT.md",
-            layer=BehaviorLayerKind.SOLVING,
-            visibility=BehaviorVisibility.SHARED,
-            share_with_workers=True,
-            content=(
-                f"当前 project：{project_label}。默认先围绕 project 目标、现状和交付节奏组织回答，"
-                "不要把用户问题误降级成通用 demo。"
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="TOOLS.md",
-            title="工具与补问边界",
-            path_hint="behavior/TOOLS.md",
-            layer=BehaviorLayerKind.TOOL_BOUNDARY,
-            visibility=BehaviorVisibility.SHARED,
-            share_with_workers=True,
-            content=(
-                "回答前先区分已知事实、合理推断和缺失输入。"
-                "遇到缺关键信息的问题，优先补最关键的 1-2 个条件；"
-                "如果用户不补充，再明确标记 best-effort fallback。"
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="MEMORY.md",
-            title="长期记忆策略",
-            path_hint="behavior/MEMORY.md",
-            layer=BehaviorLayerKind.MEMORY_POLICY,
-            visibility=BehaviorVisibility.PRIVATE,
-            content=(
-                "仅把已确认偏好和长期稳定事实当成可复用记忆，不把临时猜测、实时事实或未经确认的位置当成真相。"
-            ),
-        ),
-        BehaviorPackFile(
-            file_id="BOOTSTRAP.md",
-            title="人格自举",
-            path_hint="behavior/BOOTSTRAP.md",
-            layer=BehaviorLayerKind.BOOTSTRAP,
-            visibility=BehaviorVisibility.PRIVATE,
-            content=(
-                "首次回答或新 project 中，先建立帮助用户前进的协作节奏；"
-                "若发现行为模式不理想，可以提出 behavior patch proposal，但默认不静默改写核心文件。"
-            ),
-        ),
-    ]
+    return build_default_behavior_workspace_pack_files(
+        agent_profile=agent_profile,
+        project_name=project_name,
+        include_advanced=False,
+    )
 
 
 def build_behavior_layers(files: list[BehaviorPackFile]) -> list[BehaviorLayer]:
@@ -323,17 +310,80 @@ def build_behavior_layers(files: list[BehaviorPackFile]) -> list[BehaviorLayer]:
         if not matching:
             continue
         content = "\n".join(
-            f"[{item.file_id}] {item.content.strip()}" for item in matching if item.content.strip()
+            (
+                f"[{item.file_id}"
+                + (
+                    f"; truncated {item.effective_char_count}/{item.original_char_count} chars"
+                    if item.truncated
+                    else ""
+                )
+                + f"] {item.content.strip()}"
+            )
+            for item in matching
+            if item.content.strip()
         )
         layers.append(
             BehaviorLayer(
                 layer=layer_kind,
                 content=content,
                 source_file_ids=[item.file_id for item in matching],
-                metadata={"file_count": len(matching)},
+                original_char_count=sum(item.original_char_count for item in matching),
+                effective_char_count=sum(item.effective_char_count for item in matching),
+                truncated_file_ids=[item.file_id for item in matching if item.truncated],
+                metadata={
+                    "file_count": len(matching),
+                    "truncated_file_ids": [
+                        item.file_id for item in matching if item.truncated
+                    ],
+                },
             )
         )
     return layers
+
+
+def build_tool_universe_hints(
+    selection: DynamicToolSelection | None,
+    *,
+    scope: str = "butler_main",
+    note: str = "",
+    tool_profile_fallback: str = "",
+) -> ToolUniverseHints:
+    if selection is None:
+        return ToolUniverseHints(
+            scope=scope,
+            tool_profile=tool_profile_fallback.strip(),
+            resolution_mode="unavailable",
+            note=note,
+        )
+    effective = selection.effective_tool_universe
+    return ToolUniverseHints(
+        scope=scope,
+        tool_profile=(
+            effective.tool_profile
+            if effective is not None and effective.tool_profile
+            else tool_profile_fallback.strip()
+        ),
+        resolution_mode=selection.resolution_mode,
+        selected_tools=(
+            list(effective.selected_tools)
+            if effective is not None and effective.selected_tools
+            else list(selection.selected_tools)
+        ),
+        discovery_entrypoints=(
+            list(effective.discovery_entrypoints)
+            if effective is not None
+            else []
+        ),
+        warnings=list(selection.warnings),
+        mounted_tools=list(selection.mounted_tools),
+        blocked_tools=list(selection.blocked_tools),
+        note=note,
+        metadata={
+            "selection_id": selection.selection_id,
+            "backend": selection.backend,
+            "is_fallback": selection.is_fallback,
+        },
+    )
 
 
 def build_behavior_slice_envelope(pack: BehaviorPack) -> BehaviorSliceEnvelope:
@@ -355,12 +405,31 @@ def build_behavior_system_summary(
     *,
     agent_profile: AgentProfile,
     project_name: str = "",
+    project_slug: str = "",
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
-    pack = resolve_behavior_pack(agent_profile=agent_profile, project_name=project_name)
+    pack = resolve_behavior_pack(
+        agent_profile=agent_profile,
+        project_name=project_name,
+        project_slug=project_slug,
+        project_root=project_root,
+    )
     slice_envelope = build_behavior_slice_envelope(pack)
     return {
         "source_chain": list(pack.source_chain),
         "clarification_policy": dict(pack.clarification_policy),
+        "decision_modes": [item.value for item in ButlerDecisionMode],
+        "runtime_hint_fields": [
+            "explicit_web_search_requested",
+            "can_delegate_research",
+            "weather_query",
+            "current_location_hint",
+            "recent_location_hint",
+            "effective_location_hint",
+            "recent_clarification_category",
+            "recent_clarification_source_text",
+            "tool_universe",
+        ],
         "files": [
             {
                 "file_id": item.file_id,
@@ -369,6 +438,13 @@ def build_behavior_system_summary(
                 "visibility": item.visibility.value,
                 "share_with_workers": item.share_with_workers,
                 "source_kind": item.source_kind,
+                "path_hint": item.path_hint,
+                "is_advanced": bool(item.metadata.get("is_advanced", False)),
+                "budget_chars": item.budget_chars,
+                "original_char_count": item.original_char_count,
+                "effective_char_count": item.effective_char_count,
+                "truncated": item.truncated,
+                "truncation_reason": item.truncation_reason,
             }
             for item in pack.files
         ],
@@ -376,12 +452,17 @@ def build_behavior_system_summary(
             {
                 "layer": item.layer.value,
                 "source_file_ids": list(item.source_file_ids),
+                "truncated_file_ids": list(item.truncated_file_ids),
             }
             for item in pack.layers
         ],
         "worker_slice": {
             "shared_file_ids": list(slice_envelope.shared_file_ids),
             "layers": [item.layer.value for item in slice_envelope.layers],
+        },
+        "budget": {
+            "overlay_order": list(pack.metadata.get("overlay_order", [])),
+            "file_budgets": dict(pack.metadata.get("file_budgets", {})),
         },
     }
 
@@ -390,102 +471,529 @@ def render_behavior_system_block(
     *,
     agent_profile: AgentProfile,
     project_name: str = "",
+    project_slug: str = "",
+    project_root: Path | None = None,
     shared_only: bool = False,
 ) -> str:
-    pack = resolve_behavior_pack(agent_profile=agent_profile, project_name=project_name)
+    pack = resolve_behavior_pack(
+        agent_profile=agent_profile,
+        project_name=project_name,
+        project_slug=project_slug,
+        project_root=project_root,
+    )
     effective_layers = (
         build_behavior_slice_envelope(pack).layers if shared_only else pack.layers
     )
     rendered_layers = []
     for layer in effective_layers:
-        rendered_layers.append(f"{layer.layer.value}: {layer.content}")
+        layer_header = layer.layer.value
+        if layer.truncated_file_ids:
+            layer_header = (
+                f"{layer_header} [truncated files: {', '.join(layer.truncated_file_ids)}]"
+            )
+        rendered_layers.append(f"{layer_header}: {layer.content}")
     return (
         "BehaviorSystem:\n"
         f"source_chain: {', '.join(pack.source_chain) or 'N/A'}\n"
+        "budget_policy: per-file char budgets with explicit truncation metadata\n"
         "clarification_policy: "
         f"{pack.clarification_policy}\n"
+        "decision_modes: "
+        f"{', '.join(item.value for item in ButlerDecisionMode)}\n"
         f"{chr(10).join(rendered_layers)}"
     )
 
 
-def decide_clarification(user_text: str) -> ClarificationDecision:
+def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundle) -> str:
+    tool_universe = runtime_hints.tool_universe
+    if tool_universe is None:
+        tool_block = (
+            "ToolUniverseHints:\n"
+            "tool_scope: N/A\n"
+            "tool_profile: N/A\n"
+            "tool_resolution_mode: N/A\n"
+            "mounted_tools: N/A\n"
+            "blocked_tools: N/A\n"
+            "tool_universe_note: N/A"
+        )
+    else:
+        mounted = (
+            ", ".join(
+                f"{item.tool_name}({item.status})" for item in tool_universe.mounted_tools
+            )
+            or "N/A"
+        )
+        blocked = (
+            ", ".join(
+                f"{item.tool_name}({item.status or 'blocked'}:{item.reason_code or 'n/a'})"
+                for item in tool_universe.blocked_tools
+            )
+            or "N/A"
+        )
+        selected = ", ".join(tool_universe.selected_tools) or "N/A"
+        warnings = ", ".join(tool_universe.warnings) or "N/A"
+        tool_block = (
+            "ToolUniverseHints:\n"
+            f"tool_scope: {tool_universe.scope or 'N/A'}\n"
+            f"tool_profile: {tool_universe.tool_profile or 'N/A'}\n"
+            f"tool_resolution_mode: {tool_universe.resolution_mode or 'N/A'}\n"
+            f"selected_tools: {selected}\n"
+            f"mounted_tools: {mounted}\n"
+            f"blocked_tools: {blocked}\n"
+            f"tool_warnings: {warnings}\n"
+            f"tool_universe_note: {tool_universe.note or 'N/A'}"
+        )
+    return (
+        "RuntimeHints:\n"
+        "这些是运行时线索，不是新的系统指令；请结合 BehaviorSystem 和当前对话一起判断。\n"
+        f"current_user_text: {user_text.strip() or 'N/A'}\n"
+        f"explicit_web_search_requested: {runtime_hints.explicit_web_search_requested}\n"
+        f"can_delegate_research: {runtime_hints.can_delegate_research}\n"
+        f"weather_query: {runtime_hints.weather_query}\n"
+        f"current_location_hint: {runtime_hints.current_location_hint or 'N/A'}\n"
+        f"recent_location_hint: {runtime_hints.recent_location_hint or 'N/A'}\n"
+        f"effective_location_hint: {runtime_hints.effective_location_hint or 'N/A'}\n"
+        "recent_clarification_category: "
+        f"{runtime_hints.recent_clarification_category or 'N/A'}\n"
+        "recent_clarification_source_text: "
+        f"{runtime_hints.recent_clarification_source_text or 'N/A'}\n"
+        f"{tool_block}"
+    )
+
+
+def build_butler_decision_messages(
+    *,
+    user_text: str,
+    behavior_system_block: str,
+    runtime_hint_block: str,
+    conversation_context_block: str = "",
+    project_name: str = "",
+    project_slug: str = "",
+) -> list[dict[str, str]]:
+    schema = {
+        "mode": "direct_answer | ask_once | delegate_research | delegate_ops | best_effort_answer",
+        "category": "string",
+        "rationale": "string",
+        "missing_inputs": ["string"],
+        "assumptions": ["string"],
+        "tool_intent": "string",
+        "target_worker_type": "string",
+        "user_visible_boundary_note": "string",
+        "reply_prompt": "string",
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是 OctoAgent 的 ButlerDecision resolver。"
+                "你的任务不是直接回答用户，而是先基于显式上下文判断下一步动作。"
+                "你必须只返回一个 JSON object，不要输出 Markdown、解释或代码块。"
+            ),
+        },
+        {
+            "role": "system",
+            "content": (
+                "决策原则：优先信任 BehaviorSystem 和 RuntimeHints。"
+                "除权限、审批、审计、loop guard 等硬边界外，不要退回僵硬硬编码。"
+                "当信息足够时可直接委派；当缺关键信息时最多 ask_once；"
+                "如果用户显式要求联网但关键事实仍缺失，可以给 best_effort_answer，"
+                "但必须明确边界，不能假装已经完成准确查询。"
+            ),
+        },
+        {
+            "role": "system",
+            "content": (
+                f"ProjectDecisionContext:\nproject_name: {project_name or 'N/A'}\n"
+                f"project_slug: {project_slug or 'N/A'}"
+            ),
+        },
+        {
+            "role": "system",
+            "content": behavior_system_block,
+        },
+        {
+            "role": "system",
+            "content": runtime_hint_block,
+        },
+        *(
+            [
+                {
+                    "role": "system",
+                    "content": conversation_context_block,
+                }
+            ]
+            if conversation_context_block.strip()
+            else []
+        ),
+        {
+            "role": "user",
+            "content": (
+                f"当前用户消息：{user_text.strip() or 'N/A'}\n\n"
+                "请优先输出一个 ButlerLoopPlan JSON："
+                "{\"decision\": <ButlerDecision>, \"recall_plan\": <RecallPlan>}。"
+                "如果你只能输出旧版 ButlerDecision JSON，也允许。"
+                "RecallPlan schema: "
+                "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
+                "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
+                "\"allow_vault\":false,\"limit\":4}\n"
+                f"ButlerDecision 字段模板：{json.dumps(schema, ensure_ascii=False)}"
+            ),
+        },
+    ]
+
+
+def _parse_recall_plan_payload(payload: dict[str, Any]) -> RecallPlan | None:
+    try:
+        plan = RecallPlan.model_validate(payload)
+    except Exception:
+        return None
+    if plan.mode is RecallPlanMode.RECALL and not plan.query.strip():
+        return plan.model_copy(update={"mode": RecallPlanMode.SKIP})
+    return plan
+
+
+def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | None:
+    normalized = dict(payload)
+    if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_research":
+        normalized["target_worker_type"] = "research"
+    if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_ops":
+        normalized["target_worker_type"] = "ops"
+    try:
+        decision = ButlerDecision.model_validate(normalized)
+    except Exception:
+        return None
+    if decision.mode is ButlerDecisionMode.ASK_ONCE and not decision.reply_prompt:
+        decision = decision.model_copy(
+            update={
+                "reply_prompt": build_clarification_reply(
+                    category=decision.category,
+                    user_text="这条问题",
+                )
+            }
+        )
+    if decision.mode is ButlerDecisionMode.BEST_EFFORT_ANSWER and not decision.reply_prompt:
+        decision = decision.model_copy(
+            update={
+                "reply_prompt": build_best_effort_reply(
+                    category=decision.category,
+                    user_text="这条问题",
+                )
+            }
+        )
+    return decision
+
+
+def parse_butler_decision_response(content: str) -> ButlerDecision | None:
+    loop_plan = parse_butler_loop_plan_response(content)
+    if loop_plan is not None:
+        return loop_plan.decision
+    return None
+
+
+def parse_butler_loop_plan_response(content: str) -> ButlerLoopPlan | None:
+    raw = content.strip()
+    if not raw:
+        return None
+    candidates = [raw]
+    fenced = re.findall(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE)
+    candidates.extend(item.strip() for item in fenced if item.strip())
+    brace_match = re.search(r"\{[\s\S]*\}", raw)
+    if brace_match is not None:
+        candidates.append(brace_match.group(0).strip())
+
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if "decision" in payload or "recall_plan" in payload:
+            decision_payload = payload.get("decision", {})
+            recall_payload = payload.get("recall_plan", {})
+            if not isinstance(decision_payload, dict):
+                decision_payload = {}
+            if not isinstance(recall_payload, dict):
+                recall_payload = {}
+            decision = _parse_butler_decision_payload(decision_payload) or ButlerDecision()
+            recall_plan = _parse_recall_plan_payload(recall_payload) or RecallPlan()
+            return ButlerLoopPlan(
+                decision=decision,
+                recall_plan=recall_plan,
+                metadata={
+                    "loop_plan_source": "wrapped_json",
+                },
+            )
+        decision = _parse_butler_decision_payload(payload)
+        if decision is None:
+            continue
+        return ButlerLoopPlan(
+            decision=decision,
+            recall_plan=RecallPlan(),
+            metadata={
+                "loop_plan_source": "legacy_butler_decision",
+            },
+        )
+    return None
+
+
+def _resolve_filesystem_behavior_pack(
+    *,
+    agent_profile: AgentProfile,
+    project_name: str,
+    project_slug: str,
+    project_root: Path | None,
+) -> BehaviorPack | None:
+    if project_root is None:
+        return None
+
+    workspace = resolve_behavior_workspace(
+        project_root=project_root,
+        agent_profile=agent_profile,
+        project_name=project_name,
+        project_slug=project_slug,
+    )
+    if not bool(workspace.metadata.get("has_filesystem_sources", False)):
+        return None
+
+    return _build_behavior_pack_from_workspace(
+        agent_profile=agent_profile,
+        workspace=workspace,
+    )
+
+
+def _build_behavior_pack_from_workspace(
+    *,
+    agent_profile: AgentProfile,
+    workspace: BehaviorWorkspace,
+) -> BehaviorPack:
+    files = [
+        BehaviorPackFile(
+            file_id=item.file_id,
+            title=item.title,
+            path_hint=item.path,
+            layer=item.layer,
+            content=item.content,
+            visibility=item.visibility,
+            share_with_workers=item.share_with_workers,
+            source_kind=item.source_kind,
+            budget_chars=item.budget_chars,
+            original_char_count=item.original_char_count,
+            effective_char_count=item.effective_char_count,
+            truncated=item.truncated,
+            truncation_reason=item.truncation_reason,
+            metadata=dict(item.metadata),
+        )
+        for item in workspace.files
+    ]
+    clarification_policy = {
+        "max_clarification_turns": 2,
+        "prefer_single_question": True,
+        "fallback_requires_boundary_note": True,
+        "delegate_after_clarification_for_realtime": True,
+    }
+    return BehaviorPack(
+        pack_id=f"behavior-pack:{agent_profile.profile_id}",
+        profile_id=agent_profile.profile_id,
+        scope=agent_profile.scope.value,
+        source_chain=list(workspace.source_chain),
+        files=files,
+        layers=build_behavior_layers(files),
+        clarification_policy=clarification_policy,
+        metadata={
+            "resolved_from": "filesystem_behavior_workspace",
+            "project_slug": workspace.project_slug,
+            "overlay_order": list(workspace.metadata.get("overlay_order", [])),
+            "file_budgets": dict(workspace.metadata.get("file_budgets", {})),
+        },
+    )
+
+
+def build_runtime_hint_bundle(
+    *,
+    user_text: str,
+    surface: str = "",
+    can_delegate_research: bool = False,
+    recent_clarification_category: str = "",
+    recent_clarification_source_text: str = "",
+    recent_location_hint: str = "",
+    default_location_hint: str = "",
+    tool_universe: ToolUniverseHints | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> RuntimeHintBundle:
+    normalized = user_text.strip()
+    lowered = normalized.lower()
+    current_location = extract_explicit_location(normalized)
+    explicit_web_search_requested = any(token in lowered for token in _EXPLICIT_WEB_SEARCH_TOKENS)
+    effective_location = (
+        current_location
+        or recent_location_hint.strip()
+        or default_location_hint.strip()
+    )
+    return RuntimeHintBundle(
+        surface=surface.strip(),
+        explicit_web_search_requested=explicit_web_search_requested,
+        can_delegate_research=can_delegate_research,
+        weather_query=any(token in lowered for token in _WEATHER_QUERY_TOKENS),
+        current_location_hint=current_location,
+        recent_location_hint=recent_location_hint.strip(),
+        effective_location_hint=effective_location,
+        recent_clarification_category=recent_clarification_category.strip(),
+        recent_clarification_source_text=recent_clarification_source_text.strip(),
+        tool_universe=tool_universe,
+        metadata=dict(metadata or {}),
+    )
+
+
+def decide_butler_decision(
+    user_text: str,
+    *,
+    runtime_hints: RuntimeHintBundle | None = None,
+) -> ButlerDecision:
     normalized = user_text.strip()
     if not normalized:
-        return ClarificationDecision()
+        return ButlerDecision()
 
-    lowered = normalized.lower()
-    technical_request = _looks_like_technical_request(normalized)
-    if any(token in lowered for token in _WEATHER_QUERY_TOKENS) and not contains_explicit_location(
-        normalized
+    hints = runtime_hints or build_runtime_hint_bundle(user_text=normalized)
+
+    if (
+        hints.recent_clarification_category == "weather_location"
+        and hints.current_location_hint
+        and not hints.weather_query
     ):
-        return ClarificationDecision(
-            action=ClarificationAction.DELEGATE_AFTER_CLARIFICATION,
-            category="weather_location",
-            rationale="实时天气查询缺城市/区县，继续委派前需要先补关键位置。",
-            missing_inputs=["城市或区县"],
-            followup_prompt=build_clarification_reply(
+        rewritten = build_weather_followup_query(
+            location_text=hints.current_location_hint,
+            original_user_text=hints.recent_clarification_source_text or "今天天气怎么样？",
+        )
+        return _compatibility_fallback_decision(
+            ButlerDecision(
+            mode=ButlerDecisionMode.DELEGATE_RESEARCH,
+            category="weather_location_followup",
+            rationale="检测到上一轮天气补问后的地点补充，恢复 research 链路。",
+            assumptions=[f"用户补充的位置是 {hints.current_location_hint}。"],
+            tool_intent="web.search",
+            target_worker_type="research",
+            metadata={
+                "delegation_strategy": "butler_owned_freshness",
+                "followup_mode": "weather_location",
+                "rewritten_user_text": rewritten,
+                "resolved_location": hints.current_location_hint,
+            },
+            ),
+            fallback_reason="weather_followup_resume",
+        )
+
+    if hints.weather_query:
+        if not hints.effective_location_hint:
+            if (
+                hints.explicit_web_search_requested
+                and hints.recent_clarification_category == "weather_location"
+            ):
+                return _compatibility_fallback_decision(
+                    ButlerDecision(
+                    mode=ButlerDecisionMode.BEST_EFFORT_ANSWER,
+                    category="weather_location_missing",
+                    rationale=(
+                        "用户再次显式要求 WebSearch，"
+                        "但仍缺位置，不能假装已完成准确实时查询。"
+                    ),
+                    missing_inputs=["城市或区县"],
+                    tool_intent="web.search",
+                    target_worker_type="research",
+                    user_visible_boundary_note="缺少城市 / 区县，无法给出准确的实时天气结果。",
+                    reply_prompt=build_best_effort_reply(
+                        category="weather_location_missing",
+                        user_text=normalized,
+                    ),
+                    metadata={"clarification_needed": "weather_location"},
+                    ),
+                    fallback_reason="weather_location_missing_best_effort",
+                )
+            return _compatibility_fallback_decision(
+                ButlerDecision(
+                mode=ButlerDecisionMode.ASK_ONCE,
                 category="weather_location",
-                user_text=normalized,
+                rationale="实时天气查询缺城市/区县，继续委派前需要先补关键位置。",
+                missing_inputs=["城市或区县"],
+                tool_intent="web.search",
+                target_worker_type="research",
+                reply_prompt=build_clarification_reply(
+                    category="weather_location",
+                    user_text=normalized,
+                ),
+                metadata={
+                    "clarification_needed": "weather_location",
+                    "followup_mode": "weather_location",
+                },
+                ),
+                fallback_reason="weather_location_missing_clarify",
+            )
+
+        assumptions: list[str] = []
+        if hints.current_location_hint != hints.effective_location_hint:
+            assumptions.append(f"沿用最近确认的位置：{hints.effective_location_hint}。")
+        return _compatibility_fallback_decision(
+            ButlerDecision(
+            mode=ButlerDecisionMode.DELEGATE_RESEARCH,
+            category="weather_location_resolved",
+            rationale="天气查询的位置线索已齐，可以直接进入 research。",
+            assumptions=assumptions,
+            tool_intent="web.search",
+            target_worker_type="research",
+            metadata={
+                "delegation_strategy": "butler_owned_freshness",
+                "resolved_location": hints.effective_location_hint,
+            },
             ),
-            delegate_after_clarification=True,
-            metadata={"clarification_needed": "weather_location"},
+            fallback_reason="weather_location_resolved",
         )
 
-    if _looks_like_work_priority_request(normalized) and not _contains_explicit_task_inventory(
-        normalized
-    ):
+    return ButlerDecision()
+
+
+def _compatibility_fallback_decision(
+    decision: ButlerDecision,
+    *,
+    fallback_reason: str,
+) -> ButlerDecision:
+    return decision.model_copy(
+        update={
+            "metadata": {
+                **dict(decision.metadata),
+                "decision_source": "compatibility_fallback",
+                "decision_fallback_reason": fallback_reason,
+            }
+        }
+    )
+
+
+def decide_clarification(user_text: str) -> ClarificationDecision:
+    decision = decide_butler_decision(user_text)
+    if decision.mode is ButlerDecisionMode.ASK_ONCE:
+        action = ClarificationAction.CLARIFY
+        if decision.category == "weather_location" and decision.target_worker_type == "research":
+            action = ClarificationAction.DELEGATE_AFTER_CLARIFICATION
         return ClarificationDecision(
-            action=ClarificationAction.CLARIFY,
-            category="work_priority_context",
-            rationale="排优先级前缺真实待办或日程列表。",
-            missing_inputs=["今天下午的待办列表或日程"],
-            followup_prompt=build_clarification_reply(
-                category="work_priority_context",
-                user_text=normalized,
+            action=action,
+            category=decision.category,
+            rationale=decision.rationale,
+            missing_inputs=list(decision.missing_inputs),
+            followup_prompt=decision.reply_prompt,
+            delegate_after_clarification=(
+                action is ClarificationAction.DELEGATE_AFTER_CLARIFICATION
             ),
-            fallback_hint="如果你现在只想先拿一个通用框架，也可以直接说“先给我通用版”。",
-            metadata={"clarification_needed": "work_priority_context"},
+            metadata=dict(decision.metadata),
         )
-
-    if (
-        _looks_like_recommendation_request(normalized)
-        and not technical_request
-        and not _contains_recommendation_context(normalized)
-    ):
+    if decision.mode is ButlerDecisionMode.BEST_EFFORT_ANSWER:
         return ClarificationDecision(
-            action=ClarificationAction.CLARIFY,
-            category="recommendation_context",
-            rationale="推荐类请求缺少地点、预算或使用场景。",
-            missing_inputs=["地点", "预算", "使用场景"],
-            followup_prompt=build_clarification_reply(
-                category="recommendation_context",
-                user_text=normalized,
-            ),
-            fallback_hint=(
-                "如果你不想补充条件，我也可以先给你一个通用 shortlist，"
-                "但会明确标成通用建议。"
-            ),
-            metadata={"clarification_needed": "recommendation_context"},
+            action=ClarificationAction.BEST_EFFORT_FALLBACK,
+            category=decision.category,
+            rationale=decision.rationale,
+            missing_inputs=list(decision.missing_inputs),
+            followup_prompt=decision.reply_prompt,
+            fallback_hint=decision.user_visible_boundary_note,
+            metadata=dict(decision.metadata),
         )
-
-    if (
-        _looks_like_comparison_request(normalized)
-        and not technical_request
-        and not _contains_comparison_criteria(normalized)
-    ):
-        return ClarificationDecision(
-            action=ClarificationAction.CLARIFY,
-            category="comparison_criteria",
-            rationale="比较类问题缺少评判标准或使用场景。",
-            missing_inputs=["你最在意的评判标准"],
-            followup_prompt=build_clarification_reply(
-                category="comparison_criteria",
-                user_text=normalized,
-            ),
-            fallback_hint="如果你愿意，我也可以先按常见标准给一个通用对比框架。",
-            metadata={"clarification_needed": "comparison_criteria"},
-        )
-
     return ClarificationDecision()
 
 
@@ -517,6 +1025,17 @@ def build_clarification_reply(*, category: str, user_text: str) -> str:
             f"我可以继续帮你比较，但还缺一个最关键的判断标准：{question}\n\n"
             "你可以直接告诉我你更在意什么，比如 **价格 / 性能 / 体积 / 续航 / 风格 / 风险**；"
             "如果你不确定，我也可以先按常见标准给你一个通用对比框架。"
+        )
+    return ""
+
+
+def build_best_effort_reply(*, category: str, user_text: str) -> str:
+    question = user_text.strip() or "这条问题"
+    if category == "weather_location_missing":
+        return (
+            f"我可以继续去做 WebSearch，但这条问题目前仍然缺少**城市 / 区县**信息：{question}\n\n"
+            "没有地点时，我没法给你准确的实时天气结果，也不能假装已经查到了正确城市。"
+            "你直接回我一个位置，比如 `深圳` 或 `北京朝阳区`，我就继续往下查。"
         )
     return ""
 

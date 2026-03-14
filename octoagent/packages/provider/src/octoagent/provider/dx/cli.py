@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import click
+from octoagent.core.models import ControlPlaneActionStatus
 from rich.console import RenderableType
 
-from octoagent.core.models import ControlPlaneActionStatus
-
 from .backup_commands import backup, export, restore
+from .behavior_commands import behavior_group
 from .chat_import_commands import import_cmd
 from .config_commands import _resolve_project_root, config
 from .console_output import create_console, render_panel
@@ -85,6 +85,7 @@ def main() -> None:
 
 
 main.add_command(config)
+main.add_command(behavior_group)
 main.add_command(backup)
 main.add_command(restore)
 main.add_command(export)

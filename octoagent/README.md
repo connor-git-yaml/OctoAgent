@@ -16,7 +16,7 @@ It combines a Butler-owned user experience, durable task execution, internal But
 ## Features
 
 - **One accountable Butler**
-  You talk to a single default agent. The Butler keeps the main conversation, decides when work should be delegated, and remains responsible for the final answer.
+  You talk to a single default agent. The Butler keeps the main conversation, can directly use mounted governed tools for bounded tasks, decides when work should be delegated, and remains responsible for the final answer.
 
 - **Internal delegation you can actually inspect**
   Specialized Workers run behind the Butler with their own sessions, memory scopes, recall frames, and durable A2A conversations instead of disappearing into a black box.
@@ -34,7 +34,7 @@ It combines a Butler-owned user experience, durable task execution, internal But
   The Web UI exposes runtime health, A2A conversations, task state, memory surfaces, configuration hints, and operator actions through Control Plane and Advanced views.
 
 - **Real freshness and research flow**
-  Questions such as weather, “latest”, and web-backed research are designed to follow `Butler -> Research Worker -> Butler`, instead of pretending one flat chat agent can safely answer everything.
+  Questions such as weather, “latest”, and web-backed research are handled by the Butler decision runtime: many follow `Butler -> Research Worker -> Butler`, while bounded checks can be completed directly by Butler with governed tools and explicit provenance.
 
 - **Web first, Telegram optional**
   Web is the default surface. Telegram can be added later when you want a second control surface.
@@ -231,6 +231,33 @@ octo onboard --channel telegram
 
 `polling` is the simplest way to start. Use `webhook` only when you already have a reliable HTTPS endpoint.
 <!-- speckit:section:usage:end -->
+
+## Behavior Files
+
+The Butler behavior path is no longer only hidden prompt assembly. OctoAgent now resolves
+an explicit behavior workspace built around four core files:
+
+- `AGENTS.md`
+- `USER.md`
+- `PROJECT.md`
+- `TOOLS.md`
+
+Web exposes a read-only operator view at `Settings > Behavior Files`, showing effective
+source chain, visible files, and Worker inheritance. The canonical local management path is:
+
+```bash
+octo behavior ls
+octo behavior show AGENTS
+octo behavior init
+```
+
+At runtime, Butler combines these files with `RuntimeHintBundle`, a sanitized
+session-backed `SessionReplay`/`RecentConversation` view, and hint-first memory context.
+Default general requests now enter a single-loop main executor directly: the main model call
+runs with the mounted governed tools in one `LLM + SkillRunner` loop instead of forcing a
+separate Butler preflight first. Structured `ButlerDecision` and `ButlerLoopPlan` remain for
+compatibility, explicit delegation, and legacy preflight paths. Compatibility heuristics now only
+retain true guardrails such as weather location boundaries and follow-up resume.
 
 ## Initialization and Configuration
 

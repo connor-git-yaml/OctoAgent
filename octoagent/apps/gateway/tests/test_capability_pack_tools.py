@@ -210,7 +210,12 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         general_profile = capability_pack.get_worker_profile(WorkerType.GENERAL)
         assert general_profile.default_tool_groups == [
             "project",
+            "artifact",
+            "document",
             "session",
+            "network",
+            "browser",
+            "memory",
             "supervision",
             "delegation",
         ]
@@ -220,6 +225,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         )
         assert "Butler" in general_bootstrap.content
         assert "不要把自己叫作 general worker" in general_bootstrap.content
+        assert "优先自己使用当前已挂载的受治理工具完成有界任务" in general_bootstrap.content
         assert "今天、天气、最新资料、官网、网页信息" in general_bootstrap.content
 
         shared_bootstrap = next(

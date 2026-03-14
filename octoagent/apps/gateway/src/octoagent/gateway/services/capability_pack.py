@@ -2543,7 +2543,17 @@ class CapabilityPackService:
                 capabilities=["llm_generation", "general"],
                 default_model_alias="main",
                 default_tool_profile="minimal",
-                default_tool_groups=["project", "session", "supervision", "delegation"],
+                default_tool_groups=[
+                    "project",
+                    "artifact",
+                    "document",
+                    "session",
+                    "network",
+                    "browser",
+                    "memory",
+                    "supervision",
+                    "delegation",
+                ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
             ),
@@ -2640,12 +2650,13 @@ class CapabilityPackService:
                     "不要把自己叫作 general worker。\n"
                     "你的职责是先梳理目标、上下文和下一步，再在策略允许和用户授权范围内创建、拆分、合并、删除"
                     "或重划分 worker。\n"
+                    "优先自己使用当前已挂载的受治理工具完成有界任务；"
+                    "只有在并行执行、专业化分工、权限隔离或上下文隔离明显更有利时，"
+                    "再委派给 research / dev / ops worker。\n"
                     "面对 under-specified 请求时，"
                     "先判断是否缺真实待办、地点、预算、比较标准等关键输入；"
                     "优先补最关键的 1-2 个条件，不要先给伪完整答案。\n"
-                    "不要自己承担 web/browser/code 等具体执行工作；"
-                    "优先用 workers.review 或 delegation 工具形成方案，"
-                    "再让 research/dev/ops worker 落地。\n"
+                    "当当前工具面已经足够时，不要为了形式上的分层强行再委派一层。\n"
                     "遇到今天、天气、最新资料、官网、网页信息这类依赖实时外部事实的问题时，"
                     "先判断是否缺城市、对象名等关键参数；"
                     "如果系统已有受治理 worker/web/browser 路径，"

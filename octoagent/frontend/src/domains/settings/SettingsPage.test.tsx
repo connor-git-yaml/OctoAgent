@@ -287,6 +287,59 @@ function buildSettingsSnapshot() {
           secret_binding_risks: [],
         },
       },
+      agent_profiles: {
+        profiles: [
+          {
+            profile_id: "agent-profile-default",
+            scope: "project",
+            project_id: "project-default",
+            name: "Default Butler",
+            persona_summary: "负责长期协作。",
+            model_alias: "main",
+            tool_profile: "standard",
+            metadata: {},
+            updated_at: "2026-03-13T16:00:00Z",
+            behavior_system: {
+              source_chain: ["filesystem:behavior/projects/default", "default_behavior_templates"],
+              decision_modes: [
+                "direct_answer",
+                "ask_once",
+                "delegate_research",
+                "delegate_ops",
+                "best_effort_answer",
+              ],
+              runtime_hint_fields: [
+                "explicit_web_search_requested",
+                "effective_location_hint",
+              ],
+              files: [
+                {
+                  file_id: "AGENTS.md",
+                  title: "行为总约束",
+                  layer: "role",
+                  visibility: "shared",
+                  share_with_workers: true,
+                  source_kind: "project_file",
+                  path_hint: "behavior/projects/default/AGENTS.md",
+                },
+                {
+                  file_id: "USER.md",
+                  title: "用户默认值",
+                  layer: "communication",
+                  visibility: "private",
+                  share_with_workers: false,
+                  source_kind: "default_template",
+                  path_hint: "behavior/system/USER.md",
+                },
+              ],
+              worker_slice: {
+                shared_file_ids: ["AGENTS.md", "PROJECT.md", "TOOLS.md"],
+                layers: ["role", "solving", "tool_boundary"],
+              },
+            },
+          },
+        ],
+      },
       policy_profiles: {
         generated_at: "2026-03-13T16:00:00Z",
         active_profile_id: "balanced",
@@ -546,6 +599,36 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "打开 Agents > Providers" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("安全与能力")).not.toBeInTheDocument();
+  });
+
+  it("展示只读 Behavior Files 视图和 CLI 入口", () => {
+    mockWorkbench = {
+      snapshot: buildSettingsSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Butler 默认行为现在来自显式文件与运行时 hints" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        (_, node) => node?.textContent?.includes("behavior/projects/default/AGENTS.md") ?? false
+      ).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        (_, node) => node?.textContent?.includes("share_with_workers=true") ?? false
+      ).length
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("octo behavior ls")).toBeInTheDocument();
+    expect(screen.getByText("octo behavior show AGENTS")).toBeInTheDocument();
   });
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {

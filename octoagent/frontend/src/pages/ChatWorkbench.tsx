@@ -22,6 +22,12 @@ function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void 
 }
 
 function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[] {
+  if (
+    typeof sessions.new_conversation_token === "string" &&
+    sessions.new_conversation_token.trim()
+  ) {
+    return [];
+  }
   const sessionItems = ensureArray(sessions.sessions);
   const webSessions = sessionItems.filter((item) => item.channel === "web");
   const candidates = webSessions.length > 0 ? webSessions : sessionItems;
@@ -274,7 +280,7 @@ export default function ChatWorkbench() {
   const contextFrames = ensureArray(context.frames);
   const a2aConversations = ensureArray(context.a2a_conversations);
   const restoreTaskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
-  const { messages, sendMessage, streaming, restoring, error, taskId } = useChatStream(
+  const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId } = useChatStream(
     restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null
   );
   const [input, setInput] = useState("");
@@ -529,6 +535,15 @@ export default function ChatWorkbench() {
             </p>
           </div>
           <div className="wb-chat-head-actions">
+            {taskId || messages.length > 0 ? (
+              <button
+                type="button"
+                className="wb-button wb-button-tertiary"
+                onClick={() => void resetConversation()}
+              >
+                开始新对话
+              </button>
+            ) : null}
             {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}
             {taskId ? (
               <Link className="wb-button wb-button-tertiary" to={`/tasks/${taskId}`}>

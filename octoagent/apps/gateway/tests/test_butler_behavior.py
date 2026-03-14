@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
-from octoagent.core.models import AgentProfile, AgentProfileScope, BehaviorLayerKind
+from pathlib import Path
+
+from octoagent.core.models import (
+    AgentProfile,
+    AgentProfileScope,
+    BehaviorLayerKind,
+    ButlerDecisionMode,
+    DynamicToolSelection,
+    EffectiveToolUniverse,
+    ToolAvailabilityExplanation,
+    ToolIndexQuery,
+    WorkerType,
+)
 from octoagent.gateway.services.butler_behavior import (
     build_behavior_slice_envelope,
     build_behavior_system_summary,
+    build_runtime_hint_bundle,
+    build_tool_universe_hints,
+    contains_explicit_location,
+    decide_butler_decision,
     decide_clarification,
     render_behavior_system_block,
+    render_runtime_hint_block,
     resolve_behavior_pack,
 )
 
@@ -41,12 +58,13 @@ def test_resolve_behavior_pack_builds_default_files_layers_and_worker_slice() ->
     pack = resolve_behavior_pack(
         agent_profile=profile,
         project_name="Default Project",
+        project_slug="default-project",
     )
     slice_envelope = build_behavior_slice_envelope(pack)
 
     assert pack.profile_id == profile.profile_id
-    assert len(pack.files) == 7
-    assert pack.source_chain == ["default_behavior_templates", "project:Default Project"]
+    assert len(pack.files) == 4
+    assert pack.source_chain == ["default_behavior_templates", "project:default-project"]
     assert [item.layer for item in pack.layers][:3] == [
         BehaviorLayerKind.ROLE,
         BehaviorLayerKind.COMMUNICATION,
@@ -66,15 +84,22 @@ def test_behavior_summary_and_block_expose_effective_sources() -> None:
     summary = build_behavior_system_summary(
         agent_profile=profile,
         project_name="Default Project",
+        project_slug="default-project",
     )
     block = render_behavior_system_block(
         agent_profile=profile,
         project_name="Default Project",
+        project_slug="default-project",
     )
 
-    assert summary["source_chain"] == ["default_behavior_templates", "project:Default Project"]
+    assert summary["source_chain"] == ["default_behavior_templates", "project:default-project"]
     assert summary["worker_slice"]["shared_file_ids"] == ["AGENTS.md", "PROJECT.md", "TOOLS.md"]
+    assert "direct_answer" in summary["decision_modes"]
+    assert "effective_location_hint" in summary["runtime_hint_fields"]
+    assert summary["files"][0]["path_hint"] == "behavior/system/AGENTS.md"
+    assert summary["files"][0]["is_advanced"] is False
     assert "BehaviorSystem:" in block
+    assert "decision_modes:" in block
     assert "tool_boundary:" in block
     assert "default_behavior_templates" in block
 
@@ -82,34 +107,106 @@ def test_behavior_summary_and_block_expose_effective_sources() -> None:
 def test_worker_behavior_block_uses_worker_identity_and_shared_slice_only() -> None:
     profile = _build_worker_profile()
 
-    pack = resolve_behavior_pack(agent_profile=profile, project_name="Default Project")
+    pack = resolve_behavior_pack(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+    )
     block = render_behavior_system_block(
         agent_profile=profile,
         project_name="Default Project",
+        project_slug="default-project",
         shared_only=True,
     )
 
-    assert pack.files[0].title == "Worker 总约束"
-    assert "Root Agent" in pack.files[0].content
-    assert "Butler 的总控职责" in pack.files[0].content
+    assert pack.files[0].title == "行为总约束"
+    assert "Worker" in pack.files[0].content
+    assert "Butler 进行全局总控" in pack.files[0].content
     assert "communication:" not in block
-    assert "memory_policy:" not in block
     assert "bootstrap:" not in block
     assert "tool_boundary:" in block
 
 
-def test_decide_clarification_identifies_work_priority_missing_context() -> None:
+def test_resolve_behavior_pack_prefers_project_and_system_workspace_files(tmp_path: Path) -> None:
+    profile = _build_profile()
+    system_dir = tmp_path / "behavior" / "system"
+    project_dir = tmp_path / "behavior" / "projects" / "default-project"
+    system_dir.mkdir(parents=True)
+    project_dir.mkdir(parents=True)
+    (system_dir / "TOOLS.md").write_text("system tools", encoding="utf-8")
+    (project_dir / "AGENTS.md").write_text("project agents", encoding="utf-8")
+
+    pack = resolve_behavior_pack(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+
+    files = {item.file_id: item for item in pack.files}
+    assert pack.source_chain == [
+        "filesystem:behavior/projects/default-project",
+        "filesystem:behavior/system",
+        "default_behavior_templates",
+    ]
+    assert files["AGENTS.md"].content == "project agents"
+    assert files["AGENTS.md"].source_kind == "project_file"
+    assert files["TOOLS.md"].content == "system tools"
+    assert files["TOOLS.md"].source_kind == "system_file"
+    assert files["USER.md"].source_kind == "default_template"
+
+
+def test_resolve_behavior_pack_supports_local_override_and_truncation(tmp_path: Path) -> None:
+    profile = _build_profile()
+    project_dir = tmp_path / "behavior" / "projects" / "default-project"
+    project_dir.mkdir(parents=True)
+    long_tools = "web.search 允许联网检索。\n" * 300
+    (project_dir / "TOOLS.local.md").write_text(long_tools, encoding="utf-8")
+
+    pack = resolve_behavior_pack(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+    summary = build_behavior_system_summary(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+    block = render_behavior_system_block(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+
+    files = {item.file_id: item for item in pack.files}
+    tools_file = files["TOOLS.md"]
+    assert pack.source_chain[0] == "filesystem:behavior/projects/default-project/*.local"
+    assert tools_file.source_kind == "project_local_file"
+    assert tools_file.truncated is True
+    assert tools_file.truncation_reason == "char_budget_exceeded"
+    assert tools_file.original_char_count > tools_file.effective_char_count
+    assert summary["budget"]["overlay_order"][-1] == "project_local_file"
+    assert summary["files"][-1]["truncated"] is True
+    assert "truncated files: TOOLS.md" in block
+    assert "[TOOLS.md; truncated" in block
+
+
+def test_decide_clarification_keeps_non_weather_requests_for_model_phase() -> None:
     decision = decide_clarification(
         "帮我把今天下午的工作拆成 3 个优先级，并给我一个先做什么后做什么的顺序。"
     )
 
-    assert decision.category == "work_priority_context"
-    assert decision.action.value == "clarify"
-    assert decision.missing_inputs == ["今天下午的待办列表或日程"]
-    assert "真实待办 / 日程列表" in decision.followup_prompt
+    assert decision.category == ""
+    assert decision.action.value == "direct"
+    assert decision.followup_prompt == ""
+    assert decision.metadata == {}
 
 
-def test_decide_clarification_identifies_weather_and_recommendation_context() -> None:
+def test_decide_clarification_only_keeps_weather_boundary_fallback() -> None:
     weather = decide_clarification("今天天气怎么样？")
     recommend = decide_clarification("帮我推荐一家餐厅")
 
@@ -117,9 +214,9 @@ def test_decide_clarification_identifies_weather_and_recommendation_context() ->
     assert weather.action.value == "delegate_after_clarification"
     assert "城市 / 区县" in weather.followup_prompt
 
-    assert recommend.category == "recommendation_context"
-    assert recommend.action.value == "clarify"
-    assert "地点 / 预算 / 使用场景" in recommend.followup_prompt
+    assert recommend.category == ""
+    assert recommend.action.value == "direct"
+    assert recommend.metadata == {}
 
 
 def test_decide_clarification_skips_technical_recommendation_requests() -> None:
@@ -134,3 +231,121 @@ def test_decide_clarification_skips_technical_comparison_requests() -> None:
 
     assert decision.action.value == "direct"
     assert decision.category == ""
+
+
+def test_contains_explicit_location_does_not_treat_websearch_prefix_as_location() -> None:
+    assert contains_explicit_location("你直接去 Websearch 今天天气怎么样") is False
+
+
+def test_decide_butler_decision_resumes_weather_followup_after_location_reply() -> None:
+    hints = build_runtime_hint_bundle(
+        user_text="深圳",
+        can_delegate_research=True,
+        recent_clarification_category="weather_location",
+        recent_clarification_source_text="今天天气怎么样？",
+    )
+
+    decision = decide_butler_decision("深圳", runtime_hints=hints)
+
+    assert decision.mode is ButlerDecisionMode.DELEGATE_RESEARCH
+    assert decision.category == "weather_location_followup"
+    assert decision.metadata["rewritten_user_text"] == "深圳，今天天气怎么样？"
+    assert decision.metadata["decision_source"] == "compatibility_fallback"
+    assert decision.metadata["decision_fallback_reason"] == "weather_followup_resume"
+
+
+def test_decide_butler_decision_uses_best_effort_for_explicit_websearch_without_location(
+) -> None:
+    hints = build_runtime_hint_bundle(
+        user_text="你直接去 Websearch 今天天气怎么样",
+        can_delegate_research=True,
+        recent_clarification_category="weather_location",
+        recent_clarification_source_text="今天天气怎么样？",
+    )
+
+    decision = decide_butler_decision(
+        "你直接去 Websearch 今天天气怎么样",
+        runtime_hints=hints,
+    )
+
+    assert decision.mode is ButlerDecisionMode.BEST_EFFORT_ANSWER
+    assert decision.category == "weather_location_missing"
+    assert "缺少**城市 / 区县**信息" in decision.reply_prompt
+    assert decision.metadata["decision_source"] == "compatibility_fallback"
+    assert decision.metadata["decision_fallback_reason"] == "weather_location_missing_best_effort"
+
+
+def test_render_runtime_hint_block_exposes_effective_location_and_followup_context() -> None:
+    hints = build_runtime_hint_bundle(
+        user_text="深圳",
+        can_delegate_research=True,
+        recent_clarification_category="weather_location",
+        recent_clarification_source_text="今天天气怎么样？",
+    )
+
+    block = render_runtime_hint_block(user_text="深圳", runtime_hints=hints)
+
+    assert "RuntimeHints:" in block
+    assert "can_delegate_research: True" in block
+    assert "effective_location_hint: 深圳" in block
+    assert "recent_clarification_category: weather_location" in block
+    assert "ToolUniverseHints:" in block
+
+
+def test_render_runtime_hint_block_exposes_tool_universe_hints() -> None:
+    selection = DynamicToolSelection(
+        selection_id="selection-1",
+        query=ToolIndexQuery(query="今天天气怎么样", worker_type=WorkerType.GENERAL),
+        selected_tools=["runtime.now", "web.search"],
+        resolution_mode="profile_first_core",
+        effective_tool_universe=EffectiveToolUniverse(
+            profile_id="agent-profile-default",
+            profile_revision=1,
+            worker_type="general",
+            tool_profile="standard",
+            resolution_mode="profile_first_core",
+            selected_tools=["runtime.now", "web.search"],
+            discovery_entrypoints=["web.search"],
+            warnings=[],
+        ),
+        mounted_tools=[
+            ToolAvailabilityExplanation(
+                tool_name="runtime.now",
+                status="mounted",
+                summary="当前时间工具",
+            ),
+            ToolAvailabilityExplanation(
+                tool_name="web.search",
+                status="mounted",
+                summary="联网检索工具",
+            ),
+        ],
+        blocked_tools=[
+            ToolAvailabilityExplanation(
+                tool_name="browser.open",
+                status="blocked",
+                reason_code="tool_profile_not_allowed",
+                summary="浏览器工具未挂载",
+            )
+        ],
+    )
+    hints = build_runtime_hint_bundle(
+        user_text="今天天气怎么样",
+        can_delegate_research=True,
+        tool_universe=build_tool_universe_hints(
+            selection,
+            note="resolved_before_butler_decision",
+            tool_profile_fallback="standard",
+        ),
+    )
+
+    block = render_runtime_hint_block(
+        user_text="今天天气怎么样",
+        runtime_hints=hints,
+    )
+
+    assert "tool_resolution_mode: profile_first_core" in block
+    assert "selected_tools: runtime.now, web.search" in block
+    assert "web.search(mounted)" in block
+    assert "browser.open(blocked:tool_profile_not_allowed)" in block
+    assert "tool_universe_note: resolved_before_butler_decision" in block

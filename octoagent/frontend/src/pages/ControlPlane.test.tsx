@@ -236,6 +236,7 @@ function buildSnapshot(currentProjectId = "project-default") {
         refs: {},
         focused_session_id: "",
         focused_thread_id: "",
+        new_conversation_token: "",
         sessions: [
           {
             session_id: "thread-1",

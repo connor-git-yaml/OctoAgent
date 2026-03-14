@@ -94,6 +94,17 @@ class MemoryRecallHookOptions(BaseModel):
     min_keyword_overlap: int = Field(default=1, ge=1, le=8)
 
 
+class MemorySearchOptions(BaseModel):
+    """传给高级 memory backend 的显式检索提示。"""
+
+    expanded_queries: list[str] = Field(default_factory=list)
+    focus_terms: list[str] = Field(default_factory=list)
+    subject_hint: str = Field(default="")
+    post_filter_mode: MemoryRecallPostFilterMode = MemoryRecallPostFilterMode.NONE
+    rerank_mode: MemoryRecallRerankMode = MemoryRecallRerankMode.NONE
+    min_keyword_overlap: int = Field(default=1, ge=1, le=8)
+
+
 class MemoryRecallHookTrace(BaseModel):
     """Recall hooks 执行轨迹。"""
 

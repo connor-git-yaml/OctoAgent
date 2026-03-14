@@ -1,103 +1,129 @@
 ---
 feature_id: "049"
-title: "Butler Persona & Clarification Behavior System"
+title: "Butler Behavior Workspace & Agentic Decision Runtime"
 created: "2026-03-14"
 updated: "2026-03-14"
-status: "Draft"
+status: "Implemented"
 ---
 
 # Plan - Feature 049
 
 ## 1. 目标
 
-把 Butler 的默认行为系统从“零散 prompt/特判/文案”提升为：
+把 Butler 的默认行为从“代码里的场景特判”迁移到：
 
-- clarification-first
-- source-aware
-- project-scoped
-- 可用 markdown 文件演化
-- 可治理、可审计
+- 少量显式 behavior files
+- role/environment/communication/solving 风格的分层装配
+- `RuntimeHintBundle + ButlerDecision` 决策链
+- 可见、可编辑、可审计的 UI/CLI 管理入口
 
 ## 2. 非目标
 
-- 不为天气/推荐/购物等各个场景分别造专用缓存或专用策略树
-- 不重做 Worker 全量 persona 系统
-- 不引入新的 memory backend
-- 不绕过现有 review/apply 治理直接允许任意自我改写
+- 不把治理边界下放给 md 文件
+- 不把 `SOUL.md / IDENTITY.md / HEARTBEAT.md` 做成当前阶段默认主路径
+- 不顺带重做 Memory、Setup 或 Worker persona 全家桶
+- 不继续为天气、推荐、排期等问题追加新的硬编码分类树
 
 ## 3. 设计原则
 
-### 3.1 通用优先于 case patch
+### 3.1 文件显式优先
 
-under-specified 请求必须由通用 clarification 决策框架处理，而不是新增单案判断。
+行为入口优先来自真实文件，而不是代码模板或隐藏 prompt。
 
-### 3.2 行为与人格要有正式载体
+### 3.2 Agent 决策优先
 
-用户能改、Agent 能提案、系统能装配，才算正式产品能力。
+软行为由 Butler 基于 hints 做判断；代码只保留 deterministic guardrails。
 
-### 3.3 分层优先于大 prompt
+### 3.3 默认文件克制
 
-借鉴 Agent Zero 的 role / communication / solving 分层，不再把所有行为塞进一段大 prompt。
+当前阶段只收口四个核心文件：
 
-### 3.4 治理优先
+- `AGENTS.md`
+- `USER.md`
+- `PROJECT.md`
+- `TOOLS.md`
 
-允许 Agent 帮助演化行为文件，但核心行为文件默认走 review/apply，不做静默自改。
+### 3.4 主会话与子会话分层
+
+Worker 默认只看到共享文件和显式 capsule，不读主会话私有行为全集。
+
+### 3.5 UI / CLI 同源
+
+behavior file 的查看、编辑、diff、apply 不能只存在于本地文件系统。
 
 ## 4. 参考证据
 
-- OpenClaw workspace 行为文件：
-  - `_references/opensource/openclaw/docs/reference/AGENTS.default.md`
-  - `_references/opensource/openclaw/docs/reference/templates/AGENTS.md`
-  - `_references/opensource/openclaw/docs/reference/templates/BOOTSTRAP.md`
-- Agent Zero prompt 分层：
+- OpenClaw 文件分层与主/子会话可见性：
+  - `_references/openclaw-snapshot/data/skills/agent-config/references/file-map.md`
+- OpenClaw 文件修改工作流：
+  - `_references/openclaw-snapshot/data/skills/agent-config/SKILL.md`
+- Agent Zero 分层 system prompt：
+  - `_references/opensource/agent-zero/prompts/agent.system.main.md`
   - `_references/opensource/agent-zero/prompts/agent.system.main.role.md`
-  - `_references/opensource/agent-zero/prompts/agent.system.main.communication.md`
   - `_references/opensource/agent-zero/prompts/agent.system.main.solving.md`
 - 当前 OctoAgent runtime 基线：
   - `docs/blueprint.md`
   - `.specify/features/041-butler-worker-runtime-readiness/spec.md`
-  - `.specify/features/042-profile-first-agent-console/spec.md`
+  - `.specify/features/044-settings-center-refresh/spec.md`
 
 ## 5. 实施切片
 
-### Slice A - 行为 pack 设计
+### Slice A - Behavior Workspace 模型
 
-- 定义 7 个核心 markdown 文件
-- 规定 project / agent profile 绑定方式
-- 定义默认模板与缺失回退规则
+- 定义 `BehaviorWorkspace / BehaviorFile / BehaviorVisibility`
+- 确定四个核心文件和三个可选扩展文件
+- 定义 project / system fallback 与 effective source chain
 
-### Slice B - Clarification 决策框架
+### Slice B - Runtime Hint Bundle 与 ButlerDecision
 
-- 定义 under-specified 请求分类
-- 定义补问、fallback、继续委派三种分支
-- 约束追问轮数和 best-effort 触发条件
+- 定义 `RuntimeHintBundle`
+- 定义 `ButlerDecision`
+- 规定 direct / ask_once / delegate / best_effort 的 contract
+- 明确哪些判断继续留在 deterministic runtime guard
 
-### Slice C - Runtime 装配
+### Slice C - Worker Context Capsule
 
-- 把 behavior pack 装配到 Butler runtime
-- 定义 Worker 继承的 behavior slice
-- 为 runtime truth 增加 effective behavior source 说明
+- 定义 Butler 到 Worker 的共享文件集合
+- 定义 `USER.md` 如何被筛选为 hints 而不是整份透传
+- 将 A2A payload / work metadata 与 behavior source 对齐
 
-### Slice D - 提案与治理
+### Slice D - Web / CLI 产品面
 
-- 定义 BehaviorPatchProposal
-- 接入 review/apply 或等价治理动作
-- 明确哪些文件可自动提案、哪些默认需审批
+- 设计 behavior files 管理入口
+- 设计 effective source / diff / review / apply 界面与命令
+- 对齐 Settings / Agents / Chat 的入口层级
 
-### Slice E - 验收矩阵
+### Slice E - 兼容与迁移
 
-- 覆盖排期、推荐、比较、实时查询缺位置等场景
-- 验证“先补问再答”而不是“先答再补边界”
+- 设计从当前代码模板 / `behavior_pack` metadata 到真实文件的迁移
+- 设计兼容 fallback
+- 明确旧天气/location 特判的下线顺序
+
+### Slice F - 验收矩阵
+
+- 覆盖天气、推荐、排期、比较、显式 WebSearch 指令
+- 覆盖“有默认值 / 有会话确认事实 / 完全缺失 / 工具不可用”四类上下文
 
 ## 6. 风险
 
-- 如果行为 pack 设计过重，会让首次使用门槛升高
-- 如果 clarification 策略过强，会让简单问题也变慢
-- 如果直接允许 silent self-edit，会破坏用户对人格边界的控制感
+- 如果 `ButlerDecision` 设计得太重，会拖慢简单问题
+- 如果文件边界不清，会导致规则散落重复
+- 如果 UI/CLI 只做文件编辑不做 effective source，可维护性仍然差
+- 如果迁移太激进，现有 041 freshness 路径可能短期回退
 
 ## 7. 验证方式
 
-- 行为装配单测
-- under-specified 请求矩阵测试
-- behavior patch proposal 流程测试
-- 手动对话回放：排期、推荐、实时查询、比较任务
+- behavior workspace 装配单测
+- `RuntimeHintBundle / ButlerDecision` contract 测试
+- Worker 可见文件与 capsule 测试
+- Web 只读 behavior view 与 CLI 管理入口验收
+- 真实对话回放：天气、推荐、排期、比较、显式 web search 请求
+
+## 8. 当前实现收口（2026-03-14）
+
+- `BehaviorWorkspace` 已从真实文件系统加载，并带 source chain / visibility / shared slice
+- `RuntimeHintBundle` 已接入 Butler prompt
+- `ButlerDecision` 已支持模型预路由、generic `delegate_research / delegate_ops` 和 recent conversation context
+- deterministic 场景树已降级为 compatibility fallback，并带 provenance
+- CLI 已提供 `octo behavior ls/show/init`
+- Web `Settings` 已提供 `Behavior Files` 只读 operator 视图

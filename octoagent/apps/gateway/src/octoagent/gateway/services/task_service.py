@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,6 +33,8 @@ from octoagent.core.models import (
     EventType,
     MemoryNamespaceKind,
     PartType,
+    RecallPlan,
+    RecallPlanMode,
     RequesterInfo,
     RuntimeControlContext,
     Task,
@@ -347,6 +350,93 @@ class TaskService:
             )
         return artifact
 
+    async def record_auxiliary_model_call(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        llm_service,
+        prompt_or_messages: str | list[dict[str, str]],
+        request_summary: str,
+        model_alias: str | None,
+        dispatch_metadata: dict[str, Any] | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
+        request_artifact_name: str,
+        request_artifact_description: str,
+        request_artifact_source: str,
+        response_artifact_name: str,
+        response_artifact_description: str,
+        response_artifact_source: str,
+    ):
+        prompt_snapshot = self._render_prompt_snapshot(prompt_or_messages)
+        request_artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name=request_artifact_name,
+            description=request_artifact_description,
+            content=prompt_snapshot,
+            trace_id=trace_id,
+            source=request_artifact_source,
+        )
+        effective_alias = model_alias or "main"
+        model_call_idempotency_key = (
+            f"{task_id}:aux_llm_call:{request_artifact_name}:{effective_alias}:{ULID()}"
+        )
+        started_event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.MODEL_CALL_STARTED,
+                actor=ActorType.SYSTEM,
+                payload=ModelCallStartedPayload(
+                    model_alias=effective_alias,
+                    request_summary=request_summary,
+                    artifact_ref=request_artifact.artifact_id,
+                ).model_dump(),
+                trace_id=trace_id,
+                causality=EventCausality(idempotency_key=model_call_idempotency_key),
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, started_event)
+
+        llm_result = await self._call_llm_service(
+            llm_service=llm_service,
+            prompt_or_messages=prompt_or_messages,
+            model_alias=effective_alias,
+            task_id=task_id,
+            trace_id=trace_id,
+            dispatch_metadata=dispatch_metadata or {},
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
+        )
+        response_artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name=response_artifact_name,
+            description=response_artifact_description,
+            content=llm_result.content,
+            trace_id=trace_id,
+            emit_event=False,
+            source=response_artifact_source,
+        )
+        await self._write_model_call_completed(
+            task_id,
+            trace_id,
+            llm_result,
+            response_artifact.artifact_id,
+        )
+        await self._write_artifact_created(
+            task_id=task_id,
+            trace_id=trace_id,
+            artifact_id=response_artifact.artifact_id,
+            artifact=response_artifact,
+            source=response_artifact_source,
+        )
+        return llm_result, request_artifact, response_artifact
+
     # 响应摘要截断阈值（对齐 FR-002-CL-4，沿用 M0 8KB 阈值）
     RESPONSE_SUMMARY_MAX_BYTES = 8192
 
@@ -438,6 +528,8 @@ class TaskService:
                 task_id=task_id,
                 fallback_user_text=user_text,
                 llm_service=llm_service,
+                trace_id=trace_id,
+                model_alias=effective_alias,
                 dispatch_metadata=dispatch_metadata or {},
                 worker_capability=worker_capability,
                 tool_profile=tool_profile,
@@ -730,12 +822,225 @@ class TaskService:
             merged["work_id"] = runtime_context.work_id
         return merged
 
+    @staticmethod
+    def _render_prompt_snapshot(prompt_or_messages: str | list[dict[str, str]]) -> str:
+        if isinstance(prompt_or_messages, str):
+            return prompt_or_messages
+        return json.dumps(prompt_or_messages, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _supports_recall_planning(llm_service) -> bool:
+        return bool(getattr(llm_service, "supports_recall_planning_phase", False))
+
+    @staticmethod
+    def _build_memory_recall_planner_messages(
+        *,
+        planning_context,
+    ) -> list[dict[str, str]]:
+        transcript_lines = [
+            f"{str(item.get('role', '')).strip()}: {str(item.get('content', '')).strip()}"
+            for item in planning_context.transcript_entries[-6:]
+            if str(item.get("content", "")).strip()
+        ]
+        transcript_block = "\n".join(transcript_lines) or "N/A"
+        summary = planning_context.recent_summary.strip() or "N/A"
+        project_name = planning_context.project.name if planning_context.project is not None else "N/A"
+        workspace_name = (
+            planning_context.workspace.name if planning_context.workspace is not None else "N/A"
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是 OctoAgent 的 Memory Recall Planner。"
+                    "你的唯一任务是判断：在正式回答前，是否值得先做一次 memory recall。"
+                    "只输出 JSON，不要输出解释性正文。\n"
+                    "JSON schema: "
+                    "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
+                    "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
+                    "\"allow_vault\":false,\"limit\":4}\n"
+                    "规则：\n"
+                    "- 如果当前问题明显依赖长期事实、约束、历史承诺、用户偏好、project continuity 或多轮上下文，再用 mode=recall。\n"
+                    "- 如果 recent summary / recent transcript 已足够，或当前问题与长期记忆无关，用 mode=skip。\n"
+                    "- query 要比原始用户问题更适合检索；focus_terms 只保留最关键的 1-5 个词。\n"
+                    "- allow_vault 默认 false；只有在确实需要敏感长期事实时才设 true。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "RecallPlanningContext:\n"
+                    f"request_kind: {planning_context.request.request_kind.value}\n"
+                    f"project: {project_name}\n"
+                    f"workspace: {workspace_name}\n"
+                    f"agent_profile_id: {planning_context.agent_profile.profile_id}\n"
+                    f"agent_runtime_role: {planning_context.agent_runtime.role.value}\n"
+                    f"query: {planning_context.query}\n"
+                    f"prefetch_mode: {planning_context.prefetch_mode}\n"
+                    f"memory_scope_ids: {', '.join(planning_context.memory_scope_ids) or 'N/A'}\n"
+                    f"recent_summary: {summary}\n"
+                    f"recent_transcript:\n{transcript_block}"
+                ),
+            },
+        ]
+
+    @staticmethod
+    def _parse_memory_recall_plan_response(content: str) -> RecallPlan | None:
+        candidates = [content.strip()]
+        fenced = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content, flags=re.IGNORECASE)
+        candidates.extend(item.strip() for item in fenced if item.strip())
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            try:
+                plan = RecallPlan.model_validate(payload)
+            except Exception:
+                continue
+            if plan.mode is RecallPlanMode.RECALL and not plan.query.strip():
+                return plan.model_copy(update={"mode": RecallPlanMode.SKIP})
+            return plan
+        return None
+
+    @staticmethod
+    def _parse_precomputed_recall_plan(
+        dispatch_metadata: dict[str, Any],
+    ) -> RecallPlan | None:
+        raw = dispatch_metadata.get("precomputed_recall_plan")
+        if isinstance(raw, RecallPlan):
+            plan = raw
+        elif isinstance(raw, dict):
+            try:
+                plan = RecallPlan.model_validate(raw)
+            except Exception:
+                return None
+        else:
+            return None
+        if plan.mode is RecallPlanMode.RECALL and not plan.query.strip():
+            return plan.model_copy(update={"mode": RecallPlanMode.SKIP})
+        metadata = dict(plan.metadata)
+        request_ref = str(dispatch_metadata.get("precomputed_recall_plan_request_artifact_ref", "")).strip()
+        response_ref = str(
+            dispatch_metadata.get("precomputed_recall_plan_response_artifact_ref", "")
+        ).strip()
+        plan_source = str(dispatch_metadata.get("precomputed_recall_plan_source", "")).strip()
+        return plan.model_copy(
+            update={
+                "metadata": {
+                    **metadata,
+                    "plan_source": plan_source or str(metadata.get("plan_source", "")).strip(),
+                    "request_artifact_ref": request_ref or str(
+                        metadata.get("request_artifact_ref", "")
+                    ).strip(),
+                    "response_artifact_ref": response_ref or str(
+                        metadata.get("response_artifact_ref", "")
+                    ).strip(),
+                }
+            }
+        )
+
+    @staticmethod
+    def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    async def _build_memory_recall_plan(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        model_alias: str | None,
+        llm_service,
+        compiled: CompiledTaskContext,
+        dispatch_metadata: dict[str, Any],
+        worker_capability: str | None,
+        tool_profile: str | None,
+        runtime_context: RuntimeControlContext | None,
+    ) -> RecallPlan | None:
+        precomputed_plan = self._parse_precomputed_recall_plan(dispatch_metadata)
+        if precomputed_plan is not None:
+            return precomputed_plan
+        if self._metadata_flag(dispatch_metadata, "single_loop_executor"):
+            return None
+        if not self._supports_recall_planning(llm_service):
+            return None
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            return None
+        planning_context = await self._agent_context.build_recall_planning_context(
+            task=task,
+            compiled=compiled,
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=worker_capability,
+            runtime_context=runtime_context,
+        )
+        if (
+            planning_context.prefetch_mode != "agent_led_hint_first"
+            or not planning_context.planner_enabled
+            or not planning_context.memory_scope_ids
+            or not planning_context.query.strip()
+        ):
+            return None
+        llm_result, request_artifact, response_artifact = await self.record_auxiliary_model_call(
+            task_id=task_id,
+            trace_id=trace_id,
+            llm_service=llm_service,
+            prompt_or_messages=self._build_memory_recall_planner_messages(
+                planning_context=planning_context
+            ),
+            request_summary=f"Memory recall plan: {planning_context.query[:80]}",
+            model_alias=model_alias or "main",
+            dispatch_metadata={
+                **dispatch_metadata,
+                "decision_phase": "memory_recall_planning",
+                "decision_task_id": task_id,
+            },
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
+            request_artifact_name="memory-recall-plan-request",
+            request_artifact_description="Memory recall planner 请求",
+            request_artifact_source="memory-recall-plan-request",
+            response_artifact_name="memory-recall-plan-response",
+            response_artifact_description="Memory recall planner 响应",
+            response_artifact_source="memory-recall-plan-response",
+        )
+        parsed = self._parse_memory_recall_plan_response(llm_result.content)
+        if parsed is None:
+            return RecallPlan(
+                mode=RecallPlanMode.SKIP,
+                rationale="memory_recall_plan_parse_failed",
+                metadata={
+                    "plan_source": "parse_failed",
+                    "request_artifact_ref": request_artifact.artifact_id,
+                    "response_artifact_ref": response_artifact.artifact_id,
+                },
+            )
+        return parsed.model_copy(
+            update={
+                "metadata": {
+                    **dict(parsed.metadata),
+                    "plan_source": "model",
+                    "request_artifact_ref": request_artifact.artifact_id,
+                    "response_artifact_ref": response_artifact.artifact_id,
+                }
+            }
+        )
+
     async def _build_task_context(
         self,
         *,
         task_id: str,
         fallback_user_text: str,
         llm_service,
+        trace_id: str,
+        model_alias: str | None,
         dispatch_metadata: dict[str, Any],
         worker_capability: str | None,
         tool_profile: str | None,
@@ -755,6 +1060,17 @@ class TaskService:
         task = await self._stores.task_store.get_task(task_id)
         if task is None:
             return compiled
+        recall_plan = await self._build_memory_recall_plan(
+            task_id=task_id,
+            trace_id=trace_id,
+            model_alias=model_alias,
+            llm_service=llm_service,
+            compiled=compiled,
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
+            runtime_context=resolved_runtime_context,
+        )
         try:
             return await self._agent_context.build_task_context(
                 task=task,
@@ -762,6 +1078,7 @@ class TaskService:
                 dispatch_metadata=dispatch_metadata,
                 worker_capability=worker_capability,
                 runtime_context=resolved_runtime_context,
+                recall_plan=recall_plan,
             )
         except Exception as exc:
             log.warning(
@@ -904,6 +1221,23 @@ class TaskService:
             worker_capability=worker_capability,
             compressed_turn_count=compiled.compressed_turn_count,
         )
+        if compiled.context_frame_id:
+            try:
+                await self._agent_context.record_compaction_context(
+                    task_id=task_id,
+                    context_frame_id=compiled.context_frame_id,
+                    summary_text=compiled.summary_text,
+                    summary_artifact_id=summary_artifact.artifact_id,
+                    compacted_messages=compiled.messages,
+                )
+            except Exception as exc:
+                log.warning(
+                    "agent_context_compaction_update_degraded",
+                    task_id=task_id,
+                    context_frame_id=compiled.context_frame_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
 
         event = await self._append_event_only_with_retry(
             task_id=task_id,
@@ -1244,6 +1578,31 @@ class TaskService:
     @staticmethod
     def _build_delayed_recall_plan(frame) -> dict[str, Any]:
         memory_recall = dict(frame.budget.get("memory_recall", {}))
+        prefetch_mode = str(memory_recall.get("prefetch_mode", "")).strip().lower()
+        if prefetch_mode == "agent_led_hint_first" and not bool(
+            memory_recall.get("agent_led_recall_executed", False)
+        ):
+            return {
+                "enabled": False,
+                "query": str(memory_recall.get("query", "")).strip(),
+                "scope_ids": [
+                    str(item).strip()
+                    for item in memory_recall.get(
+                        "scope_ids",
+                        frame.budget.get("memory_scope_ids", []),
+                    )
+                    if str(item).strip()
+                ],
+                "initial_hit_count": 0,
+                "delivered_hit_count": 0,
+                "degraded_reasons": [],
+                "schedule_reason": "",
+                "backend": str(memory_recall.get("backend", "")),
+                "backend_state": str(memory_recall.get("backend_state", "")).strip().lower(),
+                "pending_replay_count": int(
+                    memory_recall.get("pending_replay_count", 0) or 0
+                ),
+            }
         query = str(memory_recall.get("query", "")).strip()
         scope_ids = [
             str(item).strip()

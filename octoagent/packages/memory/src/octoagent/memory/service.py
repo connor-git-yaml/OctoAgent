@@ -45,6 +45,7 @@ from .models import (
     MemoryRecallRerankMode,
     MemoryRecallResult,
     MemorySearchHit,
+    MemorySearchOptions,
     MemorySyncBatch,
     ProposalNotValidatedError,
     ProposalValidation,
@@ -315,6 +316,7 @@ class MemoryService:
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]:
         """基础检索接口。"""
 
@@ -325,6 +327,7 @@ class MemoryService:
                 query=query,
                 policy=policy,
                 limit=limit,
+                search_options=search_options,
             )
             self._mark_backend_healthy()
             return hits
@@ -335,6 +338,7 @@ class MemoryService:
                 query=query,
                 policy=policy,
                 limit=limit,
+                search_options=search_options,
             )
 
         try:
@@ -354,6 +358,7 @@ class MemoryService:
                 query=query,
                 policy=policy,
                 limit=limit,
+                search_options=search_options,
             )
             self._mark_backend_healthy()
             return hits
@@ -481,43 +486,81 @@ class MemoryService:
         degraded_reasons = self._recall_degraded_reasons(backend_status)
         collected: list[tuple[int, int, int, MemorySearchHit]] = []
         seen: set[str] = set()
-
-        for scope_index, scope_id in enumerate(selected_scope_ids):
-            for query_index, search_query in enumerate(expanded_queries):
+        if self._should_use_backend_recall_contract(backend_status):
+            search_options = self._build_backend_recall_search_options(
+                expanded_queries=expanded_queries,
+                hook_options=normalized_hook_options,
+                hook_trace=hook_trace,
+            )
+            for scope_index, scope_id in enumerate(selected_scope_ids):
                 hits = await self.search_memory(
                     scope_id=scope_id,
-                    query=search_query,
+                    query=normalized_query,
                     policy=policy,
-                    limit=max(1, per_scope_limit),
+                    limit=max(1, max(max_hits, per_scope_limit)),
+                    search_options=search_options,
                 )
                 for ordinal, hit in enumerate(hits):
                     if hit.record_id in seen:
                         continue
                     seen.add(hit.record_id)
+                    resolved_search_query = str(hit.metadata.get("search_query", "")).strip()
                     collected.append(
                         (
                             scope_index,
-                            query_index,
+                            0,
                             ordinal,
                             hit.model_copy(
                                 update={
                                     "metadata": {
                                         **hit.metadata,
-                                        "search_query": search_query,
+                                        "search_query": resolved_search_query or normalized_query,
+                                        "backend_recall_contract": "memu_search_options_v1",
                                     }
                                 }
                             ),
                         )
                     )
+            hook_trace.candidate_count = len(collected)
+            hook_trace.delivered_count = min(len(collected), max(1, max_hits))
+            selected_candidates = collected[: max(1, max_hits)]
+        else:
+            for scope_index, scope_id in enumerate(selected_scope_ids):
+                for query_index, search_query in enumerate(expanded_queries):
+                    hits = await self.search_memory(
+                        scope_id=scope_id,
+                        query=search_query,
+                        policy=policy,
+                        limit=max(1, per_scope_limit),
+                    )
+                    for ordinal, hit in enumerate(hits):
+                        if hit.record_id in seen:
+                            continue
+                        seen.add(hit.record_id)
+                        collected.append(
+                            (
+                                scope_index,
+                                query_index,
+                                ordinal,
+                                hit.model_copy(
+                                    update={
+                                        "metadata": {
+                                            **hit.metadata,
+                                            "search_query": search_query,
+                                        }
+                                    }
+                                ),
+                            )
+                        )
 
-        collected.sort(key=self._recall_sort_key)
-        selected_candidates, hook_trace = self._apply_recall_hooks(
-            collected=collected,
-            query=normalized_query,
-            max_hits=max_hits,
-            hook_options=normalized_hook_options,
-            degraded_reasons=degraded_reasons,
-        )
+            collected.sort(key=self._recall_sort_key)
+            selected_candidates, hook_trace = self._apply_recall_hooks(
+                collected=collected,
+                query=normalized_query,
+                max_hits=max_hits,
+                hook_options=normalized_hook_options,
+                degraded_reasons=degraded_reasons,
+            )
         selected = [item[-1] for item in selected_candidates]
         recall_hits: list[MemoryRecallHit] = []
         for hit in selected:
@@ -531,6 +574,28 @@ class MemoryService:
             backend_status=backend_status,
             degraded_reasons=degraded_reasons,
             hook_trace=hook_trace,
+        )
+
+    def _should_use_backend_recall_contract(
+        self,
+        backend_status: MemoryBackendStatus,
+    ) -> bool:
+        return self._backend.backend_id == "memu" and backend_status.active_backend == "memu"
+
+    @staticmethod
+    def _build_backend_recall_search_options(
+        *,
+        expanded_queries: list[str],
+        hook_options: MemoryRecallHookOptions,
+        hook_trace: MemoryRecallHookTrace,
+    ) -> MemorySearchOptions:
+        return MemorySearchOptions(
+            expanded_queries=list(expanded_queries),
+            focus_terms=list(hook_trace.focus_terms),
+            subject_hint=hook_trace.subject_hint,
+            post_filter_mode=hook_options.post_filter_mode,
+            rerank_mode=hook_options.rerank_mode,
+            min_keyword_overlap=hook_options.min_keyword_overlap,
         )
 
     async def list_derived_memory(
@@ -1496,12 +1561,14 @@ class MemoryService:
         query: str | None,
         policy: MemoryAccessPolicy,
         limit: int,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]:
         return await self._fallback_backend.search(
             scope_id,
             query=query,
             policy=policy,
             limit=limit,
+            search_options=search_options,
         )
 
     async def _build_recall_hit(

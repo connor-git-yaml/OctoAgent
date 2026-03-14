@@ -17,6 +17,8 @@ from typing import Any
 
 from octoagent.core.config import get_artifacts_dir, get_db_path
 from octoagent.core.models import (
+    AgentSession,
+    AgentSessionTurn,
     Artifact,
     BackupBundle,
     BackupFileEntry,
@@ -34,6 +36,7 @@ from octoagent.core.models import (
     RestoreConflictType,
     RestorePlan,
     SensitivityLevel,
+    SessionContextState,
     Task,
 )
 from octoagent.core.store import StoreGroup, create_store_group
@@ -220,6 +223,20 @@ class BackupService:
             task_refs: list[ExportTaskRef] = []
             event_count = 0
             artifact_refs: list[str] = []
+            session_contexts = await store_group.agent_context_store.list_session_contexts()
+            relevant_session_contexts = self._select_export_session_contexts(
+                session_contexts=session_contexts,
+                selected_tasks=selected,
+            )
+            relevant_agent_sessions = await self._load_export_agent_sessions(
+                store_group=store_group,
+                session_contexts=relevant_session_contexts,
+                selected_tasks=selected,
+            )
+            relevant_agent_session_turns = await self._load_export_agent_session_turns(
+                store_group=store_group,
+                agent_sessions=relevant_agent_sessions,
+            )
 
             for task in selected:
                 events = await store_group.event_store.get_events_for_task(task.task_id)
@@ -273,6 +290,18 @@ class BackupService:
                 "manifest": manifest.model_dump(mode="json"),
                 "events_by_task": events_by_task,
                 "artifacts_by_task": artifacts_by_task,
+                "session_contexts": {
+                    item.session_id: self._serialize_session_context(item)
+                    for item in relevant_session_contexts
+                },
+                "agent_sessions": {
+                    item.agent_session_id: self._serialize_agent_session(item)
+                    for item in relevant_agent_sessions
+                },
+                "agent_session_turns": {
+                    item.agent_session_turn_id: self._serialize_agent_session_turn(item)
+                    for item in relevant_agent_session_turns
+                },
             }
             await asyncio.to_thread(self._write_json_atomic, output_path, payload)
             return manifest
@@ -715,6 +744,127 @@ class BackupService:
             "name": artifact.name,
             "size": artifact.size,
             "storage_ref": artifact.storage_ref,
+        }
+
+    def _select_export_session_contexts(
+        self,
+        *,
+        session_contexts: list[SessionContextState],
+        selected_tasks: list[Task],
+    ) -> list[SessionContextState]:
+        selected_task_ids = {task.task_id for task in selected_tasks if task.task_id}
+        selected_thread_ids = {task.thread_id for task in selected_tasks if task.thread_id}
+        matched: list[SessionContextState] = []
+        for item in session_contexts:
+            if item.session_id in selected_thread_ids or item.thread_id in selected_thread_ids:
+                matched.append(item)
+                continue
+            if selected_task_ids.intersection(item.task_ids):
+                matched.append(item)
+        return matched
+
+    async def _load_export_agent_sessions(
+        self,
+        *,
+        store_group: StoreGroup,
+        session_contexts: list[SessionContextState],
+        selected_tasks: list[Task],
+    ) -> list[AgentSession]:
+        if not session_contexts and not selected_tasks:
+            return []
+        selected_thread_ids = {task.thread_id for task in selected_tasks if task.thread_id}
+        selected_session_ids = {item.session_id for item in session_contexts if item.session_id}
+        selected_agent_session_ids = {
+            item.agent_session_id for item in session_contexts if item.agent_session_id
+        }
+        agent_sessions = await store_group.agent_context_store.list_agent_sessions(limit=500)
+        return [
+            item
+            for item in agent_sessions
+            if item.agent_session_id in selected_agent_session_ids
+            or item.thread_id in selected_thread_ids
+            or item.legacy_session_id in selected_session_ids
+        ]
+
+    async def _load_export_agent_session_turns(
+        self,
+        *,
+        store_group: StoreGroup,
+        agent_sessions: list[AgentSession],
+    ) -> list[AgentSessionTurn]:
+        turns: list[AgentSessionTurn] = []
+        for item in agent_sessions:
+            turns.extend(
+                await store_group.agent_context_store.list_agent_session_turns(
+                    agent_session_id=item.agent_session_id,
+                    limit=500,
+                )
+            )
+        return turns
+
+    def _serialize_session_context(self, session: SessionContextState) -> dict[str, Any]:
+        return {
+            "session_id": session.session_id,
+            "thread_id": session.thread_id,
+            "agent_runtime_id": session.agent_runtime_id,
+            "agent_session_id": session.agent_session_id,
+            "project_id": session.project_id,
+            "workspace_id": session.workspace_id,
+            "task_ids": list(session.task_ids),
+            "recent_turn_refs": list(session.recent_turn_refs),
+            "recent_artifact_refs": list(session.recent_artifact_refs),
+            "rolling_summary": session.rolling_summary,
+            "summary_artifact_id": session.summary_artifact_id,
+            "last_context_frame_id": session.last_context_frame_id,
+            "last_recall_frame_id": session.last_recall_frame_id,
+            "updated_at": session.updated_at.isoformat(),
+        }
+
+    def _serialize_agent_session(self, session: AgentSession) -> dict[str, Any]:
+        metadata = dict(session.metadata)
+        return {
+            "agent_session_id": session.agent_session_id,
+            "agent_runtime_id": session.agent_runtime_id,
+            "kind": session.kind.value,
+            "status": session.status.value,
+            "project_id": session.project_id,
+            "workspace_id": session.workspace_id,
+            "thread_id": session.thread_id,
+            "legacy_session_id": session.legacy_session_id,
+            "work_id": session.work_id,
+            "last_context_frame_id": session.last_context_frame_id,
+            "last_recall_frame_id": session.last_recall_frame_id,
+            "recent_transcript": session.recent_transcript or metadata.get("recent_transcript", []),
+            "rolling_summary": session.rolling_summary,
+            "latest_model_reply_summary": str(
+                metadata.get("latest_model_reply_summary", "")
+            ).strip(),
+            "latest_model_reply_preview": str(
+                metadata.get("latest_model_reply_preview", "")
+            ).strip(),
+            "latest_compaction_summary": str(
+                metadata.get("latest_compaction_summary", "")
+            ).strip(),
+            "latest_compaction_summary_artifact_id": str(
+                metadata.get("latest_compaction_summary_artifact_id", "")
+            ).strip(),
+            "updated_at": session.updated_at.isoformat(),
+        }
+
+    def _serialize_agent_session_turn(self, turn: AgentSessionTurn) -> dict[str, Any]:
+        return {
+            "agent_session_turn_id": turn.agent_session_turn_id,
+            "agent_session_id": turn.agent_session_id,
+            "task_id": turn.task_id,
+            "turn_seq": turn.turn_seq,
+            "kind": turn.kind.value,
+            "role": turn.role,
+            "tool_name": turn.tool_name,
+            "artifact_ref": turn.artifact_ref,
+            "summary": turn.summary,
+            "dedupe_key": turn.dedupe_key,
+            "metadata": dict(turn.metadata),
+            "created_at": turn.created_at.isoformat(),
         }
 
     def _write_json_atomic(self, path: Path, payload: dict[str, Any]) -> None:

@@ -335,6 +335,36 @@ class TestContextCompaction:
             cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_fragments")
             fragment_count = (await cursor.fetchone())[0]
             assert fragment_count >= 1
+
+            session_state = await store_group.agent_context_store.get_session_context(
+                latest_frame.session_id
+            )
+            assert session_state is not None
+            assert session_state.summary_artifact_id == payload["summary_artifact_ref"]
+            assert session_state.rolling_summary.startswith("压缩摘要：")
+
+            agent_session = await store_group.agent_context_store.get_agent_session(
+                latest_frame.agent_session_id
+            )
+            assert agent_session is not None
+            assert agent_session.rolling_summary.startswith("压缩摘要：")
+            assert session_state.rolling_summary.startswith(
+                agent_session.metadata["latest_compaction_summary"]
+            )
+            assert (
+                agent_session.metadata["latest_compaction_summary_artifact_id"]
+                == payload["summary_artifact_ref"]
+            )
+            recent_transcript = agent_session.recent_transcript
+            assert recent_transcript[-2]["role"] == "user"
+            assert recent_transcript[-1]["role"] == "assistant"
+            assert recent_transcript[-2]["content"].startswith("第三轮用户消息。")
+            assert recent_transcript[-1]["content"] == "assistant-response-3"
+            recent_transcript = agent_session.metadata["recent_transcript"]
+            assert recent_transcript[-2]["role"] == "user"
+            assert recent_transcript[-1]["role"] == "assistant"
+            assert recent_transcript[-2]["content"].startswith("第三轮用户消息。")
+            assert recent_transcript[-1]["content"] == "assistant-response-3"
         finally:
             await _close_store_group(store_group)
 

@@ -59,6 +59,7 @@ from .routes import (
     telegram,
     watchdog,
 )
+from .services.agent_session_turn_hook import AgentSessionTurnHook
 from .services.automation_scheduler import AutomationSchedulerService
 from .services.capability_pack import CapabilityPackService
 from .services.control_plane import ControlPlaneService
@@ -443,6 +444,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ),
             tool_broker=tool_broker,
             event_store=store_group.event_store,
+            hooks=[AgentSessionTurnHook(store_group)],
         )
         app.state.llm_service = LLMService(
             fallback_manager=fallback_manager,

@@ -11,6 +11,12 @@ from pathlib import Path
 import pytest
 from octoagent.core.models import (
     ActorType,
+    AgentRuntime,
+    AgentRuntimeRole,
+    AgentSession,
+    AgentSessionKind,
+    AgentSessionTurn,
+    AgentSessionTurnKind,
     Artifact,
     ArtifactPart,
     Event,
@@ -18,6 +24,7 @@ from octoagent.core.models import (
     EventType,
     PartType,
     RequesterInfo,
+    SessionContextState,
     Task,
     TaskCreatedPayload,
     UserMessagePayload,
@@ -305,6 +312,98 @@ async def _seed_ops_chat_import_task(project_root: Path) -> str:
     return task_id
 
 
+async def _seed_session_continuity(project_root: Path) -> None:
+    store_group = await create_store_group(
+        str(project_root / "data" / "sqlite" / "octoagent.db"),
+        project_root / "data" / "artifacts",
+    )
+    now = datetime.now(tz=UTC)
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id="runtime-001",
+            role=AgentRuntimeRole.BUTLER,
+            name="Backup Export Butler",
+            persona_summary="负责 continuity export 测试。",
+            updated_at=now,
+        )
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id="thread-1",
+            thread_id="thread-1",
+            agent_runtime_id="runtime-001",
+            agent_session_id="agent-session-001",
+            task_ids=["task-022-001"],
+            recent_turn_refs=["task-022-001"],
+            recent_artifact_refs=["artifact-001"],
+            rolling_summary="用户正在继续推进 backup export 的 continuity 收口。",
+            summary_artifact_id="artifact-summary-001",
+            last_context_frame_id="context-frame-001",
+            last_recall_frame_id="recall-frame-001",
+            updated_at=now,
+        )
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id="agent-session-001",
+            agent_runtime_id="runtime-001",
+            kind=AgentSessionKind.BUTLER_MAIN,
+            thread_id="thread-1",
+            legacy_session_id="thread-1",
+            last_context_frame_id="context-frame-001",
+            last_recall_frame_id="recall-frame-001",
+            recent_transcript=[
+                {
+                    "role": "user",
+                    "content": "请把导出链路也收口到 session-native。",
+                    "task_id": "task-022-001",
+                },
+                {
+                    "role": "assistant",
+                    "content": "已开始把 continuity 信息带入导出结果。",
+                    "task_id": "task-022-001",
+                },
+            ],
+            rolling_summary="历史对话已压缩为 session summary。",
+            metadata={
+                "recent_transcript": [
+                    {
+                        "role": "user",
+                        "content": "请把导出链路也收口到 session-native。",
+                        "task_id": "task-022-001",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "已开始把 continuity 信息带入导出结果。",
+                        "task_id": "task-022-001",
+                    },
+                ],
+                "latest_model_reply_summary": "已开始把 continuity 信息带入导出结果。",
+                "latest_model_reply_preview": "已开始把 continuity 信息带入导出结果。",
+                "latest_compaction_summary": "历史对话已压缩为 session summary。",
+                "latest_compaction_summary_artifact_id": "artifact-summary-001",
+            },
+            updated_at=now,
+        )
+    )
+    await store_group.agent_context_store.save_agent_session_turn(
+        AgentSessionTurn(
+            agent_session_turn_id="agent-session-turn-001",
+            agent_session_id="agent-session-001",
+            task_id="task-022-001",
+            turn_seq=1,
+            kind=AgentSessionTurnKind.TOOL_RESULT,
+            role="tool",
+            tool_name="memory.search",
+            summary="memory.search 返回了 continuity 命中。",
+            metadata={"source": "backup-seed"},
+            created_at=now,
+        )
+    )
+    await store_group.conn.commit()
+    await store_group.conn.close()
+
+
 @pytest.mark.asyncio
 async def test_create_bundle_excludes_plaintext_secrets_and_updates_state(tmp_path: Path) -> None:
     await _seed_project(tmp_path)
@@ -441,6 +540,37 @@ async def test_export_chats_outputs_manifest_and_payload_file(tmp_path: Path) ->
     payload = json.loads(Path(manifest.output_path).read_text(encoding="utf-8"))
     assert payload["manifest"]["export_id"] == manifest.export_id
     assert task_id in payload["events_by_task"]
+
+
+@pytest.mark.asyncio
+async def test_export_chats_includes_session_continuity_payload(tmp_path: Path) -> None:
+    await _seed_project(tmp_path)
+    await _seed_session_continuity(tmp_path)
+    service = BackupService(tmp_path)
+
+    manifest = await service.export_chats(thread_id="thread-1")
+
+    payload = json.loads(Path(manifest.output_path).read_text(encoding="utf-8"))
+    assert payload["session_contexts"]["thread-1"]["rolling_summary"].startswith(
+        "用户正在继续推进 backup export"
+    )
+    assert payload["session_contexts"]["thread-1"]["task_ids"] == ["task-022-001"]
+    assert (
+        payload["agent_sessions"]["agent-session-001"]["recent_transcript"][-1]["content"]
+        == "已开始把 continuity 信息带入导出结果。"
+    )
+    assert (
+        payload["agent_sessions"]["agent-session-001"]["rolling_summary"]
+        == "历史对话已压缩为 session summary。"
+    )
+    assert (
+        payload["agent_sessions"]["agent-session-001"]["latest_compaction_summary"]
+        == "历史对话已压缩为 session summary。"
+    )
+    assert (
+        payload["agent_session_turns"]["agent-session-turn-001"]["tool_name"]
+        == "memory.search"
+    )
 
 
 @pytest.mark.asyncio

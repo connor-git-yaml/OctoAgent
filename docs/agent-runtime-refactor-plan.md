@@ -139,12 +139,14 @@
 | `038` | `MemoryNamespace / RecallFrame / Worker recall parity` |
 | `039` | `A2AConversation / A2AMessage / WorkerSession / Butler-owned delegation chain` |
 | `041` | freshness / latest / website query 的 Butler-owned end-to-end 主链 |
+| `049` | `BehaviorWorkspace / RuntimeHintBundle / ButlerDecision` 行为文件化与 agentic decision contract |
+| `051` | `session-native transcript / ToolUniverseHints / agent-led recall / behavior budget` 深层运行时收口 |
 | `035 / 040` | UI 与 acceptance 收口，不负责替代运行语义 |
 
 结论：
 
 - 不另起平行 runtime feature 树
-- 继续用 `033 / 038 / 039 / 041` 承接核心重构
+- 继续用 `033 / 038 / 039 / 041 / 049 / 051` 承接核心重构
 - 但执行上按“波次”推进，而不是按历史 feature 完成口径推进
 
 ### 5.2 迁移原则

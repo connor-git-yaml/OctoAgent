@@ -168,6 +168,10 @@ class LLMService:
     向后兼容: 无参构造时自动创建 Echo 模式的 FallbackManager + AliasRegistry。
     """
 
+    supports_butler_decision_phase = True
+    supports_recall_planning_phase = True
+    supports_single_loop_executor = True
+
     def __init__(
         self,
         fallback_manager: FallbackManager | None = None,
@@ -288,19 +292,26 @@ class LLMService:
             profile = ToolProfile.STANDARD
 
         worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
+        single_loop_executor = self._metadata_flag(metadata, "single_loop_executor")
         manifest = SkillManifest(
             skill_id=f"chat.{worker_type}.inline",
             input_model=_GenericSkillInput,
             output_model=_GenericSkillOutput,
             model_alias=model_alias,
-            description=self._build_skill_description(worker_type, selected_tools),
+            description=self._build_skill_description(
+                worker_type,
+                selected_tools,
+                single_loop_executor=single_loop_executor,
+            ),
             tools_allowed=selected_tools,
             tool_profile=profile,
         )
         execution_context = SkillExecutionContext(
             task_id=task_id,
             trace_id=trace_id,
-            caller=f"worker:{worker_type}",
+            caller=(
+                f"butler:{worker_type}" if single_loop_executor else f"worker:{worker_type}"
+            ),
             agent_runtime_id=str(metadata.get("agent_runtime_id", "")).strip(),
             agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
             work_id=str(metadata.get("work_id", "")).strip(),
@@ -409,8 +420,22 @@ class LLMService:
         return "general"
 
     @staticmethod
-    def _build_skill_description(worker_type: str, selected_tools: list[str]) -> str:
+    def _build_skill_description(
+        worker_type: str,
+        selected_tools: list[str],
+        *,
+        single_loop_executor: bool = False,
+    ) -> str:
         tool_list = ", ".join(selected_tools)
+        if single_loop_executor:
+            return (
+                "你是 OctoAgent 的主 Butler。"
+                f" 当前回合直接挂载以下受治理工具：{tool_list}。"
+                " 你需要在同一轮主执行链里自己决定是否调用工具、如何收集证据、以及何时直接回答。"
+                " 不要先输出一段“计划说明”再等待下轮；"
+                " 需要工具时直接调用，证据足够后直接给出最终答复。"
+                " 如果上下文里已经提供 recent summary / session replay / memory hints，先利用这些事实，再决定是否继续查。"
+            )
         return (
             f"你是 OctoAgent 的 {worker_type} worker。"
             f" 当前会话已经接入以下工具：{tool_list}。"
@@ -420,3 +445,10 @@ class LLMService:
             "不要把“我先查一下”“我再看看”“接下来我会”这类计划句当成最终答复。"
             " 完成后用自然语言给出最终答复。"
         )
+
+    @staticmethod
+    def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}

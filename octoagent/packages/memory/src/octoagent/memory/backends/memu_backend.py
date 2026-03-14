@@ -19,6 +19,7 @@ from ..models import (
     MemoryMaintenanceCommand,
     MemoryMaintenanceRun,
     MemorySearchHit,
+    MemorySearchOptions,
     MemorySyncBatch,
     MemorySyncResult,
     SorRecord,
@@ -44,6 +45,7 @@ class MemUBridge(Protocol):
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]: ...
 
     async def sync_batch(self, batch: MemorySyncBatch) -> MemorySyncResult: ...
@@ -94,12 +96,14 @@ class MemUBackend(MemoryBackend):
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
     ) -> list[MemorySearchHit]:
         return await self._bridge.search(
             scope_id,
             query=query,
             policy=policy,
             limit=limit,
+            search_options=search_options,
         )
 
     async def sync_batch(self, batch: MemorySyncBatch) -> MemorySyncResult:

@@ -1,41 +1,54 @@
 # Tasks - Feature 049
 
-## T001 - 设计 Butler behavior pack
+## T001 - 收口核心 behavior files
 
-- 状态：已完成（已落地 7 个核心 markdown behavior file 的默认模板、layer 装配与 worker slice）
-- 确定 7 个核心 markdown 文件及职责
-- 确定 project / profile 绑定与缺失回退规则
-- 明确哪些文件属于私有、哪些可转交 Worker
+- 状态：已完成
+- 定义 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md` 的 schema、可见性和 fallback
+- 定义 `SOUL.md / IDENTITY.md / HEARTBEAT.md` 的高级扩展策略
+- 明确 `MEMORY.md` 不属于默认行为配置主路径
 
-## T002 - 设计 clarification-first 决策框架
+## T002 - 设计 RuntimeHintBundle
 
-- 状态：已完成（已落地通用 `ClarificationDecision`，覆盖排期 / 推荐 / 比较 / 天气缺位置）
-- 识别 under-specified 请求分类
-- 定义 `direct / clarify / fallback / delegate-after-clarify` 判定
-- 定义最大追问轮数和 fallback 规则
+- 状态：已完成
+- 定义当前时间、tool availability、recent confirmed facts、user defaults、surface 等 hints
+- 明确 hints provenance 与审计要求
 
-## T003 - 设计 runtime 装配链
+## T003 - 设计 ButlerDecision contract
 
-- 状态：已完成（已接入 Butler runtime system blocks、control snapshot 与 worker shareable slice 摘要）
-- 将 behavior pack 拆为 role / communication / solving / tool-boundary / memory-policy 逻辑层
-- 定义 Butler runtime 的 effective behavior source
-- 定义 Worker inheritance 的 behavior slice envelope
+- 状态：已完成
+- 定义 `direct_answer / ask_once / delegate_research / delegate_ops / best_effort_answer`
+- 明确 assumptions、missing_inputs、boundary_note、tool_intent 字段
+- 确定 deterministic guardrails 与 agentic decision 的边界
 
-## T004 - 设计 behavior pack 更新治理
+## T004 - 设计 WorkerContextCapsule
 
-- 状态：进行中（本轮仅补齐 `BehaviorPatchProposal` 模型，review/apply runtime 还未接通）
-- 定义 BehaviorPatchProposal 结构
-- 明确提案、review、apply、audit 链路
-- 区分可自动提案与默认需审批的文件类别
+- 状态：已完成
+- 明确 Worker 默认可见的文件集合
+- 明确 `USER.md` 到 Worker hint 的筛选规则
+- 对齐 A2A payload / work metadata / runtime truth
 
-## T005 - 定义 acceptance matrix
+## T005 - 设计 Web / CLI 产品面
 
-- 状态：已完成（已新增 behavior/orchestrator 定向回归，覆盖缺信息先补问与 weather follow-up）
-- 覆盖任务排期、推荐、比较、实时查询缺位置、预算缺失等 under-specified 请求
-- 验证“先补问再答”与“fallback 明示边界”
+- 状态：已完成（当前阶段）
+- 已提供 `Settings -> Behavior Files` 只读 operator 视图
+- 已提供 `octo behavior ls/show/init`
+- 更完整的 edit/diff/review/apply 留作后续增强，不阻塞本轮 049 收口
 
-## T006 - 文档与 blueprint/split 对齐
+## T006 - 兼容迁移方案
 
-- 状态：待实现
-- 更新 milestone split 或相关 backlog 说明
-- 确保 049 与 041/042 边界清楚，不回退成 case-by-case patch
+- 状态：已完成
+- 已实现从默认模板 / system / project filesystem 的 effective source chain
+- 旧天气/location/clarify 规则已降级为 compatibility fallback，并带 provenance
+
+## T007 - 验收矩阵与回归
+
+- 状态：已完成
+- 覆盖天气、推荐、排期、比较、显式 WebSearch 指令
+- 覆盖有默认值、会话确认事实、无关键线索、tool 不可用等上下文
+
+## T008 - 文档同步
+
+- 状态：已完成
+- 更新 `docs/blueprint.md`
+- 更新 `docs/m4-feature-split.md`
+- 如实现范围确认后，再决定是否回写 README / 产品文档

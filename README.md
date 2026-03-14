@@ -25,7 +25,7 @@ OctoAgent is built to close that gap.
 ## What The Product Feels Like
 
 - **One Butler, multiple Workers**
-  You talk to the Butler. The Butler decides when to delegate to Research or other Workers and remains responsible for the final answer.
+  You talk to the Butler. The Butler can directly use mounted governed tools for bounded tasks, delegates to Research or other Workers when specialization or parallelism helps, and remains responsible for the final answer.
 
 - **Durable by default**
   Tasks, events, artifacts, A2A conversations, and runtime state are persisted instead of living only inside a prompt window.
@@ -40,7 +40,8 @@ OctoAgent is built to close that gap.
 
 - Run a local AI workspace through Web, with optional Telegram as a second surface.
 - Bootstrap real providers through `octo setup`.
-- Route freshness and research questions through `Butler -> Research Worker -> Butler`.
+- Handle freshness and research questions through the Butler decision runtime, with many cases flowing through `Butler -> Research Worker -> Butler` and bounded checks handled directly by Butler with governed tools.
+- Start a fresh Web conversation explicitly instead of silently restoring the previous task/session chain.
 - Inspect runtime truth such as sessions, A2A conversations, memory surfaces, and task status.
 - Operate the system with `octo-start`, `octo-doctor`, `octo restart`, and the Control Plane.
 
@@ -104,6 +105,16 @@ octo config memory memu-http --bridge-url "https://memory.example.com"
 ```
 
 The Web `Settings > Memory` screen uses the same three modes: local memory, MemU via local command, and MemU via HTTP bridge.
+
+Behavior files are also explicit now. The Butler default behavior is driven by
+`AGENTS.md / USER.md / PROJECT.md / TOOLS.md`, with the Web `Settings > Behavior Files`
+screen showing the current effective source chain. The canonical local management path is:
+
+```bash
+octo behavior ls
+octo behavior show AGENTS
+octo behavior init
+```
 
 To update a managed local install later:
 

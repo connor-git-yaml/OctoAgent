@@ -68,6 +68,34 @@ export default function SettingsPage() {
   const selector = snapshot!.resources.project_selector;
   const memory = snapshot!.resources.memory;
   const setup = snapshot!.resources.setup_governance;
+  const behaviorSystem =
+    (snapshot as {
+      resources?: {
+        agent_profiles?: {
+          profiles?: Array<{
+            behavior_system?: {
+              source_chain?: string[];
+              decision_modes?: string[];
+              runtime_hint_fields?: string[];
+              files?: Array<{
+                file_id: string;
+                title: string;
+                layer: string;
+                visibility: string;
+                share_with_workers: boolean;
+                source_kind: string;
+                path_hint: string;
+                is_advanced?: boolean;
+              }>;
+              worker_slice?: {
+                shared_file_ids?: string[];
+                layers?: string[];
+              };
+            };
+          }>;
+        };
+      };
+    })?.resources?.agent_profiles?.profiles?.[0]?.behavior_system ?? null;
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
   );
@@ -329,6 +357,26 @@ export default function SettingsPage() {
   const visibleMemoryAdvancedHints = usingHttpTransport ? memoryAdvancedHints : [];
   const memoryLabel = resolveMemoryLabel(memoryMode, memoryTransport);
   const memorySummaryLabel = resolveMemorySummary(memoryMode, memoryTransport);
+  const behaviorCliSnippets = [
+    {
+      key: "list",
+      title: "列出有效文件",
+      summary: "查看当前 project 下生效的 behavior files 和来源链。",
+      command: "octo behavior ls",
+    },
+    {
+      key: "show-agents",
+      title: "查看 AGENTS.md",
+      summary: "确认 Butler / Worker 当前共享的总约束。",
+      command: "octo behavior show AGENTS",
+    },
+    {
+      key: "init",
+      title: "初始化默认文件",
+      summary: "为当前作用域生成核心文件模板。",
+      command: "octo behavior init",
+    },
+  ];
   const memoryBridgeUrl = String(
     fieldState["memory.bridge_url"] ??
       getValueAtPath(config.current_value, "memory.bridge_url") ??
@@ -701,6 +749,86 @@ export default function SettingsPage() {
           </>
         ) : null}
       </section>
+
+      {behaviorSystem ? (
+        <section id="settings-group-behavior" className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">Behavior Files</p>
+              <h3>Butler 默认行为现在来自显式文件与运行时 hints</h3>
+            </div>
+          </div>
+
+          <div className="wb-card-grid wb-card-grid-4">
+            <article className="wb-card">
+              <p className="wb-card-label">生效来源</p>
+              <strong>{behaviorSystem.source_chain?.[0] ?? "N/A"}</strong>
+              <span>{behaviorSystem.source_chain?.length ?? 0} 条 source chain</span>
+            </article>
+            <article className="wb-card">
+              <p className="wb-card-label">核心文件</p>
+              <strong>{behaviorSystem.files?.length ?? 0}</strong>
+              <span>默认包含 AGENTS / USER / PROJECT / TOOLS</span>
+            </article>
+            <article className="wb-card">
+              <p className="wb-card-label">决策模式</p>
+              <strong>{behaviorSystem.decision_modes?.length ?? 0}</strong>
+              <span>{behaviorSystem.decision_modes?.join(" / ") ?? "N/A"}</span>
+            </article>
+            <article className="wb-card">
+              <p className="wb-card-label">Worker 继承</p>
+              <strong>{behaviorSystem.worker_slice?.shared_file_ids?.length ?? 0}</strong>
+              <span>{behaviorSystem.worker_slice?.shared_file_ids?.join(" / ") ?? "N/A"}</span>
+            </article>
+          </div>
+
+          <div className="wb-inline-banner is-muted">
+            <strong>当前页面先提供只读 operator 视图</strong>
+            <span>
+              你可以先在这里确认 effective source、共享范围和决策 contract；文件编辑当前仍建议走
+              CLI，避免 Web 和本地文件系统各维护一套真相。
+            </span>
+          </div>
+
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">当前文件</p>
+              <h3>核心文件、可见性与来源链</h3>
+            </div>
+          </div>
+          <div className="wb-settings-cli-grid">
+            {(behaviorSystem.files ?? []).map((file) => (
+              <article key={file.file_id} className="wb-note wb-cli-snippet">
+                <strong>{file.file_id}</strong>
+                <span>
+                  {file.title || file.layer} · {file.visibility} · {file.source_kind}
+                </span>
+                <pre className="wb-cli-snippet-code">
+                  {file.path_hint}
+                  {"\n"}
+                  share_with_workers={file.share_with_workers ? "true" : "false"}
+                </pre>
+              </article>
+            ))}
+          </div>
+
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">命令行</p>
+              <h3>当前可用的行为文件管理入口</h3>
+            </div>
+          </div>
+          <div className="wb-settings-cli-grid">
+            {behaviorCliSnippets.map((snippet) => (
+              <article key={snippet.key} className="wb-note wb-cli-snippet">
+                <strong>{snippet.title}</strong>
+                <span>{snippet.summary}</span>
+                <pre className="wb-cli-snippet-code">{snippet.command}</pre>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {otherGroupIds.map((groupId) => {
         const hints = (groupedHints[groupId] ?? []).filter(

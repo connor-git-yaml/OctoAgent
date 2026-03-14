@@ -23,7 +23,9 @@ from octoagent.core.models import (
     AgentProfileScope,
     AgentProfilesDocument,
     AgentRuntimeItem,
+    AgentSession,
     AgentSessionContinuityItem,
+    AgentSessionStatus,
     AutomationJob,
     AutomationJobDocument,
     AutomationJobItem,
@@ -661,10 +663,16 @@ class ControlPlaneService:
         return SessionProjectionDocument(
             focused_session_id=focused_session_id,
             focused_thread_id=focused_thread_id,
+            new_conversation_token=state.new_conversation_token,
             sessions=session_items,
             operator_summary=operator_summary,
             operator_items=operator_items,
             capabilities=[
+                ControlPlaneCapability(
+                    capability_id="session.new",
+                    label="新对话",
+                    action_id="session.new",
+                ),
                 ControlPlaneCapability(
                     capability_id="session.focus",
                     label="聚焦会话",
@@ -776,6 +784,8 @@ class ControlPlaneService:
     ) -> tuple[str, str]:
         if not session_items:
             return "", ""
+        if state.new_conversation_token.strip():
+            return "", ""
 
         focused_session_id = state.focused_session_id.strip()
         if focused_session_id:
@@ -848,6 +858,8 @@ class ControlPlaneService:
                 behavior_system=build_behavior_system_summary(
                     agent_profile=profile,
                     project_name=selected_project.name if selected_project is not None else "",
+                    project_slug=selected_project.slug if selected_project is not None else "",
+                    project_root=self._project_root,
                 ),
                 metadata=dict(profile.metadata),
                 updated_at=profile.updated_at,
@@ -3121,6 +3133,10 @@ class ControlPlaneService:
             )
         if action_id == "session.focus":
             return await self._handle_session_focus(request)
+        if action_id == "session.new":
+            return await self._handle_session_new(request)
+        if action_id == "session.reset":
+            return await self._handle_session_reset(request)
         if action_id == "session.export":
             return await self._handle_session_export(request)
         if action_id == "session.interrupt":
@@ -4356,6 +4372,7 @@ class ControlPlaneService:
             update={
                 "focused_session_id": session.session_id,
                 "focused_thread_id": session.thread_id,
+                "new_conversation_token": "",
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -4372,6 +4389,151 @@ class ControlPlaneService:
             target_refs=[
                 ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
                 ControlPlaneTargetRef(target_type="thread", target_id=session.thread_id),
+            ],
+        )
+
+    async def _handle_session_new(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        target = await self._resolve_session_projection_target(
+            request,
+            allow_empty=True,
+            use_focused_when_empty=True,
+        )
+        token = str(ULID())
+        state = self._state_store.load().model_copy(
+            update={
+                "focused_session_id": "",
+                "focused_thread_id": "",
+                "new_conversation_token": token,
+                "updated_at": datetime.now(tz=UTC),
+            }
+        )
+        self._state_store.save(state)
+        target_refs: list[ControlPlaneTargetRef] = []
+        if target is not None:
+            target_refs = [
+                ControlPlaneTargetRef(target_type="session", target_id=target.session_id),
+                ControlPlaneTargetRef(target_type="thread", target_id=target.thread_id),
+            ]
+        return self._completed_result(
+            request=request,
+            code="SESSION_NEW_READY",
+            message="已切换到新的会话起点",
+            data={
+                "new_conversation_token": token,
+                "previous_session_id": target.session_id if target is not None else "",
+                "previous_thread_id": target.thread_id if target is not None else "",
+                "previous_task_id": target.task_id if target is not None else "",
+            },
+            resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+            target_refs=target_refs,
+        )
+
+    async def _handle_session_reset(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        session = await self._resolve_session_projection_target(
+            request,
+            use_focused_when_empty=True,
+        )
+        now = datetime.now(tz=UTC)
+        reset_context = False
+        session_state = await self._stores.agent_context_store.get_session_context(session.session_id)
+        if session_state is None and session.thread_id:
+            session_states = await self._stores.agent_context_store.list_session_contexts(
+                project_id=session.project_id or None,
+                workspace_id=session.workspace_id or None,
+            )
+            session_state = next(
+                (item for item in session_states if item.thread_id == session.thread_id),
+                None,
+            )
+        if session_state is not None:
+            await self._stores.agent_context_store.save_session_context(
+                session_state.model_copy(
+                    update={
+                        "recent_turn_refs": [],
+                        "recent_artifact_refs": [],
+                        "rolling_summary": "",
+                        "summary_artifact_id": "",
+                        "last_context_frame_id": "",
+                        "last_recall_frame_id": "",
+                        "updated_at": now,
+                    }
+                )
+            )
+            reset_context = True
+
+        related_sessions: list[AgentSession] = []
+        seen_agent_session_ids: set[str] = set()
+        for legacy_session_id in {session.session_id, session.thread_id}:
+            normalized = str(legacy_session_id).strip()
+            if not normalized:
+                continue
+            candidates = await self._stores.agent_context_store.list_agent_sessions(
+                legacy_session_id=normalized,
+                project_id=session.project_id or None,
+                workspace_id=session.workspace_id or None,
+                limit=200,
+            )
+            for item in candidates:
+                if item.agent_session_id in seen_agent_session_ids:
+                    continue
+                seen_agent_session_ids.add(item.agent_session_id)
+                related_sessions.append(item)
+        reset_agent_sessions = 0
+        for item in related_sessions:
+            await self._stores.agent_context_store.delete_agent_session_turns(
+                agent_session_id=item.agent_session_id
+            )
+            metadata = dict(item.metadata)
+            metadata["recent_transcript"] = []
+            metadata["rolling_summary"] = ""
+            metadata["latest_model_reply_summary"] = ""
+            metadata["latest_model_reply_preview"] = ""
+            metadata["latest_compaction_summary"] = ""
+            metadata["latest_compaction_summary_artifact_id"] = ""
+            await self._stores.agent_context_store.save_agent_session(
+                item.model_copy(
+                    update={
+                        "status": AgentSessionStatus.CLOSED,
+                        "last_context_frame_id": "",
+                        "last_recall_frame_id": "",
+                        "recent_transcript": [],
+                        "rolling_summary": "",
+                        "metadata": metadata,
+                        "updated_at": now,
+                        "closed_at": now,
+                    }
+                )
+            )
+            reset_agent_sessions += 1
+
+        token = str(ULID())
+        state = self._state_store.load().model_copy(
+            update={
+                "focused_session_id": "",
+                "focused_thread_id": "",
+                "new_conversation_token": token,
+                "updated_at": now,
+            }
+        )
+        self._state_store.save(state)
+
+        return self._completed_result(
+            request=request,
+            code="SESSION_RESET",
+            message="已清空该会话的 continuity，并准备新的对话起点",
+            data={
+                "session_id": session.session_id,
+                "thread_id": session.thread_id,
+                "task_id": session.task_id,
+                "reset_session_context": reset_context,
+                "reset_agent_session_count": reset_agent_sessions,
+                "new_conversation_token": token,
+            },
+            resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+            target_refs=[
+                ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
+                ControlPlaneTargetRef(target_type="thread", target_id=session.thread_id),
+                ControlPlaneTargetRef(target_type="task", target_id=session.task_id),
             ],
         )
 
@@ -4414,29 +4576,64 @@ class ControlPlaneService:
     async def _resolve_session_projection_target(
         self,
         request: ActionRequestEnvelope,
-    ) -> SessionProjectionItem:
+        *,
+        allow_empty: bool = False,
+        use_focused_when_empty: bool = False,
+    ) -> SessionProjectionItem | None:
         requested_session_id = self._param_str(request.params, "session_id")
         requested_thread_id = self._param_str(request.params, "thread_id")
-        if not requested_session_id and not requested_thread_id:
-            raise ControlPlaneActionError(
-                "SESSION_ID_REQUIRED",
-                "session_id 或 thread_id 至少需要一个",
-            )
+        requested_task_id = self._param_str(request.params, "task_id")
 
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
         session_items = await self._build_session_projection_items(
             selected_project=selected_project,
             selected_workspace=selected_workspace,
         )
+        focused_session_id, focused_thread_id = self._resolve_projected_focus(
+            state=self._state_store.load(),
+            session_items=session_items,
+        )
+        if not requested_session_id and not requested_thread_id and not requested_task_id:
+            if use_focused_when_empty and focused_session_id:
+                requested_session_id = focused_session_id
+            elif use_focused_when_empty and focused_thread_id:
+                requested_thread_id = focused_thread_id
+            elif allow_empty:
+                return None
+            else:
+                raise ControlPlaneActionError(
+                    "SESSION_ID_REQUIRED",
+                    "session_id / thread_id / task_id 至少需要一个",
+                )
+
         if requested_session_id:
             session = next(
                 (item for item in session_items if item.session_id == requested_session_id),
                 None,
             )
+            if session is not None:
+                return session
+            thread_matches = [
+                item for item in session_items if item.thread_id == requested_session_id
+            ]
+            if len(thread_matches) == 1:
+                return thread_matches[0]
+            if len(thread_matches) > 1:
+                raise ControlPlaneActionError(
+                    "SESSION_ID_REQUIRED",
+                    "当前作用域存在多个同 thread_id 会话，请显式提供 session_id",
+                )
+            raise ControlPlaneActionError(
+                "SESSION_NOT_FOUND",
+                "当前作用域找不到对应的 session_id",
+            )
+
+        if requested_task_id:
+            session = next((item for item in session_items if item.task_id == requested_task_id), None)
             if session is None:
                 raise ControlPlaneActionError(
-                    "SESSION_NOT_FOUND",
-                    "当前作用域找不到对应的 session_id",
+                    "TASK_NOT_FOUND",
+                    "当前作用域找不到对应的 task_id",
                 )
             return session
 
@@ -7079,6 +7276,11 @@ class ControlPlaneService:
                 action_id="session.export",
             ),
             ControlPlaneCapability(
+                capability_id="session.reset",
+                label="重置",
+                action_id="session.reset",
+            ),
+            ControlPlaneCapability(
                 capability_id="session.interrupt",
                 label="中断",
                 action_id="session.interrupt",
@@ -9036,6 +9238,8 @@ class ControlPlaneService:
                 definition("capability.refresh", "刷新能力包", category="capability"),
                 definition("work.refresh", "刷新委派视图", category="delegation"),
                 definition("session.focus", "聚焦会话", category="sessions"),
+                definition("session.new", "开始新对话", category="sessions"),
+                definition("session.reset", "重置会话 continuity", category="sessions"),
                 definition("session.export", "导出会话", category="sessions"),
                 definition(
                     "session.interrupt",

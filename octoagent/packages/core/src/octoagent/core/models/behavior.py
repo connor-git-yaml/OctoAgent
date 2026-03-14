@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .capability import ToolAvailabilityExplanation
+
 
 def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
@@ -27,11 +29,29 @@ class BehaviorVisibility(StrEnum):
     PRIVATE = "private"
 
 
+class BehaviorWorkspaceScope(StrEnum):
+    SYSTEM = "system"
+    PROJECT = "project"
+
+
 class ClarificationAction(StrEnum):
     DIRECT = "direct"
     CLARIFY = "clarify"
     BEST_EFFORT_FALLBACK = "best_effort_fallback"
     DELEGATE_AFTER_CLARIFICATION = "delegate_after_clarification"
+
+
+class ButlerDecisionMode(StrEnum):
+    DIRECT_ANSWER = "direct_answer"
+    ASK_ONCE = "ask_once"
+    DELEGATE_RESEARCH = "delegate_research"
+    DELEGATE_OPS = "delegate_ops"
+    BEST_EFFORT_ANSWER = "best_effort_answer"
+
+
+class RecallPlanMode(StrEnum):
+    SKIP = "skip"
+    RECALL = "recall"
 
 
 class BehaviorPackFile(BaseModel):
@@ -43,6 +63,11 @@ class BehaviorPackFile(BaseModel):
     visibility: BehaviorVisibility = BehaviorVisibility.PRIVATE
     share_with_workers: bool = False
     source_kind: str = Field(default="default_template")
+    budget_chars: int = Field(default=0, ge=0)
+    original_char_count: int = Field(default=0, ge=0)
+    effective_char_count: int = Field(default=0, ge=0)
+    truncated: bool = False
+    truncation_reason: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -50,6 +75,9 @@ class BehaviorLayer(BaseModel):
     layer: BehaviorLayerKind
     content: str = Field(default="")
     source_file_ids: list[str] = Field(default_factory=list)
+    original_char_count: int = Field(default=0, ge=0)
+    effective_char_count: int = Field(default=0, ge=0)
+    truncated_file_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -61,6 +89,107 @@ class BehaviorPack(BaseModel):
     files: list[BehaviorPackFile] = Field(default_factory=list)
     layers: list[BehaviorLayer] = Field(default_factory=list)
     clarification_policy: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BehaviorWorkspaceFile(BaseModel):
+    file_id: str = Field(min_length=1)
+    title: str = Field(default="")
+    layer: BehaviorLayerKind = BehaviorLayerKind.ROLE
+    visibility: BehaviorVisibility = BehaviorVisibility.PRIVATE
+    share_with_workers: bool = False
+    scope: BehaviorWorkspaceScope | None = None
+    path: str = Field(default="")
+    content: str = Field(default="")
+    source_kind: str = Field(default="default_template")
+    is_advanced: bool = False
+    budget_chars: int = Field(default=0, ge=0)
+    original_char_count: int = Field(default=0, ge=0)
+    effective_char_count: int = Field(default=0, ge=0)
+    truncated: bool = False
+    truncation_reason: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BehaviorWorkspace(BaseModel):
+    project_slug: str = Field(default="")
+    system_dir: str = Field(default="")
+    project_dir: str = Field(default="")
+    files: list[BehaviorWorkspaceFile] = Field(default_factory=list)
+    source_chain: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolUniverseHints(BaseModel):
+    scope: str = Field(default="")
+    tool_profile: str = Field(default="")
+    resolution_mode: str = Field(default="")
+    selected_tools: list[str] = Field(default_factory=list)
+    discovery_entrypoints: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    mounted_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    blocked_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    note: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeHintBundle(BaseModel):
+    surface: str = Field(default="")
+    explicit_web_search_requested: bool = False
+    can_delegate_research: bool = False
+    weather_query: bool = False
+    current_location_hint: str = Field(default="")
+    recent_location_hint: str = Field(default="")
+    effective_location_hint: str = Field(default="")
+    recent_clarification_category: str = Field(default="")
+    recent_clarification_source_text: str = Field(default="")
+    tool_universe: ToolUniverseHints | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RecallPlan(BaseModel):
+    mode: RecallPlanMode = RecallPlanMode.SKIP
+    query: str = Field(default="")
+    rationale: str = Field(default="")
+    subject_hint: str = Field(default="")
+    focus_terms: list[str] = Field(default_factory=list)
+    allow_vault: bool = False
+    limit: int = Field(default=4, ge=1, le=8)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RecallEvidenceBundle(BaseModel):
+    mode: RecallPlanMode = RecallPlanMode.SKIP
+    query: str = Field(default="")
+    executed: bool = False
+    hit_count: int = Field(default=0, ge=0)
+    delivered_hit_count: int = Field(default=0, ge=0)
+    citations: list[str] = Field(default_factory=list)
+    backend: str = Field(default="")
+    backend_state: str = Field(default="")
+    degraded_reasons: list[str] = Field(default_factory=list)
+    rationale: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ButlerDecision(BaseModel):
+    mode: ButlerDecisionMode = ButlerDecisionMode.DIRECT_ANSWER
+    category: str = Field(default="")
+    rationale: str = Field(default="")
+    missing_inputs: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    tool_intent: str = Field(default="")
+    target_worker_type: str = Field(default="")
+    user_visible_boundary_note: str = Field(default="")
+    reply_prompt: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ButlerLoopPlan(BaseModel):
+    """Butler 预路由与 recall 统一规划结果。"""
+
+    decision: ButlerDecision = Field(default_factory=ButlerDecision)
+    recall_plan: RecallPlan = Field(default_factory=RecallPlan)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

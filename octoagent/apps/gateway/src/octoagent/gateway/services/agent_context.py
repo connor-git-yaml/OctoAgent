@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from octoagent.core.models import (
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
+    AgentSessionTurn,
+    AgentSessionTurnKind,
     BootstrapSession,
     BootstrapSessionStatus,
     ContextFrame,
@@ -30,7 +33,10 @@ from octoagent.core.models import (
     OwnerProfileOverlay,
     Project,
     ProjectBindingType,
+    RecallEvidenceBundle,
     RecallFrame,
+    RecallPlan,
+    RecallPlanMode,
     RuntimeControlContext,
     SessionContextState,
     Task,
@@ -55,7 +61,12 @@ from octoagent.memory import (
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
-from .butler_behavior import is_worker_behavior_profile, render_behavior_system_block
+from .butler_behavior import (
+    build_runtime_hint_bundle,
+    is_worker_behavior_profile,
+    render_behavior_system_block,
+    render_runtime_hint_block,
+)
 from .connection_metadata import summarize_control_metadata_for_prompt
 from .context_compaction import (
     CompiledTaskContext,
@@ -92,12 +103,41 @@ _WEEKDAY_NAMES_EN = {
     6: "Sunday",
 }
 
+_SESSION_TRANSCRIPT_LIMIT = 12
+
 
 def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, Any]:
     if agent_profile is None or not isinstance(agent_profile.context_budget_policy, dict):
         return {}
     raw = agent_profile.context_budget_policy.get("memory_recall", {})
     return raw if isinstance(raw, dict) else {}
+
+
+def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
+    prefs = _memory_recall_preferences(agent_profile)
+    raw = prefs.get("planner_enabled", False)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(raw)
+
+
+def _resolve_memory_prefetch_mode(
+    *,
+    request: ContextResolveRequest,
+    agent_profile: AgentProfile | None,
+    agent_runtime: AgentRuntime,
+) -> str:
+    prefs = _memory_recall_preferences(agent_profile)
+    explicit = str(prefs.get("prefetch_mode", "")).strip().lower()
+    if explicit in {"detailed_prefetch", "hint_first", "agent_led_hint_first"}:
+        return explicit
+    if (
+        request.request_kind is ContextRequestKind.WORKER
+        or agent_runtime.role is AgentRuntimeRole.WORKER
+        or is_worker_behavior_profile(agent_profile)
+    ):
+        return "detailed_prefetch"
+    return "agent_led_hint_first"
 
 
 def _bounded_int(
@@ -371,14 +411,46 @@ class ResolvedContextBundle:
     memory_recall: dict[str, Any]
 
 
+@dataclass(slots=True)
+class RecallPlanningContext:
+    """agent-led recall planner 的最小上下文。"""
+
+    request: ContextResolveRequest
+    project: Project | None
+    workspace: Workspace | None
+    agent_profile: AgentProfile
+    agent_runtime: AgentRuntime
+    agent_session: AgentSession
+    prefetch_mode: str
+    planner_enabled: bool
+    query: str
+    recent_summary: str
+    memory_scope_ids: list[str]
+    transcript_entries: list[dict[str, str]]
+
+
+@dataclass(slots=True)
+class SessionReplayProjection:
+    """从 AgentSession turn store 重建出的可 replay/sanitize 投影。"""
+
+    transcript_entries: list[dict[str, str]] = field(default_factory=list)
+    tool_exchange_lines: list[str] = field(default_factory=list)
+    latest_context_summary: str = ""
+    latest_model_reply_preview: str = ""
+    source: str = "empty"
+    dropped_orphan_tool_calls: int = 0
+    dropped_orphan_tool_results: int = 0
+
+
 class AgentContextService:
     """统一装配 AgentProfile / bootstrap / recency / memory。"""
 
     def __init__(self, store_group, *, project_root: Path | None = None) -> None:
         self._stores = store_group
         self._budget_config = ContextCompactionConfig.from_env()
+        self._project_root = (project_root or Path.cwd()).resolve()
         self._memory_runtime = MemoryRuntimeService(
-            project_root or Path.cwd(),
+            self._project_root,
             store_group=store_group,
         )
 
@@ -390,6 +462,7 @@ class AgentContextService:
         dispatch_metadata: dict[str, Any] | None = None,
         worker_capability: str | None = None,
         runtime_context: RuntimeControlContext | None = None,
+        recall_plan: RecallPlan | None = None,
     ) -> CompiledTaskContext:
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
@@ -403,6 +476,7 @@ class AgentContextService:
             task=task,
             request=resolve_request,
             query=compiled.latest_user_text or task.title,
+            recall_plan=recall_plan,
         )
         project = bundle.project
         workspace = bundle.workspace
@@ -418,6 +492,9 @@ class AgentContextService:
         memory_scope_ids = bundle.memory_scope_ids
         degraded_reasons = list(bundle.degraded_reasons)
         memory_recall = dict(bundle.memory_recall)
+        session_replay = await self.build_agent_session_replay_projection(
+            agent_session=agent_session
+        )
 
         recent_summary = session_state.rolling_summary.strip() or compiled.summary_text.strip()
         (
@@ -437,6 +514,7 @@ class AgentContextService:
             owner_overlay=owner_overlay,
             bootstrap=bootstrap,
             recent_summary=recent_summary,
+            session_replay=session_replay,
             memory_hits=memory_hits,
             memory_scope_ids=memory_scope_ids,
             worker_capability=worker_capability,
@@ -462,6 +540,43 @@ class AgentContextService:
                 )
             ),
         }
+        recall_evidence_bundle = RecallEvidenceBundle(
+            mode=(
+                recall_plan.mode
+                if recall_plan is not None
+                else (
+                    RecallPlanMode.RECALL
+                    if memory_recall.get("agent_led_recall_executed", False)
+                    else RecallPlanMode.SKIP
+                )
+            ),
+            query=str(memory_recall.get("query", "")).strip(),
+            executed=bool(memory_recall.get("agent_led_recall_executed", False)),
+            hit_count=int(memory_recall.get("hit_count", 0) or 0),
+            delivered_hit_count=len(memory_hits),
+            citations=[
+                str(item.citation).strip()
+                for item in memory_hits
+                if str(item.citation).strip()
+            ],
+            backend=str(memory_recall.get("backend", "")).strip(),
+            backend_state=str(memory_recall.get("backend_state", "")).strip(),
+            degraded_reasons=[
+                str(item).strip()
+                for item in memory_recall.get("degraded_reasons", [])
+                if str(item).strip()
+            ],
+            rationale=recall_plan.rationale if recall_plan is not None else "",
+            metadata={
+                "prefetch_mode": str(memory_recall.get("prefetch_mode", "")).strip(),
+                "plan_source": str(memory_recall.get("recall_plan_source", "")).strip(),
+            },
+        )
+        if recall_plan is not None:
+            memory_recall["recall_plan"] = recall_plan.model_dump(mode="json")
+        memory_recall["recall_evidence_bundle"] = recall_evidence_bundle.model_dump(
+            mode="json"
+        )
         memory_namespace_ids = [item.namespace_id for item in memory_namespaces]
         source_refs = self._build_source_refs(
             project=project,
@@ -500,6 +615,34 @@ class AgentContextService:
                     }
                     for item in memory_namespaces
                 ],
+                *(
+                    [
+                        {
+                            "ref_type": "artifact",
+                            "ref_id": str(
+                                recall_plan.metadata.get("request_artifact_ref", "")
+                            ).strip(),
+                            "label": "memory-recall-plan-request",
+                        }
+                    ]
+                    if recall_plan is not None
+                    and str(recall_plan.metadata.get("request_artifact_ref", "")).strip()
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "ref_type": "artifact",
+                            "ref_id": str(
+                                recall_plan.metadata.get("response_artifact_ref", "")
+                            ).strip(),
+                            "label": "memory-recall-plan-response",
+                        }
+                    ]
+                    if recall_plan is not None
+                    and str(recall_plan.metadata.get("response_artifact_ref", "")).strip()
+                    else []
+                ),
             ],
         )
         context_frame_id = str(ULID())
@@ -648,6 +791,53 @@ class AgentContextService:
             source_refs=source_refs,
         )
 
+    async def build_recall_planning_context(
+        self,
+        *,
+        task: Task,
+        compiled: CompiledTaskContext,
+        dispatch_metadata: dict[str, Any] | None = None,
+        worker_capability: str | None = None,
+        runtime_context: RuntimeControlContext | None = None,
+    ) -> RecallPlanningContext:
+        dispatch_metadata = dispatch_metadata or {}
+        resolve_request = self._build_context_request(
+            task=task,
+            trigger_text=compiled.latest_user_text or task.title,
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=worker_capability,
+            runtime_context=runtime_context,
+        )
+        bundle = await self._resolve_context_bundle(
+            task=task,
+            request=resolve_request,
+            query=compiled.latest_user_text or task.title,
+        )
+        prefetch_mode = _resolve_memory_prefetch_mode(
+            request=resolve_request,
+            agent_profile=bundle.agent_profile,
+            agent_runtime=bundle.agent_runtime,
+        )
+        replay = await self.build_agent_session_replay_projection(
+            agent_session=bundle.agent_session
+        )
+        return RecallPlanningContext(
+            request=resolve_request,
+            project=bundle.project,
+            workspace=bundle.workspace,
+            agent_profile=bundle.agent_profile,
+            agent_runtime=bundle.agent_runtime,
+            agent_session=bundle.agent_session,
+            prefetch_mode=prefetch_mode,
+            planner_enabled=_memory_recall_planner_enabled(bundle.agent_profile),
+            query=compiled.latest_user_text or task.title,
+            recent_summary=(
+                bundle.session_state.rolling_summary.strip() or compiled.summary_text.strip()
+            ),
+            memory_scope_ids=list(bundle.memory_scope_ids),
+            transcript_entries=list(replay.transcript_entries),
+        )
+
     def _build_context_request(
         self,
         *,
@@ -730,6 +920,7 @@ class AgentContextService:
         task: Task,
         request: ContextResolveRequest,
         query: str,
+        recall_plan: RecallPlan | None = None,
     ) -> ResolvedContextBundle:
         project, workspace = await self._resolve_project_scope(
             task=task,
@@ -793,6 +984,7 @@ class AgentContextService:
             memory_reasons,
             memory_recall,
         ) = await self._search_memory_hits(
+            request=request,
             task=task,
             project=project,
             workspace=workspace,
@@ -801,6 +993,7 @@ class AgentContextService:
             agent_session=agent_session,
             memory_namespaces=memory_namespaces,
             query=query,
+            recall_plan=recall_plan,
         )
         degraded_reasons.extend(memory_reasons)
         if bootstrap.status is BootstrapSessionStatus.PENDING:
@@ -922,10 +1115,73 @@ class AgentContextService:
                 frame.agent_session_id
             )
             if agent_session is not None:
+                response_preview = truncate_chars(" ".join(model_response.split()), 240)
+                await self._append_agent_session_turn(
+                    agent_session_id=agent_session.agent_session_id,
+                    task_id=task_id,
+                    kind=AgentSessionTurnKind.USER_MESSAGE,
+                    role="user",
+                    summary=truncate_chars(" ".join(latest_user_text.split()), 480),
+                    metadata={"source": "task_response_context"},
+                    dedupe_key=(
+                        f"request:{request_artifact_id}:user"
+                        if request_artifact_id
+                        else f"task:{task_id}:user:{response_artifact_id}"
+                    ),
+                )
+                await self._append_agent_session_turn(
+                    agent_session_id=agent_session.agent_session_id,
+                    task_id=task_id,
+                    kind=AgentSessionTurnKind.ASSISTANT_MESSAGE,
+                    role="assistant",
+                    summary=truncate_chars(" ".join(model_response.split()), 720),
+                    artifact_ref=response_artifact_id,
+                    metadata={
+                        "source": "task_response_context",
+                        "request_artifact_ref": request_artifact_id,
+                        "response_artifact_ref": response_artifact_id,
+                    },
+                    dedupe_key=(
+                        f"response:{response_artifact_id}:assistant"
+                        if response_artifact_id
+                        else f"task:{task_id}:assistant:{request_artifact_id}"
+                    ),
+                )
+                replay = await self.build_agent_session_replay_projection(
+                    agent_session=agent_session
+                )
+                recent_transcript = list(replay.transcript_entries)
+                if not recent_transcript:
+                    recent_transcript = self._append_session_transcript_entries(
+                        existing_entries=(
+                            agent_session.recent_transcript
+                            or agent_session.metadata.get("recent_transcript", [])
+                        ),
+                        task_id=task_id,
+                        latest_user_text=latest_user_text,
+                        model_response=model_response,
+                    )
                 agent_session = agent_session.model_copy(
                     update={
                         "last_context_frame_id": context_frame_id,
                         "last_recall_frame_id": frame.recall_frame_id or "",
+                        "recent_transcript": recent_transcript,
+                        "rolling_summary": merged_summary,
+                        "metadata": {
+                            **dict(agent_session.metadata),
+                            "recent_transcript": recent_transcript,
+                            "rolling_summary": merged_summary,
+                            "latest_model_reply_summary": response_summary,
+                            "latest_model_reply_preview": (
+                                replay.latest_model_reply_preview or response_preview
+                            ),
+                            "session_replay_source": replay.source,
+                            "session_replay_tool_lines": list(replay.tool_exchange_lines),
+                            "session_replay_sanitize_notes": {
+                                "dropped_orphan_tool_calls": replay.dropped_orphan_tool_calls,
+                                "dropped_orphan_tool_results": replay.dropped_orphan_tool_results,
+                            },
+                        },
                         "updated_at": datetime.now(tz=UTC),
                     }
                 )
@@ -1053,6 +1309,506 @@ class AgentContextService:
                     "source_refs": source_refs,
                 }
             )
+        )
+        await self._stores.conn.commit()
+
+    @staticmethod
+    def _normalize_session_transcript_entries(
+        raw_entries: Any,
+    ) -> list[dict[str, str]]:
+        if not isinstance(raw_entries, list):
+            return []
+        normalized: list[dict[str, str]] = []
+        for item in raw_entries:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            normalized.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "task_id": str(item.get("task_id", "")).strip(),
+                }
+            )
+        return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+
+    @classmethod
+    def _agent_session_transcript_entries(
+        cls,
+        session: AgentSession | None,
+    ) -> list[dict[str, str]]:
+        if session is None:
+            return []
+        return cls._normalize_session_transcript_entries(
+            session.recent_transcript or session.metadata.get("recent_transcript", [])
+        )
+
+    @staticmethod
+    def _agent_session_turn_to_transcript_entry(
+        turn: AgentSessionTurn,
+    ) -> dict[str, str] | None:
+        if turn.kind is AgentSessionTurnKind.USER_MESSAGE:
+            role = "user"
+        elif turn.kind is AgentSessionTurnKind.ASSISTANT_MESSAGE:
+            role = "assistant"
+        else:
+            return None
+        content = str(turn.summary).strip()
+        if not content:
+            return None
+        return {
+            "role": role,
+            "content": content,
+            "task_id": turn.task_id,
+        }
+
+    async def _list_agent_session_turn_transcript_entries(
+        self,
+        *,
+        agent_session_id: str,
+        limit: int = _SESSION_TRANSCRIPT_LIMIT * 4,
+    ) -> list[dict[str, str]]:
+        if not agent_session_id.strip():
+            return []
+        turns = await self._stores.agent_context_store.list_agent_session_turns(
+            agent_session_id=agent_session_id,
+            limit=limit,
+        )
+        entries = [
+            entry
+            for turn in turns
+            if (entry := self._agent_session_turn_to_transcript_entry(turn)) is not None
+        ]
+        return self._normalize_session_transcript_entries(entries)
+
+    async def build_agent_session_replay_projection(
+        self,
+        *,
+        agent_session: AgentSession | None = None,
+        agent_session_id: str = "",
+        turn_limit: int = _SESSION_TRANSCRIPT_LIMIT * 8,
+    ) -> SessionReplayProjection:
+        resolved_session = agent_session
+        resolved_session_id = (
+            str(agent_session.agent_session_id).strip() if agent_session is not None else ""
+        ) or str(agent_session_id).strip()
+        if resolved_session is None and resolved_session_id:
+            resolved_session = await self._stores.agent_context_store.get_agent_session(
+                resolved_session_id
+            )
+        if not resolved_session_id:
+            return SessionReplayProjection()
+
+        turns = await self._stores.agent_context_store.list_agent_session_turns(
+            agent_session_id=resolved_session_id,
+            limit=max(turn_limit, _SESSION_TRANSCRIPT_LIMIT * 2),
+        )
+        if not turns:
+            transcript_entries = self._agent_session_transcript_entries(resolved_session)
+            return SessionReplayProjection(
+                transcript_entries=transcript_entries,
+                latest_model_reply_preview=(
+                    str(
+                        (resolved_session.metadata if resolved_session is not None else {}).get(
+                            "latest_model_reply_preview",
+                            "",
+                        )
+                    ).strip()
+                ),
+                latest_context_summary=(
+                    str(
+                        (resolved_session.metadata if resolved_session is not None else {}).get(
+                            "latest_compaction_summary",
+                            "",
+                        )
+                    ).strip()
+                    or (resolved_session.rolling_summary.strip() if resolved_session else "")
+                ),
+                source="agent_session_projection",
+            )
+
+        transcript_entries: list[dict[str, str]] = []
+        tool_exchange_lines: list[str] = []
+        pending_tool_calls: dict[str, list[AgentSessionTurn]] = {}
+        latest_context_summary = ""
+        latest_model_reply_preview = ""
+        dropped_orphan_tool_calls = 0
+        dropped_orphan_tool_results = 0
+        previous_signature = ""
+
+        for turn in turns:
+            summary = self._normalize_turn_summary(turn.summary)
+            signature = "|".join(
+                [
+                    turn.kind.value,
+                    turn.role,
+                    turn.tool_name,
+                    turn.artifact_ref,
+                    turn.dedupe_key,
+                    summary,
+                ]
+            )
+            if signature == previous_signature:
+                continue
+            previous_signature = signature
+
+            if turn.kind is AgentSessionTurnKind.USER_MESSAGE:
+                if summary:
+                    transcript_entries.append(
+                        {
+                            "role": "user",
+                            "content": truncate_chars(summary, 480),
+                            "task_id": turn.task_id,
+                        }
+                    )
+                continue
+
+            if turn.kind is AgentSessionTurnKind.ASSISTANT_MESSAGE:
+                if summary:
+                    preview = truncate_chars(summary, 720)
+                    transcript_entries.append(
+                        {
+                            "role": "assistant",
+                            "content": preview,
+                            "task_id": turn.task_id,
+                        }
+                    )
+                    latest_model_reply_preview = preview
+                continue
+
+            if turn.kind is AgentSessionTurnKind.CONTEXT_SUMMARY:
+                if summary:
+                    latest_context_summary = truncate_chars(summary, 720)
+                continue
+
+            if turn.kind is AgentSessionTurnKind.TOOL_CALL:
+                tool_name = str(turn.tool_name).strip() or "tool"
+                pending_tool_calls.setdefault(tool_name, []).append(turn)
+                continue
+
+            if turn.kind is AgentSessionTurnKind.TOOL_RESULT:
+                tool_name = str(turn.tool_name).strip() or "tool"
+                queue = pending_tool_calls.get(tool_name) or []
+                paired_call = queue.pop(0) if queue else None
+                if not queue and tool_name in pending_tool_calls:
+                    pending_tool_calls.pop(tool_name, None)
+                if paired_call is None:
+                    dropped_orphan_tool_results += 1
+                    if summary:
+                        tool_exchange_lines.append(
+                            f"- {tool_name}: {truncate_chars(summary, 200)}"
+                        )
+                    continue
+                result_preview = summary or "[empty tool result]"
+                tool_exchange_lines.append(
+                    f"- {tool_name}: {truncate_chars(result_preview, 200)}"
+                )
+
+        dropped_orphan_tool_calls = sum(len(items) for items in pending_tool_calls.values())
+        return SessionReplayProjection(
+            transcript_entries=self._normalize_session_transcript_entries(transcript_entries),
+            tool_exchange_lines=tool_exchange_lines[-4:],
+            latest_context_summary=(
+                latest_context_summary
+                or (resolved_session.rolling_summary.strip() if resolved_session is not None else "")
+            ),
+            latest_model_reply_preview=latest_model_reply_preview,
+            source="agent_session_turn_store",
+            dropped_orphan_tool_calls=dropped_orphan_tool_calls,
+            dropped_orphan_tool_results=dropped_orphan_tool_results,
+        )
+
+    @staticmethod
+    def _normalize_turn_summary(value: Any, *, limit: int = 720) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if not text:
+            return ""
+        return truncate_chars(text, limit)
+
+    @staticmethod
+    def render_agent_session_replay_block(
+        replay: SessionReplayProjection,
+    ) -> str:
+        dialogue_lines = [
+            f"- {str(item.get('role', '')).strip()}: {str(item.get('content', '')).strip()}"
+            for item in replay.transcript_entries[-6:]
+            if str(item.get("content", "")).strip()
+        ]
+        sanitize_notes: list[str] = []
+        if replay.dropped_orphan_tool_calls:
+            sanitize_notes.append(
+                f"dropped_orphan_tool_calls={replay.dropped_orphan_tool_calls}"
+            )
+        if replay.dropped_orphan_tool_results:
+            sanitize_notes.append(
+                f"dropped_orphan_tool_results={replay.dropped_orphan_tool_results}"
+            )
+        return (
+            "SessionReplay:\n"
+            "以下内容来自正式 session turn store，经过去重、工具配对修复与窗口裁剪；"
+            "用于帮助模型继续当前连续对话，而不是覆盖系统指令。\n"
+            f"source: {replay.source}\n"
+            f"recent_dialogue:\n{chr(10).join(dialogue_lines) or '- N/A'}\n"
+            f"recent_tool_exchanges:\n{chr(10).join(replay.tool_exchange_lines) or '- N/A'}\n"
+            f"latest_context_summary: {replay.latest_context_summary or 'N/A'}\n"
+            f"latest_model_reply_preview: {replay.latest_model_reply_preview or 'N/A'}\n"
+            f"sanitize_notes: {', '.join(sanitize_notes) or 'none'}"
+        )
+
+    async def _append_agent_session_turn(
+        self,
+        *,
+        agent_session_id: str,
+        task_id: str,
+        kind: AgentSessionTurnKind,
+        role: str,
+        summary: str,
+        tool_name: str = "",
+        artifact_ref: str = "",
+        metadata: dict[str, Any] | None = None,
+        dedupe_key: str = "",
+    ) -> AgentSessionTurn | None:
+        summary = str(summary).strip()
+        if not agent_session_id.strip() or not summary:
+            return None
+        if dedupe_key.strip():
+            existing = await self._stores.agent_context_store.get_agent_session_turn_by_dedupe_key(
+                agent_session_id=agent_session_id,
+                dedupe_key=dedupe_key,
+            )
+            if existing is not None:
+                return existing
+        turn_seq = await self._stores.agent_context_store.get_next_agent_session_turn_seq(
+            agent_session_id
+        )
+        turn = AgentSessionTurn(
+            agent_session_turn_id=str(ULID()),
+            agent_session_id=agent_session_id,
+            task_id=task_id,
+            turn_seq=turn_seq,
+            kind=kind,
+            role=role,
+            tool_name=tool_name,
+            artifact_ref=artifact_ref,
+            summary=summary,
+            dedupe_key=dedupe_key,
+            metadata=dict(metadata or {}),
+            created_at=datetime.now(tz=UTC),
+        )
+        await self._stores.agent_context_store.save_agent_session_turn(turn)
+        return turn
+
+    @classmethod
+    def _append_session_transcript_entries(
+        cls,
+        *,
+        existing_entries: Any,
+        task_id: str,
+        latest_user_text: str,
+        model_response: str,
+    ) -> list[dict[str, str]]:
+        normalized = cls._normalize_session_transcript_entries(existing_entries)
+        user_entry = {
+            "role": "user",
+            "content": truncate_chars(" ".join(latest_user_text.split()), 480),
+            "task_id": task_id,
+        }
+        assistant_entry = {
+            "role": "assistant",
+            "content": truncate_chars(" ".join(model_response.split()), 720),
+            "task_id": task_id,
+        }
+        if normalized[-2:] == [user_entry, assistant_entry]:
+            return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+        if normalized and normalized[-1] == user_entry:
+            normalized = normalized[:-1]
+        if (
+            len(normalized) >= 2
+            and normalized[-2].get("task_id") == task_id
+            and normalized[-2].get("role") == "user"
+            and normalized[-1].get("task_id") == task_id
+            and normalized[-1].get("role") == "assistant"
+        ):
+            normalized = normalized[:-2]
+        normalized.extend([user_entry, assistant_entry])
+        return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+
+    @classmethod
+    def _replace_session_transcript_entries_from_messages(
+        cls,
+        *,
+        messages: list[dict[str, str]],
+        task_id: str,
+        existing_entries: Any,
+    ) -> list[dict[str, str]]:
+        normalized = cls._normalize_session_transcript_entries(existing_entries)
+        replaced = [
+            {
+                "role": role,
+                "content": truncate_chars(" ".join(content.split()), 720 if role == "assistant" else 480),
+                "task_id": task_id,
+            }
+            for item in messages
+            if (role := str(item.get("role", "")).strip()) in {"user", "assistant"}
+            and (content := str(item.get("content", "")).strip())
+        ]
+        if not replaced:
+            return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+        return replaced[-_SESSION_TRANSCRIPT_LIMIT:]
+
+    async def record_compaction_context(
+        self,
+        *,
+        task_id: str,
+        context_frame_id: str,
+        summary_text: str,
+        summary_artifact_id: str,
+        compacted_messages: list[dict[str, str]],
+    ) -> None:
+        if not context_frame_id or not summary_text.strip():
+            return
+        frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
+        if frame is None:
+            return
+        if frame.session_id:
+            state = await self._stores.agent_context_store.get_session_context(frame.session_id)
+            if state is not None:
+                updated_state = state.model_copy(
+                    update={
+                        "task_ids": self._append_unique_tail(state.task_ids, [task_id], limit=20),
+                        "recent_turn_refs": self._append_unique_tail(
+                            state.recent_turn_refs,
+                            [task_id],
+                            limit=12,
+                        ),
+                        "rolling_summary": summary_text.strip(),
+                        "summary_artifact_id": summary_artifact_id,
+                        "last_context_frame_id": context_frame_id,
+                        "last_recall_frame_id": frame.recall_frame_id or "",
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                await self._stores.agent_context_store.save_session_context(updated_state)
+        if frame.agent_session_id:
+            agent_session = await self._stores.agent_context_store.get_agent_session(
+                frame.agent_session_id
+            )
+            if agent_session is not None:
+                await self._append_agent_session_turn(
+                    agent_session_id=agent_session.agent_session_id,
+                    task_id=task_id,
+                    kind=AgentSessionTurnKind.CONTEXT_SUMMARY,
+                    role="system",
+                    summary=truncate_chars(summary_text.strip(), 720),
+                    artifact_ref=summary_artifact_id,
+                    metadata={
+                        "summary_artifact_id": summary_artifact_id,
+                        "source": "context_compaction",
+                    },
+                    dedupe_key=f"compaction:{summary_artifact_id}",
+                )
+                metadata = dict(agent_session.metadata)
+                replay = await self.build_agent_session_replay_projection(
+                    agent_session=agent_session
+                )
+                recent_transcript = list(replay.transcript_entries)
+                if not recent_transcript:
+                    recent_transcript = self._replace_session_transcript_entries_from_messages(
+                        messages=compacted_messages,
+                        task_id=task_id,
+                        existing_entries=(
+                            agent_session.recent_transcript
+                            or metadata.get("recent_transcript", [])
+                        ),
+                    )
+                metadata.update(
+                    {
+                        "recent_transcript": recent_transcript,
+                        "rolling_summary": summary_text.strip(),
+                        "latest_compaction_summary": summary_text.strip(),
+                        "latest_compaction_summary_artifact_id": summary_artifact_id,
+                        "session_replay_source": replay.source,
+                        "session_replay_tool_lines": list(replay.tool_exchange_lines),
+                        "session_replay_sanitize_notes": {
+                            "dropped_orphan_tool_calls": replay.dropped_orphan_tool_calls,
+                            "dropped_orphan_tool_results": replay.dropped_orphan_tool_results,
+                        },
+                    }
+                )
+                await self._stores.agent_context_store.save_agent_session(
+                    agent_session.model_copy(
+                        update={
+                            "last_context_frame_id": context_frame_id,
+                            "last_recall_frame_id": frame.recall_frame_id or "",
+                            "recent_transcript": recent_transcript,
+                            "rolling_summary": summary_text.strip(),
+                            "metadata": metadata,
+                            "updated_at": datetime.now(tz=UTC),
+                        }
+                    )
+                )
+
+    async def record_tool_call_turn(
+        self,
+        *,
+        agent_session_id: str,
+        task_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        tool_name = str(tool_name).strip()
+        if not agent_session_id.strip() or not tool_name:
+            return
+        summary = truncate_chars(
+            f"{tool_name}({json.dumps(arguments, ensure_ascii=False, sort_keys=True)})",
+            720,
+        )
+        await self._append_agent_session_turn(
+            agent_session_id=agent_session_id,
+            task_id=task_id,
+            kind=AgentSessionTurnKind.TOOL_CALL,
+            role="assistant",
+            tool_name=tool_name,
+            summary=summary,
+            metadata={"arguments": dict(arguments)},
+        )
+        await self._stores.conn.commit()
+
+    async def record_tool_result_turn(
+        self,
+        *,
+        agent_session_id: str,
+        task_id: str,
+        tool_name: str,
+        output: str,
+        is_error: bool,
+        error: str | None = None,
+        artifact_ref: str | None = None,
+        duration_ms: int = 0,
+    ) -> None:
+        tool_name = str(tool_name).strip()
+        if not agent_session_id.strip() or not tool_name:
+            return
+        result_preview = output if not is_error else (error or output)
+        summary = truncate_chars(" ".join(str(result_preview).split()), 720)
+        if not summary:
+            summary = "[empty tool result]"
+        await self._append_agent_session_turn(
+            agent_session_id=agent_session_id,
+            task_id=task_id,
+            kind=AgentSessionTurnKind.TOOL_RESULT,
+            role="tool",
+            tool_name=tool_name,
+            artifact_ref=str(artifact_ref or "").strip(),
+            summary=summary,
+            metadata={
+                "is_error": bool(is_error),
+                "error": str(error or "").strip(),
+                "duration_ms": int(duration_ms or 0),
+            },
         )
         await self._stores.conn.commit()
 
@@ -2334,6 +3090,7 @@ class AgentContextService:
     async def _search_memory_hits(
         self,
         *,
+        request: ContextResolveRequest,
         task: Task,
         project: Project | None,
         workspace: Workspace | None,
@@ -2342,6 +3099,7 @@ class AgentContextService:
         agent_session: AgentSession,
         memory_namespaces: list[MemoryNamespace],
         query: str,
+        recall_plan: RecallPlan | None = None,
     ) -> tuple[list[MemoryRecallHit], list[str], list[str], dict[str, Any]]:
         scope_entries = self._build_memory_scope_entries(
             agent_runtime=agent_runtime,
@@ -2349,6 +3107,11 @@ class AgentContextService:
             memory_namespaces=memory_namespaces,
         )
         scope_ids = [str(item["scope_id"]).strip() for item in scope_entries if item["scope_id"]]
+        prefetch_mode = _resolve_memory_prefetch_mode(
+            request=request,
+            agent_profile=agent_profile,
+            agent_runtime=agent_runtime,
+        )
         if not scope_ids or not query.strip():
             return (
                 [],
@@ -2360,6 +3123,14 @@ class AgentContextService:
                     "recall_owner_role": agent_runtime.role.value,
                     "agent_runtime_id": agent_runtime.agent_runtime_id,
                     "agent_session_id": agent_session.agent_session_id,
+                    "prefetch_mode": prefetch_mode,
+                    "agent_led_recall_expected": prefetch_mode != "detailed_prefetch",
+                    "agent_led_recall_executed": False,
+                    "recall_plan_source": (
+                        str(recall_plan.metadata.get("plan_source", "")).strip()
+                        if recall_plan is not None
+                        else ""
+                    ),
                 },
             )
 
@@ -2369,6 +3140,142 @@ class AgentContextService:
                 project=project,
                 workspace=workspace,
             )
+            backend_status = await memory_service.get_backend_status()
+            if prefetch_mode != "detailed_prefetch":
+                if recall_plan is not None and recall_plan.mode is RecallPlanMode.RECALL:
+                    selected_scope_ids = scope_ids[
+                        : memory_recall_scope_limit(agent_profile, default=4)
+                    ]
+                    scope_entry_map = {
+                        str(item["scope_id"]): dict(item)
+                        for item in scope_entries
+                        if str(item["scope_id"]).strip()
+                    }
+                    recall = await memory_service.recall_memory(
+                        scope_ids=selected_scope_ids,
+                        query=recall_plan.query.strip() or query,
+                        policy=effective_memory_access_policy(agent_profile).model_copy(
+                            update={"allow_vault": recall_plan.allow_vault}
+                        ),
+                        per_scope_limit=memory_recall_per_scope_limit(
+                            agent_profile,
+                            default=3,
+                        ),
+                        max_hits=max(
+                            1,
+                            min(
+                                recall_plan.limit,
+                                memory_recall_max_hits(agent_profile, default=4),
+                            ),
+                        ),
+                        hook_options=build_default_memory_recall_hook_options(
+                            agent_profile=agent_profile,
+                            subject_hint=recall_plan.subject_hint,
+                        ).model_copy(
+                            update={
+                                "focus_terms": list(recall_plan.focus_terms),
+                            }
+                        ),
+                    )
+                    recall_hits = [
+                        hit.model_copy(
+                            update={
+                                "metadata": {
+                                    **hit.metadata,
+                                    **scope_entry_map.get(hit.scope_id, {}),
+                                    "recall_owner_role": agent_runtime.role.value,
+                                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                                    "agent_session_id": agent_session.agent_session_id,
+                                }
+                            }
+                        )
+                        for hit in recall.hits
+                    ]
+                    return (
+                        recall_hits,
+                        list(recall.scope_ids),
+                        list(recall.degraded_reasons),
+                        {
+                            "query": recall.query,
+                            "expanded_queries": recall.expanded_queries,
+                            "scope_ids": list(recall.scope_ids),
+                            "scope_entries": [
+                                scope_entry_map[scope_id]
+                                for scope_id in recall.scope_ids
+                                if scope_id in scope_entry_map
+                            ],
+                            "namespace_ids": [item.namespace_id for item in memory_namespaces],
+                            "hit_count": len(recall.hits),
+                            "delivered_hit_count": len(recall_hits),
+                            "degraded_reasons": list(recall.degraded_reasons),
+                            "backend": (
+                                recall.backend_status.active_backend
+                                if recall.backend_status is not None
+                                else ""
+                            ),
+                            "backend_state": (
+                                recall.backend_status.state.value
+                                if recall.backend_status is not None
+                                else ""
+                            ),
+                            "pending_replay_count": (
+                                recall.backend_status.pending_replay_count
+                                if recall.backend_status is not None
+                                else 0
+                            ),
+                            "hook_trace": (
+                                recall.hook_trace.model_dump(mode="json")
+                                if recall.hook_trace is not None
+                                else {}
+                            ),
+                            "recall_owner_role": agent_runtime.role.value,
+                            "agent_runtime_id": agent_runtime.agent_runtime_id,
+                            "agent_session_id": agent_session.agent_session_id,
+                            "prefetch_mode": prefetch_mode,
+                            "agent_led_recall_expected": True,
+                            "agent_led_recall_executed": True,
+                            "available_tools": [
+                                "memory.search",
+                                "memory.recall",
+                                "memory.read",
+                            ],
+                            "recall_plan_source": str(
+                                recall_plan.metadata.get("plan_source", "")
+                            ).strip(),
+                        },
+                    )
+                return (
+                    [],
+                    scope_ids,
+                    [],
+                    {
+                        "query": query.strip(),
+                        "expanded_queries": [],
+                        "scope_ids": list(scope_ids),
+                        "scope_entries": list(scope_entries),
+                        "namespace_ids": [item.namespace_id for item in memory_namespaces],
+                        "hit_count": 0,
+                        "delivered_hit_count": 0,
+                        "degraded_reasons": [],
+                        "backend": backend_status.active_backend,
+                        "backend_state": backend_status.state.value,
+                        "pending_replay_count": backend_status.pending_replay_count,
+                        "hook_trace": {},
+                        "recall_owner_role": agent_runtime.role.value,
+                        "agent_runtime_id": agent_runtime.agent_runtime_id,
+                        "agent_session_id": agent_session.agent_session_id,
+                        "prefetch_mode": prefetch_mode,
+                        "agent_led_recall_expected": True,
+                        "agent_led_recall_executed": False,
+                        "available_tools": ["memory.search", "memory.recall", "memory.read"],
+                        "hint_reason": "butler_agent_led_recall",
+                        "recall_plan_source": (
+                            str(recall_plan.metadata.get("plan_source", "")).strip()
+                            if recall_plan is not None
+                            else ""
+                        ),
+                    },
+                )
             policy = effective_memory_access_policy(agent_profile)
             selected_scope_ids = scope_ids[: memory_recall_scope_limit(agent_profile, default=4)]
             scope_entry_map = {
@@ -2426,13 +3333,16 @@ class AgentContextService:
                     else 0
                 ),
                 "hook_trace": (
-                        recall.hook_trace.model_dump(mode="json")
+                    recall.hook_trace.model_dump(mode="json")
                     if recall.hook_trace is not None
                     else {}
                 ),
                 "recall_owner_role": agent_runtime.role.value,
                 "agent_runtime_id": agent_runtime.agent_runtime_id,
                 "agent_session_id": agent_session.agent_session_id,
+                "prefetch_mode": prefetch_mode,
+                "agent_led_recall_expected": False,
+                "agent_led_recall_executed": False,
             }
             return recall_hits, scope_ids, recall.degraded_reasons, recall_meta
         except Exception as exc:
@@ -2442,7 +3352,26 @@ class AgentContextService:
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
-            return [], scope_ids, ["memory_unavailable"], {}
+            return (
+                [],
+                scope_ids,
+                ["memory_unavailable"],
+                {
+                    "scope_entries": list(scope_entries),
+                    "namespace_ids": [item.namespace_id for item in memory_namespaces],
+                    "query": query.strip(),
+                    "expanded_queries": [],
+                    "hit_count": 0,
+                    "delivered_hit_count": 0,
+                    "degraded_reasons": ["memory_unavailable"],
+                    "recall_owner_role": agent_runtime.role.value,
+                    "agent_runtime_id": agent_runtime.agent_runtime_id,
+                    "agent_session_id": agent_session.agent_session_id,
+                    "prefetch_mode": prefetch_mode,
+                    "agent_led_recall_expected": prefetch_mode != "detailed_prefetch",
+                    "agent_led_recall_executed": False,
+                },
+            )
 
     async def _resolve_project_memory_scope_ids(
         self,
@@ -2518,11 +3447,13 @@ class AgentContextService:
         project: Project | None,
         workspace: Workspace | None,
         task: Task,
+        current_user_text: str,
         agent_profile: AgentProfile,
         owner_profile: OwnerProfile,
         owner_overlay: OwnerProfileOverlay | None,
         bootstrap: BootstrapSession,
         recent_summary: str,
+        session_replay: SessionReplayProjection | None,
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
@@ -2533,6 +3464,30 @@ class AgentContextService:
         ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
             owner_profile=owner_profile,
             surface=task.requester.channel or "chat",
+        )
+        is_worker_profile = is_worker_behavior_profile(agent_profile)
+        runtime_hints = build_runtime_hint_bundle(
+            user_text=current_user_text,
+            surface=task.requester.channel or "chat",
+            can_delegate_research=bool(
+                str(dispatch_metadata.get("requested_worker_type", "")).strip().lower()
+                == "research"
+                or str(dispatch_metadata.get("target_kind", "")).strip().lower() == "worker"
+            ),
+            recent_clarification_category=(
+                str(dispatch_metadata.get("clarification_category", "")).strip()
+                or str(dispatch_metadata.get("clarification_needed", "")).strip()
+            ),
+            recent_clarification_source_text=str(
+                dispatch_metadata.get("clarification_source_text", "")
+            ).strip(),
+            recent_location_hint=str(
+                dispatch_metadata.get("freshness_followup_location_text", "")
+            ).strip(),
+            default_location_hint=self._resolve_default_location_hint(owner_profile),
+            metadata={
+                "route_reason": runtime_context.route_reason if runtime_context is not None else "",
+            },
         )
         blocks: list[dict[str, str]] = [
             {
@@ -2576,7 +3531,16 @@ class AgentContextService:
                 "content": render_behavior_system_block(
                     agent_profile=agent_profile,
                     project_name=project.name if project is not None else "",
-                    shared_only=is_worker_behavior_profile(agent_profile),
+                    project_slug=project.slug if project is not None else "",
+                    project_root=self._project_root,
+                    shared_only=is_worker_profile,
+                ),
+            },
+            {
+                "role": "system",
+                "content": render_runtime_hint_block(
+                    user_text=current_user_text,
+                    runtime_hints=runtime_hints,
                 ),
             },
         ]
@@ -2630,31 +3594,35 @@ class AgentContextService:
                     "content": f"RecentSummary:\n{recent_summary}",
                 }
             )
-        if memory_hits:
+        if session_replay is not None and (
+            session_replay.transcript_entries
+            or session_replay.tool_exchange_lines
+            or session_replay.latest_context_summary
+        ):
             blocks.append(
                 {
                     "role": "system",
-                    "content": (
-                        "MemoryRecall:\n"
-                        f"scopes: {', '.join(memory_scope_ids) or 'N/A'}\n"
-                        + "\n".join(
-                            (
-                                f"- [{item.partition.value}] "
-                                f"{truncate_chars(item.subject_key or item.record_id, 80)}: "
-                                f"{truncate_chars(item.summary, 180)}"
-                                + (
-                                    f"\n  citation: {truncate_chars(item.citation, 120)}"
-                                    if item.citation
-                                    else ""
-                                )
-                                + (
-                                    f"\n  preview: {truncate_chars(item.content_preview, 160)}"
-                                    if item.content_preview
-                                    else ""
-                                )
-                            )
-                            for item in memory_hits
-                        )
+                    "content": self.render_agent_session_replay_block(session_replay),
+                }
+            )
+        if memory_scope_ids:
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": self._render_memory_runtime_block(
+                        memory_scope_ids=memory_scope_ids,
+                        include_detailed_recall=is_worker_profile,
+                    ),
+                }
+            )
+        if memory_hits or (memory_scope_ids and not is_worker_profile):
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": self._render_memory_recall_block(
+                        memory_hits=memory_hits,
+                        memory_scope_ids=memory_scope_ids,
+                        include_preview=is_worker_profile,
                     ),
                 }
             )
@@ -2747,6 +3715,14 @@ class AgentContextService:
             f"error_summary: {error_summary}"
         )
 
+    def _resolve_default_location_hint(self, owner_profile: OwnerProfile) -> str:
+        metadata = owner_profile.metadata
+        for key in ("default_location", "default_city", "city", "location"):
+            value = str(metadata.get(key, "")).strip()
+            if value:
+                return value
+        return ""
+
     def _fit_prompt_budget(
         self,
         *,
@@ -2759,6 +3735,7 @@ class AgentContextService:
         owner_overlay: OwnerProfileOverlay | None,
         bootstrap: BootstrapSession,
         recent_summary: str,
+        session_replay: SessionReplayProjection | None,
         memory_hits: list[MemoryRecallHit],
         memory_scope_ids: list[str],
         worker_capability: str | None,
@@ -2804,11 +3781,13 @@ class AgentContextService:
                         project=project,
                         workspace=workspace,
                         task=task,
+                        current_user_text=compiled.latest_user_text or task.title,
                         agent_profile=agent_profile,
                         owner_profile=owner_profile,
                         owner_overlay=owner_overlay,
                         bootstrap=bootstrap,
                         recent_summary=trimmed_summary,
+                        session_replay=session_replay,
                         memory_hits=trimmed_hits,
                         memory_scope_ids=memory_scope_ids,
                         worker_capability=worker_capability,
@@ -2976,6 +3955,61 @@ class AgentContextService:
             "derived_refs": list(hit.derived_refs),
             "metadata": dict(hit.metadata),
         }
+
+    def _render_memory_runtime_block(
+        self,
+        *,
+        memory_scope_ids: list[str],
+        include_detailed_recall: bool,
+    ) -> str:
+        mode = "detailed_prefetch" if include_detailed_recall else "hint_first"
+        guidance = (
+            "当前已注入较详细 recall，可直接引用；若还需要更多事实、证据或历史，再继续调用 memory 工具。"
+            if include_detailed_recall
+            else "当前只注入 recall runtime 提示；需要具体记忆、证据或历史时，请主动调用 memory.recall / memory.search / memory.read。"
+        )
+        return (
+            "MemoryRuntime:\n"
+            f"mode: {mode}\n"
+            f"scopes: {', '.join(memory_scope_ids) or 'N/A'}\n"
+            "available_tools: memory.search, memory.recall, memory.read\n"
+            f"guidance: {guidance}"
+        )
+
+    def _render_memory_recall_block(
+        self,
+        *,
+        memory_hits: list[MemoryRecallHit],
+        memory_scope_ids: list[str],
+        include_preview: bool,
+    ) -> str:
+        title = "MemoryRecall" if include_preview else "MemoryRecallHints"
+        if not memory_hits and not include_preview:
+            return (
+                f"{title}:\n"
+                f"scopes: {', '.join(memory_scope_ids) or 'N/A'}\n"
+                "- 当前未预取详细命中；如需具体记忆、证据或历史，请优先调用 memory.recall。"
+            )
+        max_hits = 4 if include_preview else 2
+        entries: list[str] = []
+        for item in memory_hits[:max_hits]:
+            entry = (
+                f"- [{item.partition.value}] "
+                f"{truncate_chars(item.subject_key or item.record_id, 80)}: "
+                f"{truncate_chars(item.summary, 180 if include_preview else 120)}"
+            )
+            if item.citation:
+                entry += f"\n  citation: {truncate_chars(item.citation, 120 if include_preview else 90)}"
+            if include_preview and item.content_preview:
+                entry += f"\n  preview: {truncate_chars(item.content_preview, 160)}"
+            entries.append(entry)
+        if include_preview:
+            return (
+                f"{title}:\n"
+                f"scopes: {', '.join(memory_scope_ids) or 'N/A'}\n"
+                f"{chr(10).join(entries) or '- N/A'}"
+            )
+        return f"{title}:\n{chr(10).join(entries) or '- N/A'}"
 
     @staticmethod
     def _append_unique_tail(values: list[str], new_values: list[str], *, limit: int) -> list[str]:

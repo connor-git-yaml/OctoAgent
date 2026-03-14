@@ -497,9 +497,9 @@ class _FakeMemUBridge:
             active_backend="memu",
         )
 
-    async def search(self, scope_id: str, *, query=None, policy=None, limit=10):
+    async def search(self, scope_id: str, *, query=None, policy=None, limit=10, search_options=None):
         self.calls.append(("search", scope_id))
-        _ = query, policy, limit
+        _ = query, policy, limit, search_options
         return [
             MemorySearchHit(
                 record_id="memu-hit-1",
@@ -594,7 +594,8 @@ class _FailingBackend:
             failure_code="TEST_BACKEND_FAILED",
         )
 
-    async def search(self, scope_id: str, *, query=None, policy=None, limit=10):
+    async def search(self, scope_id: str, *, query=None, policy=None, limit=10, search_options=None):
+        _ = search_options
         raise RuntimeError("backend search unavailable")
 
     async def sync_batch(self, batch: MemorySyncBatch):
@@ -641,8 +642,8 @@ class _FlakyBackend(_FailingBackend):
             failure_code="TEST_BACKEND_FAILED" if self.fail_search else "",
         )
 
-    async def search(self, scope_id: str, *, query=None, policy=None, limit=10):
-        _ = query, policy, limit
+    async def search(self, scope_id: str, *, query=None, policy=None, limit=10, search_options=None):
+        _ = query, policy, limit, search_options
         if self.fail_search:
             raise RuntimeError("backend search unavailable")
         return [
@@ -692,8 +693,8 @@ class _RecoverableSyncBackend(_FailingBackend):
             failure_code="TEST_BACKEND_FAILED" if self.fail_sync else "",
         )
 
-    async def search(self, scope_id: str, *, query=None, policy=None, limit=10):
-        _ = query, policy, limit
+    async def search(self, scope_id: str, *, query=None, policy=None, limit=10, search_options=None):
+        _ = query, policy, limit, search_options
         return [
             MemorySearchHit(
                 record_id="memu-hit-recovered",

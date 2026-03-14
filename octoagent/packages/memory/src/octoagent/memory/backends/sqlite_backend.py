@@ -86,7 +86,9 @@ class SqliteMemoryBackend(MemoryBackend):
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options=None,
     ) -> list[MemorySearchHit]:
+        _ = search_options
         policy = policy or MemoryAccessPolicy()
         sor_records = await self._store.search_sor(
             scope_id,

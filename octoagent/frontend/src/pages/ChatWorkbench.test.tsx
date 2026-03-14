@@ -30,6 +30,7 @@ function buildSnapshot(): any {
         sessions: [],
         focused_session_id: "",
         focused_thread_id: "",
+        new_conversation_token: "",
       },
       worker_profiles: {
         summary: {
@@ -88,6 +89,7 @@ describe("ChatWorkbench", () => {
     useChatStreamMock.mockReturnValue({
       messages: [],
       sendMessage,
+      resetConversation: vi.fn(),
       streaming: false,
       restoring: false,
       error: null,
@@ -222,6 +224,7 @@ describe("ChatWorkbench", () => {
         },
       ],
       sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
       streaming: true,
       restoring: false,
       error: null,
@@ -246,6 +249,49 @@ describe("ChatWorkbench", () => {
     expect(await screen.findByLabelText("当前处理进度")).toBeInTheDocument();
     expect(screen.getByText("主助手")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看内部协作进度" })).not.toBeInTheDocument();
+  });
+
+  it("可以显式开始新对话", async () => {
+    const resetConversation = vi.fn();
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [
+        {
+          id: "msg-existing",
+          role: "agent",
+          content: "这是上一轮对话。",
+          isStreaming: false,
+        },
+      ],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation,
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-existing-1",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-existing-1",
+        title: "旧会话",
+        status: "SUCCEEDED",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "开始新对话" }));
+
+    expect(resetConversation).toHaveBeenCalledTimes(1);
   });
 
   it("会用运行条展示当前参与处理的 Agent，并移除旧侧栏模块", async () => {

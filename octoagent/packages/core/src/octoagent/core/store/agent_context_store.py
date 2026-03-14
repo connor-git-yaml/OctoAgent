@@ -16,6 +16,8 @@ from ..models.agent_context import (
     AgentSession,
     AgentSessionKind,
     AgentSessionStatus,
+    AgentSessionTurn,
+    AgentSessionTurnKind,
     BootstrapSession,
     ContextFrame,
     MemoryNamespace,
@@ -534,10 +536,10 @@ class SqliteAgentContextStore:
                 agent_session_id, agent_runtime_id, kind, status, project_id,
                 workspace_id, surface, thread_id, legacy_session_id,
                 parent_agent_session_id, work_id, a2a_conversation_id,
-                last_context_frame_id, last_recall_frame_id, metadata,
-                created_at, updated_at, closed_at
+                last_context_frame_id, last_recall_frame_id, recent_transcript,
+                rolling_summary, metadata, created_at, updated_at, closed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
@@ -552,6 +554,8 @@ class SqliteAgentContextStore:
                 a2a_conversation_id = excluded.a2a_conversation_id,
                 last_context_frame_id = excluded.last_context_frame_id,
                 last_recall_frame_id = excluded.last_recall_frame_id,
+                recent_transcript = excluded.recent_transcript,
+                rolling_summary = excluded.rolling_summary,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at
@@ -571,6 +575,8 @@ class SqliteAgentContextStore:
                 session.a2a_conversation_id,
                 session.last_context_frame_id,
                 session.last_recall_frame_id,
+                self._dump(session.recent_transcript),
+                session.rolling_summary,
                 self._dump(session.metadata),
                 session.created_at.isoformat(),
                 session.updated_at.isoformat(),
@@ -624,6 +630,97 @@ class SqliteAgentContextStore:
             tuple([*args, limit]),
         )
         return [self._row_to_agent_session(row) for row in rows]
+
+    async def save_agent_session_turn(self, turn: AgentSessionTurn) -> AgentSessionTurn:
+        await self._conn.execute(
+            """
+            INSERT INTO agent_session_turns (
+                agent_session_turn_id, agent_session_id, task_id, turn_seq,
+                kind, role, tool_name, artifact_ref, summary, dedupe_key,
+                metadata, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_session_turn_id) DO UPDATE SET
+                agent_session_id = excluded.agent_session_id,
+                task_id = excluded.task_id,
+                turn_seq = excluded.turn_seq,
+                kind = excluded.kind,
+                role = excluded.role,
+                tool_name = excluded.tool_name,
+                artifact_ref = excluded.artifact_ref,
+                summary = excluded.summary,
+                dedupe_key = excluded.dedupe_key,
+                metadata = excluded.metadata,
+                created_at = excluded.created_at
+            """,
+            (
+                turn.agent_session_turn_id,
+                turn.agent_session_id,
+                turn.task_id,
+                turn.turn_seq,
+                turn.kind.value,
+                turn.role,
+                turn.tool_name,
+                turn.artifact_ref,
+                turn.summary,
+                turn.dedupe_key,
+                self._dump(turn.metadata),
+                turn.created_at.isoformat(),
+            ),
+        )
+        return turn
+
+    async def get_agent_session_turn_by_dedupe_key(
+        self,
+        *,
+        agent_session_id: str,
+        dedupe_key: str,
+    ) -> AgentSessionTurn | None:
+        if not dedupe_key.strip():
+            return None
+        row = await self._fetchone(
+            """
+            SELECT * FROM agent_session_turns
+            WHERE agent_session_id = ? AND dedupe_key = ?
+            LIMIT 1
+            """,
+            (agent_session_id, dedupe_key),
+        )
+        return self._row_to_agent_session_turn(row) if row is not None else None
+
+    async def get_next_agent_session_turn_seq(self, agent_session_id: str) -> int:
+        row = await self._fetchone(
+            """
+            SELECT COALESCE(MAX(turn_seq), 0) AS max_turn_seq
+            FROM agent_session_turns
+            WHERE agent_session_id = ?
+            """,
+            (agent_session_id,),
+        )
+        return int(row["max_turn_seq"] or 0) + 1 if row is not None else 1
+
+    async def list_agent_session_turns(
+        self,
+        *,
+        agent_session_id: str,
+        limit: int = 50,
+    ) -> list[AgentSessionTurn]:
+        rows = await self._fetchall(
+            """
+            SELECT * FROM agent_session_turns
+            WHERE agent_session_id = ?
+            ORDER BY turn_seq DESC, created_at DESC
+            LIMIT ?
+            """,
+            (agent_session_id, limit),
+        )
+        return [self._row_to_agent_session_turn(row) for row in reversed(rows)]
+
+    async def delete_agent_session_turns(self, *, agent_session_id: str) -> None:
+        await self._conn.execute(
+            "DELETE FROM agent_session_turns WHERE agent_session_id = ?",
+            (agent_session_id,),
+        )
 
     async def save_memory_namespace(self, namespace: MemoryNamespace) -> MemoryNamespace:
         await self._conn.execute(
@@ -1158,12 +1255,37 @@ class SqliteAgentContextStore:
             a2a_conversation_id=row["a2a_conversation_id"],
             last_context_frame_id=row["last_context_frame_id"],
             last_recall_frame_id=row["last_recall_frame_id"],
+            recent_transcript=cls._load(
+                row["recent_transcript"],
+                cls._load(row["metadata"], {}).get("recent_transcript", []),
+            ),
+            rolling_summary=(
+                str(row["rolling_summary"] or "").strip()
+                or str(cls._load(row["metadata"], {}).get("rolling_summary", "")).strip()
+            ),
             metadata=cls._load(row["metadata"], {}),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             closed_at=(
                 datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None
             ),
+        )
+
+    @classmethod
+    def _row_to_agent_session_turn(cls, row: aiosqlite.Row) -> AgentSessionTurn:
+        return AgentSessionTurn(
+            agent_session_turn_id=row["agent_session_turn_id"],
+            agent_session_id=row["agent_session_id"],
+            task_id=row["task_id"],
+            turn_seq=int(row["turn_seq"] or 0),
+            kind=AgentSessionTurnKind(row["kind"]),
+            role=row["role"],
+            tool_name=row["tool_name"],
+            artifact_ref=row["artifact_ref"],
+            summary=row["summary"],
+            dedupe_key=row["dedupe_key"],
+            metadata=cls._load(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
         )
 
     @classmethod

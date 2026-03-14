@@ -456,12 +456,33 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     a2a_conversation_id      TEXT NOT NULL DEFAULT '',
     last_context_frame_id    TEXT NOT NULL DEFAULT '',
     last_recall_frame_id     TEXT NOT NULL DEFAULT '',
+    recent_transcript        TEXT NOT NULL DEFAULT '[]',
+    rolling_summary          TEXT NOT NULL DEFAULT '',
     metadata                 TEXT NOT NULL DEFAULT '{}',
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL,
     closed_at                TEXT,
 
     FOREIGN KEY (agent_runtime_id) REFERENCES agent_runtimes(agent_runtime_id)
+);
+"""
+
+_AGENT_SESSION_TURNS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_session_turns (
+    agent_session_turn_id    TEXT PRIMARY KEY,
+    agent_session_id         TEXT NOT NULL,
+    task_id                  TEXT NOT NULL DEFAULT '',
+    turn_seq                 INTEGER NOT NULL DEFAULT 0,
+    kind                     TEXT NOT NULL DEFAULT 'user_message',
+    role                     TEXT NOT NULL DEFAULT '',
+    tool_name                TEXT NOT NULL DEFAULT '',
+    artifact_ref             TEXT NOT NULL DEFAULT '',
+    summary                  TEXT NOT NULL DEFAULT '',
+    dedupe_key               TEXT NOT NULL DEFAULT '',
+    metadata                 TEXT NOT NULL DEFAULT '{}',
+    created_at               TEXT NOT NULL,
+
+    FOREIGN KEY (agent_session_id) REFERENCES agent_sessions(agent_session_id)
 );
 """
 
@@ -733,6 +754,19 @@ _AGENT_CONTEXT_INDEXES = [
         "ON agent_sessions(legacy_session_id, updated_at DESC);"
     ),
     (
+        "CREATE INDEX IF NOT EXISTS idx_agent_session_turns_session_seq "
+        "ON agent_session_turns(agent_session_id, turn_seq ASC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_agent_session_turns_task_created "
+        "ON agent_session_turns(task_id, created_at DESC);"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_session_turns_dedupe "
+        "ON agent_session_turns(agent_session_id, dedupe_key) "
+        "WHERE dedupe_key != '';"
+    ),
+    (
         "CREATE INDEX IF NOT EXISTS idx_a2a_conversations_work_updated "
         "ON a2a_conversations(work_id, updated_at DESC);"
     ),
@@ -874,6 +908,22 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ADD COLUMN last_recall_frame_id TEXT NOT NULL DEFAULT ''"
         )
 
+    agent_session_columns = await _table_columns(conn, "agent_sessions")
+    if agent_session_columns and "recent_transcript" not in agent_session_columns:
+        await conn.execute(
+            "ALTER TABLE agent_sessions "
+            "ADD COLUMN recent_transcript TEXT NOT NULL DEFAULT '[]'"
+        )
+    if agent_session_columns and "rolling_summary" not in agent_session_columns:
+        await conn.execute(
+            "ALTER TABLE agent_sessions "
+            "ADD COLUMN rolling_summary TEXT NOT NULL DEFAULT ''"
+        )
+
+    agent_session_turn_columns = await _table_columns(conn, "agent_session_turns")
+    if not agent_session_turn_columns:
+        await conn.execute(_AGENT_SESSION_TURNS_DDL)
+
     context_frame_columns = await _table_columns(conn, "context_frames")
     if context_frame_columns and "agent_runtime_id" not in context_frame_columns:
         await conn.execute(
@@ -927,6 +977,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_BOOTSTRAP_SESSIONS_DDL)
     await conn.execute(_AGENT_RUNTIMES_DDL)
     await conn.execute(_AGENT_SESSIONS_DDL)
+    await conn.execute(_AGENT_SESSION_TURNS_DDL)
     await conn.execute(_A2A_CONVERSATIONS_DDL)
     await conn.execute(_A2A_MESSAGES_DDL)
     await conn.execute(_MEMORY_NAMESPACES_DDL)

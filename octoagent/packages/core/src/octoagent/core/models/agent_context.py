@@ -71,6 +71,14 @@ class AgentSessionStatus(StrEnum):
     CLOSED = "closed"
 
 
+class AgentSessionTurnKind(StrEnum):
+    USER_MESSAGE = "user_message"
+    ASSISTANT_MESSAGE = "assistant_message"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    CONTEXT_SUMMARY = "context_summary"
+
+
 class MemoryNamespaceKind(StrEnum):
     PROJECT_SHARED = "project_shared"
     BUTLER_PRIVATE = "butler_private"
@@ -233,10 +241,29 @@ class AgentSession(BaseModel):
     a2a_conversation_id: str = Field(default="")
     last_context_frame_id: str = Field(default="")
     last_recall_frame_id: str = Field(default="")
+    recent_transcript: list[dict[str, str]] = Field(default_factory=list)
+    rolling_summary: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     closed_at: datetime | None = None
+
+
+class AgentSessionTurn(BaseModel):
+    """AgentSession 的正式 turn / tool-turn 持久化记录。"""
+
+    agent_session_turn_id: str = Field(min_length=1)
+    agent_session_id: str = Field(min_length=1)
+    task_id: str = Field(default="")
+    turn_seq: int = Field(default=0, ge=0)
+    kind: AgentSessionTurnKind = AgentSessionTurnKind.USER_MESSAGE
+    role: str = Field(default="")
+    tool_name: str = Field(default="")
+    artifact_ref: str = Field(default="")
+    summary: str = Field(default="")
+    dedupe_key: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utc_now)
 
 
 class MemoryNamespace(BaseModel):

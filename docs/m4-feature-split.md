@@ -29,7 +29,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
 | 041 | Implemented | ambient facts、Butler-owned freshness delegation、worker private recall、surface truth 与缺城市/环境受限 acceptance 已闭合 |
 | 048 | Draft | `Home / Settings / Chat` 普通用户主路径清晰化：单一主行动、最少必要配置、等待态与折叠式协作进度 |
-| 049 | Draft | Butler 默认 persona 与 clarification-first 行为系统：通用补问策略、behavior pack、Agent 可提案的人格演化机制 |
+| 049 | Implemented | Butler behavior workspace 与 agentic decision runtime：少量显式 md、runtime hints、`ButlerDecision`、Web 只读 behavior 面 + CLI `ls/show/init` |
 
 ## 3. 各 Feature 边界
 
@@ -115,7 +115,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 本轮已经做实：
 
-- `general` worker 默认只保留 supervisor 工具组
+- `general` worker 仍以 Butler/supervisor 为主，但在治理允许时可直接持有有界任务需要的 `project / artifact / document / session / network / browser / memory` 等工具组
 - `workers.review` built-in tool
 - `worker.review / worker.apply` control-plane actions
 - child work `requested_tool_profile` runtime truth
@@ -205,7 +205,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 约束：
 
-- 041 不是给主 Agent 重新挂 web/browser/code 执行面；Butler 仍是 supervisor-only
+- 041 的初始目标不是把主 Agent 退化成“普通执行 worker”；Butler 仍是 supervisor 与最终责任人，但在治理允许且任务有界时可以直接使用已挂载工具完成小步执行
 - 041 不以专用天气 API 为前提；优先复用现有 `web.search / web.fetch / browser.*`
 - 041 必须保留 runtime truth：谁去查、拿到什么 tool profile、为何降级，都要可解释
 - 041 的最终完成标准不是“research route 命中了”，而是“用户可审计地看到 Butler 委派给 Worker，Worker 以独立 session/memory/recall 完成任务”
@@ -216,7 +216,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 048：Guided Surface Clarity Refresh
 
-状态：**Draft**
+状态：**Implemented**
 
 目标：
 
@@ -230,26 +230,47 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - 不重做 047 的前端架构层
 - 不修改 039/041 的 runtime truth，只负责把现有事实源翻译成普通用户语言
 
-### Feature 049：Butler Persona & Clarification Behavior System
+### Feature 049：Butler Behavior Workspace & Agentic Decision Runtime
 
 状态：**Draft**
 
 目标：
 
-- 把缺信息时的补问策略收口为通用 clarification-first 行为系统
-- 用 project-scoped markdown behavior pack 承载 Butler 默认人格与行为
-- 借鉴 OpenClaw 的行为文件体系与 Agent Zero 的 prompt 分层，支持 Agent 提案式人格演化
+- 把默认行为从代码里的场景特判迁移到显式 behavior workspace
+- 用少量核心 markdown 文件承载 Butler 行为，并通过 runtime hints 交给 Agent 自主判断
+- 借鉴 OpenClaw 的文件可见性和 Agent Zero 的分层装配，但保留 OctoAgent 的 governance / A2A / durability
 
-边界：
+当前实现：
 
-- 不为天气/推荐/排期逐个加 case patch
-- 不绕过现有治理直接让 Agent 静默改写核心行为文件
+- 当前阶段只把 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md` 作为默认核心文件
+- `RuntimeHintBundle + RecentConversation + ButlerDecision preflight` 已进入 Butler 主链
+- generic `delegate_research / delegate_ops` 已成为可执行预路由，不再只停留在 decision contract
+- deterministic 场景树已收口为 compatibility fallback，并带 provenance
+- Web 已提供 `Settings -> Behavior Files` 只读 operator 视图；CLI 已提供 `octo behavior ls/show/init`
+
+### Feature 051：Session-Native Agent Runtime & Recall Loop
+
+状态：**In Progress**
+
+目标：
+
+- 把 `AgentSession` 收口成 transcript-native 真相源，而不是继续主要依赖 task/event reconstruction
+- 把 `ToolUniverseHints` 接进 ButlerDecision，让模型先看到真实挂载工具再判断
+- 把 memory 主链推进到 agent-led recall，并给 behavior workspace 补预算 / 截断 / overlay contract
+
+当前计划：
+
+- Slice A `behavior budget + tool universe hints` 已完成
+- Slice B phase 2 已完成：`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store；`user / assistant / tool_call / tool_result / context_summary` 会写入 `agent_session_turns`，`RecentConversation / session.export / session.reset` 已优先消费该 store
+- Slice C phase 2 已完成：Butler chat 默认改成 `agent-led hint-first`；`planner_enabled` profile 下的 `ButlerDecision + RecallPlan` 已收口为统一 `ButlerLoopPlan`，direct-answer 路径会把 recall 计划作为 `precomputed_recall_plan` 注入主调用；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；Worker 保持 `detailed_prefetch`
+- Slice D 已完成：compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义
+- Slice E 已完成：`AgentSessionTurn` replay/sanitize 投影与默认 general Butler `single_loop_executor` 已接回主链；后续只剩可选增强，而非主缺口
 
 ## 6. 非伪实现门禁
 
 当前 M4 波次必须满足以下门禁，否则不能视为完成：
 
-1. 主 Agent 默认必须是 supervisor，而不是继续直接持有 web/browser/code 等执行面。
+1. 主 Agent 默认必须是 supervisor 与最终责任人；但在治理允许且任务有界时，可以直接持有并使用受治理执行面，不再为了形式上的分层强行拒绝直接工具调用。
 2. `work -> child work -> subagent/graph` 必须是 durable 主链，并能在 control plane / workbench 被解释。
 3. live dispatch 必须真正经过 `ButlerSession -> A2AConversation -> WorkerSession` 的 message-native A2A 主链，而不是只有 adapter/tests。
 4. Workbench / Settings / Setup 必须直接复用 canonical resources/actions，不得造 `settings/*`、`setup/*` 私有 backend。
@@ -257,6 +278,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 6. 035/040 必须显式展示 `context_continuity` 运行状态；若未来出现 degraded，不能把“缺上下文连续性”隐藏在默认行为里。
 7. 若系统已经具备 delegated web/browser path，则 Butler/Worker 不得把“自己不直接上网”误表述成“系统整体不能处理实时/外部事实问题”。
 8. `WorkerSession` 不得继续退化为 loop/backoff/tool_profile 一类运行态对象；它必须是完整的 internal conversation / memory / recall carrier。
+9. 049 必须把默认行为主路径从代码特判迁移到 `behavior files + runtime hints + ButlerDecision`；天气/推荐/排期等问题不得继续扩张为新的硬编码分类树。
+10. 051 必须继续把 `AgentSession`、tool universe、memory recall 收口到 agent-native 主链；不能长期停留在弱引用 session 和 system-prefetch-only recall 上。
 
 ## 7. 移入 M5 的内容
 

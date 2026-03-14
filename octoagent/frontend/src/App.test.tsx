@@ -213,6 +213,7 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         refs: {},
         focused_session_id: "",
         focused_thread_id: "",
+        new_conversation_token: "",
         sessions: [],
         operator_summary: {
           total_pending: 0,

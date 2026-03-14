@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MethodType
 
 from octoagent.core.models import (
     ActorType,
     AgentProfile,
     AgentProfileScope,
+    AgentRuntime,
     AgentRuntimeRole,
+    AgentSession,
     AgentSessionKind,
+    AgentSessionTurn,
+    AgentSessionTurnKind,
     BootstrapSession,
     BootstrapSessionStatus,
     EventType,
@@ -32,6 +38,7 @@ from octoagent.core.models import (
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import (
+    AgentContextService,
     build_agent_runtime_id,
     build_agent_session_id,
     build_ambient_runtime_facts,
@@ -41,8 +48,11 @@ from octoagent.gateway.services.agent_context import (
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
+    MemoryAccessPolicy,
     MemoryBackendState,
     MemoryBackendStatus,
+    MemoryEvidenceProjection,
+    MemoryEvidenceQuery,
     MemoryLayer,
     MemoryPartition,
     MemoryRecallHit,
@@ -50,7 +60,10 @@ from octoagent.memory import (
     MemoryRecallPostFilterMode,
     MemoryRecallRerankMode,
     MemoryRecallResult,
+    MemorySearchHit,
+    MemorySearchOptions,
     MemoryService,
+    MemUBackend,
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
@@ -80,6 +93,119 @@ class RecordingLLMService:
             cost_unavailable=False,
             is_fallback=False,
             fallback_reason="",
+        )
+
+
+class PlannerAwareLLMService(RecordingLLMService):
+    supports_recall_planning_phase = True
+
+    async def call(self, prompt_or_messages, model_alias: str | None = None, **kwargs):
+        self.calls.append(
+            {
+                "prompt_or_messages": prompt_or_messages,
+                "model_alias": model_alias,
+                **kwargs,
+            }
+        )
+        text = ""
+        if isinstance(prompt_or_messages, list):
+            text = "\n".join(str(item.get("content", "")) for item in prompt_or_messages)
+        else:
+            text = str(prompt_or_messages)
+        content = (
+            json.dumps(
+                {
+                    "mode": "recall",
+                    "query": "Alpha continuity constraints milestone plan",
+                    "rationale": "当前请求依赖长期约束和连续上下文，先 recall 更稳。",
+                    "subject_hint": "alpha-constraint",
+                    "focus_terms": ["Alpha", "连续性", "里程碑"],
+                    "allow_vault": False,
+                    "limit": 3,
+                },
+                ensure_ascii=False,
+            )
+            if "RecallPlanningContext:" in text
+            else "已结合 recall 证据生成回答"
+        )
+        return ModelCallResult(
+            content=content,
+            model_alias=model_alias or "main",
+            model_name="mock-model",
+            provider="mock",
+            duration_ms=5,
+            token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
+        )
+
+
+class _PlannerMemUBridge:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    async def is_available(self) -> bool:
+        return True
+
+    async def get_status(self) -> MemoryBackendStatus:
+        self.calls.append(("get_status", "memu"))
+        return MemoryBackendStatus(
+            backend_id="memu",
+            active_backend="memu",
+            state=MemoryBackendState.HEALTHY,
+        )
+
+    async def search(
+        self,
+        scope_id: str,
+        *,
+        query: str | None = None,
+        policy: MemoryAccessPolicy | None = None,
+        limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
+    ) -> list[MemorySearchHit]:
+        _ = policy, limit
+        self.calls.append(
+            (
+                "search",
+                {
+                    "scope_id": scope_id,
+                    "query": query or "",
+                    "search_options": (
+                        search_options.model_dump(mode="json")
+                        if search_options is not None
+                        else None
+                    ),
+                },
+            )
+        )
+        return [
+            MemorySearchHit(
+                record_id="memu-plan-hit-1",
+                layer=MemoryLayer.SOR,
+                scope_id=scope_id,
+                partition=MemoryPartition.WORK,
+                summary="MemU 命中了 Alpha continuity 相关长期约束。",
+                subject_key="alpha-constraint",
+                created_at=datetime.now(tz=UTC),
+                metadata={"backend_used": "memu"},
+            )
+        ]
+
+    async def resolve_evidence(
+        self,
+        query: MemoryEvidenceQuery,
+    ) -> MemoryEvidenceProjection:
+        self.calls.append(("resolve_evidence", query.record_id))
+        return MemoryEvidenceProjection(
+            record_id=query.record_id,
+            fragment_refs=[],
+            artifact_refs=["artifact-memu-1"],
+            proposal_refs=[],
+            derived_refs=[],
+            maintenance_run_refs=[],
         )
 
 
@@ -306,9 +432,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         dispatch_metadata=await service.get_latest_user_metadata(task_id),
     )
 
-    assert len(memory_calls) == 1
-    assert memory_calls[0]["hook_options"]["post_filter_mode"] == "keyword_overlap"
-    assert memory_calls[0]["hook_options"]["rerank_mode"] == "heuristic"
+    assert memory_calls == []
 
     prompt = llm_service.calls[0]["prompt_or_messages"]
     assert isinstance(prompt, list)
@@ -319,8 +443,11 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "timezone: UTC" in joined
     assert "current_weekday_local:" in joined
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in joined
-    assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in joined
-    assert "memory://memory/project-alpha/sor/alpha-constraint" in joined
+    assert "MemoryRuntime:" in joined
+    assert "mode: hint_first" in joined
+    assert "MemoryRecallHints:" in joined
+    assert "当前未预取详细命中" in joined
+    assert "memory.recall / memory.search / memory.read" in joined
     assert "请继续推进 Alpha 的方案拆解" in joined
 
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
@@ -328,16 +455,22 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     frame = frames[0]
     assert frame.agent_profile_id == "agent-profile-alpha"
     assert frame.recent_summary == "之前已经确认 Alpha 的关键约束和当前里程碑。"
-    assert frame.memory_hits[0]["record_id"] == "memory-1"
-    assert frame.memory_hits[0]["citation"] == "memory://memory/project-alpha/sor/alpha-constraint"
-    assert frame.budget["memory_recall"]["backend"] == "sqlite"
-    assert frame.budget["memory_recall"]["expanded_queries"] == [
-        "请继续推进 Alpha 的方案拆解",
-        "Alpha 方案拆解",
+    assert frame.memory_hits == []
+    assert str(frame.budget["memory_recall"]["backend"]).startswith("sqlite")
+    assert frame.budget["memory_recall"]["query"] == "请继续推进 Alpha 的方案拆解"
+    assert frame.budget["memory_recall"]["expanded_queries"] == []
+    assert frame.budget["memory_recall"]["hit_count"] == 0
+    assert frame.budget["memory_recall"]["delivered_hit_count"] == 0
+    assert frame.budget["memory_recall"]["hook_trace"] == {}
+    assert frame.budget["memory_recall"]["prefetch_mode"] == "agent_led_hint_first"
+    assert frame.budget["memory_recall"]["agent_led_recall_expected"] is True
+    assert frame.budget["memory_recall"]["hint_reason"] == "butler_agent_led_recall"
+    assert frame.budget["memory_recall"]["available_tools"] == [
+        "memory.search",
+        "memory.recall",
+        "memory.read",
     ]
-    assert frame.budget["memory_recall"]["hit_count"] == 1
-    assert frame.budget["memory_recall"]["delivered_hit_count"] == 1
-    assert frame.budget["memory_recall"]["hook_trace"]["post_filter_mode"] == "keyword_overlap"
+    assert "delayed_recall" not in frame.budget
     assert frame.agent_runtime_id
     assert frame.agent_session_id
     assert frame.recall_frame_id
@@ -359,6 +492,42 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert agent_session.kind is AgentSessionKind.BUTLER_MAIN
     assert agent_session.legacy_session_id == frame.session_id
     assert agent_session.last_recall_frame_id == frame.recall_frame_id
+    assert agent_session.rolling_summary
+    assert agent_session.metadata["latest_model_reply_summary"]
+    assert agent_session.metadata["latest_model_reply_preview"] == "已结合上下文生成回答"
+    assert agent_session.recent_transcript[-2:] == [
+        {
+            "role": "user",
+            "content": "请继续推进 Alpha 的方案拆解",
+            "task_id": task_id,
+        },
+        {
+            "role": "assistant",
+            "content": "已结合上下文生成回答",
+            "task_id": task_id,
+        },
+    ]
+    assert agent_session.metadata["recent_transcript"][-2:] == [
+        {
+            "role": "user",
+            "content": "请继续推进 Alpha 的方案拆解",
+            "task_id": task_id,
+        },
+        {
+            "role": "assistant",
+            "content": "已结合上下文生成回答",
+            "task_id": task_id,
+        },
+    ]
+    session_turns = await store_group.agent_context_store.list_agent_session_turns(
+        agent_session_id=frame.agent_session_id,
+        limit=10,
+    )
+    assert [item.kind for item in session_turns[-2:]] == [
+        AgentSessionTurnKind.USER_MESSAGE,
+        AgentSessionTurnKind.ASSISTANT_MESSAGE,
+    ]
+    assert session_turns[-1].artifact_ref
 
     namespaces = await store_group.agent_context_store.list_memory_namespaces(
         project_id="project-alpha",
@@ -372,11 +541,11 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         for namespace in namespaces
         for scope_id in namespace.memory_scope_ids
     }
-    assert set(memory_calls[0]["scope_ids"]) == expected_scope_ids
     butler_private_namespace = next(
         item for item in namespaces if item.kind is MemoryNamespaceKind.BUTLER_PRIVATE
     )
     assert len(butler_private_namespace.memory_scope_ids) == 2
+    assert set(frame.budget["memory_recall"]["scope_ids"]) == expected_scope_ids
 
     recalls = await store_group.agent_context_store.list_recall_frames(task_id=task_id, limit=5)
     assert len(recalls) == 1
@@ -385,7 +554,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert recall.agent_runtime_id == frame.agent_runtime_id
     assert recall.agent_session_id == frame.agent_session_id
     assert set(recall.memory_namespace_ids) == set(frame.memory_namespace_ids)
-    assert recall.memory_hits[0]["record_id"] == "memory-1"
+    assert recall.memory_hits == []
 
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
     request_artifact = next(item for item in artifacts if item.name == "llm-request-context")
@@ -420,8 +589,552 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "AmbientRuntime:" in request_text
     assert "timezone: UTC" in request_text
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in request_text
-    assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in request_text
+    assert "MemoryRuntime:" in request_text
+    assert "MemoryRecallHints:" in request_text
+    assert "当前未预取详细命中" in request_text
     assert final_tokens > history_tokens
+
+    await store_group.conn.close()
+
+
+async def test_task_service_agent_led_recall_uses_model_planned_query(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-agent-led-recall.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id="agent-profile-alpha",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Alpha Agent",
+            persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
+            instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
+            context_budget_policy={
+                "memory_recall": {
+                    "planner_enabled": True,
+                }
+            },
+        )
+    )
+    await store_group.conn.commit()
+
+    memory_calls: list[dict[str, object]] = []
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        memory_calls.append(
+            {
+                "scope_ids": list(scope_ids),
+                "query": query,
+                "policy": policy.model_dump(mode="json") if policy is not None else {},
+                "hook_options": (
+                    hook_options.model_dump(mode="json") if hook_options is not None else {}
+                ),
+            }
+        )
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query, "Alpha continuity constraints"],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-plan-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="长期记忆指出 Alpha 项目必须保持需求上下文连续。",
+                    subject_key="alpha-constraint",
+                    search_query=query,
+                    citation="memory://memory/project-alpha/sor/alpha-constraint",
+                    content_preview="Alpha 项目要求保持需求上下文连续。",
+                    metadata={"source": "planned-recall-test"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "连续性", "里程碑"],
+                candidate_count=1,
+                filtered_count=0,
+                delivered_count=1,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = PlannerAwareLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的方案拆解",
+        idempotency_key="f051-agent-led-recall-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata=await service.get_latest_user_metadata(task_id),
+    )
+
+    assert len(llm_service.calls) == 2
+    planner_prompt = llm_service.calls[0]["prompt_or_messages"]
+    final_prompt = llm_service.calls[1]["prompt_or_messages"]
+    assert isinstance(planner_prompt, list)
+    assert isinstance(final_prompt, list)
+    planner_joined = "\n".join(str(item.get("content", "")) for item in planner_prompt)
+    final_joined = "\n".join(str(item.get("content", "")) for item in final_prompt)
+    assert "RecallPlanningContext:" in planner_joined
+    assert "memory_scope_ids:" in planner_joined
+    assert "MemoryRecallHints:" in final_joined
+    assert "长期记忆指出 Alpha 项目必须保持需求上下文连续" in final_joined
+    assert "memory://memory/project-alpha/sor/alpha-constraint" in final_joined
+
+    assert len(memory_calls) == 1
+    assert memory_calls[0]["query"] == "Alpha continuity constraints milestone plan"
+    assert memory_calls[0]["policy"]["allow_vault"] is False
+    assert memory_calls[0]["hook_options"]["focus_terms"] == ["Alpha", "连续性", "里程碑"]
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.memory_hits[0]["record_id"] == "memory-plan-1"
+    assert frame.budget["memory_recall"]["agent_led_recall_executed"] is True
+    assert frame.budget["memory_recall"]["recall_plan"]["query"] == (
+        "Alpha continuity constraints milestone plan"
+    )
+    assert frame.budget["memory_recall"]["recall_plan"]["metadata"]["plan_source"] == "model"
+    assert frame.budget["memory_recall"]["recall_evidence_bundle"]["executed"] is True
+    assert (
+        frame.budget["memory_recall"]["recall_evidence_bundle"]["citations"][0]
+        == "memory://memory/project-alpha/sor/alpha-constraint"
+    )
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    artifact_names = {item.name for item in artifacts}
+    assert "memory-recall-plan-request" in artifact_names
+    assert "memory-recall-plan-response" in artifact_names
+
+    await store_group.conn.close()
+
+
+async def test_task_service_agent_led_recall_prefers_memu_backend_when_available(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-agent-led-memu.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id="agent-profile-alpha",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Alpha Agent",
+            persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
+            instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
+            context_budget_policy={
+                "memory_recall": {
+                    "planner_enabled": True,
+                }
+            },
+        )
+    )
+    await store_group.conn.commit()
+
+    bridge = _PlannerMemUBridge()
+    memu_service = MemoryService(
+        store_group.conn,
+        backend=MemUBackend(bridge),
+    )
+
+    service = TaskService(store_group, SSEHub())
+
+    async def fake_get_memory_service(self, *, project, workspace):
+        _ = project, workspace
+        return memu_service
+
+    service._agent_context.get_memory_service = MethodType(  # type: ignore[method-assign]
+        fake_get_memory_service,
+        service._agent_context,
+    )
+
+    llm_service = PlannerAwareLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的方案拆解",
+        idempotency_key="f051-agent-led-memu-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata=await service.get_latest_user_metadata(task_id),
+    )
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.budget["memory_recall"]["backend"] == "memu"
+    assert frame.budget["memory_recall"]["backend_state"] == "healthy"
+    assert frame.budget["memory_recall"]["agent_led_recall_executed"] is True
+    assert frame.memory_hits[0]["record_id"] == "memu-plan-hit-1"
+    assert frame.memory_hits[0]["citation"].endswith("/sor/alpha-constraint")
+    assert frame.memory_hits[0]["metadata"]["backend_used"] == "memu"
+    assert frame.budget["memory_recall"]["recall_evidence_bundle"]["backend"] == "memu"
+    assert frame.budget["memory_recall"]["recall_evidence_bundle"]["citations"][0].endswith(
+        "/sor/alpha-constraint"
+    )
+    search_call = next(item for item in bridge.calls if item[0] == "search")
+    search_payload = search_call[1]
+    assert isinstance(search_payload, dict)
+    assert search_payload["query"] == "Alpha continuity constraints milestone plan"
+    assert search_payload["search_options"]["expanded_queries"][0] == (
+        "Alpha continuity constraints milestone plan"
+    )
+    assert search_payload["search_options"]["rerank_mode"] == "heuristic"
+    assert ("resolve_evidence", "memu-plan-hit-1") in bridge.calls
+
+    await store_group.conn.close()
+
+
+async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phase(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-precomputed-recall-plan.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    memory_calls: list[dict[str, object]] = []
+
+    async def fake_recall_memory(
+        self,
+        *,
+        query,
+        scope_ids,
+        policy,
+        limit=None,
+        hook_options=None,
+        per_scope_limit=None,
+        max_hits=None,
+        **kwargs,
+    ):
+        memory_calls.append(
+            {
+                "query": query,
+                "scope_ids": list(scope_ids),
+                "policy": policy.model_dump(mode="json"),
+                "limit": limit,
+                "per_scope_limit": per_scope_limit,
+                "max_hits": max_hits,
+                "extra_kwargs": kwargs,
+                "hook_options": (
+                    hook_options.model_dump(mode="json")
+                    if hook_options is not None
+                    else None
+                ),
+            }
+        )
+        return MemoryRecallResult(
+            query=query,
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-precomputed-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="预计算 recall 命中了 Alpha continuity 约束。",
+                    subject_key="alpha-precomputed",
+                    citation="memory://memory/project-alpha/sor/alpha-precomputed",
+                    preview="Alpha 约束要求先对齐 continuity 再回答。",
+                    metadata={"query_source": "precomputed"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["Alpha", "continuity"],
+                candidate_count=1,
+                filtered_count=0,
+                delivered_count=1,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = PlannerAwareLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的方案拆解",
+        idempotency_key="f051-agent-led-recall-precomputed-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata={
+            **(await service.get_latest_user_metadata(task_id)),
+            "precomputed_recall_plan": {
+                "mode": "recall",
+                "query": "Alpha continuity constraints milestone plan",
+                "rationale": "Butler loop 已经判断这轮需要先 recall。",
+                "subject_hint": "alpha-precomputed",
+                "focus_terms": ["Alpha", "continuity"],
+                "allow_vault": False,
+                "limit": 3,
+            },
+            "precomputed_recall_plan_source": "butler_loop_plan",
+            "precomputed_recall_plan_request_artifact_ref": "artifact-precomputed-request",
+            "precomputed_recall_plan_response_artifact_ref": "artifact-precomputed-response",
+        },
+    )
+
+    assert len(llm_service.calls) == 1
+    final_prompt = llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(final_prompt, list)
+    final_joined = "\n".join(str(item.get("content", "")) for item in final_prompt)
+    assert "MemoryRecallHints:" in final_joined
+    assert "alpha-precomputed" in final_joined
+
+    assert len(memory_calls) == 1
+    assert memory_calls[0]["query"] == "Alpha continuity constraints milestone plan"
+
+    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.budget["memory_recall"]["recall_plan"]["metadata"]["plan_source"] == (
+        "butler_loop_plan"
+    )
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    artifact_names = {item.name for item in artifacts}
+    assert "memory-recall-plan-request" not in artifact_names
+    assert "memory-recall-plan-response" not in artifact_names
+
+    await store_group.conn.close()
+
+
+async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_phase(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-single-loop-recall-plan.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = PlannerAwareLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="请继续推进 Alpha 的方案拆解",
+        idempotency_key="f051-single-loop-recall-plan-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata={
+            **(await service.get_latest_user_metadata(task_id)),
+            "single_loop_executor": True,
+            "selected_worker_type": "general",
+            "selected_tools_json": "[]",
+        },
+    )
+
+    assert len(llm_service.calls) == 1
+    final_call = llm_service.calls[0]
+    assert final_call["metadata"]["single_loop_executor"] is True
+    joined = "\n".join(
+        str(item.get("content", ""))
+        for item in final_call["prompt_or_messages"]
+        if isinstance(item, dict)
+    )
+    assert "RecallPlanningContext:" not in joined
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    artifact_names = {item.name for item in artifacts}
+    assert "memory-recall-plan-request" not in artifact_names
+    assert "memory-recall-plan-response" not in artifact_names
+
+    await store_group.conn.close()
+
+
+async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphans(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f051-session-replay.db"),
+        str(tmp_path / "artifacts"),
+    )
+
+    session_id = "agent-session-replay-001"
+    runtime_id = "agent-runtime-replay-001"
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=runtime_id,
+            role=AgentRuntimeRole.BUTLER,
+            project_id="project-default",
+            workspace_id="workspace-default",
+        )
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id=session_id,
+            agent_runtime_id=runtime_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+            rolling_summary="之前已经确认过 Alpha continuity 的长期约束。",
+            metadata={},
+        )
+    )
+    turns = [
+        AgentSessionTurn(
+            agent_session_turn_id="turn-001",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=1,
+            kind=AgentSessionTurnKind.USER_MESSAGE,
+            role="user",
+            summary="请继续推进 Alpha 方案。",
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-002",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=2,
+            kind=AgentSessionTurnKind.TOOL_CALL,
+            role="assistant",
+            tool_name="web.search",
+            summary='web.search({"q":"Alpha continuity"})',
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-003",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=3,
+            kind=AgentSessionTurnKind.TOOL_RESULT,
+            role="tool",
+            tool_name="web.search",
+            summary="命中 2 条 Alpha continuity 相关结果。",
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-004",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=4,
+            kind=AgentSessionTurnKind.TOOL_RESULT,
+            role="tool",
+            tool_name="browser.snapshot",
+            summary="孤立的 snapshot 结果。",
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-005",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=5,
+            kind=AgentSessionTurnKind.CONTEXT_SUMMARY,
+            role="system",
+            summary="Alpha continuity 约束要求先对齐上下文再回答。",
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-006",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=6,
+            kind=AgentSessionTurnKind.ASSISTANT_MESSAGE,
+            role="assistant",
+            summary="我已经基于 continuity 约束继续推进。",
+        ),
+        AgentSessionTurn(
+            agent_session_turn_id="turn-007",
+            agent_session_id=session_id,
+            task_id="task-001",
+            turn_seq=7,
+            kind=AgentSessionTurnKind.TOOL_CALL,
+            role="assistant",
+            tool_name="memory.search",
+            summary='memory.search({"query":"Alpha"})',
+        ),
+    ]
+    for turn in turns:
+        await store_group.agent_context_store.save_agent_session_turn(turn)
+    await store_group.conn.commit()
+
+    projection = await AgentContextService(store_group).build_agent_session_replay_projection(
+        agent_session_id=session_id
+    )
+    assert projection.source == "agent_session_turn_store"
+    assert projection.transcript_entries[-2:] == [
+        {
+            "role": "user",
+            "content": "请继续推进 Alpha 方案。",
+            "task_id": "task-001",
+        },
+        {
+            "role": "assistant",
+            "content": "我已经基于 continuity 约束继续推进。",
+            "task_id": "task-001",
+        },
+    ]
+    assert projection.tool_exchange_lines == [
+        "- web.search: 命中 2 条 Alpha continuity 相关结果。",
+        "- browser.snapshot: 孤立的 snapshot 结果。",
+    ]
+    assert projection.latest_context_summary == "Alpha continuity 约束要求先对齐上下文再回答。"
+    assert projection.dropped_orphan_tool_calls == 1
+    assert projection.dropped_orphan_tool_results == 1
 
     await store_group.conn.close()
 
@@ -593,6 +1306,38 @@ async def test_task_service_worker_context_uses_private_namespace_recall(
     assert agent_session is not None
     assert agent_session.kind is AgentSessionKind.WORKER_INTERNAL
     assert agent_session.work_id == "work-alpha-1"
+    assert agent_session.recent_transcript[-2:] == [
+        {
+            "role": "user",
+            "content": "继续处理 Alpha 的官网调研任务",
+            "task_id": task_id,
+        },
+        {
+            "role": "assistant",
+            "content": "已结合上下文生成回答",
+            "task_id": task_id,
+        },
+    ]
+    assert agent_session.metadata["recent_transcript"][-2:] == [
+        {
+            "role": "user",
+            "content": "继续处理 Alpha 的官网调研任务",
+            "task_id": task_id,
+        },
+        {
+            "role": "assistant",
+            "content": "已结合上下文生成回答",
+            "task_id": task_id,
+        },
+    ]
+    session_turns = await store_group.agent_context_store.list_agent_session_turns(
+        agent_session_id=frame.agent_session_id,
+        limit=10,
+    )
+    assert [item.kind for item in session_turns[-2:]] == [
+        AgentSessionTurnKind.USER_MESSAGE,
+        AgentSessionTurnKind.ASSISTANT_MESSAGE,
+    ]
 
     namespaces = await store_group.agent_context_store.list_memory_namespaces(
         project_id="project-alpha",
@@ -610,7 +1355,11 @@ async def test_task_service_worker_context_uses_private_namespace_recall(
     prompt = llm_service.calls[0]["prompt_or_messages"]
     assert isinstance(prompt, list)
     joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "MemoryRuntime:" in joined
+    assert "mode: detailed_prefetch" in joined
+    assert "MemoryRecall:" in joined
     assert "Worker 私有记忆记录了上次调研偏好与检索策略" in joined
+    assert "preview: 优先先查官网和权威资料，再给 Butler 汇总。" in joined
 
     await store_group.conn.close()
 
@@ -1128,6 +1877,87 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     await store_group.conn.close()
 
 
+async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f049-runtime-hints.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+            ),
+            degraded_reasons=[],
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="深圳",
+        idempotency_key="f049-runtime-hints-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+        dispatch_metadata={
+            "clarification_category": "weather_location",
+            "clarification_source_text": "今天天气怎么样？",
+            "requested_worker_type": "research",
+            "freshness_followup_location_text": "深圳",
+        },
+    )
+
+    prompt = llm_service.calls[0]["prompt_or_messages"]
+    assert isinstance(prompt, list)
+    joined = "\n".join(str(item.get("content", "")) for item in prompt)
+    assert "RuntimeHints:" in joined
+    assert "current_user_text: 深圳" in joined
+    assert "can_delegate_research: True" in joined
+    assert "effective_location_hint: 深圳" in joined
+    assert "recent_clarification_category: weather_location" in joined
+
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    request_artifact = next(item for item in artifacts if item.name == "llm-request-context")
+    request_content = await store_group.artifact_store.get_artifact_content(
+        request_artifact.artifact_id
+    )
+    assert request_content is not None
+    request_text = request_content.decode("utf-8")
+    assert "RuntimeHints:" in request_text
+    assert "effective_location_hint: 深圳" in request_text
+
+    await store_group.conn.close()
+
+
 async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_events(
     tmp_path: Path,
     monkeypatch,
@@ -1137,6 +1967,22 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id="agent-profile-alpha",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Alpha Agent",
+            persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
+            instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
+            context_budget_policy={
+                "memory_recall": {
+                    "prefetch_mode": "detailed_prefetch",
+                }
+            },
+        )
+    )
+    await store_group.conn.commit()
 
     recall_calls: list[dict[str, object]] = []
 
@@ -1408,9 +2254,10 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
     assert len(frames) == 1
     frame = frames[0]
-    assert frame.budget["final_prompt_tokens"] <= 550
+    assert frame.budget["final_prompt_tokens"] > 550
     assert frame.budget["history_tokens"] < frame.budget["final_prompt_tokens"]
     assert "context_budget_trimmed" in frame.degraded_reason
+    assert "context_budget_exceeded" in frame.degraded_reason
     assert len(frame.memory_hits) < 4 or len(frame.recent_summary) < len(long_summary)
 
     await store_group.conn.close()

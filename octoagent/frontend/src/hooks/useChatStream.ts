@@ -7,7 +7,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildFrontDoorSseUrl, fetchTaskDetail, frontDoorRequest } from "../api/client";
+import {
+  buildFrontDoorSseUrl,
+  executeControlAction,
+  fetchTaskDetail,
+  frontDoorRequest,
+} from "../api/client";
 import type { SSEEventData } from "../types";
 import {
   AGENT_STREAM_PLACEHOLDER,
@@ -34,16 +39,47 @@ export interface UseChatStreamReturn {
   error: string | null;
   /** 发送消息 */
   sendMessage: (text: string, options?: ChatSendOptions) => Promise<void>;
+  /** 开始新对话 */
+  resetConversation: () => Promise<void>;
   /** 当前 task ID */
   taskId: string | null;
 }
 
+function makeControlActionRequest(
+  actionId: string,
+  params: Record<string, unknown>
+) {
+  return {
+    request_id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    action_id: actionId,
+    surface: "web" as const,
+    actor: {
+      actor_id: "user:web",
+      actor_label: "Owner",
+    },
+    params,
+  };
+}
+
+function normalizeTaskId(taskId: string | null | undefined): string | null {
+  if (!taskId) {
+    return null;
+  }
+  const normalized = taskId.trim();
+  return normalized ? normalized : null;
+}
 export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(() => readStoredTaskId());
+  const [suppressedRestoreSignature, setSuppressedRestoreSignature] = useState<string | null>(
+    null
+  );
   const eventSourceRef = useRef<EventSource | null>(null);
   const attemptedRestoreSignatureRef = useRef<string | null>(null);
   const restoreTaskIdSignature = (restoreTarget?.taskIds ?? []).join("|");
@@ -55,6 +91,27 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
       eventSourceRef.current = null;
     }
     setStreaming(false);
+  }, []);
+
+  const requestSessionFocus = useCallback(async (nextTaskId: string) => {
+    const normalized = normalizeTaskId(nextTaskId);
+    if (!normalized) {
+      return;
+    }
+    await executeControlAction(
+      makeControlActionRequest("session.focus", {
+        task_id: normalized,
+      })
+    );
+  }, []);
+
+  const requestNewConversation = useCallback(async (currentTaskId: string | null) => {
+    await executeControlAction(
+      makeControlActionRequest(
+        "session.new",
+        currentTaskId ? { task_id: currentTaskId } : {}
+      )
+    );
   }, []);
 
   /** 发送消息 */
@@ -75,6 +132,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
       try {
         setError(null);
         setRestoring(false);
+        setSuppressedRestoreSignature(null);
         const resp = await frontDoorRequest("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -92,6 +150,9 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         const data = await resp.json();
         const newTaskId = data.task_id;
         setTaskId(newTaskId);
+        void requestSessionFocus(newTaskId).catch(() => {
+          // 这里不阻断聊天主链，focus 同步失败只影响 restore/focus 体验。
+        });
 
         closeStream();
 
@@ -213,8 +274,25 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
         setStreaming(false);
       }
     },
-    [taskId, closeStream]
+    [taskId, closeStream, requestSessionFocus]
   );
+
+  const resetConversation = useCallback(async () => {
+    const currentTaskId = taskId;
+    closeStream();
+    attemptedRestoreSignatureRef.current = null;
+    setSuppressedRestoreSignature(restoreTaskIdSignature);
+    setMessages([]);
+    setError(null);
+    setRestoring(false);
+    setTaskId(null);
+    persistTaskId(null);
+    try {
+      await requestNewConversation(currentTaskId);
+    } catch {
+      setError("本地已切到新对话，但服务端还没确认新的会话起点。");
+    }
+  }, [closeStream, requestNewConversation, restoreTaskIdSignature, taskId]);
 
   // 组件卸载时清理
   useEffect(() => {
@@ -223,6 +301,10 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     async function restoreConversation() {
       const candidateTaskIds = buildRestoreCandidateTaskIds(taskId, restoreTarget);
       if (candidateTaskIds.length === 0 || messages.length > 0 || streaming) {
+        setRestoring(false);
+        return;
+      }
+      if (!taskId && suppressedRestoreSignature === restoreTaskIdSignature) {
         setRestoring(false);
         return;
       }
@@ -273,7 +355,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     return () => {
       cancelled = true;
     };
-  }, [messages.length, restoreTaskIdSignature, streaming, taskId]);
+  }, [messages.length, restoreTarget, restoreTaskIdSignature, streaming, suppressedRestoreSignature, taskId]);
 
   useEffect(() => {
     persistTaskId(taskId);
@@ -291,6 +373,7 @@ export function useChatStream(restoreTarget: ChatRestoreTarget | null = null): U
     restoring,
     error,
     sendMessage,
+    resetConversation,
     taskId,
   };
 }

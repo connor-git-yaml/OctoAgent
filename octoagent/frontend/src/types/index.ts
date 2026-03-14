@@ -481,6 +481,7 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   resource_id: "sessions:overview";
   focused_session_id: string;
   focused_thread_id: string;
+  new_conversation_token: string;
   sessions: SessionProjectionItem[];
   operator_summary: OperatorInboxSummary | null;
   operator_items: OperatorInboxItem[];
@@ -494,6 +495,25 @@ export interface AgentProfileItem {
   persona_summary: string;
   model_alias: string;
   tool_profile: string;
+  behavior_system?: {
+    source_chain?: string[];
+    decision_modes?: string[];
+    runtime_hint_fields?: string[];
+    files?: Array<{
+      file_id: string;
+      title: string;
+      layer: string;
+      visibility: string;
+      share_with_workers: boolean;
+      source_kind: string;
+      path_hint: string;
+      is_advanced?: boolean;
+    }>;
+    worker_slice?: {
+      shared_file_ids?: string[];
+      layers?: string[];
+    };
+  };
   memory_access_policy?: Record<string, unknown>;
   context_budget_policy?: Record<string, unknown>;
   metadata: Record<string, unknown>;
