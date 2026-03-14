@@ -5,10 +5,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import AgentCenter from "./AgentCenter";
 
 const useWorkbenchMock = vi.fn();
+const navigateMock = vi.fn();
 
 vi.mock("../components/shell/WorkbenchLayout", () => ({
   useWorkbench: () => useWorkbenchMock(),
 }));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
 
 function buildSnapshot(options?: {
   currentProjectId?: string;
@@ -380,6 +389,7 @@ function buildSnapshot(options?: {
 describe("AgentCenter", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    navigateMock.mockReset();
   });
 
   it("默认展示当前项目主 Agent 和已创建 Agent 列表，不把模板混进列表", async () => {
@@ -781,6 +791,41 @@ describe("AgentCenter", () => {
       expect(submitAction).toHaveBeenCalledWith("worker_profile.archive", {
         profile_id: "project-home:nas",
       });
+    });
+  });
+
+  it("可以显式开启专长 Agent 的独立会话，而不是继续偷偷 Pin 当前聊天", async () => {
+    const submitAction = vi.fn(async () => ({
+      data: {
+        new_conversation_token: "token-research",
+        project_id: "project-home",
+        workspace_id: "project-home-workspace",
+        agent_profile_id: "singleton:research",
+      },
+    }));
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction,
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    const researchCard = (await screen.findByText("Research Root Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(researchCard).not.toBeNull();
+
+    await userEvent.click(within(researchCard!).getByRole("button", { name: "直接开启会话" }));
+
+    await waitFor(() => {
+      expect(submitAction).toHaveBeenCalledWith("session.new", {
+        agent_profile_id: "singleton:research",
+      });
+      expect(navigateMock).toHaveBeenCalledWith("/chat");
     });
   });
 

@@ -10,8 +10,13 @@ const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalat
 function countDegradedResources(
   snapshot: NonNullable<ReturnType<typeof useWorkbench>["snapshot"]>
 ): number {
-  return Object.values(snapshot.resources).filter((resource) => resource.degraded.is_degraded)
-    .length;
+  return Object.values(snapshot.resources).filter((resource) => {
+    const degraded =
+      resource && typeof resource === "object" && "degraded" in resource
+        ? (resource as { degraded?: { is_degraded?: boolean } }).degraded
+        : null;
+    return Boolean(degraded?.is_degraded);
+  }).length;
 }
 
 export default function AdvancedControlPlanePage() {

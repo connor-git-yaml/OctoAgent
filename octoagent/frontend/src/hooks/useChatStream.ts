@@ -53,12 +53,14 @@ export interface ChatSessionScopeSnapshot {
   newConversationToken?: string | null;
   newConversationProjectId?: string | null;
   newConversationWorkspaceId?: string | null;
+  newConversationAgentProfileId?: string | null;
 }
 
 interface PendingConversationScope {
   token: string;
   projectId: string;
   workspaceId: string;
+  agentProfileId: string;
 }
 
 function makeControlActionRequest(
@@ -99,6 +101,7 @@ function buildPendingConversationScope(
     token,
     projectId: String(snapshot?.newConversationProjectId ?? "").trim(),
     workspaceId: String(snapshot?.newConversationWorkspaceId ?? "").trim(),
+    agentProfileId: String(snapshot?.newConversationAgentProfileId ?? "").trim(),
   };
 }
 
@@ -190,13 +193,17 @@ export function useChatStream(
         const effectiveWorkspaceId =
           pendingConversationScope?.workspaceId ||
           String(sessionScope?.activeWorkspaceId ?? "").trim();
+        const effectiveAgentProfileId =
+          (!taskId && pendingConversationScope?.token
+            ? pendingConversationScope.agentProfileId
+            : "") || options?.agentProfileId?.trim() || "";
         const resp = await frontDoorRequest("/api/chat/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
             task_id: taskId,
-            agent_profile_id: options?.agentProfileId?.trim() || undefined,
+            agent_profile_id: effectiveAgentProfileId || undefined,
             new_conversation_token:
               !taskId && pendingConversationScope?.token
                 ? pendingConversationScope.token
@@ -363,6 +370,7 @@ export function useChatStream(
         newConversationToken: String(resultData.new_conversation_token ?? ""),
         newConversationProjectId: String(resultData.project_id ?? ""),
         newConversationWorkspaceId: String(resultData.workspace_id ?? ""),
+        newConversationAgentProfileId: String(resultData.agent_profile_id ?? ""),
       };
       setPendingConversationScope(buildPendingConversationScope(nextScope));
     } catch {
@@ -379,6 +387,7 @@ export function useChatStream(
     sessionScope?.newConversationToken,
     sessionScope?.newConversationProjectId,
     sessionScope?.newConversationWorkspaceId,
+    sessionScope?.newConversationAgentProfileId,
     taskId,
   ]);
 

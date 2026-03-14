@@ -187,6 +187,7 @@ class SessionProjectionItem(BaseModel):
     requester_id: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    agent_profile_id: str = Field(default="")
     runtime_kind: str = Field(default="")
     lane: str = Field(default="queue")
     latest_message_summary: str = Field(default="")
@@ -212,6 +213,7 @@ class SessionProjectionDocument(ControlPlaneDocument):
     new_conversation_token: str = Field(default="")
     new_conversation_project_id: str = Field(default="")
     new_conversation_workspace_id: str = Field(default="")
+    new_conversation_agent_profile_id: str = Field(default="")
     sessions: list[SessionProjectionItem] = Field(default_factory=list)
     summary: SessionProjectionSummary = Field(default_factory=SessionProjectionSummary)
     operator_summary: OperatorInboxSummary | None = None
@@ -1082,4 +1084,5 @@ class ControlPlaneState(BaseModel):
     new_conversation_token: str = Field(default="")
     new_conversation_project_id: str = Field(default="")
     new_conversation_workspace_id: str = Field(default="")
+    new_conversation_agent_profile_id: str = Field(default="")
     updated_at: datetime = Field(default_factory=_utc_now)

@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import RootErrorBoundary from "./components/shell/RootErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
 const AdvancedControlPlane = lazy(() => import("./pages/AdvancedControlPlane"));
@@ -31,27 +32,32 @@ function withRouteSuspense(element: ReactNode) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<WorkbenchLayout />}>
-          <Route index element={withRouteSuspense(<Home />)} />
-          <Route path="chat" element={withRouteSuspense(<ChatWorkbench />)} />
-          <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
-          <Route
-            path="agents/skills"
-            element={withRouteSuspense(<SkillProviderCenter />)}
-          />
-          <Route
-            path="agents/mcp"
-            element={withRouteSuspense(<McpProviderCenter />)}
-          />
-          <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
-          <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
-          <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
-          <Route path="advanced" element={withRouteSuspense(<AdvancedControlPlane />)} />
-        </Route>
-        <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />)} />
-      </Routes>
-    </BrowserRouter>
+    <RootErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<WorkbenchLayout />}>
+            <Route index element={withRouteSuspense(<Home />)} />
+            <Route path="chat" element={withRouteSuspense(<ChatWorkbench />)} />
+            <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
+            <Route
+              path="agents/skills"
+              element={withRouteSuspense(<SkillProviderCenter />)}
+            />
+            <Route
+              path="agents/mcp"
+              element={withRouteSuspense(<McpProviderCenter />)}
+            />
+            <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
+            <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
+            <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
+            <Route
+              path="advanced"
+              element={withRouteSuspense(<AdvancedControlPlane />)}
+            />
+          </Route>
+          <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />)} />
+        </Routes>
+      </BrowserRouter>
+    </RootErrorBoundary>
   );
 }

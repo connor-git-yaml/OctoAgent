@@ -3288,6 +3288,38 @@ class TestControlPlaneApi:
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
         assert payload["new_conversation_project_id"] == workspace.project_id
         assert payload["new_conversation_workspace_id"] == workspace.workspace_id
+        assert payload["new_conversation_agent_profile_id"] == ""
+
+    async def test_session_new_can_prepare_explicit_agent_session_entry(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.new",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": "singleton:research",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SESSION_NEW_READY"
+        assert result["data"]["agent_profile_id"] == "singleton:research"
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        assert payload["new_conversation_agent_profile_id"] == "singleton:research"
 
     async def test_session_projection_exposes_lane_summary_and_unfocus(
         self,

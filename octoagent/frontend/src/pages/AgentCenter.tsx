@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
 import AgentTemplatePicker from "../domains/agents/AgentTemplatePicker";
@@ -65,6 +65,7 @@ function renderAgentCard(
   agent: AgentCardViewModel,
   options: {
     onEdit: () => void;
+    onStartSession?: () => void;
     onPromote?: () => void;
     onDelete?: () => void;
     primaryActionLabel: string;
@@ -102,6 +103,16 @@ function renderAgentCard(
         <button type="button" className="wb-button wb-button-primary" onClick={options.onEdit}>
           {options.primaryActionLabel}
         </button>
+        {typeof options.onStartSession === "function" ? (
+          <button
+            type="button"
+            className="wb-button wb-button-secondary"
+            disabled={options.busyActionId === "session.new"}
+            onClick={options.onStartSession}
+          >
+            直接开启会话
+          </button>
+        ) : null}
         {canPromote ? (
           <button
             type="button"
@@ -132,6 +143,12 @@ function renderAgentCard(
 
 export default function AgentCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const navigate = useNavigate();
+  const workerProfilesDocument = snapshot!.resources.worker_profiles ?? {
+    generated_at: "",
+    profiles: [],
+    summary: {},
+  };
 
   const agentView = useMemo(() => deriveAgentManagementView(snapshot!), [snapshot]);
   const capabilityProviderEntries = useMemo(
@@ -173,6 +190,41 @@ export default function AgentCenter() {
   );
   const skillEntries = capabilityProviderEntries.filter((entry) => entry.kind === "skill");
   const mcpEntries = capabilityProviderEntries.filter((entry) => entry.kind === "mcp");
+  const builtinDirectAgents = useMemo(
+    () =>
+      workerProfilesDocument.profiles
+        .filter(
+          (profile) =>
+            profile.scope === "system" &&
+            profile.origin_kind === "builtin" &&
+            profile.profile_id !== agentView.defaultProfileId
+        )
+        .map((profile) => ({
+          profileId: profile.profile_id,
+          name: profile.name,
+          summary: profile.summary,
+          status: "ready" as const,
+          profileStatus: "内置",
+          projectId: agentView.currentProjectId,
+          projectName: agentView.currentProjectName,
+          modelAlias: profile.static_config.model_alias,
+          defaultToolGroups: profile.static_config.default_tool_groups,
+          selectedTools: profile.static_config.selected_tools,
+          activeWorkCount: profile.dynamic_context.active_work_count,
+          waitingWorkCount: profile.dynamic_context.attention_work_count,
+          attentionWorkCount: profile.dynamic_context.attention_work_count,
+          updatedAt: profile.dynamic_context.updated_at,
+          sourceLabel: "系统内置",
+          isMainAgent: false,
+          removable: false,
+        })),
+    [
+      agentView.currentProjectId,
+      agentView.currentProjectName,
+      agentView.defaultProfileId,
+      workerProfilesDocument.generated_at,
+    ]
+  );
   const sessionsDocument =
     (snapshot!.resources as {
       sessions?: {
@@ -463,6 +515,17 @@ export default function AgentCenter() {
   const busySaving =
     busyActionId === "worker_profile.review" || busyActionId === "worker_profile.apply";
 
+  async function handleStartAgentSession(profileId: string, agentName: string) {
+    const result = await submitAction("session.new", {
+      agent_profile_id: profileId,
+    });
+    if (!result) {
+      return;
+    }
+    setFlashMessage(`下一条消息会直接开启「${agentName}」会话。`);
+    navigate("/chat");
+  }
+
   return (
     <div className="wb-page wb-agent-management-page">
       <section className="wb-panel">
@@ -551,6 +614,8 @@ export default function AgentCenter() {
             </div>
             {renderAgentCard(agentView.mainAgent, {
               onEdit: openMainEditor,
+              onStartSession: () =>
+                void handleStartAgentSession(agentView.mainAgent.profileId, agentView.mainAgent.name),
               primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑主 Agent" : "建立主 Agent",
               busyActionId,
             })}
@@ -583,6 +648,7 @@ export default function AgentCenter() {
                 {agentView.projectAgents.map((agent) =>
                   renderAgentCard(agent, {
                     onEdit: () => openAgentEditor(agent.profileId),
+                    onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
                     onPromote: () => void handleBindAsMain(agent.profileId, agent.name),
                     onDelete: () => void handleDeleteAgent(agent),
                     primaryActionLabel: "编辑",
@@ -593,28 +659,31 @@ export default function AgentCenter() {
             )}
           </section>
 
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">系统内建运行时</p>
-                <h3>Chat 仍可能委派这些专项 lane</h3>
-                <p className="wb-panel-copy">
-                  它们是系统内建 runtime template，用来承接 Research / Dev / Ops 这类专项工作。
-                  这些条目不是当前项目已创建的 Agent，因此不会出现在上面的项目列表里。
-                </p>
-              </div>
-              <span className="wb-chip">{agentView.builtinTemplates.length} 个模板</span>
-            </div>
-
-            <div className="wb-note-stack">
-              {agentView.builtinTemplates.map((template) => (
-                <div key={template.templateId} className="wb-note">
-                  <strong>{template.name}</strong>
-                  <span>{template.summary}</span>
+          {builtinDirectAgents.length > 0 ? (
+            <section className="wb-panel">
+              <div className="wb-panel-head">
+                <div>
+                  <p className="wb-card-label">直接会话</p>
+                  <h3>需要时，单独和专长 Agent 开一条会话</h3>
+                  <p className="wb-panel-copy">
+                    这里不会再偷偷把当前聊天绑到别的 Agent；如果你要直接和 Researcher 之类的角色对话，就显式新开一条会话。
+                    这些条目同时也是系统内建 runtime template，会被 Butler 在专项任务里当作 fallback lane 使用，
+                    但它们不等于你已经在当前项目里创建了同名 Agent。
+                  </p>
                 </div>
-              ))}
-            </div>
-          </section>
+                <span className="wb-chip">{builtinDirectAgents.length} 个</span>
+              </div>
+              <div className="wb-section-stack">
+                {builtinDirectAgents.map((agent) =>
+                  renderAgentCard(agent, {
+                    onEdit: () => void handleStartAgentSession(agent.profileId, agent.name),
+                    primaryActionLabel: "直接开启会话",
+                    busyActionId,
+                  })
+                )}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         <div className="wb-section-stack">

@@ -29,6 +29,25 @@
   color: var(--cp-muted);
 }
 
+.wb-route-fallback-detail {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(20, 32, 47, 0.04);
+  color: var(--cp-ink) !important;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.wb-route-fallback-actions {
+  align-items: center;
+}
+
+.wb-route-fallback-note {
+  color: var(--cp-muted);
+  font-size: 0.84rem;
+}
+
 .wb-advanced-stack {
   gap: var(--cp-space-4);
 }

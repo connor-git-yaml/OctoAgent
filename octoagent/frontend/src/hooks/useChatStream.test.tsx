@@ -174,13 +174,14 @@ describe("useChatStream", () => {
     expect(fetchTaskDetailMock).toHaveBeenCalledTimes(1);
   });
 
-  it("新对话首条消息会携带 session-scoped project 快照", async () => {
+  it("新对话首条消息会携带 session-scoped 起点，包括显式 Agent 会话入口", async () => {
     const FakeEventSource = installFakeEventSource();
     executeControlActionMock.mockResolvedValueOnce({
       data: {
         new_conversation_token: "token-project-alpha",
         project_id: "project-alpha",
         workspace_id: "workspace-alpha",
+        agent_profile_id: "singleton:research",
       },
     });
     frontDoorRequestMock.mockResolvedValue(
@@ -223,6 +224,7 @@ describe("useChatStream", () => {
     expect(payload.new_conversation_token).toBe("token-project-alpha");
     expect(payload.project_id).toBe("project-alpha");
     expect(payload.workspace_id).toBe("workspace-alpha");
+    expect(payload.agent_profile_id).toBe("singleton:research");
 
     await waitFor(() => {
       expect(FakeEventSource.instances).toHaveLength(1);

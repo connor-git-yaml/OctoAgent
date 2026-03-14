@@ -202,13 +202,32 @@ interface ChatActivityItem {
   tone: "success" | "warning" | "danger" | "running" | "draft";
   summary: string;
   traceTitle?: string;
-  traceEntries?: Array<{
-    id: string;
-    label: string;
-    summary: string;
-    stateLabel?: string;
-    tone?: "success" | "warning" | "danger" | "running" | "draft";
-  }>;
+  traceEntries?: ChatTraceEntry[];
+}
+
+interface ChatTraceEntry {
+  id: string;
+  label: string;
+  summary: string;
+  stateLabel?: string;
+  tone?: "success" | "warning" | "danger" | "running" | "draft";
+}
+
+function summarizeDelegationIntent(work: WorkProjectionItem): string {
+  const toolNames = ensureArray(work.selected_tools);
+  const workerType = (work.selected_worker_type || "").trim().toLowerCase();
+  const workTitle = summarizeText(work.title || "", 72);
+
+  if (toolNames.some((tool) => tool.startsWith("web."))) {
+    return "核实外部事实，优先使用受治理的 Web 工具，再把可直接回复用户的结论带回主助手。";
+  }
+  if (workerType === "research") {
+    return "先核对事实和上下文，再把整理好的结论和限制条件回给主助手。";
+  }
+  if (workTitle) {
+    return `围绕“${workTitle}”补足信息并收口成可直接回复的结果。`;
+  }
+  return "把这轮问题交给内部角色处理，并要求带回可直接使用的结果。";
 }
 
 function summarizeText(value: string, maxLength = 120): string {
@@ -261,7 +280,7 @@ function summarizeToolList(toolNames: string[], limit = 4): string {
   return `${visible.join("、")}${suffix}`;
 }
 
-function buildToolTraceEntries(workEvents: TaskEvent[]): NonNullable<ChatActivityItem["traceEntries"]> {
+function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
   const relevant = workEvents.filter((event) => {
     const eventType = String(event.type);
     return (
@@ -328,7 +347,7 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): NonNullable<ChatActivit
     });
   }
 
-  return [...latestByName.values()]
+  const entries = [...latestByName.values()]
     .sort((left, right) => right.taskSeq - left.taskSeq)
     .slice(0, 4)
     .map((item) => ({
@@ -338,24 +357,83 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): NonNullable<ChatActivit
       tone: item.tone,
       summary: item.summary,
     }));
+  if (entries.length > 0) {
+    return entries;
+  }
+  return [
+    {
+      id: "tool-none",
+      label: "工具调用",
+      stateLabel: "未记录",
+      tone: "draft",
+      summary: "这轮没有记录到受治理工具事件，说明 Worker 可能直接用模型收口，或这部分调用不在当前任务链里。",
+    },
+  ];
+}
+
+function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
+  const completed = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "MODEL_CALL_COMPLETED");
+  if (completed) {
+    const payload = completed.payload ?? {};
+    const attempt = readPayloadString(payload, "attempt");
+    const step = readPayloadString(payload, "step");
+    return {
+      id: `model-${completed.task_seq}`,
+      label: "模型处理",
+      stateLabel: "已完成",
+      tone: "success",
+      summary:
+        attempt || step
+          ? `已完成一轮模型处理${attempt ? `（attempt ${attempt}` : ""}${step ? ` / step ${step}）` : attempt ? "）" : ""}。`
+          : "已完成一轮模型处理。",
+    };
+  }
+  const failed = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "MODEL_CALL_FAILED");
+  if (failed) {
+    return {
+      id: `model-${failed.task_seq}`,
+      label: "模型处理",
+      stateLabel: "失败",
+      tone: "danger",
+      summary: summarizeText(readPayloadString(failed.payload ?? {}, "error_message") || "模型调用失败。", 120),
+    };
+  }
+  const started = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "MODEL_CALL_STARTED");
+  if (started) {
+    return {
+      id: `model-${started.task_seq}`,
+      label: "模型处理",
+      stateLabel: "处理中",
+      tone: "running",
+      summary: "Worker 已进入模型处理阶段。",
+    };
+  }
+  return null;
 }
 
 function buildButlerTraceEntries(
   work: WorkProjectionItem,
   workEvents: TaskEvent[],
-  latestMessageType: string
+  latestMessageType: string,
+  taskStatus: string
 ): ChatActivityItem["traceEntries"] {
-  const entries: NonNullable<ChatActivityItem["traceEntries"]> = [];
+  const entries: ChatTraceEntry[] = [];
   entries.push({
     id: `${work.work_id}-dispatch`,
-    label: "委派主题",
+    label: "委派目标",
     stateLabel: "已发送",
     tone: "running",
-    summary: summarizeText(work.title || "Butler 已把这轮问题交给内部角色处理。", 120),
+    summary: summarizeDelegationIntent(work),
   });
   entries.push({
     id: `${work.work_id}-tools`,
-    label: "允许工具",
+    label: "授权工具",
     stateLabel: "已挂载",
     tone: "draft",
     summary: summarizeToolList(ensureArray(work.selected_tools)),
@@ -387,6 +465,19 @@ function buildButlerTraceEntries(
       summary: latestSummary,
     });
   }
+  const normalizedTaskStatus = taskStatus.trim().toUpperCase();
+  if (latestMessageType.trim().toUpperCase() === "RESULT" || normalizedTaskStatus === "SUCCEEDED") {
+    entries.push({
+      id: `${work.work_id}-finalize`,
+      label: "最终收口",
+      stateLabel: normalizedTaskStatus === "SUCCEEDED" ? "已回复" : "整理中",
+      tone: normalizedTaskStatus === "SUCCEEDED" ? "success" : "running",
+      summary:
+        normalizedTaskStatus === "SUCCEEDED"
+          ? "主助手已经把内部结果整理成最终答复并返回给用户。"
+          : "主助手已经拿到内部结果，正在继续核对和整理最终答复。",
+    });
+  }
   return entries;
 }
 
@@ -394,15 +485,22 @@ function buildWorkerTraceEntries(
   work: WorkProjectionItem,
   workEvents: TaskEvent[]
 ): ChatActivityItem["traceEntries"] {
-  const entries: NonNullable<ChatActivityItem["traceEntries"]> = [
+  const entries: ChatTraceEntry[] = [
     {
       id: `${work.work_id}-scope`,
-      label: "当前处理",
+      label: "接手执行",
       stateLabel: formatActivityStateLabel(resolveWorkStatus(work), ""),
       tone: formatActivityTone(resolveWorkStatus(work), ""),
-      summary: summarizeText(work.title || "正在处理这轮查询。", 120),
+      summary:
+        resolveWorkStatus(work) === "RUNNING"
+          ? "Worker 已接手这轮内部任务，开始推进执行。"
+          : "Worker 已经接手并推进过这轮内部任务。",
     },
   ];
+  const modelEntry = buildModelTraceEntry(workEvents);
+  if (modelEntry) {
+    entries.push(modelEntry);
+  }
   entries.push(...buildToolTraceEntries(workEvents));
   const returnedEvent = [...workEvents]
     .reverse()
@@ -420,6 +518,14 @@ function buildWorkerTraceEntries(
         readPayloadString(returnedEvent.payload, "summary") || "内部角色已把这轮处理状态回传给主助手。",
         120
       ),
+    });
+  } else {
+    entries.push({
+      id: `${work.work_id}-returned-pending`,
+      label: "返回主助手",
+      stateLabel: "待返回",
+      tone: "draft",
+      summary: "Worker 还没有把最终处理状态回传给主助手。",
     });
   }
   return entries;
@@ -528,6 +634,8 @@ export default function ChatWorkbench() {
       newConversationToken: sessionDocument?.new_conversation_token ?? "",
       newConversationProjectId: sessionDocument?.new_conversation_project_id ?? "",
       newConversationWorkspaceId: sessionDocument?.new_conversation_workspace_id ?? "",
+      newConversationAgentProfileId:
+        sessionDocument?.new_conversation_agent_profile_id ?? "",
     }
   );
   const [input, setInput] = useState("");
@@ -551,12 +659,7 @@ export default function ChatWorkbench() {
   const activeContextFrame =
     contextFrames.find((item) => item.task_id === taskId) ??
     (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
-  const activeAgentProfileId =
-    activeWork?.requested_worker_profile_id ||
-    activeWork?.agent_profile_id ||
-    activeContextFrame?.agent_profile_id ||
-    defaultRootAgent?.profile_id ||
-    "";
+  const activeSessionAgentProfileId = activeSession?.agent_profile_id ?? "";
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
     activeWork?.a2a_conversation_id ||
@@ -663,7 +766,12 @@ export default function ChatWorkbench() {
           ),
           traceTitle: "主助手的委派轨迹",
           traceEntries: activeWork
-            ? buildButlerTraceEntries(activeWork, workEvents, activeConversationLatestType)
+            ? buildButlerTraceEntries(
+                activeWork,
+                workEvents,
+                activeConversationLatestType,
+                normalizedTaskStatus
+              )
             : [],
         },
         ...workerActivities.slice(0, 2),
@@ -714,6 +822,8 @@ export default function ChatWorkbench() {
   const pendingConversationProjectId = sessionDocument?.new_conversation_project_id ?? "";
   const pendingConversationWorkspaceId = sessionDocument?.new_conversation_workspace_id ?? "";
   const pendingConversationToken = sessionDocument?.new_conversation_token ?? "";
+  const pendingConversationAgentProfileId =
+    sessionDocument?.new_conversation_agent_profile_id ?? "";
   const effectiveProjectId =
     activeSessionProjectId || pendingConversationProjectId || selectorProjectId;
   const effectiveWorkspaceId =
@@ -724,9 +834,12 @@ export default function ChatWorkbench() {
   const effectiveWorkspaceLabel = effectiveWorkspaceId
     ? resolveWorkspaceName(availableWorkspaces, effectiveWorkspaceId)
     : "";
-  const activeAgentProfileLabel =
-    workerProfiles.find((profile) => profile.profile_id === activeAgentProfileId)?.name ??
-    activeAgentProfileId;
+  const activeSessionAgentProfileLabel =
+    workerProfiles.find((profile) => profile.profile_id === activeSessionAgentProfileId)
+      ?.name ?? activeSessionAgentProfileId;
+  const pendingConversationAgentProfileLabel =
+    workerProfiles.find((profile) => profile.profile_id === pendingConversationAgentProfileId)
+      ?.name ?? pendingConversationAgentProfileId;
   const hasPinnedConversationScope =
     Boolean(activeSessionProjectId || activeSessionWorkspaceId) ||
     Boolean(pendingConversationToken && (pendingConversationProjectId || pendingConversationWorkspaceId));
@@ -734,17 +847,22 @@ export default function ChatWorkbench() {
     Boolean(hasPinnedConversationScope) &&
     (effectiveProjectId !== selectorProjectId || effectiveWorkspaceId !== selectorWorkspaceId);
   const chatScopeBanner = activeSession
-    ? selectorDiffersFromConversation
-      ? `当前会话继续沿用 ${effectiveProjectLabel || effectiveProjectId} / ${
-          effectiveWorkspaceLabel || effectiveWorkspaceId
-        }；顶部当前 Project 选择只影响新的会话和项目默认配置。`
-      : `当前会话已经绑定到 ${effectiveProjectLabel || effectiveProjectId} / ${
-          effectiveWorkspaceLabel || effectiveWorkspaceId
-        }。`
+    ? activeSessionAgentProfileId && activeSessionAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
+      ? `当前这条会话正在由 ${activeSessionAgentProfileLabel || activeSessionAgentProfileId} 直接处理；如果你想回到默认 Butler，请开始新对话。`
+      : selectorDiffersFromConversation
+        ? `当前会话继续沿用 ${effectiveProjectLabel || effectiveProjectId} / ${
+            effectiveWorkspaceLabel || effectiveWorkspaceId
+          }；顶部当前 Project 选择只影响新的会话和项目默认配置。`
+        : `当前会话已经绑定到 ${effectiveProjectLabel || effectiveProjectId} / ${
+            effectiveWorkspaceLabel || effectiveWorkspaceId
+          }。`
     : pendingConversationToken
-      ? `这段新对话会从 ${effectiveProjectLabel || effectiveProjectId} / ${
-          effectiveWorkspaceLabel || effectiveWorkspaceId
-        } 创建；首条消息不会再回退到旧的 surface-selected project。`
+      ? pendingConversationAgentProfileId &&
+        pendingConversationAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
+        ? `下一条消息会直接开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话，不再默认先进入 Butler。`
+        : `这段新对话会从 ${effectiveProjectLabel || effectiveProjectId} / ${
+            effectiveWorkspaceLabel || effectiveWorkspaceId
+          } 创建；首条消息不会再回退到旧的 surface-selected project。`
       : "";
 
   useEffect(() => {
@@ -861,9 +979,7 @@ export default function ChatWorkbench() {
     }
     const text = input;
     setInput("");
-    await sendMessage(text, {
-      agentProfileId: activeAgentProfileId || null,
-    });
+    await sendMessage(text);
   }
 
   return (
@@ -893,12 +1009,19 @@ export default function ChatWorkbench() {
                   Workspace {effectiveWorkspaceLabel || effectiveWorkspaceId}
                 </span>
               ) : null}
-              {activeAgentProfileLabel ? (
-                <span className="wb-chip">Agent {activeAgentProfileLabel}</span>
+              {activeSessionAgentProfileId &&
+              activeSessionAgentProfileId !== (defaultRootAgent?.profile_id ?? "") ? (
+                <span className="wb-chip is-warning">
+                  会话角色 {activeSessionAgentProfileLabel || activeSessionAgentProfileId}
+                </span>
               ) : null}
-              {activeSession ? <span className="wb-chip is-success">Session Bound</span> : null}
               {!activeSession && pendingConversationToken ? (
-                <span className="wb-chip is-warning">新会话起点已冻结</span>
+                <span className="wb-chip is-warning">
+                  {pendingConversationAgentProfileId &&
+                  pendingConversationAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
+                    ? `待开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话`
+                    : "新会话起点已冻结"}
+                </span>
               ) : null}
               {selectorDiffersFromConversation ? (
                 <span className="wb-chip is-warning">

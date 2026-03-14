@@ -114,6 +114,7 @@ class TestChatSendRoute:
                 new_conversation_token="token-chat-alpha",
                 new_conversation_project_id=project.project_id,
                 new_conversation_workspace_id=workspace.workspace_id,
+                new_conversation_agent_profile_id="singleton:research",
             )
         )
 
@@ -146,6 +147,40 @@ class TestChatSendRoute:
         metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["project_id"] == project.project_id
         assert metadata["workspace_id"] == workspace.workspace_id
+        assert metadata["agent_profile_id"] == "singleton:research"
+        assert metadata["requested_worker_profile_id"] == "singleton:research"
+
+    async def test_continue_chat_reuses_explicit_session_agent_profile(
+        self,
+        client: AsyncClient,
+    ) -> None:
+        first = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "进入 Research 会话",
+                "agent_profile_id": "singleton:research",
+            },
+        )
+        assert first.status_code == 200
+        task_id = first.json()["task_id"]
+
+        await asyncio.sleep(0.6)
+
+        second = await client.post(
+            "/api/chat/send",
+            json={"message": "继续这个 Research 会话", "task_id": task_id},
+        )
+        assert second.status_code == 200
+
+        await asyncio.sleep(0.6)
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
+        assert len(user_events) >= 2
+        latest_metadata = user_events[-1]["payload"]["control_metadata"]
+        assert latest_metadata["agent_profile_id"] == "singleton:research"
+        assert latest_metadata["requested_worker_profile_id"] == "singleton:research"
 
     async def test_continue_chat_appends_user_message_and_requeues(
         self, client: AsyncClient

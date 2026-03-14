@@ -671,6 +671,7 @@ class ControlPlaneService:
             new_conversation_token=state.new_conversation_token,
             new_conversation_project_id=state.new_conversation_project_id,
             new_conversation_workspace_id=state.new_conversation_workspace_id,
+            new_conversation_agent_profile_id=state.new_conversation_agent_profile_id,
             sessions=session_items,
             summary=session_summary,
             operator_summary=operator_summary,
@@ -757,6 +758,9 @@ class ControlPlaneService:
                         "work_id": session.metadata.get("work_id", ""),
                     }
             latest_message = await self._extract_latest_user_message(latest.task_id)
+            session_agent_profile_id = await self._extract_latest_session_agent_profile_id(
+                latest.task_id
+            )
             session_items.append(
                 SessionProjectionItem(
                     session_id=session_id,
@@ -771,6 +775,7 @@ class ControlPlaneService:
                     requester_id=latest.requester.sender_id,
                     project_id=workspace.project_id,
                     workspace_id=workspace.workspace_id,
+                    agent_profile_id=session_agent_profile_id,
                     runtime_kind=str(
                         execution_summary.get(
                             "runtime_kind",
@@ -4464,6 +4469,7 @@ class ControlPlaneService:
                 "new_conversation_token": "",
                 "new_conversation_project_id": "",
                 "new_conversation_workspace_id": "",
+                "new_conversation_agent_profile_id": "",
                 "selected_project_id": session.project_id or current_state.selected_project_id,
                 "selected_workspace_id": (
                     session.workspace_id or current_state.selected_workspace_id
@@ -4552,6 +4558,25 @@ class ControlPlaneService:
             use_focused_when_empty=True,
         )
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        requested_agent_profile_id = str(
+            request.params.get("agent_profile_id", "")
+        ).strip()
+        if requested_agent_profile_id:
+            worker_profiles = await self.get_worker_profiles_document()
+            matched_profile = next(
+                (
+                    item
+                    for item in worker_profiles.profiles
+                    if item.profile_id == requested_agent_profile_id
+                ),
+                None,
+            )
+            if matched_profile is None:
+                return self._rejected_result(
+                    request=request,
+                    code="SESSION_AGENT_PROFILE_NOT_FOUND",
+                    message="指定的 Agent 当前不可用，无法作为新会话入口。",
+                )
         token = str(ULID())
         state = self._state_store.load().model_copy(
             update={
@@ -4564,6 +4589,7 @@ class ControlPlaneService:
                 "new_conversation_workspace_id": (
                     selected_workspace.workspace_id if selected_workspace is not None else ""
                 ),
+                "new_conversation_agent_profile_id": requested_agent_profile_id,
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -4584,6 +4610,7 @@ class ControlPlaneService:
                 "workspace_id": (
                     selected_workspace.workspace_id if selected_workspace is not None else ""
                 ),
+                "agent_profile_id": requested_agent_profile_id,
                 "previous_session_id": target.session_id if target is not None else "",
                 "previous_thread_id": target.thread_id if target is not None else "",
                 "previous_task_id": target.task_id if target is not None else "",
@@ -4679,6 +4706,7 @@ class ControlPlaneService:
                 "new_conversation_token": token,
                 "new_conversation_project_id": session.project_id,
                 "new_conversation_workspace_id": session.workspace_id,
+                "new_conversation_agent_profile_id": "",
                 "selected_project_id": session.project_id or current_state.selected_project_id,
                 "selected_workspace_id": (
                     session.workspace_id or current_state.selected_workspace_id
@@ -7509,6 +7537,22 @@ class ControlPlaneService:
     async def _extract_latest_user_metadata(self, task_id: str) -> dict[str, Any]:
         events = await self._stores.event_store.get_events_for_task(task_id)
         return merge_control_metadata(events)
+
+    async def _extract_latest_session_agent_profile_id(self, task_id: str) -> str:
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
+            if event.type is not EventType.USER_MESSAGE:
+                continue
+            payload = getattr(event, "payload", {}) or {}
+            if not isinstance(payload, Mapping):
+                continue
+            control = payload.get("control_metadata", {})
+            if not isinstance(control, Mapping):
+                continue
+            value = str(control.get("agent_profile_id", "")).strip()
+            if value:
+                return value
+        return ""
 
     @staticmethod
     def _is_work_merge_ready(work, works: list[Any]) -> bool:

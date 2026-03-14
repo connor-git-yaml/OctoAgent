@@ -10,6 +10,7 @@ function buildSession(sessionId: string): SessionProjectionItem {
     session_id: sessionId,
     thread_id: `thread-${sessionId}`,
     task_id: `task-${sessionId}`,
+    agent_profile_id: "",
     parent_task_id: "",
     parent_work_id: "",
     title: `Task ${sessionId}`,

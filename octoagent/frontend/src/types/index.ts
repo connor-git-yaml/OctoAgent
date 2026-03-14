@@ -479,6 +479,7 @@ export interface SessionProjectionItem {
   requester_id: string;
   project_id: string;
   workspace_id: string;
+  agent_profile_id: string;
   runtime_kind: string;
   lane?: string;
   latest_message_summary: string;
@@ -504,6 +505,7 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   new_conversation_token: string;
   new_conversation_project_id: string;
   new_conversation_workspace_id: string;
+  new_conversation_agent_profile_id: string;
   sessions: SessionProjectionItem[];
   summary?: SessionProjectionSummary | null;
   operator_summary: OperatorInboxSummary | null;

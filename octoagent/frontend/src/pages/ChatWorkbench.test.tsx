@@ -33,6 +33,7 @@ function buildSnapshot(): any {
         new_conversation_token: "",
         new_conversation_project_id: "",
         new_conversation_workspace_id: "",
+        new_conversation_agent_profile_id: "",
       },
       project_selector: {
         current_project_id: "project-default",
@@ -65,6 +66,7 @@ function buildSnapshot(): any {
         ],
       },
       worker_profiles: {
+        generated_at: "2026-03-14T10:00:00Z",
         summary: {
           default_profile_id: "project-default:nas-guardian",
         },
@@ -73,6 +75,15 @@ function buildSnapshot(): any {
             profile_id: "project-default:nas-guardian",
             name: "NAS 管家",
             summary: "默认 Worker 模板。",
+            static_config: {
+              tool_profile: "standard",
+            },
+            dynamic_context: {},
+          },
+          {
+            profile_id: "singleton:research",
+            name: "Research Root Agent",
+            summary: "资料整理与检索。",
             static_config: {
               tool_profile: "standard",
             },
@@ -113,7 +124,7 @@ describe("ChatWorkbench", () => {
     vi.useRealTimers();
   });
 
-  it("发送消息时会带上当前默认 Worker 模板的 profile_id", async () => {
+  it("普通 Butler 对话发送消息时不会偷偷继承当前 Agent profile", async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
@@ -143,13 +154,11 @@ describe("ChatWorkbench", () => {
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith("检查今天的备份情况", {
-        agentProfileId: "project-default:nas-guardian",
-      });
+      expect(sendMessage).toHaveBeenCalledWith("检查今天的备份情况");
     });
   });
 
-  it("继续当前会话时会沿用当前 work 绑定的 profile_id", async () => {
+  it("继续普通会话时不会因为当前 work 是某个 worker 就把后续消息绑过去", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.worker_profiles.profiles.push({
       profile_id: "project-default:ops-root",
@@ -165,6 +174,7 @@ describe("ChatWorkbench", () => {
         session_id: "thread-chat-ops",
         thread_id: "thread-chat-ops",
         task_id: "task-chat-ops",
+        agent_profile_id: "",
         latest_message_summary: "继续看今天的机器状态",
         execution_summary: {
           work_id: "work-chat-ops",
@@ -236,9 +246,7 @@ describe("ChatWorkbench", () => {
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志", {
-        agentProfileId: "project-default:ops-root",
-      });
+      expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志");
     });
   });
 
@@ -361,6 +369,39 @@ describe("ChatWorkbench", () => {
     ).toBeInTheDocument();
   });
 
+  it("显式开启专长 Agent 会话时，会明确提示下一条消息的直接入口", () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.new_conversation_token = "token-research";
+    snapshot.resources.sessions.new_conversation_project_id = "project-default";
+    snapshot.resources.sessions.new_conversation_workspace_id = "workspace-default";
+    snapshot.resources.sessions.new_conversation_agent_profile_id = "singleton:research";
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: null,
+    });
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("待开启 Research Root Agent 会话")).toBeInTheDocument();
+    expect(
+      screen.getByText(/下一条消息会直接开启 Research Root Agent 会话/)
+    ).toBeInTheDocument();
+  });
+
   it("会明确提示当前会话绑定的项目与顶部选择不同", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
@@ -376,6 +417,7 @@ describe("ChatWorkbench", () => {
         requester_id: "owner",
         project_id: "project-ops",
         workspace_id: "workspace-ops",
+        agent_profile_id: "",
         runtime_kind: "worker",
         lane: "running",
         latest_message_summary: "继续排查磁盘告警",
@@ -414,7 +456,6 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Session Bound")).toBeInTheDocument();
     expect(screen.getByText("会话项目 运维项目")).toBeInTheDocument();
     expect(screen.getByText("顶部选择 默认项目 / 默认空间")).toBeInTheDocument();
     expect(
@@ -885,6 +926,26 @@ describe("ChatWorkbench", () => {
           event_id: "event-tool-started",
           task_seq: 12,
           ts: "2026-03-14T12:10:12Z",
+          type: "MODEL_CALL_STARTED",
+          actor: "worker.llm.research",
+          payload: {
+            work_id: "work-chat-trace",
+          },
+        },
+        {
+          event_id: "event-model-completed",
+          task_seq: 13,
+          ts: "2026-03-14T12:10:13Z",
+          type: "MODEL_CALL_COMPLETED",
+          actor: "worker.llm.research",
+          payload: {
+            work_id: "work-chat-trace",
+          },
+        },
+        {
+          event_id: "event-tool-started",
+          task_seq: 14,
+          ts: "2026-03-14T12:10:14Z",
           type: "TOOL_CALL_STARTED",
           actor: "worker.llm.research",
           payload: {
@@ -895,8 +956,8 @@ describe("ChatWorkbench", () => {
         },
         {
           event_id: "event-tool-completed",
-          task_seq: 13,
-          ts: "2026-03-14T12:10:14Z",
+          task_seq: 15,
+          ts: "2026-03-14T12:10:15Z",
           type: "TOOL_CALL_COMPLETED",
           actor: "worker.llm.research",
           payload: {
@@ -908,7 +969,7 @@ describe("ChatWorkbench", () => {
         },
         {
           event_id: "event-worker-returned",
-          task_seq: 14,
+          task_seq: 16,
           ts: "2026-03-14T12:10:16Z",
           type: "WORKER_RETURNED",
           actor: "worker.llm.research",
@@ -930,18 +991,24 @@ describe("ChatWorkbench", () => {
 
     expect(await screen.findByLabelText("内部协作进度")).toBeInTheDocument();
 
-    const traceButtons = screen.getAllByRole("button", { name: "查看轨迹" });
+    expect(screen.getByText("委派目标")).toBeInTheDocument();
+    expect(screen.getByText("授权工具")).toBeInTheDocument();
+    expect(screen.getByText("接手执行")).toBeInTheDocument();
+    expect(screen.getByText("模型处理")).toBeInTheDocument();
+    expect(screen.getByText("web.search")).toBeInTheDocument();
+
+    const traceButtons = screen.getAllByRole("button", { name: "查看细节" });
     await userEvent.hover(traceButtons[0]!);
     expect(await screen.findByText("主助手的委派轨迹")).toBeInTheDocument();
-    expect(screen.getByText("委派主题")).toBeInTheDocument();
-    expect(screen.getByText("允许工具")).toBeInTheDocument();
+    expect(screen.getAllByText("委派目标").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("授权工具").length).toBeGreaterThan(0);
 
     await userEvent.unhover(traceButtons[0]!);
     await userEvent.hover(traceButtons[1]!);
     expect(await screen.findByText("Research Worker 的处理轨迹")).toBeInTheDocument();
-    expect(screen.getByText("web.search")).toBeInTheDocument();
+    expect(screen.getAllByText("web.search").length).toBeGreaterThan(0);
     expect(screen.getByText("返回了 5 条候选结果。")).toBeInTheDocument();
-    expect(screen.getByText("返回主助手")).toBeInTheDocument();
+    expect(screen.getAllByText("返回主助手").length).toBeGreaterThan(0);
   });
 
   it("内部 worker 已经完成时不会过早显示已回传，而是明确主助手仍在整理", async () => {

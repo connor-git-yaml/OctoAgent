@@ -15,11 +15,12 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from octoagent.core.models import RuntimeControlContext
+from octoagent.core.models import EventType, RuntimeControlContext
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
 from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 
 from ..deps import get_store_group
+from ..services.connection_metadata import control_metadata_from_payload
 from ..services.runtime_control import RUNTIME_CONTEXT_JSON_KEY, encode_runtime_context
 
 logger = logging.getLogger(__name__)
@@ -82,15 +83,19 @@ async def _resolve_chat_scope_snapshot(
     body: ChatSendRequest,
     request: Request,
     store_group,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     project_id = str(body.project_id or "").strip()
     workspace_id = str(body.workspace_id or "").strip()
     new_conversation_token = str(body.new_conversation_token or "").strip()
+    requested_agent_profile_id = str(body.agent_profile_id or "").strip()
 
     state = ControlPlaneStateStore(_resolve_project_root(request)).load()
     if new_conversation_token and new_conversation_token == state.new_conversation_token:
         project_id = state.new_conversation_project_id.strip() or project_id
         workspace_id = state.new_conversation_workspace_id.strip() or workspace_id
+        requested_agent_profile_id = (
+            requested_agent_profile_id or state.new_conversation_agent_profile_id.strip()
+        )
     elif not body.task_id:
         project_id = project_id or state.selected_project_id.strip()
         workspace_id = workspace_id or state.selected_workspace_id.strip()
@@ -102,7 +107,7 @@ async def _resolve_chat_scope_snapshot(
     if workspace is not None and project is None:
         project = await store_group.project_store.get_project(workspace.project_id)
     if project is None and workspace is None:
-        return new_conversation_token, "", ""
+        return new_conversation_token, "", "", requested_agent_profile_id
     if project is None:
         raise _chat_send_failure(
             status_code=400,
@@ -121,7 +126,23 @@ async def _resolve_chat_scope_snapshot(
         new_conversation_token,
         project.project_id,
         workspace.workspace_id if workspace is not None else "",
+        requested_agent_profile_id,
     )
+
+
+async def _resolve_session_agent_profile_id(store_group, task_id: str) -> str:
+    events = await store_group.event_store.get_events_for_task(task_id)
+    for event in reversed(events):
+        if event.type is not EventType.USER_MESSAGE:
+            continue
+        payload = getattr(event, "payload", {}) or {}
+        if not isinstance(payload, dict):
+            continue
+        control = control_metadata_from_payload(payload)
+        value = str(control.get("agent_profile_id", "")).strip()
+        if value:
+            return value
+    return ""
 
 
 def _build_workspace_scoped_chat_scope_id(
@@ -146,14 +167,20 @@ async def send_chat_message(
     """
     chat_control_metadata: dict[str, Any] = {}
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
+    new_conversation_token, project_id, workspace_id, requested_agent_profile_id = (
+        await _resolve_chat_scope_snapshot(
+            body,
+            request,
+            store_group,
+        )
+    )
+    if body.task_id and not requested_agent_profile_id:
+        requested_agent_profile_id = await _resolve_session_agent_profile_id(
+            store_group, body.task_id
+        )
     if requested_agent_profile_id:
         chat_control_metadata["agent_profile_id"] = requested_agent_profile_id
         chat_control_metadata["requested_worker_profile_id"] = requested_agent_profile_id
-    new_conversation_token, project_id, workspace_id = await _resolve_chat_scope_snapshot(
-        body,
-        request,
-        store_group,
-    )
     if project_id:
         chat_control_metadata["project_id"] = project_id
     if workspace_id:

@@ -3183,6 +3183,76 @@
   padding: 0 10px;
 }
 
+.wb-message-trace-inline {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.wb-message-trace-inline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.wb-message-trace-inline-line {
+  position: absolute;
+  top: 20px;
+  left: 4px;
+  width: 2px;
+  height: calc(100% + 8px);
+  border-radius: 999px;
+  background: rgba(20, 32, 47, 0.1);
+}
+
+.wb-message-trace-inline-line[aria-hidden="true"] {
+  display: none;
+}
+
+.wb-message-trace-inline-dot {
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgba(20, 32, 47, 0.04);
+}
+
+.wb-message-trace-inline-dot.is-success {
+  background: var(--cp-success);
+}
+
+.wb-message-trace-inline-dot.is-warning {
+  background: var(--cp-warning);
+}
+
+.wb-message-trace-inline-dot.is-danger {
+  background: var(--cp-danger);
+}
+
+.wb-message-trace-inline-dot.is-running {
+  background: var(--cp-secondary);
+}
+
+.wb-message-trace-inline-dot.is-draft {
+  background: rgba(20, 32, 47, 0.36);
+}
+
+.wb-message-trace-inline-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-message-trace-inline-copy strong {
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
 .wb-message-trace {
   display: grid;
   gap: 10px;
