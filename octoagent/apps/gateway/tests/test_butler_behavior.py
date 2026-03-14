@@ -96,6 +96,7 @@ def test_behavior_summary_and_block_expose_effective_sources() -> None:
     assert summary["worker_slice"]["shared_file_ids"] == ["AGENTS.md", "PROJECT.md", "TOOLS.md"]
     assert "direct_answer" in summary["decision_modes"]
     assert "effective_location_hint" in summary["runtime_hint_fields"]
+    assert "recent_worker_lane_topic" in summary["runtime_hint_fields"]
     assert summary["files"][0]["path_hint"] == "behavior/system/AGENTS.md"
     assert summary["files"][0]["is_advanced"] is False
     assert "BehaviorSystem:" in block
@@ -289,7 +290,21 @@ def test_render_runtime_hint_block_exposes_effective_location_and_followup_conte
     assert "can_delegate_research: True" in block
     assert "effective_location_hint: 深圳" in block
     assert "recent_clarification_category: weather_location" in block
+    assert "recent_worker_lane_topic: N/A" in block
     assert "ToolUniverseHints:" in block
+
+
+def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_worker_lanes() -> None:
+    pack = resolve_behavior_pack(
+        agent_profile=_build_profile(),
+        project_name="Default Project",
+        project_slug="default-project",
+    )
+
+    files = {item.file_id: item for item in pack.files}
+    assert "web / filesystem / terminal" in files["AGENTS.md"].content
+    assert "specialist worker lane" in files["AGENTS.md"].content
+    assert "不要把用户原话原封不动转发过去" in files["TOOLS.md"].content
 
 
 def test_render_runtime_hint_block_exposes_tool_universe_hints() -> None:

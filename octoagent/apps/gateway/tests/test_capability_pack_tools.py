@@ -37,7 +37,13 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import EvidenceRef, MemoryPartition, WriteAction, init_memory_db
-from octoagent.tooling import ExecutionContext, ToolBroker, ToolProfile
+from octoagent.tooling import (
+    BeforeHookResult,
+    ExecutionContext,
+    FailMode,
+    ToolBroker,
+    ToolProfile,
+)
 
 
 def _write_mcp_echo_server(path: Path) -> None:
@@ -188,6 +194,9 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "web.search",
             "browser.status",
             "runtime.now",
+            "filesystem.list_dir",
+            "filesystem.read_text",
+            "terminal.exec",
             "memory.search",
             "memory.recall",
         }.issubset(tool_names)
@@ -213,6 +222,8 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "artifact",
             "document",
             "session",
+            "filesystem",
+            "terminal",
             "network",
             "browser",
             "memory",
@@ -225,7 +236,8 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         )
         assert "Butler" in general_bootstrap.content
         assert "不要把自己叫作 general worker" in general_bootstrap.content
-        assert "优先自己使用当前已挂载的受治理工具完成有界任务" in general_bootstrap.content
+        assert "优先自己使用当前已挂载的受治理 web / filesystem / terminal 工具完成有界任务" in general_bootstrap.content
+        assert "specialist lane" in general_bootstrap.content
         assert "今天、天气、最新资料、官网、网页信息" in general_bootstrap.content
 
         shared_bootstrap = next(
@@ -233,6 +245,110 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         )
         assert "Current Datetime Local" in shared_bootstrap.content
         assert "Default Tool Profile" in shared_bootstrap.content
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_capability_pack_general_tools_support_filesystem_and_terminal_with_governance(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    class _PolicyCheckpointHook:
+        @property
+        def name(self) -> str:
+            return "policy_checkpoint"
+
+        @property
+        def priority(self) -> int:
+            return 0
+
+        @property
+        def fail_mode(self) -> FailMode:
+            return FailMode.CLOSED
+
+        async def before_execute(self, tool_meta, args, context):
+            return BeforeHookResult(proceed=True)
+
+    tool_broker.add_hook(_PolicyCheckpointHook())
+
+    readme = tmp_path / "README.txt"
+    readme.write_text("Alpha runtime context\n", encoding="utf-8")
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="帮我检查一下当前 workspace",
+                idempotency_key="feature-053-general-tools",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="帮我检查一下当前 workspace",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-053-general-tools",
+            worker_id="worker.butler",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:butler",
+            profile=ToolProfile.STANDARD,
+        )
+
+        with bind_execution_context(runtime_context):
+            listed = await tool_broker.execute(
+                "filesystem.list_dir",
+                {"path": ".", "max_entries": 20},
+                broker_context,
+            )
+            read = await tool_broker.execute(
+                "filesystem.read_text",
+                {"path": "README.txt"},
+                broker_context,
+            )
+            executed = await tool_broker.execute(
+                "terminal.exec",
+                {"command": "pwd && printf 'done\\n'", "cwd": "."},
+                broker_context,
+            )
+
+        assert listed.is_error is False
+        listed_payload = json.loads(listed.output)
+        assert any(item["name"] == "README.txt" for item in listed_payload["entries"])
+
+        assert read.is_error is False
+        read_payload = json.loads(read.output)
+        assert "Alpha runtime context" in read_payload["content"]
+
+        assert executed.is_error is False
+        executed_payload = json.loads(executed.output)
+        assert executed_payload["returncode"] == 0
+        assert "done" in executed_payload["stdout"]
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -271,10 +387,20 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
         assert "Owner Timezone: Asia/Shanghai" in joined
         assert "Surface: web" in joined
         assert "Worker Type: research" in joined
-        assert (
-            "Default Tool Groups: project, artifact, session, network, browser, memory, "
-            "document, media, mcp" in joined
-        )
+        assert "Default Tool Groups:" in joined
+        for group in (
+            "project",
+            "artifact",
+            "session",
+            "filesystem",
+            "network",
+            "browser",
+            "memory",
+            "document",
+            "media",
+            "mcp",
+        ):
+            assert group in joined
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

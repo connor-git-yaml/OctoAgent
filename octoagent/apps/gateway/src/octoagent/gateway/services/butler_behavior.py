@@ -426,6 +426,10 @@ def build_behavior_system_summary(
             "current_location_hint",
             "recent_location_hint",
             "effective_location_hint",
+            "recent_worker_lane_worker_type",
+            "recent_worker_lane_profile_id",
+            "recent_worker_lane_topic",
+            "recent_worker_lane_summary",
             "recent_clarification_category",
             "recent_clarification_source_text",
             "tool_universe",
@@ -557,6 +561,13 @@ def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundl
         f"{runtime_hints.recent_clarification_category or 'N/A'}\n"
         "recent_clarification_source_text: "
         f"{runtime_hints.recent_clarification_source_text or 'N/A'}\n"
+        "recent_worker_lane_worker_type: "
+        f"{runtime_hints.recent_worker_lane_worker_type or 'N/A'}\n"
+        "recent_worker_lane_profile_id: "
+        f"{runtime_hints.recent_worker_lane_profile_id or 'N/A'}\n"
+        f"recent_worker_lane_topic: {runtime_hints.recent_worker_lane_topic or 'N/A'}\n"
+        "recent_worker_lane_summary: "
+        f"{runtime_hints.recent_worker_lane_summary or 'N/A'}\n"
         f"{tool_block}"
     )
 
@@ -571,13 +582,20 @@ def build_butler_decision_messages(
     project_slug: str = "",
 ) -> list[dict[str, str]]:
     schema = {
-        "mode": "direct_answer | ask_once | delegate_research | delegate_ops | best_effort_answer",
+        "mode": (
+            "direct_answer | ask_once | delegate_research | delegate_dev | "
+            "delegate_ops | best_effort_answer"
+        ),
         "category": "string",
         "rationale": "string",
         "missing_inputs": ["string"],
         "assumptions": ["string"],
         "tool_intent": "string",
         "target_worker_type": "string",
+        "target_worker_profile_id": "string",
+        "delegate_objective": "string",
+        "continuity_topic": "string",
+        "prefer_sticky_worker": "boolean",
         "user_visible_boundary_note": "string",
         "reply_prompt": "string",
     }
@@ -595,7 +613,11 @@ def build_butler_decision_messages(
             "content": (
                 "决策原则：优先信任 BehaviorSystem 和 RuntimeHints。"
                 "除权限、审批、审计、loop guard 等硬边界外，不要退回僵硬硬编码。"
-                "当信息足够时可直接委派；当缺关键信息时最多 ask_once；"
+                "当当前挂载工具已经足够时，优先 direct_answer，不要为了形式上的多 Agent 结构强行委派。"
+                "当问题会长期持续、跨多轮、跨权限、跨敏感边界或明显更适合 specialist worker 时，再 delegate。"
+                "当 delegate 时，不要把用户原话直接转发给 Worker；应输出 delegate_objective 作为 Worker 任务目标。"
+                "当存在近期同题材 specialist lane 时，优先设置 prefer_sticky_worker=true 或指定 target_worker_profile_id。"
+                "当缺关键信息时最多 ask_once；"
                 "如果用户显式要求联网但关键事实仍缺失，可以给 best_effort_answer，"
                 "但必须明确边界，不能假装已经完成准确查询。"
             ),
@@ -656,6 +678,8 @@ def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | 
     normalized = dict(payload)
     if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_research":
         normalized["target_worker_type"] = "research"
+    if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_dev":
+        normalized["target_worker_type"] = "dev"
     if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_ops":
         normalized["target_worker_type"] = "ops"
     try:
@@ -818,6 +842,10 @@ def build_runtime_hint_bundle(
     recent_clarification_source_text: str = "",
     recent_location_hint: str = "",
     default_location_hint: str = "",
+    recent_worker_lane_worker_type: str = "",
+    recent_worker_lane_profile_id: str = "",
+    recent_worker_lane_topic: str = "",
+    recent_worker_lane_summary: str = "",
     tool_universe: ToolUniverseHints | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> RuntimeHintBundle:
@@ -840,6 +868,10 @@ def build_runtime_hint_bundle(
         effective_location_hint=effective_location,
         recent_clarification_category=recent_clarification_category.strip(),
         recent_clarification_source_text=recent_clarification_source_text.strip(),
+        recent_worker_lane_worker_type=recent_worker_lane_worker_type.strip(),
+        recent_worker_lane_profile_id=recent_worker_lane_profile_id.strip(),
+        recent_worker_lane_topic=recent_worker_lane_topic.strip(),
+        recent_worker_lane_summary=recent_worker_lane_summary.strip(),
         tool_universe=tool_universe,
         metadata=dict(metadata or {}),
     )

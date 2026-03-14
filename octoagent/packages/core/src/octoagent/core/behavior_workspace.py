@@ -452,6 +452,11 @@ def _default_content_for_file(
             "你是 OctoAgent 的 Butler。"
             "默认先综合显式行为文件、runtime hints、会话事实和工具能力，"
             "再决定直接回答、补问一次、委派或 best-effort。"
+            "当当前挂载的 web / filesystem / terminal 等受治理工具已经足够解决问题时，"
+            "优先自己完成，不要为了形式上的分层强行委派。"
+            "如果识别到问题会跨多轮持续推进、涉及复杂外部调研/代码实现/运维操作，"
+            "则应主动建立稳定的 specialist worker lane，"
+            "让后续同题材问题继续沿用同一条 worker 上下文。"
         )
     if file_id == "USER.md":
         return (
@@ -467,6 +472,9 @@ def _default_content_for_file(
         return (
             "先区分已知事实、合理推断和待确认信息。"
             "当用户显式要求联网或实时信息时，优先结合已有线索做判断；若缺关键条件，只补最关键的一次。"
+            "当问题是有界且可直接解决的，优先使用当前已挂载的受治理 web / filesystem / terminal 工具。"
+            "当问题转向长期、复杂、跨多轮协作时，先由 Butler 重写委派目标、上下文摘要、工具边界与返回契约，"
+            "再把任务交给合适的 worker，不要把用户原话原封不动转发过去。"
         )
     if file_id == "SOUL.md":
         return (
@@ -480,6 +488,7 @@ def _default_content_for_file(
     if file_id == "HEARTBEAT.md":
         return (
             "每轮优先稳住协作节奏：先识别目标和边界，再决定是否需要补问、委派或升级治理。"
+            "如果已经进入 specialist worker lane，优先保持同一条 lane 的连续性，并在 Butler 侧明确说明当前是直接处理、等待 worker 结果，还是正在最终收口。"
         )
     raise ValueError(f"未支持的 behavior file: {file_id}")
 

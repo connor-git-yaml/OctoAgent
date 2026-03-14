@@ -1130,6 +1130,10 @@ class TestOrchestrator:
             assert request_metadata["butler_decision_mode"] == "delegate_research"
             assert request_metadata["requested_worker_type"] == "research"
             assert request_metadata["butler_decision_source"] == "model"
+            assert request_metadata["butler_delegate_original_user_text"] == msg.text
+            assert request_metadata["butler_delegate_objective"] != msg.text
+            assert "ButlerDelegation for research" in request_metadata["butler_delegate_objective"]
+            assert request_metadata["delegate_continuity_topic"] == "latest_info_lookup"
 
             events = await store_group.event_store.get_events_for_task(task_id)
             assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 2
@@ -1147,6 +1151,15 @@ class TestOrchestrator:
             artifact_names = [artifact.name for artifact in artifacts]
             assert "butler-decision-request" in artifact_names
             assert "butler-decision-response" in artifact_names
+
+            conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+            assert len(conversations) == 1
+            messages = await store_group.a2a_store.list_messages(
+                a2a_conversation_id=conversations[0].a2a_conversation_id
+            )
+            assert messages[0].message_type == "TASK"
+            assert messages[0].payload["user_text"] != msg.text
+            assert "ButlerDelegation for research" in messages[0].payload["user_text"]
         finally:
             await store_group.conn.close()
 
@@ -1275,6 +1288,45 @@ class TestOrchestrator:
             assert metadata["single_loop_executor"] is True
             assert metadata["selected_worker_type"] == "research"
             assert metadata["single_loop_executor_mode"] == "butler_research"
+            assert "decision_phase" not in metadata
+        finally:
+            await store_group.conn.close()
+
+    async def test_single_loop_executor_supports_requested_worker_profile_id(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        llm_service = _SingleLoopLLMService()
+        store_group, task_service, orchestrator = await _build_context(
+            tmp_path,
+            llm_service=llm_service,
+        )
+
+        try:
+            msg = NormalizedMessage(
+                text="查一下 Alpha 最近的公开资料并汇总关键变化",
+                idempotency_key="f053-single-loop-research-profile-001",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(
+                task_id=task_id,
+                user_text=msg.text,
+                metadata={"requested_worker_profile_id": "singleton:research"},
+            )
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == "worker.llm.default"
+
+            assert len(llm_service.calls) == 1
+            metadata = llm_service.calls[0]["metadata"]
+            assert isinstance(metadata, dict)
+            assert metadata["single_loop_executor"] is True
+            assert metadata["selected_worker_type"] == "research"
+            assert metadata["requested_worker_type"] == "research"
+            assert metadata["requested_worker_profile_id"] == "singleton:research"
+            assert metadata["single_loop_executor_mode"] == "butler_research"
+            assert metadata["requested_worker_type_source"] == "requested_worker_profile_id"
             assert "decision_phase" not in metadata
         finally:
             await store_group.conn.close()

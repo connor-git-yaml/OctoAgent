@@ -1049,6 +1049,42 @@ class CapabilityPackService:
                         scope_ids.append(binding.binding_key)
             return list(dict.fromkeys(item for item in scope_ids if item))
 
+        async def _resolve_workspace_root(
+            *,
+            project_id: str = "",
+            workspace_id: str = "",
+        ) -> Path:
+            project, workspace, _task = await _resolve_runtime_project_context(
+                project_id=project_id,
+                workspace_id=workspace_id,
+            )
+            root = (
+                Path(str(workspace.root_path).strip())
+                if workspace is not None and str(workspace.root_path).strip()
+                else self._project_root
+            )
+            return root.resolve()
+
+        def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
+            normalized = raw_path.strip()
+            candidate = (
+                Path(normalized)
+                if normalized
+                else workspace_root
+            )
+            if not candidate.is_absolute():
+                candidate = workspace_root / candidate
+            resolved = candidate.resolve()
+            if resolved != workspace_root and not resolved.is_relative_to(workspace_root):
+                raise RuntimeError("path escapes current workspace root")
+            return resolved
+
+        def _truncate_text(value: str, *, limit: int = 4000) -> str:
+            text = value.strip()
+            if len(text) <= limit:
+                return text
+            return f"{text[:limit].rstrip()}\n...[truncated]"
+
         async def _current_work_context() -> tuple[Any, Any]:
             _, context, task = await _current_parent()
             if not context.work_id:
@@ -1199,6 +1235,147 @@ class CapabilityPackService:
                 },
                 ensure_ascii=False,
             )
+
+        @tool_contract(
+            name="filesystem.list_dir",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="filesystem",
+            tags=["filesystem", "directory", "list"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://filesystem.list_dir",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def filesystem_list_dir(
+            path: str = ".",
+            max_entries: int = 50,
+        ) -> str:
+            """列出当前 workspace 内目录内容。"""
+
+            workspace_root = await _resolve_workspace_root()
+            target = _resolve_workspace_path(workspace_root, path)
+            if not target.exists():
+                raise RuntimeError(f"path not found: {target}")
+            if not target.is_dir():
+                raise RuntimeError(f"path is not a directory: {target}")
+            entries = []
+            bounded_limit = max(1, min(max_entries, 200))
+            for item in sorted(target.iterdir(), key=lambda current: (not current.is_dir(), current.name))[
+                :bounded_limit
+            ]:
+                relative = "." if item == workspace_root else str(item.relative_to(workspace_root))
+                entries.append(
+                    {
+                        "name": item.name,
+                        "path": relative,
+                        "kind": "directory" if item.is_dir() else "file",
+                    }
+                )
+            return json.dumps(
+                {
+                    "workspace_root": str(workspace_root),
+                    "path": "." if target == workspace_root else str(target.relative_to(workspace_root)),
+                    "entries": entries,
+                },
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
+            name="filesystem.read_text",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="filesystem",
+            tags=["filesystem", "file", "read"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://filesystem.read_text",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def filesystem_read_text(
+            path: str,
+            max_chars: int = 4000,
+        ) -> str:
+            """读取当前 workspace 内文本文件内容。"""
+
+            workspace_root = await _resolve_workspace_root()
+            target = _resolve_workspace_path(workspace_root, path)
+            if not target.exists():
+                raise RuntimeError(f"path not found: {target}")
+            if not target.is_file():
+                raise RuntimeError(f"path is not a file: {target}")
+            content = target.read_text(encoding="utf-8")
+            bounded_limit = max(200, min(max_chars, 20_000))
+            return json.dumps(
+                {
+                    "workspace_root": str(workspace_root),
+                    "path": str(target.relative_to(workspace_root)),
+                    "content": _truncate_text(content, limit=bounded_limit),
+                },
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
+            name="terminal.exec",
+            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="terminal",
+            tags=["terminal", "command", "exec"],
+            worker_types=["ops", "dev", "general"],
+            manifest_ref="builtin://terminal.exec",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def terminal_exec(
+            command: str,
+            cwd: str = ".",
+            timeout_seconds: float = 15.0,
+            max_output_chars: int = 4000,
+        ) -> str:
+            """在当前 workspace 内执行受治理终端命令。"""
+
+            workspace_root = await _resolve_workspace_root()
+            working_dir = _resolve_workspace_path(workspace_root, cwd)
+            if not working_dir.exists() or not working_dir.is_dir():
+                raise RuntimeError(f"cwd is not a directory: {working_dir}")
+            bounded_timeout = max(1.0, min(timeout_seconds, 120.0))
+            bounded_limit = max(200, min(max_output_chars, 20_000))
+            try:
+                completed = subprocess.run(
+                    ["/bin/sh", "-lc", command],
+                    cwd=str(working_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=bounded_timeout,
+                )
+                payload = {
+                    "workspace_root": str(workspace_root),
+                    "cwd": "." if working_dir == workspace_root else str(working_dir.relative_to(workspace_root)),
+                    "command": command,
+                    "returncode": completed.returncode,
+                    "stdout": _truncate_text(completed.stdout, limit=bounded_limit),
+                    "stderr": _truncate_text(completed.stderr, limit=bounded_limit),
+                    "timed_out": False,
+                }
+            except subprocess.TimeoutExpired as exc:
+                payload = {
+                    "workspace_root": str(workspace_root),
+                    "cwd": "." if working_dir == workspace_root else str(working_dir.relative_to(workspace_root)),
+                    "command": command,
+                    "returncode": None,
+                    "stdout": _truncate_text(str(exc.stdout or ""), limit=bounded_limit),
+                    "stderr": _truncate_text(str(exc.stderr or ""), limit=bounded_limit),
+                    "timed_out": True,
+                    "timeout_seconds": bounded_timeout,
+                }
+            return json.dumps(payload, ensure_ascii=False)
 
         @tool_contract(
             name="runtime.inspect",
@@ -2456,6 +2633,9 @@ class CapabilityPackService:
             project_inspect,
             task_inspect,
             artifact_list,
+            filesystem_list_dir,
+            filesystem_read_text,
+            terminal_exec,
             runtime_inspect,
             runtime_now,
             work_inspect,
@@ -2553,6 +2733,8 @@ class CapabilityPackService:
                     "artifact",
                     "document",
                     "session",
+                    "filesystem",
+                    "terminal",
                     "network",
                     "browser",
                     "memory",
@@ -2571,6 +2753,8 @@ class CapabilityPackService:
                     "runtime",
                     "session",
                     "project",
+                    "filesystem",
+                    "terminal",
                     "automation",
                     "delegation",
                     "mcp",
@@ -2587,6 +2771,7 @@ class CapabilityPackService:
                     "project",
                     "artifact",
                     "session",
+                    "filesystem",
                     "network",
                     "browser",
                     "memory",
@@ -2606,6 +2791,8 @@ class CapabilityPackService:
                     "project",
                     "artifact",
                     "session",
+                    "filesystem",
+                    "terminal",
                     "delegation",
                     "runtime",
                     "browser",
@@ -2655,9 +2842,13 @@ class CapabilityPackService:
                     "不要把自己叫作 general worker。\n"
                     "你的职责是先梳理目标、上下文和下一步，再在策略允许和用户授权范围内创建、拆分、合并、删除"
                     "或重划分 worker。\n"
-                    "优先自己使用当前已挂载的受治理工具完成有界任务；"
+                    "优先自己使用当前已挂载的受治理 web / filesystem / terminal 工具完成有界任务；"
                     "只有在并行执行、专业化分工、权限隔离或上下文隔离明显更有利时，"
                     "再委派给 research / dev / ops worker。\n"
+                    "如果问题已经进入长期、复杂、持续推进的 specialist lane，"
+                    "优先沿用同一条 lane，保持 worker 上下文和权限边界连续。\n"
+                    "即使决定委派，也要先把目标、上下文、工具边界和返回契约重写清楚，"
+                    "不要把用户原话原封不动转发给 worker。\n"
                     "面对 under-specified 请求时，"
                     "先判断是否缺真实待办、地点、预算、比较标准等关键输入；"
                     "优先补最关键的 1-2 个条件，不要先给伪完整答案。\n"
@@ -2676,7 +2867,7 @@ class CapabilityPackService:
                 content=(
                     "你是 ops worker，优先 runtime / diagnostics / recovery。\n"
                     "如果任务涉及状态页、控制台、网页健康检查或最新运行事实，可使用受治理 "
-                    "runtime/web 工具，并明确记录来源与限制。"
+                    "runtime / web / filesystem / terminal 工具，并明确记录来源与限制。"
                 ),
                 metadata={"worker_type": "ops"},
             ),
@@ -2687,7 +2878,9 @@ class CapabilityPackService:
                 content=(
                     "你是 research worker，优先分析上下文、产物和证据。\n"
                     "如果问题依赖今天、最新公开信息、官网、网页资料或外部文档，优先使用受治理 "
-                    "web.search / web.fetch / browser.* 收集证据，并在结果中说明来源与不确定性。"
+                    "web.search / web.fetch / browser.* 收集证据；"
+                    "如果 project 内已有文档或文件线索，也可结合 filesystem 读取已有材料，"
+                    "并在结果中说明来源与不确定性。"
                 ),
                 metadata={"worker_type": "research"},
             ),
@@ -2695,7 +2888,10 @@ class CapabilityPackService:
                 file_id="bootstrap:dev",
                 path_hint="bootstrap/dev.md",
                 applies_to_worker_types=[WorkerType.DEV],
-                content="你是 dev worker，优先改动方案、补丁和验证。",
+                content=(
+                    "你是 dev worker，优先改动方案、补丁和验证。"
+                    "可使用受治理 filesystem / terminal / browser 工具完成代码阅读、命令验证和修复闭环。"
+                ),
                 metadata={"worker_type": "dev"},
             ),
         }

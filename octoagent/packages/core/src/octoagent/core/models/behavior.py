@@ -45,6 +45,7 @@ class ButlerDecisionMode(StrEnum):
     DIRECT_ANSWER = "direct_answer"
     ASK_ONCE = "ask_once"
     DELEGATE_RESEARCH = "delegate_research"
+    DELEGATE_DEV = "delegate_dev"
     DELEGATE_OPS = "delegate_ops"
     BEST_EFFORT_ANSWER = "best_effort_answer"
 
@@ -143,6 +144,10 @@ class RuntimeHintBundle(BaseModel):
     effective_location_hint: str = Field(default="")
     recent_clarification_category: str = Field(default="")
     recent_clarification_source_text: str = Field(default="")
+    recent_worker_lane_worker_type: str = Field(default="")
+    recent_worker_lane_profile_id: str = Field(default="")
+    recent_worker_lane_topic: str = Field(default="")
+    recent_worker_lane_summary: str = Field(default="")
     tool_universe: ToolUniverseHints | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -180,6 +185,10 @@ class ButlerDecision(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     tool_intent: str = Field(default="")
     target_worker_type: str = Field(default="")
+    target_worker_profile_id: str = Field(default="")
+    delegate_objective: str = Field(default="")
+    continuity_topic: str = Field(default="")
+    prefer_sticky_worker: bool = False
     user_visible_boundary_note: str = Field(default="")
     reply_prompt: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)

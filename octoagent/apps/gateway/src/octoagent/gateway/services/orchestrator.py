@@ -197,6 +197,18 @@ class ButlerFreshnessFollowup:
     original_user_text: str
 
 
+@dataclass(frozen=True)
+class _RecentWorkerLaneCandidate:
+    """Butler 最近可复用的 specialist worker lane。"""
+
+    worker_type: WorkerType
+    requested_worker_profile_id: str
+    topic: str
+    summary: str
+    source_task_id: str
+    source_work_id: str
+
+
 class OrchestratorApprovalManager(Protocol):
     """审批管理器最小接口。"""
 
@@ -554,6 +566,7 @@ class OrchestratorService:
                 error_message=gate_decision.reason,
             )
 
+        request = await self._normalize_requested_worker_lens(request)
         request = await self._prepare_single_loop_butler_request(request)
         butler_decision, request_metadata_updates = await self._resolve_butler_decision(request)
         if request_metadata_updates:
@@ -594,7 +607,7 @@ class OrchestratorService:
                 decision=butler_decision,
             )
 
-        delegated_request = self._build_butler_delegation_request(
+        delegated_request = await self._build_butler_delegation_request(
             request=request,
             decision=butler_decision,
         )
@@ -669,6 +682,62 @@ class OrchestratorService:
             envelope=envelope,
             gate_decision=gate_decision,
             work_id=work_id,
+        )
+
+    async def _normalize_requested_worker_lens(
+        self,
+        request: OrchestratorRequest,
+    ) -> OrchestratorRequest:
+        metadata = dict(request.metadata)
+        explicit_requested_worker_type = str(
+            metadata.get("requested_worker_type", "")
+        ).strip()
+        canonical_worker_type = self._canonical_requested_worker_type(metadata)
+        if explicit_requested_worker_type and canonical_worker_type:
+            return request
+        if canonical_worker_type:
+            requested_profile_id = (
+                str(metadata.get("requested_worker_profile_id", "")).strip()
+                or str(metadata.get("agent_profile_id", "")).strip()
+            )
+            return request.model_copy(
+                update={
+                    "metadata": {
+                        **metadata,
+                        "requested_worker_type": canonical_worker_type,
+                        "requested_worker_profile_id": requested_profile_id,
+                        "requested_worker_type_source": (
+                            "requested_worker_profile_id"
+                            if requested_profile_id
+                            else "canonical_worker_lens"
+                        ),
+                    }
+                }
+            )
+        requested_profile_id = (
+            str(metadata.get("requested_worker_profile_id", "")).strip()
+            or str(metadata.get("agent_profile_id", "")).strip()
+        )
+        if not requested_profile_id:
+            return request
+        if self._delegation_plane is None:
+            return request
+        resolved_worker_type = (
+            await self._delegation_plane.capability_pack.resolve_worker_type_for_profile(
+                requested_profile_id
+            )
+        )
+        if resolved_worker_type is None:
+            return request
+        return request.model_copy(
+            update={
+                "metadata": {
+                    **metadata,
+                    "requested_worker_type": resolved_worker_type.value,
+                    "requested_worker_profile_id": requested_profile_id,
+                    "requested_worker_type_source": "requested_worker_profile_id",
+                }
+            }
         )
 
     async def _prepare_single_loop_butler_request(
@@ -753,16 +822,32 @@ class OrchestratorService:
             return False
         if str(metadata.get("spawned_by", "")).strip():
             return False
-        requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
+        requested_worker_type = self._canonical_requested_worker_type(metadata)
         return requested_worker_type in {"", "general", "research", "dev", "ops"}
 
     @staticmethod
     def _resolve_single_loop_worker_type(request: OrchestratorRequest) -> WorkerType:
-        requested_worker_type = str(request.metadata.get("requested_worker_type", "")).strip()
+        requested_worker_type = OrchestratorService._canonical_requested_worker_type(
+            request.metadata
+        )
         try:
             return WorkerType(requested_worker_type or WorkerType.GENERAL.value)
         except ValueError:
             return WorkerType.GENERAL
+
+    @staticmethod
+    def _canonical_requested_worker_type(metadata: dict[str, Any]) -> str:
+        requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
+        if requested_worker_type:
+            return requested_worker_type
+        for key in ("requested_worker_profile_id", "agent_profile_id"):
+            profile_id = str(metadata.get(key, "")).strip().lower()
+            if not profile_id.startswith("singleton:"):
+                continue
+            lane = profile_id.split(":", 1)[1].strip()
+            if lane in {member.value for member in WorkerType}:
+                return lane
+        return ""
 
     async def _resolve_single_loop_tool_selection(
         self,
@@ -920,7 +1005,7 @@ class OrchestratorService:
             return False
         if str(metadata.get("spawned_by", "")).strip():
             return False
-        requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
+        requested_worker_type = self._canonical_requested_worker_type(metadata)
         return not requested_worker_type or requested_worker_type == "general"
 
     def _is_freshness_butler_decision(self, decision: ButlerDecision) -> bool:
@@ -963,6 +1048,8 @@ class OrchestratorService:
                     default_location = value
                     break
 
+        recent_worker_lane = await self._resolve_recent_worker_lane(task_id=request.task_id)
+
         return build_runtime_hint_bundle(
             user_text=request.user_text,
             can_delegate_research=self._delegation_plane is not None,
@@ -970,8 +1057,68 @@ class OrchestratorService:
             recent_clarification_source_text=latest_source_text,
             recent_location_hint=latest_location_hint,
             default_location_hint=default_location,
+            recent_worker_lane_worker_type=(
+                recent_worker_lane.worker_type.value if recent_worker_lane is not None else ""
+            ),
+            recent_worker_lane_profile_id=(
+                recent_worker_lane.requested_worker_profile_id
+                if recent_worker_lane is not None
+                else ""
+            ),
+            recent_worker_lane_topic=(
+                recent_worker_lane.topic if recent_worker_lane is not None else ""
+            ),
+            recent_worker_lane_summary=(
+                recent_worker_lane.summary if recent_worker_lane is not None else ""
+            ),
             metadata={"task_id": request.task_id},
         )
+
+    async def _resolve_recent_worker_lane(
+        self,
+        *,
+        task_id: str,
+    ) -> _RecentWorkerLaneCandidate | None:
+        session_state = await self._load_butler_session_state(task_id=task_id)
+        recent_task_ids: list[str] = []
+        if session_state is not None:
+            for ref_task_id in [*session_state.recent_turn_refs, task_id]:
+                normalized = str(ref_task_id).strip()
+                if normalized and normalized not in recent_task_ids:
+                    recent_task_ids.append(normalized)
+        if not recent_task_ids:
+            recent_task_ids = [task_id]
+
+        latest_candidate: tuple[datetime, _RecentWorkerLaneCandidate] | None = None
+        for ref_task_id in recent_task_ids[-6:]:
+            works = await self._stores.work_store.list_works(task_id=ref_task_id)
+            for work in works:
+                if work.selected_worker_type is WorkerType.GENERAL:
+                    continue
+                requested_profile_id = str(work.requested_worker_profile_id or "").strip()
+                topic = (
+                    str(work.metadata.get("delegate_continuity_topic", "")).strip()
+                    or str(work.metadata.get("butler_decision_category", "")).strip()
+                    or str(work.metadata.get("butler_decision_tool_intent", "")).strip()
+                    or work.title.strip()
+                )
+                summary = (
+                    str(work.metadata.get("butler_delegate_objective", "")).strip()
+                    or str(work.metadata.get("result_summary", "")).strip()
+                    or work.title.strip()
+                )
+                candidate = _RecentWorkerLaneCandidate(
+                    worker_type=work.selected_worker_type,
+                    requested_worker_profile_id=requested_profile_id,
+                    topic=topic,
+                    summary=summary,
+                    source_task_id=work.task_id,
+                    source_work_id=work.work_id,
+                )
+                sort_key = work.updated_at or work.created_at
+                if latest_candidate is None or sort_key > latest_candidate[0]:
+                    latest_candidate = (sort_key, candidate)
+        return None if latest_candidate is None else latest_candidate[1]
 
     async def _resolve_model_butler_decision(
         self,
@@ -1197,7 +1344,7 @@ class OrchestratorService:
             }
         )
 
-    def _build_butler_delegation_request(
+    async def _build_butler_delegation_request(
         self,
         *,
         request: OrchestratorRequest,
@@ -1205,6 +1352,7 @@ class OrchestratorService:
     ) -> OrchestratorRequest | None:
         if decision is None or decision.mode not in {
             ButlerDecisionMode.DELEGATE_RESEARCH,
+            ButlerDecisionMode.DELEGATE_DEV,
             ButlerDecisionMode.DELEGATE_OPS,
         }:
             return None
@@ -1212,20 +1360,54 @@ class OrchestratorService:
         worker_type = self._resolve_butler_target_worker_type(decision)
         if worker_type is None:
             return None
+        recent_lane = await self._resolve_recent_worker_lane(task_id=request.task_id)
         target_kind = self._butler_target_kind_for_worker_type(worker_type)
         requested_tool_profile = (
             "standard"
             if worker_type is WorkerType.RESEARCH or decision.tool_intent == "web.search"
-            else request.tool_profile
+            else (str(request.tool_profile).strip() or "standard")
+        )
+        continuity_topic = str(decision.continuity_topic).strip()
+        if not continuity_topic and recent_lane is not None and recent_lane.worker_type is worker_type:
+            continuity_topic = recent_lane.topic
+        if not continuity_topic:
+            continuity_topic = decision.category or decision.tool_intent or worker_type.value
+        requested_worker_profile_id = str(decision.target_worker_profile_id).strip()
+        if (
+            not requested_worker_profile_id
+            and decision.prefer_sticky_worker
+            and recent_lane is not None
+            and recent_lane.worker_type is worker_type
+        ):
+            requested_worker_profile_id = (
+                recent_lane.requested_worker_profile_id
+                or f"singleton:{worker_type.value}"
+            )
+        delegate_objective = (
+            str(decision.delegate_objective).strip()
+            or await self._compose_butler_delegate_objective(
+                request=request,
+                decision=decision,
+                worker_type=worker_type,
+                continuity_topic=continuity_topic,
+                requested_worker_profile_id=requested_worker_profile_id,
+                recent_lane=recent_lane,
+            )
         )
         delegation_metadata = {
             **dict(request.metadata),
             "requested_worker_type": worker_type.value,
+            "requested_worker_profile_id": requested_worker_profile_id,
             "target_kind": target_kind,
             "butler_decision_mode": decision.mode.value,
             "butler_decision_category": decision.category,
             "butler_decision_rationale": decision.rationale,
             "butler_decision_tool_intent": decision.tool_intent,
+            "butler_decision_target_worker_profile_id": requested_worker_profile_id,
+            "butler_delegate_objective": delegate_objective,
+            "delegate_continuity_topic": continuity_topic,
+            "butler_prefer_sticky_worker": decision.prefer_sticky_worker,
+            "butler_delegate_original_user_text": request.user_text,
             "butler_decision_missing_inputs": list(decision.missing_inputs),
             "butler_decision_missing_inputs_json": json.dumps(
                 decision.missing_inputs,
@@ -1239,10 +1421,21 @@ class OrchestratorService:
             f"butler_category={decision.category or 'general'}",
             f"butler_target={worker_type.value}",
         )
+        if requested_worker_profile_id:
+            route_reason = self._join_route_reason(
+                route_reason,
+                f"butler_target_profile={requested_worker_profile_id}",
+            )
+        if continuity_topic:
+            route_reason = self._join_route_reason(
+                route_reason,
+                f"butler_lane_topic={continuity_topic}",
+            )
         return request.model_copy(
             update={
                 "worker_capability": worker_type.value,
                 "tool_profile": requested_tool_profile,
+                "user_text": delegate_objective,
                 "route_reason": route_reason,
                 "metadata": delegation_metadata,
             }
@@ -1254,6 +1447,8 @@ class OrchestratorService:
         if not raw:
             if decision.mode is ButlerDecisionMode.DELEGATE_RESEARCH:
                 raw = WorkerType.RESEARCH.value
+            elif decision.mode is ButlerDecisionMode.DELEGATE_DEV:
+                raw = WorkerType.DEV.value
             elif decision.mode is ButlerDecisionMode.DELEGATE_OPS:
                 raw = WorkerType.OPS.value
         if not raw:
@@ -1262,6 +1457,66 @@ class OrchestratorService:
             return WorkerType(raw)
         except ValueError:
             return None
+
+    async def _compose_butler_delegate_objective(
+        self,
+        *,
+        request: OrchestratorRequest,
+        decision: ButlerDecision,
+        worker_type: WorkerType,
+        continuity_topic: str,
+        requested_worker_profile_id: str,
+        recent_lane: _RecentWorkerLaneCandidate | None,
+    ) -> str:
+        recent_conversation = await self._build_butler_recent_conversation_block(
+            task_id=request.task_id
+        )
+        worker_label = worker_type.value
+        continuity_lines: list[str] = []
+        if continuity_topic:
+            continuity_lines.append(f"- continuity_topic: {continuity_topic}")
+        if requested_worker_profile_id:
+            continuity_lines.append(
+                f"- preferred_worker_profile_id: {requested_worker_profile_id}"
+            )
+        if recent_lane is not None and recent_lane.worker_type is worker_type:
+            continuity_lines.append(
+                f"- recent_lane_summary: {recent_lane.summary or recent_lane.source_work_id}"
+            )
+            continuity_lines.append(f"- recent_lane_task_id: {recent_lane.source_task_id}")
+            continuity_lines.append(f"- recent_lane_work_id: {recent_lane.source_work_id}")
+        continuity_block = "\n".join(continuity_lines) or "- continuity_topic: none"
+
+        missing_inputs = "\n".join(f"- {item}" for item in decision.missing_inputs) or "- none"
+        assumptions = "\n".join(f"- {item}" for item in decision.assumptions) or "- none"
+        allowed_tools = (
+            str(request.metadata.get("selected_tools_json", "")).strip()
+            or json.dumps(request.metadata.get("selected_tools", []), ensure_ascii=False)
+            or "[]"
+        )
+        objective = str(decision.delegate_objective).strip() or request.user_text.strip()
+        return (
+            f"ButlerDelegation for {worker_label}\n"
+            "目标说明：\n"
+            f"- objective: {objective}\n"
+            f"- rationale: {decision.rationale or 'N/A'}\n"
+            f"- original_user_request: {request.user_text.strip() or 'N/A'}\n"
+            "已知前提：\n"
+            f"{assumptions}\n"
+            "仍缺信息：\n"
+            f"{missing_inputs}\n"
+            "连续性要求：\n"
+            f"{continuity_block}\n"
+            "工具契约：\n"
+            f"- tool_intent: {decision.tool_intent or 'N/A'}\n"
+            f"- requested_tool_profile: {request.tool_profile or 'standard'}\n"
+            f"- selected_tools_json: {allowed_tools}\n"
+            "返回契约：\n"
+            "- 先给可直接给 Butler 收口的结论摘要。\n"
+            "- 如果调用了外部工具，说明来源、关键参数和限制。\n"
+            "- 如果仍缺关键事实，明确告诉 Butler 还差什么。\n"
+            f"{recent_conversation}"
+        )
 
     def _butler_target_kind_for_worker_type(self, worker_type: WorkerType) -> str:
         if self._delegation_plane is None:
