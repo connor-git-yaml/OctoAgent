@@ -1,12 +1,11 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import RootErrorBoundary from "./components/shell/RootErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
 const AdvancedControlPlane = lazy(() => import("./pages/AdvancedControlPlane"));
 const AgentCenter = lazy(() => import("./pages/AgentCenter"));
 const ChatWorkbench = lazy(() => import("./pages/ChatWorkbench"));
-const Home = lazy(() => import("./pages/Home"));
 const MemoryCenter = lazy(() => import("./pages/MemoryCenter"));
 const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
@@ -36,8 +35,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<WorkbenchLayout />}>
-            <Route index element={withRouteSuspense(<Home />)} />
-            <Route path="chat" element={withRouteSuspense(<ChatWorkbench />)} />
+            <Route index element={withRouteSuspense(<ChatWorkbench />)} />
+            <Route path="chat" element={<Navigate to="/" replace />} />
             <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
             <Route
               path="agents/skills"

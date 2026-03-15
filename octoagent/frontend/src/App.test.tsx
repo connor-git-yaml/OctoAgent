@@ -939,7 +939,7 @@ describe("App workbench routing", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("默认根路由进入 Home，而不是旧控制台首页", async () => {
+  it("默认根路由直接进入 Chat，而不是首页或旧控制台", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
@@ -950,8 +950,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "开始一段对话" })).toBeInTheDocument();
   });
 
   it("Agents 路由提供主 Agent 与 Work Agent 管理入口", async () => {
@@ -1031,7 +1030,7 @@ describe("App workbench routing", () => {
     ).toBeInTheDocument();
   });
 
-  it("黄金路径 smoke 覆盖 Home / Chat / Agents / Settings / Memory / Advanced / Work", async () => {
+  it("黄金路径 smoke 覆盖 Chat / Agents / Settings / Memory / Advanced / Work", async () => {
     const snapshot = buildSnapshot();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
@@ -1052,14 +1051,6 @@ describe("App workbench routing", () => {
     const routeChecks = [
       {
         path: "/",
-        assertRoute: async () => {
-          expect(
-            await screen.findByRole("heading", { name: "先连上一个真实模型" })
-          ).toBeInTheDocument();
-        },
-      },
-      {
-        path: "/chat",
         assertRoute: async () => {
           expect(
             await screen.findByRole("heading", { name: "开始一段对话" })
@@ -2498,182 +2489,8 @@ describe("App workbench routing", () => {
     expect(button).toBeDisabled();
   });
 
-  it("project.select 后会全量回刷工作台并同步 Project 摘要", async () => {
-    const beforeSnapshot = buildSnapshot();
-    beforeSnapshot.resources.project_selector.available_projects.push({
-      project_id: "project-ops",
-      slug: "ops",
-      name: "Ops Project",
-      is_default: false,
-      status: "active",
-      workspace_ids: ["workspace-ops"],
-      warnings: [],
-    });
-    beforeSnapshot.resources.project_selector.available_workspaces.push(
-      buildWorkspace("workspace-ops", "project-ops", "Ops Primary")
-    );
-
-    const afterSnapshot = buildSnapshot();
-    afterSnapshot.resources.project_selector.current_project_id = "project-ops";
-    afterSnapshot.resources.project_selector.current_workspace_id = "workspace-ops";
-    afterSnapshot.resources.project_selector.available_projects =
-      beforeSnapshot.resources.project_selector.available_projects;
-    afterSnapshot.resources.project_selector.available_workspaces =
-      beforeSnapshot.resources.project_selector.available_workspaces;
-    afterSnapshot.resources.sessions.operator_summary = {
-      total_pending: 4,
-      approvals: 3,
-      alerts: 0,
-      retryable_failures: 0,
-      pairing_requests: 1,
-      degraded_sources: [],
-      generated_at: "2026-03-09T10:03:00Z",
-    };
-    afterSnapshot.resources.delegation.works = [
-      buildWork("work-ops", "running", { title: "Ops Work" }),
-    ] as typeof afterSnapshot.resources.delegation.works;
-    afterSnapshot.resources.delegation.summary = { by_status: { running: 1 } };
-    afterSnapshot.resources.memory.summary = {
-      ...afterSnapshot.resources.memory.summary,
-      sor_current_count: 8,
-    };
-
-    let snapshotCallCount = 0;
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        snapshotCallCount += 1;
-        return Promise.resolve(
-          jsonResponse(snapshotCallCount === 1 ? beforeSnapshot : afterSnapshot)
-        );
-      }
-      if (url.includes("/api/control/actions") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            result: {
-              contract_version: "1.0.0",
-              request_id: "req-project-select",
-              correlation_id: "req-project-select",
-              action_id: "project.select",
-              status: "completed",
-              code: "PROJECT_SELECTED",
-              message: "已切换当前 project",
-              data: {
-                project_id: "project-ops",
-                workspace_id: "workspace-ops",
-              },
-              resource_refs: [
-                {
-                  resource_type: "project_selector",
-                  resource_id: "project:selector",
-                  schema_version: 1,
-                },
-              ],
-              target_refs: [],
-              handled_at: "2026-03-09T10:03:00Z",
-            },
-          })
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    await screen.findByRole("heading", { name: "先连上一个真实模型" });
-    await userEvent.selectOptions(screen.getByLabelText("切换 Project"), "project-ops");
-    await userEvent.click(screen.getByRole("button", { name: "切换" }));
-
-    await waitFor(() =>
-      expect(screen.getAllByText("Ops Project").length).toBeGreaterThan(0)
-    );
-    expect(screen.getAllByText("Ops Primary").length).toBeGreaterThan(0);
-    const actionCall = fetchMock.mock.calls.find((call) => {
-      const [url, init] = call as FetchArgs;
-      return String(url).includes("/api/control/actions") && init?.method === "POST";
-    }) as FetchArgs | undefined;
-    expect(String(actionCall?.[1]?.body)).toContain('"project_id":"project-ops"');
-    expect(String(actionCall?.[1]?.body)).toContain('"workspace_id":"workspace-ops"');
-    expect(
-      fetchMock.mock.calls.filter((call) =>
-        String((call as FetchArgs)[0]).includes("/api/control/snapshot")
-      )
-    ).toHaveLength(2);
-  });
-
-  it("首页允许在同一 Project 内切换 Workspace", async () => {
-    const beforeSnapshot = buildSnapshot();
-    beforeSnapshot.resources.project_selector.available_workspaces.push(
-      buildWorkspace("workspace-analysis", "project-default", "Analysis")
-    );
-
-    const afterSnapshot = buildSnapshot();
-    afterSnapshot.resources.project_selector.current_workspace_id = "workspace-analysis";
-    afterSnapshot.resources.project_selector.available_workspaces =
-      beforeSnapshot.resources.project_selector.available_workspaces;
-
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        const snapshot =
-          fetchMock.mock.calls.filter((call) =>
-            String((call as FetchArgs)[0]).includes("/api/control/snapshot")
-          ).length === 1
-            ? beforeSnapshot
-            : afterSnapshot;
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/control/actions") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            result: {
-              contract_version: "1.0.0",
-              request_id: "req-workspace-select",
-              correlation_id: "req-workspace-select",
-              action_id: "project.select",
-              status: "completed",
-              code: "PROJECT_SELECTED",
-              message: "已切换当前 project",
-              data: {
-                project_id: "project-default",
-                workspace_id: "workspace-analysis",
-              },
-              resource_refs: [
-                {
-                  resource_type: "project_selector",
-                  resource_id: "project:selector",
-                  schema_version: 1,
-                },
-              ],
-              target_refs: [],
-              handled_at: "2026-03-09T10:04:00Z",
-            },
-          })
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    await screen.findByRole("heading", { name: "先连上一个真实模型" });
-    await userEvent.selectOptions(screen.getByLabelText("切换 Workspace"), "workspace-analysis");
-    await userEvent.click(screen.getByRole("button", { name: "切换" }));
-
-    const actionCall = fetchMock.mock.calls.find((call) => {
-      const [url, init] = call as FetchArgs;
-      return String(url).includes("/api/control/actions") && init?.method === "POST";
-    }) as FetchArgs | undefined;
-
-    expect(String(actionCall?.[1]?.body)).toContain('"project_id":"project-default"');
-    expect(String(actionCall?.[1]?.body)).toContain('"workspace_id":"workspace-analysis"');
-    expect(await screen.findByText("workspace-analysis")).toBeInTheDocument();
-  });
-
   it("重新进入 Chat 时会恢复当前聚焦会话的历史消息", async () => {
-    window.history.pushState({}, "", "/chat");
+    window.history.pushState({}, "", "/");
 
     const snapshot = buildSnapshot();
     const focusedSession = buildSession("task-chat-restore", "work-chat-restore");
@@ -2745,7 +2562,7 @@ describe("App workbench routing", () => {
   });
 
   it("重新进入 Chat 时会优先恢复最近的 Web 会话", async () => {
-    window.history.pushState({}, "", "/chat");
+    window.history.pushState({}, "", "/");
 
     const snapshot = buildSnapshot();
     const telegramSession = {
@@ -2814,7 +2631,7 @@ describe("App workbench routing", () => {
   });
 
   it("刷新 Chat 时会在失效的 active task 之后回退到最近的 Web 会话", async () => {
-    window.history.pushState({}, "", "/chat");
+    window.history.pushState({}, "", "/");
     window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-missing");
 
     const snapshot = buildSnapshot();

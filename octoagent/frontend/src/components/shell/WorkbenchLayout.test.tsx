@@ -87,10 +87,10 @@ describe("WorkbenchLayout", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={["/settings"]}>
         <Routes>
           <Route element={<WorkbenchLayout />}>
-            <Route path="/" element={<div>Home Slot</div>} />
+            <Route path="/settings" element={<div>Settings Slot</div>} />
           </Route>
         </Routes>
       </MemoryRouter>

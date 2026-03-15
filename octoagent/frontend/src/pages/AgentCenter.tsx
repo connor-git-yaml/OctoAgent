@@ -523,7 +523,7 @@ export default function AgentCenter() {
       return;
     }
     setFlashMessage(`下一条消息会直接开启「${agentName}」会话。`);
-    navigate("/chat");
+    navigate("/");
   }
 
   return (

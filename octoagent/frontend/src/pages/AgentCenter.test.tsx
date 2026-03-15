@@ -825,7 +825,7 @@ describe("AgentCenter", () => {
       expect(submitAction).toHaveBeenCalledWith("session.new", {
         agent_profile_id: "singleton:research",
       });
-      expect(navigateMock).toHaveBeenCalledWith("/chat");
+      expect(navigateMock).toHaveBeenCalledWith("/");
     });
   });
 
