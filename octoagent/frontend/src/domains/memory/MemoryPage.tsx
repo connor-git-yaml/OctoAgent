@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { formatDateTime } from "../../workbench/utils";
 import MemoryFiltersSection from "./MemoryFiltersSection";
@@ -18,29 +19,70 @@ import {
 } from "./shared";
 
 export default function MemoryPage() {
-  const { snapshot, submitAction, busyActionId } = useWorkbench();
-  const memory = snapshot!.resources.memory;
-  const config = snapshot!.resources.config;
-  const retrievalPlatform = snapshot!.resources.retrieval_platform ?? null;
-  const [queryDraft, setQueryDraft] = useState(memory.filters.query);
-  const [layerDraft, setLayerDraft] = useState(memory.filters.layer);
-  const [partitionDraft, setPartitionDraft] = useState(memory.filters.partition);
-  const [includeHistoryDraft, setIncludeHistoryDraft] = useState(memory.filters.include_history);
+  const { snapshot, submitAction, busyActionId, refreshSnapshot } = useWorkbench();
+  const memory = snapshot?.resources?.memory ?? null;
+  const config = snapshot?.resources?.config ?? null;
+  const retrievalPlatform = snapshot?.resources?.retrieval_platform ?? null;
+  if (!snapshot || !memory || !config) {
+    return (
+      <div className="wb-page">
+        <section className="wb-panel">
+          <div className="wb-empty-state">
+            <strong>这页暂时还没拿到完整的 Memory 快照</strong>
+            <span>
+              现在先不要在这里猜状态。你可以先重新加载；如果只是想处理审批或继续当前任务，先回
+              Chat 也可以。
+            </span>
+            <div className="wb-inline-actions wb-inline-actions-wrap">
+              <button
+                type="button"
+                className="wb-button wb-button-primary"
+                onClick={() => void refreshSnapshot()}
+              >
+                重新加载 Memory
+              </button>
+              <Link className="wb-button wb-button-secondary" to="/chat">
+                回到 Chat
+              </Link>
+              <Link className="wb-button wb-button-tertiary" to="/advanced">
+                去 Advanced 看诊断
+              </Link>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+  const memoryResource = memory;
+  const configResource = config;
+  const filters = memoryResource.filters ?? {
+    query: "",
+    layer: "",
+    partition: "",
+    include_history: false,
+    include_vault_refs: false,
+    limit: 50,
+  };
+  const records = Array.isArray(memoryResource.records) ? memoryResource.records : [];
+  const [queryDraft, setQueryDraft] = useState(filters.query);
+  const [layerDraft, setLayerDraft] = useState(filters.layer);
+  const [partitionDraft, setPartitionDraft] = useState(filters.partition);
+  const [includeHistoryDraft, setIncludeHistoryDraft] = useState(filters.include_history);
   const [includeVaultRefsDraft, setIncludeVaultRefsDraft] = useState(
-    memory.filters.include_vault_refs
+    filters.include_vault_refs
   );
-  const [limitDraft, setLimitDraft] = useState(String(memory.filters.limit || 50));
+  const [limitDraft, setLimitDraft] = useState(String(filters.limit || 50));
   const [selectedRecordId, setSelectedRecordId] = useState("");
-  const displayRecords = buildMemoryDisplayRecords(memory.records);
+  const displayRecords = buildMemoryDisplayRecords(records);
 
   useEffect(() => {
-    setQueryDraft(memory.filters.query);
-    setLayerDraft(memory.filters.layer);
-    setPartitionDraft(memory.filters.partition);
-    setIncludeHistoryDraft(memory.filters.include_history);
-    setIncludeVaultRefsDraft(memory.filters.include_vault_refs);
-    setLimitDraft(String(memory.filters.limit || 50));
-  }, [memory.filters]);
+    setQueryDraft(filters.query);
+    setLayerDraft(filters.layer);
+    setPartitionDraft(filters.partition);
+    setIncludeHistoryDraft(filters.include_history);
+    setIncludeVaultRefsDraft(filters.include_vault_refs);
+    setLimitDraft(String(filters.limit || 50));
+  }, [filters]);
 
   useEffect(() => {
     if (displayRecords.length === 0) {
@@ -57,8 +99,8 @@ export default function MemoryPage() {
 
   const layerOptions = uniqueOptions([
     "",
-    ...memory.available_layers,
-    memory.filters.layer,
+    ...(Array.isArray(memoryResource.available_layers) ? memoryResource.available_layers : []),
+    filters.layer,
     "sor",
     "fragment",
     "vault",
@@ -66,16 +108,18 @@ export default function MemoryPage() {
   ]);
   const partitionOptions = uniqueOptions([
     "",
-    ...memory.available_partitions,
-    memory.filters.partition,
+    ...(Array.isArray(memoryResource.available_partitions)
+      ? memoryResource.available_partitions
+      : []),
+    filters.partition,
   ]);
-  const memoryConfig = readConfigSection(readConfigSection(config.current_value).memory);
+  const memoryConfig = readConfigSection(readConfigSection(configResource.current_value).memory);
   const memoryMode =
-    memory.retrieval_profile?.engine_mode === "memu_compat"
+    memoryResource.retrieval_profile?.engine_mode === "memu_compat"
       ? "memu"
       : String(memoryConfig.backend_mode ?? "local_only").trim().toLowerCase() || "local_only";
   const bridgeTransport =
-    String(memory.retrieval_profile?.transport ?? "").trim().toLowerCase() ||
+    String(memoryResource.retrieval_profile?.transport ?? "").trim().toLowerCase() ||
     String(memoryConfig.bridge_transport ?? "").trim().toLowerCase() ||
     (String(memoryConfig.bridge_command ?? "").trim() ? "command" : "http");
   const bridgeUrl = String(memoryConfig.bridge_url ?? "").trim();
@@ -96,7 +140,7 @@ export default function MemoryPage() {
         ].filter(Boolean)
       : [];
   const narrative: MemoryNarrative = buildMemoryNarrative(
-    memory,
+    memoryResource,
     memoryMode,
     missingSetupItems,
     displayRecords.length
@@ -128,8 +172,8 @@ export default function MemoryPage() {
 
   async function refreshMemory() {
     await submitAction("memory.query", {
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
       query: queryDraft.trim(),
       layer: layerDraft,
       partition: partitionDraft,
@@ -147,8 +191,8 @@ export default function MemoryPage() {
     setIncludeVaultRefsDraft(false);
     setLimitDraft("50");
     await submitAction("memory.query", {
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
       query: "",
       layer: "",
       partition: "",
@@ -160,39 +204,39 @@ export default function MemoryPage() {
 
   async function flushMemory() {
     await submitAction("memory.flush", {
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
     });
   }
 
   async function startEmbeddingMigration() {
     await submitAction("retrieval.index.start", {
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
     });
   }
 
   async function cancelEmbeddingMigration(generationId: string) {
     await submitAction("retrieval.index.cancel", {
       generation_id: generationId,
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
     });
   }
 
   async function cutoverEmbeddingMigration(generationId: string) {
     await submitAction("retrieval.index.cutover", {
       generation_id: generationId,
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
     });
   }
 
   async function rollbackEmbeddingMigration(generationId: string) {
     await submitAction("retrieval.index.rollback", {
       generation_id: generationId,
-      project_id: memory.active_project_id,
-      workspace_id: memory.active_workspace_id,
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
     });
   }
 
@@ -203,7 +247,7 @@ export default function MemoryPage() {
   return (
     <div className="wb-page">
       <MemoryHeroSection
-        memory={memory}
+        memory={memoryResource}
         memoryMode={memoryMode}
         bridgeTransport={bridgeTransport}
         heroTone={narrative.heroTone}
@@ -233,7 +277,7 @@ export default function MemoryPage() {
       ) : null}
 
       <MemoryRetrievalLifecycleSection
-        memory={memory}
+        memory={memoryResource}
         memoryCorpus={memoryCorpus}
         activeGeneration={activeGeneration}
         pendingGeneration={pendingGeneration}
@@ -256,7 +300,7 @@ export default function MemoryPage() {
         layerOptions={layerOptions}
         partitionOptions={partitionOptions}
         retrievalLabel={narrative.retrievalLabel}
-        updatedAt={memory.updated_at}
+        updatedAt={memoryResource.updated_at}
         busyActionId={busyActionId}
         onQueryChange={setQueryDraft}
         onLayerChange={setLayerDraft}
@@ -273,7 +317,7 @@ export default function MemoryPage() {
 
       <div className="wb-memory-layout">
         <MemoryResultsSection
-          memory={memory}
+          memory={memoryResource}
           records={displayRecords}
           selectedRecordId={selectedRecordId}
           hasStoredRecords={narrative.hasStoredRecords}
@@ -283,7 +327,7 @@ export default function MemoryPage() {
         />
 
         <MemoryInspectorSection
-          memory={memory}
+          memory={memoryResource}
           selectedRecord={selectedRecord}
           layerOptions={layerOptions}
           partitionOptions={partitionOptions}

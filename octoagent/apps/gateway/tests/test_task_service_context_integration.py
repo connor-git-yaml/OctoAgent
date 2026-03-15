@@ -343,6 +343,83 @@ async def _seed_project_context(store_group) -> None:
     await store_group.conn.commit()
 
 
+async def test_agent_context_backfills_bootstrap_templates_and_routes(
+    tmp_path: Path,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f055-bootstrap.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_worker_profile(
+        WorkerProfile(
+            profile_id="singleton:research",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Research Root Agent",
+            summary="负责研究与外部资料核实。",
+            base_archetype="research",
+            tool_profile="standard",
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.BUILTIN,
+            active_revision=1,
+        )
+    )
+
+    service = AgentContextService(store_group, project_root=tmp_path)
+    project = await store_group.project_store.get_project("project-alpha")
+    workspace = await store_group.project_store.get_workspace("workspace-alpha")
+    assert project is not None
+    assert workspace is not None
+
+    owner_profile = await service._ensure_owner_profile()
+    agent_profile = await service._ensure_agent_profile(project)
+    owner_overlay = await service._ensure_owner_overlay(
+        owner_profile=owner_profile,
+        project=project,
+        workspace=workspace,
+    )
+    bootstrap = await service._ensure_bootstrap_session(
+        project=project,
+        workspace=workspace,
+        owner_profile=owner_profile,
+        owner_overlay=owner_overlay,
+        agent_profile=agent_profile,
+        surface="chat",
+    )
+    mirrored = await service._ensure_agent_profile_from_worker_profile("singleton:research")
+
+    assert owner_overlay is not None
+    assert mirrored is not None
+    assert "behavior:system:AGENTS.md" in agent_profile.bootstrap_template_ids
+    assert "behavior:agent:IDENTITY.md" in agent_profile.bootstrap_template_ids
+    assert "behavior:project:PROJECT.md" in agent_profile.bootstrap_template_ids
+    assert "behavior:project:PROJECT.md" in owner_overlay.bootstrap_template_ids
+    assert "behavior:project_agent:TOOLS.md" in mirrored.bootstrap_template_ids
+    assert bootstrap.steps == [
+        "owner_identity",
+        "assistant_identity",
+        "assistant_personality",
+        "locale_and_location",
+        "memory_preferences",
+        "secret_routing",
+    ]
+    assert bootstrap.metadata["project_path_manifest_required"] is True
+    routes = {
+        item["step"]: item["route"]
+        for item in bootstrap.metadata.get("questionnaire", [])
+    }
+    assert routes["owner_identity"] == "memory"
+    assert routes["assistant_personality"] == "behavior:SOUL.md"
+    assert routes["secret_routing"] == "secrets"
+    assert (
+        bootstrap.metadata["storage_boundary_hints"]["facts_store"] == "MemoryService"
+    )
+    assert "behavior:project:instructions/README.md" in bootstrap.metadata[
+        "bootstrap_template_ids"
+    ]
+
+
 async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     tmp_path: Path,
     monkeypatch,

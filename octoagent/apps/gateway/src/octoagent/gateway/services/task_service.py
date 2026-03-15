@@ -644,6 +644,11 @@ class TaskService:
                             worker_capability=worker_capability,
                             tool_profile=tool_profile,
                         )
+                    sanitized_content = self._sanitize_user_visible_response(
+                        llm_result.content
+                    )
+                    if sanitized_content and sanitized_content != llm_result.content:
+                        llm_result = llm_result.model_copy(update={"content": sanitized_content})
 
                     # 4. 存储 Artifact + 写入完成事件
                     artifact_id, artifact = await self._store_llm_artifact(
@@ -1805,6 +1810,92 @@ class TaskService:
             )
             return truncated + f"... [truncated, {suffix}]"
         return text
+
+    @staticmethod
+    def _sanitize_user_visible_response(text: str) -> str:
+        """清理误泄漏到最终答复里的工具 transcript / 原始 JSON。"""
+
+        normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not normalized:
+            return ""
+
+        tool_transcript_pattern = re.compile(r"\bto=[a-z0-9_.-]+", re.IGNORECASE)
+        if not tool_transcript_pattern.search(normalized):
+            return normalized
+
+        raw_json_markers = (
+            '"query":',
+            '"matches":',
+            '"memories":',
+            '"scopes":',
+            '"result":',
+            '"ids":',
+        )
+        cleaned_lines: list[str] = []
+        skip_block_kind = ""
+        json_balance = 0
+        pending_json_after_tool = False
+
+        def is_jsonish_line(value: str) -> bool:
+            stripped = value.strip()
+            if not stripped:
+                return False
+            if stripped.startswith("```"):
+                return True
+            if stripped.startswith(("{", "[", "}", "]")):
+                return True
+            if any(token in stripped for token in raw_json_markers):
+                return True
+            if re.search(r'^".+?:', stripped):
+                return True
+            return False
+
+        for raw_line in normalized.splitlines():
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped:
+                if not pending_json_after_tool and not skip_block_kind and cleaned_lines and cleaned_lines[-1] != "":
+                    cleaned_lines.append("")
+                continue
+
+            if skip_block_kind == "fence":
+                if stripped.startswith("```"):
+                    skip_block_kind = ""
+                continue
+
+            if skip_block_kind == "json":
+                json_balance += stripped.count("{") + stripped.count("[")
+                json_balance -= stripped.count("}") + stripped.count("]")
+                if json_balance <= 0:
+                    skip_block_kind = ""
+                continue
+
+            match = tool_transcript_pattern.search(line)
+            if match is not None:
+                prefix = line[: match.start()].rstrip()
+                if prefix.strip() and not is_jsonish_line(prefix):
+                    cleaned_lines.append(prefix.strip())
+                pending_json_after_tool = True
+                continue
+
+            if pending_json_after_tool:
+                if is_jsonish_line(stripped):
+                    if stripped.startswith("```"):
+                        skip_block_kind = "fence"
+                    elif stripped.startswith(("{", "[")):
+                        json_balance = stripped.count("{") + stripped.count("[")
+                        json_balance -= stripped.count("}") + stripped.count("]")
+                        if json_balance > 0:
+                            skip_block_kind = "json"
+                    continue
+                pending_json_after_tool = False
+
+            cleaned_lines.append(line)
+
+        sanitized = "\n".join(cleaned_lines)
+        sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+        sanitized = re.sub(r"[ \t]+\n", "\n", sanitized).strip()
+        return sanitized or normalized
 
     async def _store_llm_artifact(
         self,

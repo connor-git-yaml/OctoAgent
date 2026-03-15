@@ -29,7 +29,8 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 040 | Implemented | M4 串联验收与用户旅程闭环（见 §4） |
 | 041 | Implemented | ambient facts、Butler-owned freshness delegation、worker private recall、surface truth 与缺城市/环境受限 acceptance 已闭合 |
 | 048 | Draft | `Home / Settings / Chat` 普通用户主路径清晰化：单一主行动、最少必要配置、等待态与折叠式协作进度 |
-| 049 | Implemented | Butler behavior workspace 与 agentic decision runtime：少量显式 md、runtime hints、`ButlerDecision`、Web 只读 behavior 面 + CLI `ls/show/init` |
+| 049 | Implemented | Butler behavior workspace 与 agentic decision runtime 初版：少量显式 md、runtime hints、`ButlerDecision`、初始 Web/CLI 入口；其 scope 仍以 `system/project` 为起点 |
+| 055 | Implemented | 把 behavior workspace 重构为 `shared / agent / project / project-agent` 四层，改成 project-centered 目录；明确 behavior / memory / secrets / workspace 边界；加入 bootstrap 模板、默认会话 Agent 用户画像/名字/性格引导、`project_path_manifest`，并把 Web 行为入口从 Settings 迁到 Agents |
 | 052 | Implemented | tooling/MCP/skills 默认权限面放宽：trusted local `standard` baseline、MCP `auto_readonly`、skill `permission_mode=inherit`、`recommended_tools` 合同升级 |
 
 ## 3. 各 Feature 边界
@@ -233,7 +234,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 ### Feature 049：Butler Behavior Workspace & Agentic Decision Runtime
 
-状态：**Draft**
+状态：**Implemented**
 
 目标：
 
@@ -247,7 +248,43 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `RuntimeHintBundle + RecentConversation + ButlerDecision preflight` 已进入 Butler 主链
 - generic `delegate_research / delegate_ops` 已成为可执行预路由，不再只停留在 decision contract
 - deterministic 场景树已收口为 compatibility fallback，并带 provenance
-- Web 已提供 `Settings -> Behavior Files` operator 视图；CLI 已提供 `octo behavior ls/show/init/edit/diff/apply`
+- Web 已提供行为文件视图与 CLI 入口；CLI 已提供 `octo behavior ls/show/init/edit/diff/apply`
+
+边界说明：
+
+- 049 的完成态只覆盖“初版 behavior workspace + agentic decision runtime”
+- 049 不再承诺多 Agent parity 的四层 scope、project-centered 目录、bootstrap 模板、`project_path_manifest` 或 `Agents` 行为中心
+- 上述内容已在 055 收口
+
+### Feature 055：Agent Behavior Scope Reset & Behavior Center
+
+状态：**Implemented**
+
+已落地：
+
+- `BehaviorWorkspaceScope` 已从 `system/project` 升级为：
+  - `system_shared`
+  - `agent_private`
+  - `project_shared`
+  - `project_agent`
+- 行为目录已改成 project-centered：
+  - `behavior/system/`
+  - `behavior/agents/<agent-slug>/`
+  - `projects/<project-slug>/behavior/`
+  - `projects/<project-slug>/behavior/agents/<agent-slug>/`
+  - `projects/<project-slug>/{workspace,data,notes,artifacts}/`
+  - `projects/<project-slug>/project.secret-bindings.json`
+- 已明确 behavior / memory / secrets / project workspace 边界：
+  - 行为文件只管规则与人格
+  - facts 走 `Memory`
+  - 敏感值走 `secret bindings / SecretService`
+  - 代码、数据、文档、notes、artifacts 留在 project workspace
+- `MEMORY.md` 已从默认 behavior 文件集合中移除
+- `project_path_manifest + storage_boundary_hints` 已进入运行时装配与 handoff capsule
+- `octo behavior` 已支持 `--agent ...`
+- `Agents` 页已升级成真正的 `Behavior Center`
+- `Settings` 里的无效 behavior 区块已迁走
+- bootstrap 模板、默认会话 Agent 用户画像/名字/性格引导以及落点路由已形成正式 contract
 
 ### Feature 051：Session-Native Agent Runtime & Recall Loop
 

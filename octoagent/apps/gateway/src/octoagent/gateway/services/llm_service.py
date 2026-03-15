@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import re
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -308,6 +309,7 @@ class LLMService:
                 worker_type,
                 selected_tools,
                 single_loop_executor=single_loop_executor,
+                prompt=prompt,
             ),
             permission_mode=SkillPermissionMode.INHERIT,
             tools_allowed=selected_tools,
@@ -407,8 +409,14 @@ class LLMService:
         selected_tools: list[str],
         *,
         single_loop_executor: bool = False,
+        prompt: str = "",
     ) -> str:
         tool_list = ", ".join(selected_tools)
+        objective_guidance = LLMService._build_objective_guidance(
+            prompt=prompt,
+            selected_tools=selected_tools,
+            single_loop_executor=single_loop_executor,
+        )
         if single_loop_executor:
             worker_lens = (
                 f" 当前回合按 {worker_type} worker 视角挂载工具。"
@@ -422,6 +430,8 @@ class LLMService:
                 " 不要先输出一段“计划说明”再等待下轮；"
                 " 需要工具时直接调用，证据足够后直接给出最终答复。"
                 " 如果上下文里已经提供 recent summary / session replay / memory hints，先利用这些事实，再决定是否继续查。"
+                " 最终答复只能是自然语言，不要暴露 to=tool、原始 JSON、工具参数回显或中间调试文本。"
+                f"{objective_guidance}"
             )
         return (
             f"你是 OctoAgent 的 {worker_type} worker。"
@@ -430,8 +440,55 @@ class LLMService:
             " 不要声称自己没有工具；只在确实没有必要时直接回答。"
             " 如果工具已经返回足够证据，直接输出结论；"
             "不要把“我先查一下”“我再看看”“接下来我会”这类计划句当成最终答复。"
-            " 完成后用自然语言给出最终答复。"
+            " 完成后用自然语言给出最终答复，不要输出 to=tool、原始 JSON、工具调用 transcript 或乱码。"
+            f"{objective_guidance}"
         )
+
+    @staticmethod
+    def _build_objective_guidance(
+        *,
+        prompt: str,
+        selected_tools: list[str],
+        single_loop_executor: bool,
+    ) -> str:
+        normalized_prompt = prompt.strip().lower()
+        selected = {item.strip().lower() for item in selected_tools if item.strip()}
+        looks_like_local_doc_read = bool(
+            normalized_prompt
+            and (
+                "readme" in normalized_prompt
+                or "README" in prompt
+                or "当前项目" in prompt
+                or "仓库" in prompt
+                or "文件" in prompt
+            )
+            and ("读取" in prompt or "read" in normalized_prompt or "开头" in prompt)
+        )
+        has_filesystem = {
+            "filesystem.list_dir",
+            "filesystem.read_text",
+        }.issubset(selected) or (
+            "filesystem.list_dir" in selected and "filesystem.read_text" in selected
+        )
+        if looks_like_local_doc_read and has_filesystem:
+            terminal_hint = (
+                " 只有在 filesystem.list_dir / filesystem.read_text 无法定位路径时，才允许退到 terminal.exec。"
+                if "terminal.exec" in selected
+                else ""
+            )
+            ownership_hint = (
+                " 这是主助手直接解决的问题，不要把用户原话改写成另一个 worker 的委派请求。"
+                if single_loop_executor
+                else ""
+            )
+            return (
+                " 当前任务是边界明确的本地文档读取/总结。"
+                " 优先用 filesystem.list_dir 确认候选路径，再用 filesystem.read_text 读取 README 或指定文件。"
+                " 不要用 memory.search / memory.recall / control-plane 元数据代替真实文件内容。"
+                " 一旦成功读到目标 README 的开头或足够段落，就立刻停止继续探索并直接给出一句话总结。"
+                f"{terminal_hint}{ownership_hint}"
+            )
+        return ""
 
     @staticmethod
     def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:

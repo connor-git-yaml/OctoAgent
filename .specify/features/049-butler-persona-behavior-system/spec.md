@@ -257,9 +257,28 @@ Butler 每轮先产出一个结构化 `ButlerDecision`：
 - **FR-012**: 迁移期间系统 MAY 保留兼容 fallback，但必须把其标记为 temporary compatibility path，而不是新的长期架构；运行时必须暴露 `decision_source / decision_fallback_reason / decision_model_resolution_status` 一类 provenance。
 - **FR-013**: Butler 默认应采用 hint-first memory runtime；预加载记忆只作为线索和初始摘要，更完整事实、证据与历史应优先通过 `memory.search / memory.recall / memory.read` 继续获取。
 
+## 049 边界说明（2026-03-15 回写）
+
+049 的完成态明确收口为：
+
+- 初版 `BehaviorWorkspace`
+- `RuntimeHintBundle + ButlerDecision`
+- 初始 Web/CLI 行为文件入口
+- Butler 侧的 bounded direct tooling 与 hint-first 决策主链
+
+049 不再承担以下范围：
+
+- 四层 `BehaviorWorkspaceScope`
+- project-centered 行为目录与 `project.secret-bindings.json`
+- `project_path_manifest + storage_boundary_hints`
+- bootstrap 模板与默认会话 Agent 的用户画像/名字/性格引导
+- `Agents` 页的完整 Behavior Center 与 `Settings` 行为入口迁移
+
+这些范围统一由 Feature 055 承接。
+
 ## Key Entities
 
-- **BehaviorWorkspace**: project 或 system 作用域下的显式行为文件集合。
+- **BehaviorWorkspace**: 初版 project 或 system 作用域下的显式行为文件集合；多 Agent 四层 scope 与 project-centered 布局由 055 承接。
 - **BehaviorFile**: `AGENTS.md / USER.md / PROJECT.md / TOOLS.md` 等单个文件的内容、可见性与版本。
 - **RuntimeHintBundle**: Butler 决策时可见的环境事实、确认事实、默认值和工具状态集合。
 - **ButlerDecision**: 每轮回答前的结构化行为决策结果。

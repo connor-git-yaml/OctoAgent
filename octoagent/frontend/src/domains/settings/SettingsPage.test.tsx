@@ -862,7 +862,7 @@ describe("SettingsPage", () => {
     expect(draft.config.memory.expand_model_alias).toBe("");
   });
 
-  it("把 Agent 能力管理入口迁到 Agents 页面", async () => {
+  it("把 Agent 与 Behavior 管理入口迁到 Agents 页面", async () => {
     mockWorkbench = {
       snapshot: buildSettingsSnapshot(),
       submitAction: vi.fn(),
@@ -875,12 +875,16 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "打开 Agents > Providers" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Agent 与 Behavior 管理已移到 Agents")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开 Agents > Behavior" })).toHaveAttribute(
+      "href",
+      "/agents?view=behavior"
+    );
+    expect(screen.getByRole("link", { name: "打开 Agents > Skills / MCP" })).toBeInTheDocument();
     expect(screen.queryByText("安全与能力")).not.toBeInTheDocument();
   });
 
-  it("展示只读 Behavior Files 视图和 CLI 入口", () => {
+  it("不再在 Settings 页面展示只读 Behavior Files 视图", () => {
     mockWorkbench = {
       snapshot: buildSettingsSnapshot(),
       submitAction: vi.fn(),
@@ -893,28 +897,13 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(
-      screen.getByRole("heading", { name: "当前项目默认行为现在来自显式文件与运行时 hints" })
-    ).toBeInTheDocument();
     expect(screen.getByText("Providers / Memory = 平台级")).toBeInTheDocument();
-    expect(screen.getByText("Behavior Files = 项目默认")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "这里改的是平台设置和项目默认，不是某一条会话本身" })
     ).toBeInTheDocument();
-    expect(
-      screen.getAllByText(
-        (_, node) => node?.textContent?.includes("behavior/projects/default/AGENTS.md") ?? false
-      ).length
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(
-        (_, node) => node?.textContent?.includes("share_with_workers=true") ?? false
-      ).length
-    ).toBeGreaterThan(0);
-    expect(screen.getByText("octo behavior ls")).toBeInTheDocument();
-    expect(screen.getByText("octo behavior show AGENTS")).toBeInTheDocument();
-    expect(screen.getByText("octo behavior edit AGENTS")).toBeInTheDocument();
-    expect(screen.getByText("octo behavior diff AGENTS")).toBeInTheDocument();
+    expect(screen.getByText("Agent 模板、Behavior Files 和 Provider 绑定统一放在 Agents 页面维护。")).toBeInTheDocument();
+    expect(screen.queryByText("当前项目默认行为现在来自显式文件与运行时 hints")).not.toBeInTheDocument();
+    expect(screen.queryByText("octo behavior ls")).not.toBeInTheDocument();
   });
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {

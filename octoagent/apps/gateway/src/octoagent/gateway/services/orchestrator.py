@@ -1170,6 +1170,9 @@ class OrchestratorService:
             project_name=project.name if project is not None else "",
             project_slug=project.slug if project is not None else "",
             project_root=self._project_root,
+            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_slug=workspace.slug if workspace is not None else "",
+            workspace_root_path=workspace.root_path if workspace is not None else "",
         )
         hint_block = render_runtime_hint_block(
             user_text=request.user_text,

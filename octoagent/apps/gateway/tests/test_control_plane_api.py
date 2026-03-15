@@ -382,6 +382,20 @@ async def _seed_context_resources(app) -> None:
             project_id=project.project_id,
             name="Default Agent",
             persona_summary="用于 control plane 可视化的默认 profile。",
+            bootstrap_template_ids=[
+                "behavior:system:AGENTS.md",
+                "behavior:system:USER.md",
+                "behavior:system:TOOLS.md",
+                "behavior:system:BOOTSTRAP.md",
+                "behavior:agent:IDENTITY.md",
+                "behavior:agent:SOUL.md",
+                "behavior:agent:HEARTBEAT.md",
+                "behavior:project:PROJECT.md",
+                "behavior:project:KNOWLEDGE.md",
+                "behavior:project:USER.md",
+                "behavior:project:TOOLS.md",
+                "behavior:project:instructions/README.md",
+            ],
         )
     )
     await store_group.project_store.save_project(
@@ -414,6 +428,25 @@ async def _seed_context_resources(app) -> None:
             status=BootstrapSessionStatus.COMPLETED,
             current_step="done",
             answers={"assistant_identity": "Default Agent"},
+            metadata={
+                "questionnaire": {
+                    "owner_identity": {
+                        "route": "memory",
+                        "target": "OwnerProfile + Memory",
+                        "summary": "用户怎么称呼自己、长期个人事实。",
+                    },
+                    "assistant_identity": {
+                        "route": "behavior",
+                        "target": "IDENTITY.md",
+                        "summary": "默认会话 Agent 的身份与名称。",
+                    },
+                    "secret_routing": {
+                        "route": "secrets",
+                        "target": "projects/default-project/project.secret-bindings.json",
+                        "summary": "敏感值进入 project secret bindings。",
+                    },
+                }
+            },
         )
     )
     await store_group.agent_context_store.save_agent_runtime(runtime)
@@ -695,6 +728,10 @@ class TestControlPlaneApi:
             "agent-profile-default"
         )
         assert (
+            payload["resources"]["agent_profiles"]["profiles"][0]["bootstrap_template_ids"][0]
+            == "behavior:system:AGENTS.md"
+        )
+        assert (
             payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
                 "source_chain"
             ][0]
@@ -712,6 +749,18 @@ class TestControlPlaneApi:
                 "runtime_hint_fields"
             ]
         )
+        assert (
+            payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+                "bootstrap_templates"
+            ]["shared"][0]
+            == "behavior:system:AGENTS.md"
+        )
+        assert (
+            payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+                "bootstrap_routes"
+            ]["assistant_identity"]["target"]
+            == "IDENTITY.md"
+        )
         worker_profile = payload["resources"]["worker_profiles"]["profiles"][0]
         assert worker_profile["profile_id"] == "singleton:general"
         assert worker_profile["mode"] == "singleton"
@@ -722,6 +771,12 @@ class TestControlPlaneApi:
         )
         assert payload["resources"]["bootstrap_session"]["session"]["bootstrap_id"] == (
             "bootstrap-default"
+        )
+        assert (
+            payload["resources"]["bootstrap_session"]["session"]["metadata"]["questionnaire"][
+                "secret_routing"
+            ]["route"]
+            == "secrets"
         )
         assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
             "context-frame-default"

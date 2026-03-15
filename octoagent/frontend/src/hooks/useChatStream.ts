@@ -47,6 +47,10 @@ export interface UseChatStreamReturn {
   taskId: string | null;
 }
 
+interface UseChatStreamOptions {
+  deferStoredTaskIdRestore?: boolean;
+}
+
 export interface ChatSessionScopeSnapshot {
   activeProjectId?: string | null;
   activeWorkspaceId?: string | null;
@@ -125,13 +129,16 @@ async function fetchTaskDetailWithTimeout(taskId: string): Promise<TaskDetailRes
 
 export function useChatStream(
   restoreTarget: ChatRestoreTarget | null = null,
-  sessionScope: ChatSessionScopeSnapshot | null = null
+  sessionScope: ChatSessionScopeSnapshot | null = null,
+  options: UseChatStreamOptions = {}
 ): UseChatStreamReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(() => readStoredTaskId());
+  const [taskId, setTaskId] = useState<string | null>(() =>
+    options.deferStoredTaskIdRestore ? null : readStoredTaskId()
+  );
   const [pendingConversationScope, setPendingConversationScope] =
     useState<PendingConversationScope | null>(() => buildPendingConversationScope(sessionScope));
   const [suppressedRestoreSignature, setSuppressedRestoreSignature] = useState<string | null>(

@@ -289,9 +289,9 @@ function buildConfidenceLabel(record: MemoryRecordProjection): string {
 }
 
 export function buildMemoryDisplayRecords(
-  records: MemoryRecordProjection[]
+  records: MemoryRecordProjection[] | undefined | null
 ): MemoryDisplayRecord[] {
-  return records
+  return (Array.isArray(records) ? records : [])
     .filter((record) => !shouldHideRecord(record))
     .map((record) => ({
       record,

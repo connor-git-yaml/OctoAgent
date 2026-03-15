@@ -230,6 +230,7 @@ class AgentProfileItem(BaseModel):
     tool_profile: str = Field(default="standard")
     memory_access_policy: dict[str, Any] = Field(default_factory=dict)
     context_budget_policy: dict[str, Any] = Field(default_factory=dict)
+    bootstrap_template_ids: list[str] = Field(default_factory=list)
     behavior_system: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     updated_at: datetime | None = None

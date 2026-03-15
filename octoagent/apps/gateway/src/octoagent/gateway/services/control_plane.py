@@ -921,11 +921,21 @@ class ControlPlaneService:
                 tool_profile=profile.tool_profile,
                 memory_access_policy=dict(profile.memory_access_policy),
                 context_budget_policy=dict(profile.context_budget_policy),
+                bootstrap_template_ids=list(profile.bootstrap_template_ids),
                 behavior_system=build_behavior_system_summary(
                     agent_profile=profile,
                     project_name=selected_project.name if selected_project is not None else "",
                     project_slug=selected_project.slug if selected_project is not None else "",
                     project_root=self._project_root,
+                    workspace_id=(
+                        selected_workspace.workspace_id if selected_workspace is not None else ""
+                    ),
+                    workspace_slug=(
+                        selected_workspace.slug if selected_workspace is not None else ""
+                    ),
+                    workspace_root_path=(
+                        selected_workspace.root_path if selected_workspace is not None else ""
+                    ),
                 ),
                 metadata=dict(profile.metadata),
                 updated_at=profile.updated_at,

@@ -227,13 +227,19 @@ def resolve_behavior_pack(
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
+    workspace_id: str = "",
+    workspace_slug: str = "",
+    workspace_root_path: Path | str | None = None,
 ) -> BehaviorPack:
     metadata = dict(agent_profile.metadata)
     filesystem_pack = _resolve_filesystem_behavior_pack(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
-        project_root=project_root,
+        project_root=project_root or Path.cwd(),
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        workspace_root_path=workspace_root_path,
     )
     if filesystem_pack is not None:
         return filesystem_pack
@@ -257,6 +263,7 @@ def resolve_behavior_pack(
     files = build_default_behavior_pack_files(
         agent_profile=agent_profile,
         project_name=project_name,
+        project_slug=project_slug,
     )
     source_chain = ["default_behavior_templates"]
     if agent_profile.scope.value == "project" and project_slug:
@@ -287,10 +294,12 @@ def build_default_behavior_pack_files(
     *,
     agent_profile: AgentProfile,
     project_name: str = "",
+    project_slug: str = "",
 ) -> list[BehaviorPackFile]:
     return build_default_behavior_workspace_pack_files(
         agent_profile=agent_profile,
         project_name=project_name,
+        project_slug=project_slug,
         include_advanced=False,
     )
 
@@ -401,20 +410,97 @@ def build_behavior_slice_envelope(pack: BehaviorPack) -> BehaviorSliceEnvelope:
     )
 
 
+def _group_bootstrap_template_ids(template_ids: list[str]) -> dict[str, list[str]]:
+    groups = {
+        "shared": [],
+        "agent_private": [],
+        "project_shared": [],
+        "project_agent": [],
+    }
+    for template_id in template_ids:
+        if template_id.startswith("behavior:system:"):
+            groups["shared"].append(template_id)
+        elif template_id.startswith("behavior:agent:"):
+            groups["agent_private"].append(template_id)
+        elif template_id.startswith("behavior:project_agent:"):
+            groups["project_agent"].append(template_id)
+        elif template_id.startswith("behavior:project:"):
+            groups["project_shared"].append(template_id)
+    return groups
+
+
+def _build_bootstrap_routes(
+    *,
+    path_manifest: dict[str, Any],
+    storage_boundary_hints: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "facts": {
+            "store": storage_boundary_hints.get("facts_store") or "MemoryService",
+            "access": (
+                storage_boundary_hints.get("facts_access")
+                or "使用 MemoryService / memory tools 读取与写入稳定事实。"
+            ),
+            "summary": "用户稳定事实、长期偏好和已确认上下文写入 Memory，而不是 behavior files。",
+        },
+        "secrets": {
+            "store": storage_boundary_hints.get("secrets_store") or "SecretService",
+            "metadata_path": (
+                storage_boundary_hints.get("secret_bindings_metadata_path")
+                or path_manifest.get("secret_bindings_path")
+                or ""
+            ),
+            "access": (
+                storage_boundary_hints.get("secrets_access")
+                or "使用 SecretService / secret bindings workflow 管理敏感值。"
+            ),
+            "summary": (
+                "敏感值通过 SecretService / secret bindings workflow 管理；"
+                "project.secret-bindings.json 只保存绑定元数据，不保存 secret 值。"
+            ),
+        },
+        "assistant_identity": {
+            "target": "IDENTITY.md",
+            "summary": "Agent 名称、角色身份和自称放在 Agent private identity。",
+        },
+        "assistant_personality": {
+            "target": "SOUL.md",
+            "summary": "Agent 性格、语气和协作风格放在 Agent private soul。",
+        },
+        "project_instructions": {
+            "target": "instructions/README.md",
+            "summary": "Project 专属启动说明和协作约束放在 instructions README。",
+        },
+        "workspace_materials": {
+            "roots": list(storage_boundary_hints.get("workspace_roots", [])),
+            "summary": "代码、数据、笔记和产物进入 project workspace/data/notes/artifacts。",
+        },
+    }
+
+
 def build_behavior_system_summary(
     *,
     agent_profile: AgentProfile,
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
+    workspace_id: str = "",
+    workspace_slug: str = "",
+    workspace_root_path: Path | str | None = None,
 ) -> dict[str, Any]:
     pack = resolve_behavior_pack(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
         project_root=project_root,
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        workspace_root_path=workspace_root_path,
     )
     slice_envelope = build_behavior_slice_envelope(pack)
+    path_manifest = dict(pack.metadata.get("path_manifest", {}))
+    storage_boundary_hints = dict(pack.metadata.get("storage_boundary_hints", {}))
+    bootstrap_template_ids = list(agent_profile.bootstrap_template_ids)
     return {
         "source_chain": list(pack.source_chain),
         "clarification_policy": dict(pack.clarification_policy),
@@ -468,6 +554,14 @@ def build_behavior_system_summary(
             "overlay_order": list(pack.metadata.get("overlay_order", [])),
             "file_budgets": dict(pack.metadata.get("file_budgets", {})),
         },
+        "path_manifest": path_manifest,
+        "storage_boundary_hints": storage_boundary_hints,
+        "bootstrap_template_ids": bootstrap_template_ids,
+        "bootstrap_templates": _group_bootstrap_template_ids(bootstrap_template_ids),
+        "bootstrap_routes": _build_bootstrap_routes(
+            path_manifest=path_manifest,
+            storage_boundary_hints=storage_boundary_hints,
+        ),
     }
 
 
@@ -477,6 +571,9 @@ def render_behavior_system_block(
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
+    workspace_id: str = "",
+    workspace_slug: str = "",
+    workspace_root_path: Path | str | None = None,
     shared_only: bool = False,
 ) -> str:
     pack = resolve_behavior_pack(
@@ -484,10 +581,15 @@ def render_behavior_system_block(
         project_name=project_name,
         project_slug=project_slug,
         project_root=project_root,
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        workspace_root_path=workspace_root_path,
     )
     effective_layers = (
         build_behavior_slice_envelope(pack).layers if shared_only else pack.layers
     )
+    path_manifest = dict(pack.metadata.get("path_manifest", {}))
+    storage_boundary_hints = dict(pack.metadata.get("storage_boundary_hints", {}))
     rendered_layers = []
     for layer in effective_layers:
         layer_header = layer.layer.value
@@ -496,6 +598,46 @@ def render_behavior_system_block(
                 f"{layer_header} [truncated files: {', '.join(layer.truncated_file_ids)}]"
             )
         rendered_layers.append(f"{layer_header}: {layer.content}")
+    manifest_lines = []
+    if path_manifest:
+        manifest_lines.extend(
+            [
+                "ProjectPathManifest:",
+                f"repository_root: {path_manifest.get('repository_root') or 'N/A'}",
+                f"project_root: {path_manifest.get('project_root') or 'N/A'}",
+                f"project_root_source: {path_manifest.get('project_root_source') or 'N/A'}",
+                f"project_behavior_root: {path_manifest.get('project_behavior_root') or 'N/A'}",
+                f"project_workspace_root: {path_manifest.get('project_workspace_root') or 'N/A'}",
+                "project_workspace_root_source: "
+                f"{path_manifest.get('project_workspace_root_source') or 'N/A'}",
+                f"workspace_id: {path_manifest.get('workspace_id') or 'N/A'}",
+                f"workspace_slug: {path_manifest.get('workspace_slug') or 'N/A'}",
+                f"project_data_root: {path_manifest.get('project_data_root') or 'N/A'}",
+                f"project_notes_root: {path_manifest.get('project_notes_root') or 'N/A'}",
+                f"project_artifacts_root: {path_manifest.get('project_artifacts_root') or 'N/A'}",
+                f"shared_behavior_root: {path_manifest.get('shared_behavior_root') or 'N/A'}",
+                f"agent_behavior_root: {path_manifest.get('agent_behavior_root') or 'N/A'}",
+                f"project_agent_behavior_root: {path_manifest.get('project_agent_behavior_root') or 'N/A'}",
+                f"secret_bindings_path: {path_manifest.get('secret_bindings_path') or 'N/A'}",
+            ]
+        )
+    storage_lines = []
+    if storage_boundary_hints:
+        workspace_roots = ", ".join(storage_boundary_hints.get("workspace_roots", [])) or "N/A"
+        storage_lines.extend(
+            [
+                "StorageBoundaries:",
+                f"facts_store: {storage_boundary_hints.get('facts_store') or 'MemoryService'}",
+                f"facts_access: {storage_boundary_hints.get('facts_access') or 'N/A'}",
+                f"secrets_store: {storage_boundary_hints.get('secrets_store') or 'SecretService'}",
+                f"secrets_access: {storage_boundary_hints.get('secrets_access') or 'N/A'}",
+                "secret_bindings_metadata_path: "
+                f"{storage_boundary_hints.get('secret_bindings_metadata_path') or 'N/A'}",
+                f"behavior_store: {storage_boundary_hints.get('behavior_store') or 'behavior_files'}",
+                f"workspace_roots: {workspace_roots}",
+                f"boundary_note: {storage_boundary_hints.get('note') or 'N/A'}",
+            ]
+        )
     return (
         "BehaviorSystem:\n"
         f"source_chain: {', '.join(pack.source_chain) or 'N/A'}\n"
@@ -504,7 +646,9 @@ def render_behavior_system_block(
         f"{pack.clarification_policy}\n"
         "decision_modes: "
         f"{', '.join(item.value for item in ButlerDecisionMode)}\n"
-        f"{chr(10).join(rendered_layers)}"
+        f"{chr(10).join(rendered_layers)}\n"
+        f"{chr(10).join(manifest_lines)}\n"
+        f"{chr(10).join(storage_lines)}"
     )
 
 
@@ -611,15 +755,19 @@ def build_butler_decision_messages(
         {
             "role": "system",
             "content": (
-                "决策原则：优先信任 BehaviorSystem 和 RuntimeHints。"
-                "除权限、审批、审计、loop guard 等硬边界外，不要退回僵硬硬编码。"
-                "当当前挂载工具已经足够时，优先 direct_answer，不要为了形式上的多 Agent 结构强行委派。"
-                "当问题会长期持续、跨多轮、跨权限、跨敏感边界或明显更适合 specialist worker 时，再 delegate。"
-                "当 delegate 时，不要把用户原话直接转发给 Worker；应输出 delegate_objective 作为 Worker 任务目标。"
-                "当存在近期同题材 specialist lane 时，优先设置 prefer_sticky_worker=true 或指定 target_worker_profile_id。"
-                "当缺关键信息时最多 ask_once；"
-                "如果用户显式要求联网但关键事实仍缺失，可以给 best_effort_answer，"
-                "但必须明确边界，不能假装已经完成准确查询。"
+            "决策原则：优先信任 BehaviorSystem 和 RuntimeHints。"
+            "除权限、审批、审计、loop guard 等硬边界外，不要退回僵硬硬编码。"
+            "当当前挂载工具已经足够时，优先 direct_answer；"
+            "不要为了形式上的多 Agent 结构强行委派。"
+            "当问题会长期持续、跨多轮、跨权限、跨敏感边界，"
+            "或明显更适合 specialist worker 时，再 delegate。"
+            "当 delegate 时，不要把用户原话直接转发给 Worker；"
+            "应输出 delegate_objective 作为 Worker 任务目标。"
+            "当存在近期同题材 specialist lane 时，"
+            "优先设置 prefer_sticky_worker=true 或指定 target_worker_profile_id。"
+            "当缺关键信息时最多 ask_once；"
+            "如果用户显式要求联网但关键事实仍缺失，可以给 best_effort_answer，"
+            "但必须明确边界，不能假装已经完成准确查询。"
             ),
         },
         {
@@ -767,6 +915,9 @@ def _resolve_filesystem_behavior_pack(
     project_name: str,
     project_slug: str,
     project_root: Path | None,
+    workspace_id: str = "",
+    workspace_slug: str = "",
+    workspace_root_path: Path | str | None = None,
 ) -> BehaviorPack | None:
     if project_root is None:
         return None
@@ -776,9 +927,11 @@ def _resolve_filesystem_behavior_pack(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
+        workspace_id=workspace_id,
+        workspace_slug=workspace_slug,
+        project_runtime_root=workspace_root_path,
+        workspace_root_path=workspace_root_path,
     )
-    if not bool(workspace.metadata.get("has_filesystem_sources", False)):
-        return None
 
     return _build_behavior_pack_from_workspace(
         agent_profile=agent_profile,
@@ -829,6 +982,16 @@ def _build_behavior_pack_from_workspace(
             "project_slug": workspace.project_slug,
             "overlay_order": list(workspace.metadata.get("overlay_order", [])),
             "file_budgets": dict(workspace.metadata.get("file_budgets", {})),
+            "path_manifest": (
+                workspace.path_manifest.model_dump(mode="json")
+                if workspace.path_manifest is not None
+                else {}
+            ),
+            "storage_boundary_hints": (
+                workspace.storage_boundary_hints.model_dump(mode="json")
+                if workspace.storage_boundary_hints is not None
+                else {}
+            ),
         },
     )
 

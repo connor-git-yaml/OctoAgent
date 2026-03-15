@@ -157,6 +157,7 @@ describe("ChatWorkbench", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    window.sessionStorage.clear();
   });
 
   it("普通 Butler 对话发送消息时不会偷偷继承当前 Agent profile", async () => {
@@ -537,6 +538,47 @@ describe("ChatWorkbench", () => {
     expect(resetConversation).toHaveBeenCalledTimes(1);
 
     vi.useRealTimers();
+  });
+
+  it("进入 Chat 时先让用户选择继续最近会话还是新开会话", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-restore",
+        thread_id: "thread-restore",
+        task_id: "task-restore",
+        title: "昨天的排查",
+        latest_message_summary: "继续排查 provider 配置",
+      },
+    ];
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockImplementation((restoreTarget: { taskIds?: string[] } | null) => ({
+      messages: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn().mockResolvedValue(undefined),
+      streaming: false,
+      restoring: Boolean(restoreTarget?.taskIds?.length),
+      error: null,
+      taskId: null,
+    }));
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("你有一段最近会话")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续最近会话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "继续最近会话" }));
+
+    expect(await screen.findByText("正在恢复最近对话")).toBeInTheDocument();
   });
 
   it("Chat 头部的主要操作按钮使用统一的小规格按钮", async () => {
@@ -990,9 +1032,34 @@ describe("ChatWorkbench", () => {
           },
         },
         {
-          event_id: "event-tool-completed",
+          event_id: "event-tool-failed",
           task_seq: 15,
           ts: "2026-03-14T12:10:15Z",
+          type: "TOOL_CALL_FAILED",
+          actor: "worker.llm.research",
+          payload: {
+            work_id: "work-chat-trace",
+            tool_name: "web.search",
+            args_summary: "q=深圳天气",
+            error_message: "第一次查询超时。",
+          },
+        },
+        {
+          event_id: "event-tool-retry-started",
+          task_seq: 16,
+          ts: "2026-03-14T12:10:16Z",
+          type: "TOOL_CALL_STARTED",
+          actor: "worker.llm.research",
+          payload: {
+            work_id: "work-chat-trace",
+            tool_name: "web.search",
+            args_summary: "q=深圳天气",
+          },
+        },
+        {
+          event_id: "event-tool-completed",
+          task_seq: 17,
+          ts: "2026-03-14T12:10:17Z",
           type: "TOOL_CALL_COMPLETED",
           actor: "worker.llm.research",
           payload: {
@@ -1004,8 +1071,8 @@ describe("ChatWorkbench", () => {
         },
         {
           event_id: "event-worker-returned",
-          task_seq: 16,
-          ts: "2026-03-14T12:10:16Z",
+          task_seq: 18,
+          ts: "2026-03-14T12:10:18Z",
           type: "WORKER_RETURNED",
           actor: "worker.llm.research",
           payload: {
@@ -1030,7 +1097,8 @@ describe("ChatWorkbench", () => {
     expect(screen.getByText("授权工具")).toBeInTheDocument();
     expect(screen.getByText("接手执行")).toBeInTheDocument();
     expect(screen.getByText("模型处理")).toBeInTheDocument();
-    expect(screen.getByText("web.search")).toBeInTheDocument();
+    expect(screen.getByText("1. web.search")).toBeInTheDocument();
+    expect(screen.getByText("2. web.search")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看细节" })).not.toBeInTheDocument();
 
     const dispatchTrigger = screen.getAllByText("委派目标")[0]!;
@@ -1042,8 +1110,15 @@ describe("ChatWorkbench", () => {
     ).toBeInTheDocument();
 
     await userEvent.unhover(dispatchTrigger);
-    const toolTrigger = screen.getAllByText("web.search")[0]!;
+    const toolTrigger = screen.getByText("1. web.search");
     await userEvent.hover(toolTrigger);
+    expect(await screen.findByText("输入")).toBeInTheDocument();
+    expect(screen.getByText("q=深圳天气")).toBeInTheDocument();
+    expect(screen.getByText("第一次查询超时。")).toBeInTheDocument();
+
+    await userEvent.unhover(toolTrigger);
+    const retryTrigger = screen.getByText("2. web.search");
+    await userEvent.hover(retryTrigger);
     expect(await screen.findByText("输入")).toBeInTheDocument();
     expect(screen.getByText("q=深圳天气")).toBeInTheDocument();
     expect(screen.getByText("返回了 5 条候选结果。")).toBeInTheDocument();
@@ -1276,7 +1351,7 @@ describe("ChatWorkbench", () => {
     expect(await screen.findByText("主助手正在直接调用工具处理这条消息。")).toBeInTheDocument();
     expect(screen.getByText("处理方式")).toBeInTheDocument();
     expect(screen.getByText("直连工具")).toBeInTheDocument();
-    expect(screen.getByText("filesystem.read_text")).toBeInTheDocument();
+    expect(screen.getByText("1. filesystem.read_text")).toBeInTheDocument();
     expect(screen.queryByText("worker.llm.default")).not.toBeInTheDocument();
     expect(screen.queryByText("Research Worker")).not.toBeInTheDocument();
   });
@@ -1629,6 +1704,71 @@ describe("ChatWorkbench", () => {
     });
   });
 
+  it("待审批时会在聊天里显示显眼的审批提示和倒计时", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-03-15T10:00:30Z").getTime());
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-approve-banner",
+        thread_id: "thread-approve-banner",
+        task_id: "task-chat-approve-banner",
+        title: "审批中的会话",
+        latest_message_summary: "README 查询",
+      },
+    ];
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction: vi.fn().mockResolvedValue(null),
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-approve-banner", role: "user", content: "继续读 README", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-approve-banner",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-approve-banner",
+        title: "审批中的会话",
+        status: "WAITING_APPROVAL",
+      },
+      events: [],
+      artifacts: [],
+    });
+    fetchApprovalsMock.mockResolvedValue({
+      approvals: [
+        {
+          approval_id: "approval-banner-1",
+          task_id: "task-chat-approve-banner",
+          tool_name: "terminal.exec",
+          tool_args_summary: "command: sed -n '1,40p' app/README.md",
+          risk_explanation: "这次只读终端命令需要你确认后继续。",
+          policy_label: "default",
+          side_effect_level: "reversible",
+          remaining_seconds: 90,
+          created_at: "2026-03-15T10:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("等待你批准 terminal.exec · 01:00 后超时")).toBeInTheDocument();
+    expect(screen.getByText("这次只读终端命令需要你确认后继续。")).toBeInTheDocument();
+    expect(screen.getByText("command: sed -n '1,40p' app/README.md")).toBeInTheDocument();
+  });
+
   it("审批快照缺失时，也会回退到当前执行会话里的 pending approval", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
@@ -1759,6 +1899,168 @@ describe("ChatWorkbench", () => {
 
     await userEvent.keyboard("{ArrowDown}{Enter}");
     expect(input).toHaveValue("/approve always");
+  });
+
+  it("审批列表快照为空时，仍然会从未收口的 APPROVAL_REQUESTED 事件恢复当前审批", async () => {
+    const submitAction = vi.fn().mockResolvedValue({
+      message: "批准已提交",
+    });
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-approval-events", role: "agent", content: "等待确认。", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-approval-events",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-approval-events",
+        title: "事件回放审批",
+        status: "WAITING_APPROVAL",
+      },
+      events: [
+        {
+          event_id: "event-approval-requested",
+          task_seq: 21,
+          ts: "2026-03-15T10:12:00Z",
+          type: "APPROVAL_REQUESTED",
+          actor: "system",
+          payload: {
+            approval_id: "approval-from-events-1",
+            tool_name: "terminal.exec",
+            tool_args_summary: "command: sed -n '1,40p' README.md",
+            risk_explanation: "需要确认后才能读取终端输出。",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+    fetchTaskExecutionSessionMock.mockResolvedValue({
+      session: {
+        session_id: "exec-approval-events",
+        task_id: "task-chat-approval-events",
+        state: "RUNNING",
+        current_step: "waiting approval mirror",
+        pending_approval_id: null,
+        requested_input: "",
+        can_attach_input: false,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+    fetchApprovalsMock.mockResolvedValue({ approvals: [], total: 0 });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.type(
+      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      "/approve"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "执行命令" }));
+
+    await waitFor(() => {
+      expect(submitAction).toHaveBeenCalledWith("operator.approval.resolve", {
+        approval_id: "approval-from-events-1",
+        mode: "once",
+      });
+    });
+  });
+
+  it("审批已经超时时，聊天内命令会明确提示已经自动拒绝", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date("2026-03-15T10:14:10Z").getTime());
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction: vi.fn().mockResolvedValue(null),
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-approval-expired", role: "agent", content: "等待确认。", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-approval-expired",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-approval-expired",
+        title: "审批已过期",
+        status: "RUNNING",
+      },
+      events: [
+        {
+          event_id: "event-approval-requested-expired",
+          task_seq: 21,
+          ts: "2026-03-15T10:12:00Z",
+          type: "APPROVAL_REQUESTED",
+          actor: "system",
+          payload: {
+            approval_id: "approval-expired-1",
+            tool_name: "terminal.exec",
+            args_summary: "command: sed -n '1,40p' README.md",
+            risk_explanation: "需要确认后才能继续。",
+          },
+        },
+        {
+          event_id: "event-approval-expired",
+          task_seq: 22,
+          ts: "2026-03-15T10:14:00Z",
+          type: "APPROVAL_EXPIRED",
+          actor: "system",
+          payload: {
+            approval_id: "approval-expired-1",
+            tool_name: "terminal.exec",
+            args_summary: "command: sed -n '1,40p' README.md",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+    fetchTaskExecutionSessionMock.mockResolvedValue({
+      session: {
+        session_id: "exec-approval-expired",
+        task_id: "task-chat-approval-expired",
+        state: "RUNNING",
+        current_step: "tool retry pending",
+        pending_approval_id: null,
+        requested_input: "",
+        can_attach_input: false,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+    fetchApprovalsMock.mockResolvedValue({ approvals: [], total: 0 });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.type(
+      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      "/approve"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "执行命令" }));
+
+    expect(await screen.findByText("刚才那条审批已经超时")).toBeInTheDocument();
+    expect(
+      screen.getByText("terminal.exec 没等到你的确认，已经自动拒绝。请先重试这一步，再重新批准。")
+    ).toBeInTheDocument();
   });
 
   it("等待输入时会把下一条消息作为 steer 附加到当前执行", async () => {

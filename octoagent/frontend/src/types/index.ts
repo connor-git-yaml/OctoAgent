@@ -568,6 +568,7 @@ export interface AgentProfileItem {
   persona_summary: string;
   model_alias: string;
   tool_profile: string;
+  bootstrap_template_ids?: string[];
   behavior_system?: {
     source_chain?: string[];
     decision_modes?: string[];
@@ -581,10 +582,89 @@ export interface AgentProfileItem {
       source_kind: string;
       path_hint: string;
       is_advanced?: boolean;
+      budget_chars?: number;
+      original_char_count?: number;
+      effective_char_count?: number;
+      truncated?: boolean;
+      truncation_reason?: string;
+    }>;
+    layers?: Array<{
+      layer: string;
+      source_file_ids?: string[];
+      truncated_file_ids?: string[];
     }>;
     worker_slice?: {
       shared_file_ids?: string[];
       layers?: string[];
+    };
+    budget?: {
+      overlay_order?: string[];
+      file_budgets?: Record<string, number>;
+    };
+    path_manifest?: {
+      project_root?: string;
+      project_behavior_root?: string;
+      project_workspace_root?: string;
+      project_data_root?: string;
+      project_notes_root?: string;
+      project_artifacts_root?: string;
+      shared_behavior_root?: string;
+      agent_behavior_root?: string;
+      project_agent_behavior_root?: string;
+      secret_bindings_path?: string;
+      effective_behavior_files?: Array<{
+        file_id: string;
+        path: string;
+        scope?: string;
+        editable_mode?: string;
+        review_mode?: string;
+        source_kind?: string;
+        exists_on_disk?: boolean;
+        metadata?: Record<string, unknown>;
+      }>;
+      metadata?: Record<string, unknown>;
+    };
+    storage_boundary_hints?: {
+      facts_store?: string;
+      secrets_store?: string;
+      behavior_store?: string;
+      workspace_roots?: string[];
+      note?: string;
+      metadata?: Record<string, unknown>;
+    };
+    bootstrap_template_ids?: string[];
+    bootstrap_templates?: {
+      shared?: string[];
+      agent_private?: string[];
+      project_shared?: string[];
+      project_agent?: string[];
+    };
+    bootstrap_routes?: {
+      facts?: {
+        store?: string;
+        summary?: string;
+      };
+      secrets?: {
+        store?: string;
+        path?: string;
+        summary?: string;
+      };
+      assistant_identity?: {
+        target?: string;
+        summary?: string;
+      };
+      assistant_personality?: {
+        target?: string;
+        summary?: string;
+      };
+      project_instructions?: {
+        target?: string;
+        summary?: string;
+      };
+      workspace_materials?: {
+        roots?: string[];
+        summary?: string;
+      };
     };
   };
   memory_access_policy?: Record<string, unknown>;

@@ -294,8 +294,8 @@
   z-index: 20;
   display: grid;
   gap: 8px;
-  width: min(300px, 72vw);
-  max-width: min(420px, calc(100vw - 24px));
+  width: min(720px, 94vw);
+  max-width: min(920px, calc(100vw - 24px));
   max-height: min(70vh, 560px);
   overflow: auto;
   padding: 12px;

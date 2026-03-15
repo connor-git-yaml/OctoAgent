@@ -1,5 +1,5 @@
-import { startTransition, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
 import AgentTemplatePicker from "../domains/agents/AgentTemplatePicker";
@@ -22,6 +22,7 @@ import {
   type AgentEditorDraft,
   type AgentEditorReview,
 } from "../domains/agents/agentManagementData";
+import type { AgentProfileItem } from "../types";
 import { formatDateTime } from "../workbench/utils";
 
 type EditorMode = "main" | "agent" | "create";
@@ -29,6 +30,393 @@ type EditorMode = "main" | "agent" | "create";
 interface EditorState {
   mode: EditorMode;
   draft: AgentEditorDraft;
+}
+
+type BehaviorSystemSummary = NonNullable<AgentProfileItem["behavior_system"]>;
+type BehaviorFileSummary = NonNullable<BehaviorSystemSummary["files"]>[number];
+type BehaviorManifestFile = NonNullable<
+  NonNullable<BehaviorSystemSummary["path_manifest"]>["effective_behavior_files"]
+>[number];
+
+interface BehaviorScopeGroup {
+  scope: string;
+  title: string;
+  summary: string;
+  files: Array<BehaviorManifestFile & { title: string; visibility: string; shareWithWorkers: boolean }>;
+}
+
+interface BootstrapTemplateGroup {
+  key: string;
+  title: string;
+  summary: string;
+  items: string[];
+}
+
+interface BootstrapQuestionRouteItem {
+  stepId: string;
+  route: string;
+  target: string;
+  summary: string;
+}
+
+interface BehaviorGovernanceCommand {
+  key: string;
+  title: string;
+  summary: string;
+  command: string;
+}
+
+const AGENT_PRIVATE_FILE_IDS = new Set(["IDENTITY.md", "SOUL.md", "HEARTBEAT.md"]);
+const SHARED_FILE_IDS = new Set(["AGENTS.md", "USER.md", "TOOLS.md", "BOOTSTRAP.md"]);
+const PROJECT_SHARED_FILE_IDS = new Set(["PROJECT.md", "KNOWLEDGE.md", "USER.md", "TOOLS.md"]);
+
+function formatScopeTitle(scope: string): string {
+  switch (scope) {
+    case "system_shared":
+      return "Shared Files";
+    case "agent_private":
+      return "Agent Private";
+    case "project_shared":
+      return "Project Shared";
+    case "project_agent":
+      return "Project-Agent Override";
+    default:
+      return formatTokenLabel(scope || "unknown");
+  }
+}
+
+function formatScopeSummary(scope: string): string {
+  switch (scope) {
+    case "system_shared":
+      return "所有 Agent 共享的全局规则和启动约束。";
+    case "agent_private":
+      return "这个 Agent 自己的身份、风格和内部节奏。";
+    case "project_shared":
+      return "当前 Project 下所有 Agent 共享的项目级说明。";
+    case "project_agent":
+      return "这个 Agent 在当前 Project 里的局部覆盖。";
+    default:
+      return "当前生效的行为文件。";
+  }
+}
+
+function inferBehaviorScope(
+  file: BehaviorManifestFile,
+  fileSummary: BehaviorFileSummary | undefined
+): string {
+  const explicitScope = typeof file.scope === "string" ? file.scope.trim() : "";
+  if (explicitScope) {
+    return explicitScope;
+  }
+  const path = file.path || fileSummary?.path_hint || "";
+  const sourceKind = file.source_kind || fileSummary?.source_kind || "";
+  if (path.includes("/behavior/agents/") || sourceKind.includes("project_agent")) {
+    return "project_agent";
+  }
+  if (path.includes("/projects/") || sourceKind.startsWith("project_")) {
+    return "project_shared";
+  }
+  if (
+    path.includes("/behavior/agents/") ||
+    sourceKind.includes("agent_") ||
+    AGENT_PRIVATE_FILE_IDS.has(file.file_id)
+  ) {
+    return "agent_private";
+  }
+  if (SHARED_FILE_IDS.has(file.file_id)) {
+    return "system_shared";
+  }
+  if (PROJECT_SHARED_FILE_IDS.has(file.file_id)) {
+    return "project_shared";
+  }
+  return "system_shared";
+}
+
+function describeReviewMode(editableMode?: string, reviewMode?: string): string {
+  const editable = editableMode?.trim() || "proposal_required";
+  const review = reviewMode?.trim() || "review_required";
+  if (editable === "direct_edit" && review === "no_review") {
+    return "可直接编辑";
+  }
+  if (editable === "direct_edit") {
+    return "可直接编辑，建议 review";
+  }
+  if (review === "no_review") {
+    return "提案后可直接应用";
+  }
+  return "先提案，再 review/apply";
+}
+
+function formatBootstrapTemplateLabel(templateId: string): string {
+  return templateId.replace(/^behavior:(?:system|agent|project|project_agent):/, "");
+}
+
+function formatBehaviorScopeCli(scope: string): string {
+  switch (scope) {
+    case "system_shared":
+      return "system";
+    case "agent_private":
+      return "agent";
+    case "project_agent":
+      return "project-agent";
+    default:
+      return "project";
+  }
+}
+
+function inferBehaviorAgentSlug(
+  profile: AgentProfileItem | null,
+  summary: BehaviorSystemSummary | undefined
+): string {
+  const metadataValue = profile?.metadata?.behavior_agent_slug;
+  if (typeof metadataValue === "string" && metadataValue.trim()) {
+    return metadataValue.trim();
+  }
+  const agentRoot = summary?.path_manifest?.agent_behavior_root;
+  if (typeof agentRoot === "string" && agentRoot.includes("/")) {
+    const parts = agentRoot.split("/").filter(Boolean);
+    const token = parts[parts.length - 1];
+    if (token) {
+      return token;
+    }
+  }
+  const projectAgentRoot = summary?.path_manifest?.project_agent_behavior_root;
+  if (typeof projectAgentRoot === "string" && projectAgentRoot.includes("/")) {
+    const parts = projectAgentRoot.split("/").filter(Boolean);
+    const token = parts[parts.length - 1];
+    if (token) {
+      return token;
+    }
+  }
+  const profileParts = profile?.profile_id?.split(":").filter(Boolean) ?? [];
+  const profileToken = profileParts[profileParts.length - 1];
+  if (profileToken) {
+    return profileToken;
+  }
+  return "butler";
+}
+
+function buildBehaviorGovernanceCommands(
+  file: (BehaviorManifestFile & { title: string; visibility: string; shareWithWorkers: boolean }) | null,
+  profile: AgentProfileItem | null,
+  summary: BehaviorSystemSummary | undefined
+): BehaviorGovernanceCommand[] {
+  if (!file) {
+    return [];
+  }
+  const scopeCli = formatBehaviorScopeCli(file.scope || "");
+  const fileToken = file.file_id.replace(/\.md$/i, "");
+  const agentSlug = inferBehaviorAgentSlug(profile, summary);
+  const projectArg = profile?.project_id ? ` --project ${profile.project_id}` : "";
+  const agentArg = ` --agent ${agentSlug}`;
+  return [
+    {
+      key: "show",
+      title: "查看 effective 内容",
+      summary: "确认当前真正生效的内容和来源。",
+      command: `octo behavior show ${fileToken}${projectArg}${agentArg}`,
+    },
+    {
+      key: "edit",
+      title: "准备编辑目标",
+      summary: "materialize 对应 scope 的目标文件，再交给本机编辑器。",
+      command: `octo behavior edit ${fileToken} --scope ${scopeCli}${projectArg}${agentArg}`,
+    },
+    {
+      key: "diff",
+      title: "比较 override 差异",
+      summary: "查看这个 scope 相对下层来源到底改了什么。",
+      command: `octo behavior diff ${fileToken} --scope ${scopeCli}${projectArg}${agentArg}`,
+    },
+    {
+      key: "apply",
+      title: "应用 reviewed proposal",
+      summary: "把外部提案写回目标 behavior file。",
+      command: `octo behavior apply ${fileToken} --scope ${scopeCli}${projectArg}${agentArg} --from /absolute/path/to/proposal.md`,
+    },
+  ];
+}
+
+function buildBootstrapTemplateGroups(
+  summary: BehaviorSystemSummary | undefined,
+  profile: AgentProfileItem | null
+): BootstrapTemplateGroup[] {
+  const explicitGroups = summary?.bootstrap_templates;
+  const groups = explicitGroups ?? {
+    shared: (summary?.bootstrap_template_ids ?? profile?.bootstrap_template_ids ?? []).filter((item) =>
+      item.startsWith("behavior:system:")
+    ),
+    agent_private: (summary?.bootstrap_template_ids ?? profile?.bootstrap_template_ids ?? []).filter((item) =>
+      item.startsWith("behavior:agent:")
+    ),
+    project_shared: (summary?.bootstrap_template_ids ?? profile?.bootstrap_template_ids ?? []).filter((item) =>
+      item.startsWith("behavior:project:")
+    ),
+    project_agent: (summary?.bootstrap_template_ids ?? profile?.bootstrap_template_ids ?? []).filter((item) =>
+      item.startsWith("behavior:project_agent:")
+    ),
+  };
+  const normalized: Array<[string, string, string, string[] | undefined]> = [
+    ["shared", "Shared Templates", "所有 Agent 共享的默认行为模板。", groups.shared],
+    ["agent_private", "Agent Private Templates", "这个 Agent 自己的身份、性格和节奏模板。", groups.agent_private],
+    ["project_shared", "Project Shared Templates", "当前 Project 的共享启动说明与约束模板。", groups.project_shared],
+    ["project_agent", "Project-Agent Templates", "这个 Agent 在当前 Project 里的局部模板覆盖。", groups.project_agent],
+  ];
+  return normalized
+    .map(([key, title, summaryText, items]) => ({
+      key,
+      title,
+      summary: summaryText,
+      items: (items ?? []).map(formatBootstrapTemplateLabel),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+function readBootstrapSession(snapshot: ReturnType<typeof useWorkbench>["snapshot"]) {
+  const raw = snapshot?.resources.bootstrap_session?.session;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  return raw as Record<string, unknown>;
+}
+
+function normalizeBootstrapRoute(
+  routeValue: string,
+  summary: BehaviorSystemSummary | undefined
+): { route: string; target: string } {
+  const normalizedRoute = routeValue.trim();
+  if (!normalizedRoute) {
+    return { route: "unknown", target: "" };
+  }
+  if (normalizedRoute.startsWith("behavior:")) {
+    return {
+      route: "behavior",
+      target: normalizedRoute.replace(/^behavior:/, ""),
+    };
+  }
+  if (normalizedRoute === "memory") {
+    return {
+      route: "memory",
+      target: summary?.bootstrap_routes?.facts?.store || summary?.storage_boundary_hints?.facts_store || "MemoryService",
+    };
+  }
+  if (normalizedRoute === "memory_policy") {
+    return {
+      route: "memory_policy",
+      target: summary?.bootstrap_routes?.facts?.store || summary?.storage_boundary_hints?.facts_store || "MemoryService",
+    };
+  }
+  if (normalizedRoute === "secrets") {
+    return {
+      route: "secrets",
+      target:
+        summary?.bootstrap_routes?.secrets?.path ||
+        summary?.storage_boundary_hints?.secrets_store ||
+        "SecretService",
+    };
+  }
+  return { route: normalizedRoute, target: "" };
+}
+
+function buildBootstrapQuestionRoutes(
+  session: Record<string, unknown> | null,
+  summary: BehaviorSystemSummary | undefined
+): BootstrapQuestionRouteItem[] {
+  const metadata =
+    session && typeof session.metadata === "object" && session.metadata && !Array.isArray(session.metadata)
+      ? (session.metadata as Record<string, unknown>)
+      : null;
+  const questionnaire = metadata?.questionnaire;
+
+  const normalizeItem = (
+    raw: unknown,
+    fallbackStepId: string
+  ): BootstrapQuestionRouteItem | null => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return null;
+    }
+    const item = raw as Record<string, unknown>;
+    const stepId =
+      (typeof item.step === "string" && item.step.trim()) ||
+      (typeof fallbackStepId === "string" && fallbackStepId.trim()) ||
+      "";
+    if (!stepId) {
+      return null;
+    }
+    const routeValue = typeof item.route === "string" ? item.route : "";
+    const normalizedRoute = normalizeBootstrapRoute(routeValue, summary);
+    return {
+      stepId,
+      route: normalizedRoute.route,
+      target:
+        (typeof item.target === "string" && item.target) ||
+        normalizedRoute.target,
+      summary:
+        (typeof item.summary === "string" && item.summary) ||
+        (typeof item.prompt === "string" ? item.prompt : ""),
+    };
+  };
+
+  if (Array.isArray(questionnaire)) {
+    return questionnaire
+      .map((raw) => normalizeItem(raw, ""))
+      .filter((item): item is BootstrapQuestionRouteItem => Boolean(item));
+  }
+
+  if (!questionnaire || typeof questionnaire !== "object") {
+    return [];
+  }
+
+  return Object.entries(questionnaire as Record<string, unknown>)
+    .map(([stepId, raw]) => normalizeItem(raw, stepId))
+    .filter((item): item is BootstrapQuestionRouteItem => Boolean(item));
+}
+
+function buildBehaviorScopeGroups(summary: BehaviorSystemSummary | undefined): BehaviorScopeGroup[] {
+  if (!summary?.path_manifest?.effective_behavior_files) {
+    return [];
+  }
+  const fileSummaryById = new Map((summary.files ?? []).map((item) => [item.file_id, item]));
+  const grouped = new Map<string, BehaviorScopeGroup>();
+
+  summary.path_manifest.effective_behavior_files.forEach((file) => {
+    const fileSummary = fileSummaryById.get(file.file_id);
+    const scope = inferBehaviorScope(file, fileSummary);
+    const current =
+      grouped.get(scope) ??
+      {
+        scope,
+        title: formatScopeTitle(scope),
+        summary: formatScopeSummary(scope),
+        files: [],
+      };
+    current.files.push({
+      ...file,
+      title: fileSummary?.title || file.file_id,
+      visibility: fileSummary?.visibility || "private",
+      shareWithWorkers: Boolean(fileSummary?.share_with_workers),
+    });
+    grouped.set(scope, current);
+  });
+
+  return ["system_shared", "agent_private", "project_shared", "project_agent"]
+    .map((scope) => grouped.get(scope))
+    .filter((item): item is BehaviorScopeGroup => Boolean(item))
+    .map((group) => ({
+      ...group,
+      files: [...group.files].sort((left, right) => left.file_id.localeCompare(right.file_id, "zh-Hans-CN")),
+    }));
+}
+
+function formatAgentScope(scope: string): string {
+  switch (scope) {
+    case "project":
+      return "当前 Project";
+    case "system":
+      return "系统共享";
+    default:
+      return formatTokenLabel(scope || "unknown");
+  }
 }
 
 function validateMetadataText(value: string): string {
@@ -142,8 +530,17 @@ function renderAgentCard(
 }
 
 export default function AgentCenter() {
-  const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const { snapshot, submitAction, busyActionId, refreshSnapshot } = useWorkbench();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const behaviorCenterRef = useRef<HTMLElement | null>(null);
+  const mainAgentRef = useRef<HTMLElement | null>(null);
+  const agentProfilesDocument = snapshot!.resources.agent_profiles ?? {
+    generated_at: "",
+    profiles: [],
+    active_project_id: "",
+    active_workspace_id: "",
+  };
   const workerProfilesDocument = snapshot!.resources.worker_profiles ?? {
     generated_at: "",
     profiles: [],
@@ -252,6 +649,15 @@ export default function AgentCenter() {
     : "";
   const focusedSessionDiffersFromCurrentProject =
     Boolean(focusedSession?.project_id) && focusedSession?.project_id !== agentView.currentProjectId;
+  const behaviorProfiles = useMemo(
+    () =>
+      agentProfilesDocument.profiles.filter(
+        (profile) =>
+          profile.scope === "system" || profile.project_id === "" || profile.project_id === agentView.currentProjectId
+      ),
+    [agentProfilesDocument.generated_at, agentView.currentProjectId]
+  );
+  const [selectedBehaviorProfileId, setSelectedBehaviorProfileId] = useState("");
 
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -259,6 +665,7 @@ export default function AgentCenter() {
     "先确定当前项目的主 Agent，再把其他 Agent 按职责分开。"
   );
   const [review, setReview] = useState<AgentEditorReview | null>(null);
+  const [copiedGovernanceKey, setCopiedGovernanceKey] = useState("");
 
   const metadataError = editorState ? validateMetadataText(editorState.draft.metadataText) : "";
 
@@ -279,6 +686,101 @@ export default function AgentCenter() {
     focusedSessionWorkspaceName,
   ]);
 
+  useEffect(() => {
+    setSelectedBehaviorProfileId((current) => {
+      if (current && behaviorProfiles.some((profile) => profile.profile_id === current)) {
+        return current;
+      }
+      const preferredProfileId =
+        agentView.mainAgentProfile?.profile_id ||
+        behaviorProfiles.find((profile) => profile.project_id === agentView.currentProjectId)?.profile_id ||
+        behaviorProfiles[0]?.profile_id ||
+        "";
+      return preferredProfileId;
+    });
+  }, [agentView.currentProjectId, agentView.mainAgentProfile?.profile_id, behaviorProfiles]);
+
+  const selectedBehaviorProfile =
+    behaviorProfiles.find((profile) => profile.profile_id === selectedBehaviorProfileId) ??
+    behaviorProfiles[0] ??
+    null;
+  const selectedBehaviorSystem = selectedBehaviorProfile?.behavior_system;
+  const behaviorScopeGroups = buildBehaviorScopeGroups(selectedBehaviorSystem);
+  const bootstrapSession = readBootstrapSession(snapshot);
+  const bootstrapQuestionRoutes = buildBootstrapQuestionRoutes(
+    bootstrapSession,
+    selectedBehaviorSystem
+  );
+  const bootstrapTemplateGroups = buildBootstrapTemplateGroups(
+    selectedBehaviorSystem,
+    selectedBehaviorProfile
+  );
+  const effectiveBehaviorFiles = behaviorScopeGroups.flatMap((group) =>
+    group.files.map((file) => ({
+      ...file,
+      scopeTitle: group.title,
+      scopeSummary: group.summary,
+    }))
+  );
+  const [selectedBehaviorFileKey, setSelectedBehaviorFileKey] = useState("");
+  const bootstrapSessionStatus =
+    bootstrapSession && typeof bootstrapSession.status === "string"
+      ? bootstrapSession.status
+      : "pending";
+  const bootstrapCurrentStep =
+    bootstrapSession && typeof bootstrapSession.current_step === "string"
+      ? bootstrapSession.current_step
+      : "";
+  const bootstrapSessionAgentName =
+    bootstrapSession && typeof bootstrapSession.agent_profile_id === "string"
+      ? behaviorProfiles.find((profile) => profile.profile_id === bootstrapSession.agent_profile_id)?.name ??
+        bootstrapSession.agent_profile_id
+      : "";
+  useEffect(() => {
+    setSelectedBehaviorFileKey((current) => {
+      if (
+        current &&
+        effectiveBehaviorFiles.some((file) => `${file.scope}:${file.path}:${file.file_id}` === current)
+      ) {
+        return current;
+      }
+      const preferred = effectiveBehaviorFiles[0];
+      return preferred ? `${preferred.scope}:${preferred.path}:${preferred.file_id}` : "";
+    });
+  }, [effectiveBehaviorFiles]);
+  const selectedBehaviorFile =
+    effectiveBehaviorFiles.find(
+      (file) => `${file.scope}:${file.path}:${file.file_id}` === selectedBehaviorFileKey
+    ) ?? effectiveBehaviorFiles[0] ?? null;
+  const governanceCommands = buildBehaviorGovernanceCommands(
+    selectedBehaviorFile,
+    selectedBehaviorProfile,
+    selectedBehaviorSystem
+  );
+
+  useEffect(() => {
+    const view = (searchParams.get("view") || "").trim().toLowerCase();
+    if (view === "behavior") {
+      behaviorCenterRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      return;
+    }
+    if (view === "main") {
+      mainAgentRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    }
+  }, [searchParams]);
+
+  async function handleCopyGovernanceCommand(command: BehaviorGovernanceCommand) {
+    try {
+      await navigator.clipboard.writeText(command.command);
+      setCopiedGovernanceKey(command.key);
+      setFlashMessage(`已复制「${command.title}」命令。`);
+      window.setTimeout(() => {
+        setCopiedGovernanceKey((current) => (current === command.key ? "" : current));
+      }, 1500);
+    } catch {
+      setFlashMessage("复制失败了，请手动复制下面的命令。");
+    }
+  }
   function openMainEditor() {
     const draft =
       agentView.mainAgentProfile !== null
@@ -603,9 +1105,325 @@ export default function AgentCenter() {
         ) : null}
       </section>
 
+      <section id="agents-behavior-center" ref={behaviorCenterRef} className="wb-panel">
+        <div className="wb-panel-head">
+          <div>
+            <p className="wb-card-label">Behavior Center</p>
+            <h3>把共享规则、Agent 私有文件和 Project 覆盖放在一个地方看清楚</h3>
+            <p className="wb-panel-copy">
+              这里展示的是当前 Project 下的 effective behavior files、路径清单和存储边界。Settings
+              不再维护这一块。
+            </p>
+          </div>
+          <div className="wb-inline-actions wb-inline-actions-wrap">
+            <button
+              type="button"
+              className="wb-button wb-button-secondary"
+              onClick={() => void refreshSnapshot()}
+            >
+              刷新控制面
+            </button>
+            <Link className="wb-button wb-button-tertiary" to="/agents?view=main">
+              定位到主 Agent
+            </Link>
+          </div>
+        </div>
+
+        {behaviorProfiles.length === 0 || selectedBehaviorProfile === null ? (
+          <div className="wb-empty-state">
+            <strong>当前作用域还没有可见的 Behavior Profile</strong>
+            <span>先建立当前 Project 的主 Agent，或者刷新控制面，让当前有效的 behavior summary 出现在这里。</span>
+            <div className="wb-inline-actions wb-inline-actions-wrap">
+              <button
+                type="button"
+                className="wb-button wb-button-primary"
+                onClick={openMainEditor}
+              >
+                建立主 Agent
+              </button>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={() => void refreshSnapshot()}
+              >
+                刷新控制面
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="wb-behavior-layout">
+            <div className="wb-section-stack">
+              <div className="wb-agent-tablist">
+                {behaviorProfiles.map((profile) => {
+                  const isActive = profile.profile_id === selectedBehaviorProfile.profile_id;
+                  return (
+                    <button
+                      key={profile.profile_id}
+                      type="button"
+                      className={`wb-agent-tab ${isActive ? "is-active" : ""}`}
+                      onClick={() => setSelectedBehaviorProfileId(profile.profile_id)}
+                    >
+                      <strong>{profile.name}</strong>
+                      <span>{formatAgentScope(profile.scope)} · {profile.tool_profile}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="wb-card-grid wb-card-grid-4">
+                <article className="wb-card">
+                  <p className="wb-card-label">当前 Agent</p>
+                  <strong>{selectedBehaviorProfile.name}</strong>
+                  <span>{selectedBehaviorProfile.persona_summary || "还没有填写 persona 摘要。"}</span>
+                </article>
+                <article className="wb-card">
+                  <p className="wb-card-label">有效文件</p>
+                  <strong>{selectedBehaviorSystem?.files?.length ?? 0}</strong>
+                  <span>{selectedBehaviorSystem?.source_chain?.length ?? 0} 条来源链</span>
+                </article>
+                <article className="wb-card">
+                  <p className="wb-card-label">继承给 Worker</p>
+                  <strong>{selectedBehaviorSystem?.worker_slice?.shared_file_ids?.length ?? 0}</strong>
+                  <span>
+                    {selectedBehaviorSystem?.worker_slice?.shared_file_ids?.slice(0, 3)?.join(" / ") || "当前没有共享切片"}
+                  </span>
+                </article>
+                <article className="wb-card">
+                  <p className="wb-card-label">运行时提示</p>
+                  <strong>{selectedBehaviorSystem?.runtime_hint_fields?.length ?? 0}</strong>
+                  <span>
+                    {selectedBehaviorSystem?.runtime_hint_fields?.slice(0, 2)?.join(" / ") || "当前没有 runtime hint"}
+                  </span>
+                </article>
+                <article className="wb-card">
+                  <p className="wb-card-label">Bootstrap 模板</p>
+                  <strong>{selectedBehaviorProfile.bootstrap_template_ids?.length ?? 0}</strong>
+                  <span>
+                    {bootstrapTemplateGroups.map((group) => group.title).join(" / ") || "当前没有 bootstrap 模板"}
+                  </span>
+                </article>
+              </div>
+
+              <div className="wb-inline-banner is-muted">
+                <strong>当前 effective source chain</strong>
+                <span>{selectedBehaviorSystem?.source_chain?.join(" -> ") || "default_behavior_templates"}</span>
+              </div>
+
+              <div className="wb-behavior-scope-grid">
+                {behaviorScopeGroups.map((group) => (
+                  <article key={group.scope} className="wb-note wb-behavior-scope-card">
+                    <strong>{group.title}</strong>
+                    <span>{group.summary}</span>
+                    <div className="wb-chip-row">
+                      <span className="wb-chip">{group.files.length} 个文件</span>
+                    </div>
+                    <div className="wb-note-stack">
+                      {group.files.map((file) => (
+                        <button
+                          key={`${group.scope}:${file.file_id}`}
+                          type="button"
+                          className={`wb-note wb-behavior-file-row ${
+                            selectedBehaviorFile &&
+                            `${file.scope}:${file.path}:${file.file_id}` ===
+                              `${selectedBehaviorFile.scope}:${selectedBehaviorFile.path}:${selectedBehaviorFile.file_id}`
+                              ? "is-active"
+                              : ""
+                          }`}
+                          onClick={() => setSelectedBehaviorFileKey(`${file.scope}:${file.path}:${file.file_id}`)}
+                        >
+                          <strong>{file.file_id}</strong>
+                          <span>{file.title} · {file.visibility} · {describeReviewMode(file.editable_mode, file.review_mode)}</span>
+                          <small className="wb-inline-note">
+                            {file.path || "未物化"} · {file.exists_on_disk ? "已存在" : "按需 materialize"} ·
+                            {file.shareWithWorkers ? " 会被 Worker 看到" : " 只影响当前 Agent"}
+                          </small>
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="wb-section-stack">
+              <article className="wb-note wb-behavior-scope-card">
+                <strong>Bootstrap & Templates</strong>
+                <span>默认会话 Agent 的初始化模板、当前 bootstrap 状态，以及问题答案会落去哪里。</span>
+                <div className="wb-note-stack">
+                  <div className="wb-note">
+                    <strong>当前 bootstrap</strong>
+                    <span>
+                      {bootstrapSession
+                        ? `${bootstrapSessionStatus}${bootstrapCurrentStep ? ` · 当前步骤 ${bootstrapCurrentStep}` : ""}`
+                        : "当前 project 还没有 bootstrap session"}
+                    </span>
+                    {bootstrapSessionAgentName ? (
+                      <small className="wb-inline-note">绑定 Agent：{bootstrapSessionAgentName}</small>
+                    ) : null}
+                  </div>
+                  {bootstrapTemplateGroups.map((group) => (
+                    <div key={group.key} className="wb-note">
+                      <strong>{group.title}</strong>
+                      <span>{group.summary}</span>
+                      <small className="wb-inline-note">{group.items.join(" / ")}</small>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="wb-note wb-behavior-scope-card">
+                <strong>Bootstrap 问卷与落点</strong>
+                <span>首次进入 project 时默认会话 Agent 会按这条路由提问；答案不会随意落到 md。</span>
+                <div className="wb-note-stack">
+                  {bootstrapQuestionRoutes.length > 0 ? (
+                    bootstrapQuestionRoutes.map((item) => (
+                      <div key={item.stepId} className="wb-note">
+                        <strong>{item.stepId}</strong>
+                        <span>
+                          {item.summary || "当前没有额外说明。"}
+                        </span>
+                        <small className="wb-inline-note">
+                          路由：{item.route}
+                          {item.target ? ` · 目标：${item.target}` : ""}
+                        </small>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="wb-note">
+                      <strong>当前没有 bootstrap 问卷</strong>
+                      <span>bootstrap 还没创建，或当前控制面尚未投影这轮问卷配置。</span>
+                    </div>
+                  )}
+                </div>
+              </article>
+
+              <article className="wb-note wb-behavior-scope-card">
+                <strong>Project Path Manifest</strong>
+                <span>任何 Agent 要改 behavior、读 workspace 或找数据目录，都应该先看这份路径清单。</span>
+                <div className="wb-note-stack">
+                  <div className="wb-note">
+                    <strong>project root</strong>
+                    <span>{selectedBehaviorSystem?.path_manifest?.project_root || "未提供"}</span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>behavior roots</strong>
+                    <span>
+                      shared: {selectedBehaviorSystem?.path_manifest?.shared_behavior_root || "未提供"}
+                      {" · "}
+                      agent: {selectedBehaviorSystem?.path_manifest?.agent_behavior_root || "未提供"}
+                    </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>project roots</strong>
+                    <span>
+                      workspace: {selectedBehaviorSystem?.path_manifest?.project_workspace_root || "未提供"}
+                      {" · "}
+                      data: {selectedBehaviorSystem?.path_manifest?.project_data_root || "未提供"}
+                    </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>notes / artifacts / secrets</strong>
+                    <span>
+                      notes: {selectedBehaviorSystem?.path_manifest?.project_notes_root || "未提供"}
+                      {" · "}
+                      artifacts: {selectedBehaviorSystem?.path_manifest?.project_artifacts_root || "未提供"}
+                      {" · "}
+                      secrets: {selectedBehaviorSystem?.path_manifest?.secret_bindings_path || "未提供"}
+                    </span>
+                  </div>
+                </div>
+              </article>
+
+              <article className="wb-note wb-behavior-scope-card">
+                <strong>Storage Boundaries</strong>
+                <span>把规则、事实、敏感值和工作材料分开，避免行为文件继续承担 Memory / Secrets 的角色。</span>
+                <div className="wb-note-stack">
+                  <div className="wb-note">
+                    <strong>事实</strong>
+                    <span>{selectedBehaviorSystem?.storage_boundary_hints?.facts_store || "MemoryService"}</span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>敏感值</strong>
+                    <span>{selectedBehaviorSystem?.storage_boundary_hints?.secrets_store || "SecretService"}</span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>行为文件</strong>
+                    <span>{selectedBehaviorSystem?.storage_boundary_hints?.behavior_store || "behavior_files"}</span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>工作材料</strong>
+                    <span>
+                      {(selectedBehaviorSystem?.storage_boundary_hints?.workspace_roots ?? []).join(" / ") || "workspace / data / notes / artifacts"}
+                    </span>
+                  </div>
+                  <div className="wb-note">
+                    <strong>Bootstrap 默认落点</strong>
+                    <span>
+                      facts → {selectedBehaviorSystem?.bootstrap_routes?.facts?.store || "MemoryService"}
+                      {" · "}
+                      secrets → {selectedBehaviorSystem?.bootstrap_routes?.secrets?.path || "project.secret-bindings.json"}
+                    </span>
+                    <small className="wb-inline-note">
+                      身份 → {selectedBehaviorSystem?.bootstrap_routes?.assistant_identity?.target || "IDENTITY.md"}
+                      {" · "}
+                      性格 → {selectedBehaviorSystem?.bootstrap_routes?.assistant_personality?.target || "SOUL.md"}
+                    </small>
+                  </div>
+                </div>
+              </article>
+
+              <article className="wb-note wb-behavior-scope-card">
+                <strong>Effective View & Governance</strong>
+                <span>选中一个具体文件后，看它真正影响谁、该怎么改；当前先在这里复制精确命令，再去终端 proposal/apply。</span>
+                <div className="wb-settings-cli-grid">
+                  {selectedBehaviorFile ? (
+                    <>
+                      <article className="wb-note wb-cli-snippet">
+                        <strong>{selectedBehaviorFile.file_id}</strong>
+                        <span>
+                          {selectedBehaviorFile.scopeTitle} · {selectedBehaviorFile.title}
+                        </span>
+                        <small className="wb-inline-note">
+                          {selectedBehaviorFile.path} · {describeReviewMode(selectedBehaviorFile.editable_mode, selectedBehaviorFile.review_mode)}
+                        </small>
+                        <small className="wb-inline-note">
+                          {selectedBehaviorFile.shareWithWorkers ? "会进入 Worker 共享切片" : "只影响当前 Agent"} ·
+                          {selectedBehaviorFile.exists_on_disk ? " 已物化" : " 尚未物化"}
+                        </small>
+                      </article>
+                      {governanceCommands.map((snippet) => (
+                        <article key={snippet.key} className="wb-note wb-cli-snippet">
+                          <strong>{snippet.title}</strong>
+                          <span>{snippet.summary}</span>
+                          <pre className="wb-cli-snippet-code">{snippet.command}</pre>
+                          <div className="wb-inline-actions wb-inline-actions-wrap">
+                            <button
+                              type="button"
+                              className="wb-button wb-button-secondary wb-button-inline"
+                              onClick={() => void handleCopyGovernanceCommand(snippet)}
+                            >
+                              {copiedGovernanceKey === snippet.key ? "已复制" : "复制命令"}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </>
+                  ) : (
+                    <article className="wb-note wb-cli-snippet">
+                      <strong>当前没有可选文件</strong>
+                      <span>先让当前 Agent 暴露出 effective behavior files，再选择具体文件查看治理动作。</span>
+                    </article>
+                  )}
+                </div>
+              </article>
+            </div>
+          </div>
+        )}
+      </section>
+
       <div className="wb-agent-management-layout">
         <div className="wb-section-stack">
-          <section className="wb-panel">
+          <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">主 Agent</p>

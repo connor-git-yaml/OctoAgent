@@ -1319,7 +1319,7 @@ describe("App workbench routing", () => {
     await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
-    expect(await screen.findByText("Agent 能力管理已移到 Agents")).toBeInTheDocument();
+    expect(await screen.findByText("Agent 与 Behavior 管理已移到 Agents")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
 
     await waitFor(() =>

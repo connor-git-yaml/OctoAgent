@@ -30,8 +30,21 @@ class BehaviorVisibility(StrEnum):
 
 
 class BehaviorWorkspaceScope(StrEnum):
-    SYSTEM = "system"
-    PROJECT = "project"
+    SYSTEM_SHARED = "system_shared"
+    AGENT_PRIVATE = "agent_private"
+    PROJECT_SHARED = "project_shared"
+    PROJECT_AGENT = "project_agent"
+
+
+class BehaviorEditabilityMode(StrEnum):
+    DIRECT = "direct"
+    PROPOSAL_REQUIRED = "proposal_required"
+    READ_ONLY = "read_only"
+
+
+class BehaviorReviewMode(StrEnum):
+    NONE = "none"
+    REVIEW_REQUIRED = "review_required"
 
 
 class ClarificationAction(StrEnum):
@@ -101,6 +114,8 @@ class BehaviorWorkspaceFile(BaseModel):
     share_with_workers: bool = False
     scope: BehaviorWorkspaceScope | None = None
     path: str = Field(default="")
+    editable_mode: BehaviorEditabilityMode = BehaviorEditabilityMode.PROPOSAL_REQUIRED
+    review_mode: BehaviorReviewMode = BehaviorReviewMode.REVIEW_REQUIRED
     content: str = Field(default="")
     source_kind: str = Field(default="default_template")
     is_advanced: bool = False
@@ -112,12 +127,68 @@ class BehaviorWorkspaceFile(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProjectPathManifestFile(BaseModel):
+    file_id: str = Field(min_length=1)
+    path: str = Field(default="")
+    scope: BehaviorWorkspaceScope | None = None
+    editable_mode: BehaviorEditabilityMode = BehaviorEditabilityMode.PROPOSAL_REQUIRED
+    review_mode: BehaviorReviewMode = BehaviorReviewMode.REVIEW_REQUIRED
+    source_kind: str = Field(default="")
+    exists_on_disk: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectPathManifest(BaseModel):
+    repository_root: str = Field(default="")
+    project_root: str = Field(default="")
+    project_root_source: str = Field(default="")
+    project_behavior_root: str = Field(default="")
+    project_workspace_root: str = Field(default="")
+    project_workspace_root_source: str = Field(default="")
+    workspace_id: str = Field(default="")
+    workspace_slug: str = Field(default="")
+    project_data_root: str = Field(default="")
+    project_notes_root: str = Field(default="")
+    project_artifacts_root: str = Field(default="")
+    shared_behavior_root: str = Field(default="")
+    agent_behavior_root: str = Field(default="")
+    project_agent_behavior_root: str = Field(default="")
+    secret_bindings_path: str = Field(default="")
+    effective_behavior_files: list[ProjectPathManifestFile] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StorageBoundaryHints(BaseModel):
+    facts_store: str = Field(default="MemoryService")
+    facts_access: str = Field(default="")
+    secrets_store: str = Field(default="SecretService")
+    secrets_access: str = Field(default="")
+    secret_bindings_metadata_path: str = Field(default="")
+    behavior_store: str = Field(default="behavior_files")
+    workspace_roots: list[str] = Field(default_factory=list)
+    note: str = Field(default="")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class BehaviorWorkspace(BaseModel):
     project_slug: str = Field(default="")
     system_dir: str = Field(default="")
     project_dir: str = Field(default="")
+    agent_slug: str = Field(default="")
+    shared_dir: str = Field(default="")
+    agent_dir: str = Field(default="")
+    project_root_dir: str = Field(default="")
+    project_behavior_dir: str = Field(default="")
+    project_agent_dir: str = Field(default="")
+    project_workspace_dir: str = Field(default="")
+    project_data_dir: str = Field(default="")
+    project_notes_dir: str = Field(default="")
+    project_artifacts_dir: str = Field(default="")
+    secret_bindings_path: str = Field(default="")
     files: list[BehaviorWorkspaceFile] = Field(default_factory=list)
     source_chain: list[str] = Field(default_factory=list)
+    path_manifest: ProjectPathManifest | None = None
+    storage_boundary_hints: StorageBoundaryHints | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

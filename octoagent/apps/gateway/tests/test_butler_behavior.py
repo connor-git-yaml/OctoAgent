@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from octoagent.core.behavior_workspace import normalize_behavior_agent_slug
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
@@ -36,6 +37,20 @@ def _build_profile() -> AgentProfile:
         project_id="project-default",
         name="Default Butler",
         persona_summary="负责长期协作。",
+        bootstrap_template_ids=[
+            "behavior:system:AGENTS.md",
+            "behavior:system:USER.md",
+            "behavior:system:TOOLS.md",
+            "behavior:system:BOOTSTRAP.md",
+            "behavior:agent:IDENTITY.md",
+            "behavior:agent:SOUL.md",
+            "behavior:agent:HEARTBEAT.md",
+            "behavior:project:PROJECT.md",
+            "behavior:project:KNOWLEDGE.md",
+            "behavior:project:USER.md",
+            "behavior:project:TOOLS.md",
+            "behavior:project:instructions/README.md",
+        ],
     )
 
 
@@ -63,46 +78,119 @@ def test_resolve_behavior_pack_builds_default_files_layers_and_worker_slice() ->
     slice_envelope = build_behavior_slice_envelope(pack)
 
     assert pack.profile_id == profile.profile_id
-    assert len(pack.files) == 4
-    assert pack.source_chain == ["default_behavior_templates", "project:default-project"]
+    assert len(pack.files) == 6
+    assert "default_behavior_templates" in pack.source_chain
     assert [item.layer for item in pack.layers][:3] == [
         BehaviorLayerKind.ROLE,
         BehaviorLayerKind.COMMUNICATION,
         BehaviorLayerKind.SOLVING,
     ]
-    assert slice_envelope.shared_file_ids == ["AGENTS.md", "PROJECT.md", "TOOLS.md"]
+    assert slice_envelope.shared_file_ids == [
+        "AGENTS.md",
+        "USER.md",
+        "PROJECT.md",
+        "KNOWLEDGE.md",
+        "TOOLS.md",
+        "BOOTSTRAP.md",
+    ]
     assert [item.layer for item in slice_envelope.layers] == [
         BehaviorLayerKind.ROLE,
+        BehaviorLayerKind.COMMUNICATION,
         BehaviorLayerKind.SOLVING,
         BehaviorLayerKind.TOOL_BOUNDARY,
+        BehaviorLayerKind.BOOTSTRAP,
     ]
 
 
 def test_behavior_summary_and_block_expose_effective_sources() -> None:
     profile = _build_profile()
+    workspace_root = Path("/tmp/runtime-workspace")
 
     summary = build_behavior_system_summary(
         agent_profile=profile,
         project_name="Default Project",
         project_slug="default-project",
+        workspace_id="workspace-primary",
+        workspace_slug="primary",
+        workspace_root_path=workspace_root,
     )
     block = render_behavior_system_block(
         agent_profile=profile,
         project_name="Default Project",
         project_slug="default-project",
+        workspace_id="workspace-primary",
+        workspace_slug="primary",
+        workspace_root_path=workspace_root,
     )
 
-    assert summary["source_chain"] == ["default_behavior_templates", "project:default-project"]
-    assert summary["worker_slice"]["shared_file_ids"] == ["AGENTS.md", "PROJECT.md", "TOOLS.md"]
+    assert "default_behavior_templates" in summary["source_chain"]
+    assert summary["worker_slice"]["shared_file_ids"] == [
+        "AGENTS.md",
+        "USER.md",
+        "PROJECT.md",
+        "KNOWLEDGE.md",
+        "TOOLS.md",
+        "BOOTSTRAP.md",
+    ]
     assert "direct_answer" in summary["decision_modes"]
     assert "effective_location_hint" in summary["runtime_hint_fields"]
     assert "recent_worker_lane_topic" in summary["runtime_hint_fields"]
-    assert summary["files"][0]["path_hint"] == "behavior/system/AGENTS.md"
+    assert summary["files"][0]["path_hint"].endswith("behavior/system/AGENTS.md")
     assert summary["files"][0]["is_advanced"] is False
+    assert summary["path_manifest"]["repository_root"]
+    assert summary["path_manifest"]["project_root"] == str(workspace_root.resolve())
+    assert summary["path_manifest"]["project_root_source"] == "runtime_project_root"
+    assert summary["path_manifest"]["project_workspace_root"] == str(workspace_root.resolve())
+    assert summary["path_manifest"]["project_workspace_root_source"] == "workspace.root_path"
+    assert summary["path_manifest"]["workspace_id"] == "workspace-primary"
+    assert summary["path_manifest"]["workspace_slug"] == "primary"
+    assert (
+        summary["path_manifest"]["secret_bindings_path"]
+        .endswith("projects/default-project/project.secret-bindings.json")
+    )
+    assert summary["storage_boundary_hints"]["facts_store"] == "MemoryService"
+    assert "MemoryService / memory tools" in summary["storage_boundary_hints"]["facts_access"]
+    assert summary["storage_boundary_hints"]["secret_bindings_metadata_path"].endswith(
+        "projects/default-project/project.secret-bindings.json"
+    )
+    assert "behavior:system:AGENTS.md" in summary["bootstrap_template_ids"]
+    assert summary["bootstrap_templates"]["shared"] == [
+        "behavior:system:AGENTS.md",
+        "behavior:system:USER.md",
+        "behavior:system:TOOLS.md",
+        "behavior:system:BOOTSTRAP.md",
+    ]
+    assert summary["bootstrap_templates"]["agent_private"] == [
+        "behavior:agent:IDENTITY.md",
+        "behavior:agent:SOUL.md",
+        "behavior:agent:HEARTBEAT.md",
+    ]
+    assert summary["bootstrap_routes"]["facts"]["store"] == "MemoryService"
+    assert "memory tools" in summary["bootstrap_routes"]["facts"]["access"]
+    assert summary["bootstrap_routes"]["secrets"]["metadata_path"].endswith(
+        "projects/default-project/project.secret-bindings.json"
+    )
+    assert summary["bootstrap_routes"]["assistant_identity"]["target"] == "IDENTITY.md"
+    assert "project_root" in summary["path_manifest"]
     assert "BehaviorSystem:" in block
     assert "decision_modes:" in block
     assert "tool_boundary:" in block
     assert "default_behavior_templates" in block
+    assert "ProjectPathManifest:" in block
+    assert "StorageBoundaries:" in block
+    assert "project_workspace_root:" in block
+    assert "facts_store: MemoryService" in block
+    assert "facts_access:" in block
+    assert "secrets_access:" in block
+
+
+def test_normalize_behavior_agent_slug_uses_stable_hash_for_non_ascii_names() -> None:
+    research = normalize_behavior_agent_slug("研究员")
+    reviewer = normalize_behavior_agent_slug("审稿助手")
+
+    assert research.startswith("agent-")
+    assert reviewer.startswith("agent-")
+    assert research != reviewer
 
 
 def test_worker_behavior_block_uses_worker_identity_and_shared_slice_only() -> None:
@@ -121,21 +209,21 @@ def test_worker_behavior_block_uses_worker_identity_and_shared_slice_only() -> N
     )
 
     assert pack.files[0].title == "行为总约束"
-    assert "Worker" in pack.files[0].content
-    assert "Butler 进行全局总控" in pack.files[0].content
-    assert "communication:" not in block
-    assert "bootstrap:" not in block
+    assert "specialist Worker" in pack.files[0].content
+    assert "Butler 负责默认会话总控" in pack.files[0].content
+    assert "communication:" in block
+    assert "bootstrap:" in block
     assert "tool_boundary:" in block
 
 
 def test_resolve_behavior_pack_prefers_project_and_system_workspace_files(tmp_path: Path) -> None:
     profile = _build_profile()
     system_dir = tmp_path / "behavior" / "system"
-    project_dir = tmp_path / "behavior" / "projects" / "default-project"
+    project_dir = tmp_path / "projects" / "default-project" / "behavior"
     system_dir.mkdir(parents=True)
     project_dir.mkdir(parents=True)
     (system_dir / "TOOLS.md").write_text("system tools", encoding="utf-8")
-    (project_dir / "AGENTS.md").write_text("project agents", encoding="utf-8")
+    (project_dir / "PROJECT.md").write_text("project context", encoding="utf-8")
 
     pack = resolve_behavior_pack(
         agent_profile=profile,
@@ -146,12 +234,12 @@ def test_resolve_behavior_pack_prefers_project_and_system_workspace_files(tmp_pa
 
     files = {item.file_id: item for item in pack.files}
     assert pack.source_chain == [
-        "filesystem:behavior/projects/default-project",
+        "filesystem:projects/default-project/behavior",
         "filesystem:behavior/system",
         "default_behavior_templates",
     ]
-    assert files["AGENTS.md"].content == "project agents"
-    assert files["AGENTS.md"].source_kind == "project_file"
+    assert files["PROJECT.md"].content == "project context"
+    assert files["PROJECT.md"].source_kind == "project_file"
     assert files["TOOLS.md"].content == "system tools"
     assert files["TOOLS.md"].source_kind == "system_file"
     assert files["USER.md"].source_kind == "default_template"
@@ -159,7 +247,7 @@ def test_resolve_behavior_pack_prefers_project_and_system_workspace_files(tmp_pa
 
 def test_resolve_behavior_pack_supports_local_override_and_truncation(tmp_path: Path) -> None:
     profile = _build_profile()
-    project_dir = tmp_path / "behavior" / "projects" / "default-project"
+    project_dir = tmp_path / "projects" / "default-project" / "behavior"
     project_dir.mkdir(parents=True)
     long_tools = "web.search 允许联网检索。\n" * 300
     (project_dir / "TOOLS.local.md").write_text(long_tools, encoding="utf-8")
@@ -185,15 +273,34 @@ def test_resolve_behavior_pack_supports_local_override_and_truncation(tmp_path: 
 
     files = {item.file_id: item for item in pack.files}
     tools_file = files["TOOLS.md"]
-    assert pack.source_chain[0] == "filesystem:behavior/projects/default-project/*.local"
+    assert pack.source_chain[0] == "filesystem:projects/default-project/behavior/*.local"
     assert tools_file.source_kind == "project_local_file"
     assert tools_file.truncated is True
     assert tools_file.truncation_reason == "char_budget_exceeded"
     assert tools_file.original_char_count > tools_file.effective_char_count
-    assert summary["budget"]["overlay_order"][-1] == "project_local_file"
-    assert summary["files"][-1]["truncated"] is True
+    assert "project_local_file" in summary["budget"]["overlay_order"]
+    assert any(item["file_id"] == "TOOLS.md" and item["truncated"] for item in summary["files"])
     assert "truncated files: TOOLS.md" in block
     assert "[TOOLS.md; truncated" in block
+
+
+def test_resolve_behavior_pack_reads_legacy_project_behavior_directory(tmp_path: Path) -> None:
+    profile = _build_profile()
+    legacy_project_dir = tmp_path / "behavior" / "projects" / "default-project"
+    legacy_project_dir.mkdir(parents=True)
+    (legacy_project_dir / "PROJECT.md").write_text("legacy project context", encoding="utf-8")
+
+    pack = resolve_behavior_pack(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+
+    files = {item.file_id: item for item in pack.files}
+    assert files["PROJECT.md"].content == "legacy project context"
+    assert files["PROJECT.md"].source_kind == "project_file"
+    assert "filesystem:behavior/projects/default-project" in pack.source_chain
 
 
 def test_decide_clarification_keeps_non_weather_requests_for_model_phase() -> None:
@@ -303,6 +410,7 @@ def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_wor
 
     files = {item.file_id: item for item in pack.files}
     assert "web / filesystem / terminal" in files["AGENTS.md"].content
+    assert "sticky worker lane" in files["AGENTS.md"].content
     assert "specialist worker lane" in files["AGENTS.md"].content
     assert "不要把用户原话原封不动转发过去" in files["TOOLS.md"].content
 

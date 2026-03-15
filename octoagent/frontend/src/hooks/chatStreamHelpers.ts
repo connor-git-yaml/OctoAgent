@@ -68,13 +68,13 @@ export function extractAgentMessage(
     return "";
   }
   if (typeof payload.response === "string" && payload.response.trim()) {
-    return payload.response;
+    return sanitizeAgentVisibleText(payload.response);
   }
   if (typeof payload.response_summary === "string" && payload.response_summary.trim()) {
-    return payload.response_summary;
+    return sanitizeAgentVisibleText(payload.response_summary);
   }
   if (typeof payload.summary === "string" && payload.summary.trim()) {
-    return payload.summary;
+    return sanitizeAgentVisibleText(payload.summary);
   }
   return "";
 }
@@ -119,10 +119,108 @@ function extractArtifactText(artifact: Artifact | undefined): string {
   }
   for (const part of artifact.parts) {
     if (typeof part.content === "string" && part.content.trim()) {
-      return part.content;
+      return sanitizeAgentVisibleText(part.content);
     }
   }
   return "";
+}
+
+export function sanitizeAgentVisibleText(raw: string): string {
+  const normalized = String(raw || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!normalized) {
+    return "";
+  }
+  const toolTranscriptPattern = /\bto=[a-z0-9_.-]+/i;
+  if (!toolTranscriptPattern.test(normalized)) {
+    return normalized;
+  }
+  const rawJsonMarkers = [
+    '"query":',
+    '"matches":',
+    '"memories":',
+    '"scopes":',
+    '"result":',
+    '"ids":',
+  ];
+
+  const kept: string[] = [];
+  let skipBlockKind: "" | "fence" | "json" = "";
+  let jsonBalance = 0;
+  let pendingJsonAfterTool = false;
+
+  const isJsonishLine = (value: string): boolean => {
+    const stripped = value.trim();
+    if (!stripped) {
+      return false;
+    }
+    if (stripped.startsWith("```")) {
+      return true;
+    }
+    if (/^[\[{]/.test(stripped) || /^[\]}]/.test(stripped)) {
+      return true;
+    }
+    if (rawJsonMarkers.some((marker) => stripped.includes(marker))) {
+      return true;
+    }
+    return /^".+?:/.test(stripped);
+  };
+
+  for (const rawLine of normalized.split("\n")) {
+    const line = rawLine.trimEnd();
+    const stripped = line.trim();
+    if (!stripped) {
+      if (!pendingJsonAfterTool && !skipBlockKind && kept.length > 0 && kept[kept.length - 1] !== "") {
+        kept.push("");
+      }
+      continue;
+    }
+
+    if (skipBlockKind === "fence") {
+      if (stripped.startsWith("```")) {
+        skipBlockKind = "";
+      }
+      continue;
+    }
+
+    if (skipBlockKind === "json") {
+      jsonBalance += (stripped.match(/[\[{]/g) ?? []).length;
+      jsonBalance -= (stripped.match(/[\]}]/g) ?? []).length;
+      if (jsonBalance <= 0) {
+        skipBlockKind = "";
+      }
+      continue;
+    }
+
+    const transcriptMatch = line.match(toolTranscriptPattern);
+    if (transcriptMatch && transcriptMatch.index !== undefined) {
+      const prefix = line.slice(0, transcriptMatch.index).trim();
+      if (prefix && !isJsonishLine(prefix)) {
+        kept.push(prefix);
+      }
+      pendingJsonAfterTool = true;
+      continue;
+    }
+
+    if (pendingJsonAfterTool) {
+      if (isJsonishLine(stripped)) {
+        if (stripped.startsWith("```")) {
+          skipBlockKind = "fence";
+        } else if (/^[\[{]/.test(stripped)) {
+          jsonBalance = (stripped.match(/[\[{]/g) ?? []).length - (stripped.match(/[\]}]/g) ?? []).length;
+          if (jsonBalance > 0) {
+            skipBlockKind = "json";
+          }
+        }
+        continue;
+      }
+      pendingJsonAfterTool = false;
+    }
+
+    kept.push(line);
+  }
+
+  const sanitized = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return sanitized || normalized;
 }
 
 function normalizeFailureMessage(raw: string): string {

@@ -123,34 +123,6 @@ export default function SettingsPage() {
   const memory = snapshot!.resources.memory;
   const retrievalPlatform = snapshot!.resources.retrieval_platform ?? null;
   const setup = snapshot!.resources.setup_governance;
-  const behaviorSystem =
-    (snapshot as {
-      resources?: {
-        agent_profiles?: {
-          profiles?: Array<{
-            behavior_system?: {
-              source_chain?: string[];
-              decision_modes?: string[];
-              runtime_hint_fields?: string[];
-              files?: Array<{
-                file_id: string;
-                title: string;
-                layer: string;
-                visibility: string;
-                share_with_workers: boolean;
-                source_kind: string;
-                path_hint: string;
-                is_advanced?: boolean;
-              }>;
-              worker_slice?: {
-                shared_file_ids?: string[];
-                layers?: string[];
-              };
-            };
-          }>;
-        };
-      };
-    })?.resources?.agent_profiles?.profiles?.[0]?.behavior_system ?? null;
   const [fieldState, setFieldState] = useState<FieldState>(() =>
     buildFieldState(config.ui_hints, config.current_value)
   );
@@ -502,44 +474,6 @@ export default function SettingsPage() {
     (Boolean(memoryCorpus.pending_generation_id) ||
       memoryCorpus.state === "migration_deferred" ||
       rollbackCandidate !== null);
-  const behaviorCliSnippets = [
-    {
-      key: "list",
-      title: "列出有效文件",
-      summary: "查看当前 project 下生效的 behavior files 和来源链。",
-      command: "octo behavior ls",
-    },
-    {
-      key: "show-agents",
-      title: "查看 AGENTS.md",
-      summary: "确认 Butler / Worker 当前共享的总约束。",
-      command: "octo behavior show AGENTS",
-    },
-    {
-      key: "init",
-      title: "初始化默认文件",
-      summary: "为当前作用域生成核心文件模板。",
-      command: "octo behavior init",
-    },
-    {
-      key: "edit-agents",
-      title: "准备并编辑 AGENTS.md",
-      summary: "materialize 当前 project override，并交给本机编辑器处理。",
-      command: "octo behavior edit AGENTS",
-    },
-    {
-      key: "diff-agents",
-      title: "查看 override diff",
-      summary: "比较当前 override 相对下层来源的差异。",
-      command: "octo behavior diff AGENTS",
-    },
-    {
-      key: "apply-agents",
-      title: "应用 reviewed proposal",
-      summary: "把外部提案文件写回 behavior workspace。",
-      command: "octo behavior apply AGENTS --from /path/to/proposal.md",
-    },
-  ];
   const reviewNextActions = review.next_actions.slice(0, 3);
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
@@ -733,13 +667,13 @@ export default function SettingsPage() {
       />
 
       <div className="wb-inline-banner is-muted">
-        <strong>Agent 能力管理已移到 Agents</strong>
+        <strong>Agent 与 Behavior 管理已移到 Agents</strong>
         <span>
-          Skill / MCP Provider 的安装、当前项目默认启用范围，以及 Butler / Worker 的绑定，
-          现在统一放在 Agents &gt; Providers。
+          Skill / MCP Provider、Behavior Files、Project Path Manifest 和当前项目的 Agent 默认行为，
+          现在统一放在 Agents 页面维护。
         </span>
-        <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents?view=providers">
-          打开 Agents &gt; Providers
+        <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents">
+          打开 Agents
         </Link>
       </div>
 
@@ -1024,91 +958,6 @@ export default function SettingsPage() {
           </details>
         ) : null}
       </section>
-
-      {behaviorSystem ? (
-        <section id="settings-group-behavior" className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">Behavior Files</p>
-              <h3>当前项目默认行为现在来自显式文件与运行时 hints</h3>
-              <div className="wb-chip-row">
-                <span className="wb-chip">项目默认</span>
-                <span className="wb-chip">影响后续新会话</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="wb-card-grid wb-card-grid-4">
-            <article className="wb-card">
-              <p className="wb-card-label">生效来源</p>
-              <strong>{behaviorSystem.source_chain?.[0] ?? "N/A"}</strong>
-              <span>{behaviorSystem.source_chain?.length ?? 0} 条 source chain</span>
-            </article>
-            <article className="wb-card">
-              <p className="wb-card-label">核心文件</p>
-              <strong>{behaviorSystem.files?.length ?? 0}</strong>
-              <span>默认包含 AGENTS / USER / PROJECT / TOOLS</span>
-            </article>
-            <article className="wb-card">
-              <p className="wb-card-label">决策模式</p>
-              <strong>{behaviorSystem.decision_modes?.length ?? 0}</strong>
-              <span>{behaviorSystem.decision_modes?.join(" / ") ?? "N/A"}</span>
-            </article>
-            <article className="wb-card">
-              <p className="wb-card-label">Worker 继承</p>
-              <strong>{behaviorSystem.worker_slice?.shared_file_ids?.length ?? 0}</strong>
-              <span>{behaviorSystem.worker_slice?.shared_file_ids?.join(" / ") ?? "N/A"}</span>
-            </article>
-          </div>
-
-          <div className="wb-inline-banner is-muted">
-            <strong>当前页面先提供只读 operator 视图</strong>
-            <span>
-              你可以先在这里确认 effective source、共享范围和决策 contract；文件编辑当前仍建议走
-              CLI，避免 Web 和本地文件系统各维护一套真相。已存在的会话会继续沿用自己的
-              session-scoped project / workspace 绑定。
-            </span>
-          </div>
-
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">当前文件</p>
-              <h3>核心文件、可见性与来源链</h3>
-            </div>
-          </div>
-          <div className="wb-settings-cli-grid">
-            {(behaviorSystem.files ?? []).map((file) => (
-              <article key={file.file_id} className="wb-note wb-cli-snippet">
-                <strong>{file.file_id}</strong>
-                <span>
-                  {file.title || file.layer} · {file.visibility} · {file.source_kind}
-                </span>
-                <pre className="wb-cli-snippet-code">
-                  {file.path_hint}
-                  {"\n"}
-                  share_with_workers={file.share_with_workers ? "true" : "false"}
-                </pre>
-              </article>
-            ))}
-          </div>
-
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">命令行</p>
-              <h3>当前可用的行为文件管理入口</h3>
-            </div>
-          </div>
-          <div className="wb-settings-cli-grid">
-            {behaviorCliSnippets.map((snippet) => (
-              <article key={snippet.key} className="wb-note wb-cli-snippet">
-                <strong>{snippet.title}</strong>
-                <span>{snippet.summary}</span>
-                <pre className="wb-cli-snippet-code">{snippet.command}</pre>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {otherGroupIds.map((groupId) => {
         const hints = (groupedHints[groupId] ?? []).filter(

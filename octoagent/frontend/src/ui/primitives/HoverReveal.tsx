@@ -1,6 +1,8 @@
 import {
+  type FocusEvent,
   useEffect,
   useLayoutEffect,
+  type MouseEvent,
   useRef,
   useState,
   type CSSProperties,
@@ -52,7 +54,38 @@ export default function HoverReveal({
     closeTimerRef.current = window.setTimeout(() => {
       onToggle(false);
       closeTimerRef.current = null;
-    }, 90);
+    }, 180);
+  }
+
+  function containsHoverTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Node)) {
+      return false;
+    }
+    return Boolean(
+      triggerRef.current?.contains(target) ||
+        cardRef.current?.contains(target)
+    );
+  }
+
+  function handleWrapperMouseLeave(event: MouseEvent<HTMLDivElement>) {
+    if (containsHoverTarget(event.relatedTarget)) {
+      return;
+    }
+    scheduleClose();
+  }
+
+  function handleCardMouseLeave(event: MouseEvent<HTMLDivElement>) {
+    if (containsHoverTarget(event.relatedTarget)) {
+      return;
+    }
+    scheduleClose();
+  }
+
+  function handleTriggerBlur(event: FocusEvent<HTMLButtonElement>) {
+    if (containsHoverTarget(event.relatedTarget)) {
+      return;
+    }
+    scheduleClose();
   }
 
   useEffect(() => {
@@ -98,7 +131,7 @@ export default function HoverReveal({
     <div
       className={`wb-hover-reveal${wrapperClassName ? ` ${wrapperClassName}` : ""}`}
       onMouseEnter={openCard}
-      onMouseLeave={scheduleClose}
+      onMouseLeave={handleWrapperMouseLeave}
     >
       <button
         ref={triggerRef}
@@ -107,7 +140,7 @@ export default function HoverReveal({
         aria-expanded={expanded}
         onClick={() => onToggle(!expanded)}
         onFocus={openCard}
-        onBlur={scheduleClose}
+        onBlur={handleTriggerBlur}
       >
         {triggerContent ?? label}
       </button>
@@ -120,7 +153,7 @@ export default function HoverReveal({
               aria-label={ariaLabel}
               style={cardStyle}
               onMouseEnter={openCard}
-              onMouseLeave={scheduleClose}
+              onMouseLeave={handleCardMouseLeave}
             >
               {children}
             </div>,

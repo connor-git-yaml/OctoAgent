@@ -353,4 +353,105 @@ describe("useChatStream", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.messages[result.current.messages.length - 1]?.isStreaming).toBe(false);
   });
+
+  it("恢复历史答复时会过滤误泄漏的 tool transcript 和 JSON", async () => {
+    window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-restore-sanitize");
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-restore-sanitize",
+        title: "清洗脏答复",
+        status: "SUCCEEDED",
+      },
+      events: [
+        {
+          event_id: "evt-user-sanitize",
+          task_id: "task-restore-sanitize",
+          task_seq: 1,
+          ts: "2026-03-15T10:00:00Z",
+          type: "USER_MESSAGE",
+          actor: "user",
+          payload: { text: "帮我总结 README" },
+        },
+        {
+          event_id: "evt-agent-sanitize",
+          task_id: "task-restore-sanitize",
+          task_seq: 2,
+          ts: "2026-03-15T10:00:02Z",
+          type: "MODEL_CALL_COMPLETED",
+          actor: "system",
+          payload: {
+            response_summary:
+              "先给结论：README 主要在讲个人 AI OS。 to=memory.search\n" +
+              '{"query":"README","matches":[]}\n' +
+              "最终结论：这是个人 AI OS。",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+
+    const { result } = renderHook(() => useChatStream({ taskIds: ["task-restore-sanitize"] }));
+
+    await waitFor(() => {
+      expect(result.current.restoring).toBe(false);
+      expect(result.current.messages).toHaveLength(2);
+    });
+
+    const agentMessage = result.current.messages[1]?.content ?? "";
+    expect(agentMessage).toContain("先给结论：README 主要在讲个人 AI OS。");
+    expect(agentMessage).toContain("最终结论：这是个人 AI OS。");
+    expect(agentMessage).not.toContain("to=memory.search");
+    expect(agentMessage).not.toContain('"query"');
+    expect(agentMessage).not.toContain('"matches"');
+  });
+
+  it("恢复历史答复时保留正常的 JSON 示例", async () => {
+    window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-restore-json");
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-restore-json",
+        title: "保留 JSON 示例",
+        status: "SUCCEEDED",
+      },
+      events: [
+        {
+          event_id: "evt-user-json",
+          task_id: "task-restore-json",
+          task_seq: 1,
+          ts: "2026-03-15T10:10:00Z",
+          type: "USER_MESSAGE",
+          actor: "user",
+          payload: { text: "给我一个 JSON 示例" },
+        },
+        {
+          event_id: "evt-agent-json",
+          task_id: "task-restore-json",
+          task_seq: 2,
+          ts: "2026-03-15T10:10:02Z",
+          type: "MODEL_CALL_COMPLETED",
+          actor: "system",
+          payload: {
+            response_summary:
+              "配置如下：\n```json\n" +
+              '{"result":"ok","ids":[1,2,3]}\n' +
+              "```\n按这个格式返回即可。",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+
+    const { result } = renderHook(() => useChatStream({ taskIds: ["task-restore-json"] }));
+
+    await waitFor(() => {
+      expect(result.current.restoring).toBe(false);
+      expect(result.current.messages).toHaveLength(2);
+    });
+
+    const agentMessage = result.current.messages[1]?.content ?? "";
+    expect(agentMessage).toContain("配置如下：");
+    expect(agentMessage).toContain('"result":"ok"');
+    expect(agentMessage).toContain('"ids":[1,2,3]');
+    expect(agentMessage).toContain("按这个格式返回即可。");
+  });
 });

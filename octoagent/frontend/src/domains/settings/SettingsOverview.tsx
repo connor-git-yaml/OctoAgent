@@ -83,7 +83,7 @@ export default function SettingsOverview({
   const canWaitItems = [
     "渠道与远程入口：现在先用 Web 就够了，Telegram 和其他远程入口可以后面再配。",
     `记忆增强：当前 ${memoryLabel} 已经是可用状态；第一次真实对话不依赖你现在就把它调到最优。`,
-    "Agent 能力与 Provider 绑定：后面需要扩展时，再去 Agents > Providers 处理也来得及。",
+    "Agent 模板、Behavior Files 和 Provider 绑定：后面需要扩展时，再去 Agents 页面统一处理也来得及。",
   ];
   const minimumStatusValue = usingEchoMode ? "未连接真实模型" : "已连接真实模型";
   const minimumStatusHint = usingEchoMode
@@ -119,7 +119,6 @@ export default function SettingsOverview({
               {currentWorkspace?.name ?? selector.current_workspace_id}
             </span>
             <span className="wb-chip">Providers / Memory = 平台级</span>
-            <span className="wb-chip">Behavior Files = 项目默认</span>
             <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`} role="status">
               {statusChipLabel}
             </span>
@@ -181,10 +180,8 @@ export default function SettingsOverview({
             <span>Models & Providers、Memory 默认质量层会影响整个平台默认运行面。</span>
           </div>
           <div className="wb-note">
-            <strong>项目默认</strong>
-            <span>
-              Behavior Files 会影响当前项目后续新会话的默认行为，但不会反向改写旧会话。
-            </span>
+            <strong>Agent 与行为</strong>
+            <span>Agent 模板、Behavior Files 和 Provider 绑定统一放在 Agents 页面维护。</span>
           </div>
           <div className="wb-note">
             <strong>已有会话</strong>
@@ -261,9 +258,15 @@ export default function SettingsOverview({
             </button>
             <Link
               className="wb-button wb-button-tertiary"
-              to="/agents?view=providers"
+              to="/agents?view=behavior"
             >
-              打开 Agents &gt; Providers
+              打开 Agents &gt; Behavior
+            </Link>
+            <Link
+              className="wb-button wb-button-tertiary"
+              to="/agents/skills"
+            >
+              打开 Agents &gt; Skills / MCP
             </Link>
             {!usingEchoMode && review.ready ? (
               <Link className="wb-button wb-button-tertiary" to="/chat">
@@ -283,8 +286,8 @@ export default function SettingsOverview({
           <div className="wb-note">
             <strong>哪些内容已经移走了</strong>
             <span>
-              Skill / MCP Provider 的安装、当前项目默认启用范围，以及 Butler / Worker 的绑定，
-              现在统一去 Agents &gt; Providers 处理。
+              Behavior Files、Agent 模板和当前 Project 的默认 Agent 配置，统一去 Agents &gt; Behavior；
+              Skill / MCP Provider 的安装和 Provider 绑定，统一去 Agents &gt; Skills / MCP。
             </span>
           </div>
         </div>
@@ -304,8 +307,8 @@ export default function SettingsOverview({
           </article>
           <article className="wb-card">
             <p className="wb-card-label">Agent 能力入口</p>
-            <strong>Agents &gt; Providers</strong>
-            <span>这里不再负责 Skills / MCP 的安装和授权。</span>
+            <strong>Agents &gt; Behavior / Skills / MCP</strong>
+            <span>行为文件去 Behavior，Skills / MCP 和 Provider 绑定去对应 Agent 页面。</span>
           </article>
         </div>
       </section>

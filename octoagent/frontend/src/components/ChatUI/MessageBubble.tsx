@@ -84,7 +84,7 @@ export function MessageBubble({
                           <span>{item.summary}</span>
                           {item.traceEntries && item.traceEntries.length > 0 ? (
                             <div className="wb-message-trace-inline" aria-label={`${item.actor} 的处理阶段`}>
-                              {item.traceEntries.slice(0, 4).map((entry, traceIndex, visibleEntries) => (
+                              {item.traceEntries.map((entry, traceIndex, visibleEntries) => (
                                 <HoverReveal
                                   key={entry.id}
                                   label=""
@@ -128,11 +128,13 @@ export function MessageBubble({
                                     <div className="wb-message-trace-detail-grid">
                                       <div className="wb-message-trace-detail-block">
                                         <span>输入</span>
-                                        <p>{entry.detailInput || "这一步没有额外暴露输入。"} </p>
+                                        <p style={{ whiteSpace: "pre-wrap" }}>
+                                          {entry.detailInput || "这一步没有额外暴露输入。"}
+                                        </p>
                                       </div>
                                       <div className="wb-message-trace-detail-block">
                                         <span>输出</span>
-                                        <p>{entry.detailOutput || entry.summary}</p>
+                                        <p style={{ whiteSpace: "pre-wrap" }}>{entry.detailOutput || entry.summary}</p>
                                       </div>
                                     </div>
                                   </div>
@@ -151,11 +153,6 @@ export function MessageBubble({
             <MarkdownContent content={content} />
           )}
         </div>
-        {message.hasApproval ? (
-          <div className={`wb-message-approval ${isUser ? "is-user" : "is-agent"}`}>
-            这条回复需要确认，请到审批区处理。
-          </div>
-        ) : null}
       </div>
     </div>
   );

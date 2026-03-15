@@ -8,6 +8,7 @@ let mockWorkbench: {
   snapshot: unknown;
   submitAction: ReturnType<typeof vi.fn>;
   busyActionId: string | null;
+  refreshSnapshot?: ReturnType<typeof vi.fn>;
 };
 
 vi.mock("../../components/shell/WorkbenchLayout", () => ({
@@ -260,6 +261,34 @@ describe("MemoryPage", () => {
         limit: 50,
       })
     );
+  });
+
+  it("资源缺失时给出可恢复降级态，而不是直接崩溃", async () => {
+    const refreshSnapshot = vi.fn().mockResolvedValue(undefined);
+    mockWorkbench = {
+      snapshot: {
+        resources: {
+          memory: null,
+          config: null,
+        },
+      },
+      submitAction: vi.fn(),
+      busyActionId: null,
+      refreshSnapshot,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("这页暂时还没拿到完整的 Memory 快照")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "回到 Chat" })).toHaveAttribute("href", "/chat");
+
+    await userEvent.click(screen.getByRole("button", { name: "重新加载 Memory" }));
+
+    expect(refreshSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it("支持切换记录并在右侧 inspector 显示详情", async () => {

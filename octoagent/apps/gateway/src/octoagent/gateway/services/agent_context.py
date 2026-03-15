@@ -10,6 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
+from octoagent.core.behavior_workspace import build_behavior_bootstrap_template_ids
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
@@ -2873,11 +2874,24 @@ class AgentContextService:
         return await self._ensure_agent_profile(project), degraded_reasons
 
     async def _ensure_agent_profile(self, project: Project | None) -> AgentProfile:
+        bootstrap_template_ids = build_behavior_bootstrap_template_ids(
+            include_agent_private=True,
+            include_project_shared=project is not None,
+            include_project_agent=False,
+        )
         if project is not None and project.default_agent_profile_id:
             existing = await self._stores.agent_context_store.get_agent_profile(
                 project.default_agent_profile_id
             )
             if existing is not None:
+                if existing.bootstrap_template_ids != bootstrap_template_ids:
+                    existing = existing.model_copy(
+                        update={
+                            "bootstrap_template_ids": bootstrap_template_ids,
+                            "updated_at": datetime.now(tz=UTC),
+                        }
+                    )
+                    await self._stores.agent_context_store.save_agent_profile(existing)
                 return existing
             mirrored = await self._ensure_agent_profile_from_worker_profile(
                 project.default_agent_profile_id
@@ -2889,6 +2903,14 @@ class AgentContextService:
             profile_id = "agent-profile-system-default"
             existing = await self._stores.agent_context_store.get_agent_profile(profile_id)
             if existing is not None:
+                if existing.bootstrap_template_ids != bootstrap_template_ids:
+                    existing = existing.model_copy(
+                        update={
+                            "bootstrap_template_ids": bootstrap_template_ids,
+                            "updated_at": datetime.now(tz=UTC),
+                        }
+                    )
+                    await self._stores.agent_context_store.save_agent_profile(existing)
                 return existing
             profile = AgentProfile(
                 profile_id=profile_id,
@@ -2908,6 +2930,7 @@ class AgentContextService:
                 ],
                 tool_profile="standard",
                 model_alias="main",
+                bootstrap_template_ids=bootstrap_template_ids,
             )
             await self._stores.agent_context_store.save_agent_profile(profile)
             return profile
@@ -2933,6 +2956,7 @@ class AgentContextService:
             ],
             tool_profile="standard",
             model_alias="main",
+            bootstrap_template_ids=bootstrap_template_ids,
         )
         await self._stores.agent_context_store.save_agent_profile(profile)
         await self._stores.project_store.save_project(
@@ -2954,6 +2978,11 @@ class AgentContextService:
         worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
         if worker_profile is None or worker_profile.status == WorkerProfileStatus.ARCHIVED:
             return None
+        bootstrap_template_ids = build_behavior_bootstrap_template_ids(
+            include_agent_private=True,
+            include_project_shared=bool(worker_profile.project_id),
+            include_project_agent=bool(worker_profile.project_id),
+        )
         merged_memory_recall = {
             **_default_worker_memory_recall_preferences(worker_profile),
             **(
@@ -3000,6 +3029,7 @@ class AgentContextService:
                     merged_memory_recall.get("prefetch_mode", "")
                 ).strip(),
             },
+            bootstrap_template_ids=bootstrap_template_ids,
             version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
             created_at=worker_profile.created_at,
             updated_at=worker_profile.updated_at,
@@ -3034,11 +3064,24 @@ class AgentContextService:
     ) -> OwnerProfileOverlay | None:
         if project is None:
             return None
+        bootstrap_template_ids = build_behavior_bootstrap_template_ids(
+            include_agent_private=False,
+            include_project_shared=True,
+            include_project_agent=False,
+        )
         existing = await self._stores.agent_context_store.get_owner_overlay_for_scope(
             project_id=project.project_id,
             workspace_id=workspace.workspace_id if workspace is not None else "",
         )
         if existing is not None:
+            if existing.bootstrap_template_ids != bootstrap_template_ids:
+                existing = existing.model_copy(
+                    update={
+                        "bootstrap_template_ids": bootstrap_template_ids,
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                await self._stores.agent_context_store.save_owner_overlay(existing)
             return existing
         overlay = OwnerProfileOverlay(
             owner_overlay_id=(
@@ -3059,6 +3102,7 @@ class AgentContextService:
             working_style_override="聚焦当前 project 的连续上下文、约束和验收标准。",
             interaction_preferences_override=["回答时优先引用当前 project 事实与最近上下文。"],
             boundary_notes_override=["跨 project 信息默认不共享。"],
+            bootstrap_template_ids=bootstrap_template_ids,
         )
         await self._stores.agent_context_store.save_owner_overlay(overlay)
         return overlay
@@ -3075,11 +3119,109 @@ class AgentContextService:
     ) -> BootstrapSession:
         project_id = project.project_id if project is not None else ""
         workspace_id = workspace.workspace_id if workspace is not None else ""
+        bootstrap_steps = [
+            "owner_identity",
+            "assistant_identity",
+            "assistant_personality",
+            "locale_and_location",
+            "memory_preferences",
+            "secret_routing",
+        ]
+        bootstrap_template_ids = list(
+            dict.fromkeys(
+                [
+                    *agent_profile.bootstrap_template_ids,
+                    *(
+                        owner_overlay.bootstrap_template_ids
+                        if owner_overlay is not None
+                        else []
+                    ),
+                ]
+            )
+        )
+        bootstrap_metadata = {
+            "project_path_manifest_required": True,
+            "bootstrap_template_ids": bootstrap_template_ids,
+            "questionnaire": [
+                {
+                    "step": "owner_identity",
+                    "prompt": "你希望系统如何称呼你？有哪些稳定的个人偏好需要记住？",
+                    "route": "memory",
+                },
+                {
+                    "step": "assistant_identity",
+                    "prompt": "默认会话 Agent 应该叫什么？是否有固定角色定位？",
+                    "route": "behavior:IDENTITY.md",
+                },
+                {
+                    "step": "assistant_personality",
+                    "prompt": "你希望 Agent 的性格、语气、协作风格是什么？",
+                    "route": "behavior:SOUL.md",
+                },
+                {
+                    "step": "locale_and_location",
+                    "prompt": "你的常用语言、时区、地点是什么？哪些是长期事实？",
+                    "route": "memory",
+                },
+                {
+                    "step": "memory_preferences",
+                    "prompt": "哪些信息应该长期记住，哪些只属于当前项目/任务？",
+                    "route": "memory_policy",
+                },
+                {
+                    "step": "secret_routing",
+                    "prompt": "哪些是敏感信息，应通过 secret bindings 而不是行为文件保存？",
+                    "route": "secrets",
+                },
+            ],
+            "storage_boundary_hints": {
+                "facts_store": "MemoryService",
+                "facts_access": "通过 MemoryService / memory tools 读取与写入稳定事实。",
+                "secrets_store": "SecretService",
+                "secrets_access": (
+                    "通过 SecretService / secret bindings workflow 管理敏感值；"
+                    "project.secret-bindings.json 只保存绑定元数据。"
+                ),
+                "secret_bindings_metadata_path": (
+                    f"projects/{project.slug}/project.secret-bindings.json"
+                    if project is not None and project.slug
+                    else ""
+                ),
+                "behavior_store": "behavior files",
+            },
+        }
         existing = await self._stores.agent_context_store.get_latest_bootstrap_session(
             project_id=project_id,
             workspace_id=workspace_id,
         )
         if existing is not None:
+            needs_update = (
+                existing.steps != bootstrap_steps
+                or existing.current_step == "owner_basics"
+                or existing.metadata.get("bootstrap_template_ids") != bootstrap_template_ids
+            )
+            if needs_update:
+                existing = existing.model_copy(
+                    update={
+                        "current_step": (
+                            existing.current_step
+                            if existing.current_step and existing.current_step != "owner_basics"
+                            else bootstrap_steps[0]
+                        ),
+                        "steps": bootstrap_steps,
+                        "metadata": {
+                            **bootstrap_metadata,
+                            **dict(existing.metadata),
+                            "bootstrap_template_ids": bootstrap_template_ids,
+                            "questionnaire": bootstrap_metadata["questionnaire"],
+                            "storage_boundary_hints": bootstrap_metadata[
+                                "storage_boundary_hints"
+                            ],
+                        },
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                await self._stores.agent_context_store.save_bootstrap_session(existing)
             return existing
         session = BootstrapSession(
             bootstrap_id=(
@@ -3093,11 +3235,12 @@ class AgentContextService:
             owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
             agent_profile_id=agent_profile.profile_id,
             status=BootstrapSessionStatus.PENDING,
-            current_step="owner_basics",
-            steps=["owner_basics", "assistant_identity", "interaction_preference"],
+            current_step=bootstrap_steps[0],
+            steps=bootstrap_steps,
             answers={},
             surface=surface,
             blocking_reason="bootstrap 尚未完成，将以 safe default 继续回答。",
+            metadata=bootstrap_metadata,
         )
         await self._stores.agent_context_store.save_bootstrap_session(session)
         return session
@@ -3654,6 +3797,9 @@ class AgentContextService:
                     project_name=project.name if project is not None else "",
                     project_slug=project.slug if project is not None else "",
                     project_root=self._project_root,
+                    workspace_id=workspace.workspace_id if workspace is not None else "",
+                    workspace_slug=workspace.slug if workspace is not None else "",
+                    workspace_root_path=workspace.root_path if workspace is not None else "",
                     shared_only=is_worker_profile,
                 ),
             },

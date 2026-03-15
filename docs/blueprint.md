@@ -2904,7 +2904,7 @@ M3 核心对象关系（2026-03-08 补充）：
 | 对象 | 归属 / 作用域 | 主要承载 | 默认继承来源 | 说明 |
 |------|---------------|----------|--------------|------|
 | `Project` | Owner 显式选择的一级产品对象 | instructions、memory bindings、secret bindings、asset bindings、channel/A2A routing | system defaults | M3 的根隔离单位 |
-| `BehaviorWorkspace` | system 或 project 作用域 | `AGENTS.md / USER.md / PROJECT.md / TOOLS.md` 等显式上下文文件、可见性、版本、effective source chain | system defaults 或 project overrides | Butler / Worker 行为系统的正式文件入口 |
+| `BehaviorWorkspace` | `system_shared / agent_private / project_shared / project_agent` 四层作用域 | `AGENTS.md / USER.md / TOOLS.md / BOOTSTRAP.md` 等共享规则文件、`IDENTITY.md / SOUL.md / HEARTBEAT.md` 等 Agent 私有文件、`PROJECT.md / KNOWLEDGE.md / instructions/*` 等项目行为文件、可见性、版本、effective source chain | system defaults + agent defaults + project overrides + project-agent overrides | 任意 Agent 的正式行为文件入口，不再围绕 Butler 特殊化 |
 | `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability refs、policy refs、budget defaults | project | Butler / Worker runtime 的静态模板 |
 | `WorkerProfile` | project 作用域的可复用模板 | worker role、bootstrap、工具集合、权限集合、能力集合 | project + AgentProfile | WorkerRuntime 的静态模板 |
 | `AgentRuntime` | 严格隶属于一个 project | agent identity、effective config、persona、capability、memory namespace bindings | project + selected profile | Butler 或 Worker 的长期运行实体 |
@@ -2918,12 +2918,16 @@ M3 核心对象关系（2026-03-08 补充）：
 | `RecallFrame` | 单次响应或单次 A2A 交互 | session recency、memory hits、artifact evidence、provenance | AgentSession + MemoryNamespace + Work | “当前问题真正取回了什么”的 durable 证明 |
 | `RuntimeHintBundle` | 单次 Butler/Worker 响应 | 当前时间、surface、tool availability、confirmed facts、user defaults、最近失败限制、RecentConversation 摘要 | session + project + runtime | 供 Agent 进行 `direct / ask / delegate / best-effort` 判断，而不是让代码写场景树 |
 
-BehaviorWorkspace 设计补充（2026-03-14）：
+BehaviorWorkspace 设计补充（2026-03-15）：
 
-- 当前阶段默认只暴露四个核心文件：`AGENTS.md`、`USER.md`、`PROJECT.md`、`TOOLS.md`
-- Butler 默认读取四个核心文件；Worker 默认只读取 `AGENTS.md + PROJECT.md + TOOLS.md`，`USER.md` 只能以筛选后的 hints/capsule 形式转交
-- `SOUL.md / IDENTITY.md / HEARTBEAT.md` 作为高级扩展保留，但不作为当前阶段默认必需入口
-- `MEMORY.md` 属于长期事实与 recall 层，不作为默认行为配置文件整份注入
+- 当前行为文件系统已正式收口为四层：`system_shared -> agent_private -> project_shared -> project_agent`
+- 共享层默认文件为：`AGENTS.md`、`USER.md`、`TOOLS.md`、`BOOTSTRAP.md`
+- Agent 私有层默认文件为：`IDENTITY.md`、`SOUL.md`、`HEARTBEAT.md`
+- Project 共享层默认文件为：`PROJECT.md`、`KNOWLEDGE.md`、`USER.md`、`TOOLS.md`、`instructions/*.md`
+- `MEMORY.md` 已从默认 behavior 文件集合中移除；行为文件负责规则，长期事实走 `Memory`，敏感值走 `secret bindings / SecretService`
+- `BehaviorWorkspace` 目录已按 project-centered 方式定义：全局共享与 agent 通用人格保留在 `behavior/` 下，某个 project 自己的行为文件、代码、数据、文档、notes、artifacts 都进入 `projects/<project-slug>/`
+- 任意 Agent 的 effective context 都必须携带 `project_path_manifest`，明确 `project/workspace/data/notes/artifacts/behavior` 根目录与关键行为文件路径
+- subordinate / worker handoff 不得裸转发原始用户问题，必须携带 `project_path_manifest + effective_behavior_source_chain + shared/project instructions summary + agent private identity summary`
 
 交付：从“能力齐全的 Agent 系统”推进到“普通用户 Ready 的 Personal AI OS”——新用户可一键安装并完成统一向导配置，随后在 Web 管理台完成渠道接入、审批、恢复和 Memory 浏览；高级记忆能力通过 MemU 等 backend 深度融入，但不破坏现有治理模型。
 
@@ -2935,7 +2939,7 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - 用户可以为 project 选择默认 `AgentProfile` / `WorkerProfile`，并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
 - Butler 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
 - 用户可以在 Web 或 CLI 中查看并编辑当前 project 的核心 behavior files（至少 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md`），并看到每次运行的 effective behavior source
-- 当前阶段 Web 提供 `Behavior Files` operator 视图；CLI 提供 `octo behavior ls/show/init/edit/diff/apply` 作为 canonical 管理入口
+- 当前阶段 Web 已把行为文件管理入口收口到 `Agents` 页的 `Behavior Center`；CLI 提供 `octo behavior ls/show/init/edit/diff/apply --agent ...` 作为 canonical 管理入口
 - Telegram 与 Web 都可以完成最基本的控制命令：approve、model 切换、skill 调用、subagent/work 控制、状态查询
 - Web 管理台可以完成 provider/channel 配置、device pairing、agents / memory / permissions / secrets 管理、任务查看、backup/restore dry-run、memory 浏览与证据追溯，不再依赖终端作为唯一操作面
 - 用户可以在正式的 session/chat center 中完成 ButlerSession / WorkerSession 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
@@ -2978,7 +2982,8 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
 - [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、Butler-owned freshness delegation 主链、缺城市显式追问、backend unavailable 降级、worker private recall runtime、message-native 返回链与 runtime truth surface）
-- [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web behavior 视图、CLI `octo behavior ls/show/init/edit/diff/apply`，并把 Butler bounded direct tooling 与 hint-first memory runtime 接回主链）
+- [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成初版 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web/CLI 的初始行为文件视图与 CLI `octo behavior ls/show/init/edit/diff/apply`；其 scope 仍以 `system/project` 为起点，后续多 Agent parity、project-centered 目录、bootstrap 模板与 `Agents` 行为中心收口到 055）
+- [x] Feature 055：Agent Behavior Scope Reset & Behavior Center（已完成四层 `BehaviorWorkspaceScope`、project-centered 路径解析、`project_path_manifest` 与 `storage_boundary_hints` 注入、bootstrap 模板与默认会话 Agent 用户画像/个性引导 contract、`octo behavior --agent ...`、`Agents` 页的 Behavior Center 与 `Settings` 行为入口迁移）
 - [x] Feature 051：Session-Native Agent Runtime & Recall Loop（`behavior budget + ToolUniverseHints` 已落地；`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store，`user / assistant / tool_call / tool_result / context_summary` 会落到 `agent_session_turns`，`RecentConversation / session.export / session.reset` 都优先消费该 store；控制面已新增 `session.new / session.reset / session.unfocus`，Session Center 已提供 `全部 / 运行中 / 队列 / 历史` lane 视图；Butler chat 默认切到 `agent-led hint-first` memory runtime，并已把 `ButlerDecision + RecallPlan` 收口为统一 `ButlerLoopPlan`；Worker 默认切到 planner-capable `hint-first` runtime，仅在显式 profile override 下保留 `detailed_prefetch`；`AgentSessionTurn` 现在还会生成正式 replay/sanitize 投影，并进入预算驱动裁剪链；默认 `single_loop_executor` 已从 general Butler 扩到显式 `research/dev/ops` worker lens，主模型调用直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环，不再额外触发 `butler-decision` 或 `memory-recall-planning` 辅助 phase；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义）
 - [x] Feature 052：Trusted Tooling Surface & Permission Relaxation（trusted local baseline 已把 `general / research / dev / ops` 默认 tool profile 收口到 `standard`；MCP provider 已支持 `mount_policy=explicit|auto_readonly|auto_all`，其中 `auto_readonly` 默认自动挂载 `minimal` 工具；Skill provider 已支持 `permission_mode=inherit|restrict` 且默认 `inherit`；runtime metadata / control plane 已同步暴露 `recommended_tools + mounted_tools + blocked_tools`，`selected_tools_json` 退化为 recommended mirror；危险动作仍继续走 ToolBroker / Policy / Approval / Audit 主链）
 - [x] Feature 054：Builtin Memory Engine & Shared Retrieval Platform（`local_only` 已升级为内建 Memory Engine，默认优先使用本地 `Qwen3-Embedding-0.6B`，不可用时回退到双语 hash embedding；`memory_reasoning / memory_expand / memory_embedding / memory_rerank` 已接入 Settings / CLI / runtime；`EmbeddingProfile / IndexGeneration / IndexBuildJob / CorpusKind` 已形成共享 retrieval platform contract，Memory 与未来 knowledge base 共用 generation lifecycle；embedding 迁移已支持后台 build、进度展示、cutover / cancel / rollback，且迁移期间旧 generation 持续服务；facts / Vault 候选仍走 proposal / commit / grant / audit 治理链）

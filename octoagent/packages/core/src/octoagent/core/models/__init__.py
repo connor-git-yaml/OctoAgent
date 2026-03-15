@@ -58,12 +58,14 @@ from .backup import (
     SensitivityLevel,
 )
 from .behavior import (
+    BehaviorEditabilityMode,
     BehaviorFileChange,
     BehaviorLayer,
     BehaviorLayerKind,
     BehaviorPack,
     BehaviorPackFile,
     BehaviorPatchProposal,
+    BehaviorReviewMode,
     BehaviorSliceEnvelope,
     BehaviorVisibility,
     BehaviorWorkspace,
@@ -74,7 +76,10 @@ from .behavior import (
     ButlerLoopPlan,
     ClarificationAction,
     ClarificationDecision,
+    ProjectPathManifest,
+    ProjectPathManifestFile,
     RuntimeHintBundle,
+    StorageBoundaryHints,
     ToolUniverseHints,
 )
 from .behavior import (
@@ -417,6 +422,11 @@ __all__ = [
     "BehaviorPack",
     "BehaviorWorkspaceFile",
     "BehaviorWorkspace",
+    "BehaviorEditabilityMode",
+    "BehaviorReviewMode",
+    "ProjectPathManifest",
+    "ProjectPathManifestFile",
+    "StorageBoundaryHints",
     "RuntimeHintBundle",
     "ToolUniverseHints",
     "ButlerDecision",
