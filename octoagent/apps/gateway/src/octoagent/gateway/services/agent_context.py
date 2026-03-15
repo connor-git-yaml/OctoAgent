@@ -3843,15 +3843,46 @@ class AgentContextService:
                     ),
                 }
             )
+        bootstrap_block_content = (
+            f"BootstrapSession: {bootstrap.status.value}\n"
+            f"current_step: {bootstrap.current_step}\n"
+            f"blocking_reason: {bootstrap.blocking_reason or 'N/A'}\n"
+            f"answers: {truncate_chars(str(bootstrap.answers or {}), 280)}"
+        )
+        if bootstrap.status is BootstrapSessionStatus.PENDING:
+            # 从 metadata.questionnaire 提取当前步骤的提问
+            questionnaire = (bootstrap.metadata or {}).get("questionnaire", [])
+            current_step = bootstrap.current_step or ""
+            current_q = next(
+                (q for q in questionnaire if q.get("step") == current_step),
+                None,
+            )
+            remaining_steps = []
+            found_current = False
+            for q in questionnaire:
+                if q.get("step") == current_step:
+                    found_current = True
+                if found_current:
+                    remaining_steps.append(q.get("step", ""))
+            prompt_hint = current_q["prompt"] if current_q else ""
+            bootstrap_block_content += (
+                "\n\n[BOOTSTRAP 引导指令]\n"
+                "当前 bootstrap 尚未完成。你的首要任务是完成初始化问卷。\n"
+                "规则：\n"
+                "1. 每次只问一个问题，等用户回答后再进入下一步\n"
+                "2. 先用简短友好的方式打招呼，然后自然地引出当前步骤的问题\n"
+                "3. 用户回答后，通过 bootstrap.answer 工具保存答案\n"
+                "4. 如果用户想跳过某个步骤，尊重用户意愿并进入下一步\n"
+                "5. 不要一次性列出所有问题\n"
+                f"\n当前步骤: {current_step}\n"
+                f"当前问题: {prompt_hint}\n"
+                f"剩余步骤: {', '.join(remaining_steps)}\n"
+                f"已完成的回答: {truncate_chars(str(bootstrap.answers or {}), 280)}"
+            )
         blocks.append(
             {
                 "role": "system",
-                "content": (
-                    f"BootstrapSession: {bootstrap.status.value}\n"
-                    f"current_step: {bootstrap.current_step}\n"
-                    f"blocking_reason: {bootstrap.blocking_reason or 'N/A'}\n"
-                    f"answers: {truncate_chars(str(bootstrap.answers or {}), 280)}"
-                ),
+                "content": bootstrap_block_content,
             }
         )
         if recent_summary:
