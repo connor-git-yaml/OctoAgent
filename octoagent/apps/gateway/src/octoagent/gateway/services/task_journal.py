@@ -116,6 +116,9 @@ class TaskJournalService:
         waiting_approval_entries: list[dict] = []
 
         for task in tasks:
+            # 排除系统内部任务（如 ops-control-plane 审计日志载体）
+            if task.task_id.startswith("ops-"):
+                continue
             task_status = TaskStatus(task.status)
 
             # 2. 获取最近事件时间戳（FR-015 last_event_ts 字段）

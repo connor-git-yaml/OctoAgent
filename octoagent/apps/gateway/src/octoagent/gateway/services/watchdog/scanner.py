@@ -111,6 +111,9 @@ class WatchdogScanner:
             self._cooldown.cleanup_terminated({t.task_id for t in active_tasks})
 
             for task in active_tasks:
+                # 排除系统内部任务（如 ops-control-plane 审计日志载体）
+                if task.task_id.startswith("ops-"):
+                    continue
                 # FR-008/FR-020: structlog 绑定 task_id 上下文，全链路透传
                 task_log = log.bind(task_id=task.task_id)
 
