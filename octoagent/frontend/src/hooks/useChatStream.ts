@@ -138,8 +138,30 @@ export function useChatStream(
     null
   );
   const eventSourceRef = useRef<EventSource | null>(null);
+  const activeAgentMessageIdRef = useRef<string | null>(null);
   const attemptedRestoreSignatureRef = useRef<string | null>(null);
   const restoreTaskIdSignature = (restoreTarget?.taskIds ?? []).join("|");
+
+  const spawnAgentPlaceholder = useCallback(() => {
+    const placeholderId = `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    activeAgentMessageIdRef.current = placeholderId;
+    const agentMsg: ChatMessage = {
+      id: placeholderId,
+      role: "agent",
+      content: AGENT_STREAM_PLACEHOLDER,
+      isStreaming: true,
+    };
+    setMessages((prev) => [...prev, agentMsg]);
+    setStreaming(true);
+    return placeholderId;
+  }, []);
+
+  const ensureActiveAgentPlaceholder = useCallback(() => {
+    if (activeAgentMessageIdRef.current) {
+      return activeAgentMessageIdRef.current;
+    }
+    return spawnAgentPlaceholder();
+  }, [spawnAgentPlaceholder]);
 
   /** 关闭 EventSource */
   const closeStream = useCallback(() => {
@@ -147,6 +169,7 @@ export function useChatStream(
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    activeAgentMessageIdRef.current = null;
     setStreaming(false);
   }, []);
 
@@ -187,6 +210,10 @@ export function useChatStream(
         setError(null);
         setRestoring(false);
         setSuppressedRestoreSignature(null);
+        const reuseLiveStream =
+          Boolean(taskId) &&
+          eventSourceRef.current != null &&
+          eventSourceRef.current.readyState !== EventSource.CLOSED;
         const effectiveProjectId =
           pendingConversationScope?.projectId ||
           String(sessionScope?.activeProjectId ?? "").trim();
@@ -227,18 +254,12 @@ export function useChatStream(
           // 这里不阻断聊天主链，focus 同步失败只影响 restore/focus 体验。
         });
 
-        closeStream();
+        if (reuseLiveStream) {
+          return;
+        }
 
-        // 创建 Agent 占位消息
-        const agentMsgId = `agent-${Date.now()}`;
-        const agentMsg: ChatMessage = {
-          id: agentMsgId,
-          role: "agent",
-          content: AGENT_STREAM_PLACEHOLDER,
-          isStreaming: true,
-        };
-        setMessages((prev) => [...prev, agentMsg]);
-        setStreaming(true);
+        closeStream();
+        ensureActiveAgentPlaceholder();
 
         // 连接 SSE 流
         const streamUrl = buildFrontDoorSseUrl(data.stream_url);
@@ -252,12 +273,17 @@ export function useChatStream(
               type: string;
             };
 
+            if (eventData.type === "MODEL_CALL_STARTED" && isUserVisibleModelEvent(eventData)) {
+              ensureActiveAgentPlaceholder();
+            }
+
             // 检查是否是模型回复事件
             if (eventData.type === "MODEL_CALL_COMPLETED" && isUserVisibleModelEvent(eventData)) {
               const content = extractAgentMessage(eventData);
+              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === agentMsgId
+                  msg.id === currentAgentMsgId
                     ? {
                         ...msg,
                         content: content || "已收到回复，但没有可显示的正文。",
@@ -266,6 +292,7 @@ export function useChatStream(
                     : msg
                 )
               );
+              activeAgentMessageIdRef.current = null;
               setStreaming(false);
             }
 
@@ -274,10 +301,11 @@ export function useChatStream(
               eventData.type === "ERROR"
             ) {
               const failureMessage = extractFailureMessage(eventData);
+              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
               setError(failureMessage);
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === agentMsgId
+                  msg.id === currentAgentMsgId
                     ? {
                         ...msg,
                         content:
@@ -289,6 +317,7 @@ export function useChatStream(
                     : msg
                 )
               );
+              activeAgentMessageIdRef.current = null;
               setStreaming(false);
             }
 
@@ -297,13 +326,15 @@ export function useChatStream(
               eventData.type === "approval:requested" ||
               eventData.type === "APPROVAL_REQUESTED"
             ) {
+              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === agentMsgId
-                    ? { ...msg, hasApproval: true }
+                  msg.id === currentAgentMsgId
+                    ? { ...msg, hasApproval: true, isStreaming: true }
                     : msg
                 )
               );
+              setStreaming(true);
             }
 
             // 终态检测
@@ -335,11 +366,12 @@ export function useChatStream(
             setStreaming(false);
             setMessages((prev) =>
               prev.map((msg) =>
-                msg.id === agentMsgId
+                msg.id === activeAgentMessageIdRef.current
                   ? { ...msg, isStreaming: false }
                   : msg
               )
             );
+            activeAgentMessageIdRef.current = null;
           }
         };
       } catch (err) {
@@ -347,7 +379,14 @@ export function useChatStream(
         setStreaming(false);
       }
     },
-    [taskId, closeStream, pendingConversationScope, requestSessionFocus, sessionScope]
+    [
+      taskId,
+      closeStream,
+      ensureActiveAgentPlaceholder,
+      pendingConversationScope,
+      requestSessionFocus,
+      sessionScope,
+    ]
   );
 
   const resetConversation = useCallback(async () => {
@@ -359,6 +398,7 @@ export function useChatStream(
     setError(null);
     setRestoring(false);
     setTaskId(null);
+    activeAgentMessageIdRef.current = null;
     persistTaskId(null);
     try {
       const result = await requestNewConversation(currentTaskId);

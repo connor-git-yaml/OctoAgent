@@ -164,7 +164,8 @@ export default function WorkbenchLayout() {
   const activeWorkCount = delegation.works.filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
   ).length;
-  const pendingTitle = sessions.operator_items[0]?.title?.trim() ?? "";
+  const operatorItems = Array.isArray(sessions.operator_items) ? sessions.operator_items : [];
+  const pendingTitle = operatorItems[0]?.title?.trim() ?? "";
   const shellStatus = buildShellStatus({
     runtimeMode,
     pendingCount: pendingTotal,

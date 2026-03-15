@@ -108,8 +108,9 @@ export default function MemoryPage() {
   const operatorItems = sessions.operator_items ?? [];
   const operatorSummary = sessions.operator_summary;
   const recoverySummary = diagnostics.recovery_summary as Partial<RecoverySummary>;
+  const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
   const focusedSession =
-    sessions.sessions.find((item) => item.session_id === sessions.focused_session_id) ?? null;
+    sessionItems.find((item) => item.session_id === sessions.focused_session_id) ?? null;
   const canExportFocusedSession = Boolean(sessions.focused_session_id || sessions.focused_thread_id);
   const exportTargetLabel =
     focusedSession?.title ||

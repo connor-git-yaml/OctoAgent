@@ -1,12 +1,20 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { fetchTaskDetail } from "../api/client";
+import {
+  ApiError,
+  attachExecutionInput,
+  fetchTaskDetail,
+  fetchTaskExecutionSession,
+} from "../api/client";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } from "../domains/chat/presentation";
 import { useChatStream } from "../hooks/useChatStream";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import type {
+  ExecutionSessionDocument,
+  OperatorActionKind,
+  OperatorInboxItem,
   ProjectOption,
   SessionProjectionDocument,
   TaskDetailResponse,
@@ -19,6 +27,81 @@ const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJ
 
 function ensureArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
+}
+
+function mapOperatorQuickAction(
+  item: OperatorInboxItem,
+  kind: OperatorActionKind
+): { actionId: string; params: Record<string, unknown> } | null {
+  const approvalId = item.item_id.split(":")[1] ?? "";
+  if (kind === "approve_once") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: approvalId,
+        mode: "once",
+      },
+    };
+  }
+  if (kind === "approve_always") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: approvalId,
+        mode: "always",
+      },
+    };
+  }
+  if (kind === "deny") {
+    return {
+      actionId: "operator.approval.resolve",
+      params: {
+        approval_id: approvalId,
+        mode: "deny",
+      },
+    };
+  }
+  if (kind === "cancel_task") {
+    return { actionId: "operator.task.cancel", params: { item_id: item.item_id } };
+  }
+  if (kind === "retry_task") {
+    return { actionId: "operator.task.retry", params: { item_id: item.item_id } };
+  }
+  if (kind === "ack_alert") {
+    return { actionId: "operator.alert.ack", params: { item_id: item.item_id } };
+  }
+  if (kind === "approve_pairing") {
+    return { actionId: "channel.pairing.approve", params: { item_id: item.item_id } };
+  }
+  if (kind === "reject_pairing") {
+    return { actionId: "channel.pairing.reject", params: { item_id: item.item_id } };
+  }
+  return null;
+}
+
+function parseApprovalCommand(
+  input: string
+): "approve_once" | "approve_always" | "deny" | null {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized.startsWith("/")) {
+    return null;
+  }
+  if (normalized === "/approve" || normalized === "/approve once") {
+    return "approve_once";
+  }
+  if (normalized === "/approve always" || normalized === "/approve all") {
+    return "approve_always";
+  }
+  if (normalized === "/deny" || normalized === "/reject") {
+    return "deny";
+  }
+  return null;
+}
+
+function readExecutionSessionDocument(
+  response: { session?: ExecutionSessionDocument | null } | null | undefined
+): ExecutionSessionDocument | null {
+  return response?.session ?? null;
 }
 
 function resolveProjectName(projects: ProjectOption[], projectId: string): string {
@@ -108,6 +191,21 @@ function resolveWorkStatus(work: WorkProjectionItem): string {
   )
     .trim()
     .toUpperCase();
+}
+
+function isDirectButlerExecution(work: WorkProjectionItem | null | undefined): boolean {
+  if (!work) {
+    return false;
+  }
+  const runtimeId = work.runtime_id.trim().toLowerCase();
+  const selectedWorkerType = work.selected_worker_type.trim().toLowerCase();
+  const targetKind = work.target_kind.trim().toLowerCase();
+  const routeReason = work.route_reason.trim().toLowerCase();
+  return (
+    runtimeId === "worker.llm.default" &&
+    selectedWorkerType === "general" &&
+    (targetKind === "fallback" || routeReason.includes("single_worker"))
+  );
 }
 
 function formatActorSummary(actor: string, workTitle: string, status: string, latestMessageType: string): string {
@@ -371,6 +469,37 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
   ];
 }
 
+function buildApprovalTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
+  const expired = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "APPROVAL_EXPIRED");
+  if (expired) {
+    return {
+      id: `approval-${expired.task_seq}`,
+      label: "审批",
+      stateLabel: "已超时",
+      tone: "danger",
+      summary: "这一步需要你的确认，但审批超时后已经自动拒绝。",
+    };
+  }
+  const requested = [...workEvents]
+    .reverse()
+    .find((event) => String(event.type) === "APPROVAL_REQUESTED");
+  if (requested) {
+    const toolName = readPayloadString(requested.payload ?? {}, "tool_name");
+    return {
+      id: `approval-${requested.task_seq}`,
+      label: "审批",
+      stateLabel: "等你确认",
+      tone: "warning",
+      summary: toolName
+        ? `这一步想调用 ${toolName}，但继续前需要你确认一次。`
+        : "这一步继续前需要你确认一次。",
+    };
+  }
+  return null;
+}
+
 function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
   const completed = [...workEvents]
     .reverse()
@@ -421,8 +550,56 @@ function buildButlerTraceEntries(
   work: WorkProjectionItem,
   workEvents: TaskEvent[],
   latestMessageType: string,
-  taskStatus: string
+  taskStatus: string,
+  isDirectExecution: boolean
 ): ChatActivityItem["traceEntries"] {
+  if (isDirectExecution) {
+    const entries: ChatTraceEntry[] = [
+      {
+        id: `${work.work_id}-direct`,
+        label: "处理方式",
+        stateLabel: "直连工具",
+        tone: "running",
+        summary: "这轮由主助手直接调用当前挂载的工具处理，没有另起 specialist worker。",
+      },
+      {
+        id: `${work.work_id}-tools`,
+        label: "可用工具",
+        stateLabel: "已挂载",
+        tone: "draft",
+        summary: summarizeToolList(ensureArray(work.selected_tools)),
+      },
+    ];
+    const modelEntry = buildModelTraceEntry(workEvents);
+    if (modelEntry) {
+      entries.push(modelEntry);
+    }
+    entries.push(...buildToolTraceEntries(workEvents));
+    const approvalEntry = buildApprovalTraceEntry(workEvents);
+    if (approvalEntry) {
+      entries.push(approvalEntry);
+    }
+    const normalizedTaskStatus = taskStatus.trim().toUpperCase();
+    if (normalizedTaskStatus === "SUCCEEDED") {
+      entries.push({
+        id: `${work.work_id}-finalize`,
+        label: "最终收口",
+        stateLabel: "已回复",
+        tone: "success",
+        summary: "主助手已经直接整理好工具结果，并把最终答复返回给用户。",
+      });
+    } else if (normalizedTaskStatus === "FAILED") {
+      entries.push({
+        id: `${work.work_id}-finalize`,
+        label: "最终收口",
+        stateLabel: "失败",
+        tone: "danger",
+        summary: "这轮直连处理没有顺利完成，主助手没有拿到可直接返回的最终结果。",
+      });
+    }
+    return entries;
+  }
+
   const entries: ChatTraceEntry[] = [];
   entries.push({
     id: `${work.work_id}-dispatch`,
@@ -535,7 +712,8 @@ function buildButlerActivity(
   taskStatus: string,
   streaming: boolean,
   hasInternalCollaboration: boolean,
-  latestMessageType: string
+  latestMessageType: string,
+  isDirectExecution: boolean
 ): ChatActivityItem {
   const normalizedStatus = taskStatus.trim().toUpperCase();
   const normalizedMessageType = latestMessageType.trim().toUpperCase();
@@ -576,6 +754,18 @@ function buildButlerActivity(
       summary: "主助手正在协调内部角色、补充上下文和收口结果。",
     };
   }
+  if (isDirectExecution) {
+    return {
+      id: "butler",
+      actor: "主助手",
+      stateLabel: normalizedStatus === "WAITING_APPROVAL" ? "等你确认" : "进行中",
+      tone: normalizedStatus === "WAITING_APPROVAL" ? "warning" : "running",
+      summary:
+        normalizedStatus === "WAITING_APPROVAL"
+          ? "主助手已经找到下一步，但其中有一步需要你确认后才能继续。"
+          : "主助手正在直接调用工具处理这条消息。",
+    };
+  }
   if (streaming || normalizedStatus === "RUNNING" || normalizedStatus === "QUEUED") {
     return {
       id: "butler",
@@ -598,6 +788,9 @@ function buildWorkerActivity(
   work: WorkProjectionItem,
   fallbackLatestMessageType: string
 ): ChatActivityItem | null {
+  if (isDirectButlerExecution(work)) {
+    return null;
+  }
   const actor = formatAgentRoleLabel(resolveWorkActor(work));
   if (actor === "主助手") {
     return null;
@@ -613,7 +806,7 @@ function buildWorkerActivity(
 }
 
 export default function ChatWorkbench() {
-  const { snapshot, refreshResources } = useWorkbench();
+  const { snapshot, refreshResources, submitAction, busyActionId } = useWorkbench();
   const sessionDocument = snapshot!.resources.sessions;
   const projectSelector = snapshot!.resources.project_selector;
   const availableProjects = ensureArray(projectSelector?.available_projects);
@@ -642,6 +835,13 @@ export default function ChatWorkbench() {
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
   const [showRestoreEscape, setShowRestoreEscape] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
+  const [executionSession, setExecutionSession] = useState<ExecutionSessionDocument | null>(null);
+  const [chatActionNotice, setChatActionNotice] = useState<{
+    tone: "info" | "success" | "error";
+    title: string;
+    message: string;
+  } | null>(null);
+  const [steeringBusy, setSteeringBusy] = useState(false);
 
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
@@ -660,6 +860,7 @@ export default function ChatWorkbench() {
     contextFrames.find((item) => item.task_id === taskId) ??
     (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
   const activeSessionAgentProfileId = activeSession?.agent_profile_id ?? "";
+  const isDirectExecution = isDirectButlerExecution(activeWork);
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
     activeWork?.a2a_conversation_id ||
@@ -674,8 +875,9 @@ export default function ChatWorkbench() {
     (taskId ? a2aConversations.find((item) => item.task_id === taskId) ?? null : null);
 
   const hasInternalCollaboration =
-    activeA2AConversationRecord != null ||
-    Boolean(activeConversationId || readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id"));
+    !isDirectExecution &&
+    (activeA2AConversationRecord != null ||
+      Boolean(activeConversationId || readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id")));
   const activeConversationLatestType = activeA2AConversationRecord?.latest_message_type || "";
   const activeConversationWorkerSessionId =
     activeA2AConversationRecord?.target_agent_session_id ||
@@ -762,15 +964,17 @@ export default function ChatWorkbench() {
             normalizedTaskStatus,
             streaming,
             hasInternalCollaboration,
-            activeConversationLatestType
+            activeConversationLatestType,
+            isDirectExecution
           ),
-          traceTitle: "主助手的委派轨迹",
+          traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
           traceEntries: activeWork
             ? buildButlerTraceEntries(
                 activeWork,
                 workEvents,
                 activeConversationLatestType,
-                normalizedTaskStatus
+                normalizedTaskStatus,
+                isDirectExecution
               )
             : [],
         },
@@ -864,6 +1068,33 @@ export default function ChatWorkbench() {
             effectiveWorkspaceLabel || effectiveWorkspaceId
           } 创建；首条消息不会再回退到旧的 surface-selected project。`
       : "";
+  const operatorItems = ensureArray(sessionDocument?.operator_items);
+  const activeTaskOperatorItems = operatorItems.filter((item) => {
+    if (item.state && String(item.state).trim().toLowerCase() !== "pending") {
+      return false;
+    }
+    if (taskId && item.task_id === taskId) {
+      return true;
+    }
+    if (activeSession?.thread_id && item.thread_id === activeSession.thread_id) {
+      return true;
+    }
+    return false;
+  });
+  const activeApprovalItem =
+    activeTaskOperatorItems.find((item) =>
+      item.quick_actions.some((action) =>
+        ["approve_once", "approve_always", "deny"].includes(action.kind)
+      )
+    ) ?? null;
+  const canSteerCurrentRun =
+    Boolean(taskId) &&
+    normalizedTaskStatus === "WAITING_INPUT" &&
+    executionSession?.can_attach_input !== false;
+  const inputPlaceholder = canSteerCurrentRun
+    ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
+    : "告诉 OctoAgent 你现在要做什么";
+  const submitLabel = canSteerCurrentRun ? "继续这轮" : streaming ? "加入队列" : "发送";
 
   useEffect(() => {
     if (!isRestoringConversation) {
@@ -884,18 +1115,22 @@ export default function ChatWorkbench() {
     async function loadDetail() {
       if (!taskId) {
         setTaskDetail(null);
+        setExecutionSession(null);
         return;
       }
-      try {
-        const detail = await fetchTaskDetail(taskId);
-        if (!cancelled) {
-          setTaskDetail(detail);
-        }
-      } catch {
-        if (!cancelled) {
-          setTaskDetail(null);
-        }
+      const [detailResult, sessionResult] = await Promise.allSettled([
+        fetchTaskDetail(taskId),
+        fetchTaskExecutionSession(taskId),
+      ]);
+      if (cancelled) {
+        return;
       }
+      setTaskDetail(detailResult.status === "fulfilled" ? detailResult.value : null);
+      setExecutionSession(
+        sessionResult.status === "fulfilled"
+          ? readExecutionSessionDocument(sessionResult.value)
+          : null
+      );
     }
 
     void loadDetail();
@@ -929,18 +1164,19 @@ export default function ChatWorkbench() {
     ];
 
     async function refreshLiveState() {
-      try {
-        const detail = await fetchTaskDetail(currentTaskId);
-        if (cancelled) {
-          return;
-        }
-        setTaskDetail(detail);
-      } catch {
-        if (cancelled) {
-          return;
-        }
-        setTaskDetail(null);
+      const [detailResult, sessionResult] = await Promise.allSettled([
+        fetchTaskDetail(currentTaskId),
+        fetchTaskExecutionSession(currentTaskId),
+      ]);
+      if (cancelled) {
+        return;
       }
+      setTaskDetail(detailResult.status === "fulfilled" ? detailResult.value : null);
+      setExecutionSession(
+        sessionResult.status === "fulfilled"
+          ? readExecutionSessionDocument(sessionResult.value)
+          : null
+      );
       if (cancelled) {
         return;
       }
@@ -972,13 +1208,113 @@ export default function ChatWorkbench() {
     snapshot!.resources.sessions.schema_version,
   ]);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!input.trim() || streaming) {
+  useEffect(() => {
+    setChatActionNotice(null);
+  }, [taskId]);
+
+  async function handleOperatorAction(item: OperatorInboxItem, kind: OperatorActionKind) {
+    const mapped = mapOperatorQuickAction(item, kind);
+    if (!mapped) {
       return;
     }
-    const text = input;
+    const result = await submitAction(mapped.actionId, mapped.params);
+    if (!result) {
+      setChatActionNotice({
+        tone: "error",
+        title: "这次确认没有成功",
+        message: "审批区还没处理完成，你可以再试一次。",
+      });
+      return;
+    }
+    setChatActionNotice({
+      tone: "success",
+      title: "这轮确认已经处理",
+      message: result.message || "主助手会基于你的确认继续往下执行。",
+    });
+    if (taskId) {
+      void refreshResources([
+        {
+          resource_type: snapshot!.resources.sessions.resource_type,
+          resource_id: snapshot!.resources.sessions.resource_id,
+          schema_version: snapshot!.resources.sessions.schema_version,
+        },
+        {
+          resource_type: snapshot!.resources.delegation.resource_type,
+          resource_id: snapshot!.resources.delegation.resource_id,
+          schema_version: snapshot!.resources.delegation.schema_version,
+        },
+        {
+          resource_type: snapshot!.resources.context_continuity.resource_type,
+          resource_id: snapshot!.resources.context_continuity.resource_id,
+          schema_version: snapshot!.resources.context_continuity.schema_version,
+        },
+      ]);
+    }
+  }
+
+  async function handleAttachInput(text: string) {
+    if (!taskId) {
+      return false;
+    }
+    setSteeringBusy(true);
+    try {
+      const response = await attachExecutionInput(taskId, {
+        text,
+        approval_id: executionSession?.pending_approval_id ?? undefined,
+        actor: "user:web",
+      });
+      setExecutionSession(readExecutionSessionDocument(response));
+      setChatActionNotice({
+        tone: "success",
+        title: "已经把你的补充发给当前执行流程",
+        message: response.result.delivered_live
+          ? "这轮正在继续执行。"
+          : "系统已经接收你的补充，并会继续恢复这轮执行。",
+      });
+      return true;
+    } catch (error) {
+      const apiError = error instanceof ApiError ? error : null;
+      setChatActionNotice({
+        tone: "error",
+        title: "这条补充还没发进去",
+        message:
+          apiError?.message ||
+          "当前这轮还没有进入可接收 steering 的状态，请稍后再试。",
+      });
+      return false;
+    } finally {
+      setSteeringBusy(false);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text || restoring || steeringBusy) {
+      return;
+    }
+    const approvalCommand = parseApprovalCommand(text);
+    if (approvalCommand) {
+      if (!activeApprovalItem) {
+        setChatActionNotice({
+          tone: "error",
+          title: "当前没有可处理的审批",
+          message: "这条命令只有在等待你确认时才会生效。",
+        });
+        return;
+      }
+      setInput("");
+      await handleOperatorAction(activeApprovalItem, approvalCommand);
+      return;
+    }
     setInput("");
+    if (canSteerCurrentRun) {
+      const attached = await handleAttachInput(text);
+      if (!attached) {
+        setInput(text);
+      }
+      return;
+    }
     await sendMessage(text);
   }
 
@@ -1155,22 +1491,76 @@ export default function ChatWorkbench() {
               </InlineCallout>
             ) : null}
 
+            {activeApprovalItem ? (
+              <>
+                <InlineCallout
+                  title="这轮正在等你确认"
+                  actions={
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
+                    {activeApprovalItem.quick_actions.map((action) => (
+                      <button
+                        key={`${activeApprovalItem.item_id}-${action.kind}`}
+                        type="button"
+                        className={
+                          action.style === "primary"
+                            ? "wb-button wb-button-primary"
+                            : "wb-button wb-button-secondary"
+                        }
+                        disabled={
+                          !action.enabled ||
+                          busyActionId === mapOperatorQuickAction(activeApprovalItem, action.kind)?.actionId
+                        }
+                        onClick={() => void handleOperatorAction(activeApprovalItem, action.kind)}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                    </div>
+                  }
+                >
+                  {activeApprovalItem.summary}
+                </InlineCallout>
+                <p className="wb-chat-form-hint">
+                  也可以直接输入 <code>/approve</code>、<code>/approve always</code> 或{" "}
+                  <code>/deny</code>。
+                </p>
+              </>
+            ) : null}
+
+            {chatActionNotice ? (
+              <InlineCallout
+                title={chatActionNotice.title}
+                tone={chatActionNotice.tone === "error" ? "error" : "muted"}
+              >
+                {chatActionNotice.message}
+              </InlineCallout>
+            ) : null}
+
             <form className="wb-chat-form" onSubmit={handleSubmit}>
               <input
                 type="text"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="告诉 OctoAgent 你现在要做什么"
-                disabled={streaming}
+                placeholder={inputPlaceholder}
+                disabled={restoring || steeringBusy}
               />
               <button
                 type="submit"
                 className="wb-button wb-button-primary"
-                disabled={streaming || !input.trim()}
+                disabled={restoring || steeringBusy || !input.trim()}
               >
-                {streaming ? "发送中" : "发送"}
+                {steeringBusy ? "处理中" : submitLabel}
               </button>
             </form>
+            {canSteerCurrentRun ? (
+              <p className="wb-chat-form-hint">
+                这条输入会直接作为当前执行的补充，不会新开一轮。
+              </p>
+            ) : streaming ? (
+              <p className="wb-chat-form-hint">
+                当前这轮还在处理；你现在继续发的消息会进入同一条会话队列，主助手会接着处理。
+              </p>
+            ) : null}
           </>
         )}
       </section>

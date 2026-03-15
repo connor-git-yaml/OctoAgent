@@ -276,4 +276,24 @@ describe("MemoryPage", () => {
     expect(within(derivedInspector!).getByText("ToM 判断 · 置信度 82%")).toBeInTheDocument();
     expect(within(derivedInspector!).getByText("更偏好异步")).toBeInTheDocument();
   });
+
+  it("sessions 缺少会话列表时不会因为 focused session 查找而崩溃", async () => {
+    const snapshot = buildMemorySnapshot();
+    delete snapshot.resources.sessions.sessions;
+
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "2 条可读记忆" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出当前会话" })).toBeInTheDocument();
+  });
 });

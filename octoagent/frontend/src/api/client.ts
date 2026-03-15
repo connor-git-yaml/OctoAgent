@@ -5,10 +5,12 @@
 import type {
   ActionRequestEnvelope,
   ActionResultEnvelope,
+  AttachExecutionInputResponse,
   BackupBundle,
   ControlPlaneActionResponse,
   ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
+  ExecutionSessionResponse,
   ExportFilter,
   ExportManifest,
   ImportRunDocument,
@@ -463,6 +465,35 @@ export async function fetchTaskDetail(
   taskId: string
 ): Promise<TaskDetailResponse> {
   return apiFetch<TaskDetailResponse>(`/api/tasks/${taskId}`);
+}
+
+export async function fetchTaskExecutionSession(
+  taskId: string
+): Promise<ExecutionSessionResponse> {
+  return apiFetch<ExecutionSessionResponse>(
+    `/api/tasks/${encodeURIComponent(taskId)}/execution`
+  );
+}
+
+export async function attachExecutionInput(
+  taskId: string,
+  body: {
+    text: string;
+    approval_id?: string | null;
+    actor?: string;
+  }
+): Promise<AttachExecutionInputResponse> {
+  return apiFetch<AttachExecutionInputResponse>(
+    `/api/tasks/${encodeURIComponent(taskId)}/execution/input`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        text: body.text,
+        approval_id: body.approval_id ?? null,
+        actor: body.actor ?? "user:web",
+      }),
+    }
+  );
 }
 
 /** GET /api/ops/recovery -- 最近一次恢复准备度摘要 */

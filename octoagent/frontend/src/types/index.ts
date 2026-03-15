@@ -94,6 +94,37 @@ export interface TaskDetailResponse {
   artifacts: Artifact[];
 }
 
+export interface ExecutionSessionDocument {
+  session_id: string;
+  task_id: string;
+  state: string;
+  current_step: string;
+  requested_input?: string | null;
+  pending_approval_id?: string | null;
+  latest_artifact_id?: string | null;
+  can_attach_input: boolean;
+  can_cancel: boolean;
+  metadata: Record<string, string>;
+}
+
+export interface ExecutionSessionResponse {
+  session: ExecutionSessionDocument;
+}
+
+export interface AttachExecutionInputResult {
+  task_id: string;
+  session_id: string;
+  request_id: string;
+  artifact_id: string;
+  delivered_live: boolean;
+  approval_id?: string | null;
+}
+
+export interface AttachExecutionInputResponse {
+  result: AttachExecutionInputResult;
+  session: ExecutionSessionDocument | null;
+}
+
 export interface SSEEventData extends TaskEvent {
   task_id: string;
   final?: boolean;

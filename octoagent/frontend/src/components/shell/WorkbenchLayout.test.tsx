@@ -104,4 +104,73 @@ describe("WorkbenchLayout", () => {
     expect(screen.queryByText(/记忆记录/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/current records/i)).not.toBeInTheDocument();
   });
+
+  it("sessions 缺少 operator_items 时不会因为读取第一个待处理项而崩溃", () => {
+    mockUseWorkbenchData.mockReturnValue({
+      snapshot: {
+        generated_at: "2026-03-15T00:55:00Z",
+        resources: {
+          project_selector: {
+            current_project_id: "project-default",
+            current_workspace_id: "workspace-default",
+            available_projects: [
+              {
+                project_id: "project-default",
+                slug: "default",
+                name: "Default Project",
+              },
+            ],
+            available_workspaces: [
+              {
+                workspace_id: "workspace-default",
+                project_id: "project-default",
+                slug: "primary",
+                name: "Primary Workspace",
+              },
+            ],
+          },
+          diagnostics: {
+            overall_status: "ready",
+          },
+          sessions: {
+            operator_summary: {
+              total_pending: 1,
+            },
+          },
+          config: {
+            current_value: {
+              runtime: {
+                llm_mode: "litellm",
+              },
+            },
+          },
+          delegation: {
+            works: [],
+          },
+        },
+      },
+      loading: false,
+      error: null,
+      authError: null,
+      busyActionId: null,
+      lastAction: null,
+      refreshSnapshot: vi.fn(),
+      refreshResources: vi.fn(),
+      submitAction: vi.fn(),
+      clearError: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <Routes>
+          <Route element={<WorkbenchLayout />}>
+            <Route path="/chat" element={<div>Chat Slot</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("有 1 项需要处理")).toBeInTheDocument();
+    expect(screen.getByText("先看一下待处理事项，再继续会更稳。")).toBeInTheDocument();
+  });
 });

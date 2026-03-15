@@ -1,12 +1,14 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatWorkbench from "./ChatWorkbench";
 
 const useWorkbenchMock = vi.fn();
 const useChatStreamMock = vi.fn();
 const fetchTaskDetailMock = vi.fn();
+const fetchTaskExecutionSessionMock = vi.fn();
+const attachExecutionInputMock = vi.fn();
 
 vi.mock("../components/shell/WorkbenchLayout", () => ({
   useWorkbench: () => useWorkbenchMock(),
@@ -18,6 +20,21 @@ vi.mock("../hooks/useChatStream", () => ({
 
 vi.mock("../api/client", () => ({
   fetchTaskDetail: (...args: unknown[]) => fetchTaskDetailMock(...args),
+  fetchTaskExecutionSession: (...args: unknown[]) =>
+    fetchTaskExecutionSessionMock(...args),
+  attachExecutionInput: (...args: unknown[]) => attachExecutionInputMock(...args),
+  ApiError: class ApiError extends Error {
+    status: number;
+    code?: string;
+    hint?: string;
+
+    constructor(message: string, options: { status: number; code?: string; hint?: string }) {
+      super(message);
+      this.status = options.status;
+      this.code = options.code;
+      this.hint = options.hint;
+    }
+  },
 }));
 
 function buildSnapshot(): any {
@@ -119,6 +136,21 @@ function buildSnapshot(): any {
 }
 
 describe("ChatWorkbench", () => {
+  beforeEach(() => {
+    fetchTaskDetailMock.mockResolvedValue(null);
+    fetchTaskExecutionSessionMock.mockResolvedValue({ session: null });
+    attachExecutionInputMock.mockResolvedValue({
+      result: {
+        task_id: "task-default",
+        session_id: "exec-default",
+        request_id: "req-default",
+        artifact_id: "artifact-default",
+        delivered_live: true,
+      },
+      session: null,
+    });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
@@ -1122,6 +1154,127 @@ describe("ChatWorkbench", () => {
     expect(screen.queryByText("已回传")).not.toBeInTheDocument();
   });
 
+  it("主助手默认执行器会折叠成主助手直连工具处理，不再渲染成额外 worker", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "thread-chat-direct",
+        thread_id: "thread-chat-direct",
+        task_id: "task-chat-direct",
+        latest_message_summary: "读取当前项目 README",
+        execution_summary: {
+          work_id: "work-chat-direct",
+        },
+      },
+    ];
+    snapshot.resources.delegation.works = [
+      {
+        work_id: "work-chat-direct",
+        task_id: "task-chat-direct",
+        parent_work_id: "",
+        title: "读取当前项目 README",
+        status: "running",
+        target_kind: "fallback",
+        selected_worker_type: "general",
+        route_reason: "fallback=single_worker",
+        owner_id: "orchestrator",
+        selected_tools: ["filesystem.list_dir", "filesystem.read_text", "terminal.exec"],
+        pipeline_run_id: "",
+        runtime_id: "worker.llm.default",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        requested_worker_profile_id: "worker-profile-project-default-default-project-agent",
+        requested_worker_profile_version: 1,
+        effective_worker_snapshot_id: "worker-snapshot:general:1",
+        child_work_ids: [],
+        child_work_count: 0,
+        merge_ready: false,
+        runtime_summary: {},
+        updated_at: "2026-03-15T00:56:00Z",
+        capabilities: [],
+      },
+    ];
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [
+        {
+          id: "msg-direct",
+          role: "agent",
+          content: "主助手正在直接处理。",
+          isStreaming: true,
+        },
+      ],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-direct",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-direct",
+        title: "读取当前项目 README",
+        status: "RUNNING",
+      },
+      events: [
+        {
+          event_id: "event-model-started",
+          task_seq: 10,
+          ts: "2026-03-15T00:56:01Z",
+          type: "MODEL_CALL_STARTED",
+          actor: "worker.llm.default",
+          payload: {
+            work_id: "work-chat-direct",
+          },
+        },
+        {
+          event_id: "event-tool-started",
+          task_seq: 11,
+          ts: "2026-03-15T00:56:02Z",
+          type: "TOOL_CALL_STARTED",
+          actor: "tool",
+          payload: {
+            work_id: "work-chat-direct",
+            tool_name: "filesystem.read_text",
+            args_summary: "path=app/README.md",
+          },
+        },
+        {
+          event_id: "event-tool-completed",
+          task_seq: 12,
+          ts: "2026-03-15T00:56:03Z",
+          type: "TOOL_CALL_COMPLETED",
+          actor: "tool",
+          payload: {
+            work_id: "work-chat-direct",
+            tool_name: "filesystem.read_text",
+            args_summary: "path=app/README.md",
+            output_summary: "读取到了 README 开头段落。",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("主助手正在直接调用工具处理这条消息。")).toBeInTheDocument();
+    expect(screen.getByText("处理方式")).toBeInTheDocument();
+    expect(screen.getByText("直连工具")).toBeInTheDocument();
+    expect(screen.getByText("filesystem.read_text")).toBeInTheDocument();
+    expect(screen.queryByText("worker.llm.default")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research Worker")).not.toBeInTheDocument();
+  });
+
   it("任务完成后不再展示内部协作运行条", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
@@ -1383,5 +1536,179 @@ describe("ChatWorkbench", () => {
         },
       ]);
     });
+  });
+
+  it("当前任务等待审批时，可以直接在聊天里点击批准一次", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-approve",
+        thread_id: "thread-approve",
+        task_id: "task-chat-approve",
+        title: "审批中的会话",
+        latest_message_summary: "README 查询",
+      },
+    ];
+    snapshot.resources.sessions.operator_items = [
+      {
+        item_id: "approval:approval-1",
+        kind: "approval",
+        state: "pending",
+        title: "terminal.exec 需要审批",
+        summary: "这次只读命令需要你确认后继续。",
+        task_id: "task-chat-approve",
+        thread_id: "thread-approve",
+        source_ref: "approval-1",
+        created_at: "2026-03-15T10:00:00Z",
+        suggested_actions: ["approve_once"],
+        quick_actions: [
+          { kind: "approve_once", label: "批准一次", style: "primary", enabled: true },
+          { kind: "deny", label: "拒绝", style: "secondary", enabled: true },
+        ],
+        metadata: {},
+      },
+    ];
+
+    const submitAction = vi.fn().mockResolvedValue({
+      message: "这轮确认已经处理。",
+      handled_at: "2026-03-15T10:00:03Z",
+    });
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-approve", role: "user", content: "继续读 README", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-approve",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-approve",
+        title: "审批中的会话",
+        status: "WAITING_APPROVAL",
+      },
+      events: [],
+      artifacts: [],
+    });
+    fetchTaskExecutionSessionMock.mockResolvedValue({
+      session: {
+        session_id: "exec-approve",
+        task_id: "task-chat-approve",
+        state: "RUNNING",
+        current_step: "waiting approval",
+        can_attach_input: false,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "批准一次" }));
+
+    expect(submitAction).toHaveBeenCalledWith("operator.approval.resolve", {
+      approval_id: "approval-1",
+      mode: "once",
+    });
+  });
+
+  it("等待输入时会把下一条消息作为 steer 附加到当前执行", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-steer",
+        thread_id: "thread-steer",
+        task_id: "task-chat-steer",
+        title: "等待补充的会话",
+        latest_message_summary: "请补充路径",
+      },
+    ];
+
+    const submitAction = vi.fn().mockResolvedValue(null);
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-steer", role: "agent", content: "请补充 README 路径。", isStreaming: false }],
+      sendMessage,
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-steer",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-steer",
+        title: "等待补充的会话",
+        status: "WAITING_INPUT",
+      },
+      events: [],
+      artifacts: [],
+    });
+    fetchTaskExecutionSessionMock.mockResolvedValue({
+      session: {
+        session_id: "exec-steer",
+        task_id: "task-chat-steer",
+        state: "WAITING_INPUT",
+        current_step: "requesting path",
+        requested_input: "请告诉我 README 的相对路径",
+        can_attach_input: true,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+    attachExecutionInputMock.mockResolvedValue({
+      result: {
+        task_id: "task-chat-steer",
+        session_id: "exec-steer",
+        request_id: "req-steer",
+        artifact_id: "artifact-steer",
+        delivered_live: true,
+      },
+      session: {
+        session_id: "exec-steer",
+        task_id: "task-chat-steer",
+        state: "RUNNING",
+        current_step: "running",
+        can_attach_input: false,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.type(
+      await screen.findByPlaceholderText("请告诉我 README 的相对路径"),
+      "./README.md"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "继续这轮" }));
+
+    expect(attachExecutionInputMock).toHaveBeenCalledWith("task-chat-steer", {
+      text: "./README.md",
+      approval_id: undefined,
+      actor: "user:web",
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
