@@ -2775,7 +2775,7 @@
   display: flex;
   flex: 0 0 auto;
   gap: 10px;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .wb-chat-form.is-empty {
@@ -2783,13 +2783,17 @@
   margin: 0 auto;
 }
 
-.wb-chat-form input {
+.wb-chat-form textarea {
   flex: 1;
-  min-height: 48px;
-  padding: 0 16px;
-  border-radius: 999px;
+  min-height: 72px;
+  max-height: 220px;
+  padding: 14px 16px;
+  border-radius: 20px;
   border: 1px solid rgba(20, 32, 47, 0.12);
   background: rgba(255, 255, 255, 0.96);
+  resize: vertical;
+  line-height: 1.5;
+  font: inherit;
 }
 
 .wb-inline-meta {
@@ -3282,13 +3286,13 @@
 .wb-message-trace {
   display: grid;
   gap: 10px;
-  min-width: min(420px, 80vw);
+  min-width: min(680px, 94vw);
 }
 
 .wb-message-trace-detail {
   display: grid;
   gap: 12px;
-  min-width: min(360px, 72vw);
+  min-width: min(680px, 94vw);
 }
 
 .wb-message-trace-detail-grid {
@@ -3319,6 +3323,7 @@
   color: rgba(20, 32, 47, 0.86);
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .wb-message-trace-title {
@@ -3477,6 +3482,25 @@
   transform: translateY(-1px);
 }
 
+.wb-chat-approval-banner-line {
+  display: block;
+}
+
+.wb-chat-approval-banner-line + .wb-chat-approval-banner-line {
+  margin-top: 6px;
+}
+
+.wb-chat-approval-banner-line code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(20, 32, 47, 0.06);
+  color: var(--cp-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .wb-topbar-menu {
   display: none;
   min-height: 40px;
@@ -3631,7 +3655,7 @@
   }
 
   .wb-button,
-  .wb-chat-form input,
+  .wb-chat-form textarea,
   .wb-chat-form button,
   .wb-inline-form .wb-button {
     width: 100%;
