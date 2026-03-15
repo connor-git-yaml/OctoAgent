@@ -56,12 +56,6 @@ export default function SettingsProviderSection({
   onOpenAIOAuthConnect,
 }: SettingsProviderSectionProps) {
   const activeProvidersCount = providerDrafts.filter((item) => item.enabled).length;
-  const connectionSummary = usingEchoMode
-    ? "还没有连接真实模型。先添加 1 个 Provider，并填 API Key 或完成 OAuth。没配好前，系统会先自动回退。"
-    : `当前已启用 ${activeProvidersCount} 个 Provider。保存后，新的模型别名和聊天会优先使用它们。`;
-  const defaultProviderSummary = usingEchoMode
-    ? "配好之后，系统会自动从第一个启用的 Provider 开始路由，不需要你手动切换模式。"
-    : `当前默认 Provider 是 ${defaultProvider.name || defaultProvider.id}。新的推荐别名会优先引用它。`;
 
   return (
     <>
@@ -85,27 +79,17 @@ export default function SettingsProviderSection({
             <div className="wb-provider-card-head">
               <div>
                 <p className="wb-card-label">连接状态</p>
-                <strong>{usingEchoMode ? "还没有连接真实模型" : "真实模型连接已准备好"}</strong>
+                <strong>{usingEchoMode ? "未连接" : "已连接"}</strong>
               </div>
               <span className={`wb-status-pill ${usingEchoMode ? "is-warning" : "is-ready"}`}>
-                {usingEchoMode ? "自动回退中" : "已启用"}
+                {usingEchoMode ? "体验模式" : `${activeProvidersCount} 个 Provider`}
               </span>
             </div>
-
-            <div className="wb-note">
-              <strong>现在会发生什么</strong>
-              <span>{connectionSummary}</span>
-            </div>
-            <div className="wb-note">
-              <strong>默认会先用谁</strong>
-              <span>{defaultProviderSummary}</span>
-            </div>
-            <div className="wb-note">
-              <strong>这些参数你不用管</strong>
-              <span>
-                Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。
-              </span>
-            </div>
+            {usingEchoMode ? (
+              <p className="wb-panel-copy">
+                添加至少一个 Provider 并填写 API Key 后保存即可切换到真实模型。
+              </p>
+            ) : null}
           </div>
 
           <div className="wb-provider-card">

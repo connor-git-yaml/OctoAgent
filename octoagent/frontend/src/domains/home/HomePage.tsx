@@ -198,63 +198,63 @@ function buildPrimaryState(options: {
 }): HomePrimaryState {
   if (options.usingEchoMode) {
     return {
-      title: "先连上一个真实模型",
-      summary: "现在还是体验模式。先完成模型连接后，再来体验实时查询和专门角色协作。",
-      primaryActionLabel: "去设置完成连接",
+      title: "模型未连接",
+      summary: "当前处于体验模式，需要先在 Settings 中配置至少一个 Provider。",
+      primaryActionLabel: "前往设置",
       primaryActionTo: "/settings",
-      secondaryActionLabel: "先看看聊天页",
+      secondaryActionLabel: "体验聊天",
       secondaryActionTo: "/chat",
     };
   }
 
   if (!options.setupReady) {
     return {
-      title: "还差几项设置才能稳定开始",
-      summary: "先把阻塞项补齐，再开始第一次真实对话会更顺。",
-      primaryActionLabel: "回到设置检查",
+      title: "配置未完成",
+      summary: "部分阻塞项需要补齐后才能稳定使用。",
+      primaryActionLabel: "前往设置",
       primaryActionTo: "/settings",
     };
   }
 
   if (options.operatorItems.length > 0) {
     return {
-      title: `有 ${options.operatorItems.length} 项事情等你确认`,
-      summary: "先处理卡住提醒、失败重试或确认动作；每一项都会告诉你下一步该点什么。",
-      primaryActionLabel: "去 Work 里处理",
+      title: `${options.operatorItems.length} 项待处理`,
+      summary: "有需要确认或重试的操作。",
+      primaryActionLabel: "查看详情",
       primaryActionTo: "/work",
-      secondaryActionLabel: "继续进入聊天",
+      secondaryActionLabel: "继续聊天",
       secondaryActionTo: "/chat",
     };
   }
 
   if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
     return {
-      title: "现在可以继续用，但外部能力受影响",
-      summary: "普通对话还能继续；联网查询、外部连接或后台能力可能变慢或失败。",
-      primaryActionLabel: "直接进入聊天",
+      title: "部分能力受限",
+      summary: "基础对话正常，联网查询或后台任务可能不稳定。",
+      primaryActionLabel: "进入聊天",
       primaryActionTo: "/chat",
-      secondaryActionLabel: "查看详细诊断",
+      secondaryActionLabel: "诊断详情",
       secondaryActionTo: "/advanced",
     };
   }
 
   if (options.activeWorks.length > 0) {
     return {
-      title: `有 ${options.activeWorks.length} 项事情还在处理中`,
-      summary: "你可以继续聊天，也可以先去 Work 看当前进度。",
-      primaryActionLabel: "继续进入聊天",
+      title: `${options.activeWorks.length} 项任务进行中`,
+      summary: "可以继续聊天，或查看当前进度。",
+      primaryActionLabel: "继续聊天",
       primaryActionTo: "/chat",
-      secondaryActionLabel: "查看当前工作",
+      secondaryActionLabel: "查看任务",
       secondaryActionTo: "/work",
     };
   }
 
   return {
-    title: "现在可以直接开始聊天",
-    summary: "模型、当前项目和主助手都已经准备好。发第一条消息就行。",
+    title: "就绪",
+    summary: "模型和主助手已准备好，可以开始对话。",
     primaryActionLabel: "进入聊天",
     primaryActionTo: "/chat",
-    secondaryActionLabel: "打开设置",
+    secondaryActionLabel: "设置",
     secondaryActionTo: "/settings",
   };
 }
@@ -333,6 +333,7 @@ export default function HomePage() {
         kicker="Home"
         title={primaryState.title}
         summary={primaryState.summary}
+        compact
         actions={
           <>
             <Link className="wb-button wb-button-primary" to={primaryState.primaryActionTo}>

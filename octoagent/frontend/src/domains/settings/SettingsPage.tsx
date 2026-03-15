@@ -632,7 +632,6 @@ export default function SettingsPage() {
         providerDraftCount={providerDrafts.length}
         activeProvidersCount={activeProviders.length}
         aliasDraftCount={aliasDrafts.length}
-        defaultProviderId={defaultProvider.id}
         memoryLabel={memoryLabel}
         memoryStatus={memory.backend_state || memory.status}
         onQuickConnect={() => void handleQuickConnect()}

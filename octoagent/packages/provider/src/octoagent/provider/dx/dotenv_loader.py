@@ -31,30 +31,37 @@ def load_project_dotenv(
     if project_root is None:
         project_root = Path.cwd()
 
-    env_path = project_root / ".env"
-
-    # .env 不存在时静默跳过
-    if not env_path.exists():
-        log.debug("dotenv_skip", path=str(env_path), reason="文件不存在")
-        return False
+    # 按优先级加载多个 .env 文件（先加载的不覆盖后加载的）
+    env_files = [".env", ".env.litellm"]
+    any_loaded = False
 
     try:
         from dotenv import load_dotenv
-
-        loaded = load_dotenv(
-            dotenv_path=str(env_path),
-            override=override,
-        )
-        if loaded:
-            log.info("dotenv_loaded", path=str(env_path), override=override)
-        else:
-            log.debug("dotenv_empty", path=str(env_path))
-        return loaded
-    except Exception as exc:
-        # 语法错误或其他异常：仅 warning，不阻塞启动（EC-7）
-        log.warning(
-            "dotenv_load_error",
-            path=str(env_path),
-            error=str(exc),
-        )
+    except ImportError:
+        log.warning("dotenv_import_error", reason="python-dotenv 未安装")
         return False
+
+    for filename in env_files:
+        env_path = project_root / filename
+        if not env_path.exists():
+            log.debug("dotenv_skip", path=str(env_path), reason="文件不存在")
+            continue
+        try:
+            loaded = load_dotenv(
+                dotenv_path=str(env_path),
+                override=override,
+            )
+            if loaded:
+                log.info("dotenv_loaded", path=str(env_path), override=override)
+                any_loaded = True
+            else:
+                log.debug("dotenv_empty", path=str(env_path))
+        except Exception as exc:
+            # 语法错误或其他异常：仅 warning，不阻塞启动（EC-7）
+            log.warning(
+                "dotenv_load_error",
+                path=str(env_path),
+                error=str(exc),
+            )
+
+    return any_loaded

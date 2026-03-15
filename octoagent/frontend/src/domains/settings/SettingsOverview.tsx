@@ -11,7 +11,6 @@ interface SettingsOverviewProps {
   providerDraftCount: number;
   activeProvidersCount: number;
   aliasDraftCount: number;
-  defaultProviderId: string;
   memoryLabel: string;
   memoryStatus: string;
   onQuickConnect: () => void;
@@ -28,7 +27,6 @@ export default function SettingsOverview({
   providerDraftCount,
   activeProvidersCount,
   aliasDraftCount,
-  defaultProviderId,
   memoryLabel,
   memoryStatus,
   onQuickConnect,
@@ -61,39 +59,7 @@ export default function SettingsOverview({
     : review.ready
       ? "保存后回聊天验证"
       : "先检查阻塞项";
-  const checklistItems = usingEchoMode
-    ? [
-        review.next_actions[0] ?? "先添加一个 Provider，并填好密钥或完成 OAuth。",
-        echoReady
-          ? "现在可以先保存这次配置；保存后系统会自动开始使用真实模型。"
-          : "补好 API Key 或完成 OAuth 连接后，保存配置。",
-        "回聊天页发第一条真实消息，确认真实模型已经接管回复。",
-      ]
-    : review.ready
-      ? [
-          "先保存当前配置，确保这次修改已经生效。",
-          "回到聊天页发第一条消息，确认真实模型和主助手已经正常响应。",
-          "如果这轮验证没问题，再回来补渠道、Memory 或更多能力。",
-        ]
-      : [
-          review.next_actions[0] ?? "先处理 review 里提示的阻塞项。",
-          "执行一次配置检查，确认阻塞项和提醒是否已经收口。",
-          "保存配置后，回聊天页验证一次真实对话。",
-        ];
-  const canWaitItems = [
-    "渠道与远程入口：现在先用 Web 就够了，Telegram 和其他远程入口可以后面再配。",
-    `记忆增强：当前 ${memoryLabel} 已经是可用状态；第一次真实对话不依赖你现在就把它调到最优。`,
-    "Agent 模板、Behavior Files 和 Provider 绑定：后面需要扩展时，再去 Agents 页面统一处理也来得及。",
-  ];
   const minimumStatusValue = usingEchoMode ? "未连接真实模型" : "已连接真实模型";
-  const minimumStatusHint = usingEchoMode
-    ? "没配好前系统会先自动回退。"
-    : "当前已经接入真实模型链路。";
-  const nextValidationHint = usingEchoMode
-    ? "配好后保存配置，再回聊天页发第一条真实消息。"
-    : review.ready
-      ? "保存后直接回聊天页发第一条消息。"
-      : "先在当前页做一次检查，再决定保存。";
   const statusChipLabel = usingEchoMode
     ? echoReady
       ? "可以先保存"
@@ -191,55 +157,6 @@ export default function SettingsOverview({
           </div>
         </div>
       </section>
-
-      <div className="wb-split">
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">现在只管这 3 件事</p>
-              <h3>先走通第一次真实对话</h3>
-            </div>
-          </div>
-          <div className="wb-note-stack">
-            {checklistItems.map((item, index) => (
-              <div key={item} className="wb-note">
-                <strong>第 {index + 1} 步</strong>
-                <span>{item}</span>
-              </div>
-            ))}
-            <div className="wb-note">
-              <strong>做完后回哪里验证</strong>
-              <span>
-                {nextValidationHint} 当前默认模型来源 {defaultProviderId || "未设置"}。
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">这些事情现在不用急</p>
-              <h3>先用起来，再慢慢扩展</h3>
-            </div>
-          </div>
-          <div className="wb-note-stack">
-            {canWaitItems.map((item) => (
-              <div key={item} className="wb-note">
-                <strong>可以后面再说</strong>
-                <span>{item}</span>
-              </div>
-            ))}
-            <div className="wb-note">
-              <strong>当前基础状态</strong>
-              <span>
-                {minimumStatusHint} 当前 Memory 状态是 {memoryStatus}，模型连接会跟着你保存的
-                Provider 自动更新。
-              </span>
-            </div>
-          </div>
-        </section>
-      </div>
 
       <section className="wb-panel">
         <div className="wb-panel-head">
