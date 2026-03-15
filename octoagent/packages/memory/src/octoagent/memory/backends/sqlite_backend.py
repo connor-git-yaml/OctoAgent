@@ -553,6 +553,13 @@ class SqliteMemoryBackend(MemoryBackend):
                 "derived_refs": derived_ids,
                 "project_id": batch.project_id,
                 "workspace_id": batch.workspace_id,
+                "candidate_engine": "builtin-memory-engine",
+                "candidate_contract_version": "1.0.0",
+                "candidate_kind": (
+                    "vault_candidate"
+                    if partition in SENSITIVE_PARTITIONS
+                    else "fact_candidate"
+                ),
             },
         )
 

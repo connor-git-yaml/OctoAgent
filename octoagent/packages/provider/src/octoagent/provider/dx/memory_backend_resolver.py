@@ -37,6 +37,7 @@ from octoagent.memory import (
 from pydantic import SecretStr
 
 from .backup_service import resolve_project_root
+from .builtin_memu_bridge import BuiltinMemUBridge
 from .config_wizard import load_config
 from .secret_models import SecretRef
 from .secret_refs import SecretResolutionError, resolve_secret_ref
@@ -203,15 +204,11 @@ class MemoryBackendResolver:
 
         if memory.backend_mode == "local_only":
             return MemUBackend(
-                _StaticMemUBridge(
-                    MemoryBackendStatus(
-                        backend_id="memu",
-                        memory_engine_contract_version="1.0.0",
-                        state=MemoryBackendState.HEALTHY,
-                        active_backend="sqlite-metadata",
-                        message="当前使用本地 Memory 模式，未连接远端 MemU bridge。",
-                        project_binding=binding_ref,
-                    )
+                BuiltinMemUBridge(
+                    self._memory_store(),
+                    project_binding=binding_ref,
+                    project_root=self._project_root,
+                    environ=self._environ,
                 )
             )
 
@@ -333,6 +330,11 @@ class MemoryBackendResolver:
             code="MEMU_SECRET_ENV_MISSING",
             message=f"未找到 Memory bridge API Key 环境变量：{env_name}",
         )
+
+    def _memory_store(self):
+        from octoagent.memory import SqliteMemoryStore
+
+        return SqliteMemoryStore(self._stores.conn)
 
     async def _resolve_bridge_binding(
         self,
@@ -459,8 +461,9 @@ class _StaticMemUBridge:
         query: str | None = None,
         policy: MemoryAccessPolicy | None = None,
         limit: int = 10,
+        search_options=None,
     ) -> list[MemorySearchHit]:
-        _ = scope_id, query, policy, limit
+        _ = scope_id, query, policy, limit, search_options
         raise RuntimeError(self._status.message or self._status.failure_code)
 
     async def sync_batch(self, batch: MemorySyncBatch) -> MemorySyncResult:

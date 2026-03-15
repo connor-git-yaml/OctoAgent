@@ -74,6 +74,7 @@ export interface MemoryNarrative {
   stateLabel: string;
   nextActionTitle: string;
   nextActionSummary: string;
+  showNextActionPanel: boolean;
   guideItems: MemoryGuideItem[];
   missingSetupItems: string[];
   retrievalLabel: string;
@@ -491,7 +492,9 @@ export function buildMemoryNarrative(
   missingSetupItems: string[],
   visibleRecordCount = memory.records.length
 ): MemoryNarrative {
-  const retrievalLabel = formatRetrievalLabel(memory.retrieval_backend, memoryMode);
+  const retrievalLabel =
+    memory.retrieval_profile?.active_backend_label?.trim() ||
+    formatRetrievalLabel(memory.retrieval_backend, memoryMode);
   const usingFallback =
     memoryMode === "memu" &&
     Boolean(memory.retrieval_backend) &&
@@ -501,11 +504,14 @@ export function buildMemoryNarrative(
     memory.summary.sor_current_count +
     memory.summary.fragment_count +
     memory.summary.vault_ref_count;
+  const backlogCount = Math.max(memory.summary.pending_replay_count, memory.summary.fragment_count);
   const hasStoredRecords = totalStoredRecords > 0;
   const hasBacklog =
     memory.summary.fragment_count > 0 || memory.summary.pending_replay_count > 0;
   const hasVisibleRecords = visibleRecordCount > 0;
-  const memoryWarnings = uniqueOptions(memory.warnings.map(normalizeMemoryWarning));
+  const memoryWarnings = uniqueOptions(
+    [...memory.warnings, ...(memory.retrieval_profile?.warnings ?? [])].map(normalizeMemoryWarning)
+  );
 
   const hasActiveFilters =
     Boolean(memory.filters.query.trim()) ||
@@ -519,9 +525,10 @@ export function buildMemoryNarrative(
   let heroSummary =
     "你现在看到的是系统已经整理成可读结论的内容，可以直接用来判断它记住了什么。";
   let stateLabel = "运行中";
-  const nextActionTitle = "下一步建议";
+  let nextActionTitle = "下一步建议";
   let nextActionSummary =
     "继续在 Chat 里对话，或导入一段历史消息；Memory 会把这些内容整理成你能读懂的结论。";
+  let showNextActionPanel = true;
   const guideItems: MemoryGuideItem[] = [];
 
   if (missingSetupItems.length > 0) {
@@ -532,11 +539,6 @@ export function buildMemoryNarrative(
     nextActionSummary =
       "如果你只是想先让基础 Memory 工作，也可以保持本地记忆模式，不需要额外服务。";
     guideItems.push(
-      {
-        title: "基础记忆已经可用",
-        summary: "本地记忆模式不需要额外部署。只要有聊天或导入内容，系统就能开始整理摘要。",
-        state: "done",
-      },
       ...missingSetupItems.map((item) => ({
         title: `补齐 ${item}`,
         summary: "去 Settings > Memory 填好这项并保存配置，然后回到本页刷新。",
@@ -557,13 +559,6 @@ export function buildMemoryNarrative(
         title: "先确认 Memory 设置",
         summary: "打开 Settings > Memory，确认当前模式、接入方式和最小配置是否仍然正确。",
         state: "todo",
-      },
-      {
-        title: "已有内容仍然可读",
-        summary: hasStoredRecords
-          ? "你现在看到的已有结论和片段不会因为降级而消失。"
-          : "即使现在没内容，基础 Memory 路径仍然可以继续接收新的聊天和导入。",
-        state: "done",
       },
       {
         title: "需要时再打开 Advanced",
@@ -587,17 +582,14 @@ export function buildMemoryNarrative(
         summary: "大多数“什么都没看到”的情况，只是筛选条件太窄，不代表 Memory 没在工作。",
         state: "todo",
       },
-      {
-        title: "已有记忆内容",
-        summary: `当前项目至少已经累积了 ${totalStoredRecords} 条结论、片段或受保护引用。`,
-        state: "done",
-      },
-      {
-        title: "最近有新内容时可整理一次",
-        summary: "如果刚完成聊天或导入，整理最新记忆会让新片段更快变成可读结论。",
-        state: hasBacklog ? "optional" : "done",
-      }
     );
+    if (hasBacklog) {
+      guideItems.push({
+        title: "整理最新记忆",
+        summary: "如果刚完成聊天或导入，整理一次会让新片段更快变成可读结论。",
+        state: "optional",
+      });
+    }
   } else if (hasVisibleRecords) {
     heroTone = "success";
     stateLabel = memory.backend_state === "syncing" ? "更新中" : "运行中";
@@ -609,29 +601,20 @@ export function buildMemoryNarrative(
       memoryMode === "memu" && !usingFallback
         ? "增强记忆已经接通。你可以直接阅读这些结论，必要时再回到 Settings 微调检索策略。"
         : "基础记忆已经在工作。继续聊天、导入或整理片段，系统会把更多内容沉淀成可读结论。";
-    nextActionSummary = hasBacklog
-      ? "如果你刚完成新的聊天或导入，建议再整理一次最新记忆，让片段更快变成结论。"
-      : "现在可以直接阅读这些记录；需要更强的跨会话检索时，再去 Settings 打开增强记忆。";
-    guideItems.push(
-      {
-        title: "现在就能使用",
-        summary: "这些记录已经是给用户看的 Memory 摘要，不需要理解底层 scope 或索引实现。",
-        state: "done",
-      },
-      {
-        title: "继续积累内容",
-        summary: "新的聊天、任务和导入会继续进入 Memory，形成更多结论和片段。",
-        state: "done",
-      },
-      {
-        title: memoryMode === "memu" ? "增强检索已启用" : "如需更强检索再升级",
-        summary:
-          memoryMode === "memu"
-            ? "当前已经处于增强记忆模式。只有在需要调优时，再回到 Settings 微调。"
-            : "如果你需要更稳定的跨会话检索，再到 Settings > Memory 切到增强记忆并补齐最小配置。",
-        state: memoryMode === "memu" ? "done" : "optional",
-      }
-    );
+    if (hasBacklog) {
+      nextActionTitle = "还有新的内容待整理";
+      nextActionSummary =
+        "现在这些记忆已经能直接看，但最近新增的片段还没完全沉淀成结论。需要时再整理一次即可。";
+      guideItems.push({
+        title: "整理最新记忆",
+        summary: `当前还有 ${backlogCount} 条片段或积压待处理，整理后会更快变成稳定结论。`,
+        state: "todo",
+      });
+    } else {
+      showNextActionPanel = false;
+      nextActionTitle = "";
+      nextActionSummary = "";
+    }
   } else {
     heroTone = "warning";
     stateLabel = "已就绪";
@@ -644,27 +627,15 @@ export function buildMemoryNarrative(
       "最短路径是先产生内容，再回来查看；只有明确需要跨会话检索时，才需要继续折腾增强记忆。";
     guideItems.push(
       {
-        title: "基础链路已经就绪",
-        summary:
-          memoryMode === "local_only"
-            ? "本地记忆已经准备好，不需要额外 Memory 服务。"
-            : "增强记忆的最小配置已经存在，可以继续接收新的内容。",
-        state: "done",
-      },
-      {
         title: "先去产生第一批内容",
         summary: "去 Chat 发起一段对话，或者导入一段历史消息，再回来刷新本页。",
         state: "todo",
       },
-      {
-        title: "后续再决定是否增强",
-        summary:
-          memoryMode === "local_only"
-            ? "如果你以后需要跨会话检索，再去 Settings > Memory 开启增强记忆。"
-            : "如果你暂时只是在做基础验证，不需要再补更多后端细节。",
-        state: "optional",
-      }
     );
+  }
+
+  if (guideItems.length === 0) {
+    showNextActionPanel = false;
   }
 
   return {
@@ -674,6 +645,7 @@ export function buildMemoryNarrative(
     stateLabel,
     nextActionTitle,
     nextActionSummary,
+    showNextActionPanel,
     guideItems,
     missingSetupItems,
     retrievalLabel,

@@ -1243,14 +1243,15 @@ WriteProposal:
 - SoR 先走 `status=current` 过滤和 `subject_key/content` metadata 查询
 - 检索契约采用 `search_memory()` / `get_memory()` 两段式，避免把长正文直接塞回主上下文
 
-在 MemU backend 路径下：
+在 MemU / 内建增强检索路径下：
 - governance 仍由 SQLite + arbitration 控制
-- MemU 承担检索、索引、增量同步和后续 chat import / knowledge update 的主要执行负载
-- MemU 不可用时自动降级回 SQLite-only search
-- `MemUBackend` transport 必须同时支持本地 `command` 与远端 `http`
-- 当 MemU 与 Gateway 同机部署时，默认优先 `command` 路径，不强制要求独立 bridge 服务
+- 默认主路径先使用内建 Memory Engine：canonical store 在本地治理层，默认检索层优先使用本地 `Qwen3-Embedding-0.6B`，不可用时再回退到内建双语 hash embedding
+- `MemUBackend` 承担检索、索引、增量同步和后续 chat import / knowledge update 的主要执行负载；旧 `command/http` transport 只作为兼容接入层存在
+- 内建 embedding 不可用时，系统必须诚实降级回 lexical / metadata recall，而不是伪装成仍有语义检索
+- embedding 切换不迁移 `fragment / fact / vault / proposal / audit / evidence` 本体，只重建 projection generation，并在 cutover 前保持旧 generation 持续服务
+- 当兼容 MemU 与 Gateway 同机部署时，兼容层优先 `command`，不要求额外常驻 bridge 服务
 - 本地 `command` 路径允许包裹 OpenClaw 风格的 MemU 脚本链，只要求 embedding / rerank / expanding 等模型与本地运行时，不额外引入常驻服务复杂度
-- Web `Settings > Memory` 与 `octo config memory *` 必须共享同一套 `local_only / memu(command) / memu(http)` 配置语义，避免 Web 与 CLI 漂移
+- Web `Settings > Memory` 与 `octo config memory *` 必须共享同一套“内建 Memory 引擎 + retrieval model bindings + Advanced 兼容接入”的配置语义，避免 Web 与 CLI 漂移
 
 M3 产品化集成约束（2026-03-07）：
 - `MemUBackend` 不应被视为纯外挂检索器，而应作为 Memory engine 的首选实现之一，与 `search_memory()` / `get_memory()` / `before_compaction_flush()` 共用同一治理边界
@@ -2861,7 +2862,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 2026-03-09 设计复核新增 Feature 033：当时主 Agent 仍未真实消费 `AgentProfile`、owner basics、bootstrap、recent summary 与 memory retrieval；该补位已完成，不再作为当前 blocker。
 - 2026-03-10 设计复核新增并实现 Feature 038：memory runtime 已补齐 `project/workspace -> resolver -> recall pack -> context/tooling/import` 主链，不再把 `MemoryBackendResolver` 限制在 console-only 路径。
 - 2026-03-14 产品化纠偏：`/memory` 必须先经过用户态 display model，再展示 current memory / vault refs / derived 结果；不得把 raw projection、技术写回或占位摘要直接暴露给用户。
-- 2026-03-14 配置纠偏：Memory 设置必须显式支持 `local_only`、`memu + command`、`memu + http` 三条路径；同机默认优先 command，本地 MemU 不应被描述成“必须另起独立服务”。
+- 2026-03-14 配置纠偏：Memory 主路径必须收口为“内建 Memory 引擎 + retrieval model bindings”；`memu + command/http` 仅作为兼容迁移与排障入口保留。同机兼容接入仍优先 command，本地 MemU 不应再被描述成“必须另起独立服务”。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 message-native A2A 主链。
 - 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、Butler-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低“本机反向代理误暴露 = owner-facing API 被放行”的风险。
@@ -2972,7 +2973,7 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - [x] Feature 032：OpenClaw Built-in Tool Suite + Live Runtime Truth（built-in tool catalog、graph/subagent live runtime、child work split/merge、control plane runtime truth）
 - [x] Feature 034：主 Agent / Worker 上下文压缩（cheap/summarizer 驱动，artifact/evidence 可审计，Subagent 排除）
 - [~] Feature 035：Guided User Workbench + Visual Config Center（`Home / Chat / Work / Memory / Settings / Advanced` 已落地；已接入 setup readiness、worker review/apply、context degraded 提示，以及 `memory -> operator -> export/recovery` guided 主路径；`/memory` 已补齐用户态 display model、internal writeback 过滤与派生信息可读化；仍待更细粒度 context evidence）
-- [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义；Memory 配置已统一成 `local / memu-command / memu-http` 三条 operator path）
+- [x] Feature 036：Guided Setup Governance（`setup-governance / policy-profiles / skill-governance / setup.review / setup.apply / agent_profile.save / policy_profile.select / skills.selection.save` 已落地；CLI/Web 已汇流到 canonical setup review/apply 语义；Memory 配置主路径已收口为“内建 Memory 引擎 + retrieval model bindings”，旧 `memu-command / memu-http` 仅保留兼容/operator path）
 - [x] Feature 037：Runtime Context Hardening（runtime lineage、selector drift、session authority 收口）
 - [x] Feature 039：Supervisor Worker Governance + Internal A2A Dispatch（已完成 supervisor-only 主 Agent、`workers.review`、`worker.review/apply`、message-native A2A roundtrip 与 durable `A2AConversation / A2AMessage / WorkerSession`）
 - [x] Feature 040：M4 Guided Experience Integration Acceptance（已形成 M4 acceptance matrix / release gate report，并打通 `setup -> workbench -> chat -> worker review/apply -> memory/operator/export/recovery` 主链；033/036 blocker 已关闭）
@@ -2980,6 +2981,7 @@ BehaviorWorkspace 设计补充（2026-03-14）：
 - [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web behavior 视图、CLI `octo behavior ls/show/init/edit/diff/apply`，并把 Butler bounded direct tooling 与 hint-first memory runtime 接回主链）
 - [x] Feature 051：Session-Native Agent Runtime & Recall Loop（`behavior budget + ToolUniverseHints` 已落地；`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store，`user / assistant / tool_call / tool_result / context_summary` 会落到 `agent_session_turns`，`RecentConversation / session.export / session.reset` 都优先消费该 store；控制面已新增 `session.new / session.reset / session.unfocus`，Session Center 已提供 `全部 / 运行中 / 队列 / 历史` lane 视图；Butler chat 默认切到 `agent-led hint-first` memory runtime，并已把 `ButlerDecision + RecallPlan` 收口为统一 `ButlerLoopPlan`；Worker 默认切到 planner-capable `hint-first` runtime，仅在显式 profile override 下保留 `detailed_prefetch`；`AgentSessionTurn` 现在还会生成正式 replay/sanitize 投影，并进入预算驱动裁剪链；默认 `single_loop_executor` 已从 general Butler 扩到显式 `research/dev/ops` worker lens，主模型调用直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环，不再额外触发 `butler-decision` 或 `memory-recall-planning` 辅助 phase；当 MemU backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义）
 - [x] Feature 052：Trusted Tooling Surface & Permission Relaxation（trusted local baseline 已把 `general / research / dev / ops` 默认 tool profile 收口到 `standard`；MCP provider 已支持 `mount_policy=explicit|auto_readonly|auto_all`，其中 `auto_readonly` 默认自动挂载 `minimal` 工具；Skill provider 已支持 `permission_mode=inherit|restrict` 且默认 `inherit`；runtime metadata / control plane 已同步暴露 `recommended_tools + mounted_tools + blocked_tools`，`selected_tools_json` 退化为 recommended mirror；危险动作仍继续走 ToolBroker / Policy / Approval / Audit 主链）
+- [x] Feature 054：Builtin Memory Engine & Shared Retrieval Platform（`local_only` 已升级为内建 Memory Engine，默认优先使用本地 `Qwen3-Embedding-0.6B`，不可用时回退到双语 hash embedding；`memory_reasoning / memory_expand / memory_embedding / memory_rerank` 已接入 Settings / CLI / runtime；`EmbeddingProfile / IndexGeneration / IndexBuildJob / CorpusKind` 已形成共享 retrieval platform contract，Memory 与未来 knowledge base 共用 generation lifecycle；embedding 迁移已支持后台 build、进度展示、cutover / cancel / rollback，且迁移期间旧 generation 持续服务；facts / Vault 候选仍走 proposal / commit / grant / audit 治理链）
 - [x] Feature 053：Session-Scoped Project Activation（对齐 Agent Zero 的 `each chat/context has its own active project` 语义；`session.new` 现在会冻结当前 `project_id/workspace_id` 并形成待消费的新会话 snapshot；chat 首条消息会透传 token + project/workspace 并写入 `workspace:<workspace_id>:chat:<channel>:<thread_id>` durable scope；`session.focus / session.reset` 会恢复目标会话自己的 project/workspace 到 control-plane selector；Web `useChatStream / ChatWorkbench` 也已支持 pending snapshot 的刷新恢复，不再把新会话 project 绑定退回 surface-selected selector）
 - [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为“当前项目主 Agent + 已创建 Agent 列表 + 模板创建流”，并将结构化编辑控件替代技术字段编辑主路径）
 

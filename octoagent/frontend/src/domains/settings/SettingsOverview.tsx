@@ -178,7 +178,7 @@ export default function SettingsOverview({
         <div className="wb-note-stack">
           <div className="wb-note">
             <strong>平台级</strong>
-            <span>Models & Providers、Memory bridge 会影响整个平台默认运行面。</span>
+            <span>Models & Providers、Memory 默认质量层会影响整个平台默认运行面。</span>
           </div>
           <div className="wb-note">
             <strong>项目默认</strong>
@@ -277,7 +277,7 @@ export default function SettingsOverview({
           <div className="wb-note">
             <strong>这页下面还有什么</strong>
             <span>
-              Providers、模型别名、Memory 和渠道连接都还在下面；只想先用起来，不必一次看完。
+              Providers、模型别名、Memory 默认质量层和渠道连接都还在下面；只想先用起来，不必一次看完。
             </span>
           </div>
           <div className="wb-note">
@@ -300,7 +300,7 @@ export default function SettingsOverview({
             <p className="wb-card-label">记忆连接</p>
             <strong>{memoryLabel}</strong>
             <span>{memoryStatus}</span>
-            <span>Memory 连接和模式切换仍在本页处理。</span>
+            <span>Memory 默认质量层和兼容接入都仍在本页处理。</span>
           </article>
           <article className="wb-card">
             <p className="wb-card-label">Agent 能力入口</p>

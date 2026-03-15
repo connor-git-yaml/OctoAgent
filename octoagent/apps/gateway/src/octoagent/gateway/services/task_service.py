@@ -71,6 +71,9 @@ from octoagent.memory import (
     MemoryPartition,
     init_memory_db,
 )
+from octoagent.provider.dx.memory_retrieval_profile import (
+    apply_retrieval_profile_to_hook_options,
+)
 from ulid import ULID
 
 from .agent_context import (
@@ -1417,6 +1420,12 @@ class TaskService:
                 project=project,
                 workspace=workspace,
             )
+            backend_status = await memory_service.get_backend_status()
+            retrieval_profile = await self._agent_context.get_memory_retrieval_profile(
+                project=project,
+                workspace=workspace,
+                backend_status=backend_status,
+            )
             agent_profile = await self._stores.agent_context_store.get_agent_profile(
                 frame.agent_profile_id
             )
@@ -1433,8 +1442,9 @@ class TaskService:
                     memory_recall_max_hits(agent_profile, default=8),
                     int(plan["initial_hit_count"]) or 0,
                 ),
-                hook_options=build_default_memory_recall_hook_options(
-                    agent_profile=agent_profile
+                hook_options=apply_retrieval_profile_to_hook_options(
+                    build_default_memory_recall_hook_options(agent_profile=agent_profile),
+                    retrieval_profile,
                 ),
             )
             result_artifact_id = await self._store_delayed_recall_artifact(

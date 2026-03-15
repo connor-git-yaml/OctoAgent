@@ -591,6 +591,10 @@ class MemoryService:
     ) -> MemorySearchOptions:
         return MemorySearchOptions(
             expanded_queries=list(expanded_queries),
+            reasoning_target=hook_options.reasoning_target,
+            expand_target=hook_options.expand_target,
+            embedding_target=hook_options.embedding_target,
+            rerank_target=hook_options.rerank_target,
             focus_terms=list(hook_trace.focus_terms),
             subject_hint=hook_trace.subject_hint,
             post_filter_mode=hook_options.post_filter_mode,

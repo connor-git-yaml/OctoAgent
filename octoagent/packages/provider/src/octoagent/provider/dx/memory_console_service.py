@@ -49,6 +49,7 @@ from ulid import ULID
 
 from .backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
+from .memory_retrieval_profile import load_memory_retrieval_profile
 
 _MEMORY_BINDING_TYPES = {
     ProjectBindingType.SCOPE,
@@ -234,6 +235,10 @@ class MemoryConsoleService:
         )
         memory = await self._memory_service_for_context(context)
         backend_status = await memory.get_backend_status()
+        retrieval_profile = load_memory_retrieval_profile(
+            self._project_root,
+            backend_status=backend_status,
+        )
         records: list[MemoryRecordProjection] = []
         summary = MemoryConsoleSummary(scope_count=len(context.selected_scope_ids))
         for scope in context.selected_scope_ids:
@@ -364,6 +369,7 @@ class MemoryConsoleService:
             retrieval_backend=backend_status.active_backend,
             backend_state=backend_status.state.value,
             index_health=self._backend_index_health(backend_status),
+            retrieval_profile=retrieval_profile,
             filters=MemoryConsoleFilter(
                 project_id=context.project.project_id,
                 workspace_id=context.workspace.workspace_id if context.workspace else "",

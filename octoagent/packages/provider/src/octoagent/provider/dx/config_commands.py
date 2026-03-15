@@ -118,20 +118,36 @@ def _print_memory_summary(config: OctoAgentConfig) -> None:
     memory = config.memory
     console.print("[bold]Memory[/bold]:")
     console.print(f"  backend_mode:       {memory.backend_mode}")
+    console.print(
+        "  reasoning_alias:   "
+        f"{memory.reasoning_model_alias or 'main（默认）'}"
+    )
+    console.print(
+        "  expand_alias:      "
+        f"{memory.expand_model_alias or 'main（默认）'}"
+    )
+    console.print(
+        "  embedding_alias:   "
+        f"{memory.embedding_model_alias or 'builtin（默认）'}"
+    )
+    console.print(
+        "  rerank_alias:      "
+        f"{memory.rerank_model_alias or 'heuristic（默认）'}"
+    )
     if memory.backend_mode != "memu":
-        console.print("  transport:          local sqlite / vault")
+        console.print("  compat_transport:   builtin")
         return
-    console.print(f"  bridge_transport:   {memory.bridge_transport}")
+    console.print(f"  compat_transport:   {memory.bridge_transport}")
     if memory.bridge_transport == "command":
-        console.print(f"  bridge_command:     {memory.bridge_command or '-'}")
-        console.print(f"  bridge_command_cwd: {memory.bridge_command_cwd or '-'}")
+        console.print(f"  compat_command:     {memory.bridge_command or '-'}")
+        console.print(f"  compat_command_cwd: {memory.bridge_command_cwd or '-'}")
         console.print(
-            f"  command_timeout:    {memory.bridge_command_timeout_seconds:g} 秒"
+            f"  compat_timeout:     {memory.bridge_command_timeout_seconds:g} 秒"
         )
         return
-    console.print(f"  bridge_url:         {memory.bridge_url or '-'}")
-    console.print(f"  bridge_api_key_env: {memory.bridge_api_key_env or '-'}")
-    console.print(f"  http_timeout:       {memory.bridge_timeout_seconds:g} 秒")
+    console.print(f"  compat_url:         {memory.bridge_url or '-'}")
+    console.print(f"  compat_api_key_env: {memory.bridge_api_key_env or '-'}")
+    console.print(f"  compat_timeout:     {memory.bridge_timeout_seconds:g} 秒")
 
 
 def _save_memory_patch(
@@ -745,7 +761,7 @@ def alias_set(
 
 @config.group("memory")
 def memory_group() -> None:
-    """管理 Memory 后端与 MemU 连接方式"""
+    """管理内建 Memory 引擎与旧兼容接入方式"""
 
 
 @memory_group.command("show")
@@ -782,11 +798,11 @@ def memory_local(ctx: click.Context) -> None:
 
 
 @memory_group.command("memu-http")
-@click.option("--bridge-url", default=None, help="MemU HTTP bridge 基础地址")
+@click.option("--bridge-url", default=None, help="兼容 HTTP Bridge 基础地址")
 @click.option(
     "--api-key-env",
     default=None,
-    help="HTTP bridge 的 API Key 环境变量名（可选）",
+    help="兼容 HTTP Bridge 的 API Key 环境变量名（可选）",
 )
 @click.option("--timeout", type=float, default=None, help="HTTP 请求超时（秒）")
 @click.pass_context
@@ -796,12 +812,12 @@ def memory_memu_http(
     api_key_env: str | None,
     timeout: float | None,
 ) -> None:
-    """配置 MemU HTTP bridge。"""
+    """配置兼容 HTTP Bridge。"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
     resolved_url = _resolve_required_value(
         bridge_url,
-        prompt_text="MemU HTTP bridge 地址",
+        prompt_text="兼容 HTTP Bridge 地址",
         error_message="缺少 --bridge-url，且当前终端无法交互输入。",
         default="https://memory.example.com",
     )
@@ -820,12 +836,12 @@ def memory_memu_http(
     _save_memory_patch(
         project_root,
         patch=patch,
-        success_message="已更新为 MemU HTTP bridge 配置。",
+        success_message="已更新兼容 HTTP Bridge 配置。",
     )
 
 
 @memory_group.command("memu-command")
-@click.option("--command", "command_value", default=None, help="本地 MemU bridge 命令")
+@click.option("--command", "command_value", default=None, help="本地兼容 Bridge 命令")
 @click.option("--cwd", default=None, help="执行命令时的工作目录")
 @click.option("--timeout", type=float, default=None, help="命令执行超时（秒）")
 @click.pass_context
@@ -835,12 +851,12 @@ def memory_memu_command(
     cwd: str | None,
     timeout: float | None,
 ) -> None:
-    """配置 MemU 本地命令桥接。"""
+    """配置本地兼容命令桥接。"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
     resolved_command = _resolve_required_value(
         command_value,
-        prompt_text="MemU 本地命令",
+        prompt_text="兼容 Bridge 本地命令",
         error_message="缺少 --command，且当前终端无法交互输入。",
         default="uv run python scripts/memu_bridge.py",
     )
@@ -859,7 +875,7 @@ def memory_memu_command(
     _save_memory_patch(
         project_root,
         patch=patch,
-        success_message="已更新为 MemU 本地命令配置。",
+        success_message="已更新本地兼容命令配置。",
     )
 
 

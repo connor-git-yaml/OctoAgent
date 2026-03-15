@@ -144,6 +144,20 @@ async def get_control_diagnostics(control_plane=Depends(get_control_plane_servic
     return (await control_plane.get_diagnostics_summary()).model_dump(mode="json", by_alias=True)
 
 
+@router.get("/api/control/resources/retrieval-platform")
+async def get_control_retrieval_platform(
+    project_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    return (
+        await control_plane.get_retrieval_platform_document(
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
+    ).model_dump(mode="json", by_alias=True)
+
+
 @router.get("/api/control/resources/memory")
 async def get_control_memory(
     project_id: str | None = Query(default=None),

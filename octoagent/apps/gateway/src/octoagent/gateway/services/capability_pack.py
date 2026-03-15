@@ -49,6 +49,9 @@ from octoagent.memory import (
 )
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.memory_console_service import MemoryConsoleService
+from octoagent.provider.dx.memory_retrieval_profile import (
+    apply_retrieval_profile_to_hook_options,
+)
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillManifest, SkillRegistry
 from octoagent.tooling import (
@@ -2593,6 +2596,12 @@ class CapabilityPackService:
                 project=project,
                 workspace=workspace,
             )
+            backend_status = await memory_service.get_backend_status()
+            retrieval_profile = await self._memory_runtime_service.retrieval_profile_for_scope(
+                project=project,
+                workspace=workspace,
+                backend_status=backend_status,
+            )
             scope_ids = await _resolve_memory_scope_ids(
                 task=task,
                 project=project,
@@ -2605,19 +2614,22 @@ class CapabilityPackService:
                     expanded_queries=[],
                     scope_ids=[],
                     hits=[],
-                    backend_status=await memory_service.get_backend_status(),
+                    backend_status=backend_status,
                     degraded_reasons=["memory_scope_unresolved"],
                 )
                 return json.dumps(empty.model_dump(mode="json"), ensure_ascii=False)
             bounded_limit = max(1, min(limit, 8))
-            hook_options = build_default_memory_recall_hook_options(
-                subject_hint=subject_hint,
-            ).model_copy(
-                update={
-                    "post_filter_mode": post_filter_mode,
-                    "rerank_mode": rerank_mode,
-                    "focus_terms": list(focus_terms or []),
-                }
+            hook_options = apply_retrieval_profile_to_hook_options(
+                build_default_memory_recall_hook_options(
+                    subject_hint=subject_hint,
+                ).model_copy(
+                    update={
+                        "post_filter_mode": post_filter_mode,
+                        "rerank_mode": rerank_mode,
+                        "focus_terms": list(focus_terms or []),
+                    }
+                ),
+                retrieval_profile,
             )
             recall = await memory_service.recall_memory(
                 scope_ids=scope_ids[:4],

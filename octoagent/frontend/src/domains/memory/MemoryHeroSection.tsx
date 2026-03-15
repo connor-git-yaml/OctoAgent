@@ -7,6 +7,7 @@ import { formatMemoryMode } from "./shared";
 interface MemoryHeroSectionProps {
   memory: MemoryConsoleDocument;
   memoryMode: string;
+  bridgeTransport: string;
   heroTone: "success" | "warning" | "danger";
   heroTitle: string;
   heroSummary: string;
@@ -14,11 +15,13 @@ interface MemoryHeroSectionProps {
   retrievalLabel: string;
   nextActionTitle: string;
   nextActionSummary: string;
+  showNextActionPanel: boolean;
   guideItems: MemoryGuideItem[];
   hasVisibleRecords: boolean;
   hasStoredRecords: boolean;
   hasBacklog: boolean;
   isDegraded: boolean;
+  missingSetupItems: string[];
   busyActionId: string | null;
   onResetFilters: () => Promise<void>;
   onFlushMemory: () => Promise<void>;
@@ -27,6 +30,7 @@ interface MemoryHeroSectionProps {
 export default function MemoryHeroSection({
   memory,
   memoryMode,
+  bridgeTransport,
   heroTone,
   heroTitle,
   heroSummary,
@@ -34,15 +38,21 @@ export default function MemoryHeroSection({
   retrievalLabel,
   nextActionTitle,
   nextActionSummary,
+  showNextActionPanel,
   guideItems,
   hasVisibleRecords,
   hasStoredRecords,
   hasBacklog,
   isDegraded,
+  missingSetupItems,
   busyActionId,
   onResetFilters,
   onFlushMemory,
 }: MemoryHeroSectionProps) {
+  const retrievalProfile = memory.retrieval_profile;
+  const engineLabel = retrievalProfile?.engine_label || formatMemoryMode(memoryMode);
+  const transportLabel = retrievalProfile?.transport_label || bridgeTransport || "内建";
+
   return (
     <>
       <section className="wb-hero wb-hero-memory">
@@ -51,11 +61,12 @@ export default function MemoryHeroSection({
           <h1>{heroTitle}</h1>
           <p>{heroSummary}</p>
           <div className="wb-chip-row">
-            <span className="wb-chip">模式 {formatMemoryMode(memoryMode)}</span>
+            <span className="wb-chip">引擎 {engineLabel}</span>
             <span className={`wb-chip ${heroTone === "success" ? "is-success" : "is-warning"}`}>
               状态 {stateLabel}
             </span>
             <span className="wb-chip">当前检索 {retrievalLabel}</span>
+            <span className="wb-chip">接入 {transportLabel}</span>
             <span className="wb-chip">更新时间 {formatDateTime(memory.updated_at)}</span>
           </div>
         </div>
@@ -82,77 +93,75 @@ export default function MemoryHeroSection({
       </section>
 
       <div className="wb-split">
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">下一步</p>
-              <h3>{nextActionTitle}</h3>
-            </div>
-            <span className={`wb-status-pill is-${heroTone}`}>{stateLabel}</span>
-          </div>
-
-          <p className="wb-panel-copy">{nextActionSummary}</p>
-
-          <div className="wb-note-stack">
-            {guideItems.map((item) => (
-              <div key={`${item.title}-${item.summary}`} className="wb-note">
-                <div className="wb-panel-head">
-                  <strong>{item.title}</strong>
-                  <span
-                    className={`wb-status-pill is-${
-                      item.state === "done"
-                        ? "success"
-                        : item.state === "optional"
-                          ? "draft"
-                          : "warning"
-                    }`}
-                  >
-                    {item.state === "done" ? "已完成" : item.state === "optional" ? "可选" : "待处理"}
-                  </span>
-                </div>
-                <span>{item.summary}</span>
+        {showNextActionPanel ? (
+          <section className="wb-panel">
+            <div className="wb-panel-head">
+              <div>
+                <p className="wb-card-label">下一步</p>
+                <h3>{nextActionTitle}</h3>
               </div>
-            ))}
-          </div>
+              <span className={`wb-status-pill is-${heroTone}`}>{stateLabel}</span>
+            </div>
 
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            {!hasVisibleRecords || !hasStoredRecords ? (
-              <Link className="wb-button wb-button-primary" to="/chat">
-                去 Chat 产生内容
-              </Link>
-            ) : null}
-            {memoryMode === "local_only" || isDegraded ? (
-              <Link className="wb-button wb-button-secondary" to="/settings#settings-group-memory">
-                打开 Settings &gt; Memory
-              </Link>
-            ) : null}
-            {!hasVisibleRecords && hasStoredRecords ? (
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={() => void onResetFilters()}
-                disabled={busyActionId === "memory.query"}
-              >
-                清空筛选后重查
-              </button>
-            ) : null}
-            {hasBacklog ? (
-              <button
-                type="button"
-                className="wb-button wb-button-tertiary"
-                onClick={() => void onFlushMemory()}
-                disabled={busyActionId === "memory.flush"}
-              >
-                {busyActionId === "memory.flush" ? "整理中..." : "整理最新记忆"}
-              </button>
-            ) : null}
-            {isDegraded ? (
-              <Link className="wb-button wb-button-tertiary" to="/advanced">
-                打开 Advanced 诊断
-              </Link>
-            ) : null}
-          </div>
-        </section>
+            <p className="wb-panel-copy">{nextActionSummary}</p>
+
+            <div className="wb-note-stack">
+              {guideItems.map((item) => (
+                <div key={`${item.title}-${item.summary}`} className="wb-note">
+                  <div className="wb-panel-head">
+                    <strong>{item.title}</strong>
+                    <span
+                      className={`wb-status-pill is-${
+                        item.state === "optional" ? "draft" : "warning"
+                      }`}
+                    >
+                      {item.state === "optional" ? "可选" : "待处理"}
+                    </span>
+                  </div>
+                  <span>{item.summary}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="wb-inline-actions wb-inline-actions-wrap">
+              {!hasVisibleRecords || !hasStoredRecords ? (
+                <Link className="wb-button wb-button-primary" to="/chat">
+                  去 Chat 产生内容
+                </Link>
+              ) : null}
+              {memoryMode === "local_only" || isDegraded || missingSetupItems.length > 0 ? (
+                <Link className="wb-button wb-button-secondary" to="/settings#settings-group-memory">
+                  打开 Settings &gt; Memory
+                </Link>
+              ) : null}
+              {!hasVisibleRecords && hasStoredRecords ? (
+                <button
+                  type="button"
+                  className="wb-button wb-button-secondary"
+                  onClick={() => void onResetFilters()}
+                  disabled={busyActionId === "memory.query"}
+                >
+                  清空筛选后重查
+                </button>
+              ) : null}
+              {hasBacklog ? (
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() => void onFlushMemory()}
+                  disabled={busyActionId === "memory.flush"}
+                >
+                  {busyActionId === "memory.flush" ? "整理中..." : "整理最新记忆"}
+                </button>
+              ) : null}
+              {isDegraded ? (
+                <Link className="wb-button wb-button-tertiary" to="/advanced">
+                  打开 Advanced 诊断
+                </Link>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
         <section className="wb-panel">
           <div className="wb-panel-head">
@@ -166,10 +175,12 @@ export default function MemoryHeroSection({
             <div className="wb-note">
               <strong>当前模式</strong>
               <span>
-                {formatMemoryMode(memoryMode)}
-                {memoryMode === "local_only"
-                  ? "：基础链路，不需要额外 Memory 服务。"
-                  : "：适合需要跨会话检索和更强回放能力的场景。"}
+                {engineLabel}
+                {retrievalProfile?.backend_summary
+                  ? `：${retrievalProfile.backend_summary}`
+                  : memoryMode === "local_only"
+                    ? "：基础链路，不需要额外 Memory 服务。"
+                    : "：适合需要跨会话检索和更强回放能力的场景。"}
               </span>
             </div>
             <div className="wb-note">
@@ -181,6 +192,28 @@ export default function MemoryHeroSection({
                   : "。这是这次页面实际使用的记忆检索路径。"}
               </span>
             </div>
+            {retrievalProfile?.bindings?.map((item) => (
+              <div key={item.binding_key} className="wb-note">
+                <div className="wb-panel-head">
+                  <strong>{item.label}</strong>
+                  <span
+                    className={`wb-status-pill is-${
+                      item.status === "configured"
+                        ? "success"
+                        : item.status === "misconfigured"
+                          ? "warning"
+                          : "draft"
+                    }`}
+                  >
+                    {item.effective_label}
+                  </span>
+                </div>
+                <span>{item.summary}</span>
+                {item.configured_alias && item.configured_alias !== item.effective_target ? (
+                  <span>已配置 {item.configured_alias}，当前实际回退到 {item.effective_label}。</span>
+                ) : null}
+              </div>
+            ))}
             <div className="wb-note">
               <strong>内容覆盖范围</strong>
               <span>
@@ -201,7 +234,11 @@ export default function MemoryHeroSection({
             <div className="wb-note">
               <strong>设置入口</strong>
               <span>
-                所有模式切换和最小配置都在 Settings 的 Memory 分区，不需要单独理解 backend 部署细节。
+                {memoryMode === "local_only"
+                  ? "Settings > Memory 现在主要用来绑定加工、扩写、embedding 和 rerank 模型。当前这套实例还在用内建记忆引擎，不需要额外 bridge。"
+                  : bridgeTransport === "command"
+                    ? "Settings > Memory 仍然可以绑定 retrieval models；当前这套实例额外走了本地 MemU 兼容链路。command / http 这组字段只在旧实例迁移或排障时才需要展开。"
+                    : "Settings > Memory 仍然可以绑定 retrieval models；当前这套实例额外走了远端 MemU 兼容链路。command / http 这组字段只在旧实例迁移或排障时才需要展开。"}
               </span>
               <div className="wb-inline-actions">
                 <Link

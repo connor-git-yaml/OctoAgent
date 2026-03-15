@@ -759,6 +759,78 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         channel_summary: { telegram_enabled: false },
         deep_refs: {},
       },
+      retrieval_platform: {
+        contract_version: "1.0.0",
+        resource_type: "retrieval_platform",
+        resource_id: "retrieval:platform",
+        schema_version: 1,
+        generated_at: "2026-03-09T10:00:00Z",
+        updated_at: "2026-03-09T10:00:00Z",
+        status: "ready",
+        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
+        warnings: [],
+        capabilities: [],
+        refs: {},
+        active_project_id: "project-default",
+        active_workspace_id: "workspace-default",
+        profiles: [],
+        corpora: [
+          {
+            corpus_kind: "memory",
+            label: "Memory",
+            active_generation_id: "gen-memory-default",
+            pending_generation_id: "",
+            active_profile_id: "builtin:engine-default",
+            active_profile_target: "engine-default",
+            desired_profile_id: "builtin:engine-default",
+            desired_profile_target: "engine-default",
+            state: "ready",
+            summary: "当前 embedding 与在线索引保持一致。",
+            last_cutover_at: "2026-03-09T10:00:00Z",
+            warnings: [],
+          },
+          {
+            corpus_kind: "knowledge_base",
+            label: "知识库",
+            active_generation_id: "",
+            pending_generation_id: "",
+            active_profile_id: "",
+            active_profile_target: "",
+            desired_profile_id: "builtin:engine-default",
+            desired_profile_target: "engine-default",
+            state: "reserved",
+            summary: "知识库还没有接入内容。",
+            last_cutover_at: null,
+            warnings: [],
+          },
+        ],
+        generations: [
+          {
+            generation_id: "gen-memory-default",
+            corpus_kind: "memory",
+            profile_id: "builtin:engine-default",
+            profile_target: "engine-default",
+            label: "Qwen3-Embedding-0.6B（默认）",
+            status: "active",
+            is_active: true,
+            build_job_id: "",
+            previous_generation_id: "",
+            created_at: "2026-03-09T10:00:00Z",
+            updated_at: "2026-03-09T10:00:00Z",
+            activated_at: "2026-03-09T10:00:00Z",
+            completed_at: "2026-03-09T10:00:00Z",
+            rollback_deadline: null,
+            warnings: [],
+            metadata: {},
+          },
+        ],
+        build_jobs: [],
+        summary: {
+          active_generation_count: 1,
+          pending_generation_count: 0,
+          profile_count: 1,
+        },
+      },
       memory: {
         contract_version: "1.0.0",
         resource_type: "memory_console",
@@ -2167,7 +2239,7 @@ describe("App workbench routing", () => {
     ).toBe(true);
   });
 
-  it("Memory 页面会串起 operator 动作和 export/recovery 入口", async () => {
+  it("Memory 页面会收口成记忆主路径，不再混入 operator 与备份入口", async () => {
     window.history.pushState({}, "", "/memory");
 
     const snapshot = buildSnapshot();
@@ -2225,7 +2297,7 @@ describe("App workbench routing", () => {
     let sessionExported = false;
     let exportRequestBody: Record<string, unknown> | null = null;
 
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(snapshot));
@@ -2423,45 +2495,17 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("允许读取受限记忆")).toBeInTheDocument();
-    expect(await screen.findByText("创建备份")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "允许一次" }));
-    expect(await screen.findByText(/已处理审批/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "创建备份" }));
-    expect(await screen.findByText(/已创建 backup bundle/)).toBeInTheDocument();
-    expect(await screen.findByText("/tmp/backup.zip")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "导出当前会话" }));
-    expect(await screen.findByText(/已导出会话数据/)).toBeInTheDocument();
-
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes(
-          '"action_id":"operator.approval.resolve"'
-        )
-      )
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"backup.create"')
-      )
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"session.export"')
-      )
-    ).toBe(true);
-    expect(sessionExported).toBe(true);
-    expect(exportRequestBody).toMatchObject({
-      action_id: "session.export",
-      params: {
-        session_id: focusedSession.session_id,
-      },
-    });
-    const exportParams = exportRequestBody?.["params"] as Record<string, unknown> | undefined;
-    expect(exportParams?.thread_id).toBeUndefined();
+    expect(await screen.findByRole("button", { name: "整理最新记忆" })).toBeInTheDocument();
+    expect((await screen.findAllByText("打开 Settings > Memory")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
+    expect(screen.queryByText("备份与恢复")).not.toBeInTheDocument();
+    expect(screen.queryByText("允许读取受限记忆")).not.toBeInTheDocument();
+    expect(screen.queryByText("创建备份")).not.toBeInTheDocument();
+    expect(screen.queryByText("导出当前会话")).not.toBeInTheDocument();
+    expect(operatorResolved).toBe(false);
+    expect(backupCreated).toBe(false);
+    expect(sessionExported).toBe(false);
+    expect(exportRequestBody).toBeNull();
   });
 
   it("Work 页面会禁用 terminal work 的 worker.review 按钮", async () => {
@@ -3074,6 +3118,112 @@ describe("App workbench routing", () => {
     expect(screen.getByText(/Research Worker · 标准工具面 · network \/ browser \/ session/)).toBeInTheDocument();
     expect(screen.getAllByText(/owner timezone 未配置/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Butler 会先接住这条实时问题/).length).toBeGreaterThan(0);
+  });
+
+  it("Work 看板会显示后台 embedding 迁移，并允许切换到新索引", async () => {
+    window.history.pushState({}, "", "/work");
+
+    const snapshot = buildSnapshot();
+    snapshot.resources.retrieval_platform!.corpora[0] = {
+      ...snapshot.resources.retrieval_platform!.corpora[0],
+      pending_generation_id: "gen-memory-next",
+      desired_profile_id: "alias:knowledge-embed",
+      desired_profile_target: "knowledge-embed",
+      state: "migration_pending",
+      summary: "新的 embedding 已准备好切换，但当前查询仍继续使用旧索引。",
+      warnings: ["embedding 迁移尚未 cutover；当前仍使用 engine-default。"],
+    };
+    snapshot.resources.retrieval_platform!.generations.push({
+      generation_id: "gen-memory-next",
+      corpus_kind: "memory",
+      profile_id: "alias:knowledge-embed",
+      profile_target: "knowledge-embed",
+      label: "knowledge-embed",
+      status: "ready_to_cutover",
+      is_active: false,
+      build_job_id: "job-memory-next",
+      previous_generation_id: "gen-memory-default",
+      created_at: "2026-03-09T10:10:00Z",
+      updated_at: "2026-03-09T10:15:00Z",
+      activated_at: null,
+      completed_at: "2026-03-09T10:15:00Z",
+      rollback_deadline: null,
+      warnings: [],
+      metadata: {},
+    });
+    snapshot.resources.retrieval_platform!.build_jobs.push({
+      job_id: "job-memory-next",
+      corpus_kind: "memory",
+      generation_id: "gen-memory-next",
+      stage: "ready_to_cutover",
+      summary: "新索引已经准备好，等待切换。",
+      total_items: 120,
+      processed_items: 120,
+      percent_complete: 100,
+      can_cancel: true,
+      eta_seconds: 0,
+      created_at: "2026-03-09T10:10:00Z",
+      updated_at: "2026-03-09T10:15:00Z",
+      completed_at: "2026-03-09T10:15:00Z",
+      latest_error: "",
+      latest_maintenance_run_id: "run-memory-next",
+      metadata: {},
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/api/control/snapshot")) {
+        return Promise.resolve(jsonResponse(snapshot));
+      }
+      if (url.includes("/api/control/actions") && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            contract_version: "1.0.0",
+            result: {
+              contract_version: "1.0.0",
+              request_id: "req-retrieval-cutover",
+              correlation_id: "req-retrieval-cutover",
+              action_id: "retrieval.index.cutover",
+              status: "completed",
+              code: "RETRIEVAL_GENERATION_CUTOVER_READY",
+              message: "已切换到新的 embedding 索引。",
+              data: {},
+              resource_refs: [
+                {
+                  resource_type: "retrieval_platform",
+                  resource_id: "retrieval:platform",
+                  schema_version: 1,
+                },
+              ],
+              target_refs: [],
+              handled_at: "2026-03-09T10:16:00Z",
+            },
+          })
+        );
+      }
+      if (url.includes("/api/control/resources/retrieval-platform")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.retrieval_platform!));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("后台索引任务")).toBeInTheDocument();
+    expect(screen.getByText("Embedding 迁移正在后台准备，不会中断当前检索")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "切换到新索引" }));
+
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"retrieval.index.cutover"')
+      )
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String((call as FetchArgs)[1]?.body ?? "").includes('"generation_id":"gen-memory-next"')
+      )
+    ).toBe(true);
   });
 
   it("Memory 页面会按当前筛选条件提交查询并展示可读摘要", async () => {

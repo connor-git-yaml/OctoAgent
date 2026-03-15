@@ -1320,6 +1320,134 @@ export interface MemoryConsoleSummary {
   pending_replay_count: number;
 }
 
+export interface MemoryRetrievalBindingItem {
+  binding_key: string;
+  label: string;
+  configured_alias: string;
+  effective_target: string;
+  effective_label: string;
+  fallback_target: string;
+  fallback_label: string;
+  status: string;
+  summary: string;
+  warnings: string[];
+}
+
+export interface MemoryRetrievalProfile {
+  engine_mode: string;
+  engine_label: string;
+  transport: string;
+  transport_label: string;
+  active_backend: string;
+  active_backend_label: string;
+  backend_state: string;
+  backend_summary: string;
+  uses_compat_bridge: boolean;
+  bindings: MemoryRetrievalBindingItem[];
+  warnings: string[];
+}
+
+export type CorpusKind = "memory" | "knowledge_base";
+
+export interface EmbeddingProfile {
+  profile_id: string;
+  label: string;
+  target: string;
+  source_kind: string;
+  model_alias: string;
+  is_builtin: boolean;
+  is_available: boolean;
+  summary: string;
+  warnings: string[];
+}
+
+export type IndexGenerationStatus =
+  | "active"
+  | "queued"
+  | "building"
+  | "ready_to_cutover"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "rolled_back";
+
+export type IndexBuildJobStage =
+  | "queued"
+  | "scanning"
+  | "embedding"
+  | "writing_projection"
+  | "catching_up"
+  | "validating"
+  | "ready_to_cutover"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export interface IndexBuildJob {
+  job_id: string;
+  corpus_kind: CorpusKind;
+  generation_id: string;
+  stage: IndexBuildJobStage;
+  summary: string;
+  total_items: number;
+  processed_items: number;
+  percent_complete: number;
+  eta_seconds: number | null;
+  can_cancel: boolean;
+  latest_error: string;
+  latest_maintenance_run_id: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface IndexGeneration {
+  generation_id: string;
+  corpus_kind: CorpusKind;
+  profile_id: string;
+  profile_target: string;
+  label: string;
+  status: IndexGenerationStatus;
+  is_active: boolean;
+  build_job_id: string;
+  previous_generation_id: string;
+  created_at: string;
+  updated_at: string;
+  activated_at: string | null;
+  completed_at: string | null;
+  rollback_deadline: string | null;
+  warnings: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface RetrievalCorpusState {
+  corpus_kind: CorpusKind;
+  label: string;
+  active_generation_id: string;
+  pending_generation_id: string;
+  active_profile_id: string;
+  active_profile_target: string;
+  desired_profile_id: string;
+  desired_profile_target: string;
+  state: string;
+  summary: string;
+  last_cutover_at: string | null;
+  warnings: string[];
+}
+
+export interface RetrievalPlatformDocument extends ControlPlaneDocumentBase {
+  resource_type: "retrieval_platform";
+  resource_id: "retrieval:platform";
+  active_project_id: string;
+  active_workspace_id: string;
+  profiles: EmbeddingProfile[];
+  corpora: RetrievalCorpusState[];
+  generations: IndexGeneration[];
+  build_jobs: IndexBuildJob[];
+  summary: Record<string, unknown>;
+}
+
 export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
   resource_type: "memory_console";
   resource_id: "memory:overview";
@@ -1329,6 +1457,7 @@ export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
   retrieval_backend: string;
   backend_state: string;
   index_health: Record<string, unknown>;
+  retrieval_profile?: MemoryRetrievalProfile;
   filters: MemoryConsoleFilter;
   summary: MemoryConsoleSummary;
   records: MemoryRecordProjection[];
@@ -1654,6 +1783,7 @@ export interface ControlPlaneSnapshot {
     pipelines: SkillPipelineDocument;
     automation: AutomationJobDocument;
     diagnostics: DiagnosticsSummaryDocument;
+    retrieval_platform?: RetrievalPlatformDocument;
     memory: MemoryConsoleDocument;
     imports: ImportWorkbenchDocument;
   };

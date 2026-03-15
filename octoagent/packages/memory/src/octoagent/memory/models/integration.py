@@ -89,6 +89,10 @@ class MemoryRecallHookOptions(BaseModel):
 
     post_filter_mode: MemoryRecallPostFilterMode = MemoryRecallPostFilterMode.NONE
     rerank_mode: MemoryRecallRerankMode = MemoryRecallRerankMode.NONE
+    reasoning_target: str = Field(default="")
+    expand_target: str = Field(default="")
+    embedding_target: str = Field(default="")
+    rerank_target: str = Field(default="")
     focus_terms: list[str] = Field(default_factory=list)
     subject_hint: str = Field(default="")
     min_keyword_overlap: int = Field(default=1, ge=1, le=8)
@@ -98,6 +102,10 @@ class MemorySearchOptions(BaseModel):
     """传给高级 memory backend 的显式检索提示。"""
 
     expanded_queries: list[str] = Field(default_factory=list)
+    reasoning_target: str = Field(default="")
+    expand_target: str = Field(default="")
+    embedding_target: str = Field(default="")
+    rerank_target: str = Field(default="")
     focus_terms: list[str] = Field(default_factory=list)
     subject_hint: str = Field(default="")
     post_filter_mode: MemoryRecallPostFilterMode = MemoryRecallPostFilterMode.NONE

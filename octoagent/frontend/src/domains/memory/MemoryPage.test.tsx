@@ -21,8 +21,71 @@ function buildMemorySnapshot(): any {
         active_project_id: "project-default",
         active_workspace_id: "workspace-default",
         retrieval_backend: "memu",
-        backend_state: "ready",
+        backend_state: "healthy",
         backend_id: "memory-local",
+        retrieval_profile: {
+          engine_mode: "memu_compat",
+          engine_label: "MemU 兼容链路",
+          transport: "http",
+          transport_label: "HTTP Bridge",
+          active_backend: "memu",
+          active_backend_label: "增强检索",
+          backend_state: "healthy",
+          backend_summary: "当前已经通过 HTTP Bridge 接上增强记忆链路。",
+          uses_compat_bridge: true,
+          warnings: [],
+          bindings: [
+            {
+              binding_key: "reasoning",
+              label: "记忆加工",
+              configured_alias: "main",
+              effective_target: "main",
+              effective_label: "main",
+              fallback_target: "main",
+              fallback_label: "main（默认）",
+              status: "configured",
+              summary: "当前优先用 main 做记忆加工、总结和候选整理。",
+              warnings: [],
+            },
+            {
+              binding_key: "expand",
+              label: "查询扩写",
+              configured_alias: "",
+              effective_target: "main",
+              effective_label: "main（默认）",
+              fallback_target: "main",
+              fallback_label: "main（默认）",
+              status: "fallback",
+              summary: "未绑定查询扩写模型时，当前沿用 main 做 recall 扩写。",
+              warnings: [],
+            },
+            {
+              binding_key: "embedding",
+              label: "语义检索",
+              configured_alias: "",
+              effective_target: "engine-default",
+              effective_label: "Qwen3-Embedding-0.6B（默认）",
+              fallback_target: "engine-default",
+              fallback_label: "Qwen3-Embedding-0.6B（默认）",
+              status: "fallback",
+              summary:
+                "未绑定 embedding 模型时，当前优先由内建 Qwen3-Embedding-0.6B 接管；若本机运行时暂不可用，会自动回退到双语 hash embedding。",
+              warnings: [],
+            },
+            {
+              binding_key: "rerank",
+              label: "结果重排",
+              configured_alias: "",
+              effective_target: "heuristic",
+              effective_label: "heuristic（默认）",
+              fallback_target: "heuristic",
+              fallback_label: "heuristic（默认）",
+              status: "fallback",
+              summary: "未绑定 rerank 模型时，当前继续使用 heuristic 重排。",
+              warnings: [],
+            },
+          ],
+        },
         filters: {
           query: "",
           layer: "",
@@ -277,6 +340,188 @@ describe("MemoryPage", () => {
     expect(within(derivedInspector!).getByText("更偏好异步")).toBeInTheDocument();
   });
 
+  it("只保留真正需要处理的 Memory 提示，并移除无关的全局待办区", async () => {
+    mockWorkbench = {
+      snapshot: buildMemorySnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "还有新的内容待整理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "整理最新记忆" })).toBeInTheDocument();
+    expect(screen.queryByText("现在就能使用")).not.toBeInTheDocument();
+    expect(screen.queryByText("继续积累内容")).not.toBeInTheDocument();
+    expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
+    expect(screen.queryByText("备份与恢复")).not.toBeInTheDocument();
+  });
+
+  it("会展示当前实际生效的检索画像，而不是只靠模式猜状态", async () => {
+    mockWorkbench = {
+      snapshot: buildMemorySnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("引擎 MemU 兼容链路")).toBeInTheDocument();
+    expect(screen.getByText("接入 HTTP Bridge")).toBeInTheDocument();
+    expect(screen.getByText("记忆加工")).toBeInTheDocument();
+    expect(screen.getByText("当前优先用 main 做记忆加工、总结和候选整理。")).toBeInTheDocument();
+    expect(screen.getByText("语义检索")).toBeInTheDocument();
+    expect(screen.getByText("Qwen3-Embedding-0.6B（默认）")).toBeInTheDocument();
+  });
+
+  it("会在 Memory 页面展示 embedding 迁移进度，并允许切换到新索引", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.retrieval_platform = {
+      resource_type: "retrieval_platform",
+      active_project_id: "project-default",
+      active_workspace_id: "workspace-default",
+      profiles: [],
+      corpora: [
+        {
+          corpus_kind: "memory",
+          label: "Memory",
+          active_generation_id: "gen-memory-active",
+          pending_generation_id: "gen-memory-next",
+          active_profile_id: "builtin:engine-default",
+          active_profile_target: "engine-default",
+          desired_profile_id: "alias:knowledge-embed",
+          desired_profile_target: "knowledge-embed",
+          state: "migration_pending",
+          summary: "新的 embedding 已准备好切换，但当前查询仍继续使用旧索引。",
+          warnings: ["embedding 迁移尚未 cutover；当前仍使用 engine-default。"],
+          last_cutover_at: "2026-03-14T09:00:00Z",
+        },
+      ],
+      generations: [
+        {
+          generation_id: "gen-memory-active",
+          corpus_kind: "memory",
+          profile_id: "builtin:engine-default",
+          profile_target: "engine-default",
+          label: "Qwen3-Embedding-0.6B（默认）",
+          status: "active",
+          is_active: true,
+          build_job_id: "",
+          previous_generation_id: "",
+          created_at: "2026-03-14T09:00:00Z",
+          updated_at: "2026-03-14T09:00:00Z",
+          activated_at: "2026-03-14T09:00:00Z",
+          completed_at: "2026-03-14T09:00:00Z",
+          rollback_deadline: null,
+          warnings: [],
+          metadata: {},
+        },
+        {
+          generation_id: "gen-memory-next",
+          corpus_kind: "memory",
+          profile_id: "alias:knowledge-embed",
+          profile_target: "knowledge-embed",
+          label: "knowledge-embed",
+          status: "ready_to_cutover",
+          is_active: false,
+          build_job_id: "job-memory-next",
+          previous_generation_id: "gen-memory-active",
+          created_at: "2026-03-15T10:00:00Z",
+          updated_at: "2026-03-15T10:05:00Z",
+          activated_at: null,
+          completed_at: "2026-03-15T10:05:00Z",
+          rollback_deadline: null,
+          warnings: ["配置已更新；切换前仍继续使用旧索引。"],
+          metadata: {},
+        },
+      ],
+      build_jobs: [
+        {
+          job_id: "job-memory-next",
+          corpus_kind: "memory",
+          generation_id: "gen-memory-next",
+          stage: "ready_to_cutover",
+          summary: "新索引已经准备好，等待切换。",
+          total_items: 120,
+          processed_items: 120,
+          percent_complete: 100,
+          can_cancel: true,
+          created_at: "2026-03-15T10:00:00Z",
+          updated_at: "2026-03-15T10:05:00Z",
+          completed_at: "2026-03-15T10:05:00Z",
+          latest_error: "",
+          latest_maintenance_run_id: "run-memory-next",
+          metadata: {},
+        },
+      ],
+      warnings: [],
+      summary: {
+        active_generation_count: 1,
+        pending_generation_count: 1,
+        profile_count: 2,
+      },
+      updated_at: "2026-03-15T10:05:00Z",
+    };
+    const submitAction = vi.fn().mockResolvedValue(null);
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Embedding 迁移")).toBeInTheDocument();
+    expect(screen.getByText("当前查询继续使用旧索引，直到新索引切换完成")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Memory 和未来知识库会共用这条 embedding 轨道/)
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("待切换")).toHaveLength(2);
+    expect(screen.getByText("100%")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "切换到新索引" }));
+
+    expect(submitAction).toHaveBeenCalledWith("retrieval.index.cutover", {
+      generation_id: "gen-memory-next",
+      project_id: "project-default",
+      workspace_id: "workspace-default",
+    });
+  });
+
+  it("没有积压时会隐藏下一步区，避免继续提醒已完成事项", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.summary.fragment_count = 0;
+    snapshot.resources.memory.summary.pending_replay_count = 0;
+
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Memory 当前记住了 2 条现行结论" })).toBeInTheDocument();
+    expect(screen.queryByText("下一步")).not.toBeInTheDocument();
+    expect(screen.queryByText("整理最新记忆")).not.toBeInTheDocument();
+  });
+
   it("sessions 缺少会话列表时不会因为 focused session 查找而崩溃", async () => {
     const snapshot = buildMemorySnapshot();
     delete snapshot.resources.sessions.sessions;
@@ -294,6 +539,6 @@ describe("MemoryPage", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "2 条可读记忆" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出当前会话" })).toBeInTheDocument();
+    expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
   });
 });

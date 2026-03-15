@@ -309,27 +309,37 @@ Important sections:
 
 ### Memory configuration model
 
-OctoAgent treats Memory as local-first.
+OctoAgent treats Memory as a built-in engine first, and retrieval quality as a separate upgrade path.
 
 - `local_only`
   - the default mode
-  - uses the built-in SQLite / Vault / SoR path
-  - does not require a separate MemU service
-- `memu + command`
-  - recommended when MemU runs on the same machine
-  - matches the OpenClaw-style local wrapper pattern
-  - only needs a local command, optional working directory, and command timeout
-- `memu + http`
-  - intended for a remote or separately managed MemU bridge
-  - needs a bridge URL, optional API key env name, and HTTP timeout
+  - uses the built-in canonical store and a built-in local embedding path
+  - does not require a separate MemU deployment
+  - if no retrieval aliases are bound, the system falls back to `main` for reasoning / expansion and to the built-in `engine-default` embedding layer
+  - `engine-default` now prefers local `Qwen/Qwen3-Embedding-0.6B`
+  - if the local Qwen runtime is unavailable, it automatically falls back to the built-in bilingual hash embedding, then to lexical / metadata recall
+- retrieval model bindings
+  - `memory_reasoning`
+  - `memory_expand`
+  - `memory_embedding`
+  - `memory_rerank`
+  - these are configured through Providers + model aliases, then bound in `Settings > Memory`
+- `memu + command/http`
+  - kept only as a compatibility path for old instances or troubleshooting
+  - not the primary product path anymore
+  - should be treated as an advanced/operator-only bridge surface, not a first-time setup step
 
-The Web `Settings > Memory` page and the CLI use the same config contract.
+The Web `Settings > Memory` page and the CLI now share the same main contract:
+
+- everyday users bind retrieval models and watch embedding migrations in one place
+- advanced users can still expand the compatibility section when they must keep an old bridge
 
 Useful commands:
 
 ```bash
 octo config memory show
 octo config memory local
+# compatibility only
 octo config memory memu-command --command "uv run python scripts/memu_bridge.py"
 octo config memory memu-command --command "uv run python scripts/memu_bridge.py" --cwd "/path/to/memu"
 octo config memory memu-http --bridge-url "https://memory.example.com" --api-key-env MEMU_API_KEY
@@ -338,8 +348,16 @@ octo config memory memu-http --bridge-url "https://memory.example.com" --api-key
 At the product level, the important rule is:
 
 - basic Memory should already work without extra deployment
-- MemU is an enhancement layer, not a requirement for first use
-- when MemU is local, prefer `command` over introducing an extra standalone bridge service
+- the built-in engine already provides lightweight bilingual semantic retrieval out of the box
+- retrieval quality can be upgraded independently from the storage/governance path
+- the default embedding layer prefers local `Qwen/Qwen3-Embedding-0.6B`, with hash fallback kept as a safety net
+- compatibility bridges exist for migration, not as the default setup story
+
+If you want the built-in Qwen embedding runtime locally, install the provider extra:
+
+```bash
+uv pip install -e "packages/provider[local-embedding]"
+```
 
 ### Credentials and secrets
 

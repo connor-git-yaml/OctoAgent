@@ -69,6 +69,13 @@ from octoagent.memory import (
 from octoagent.provider.auth.credentials import OAuthCredential
 from octoagent.provider.auth.environment import EnvironmentContext
 from octoagent.provider.auth.store import CredentialStore
+from octoagent.provider.dx.config_schema import (
+    MemoryConfig,
+    ModelAlias,
+    OctoAgentConfig,
+    ProviderEntry,
+)
+from octoagent.provider.dx.config_wizard import save_config
 from octoagent.provider.dx.project_selector import ProjectSelectorService
 from pydantic import SecretStr
 from ulid import ULID
@@ -654,6 +661,7 @@ class TestControlPlaneApi:
             "pipelines",
             "automation",
             "diagnostics",
+            "retrieval_platform",
             "memory",
             "imports",
         }
@@ -662,6 +670,10 @@ class TestControlPlaneApi:
         assert any(item["action_id"] == "setup.review" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "setup.apply" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "memory.query" for item in payload["registry"]["actions"])
+        assert any(
+            item["action_id"] == "retrieval.index.start"
+            for item in payload["registry"]["actions"]
+        )
         assert any(item["action_id"] == "work.cancel" for item in payload["registry"]["actions"])
         assert any(
             item["action_id"] == "pipeline.resume" for item in payload["registry"]["actions"]
@@ -674,7 +686,10 @@ class TestControlPlaneApi:
         assert payload["resources"]["memory"]["resource_type"] == "memory_console"
         assert payload["resources"]["memory"]["backend_id"]
         assert payload["resources"]["memory"]["retrieval_backend"]
+        assert payload["resources"]["memory"]["retrieval_profile"]["engine_label"]
+        assert payload["resources"]["memory"]["retrieval_profile"]["bindings"]
         assert "index_health" in payload["resources"]["memory"]
+        assert payload["resources"]["retrieval_platform"]["resource_type"] == "retrieval_platform"
         assert payload["resources"]["imports"]["resource_type"] == "import_workbench"
         assert payload["resources"]["agent_profiles"]["profiles"][0]["profile_id"] == (
             "agent-profile-default"
@@ -2188,6 +2203,10 @@ class TestControlPlaneApi:
         hints = resp.json()["ui_hints"]
         assert "front_door.mode" in hints
         assert "memory.backend_mode" in hints
+        assert "memory.reasoning_model_alias" in hints
+        assert "memory.expand_model_alias" in hints
+        assert "memory.embedding_model_alias" in hints
+        assert "memory.rerank_model_alias" in hints
         assert "memory.bridge_transport" in hints
         assert "memory.bridge_command" in hints
         assert "memory.bridge_command_cwd" in hints
@@ -2195,6 +2214,97 @@ class TestControlPlaneApi:
         assert "channels.telegram.dm_policy" in hints
         assert "channels.telegram.group_policy" in hints
         assert "channels.telegram.group_allow_users" in hints
+
+    async def test_retrieval_platform_keeps_old_embedding_active_until_cancelled_generation_is_resolved(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        baseline = await control_plane_client.get("/api/control/resources/retrieval-platform")
+        assert baseline.status_code == 200
+        baseline_memory = next(
+            item for item in baseline.json()["corpora"] if item["corpus_kind"] == "memory"
+        )
+        assert baseline_memory["active_profile_target"] == "sqlite-metadata"
+
+        save_config(
+            OctoAgentConfig(
+                updated_at="2026-03-15T12:00:00Z",
+                providers=[
+                    ProviderEntry(
+                        id="openrouter",
+                        name="OpenRouter",
+                        auth_type="api_key",
+                        api_key_env="OPENROUTER_API_KEY",
+                        enabled=True,
+                    )
+                ],
+                model_aliases={
+                    "main": ModelAlias(provider="openrouter", model="openrouter/auto"),
+                    "knowledge-embed": ModelAlias(
+                        provider="openrouter",
+                        model="openai/text-embedding-3-small",
+                    ),
+                },
+                memory=MemoryConfig(embedding_model_alias="knowledge-embed"),
+            ),
+            seeded_control_plane.state.project_root,
+        )
+
+        pending_resp = await control_plane_client.get("/api/control/resources/retrieval-platform")
+        assert pending_resp.status_code == 200
+        pending_payload = pending_resp.json()
+        pending_memory = next(
+            item for item in pending_payload["corpora"] if item["corpus_kind"] == "memory"
+        )
+        assert pending_memory["active_profile_target"] == "engine-default"
+        assert pending_memory["desired_profile_target"] == "knowledge-embed"
+        assert pending_memory["pending_generation_id"]
+
+        cancel_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": "req-retrieval-cancel",
+                "action_id": "retrieval.index.cancel",
+                "params": {"generation_id": pending_memory["pending_generation_id"]},
+                "surface": "web",
+                "actor": {"actor_id": "owner:test", "actor_label": "Owner"},
+            },
+        )
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["result"]["code"] == "RETRIEVAL_BUILD_CANCELLED"
+
+        after_cancel = await control_plane_client.get("/api/control/resources/retrieval-platform")
+        assert after_cancel.status_code == 200
+        cancelled_memory = next(
+            item for item in after_cancel.json()["corpora"] if item["corpus_kind"] == "memory"
+        )
+        assert cancelled_memory["active_profile_target"] == "engine-default"
+        assert cancelled_memory["pending_generation_id"] == ""
+        assert cancelled_memory["state"] == "migration_deferred"
+
+        restart_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": "req-retrieval-restart",
+                "action_id": "retrieval.index.start",
+                "params": {},
+                "surface": "web",
+                "actor": {"actor_id": "owner:test", "actor_label": "Owner"},
+            },
+        )
+        assert restart_resp.status_code == 200
+        assert restart_resp.json()["result"]["code"] == "RETRIEVAL_BUILD_STARTED"
+
+        after_restart = await control_plane_client.get("/api/control/resources/retrieval-platform")
+        assert after_restart.status_code == 200
+        restarted_memory = next(
+            item for item in after_restart.json()["corpora"] if item["corpus_kind"] == "memory"
+        )
+        assert restarted_memory["active_profile_target"] == "engine-default"
+        assert restarted_memory["desired_profile_target"] == "knowledge-embed"
+        assert restarted_memory["pending_generation_id"]
+        assert restarted_memory["state"] in {"migration_running", "migration_pending"}
 
     async def test_snapshot_exposes_builtin_tool_catalog_and_work_split_merge_actions(
         self,
@@ -2679,6 +2789,8 @@ class TestControlPlaneApi:
         assert memory_payload["resource_type"] == "memory_console"
         assert memory_payload["backend_id"]
         assert memory_payload["retrieval_backend"]
+        assert memory_payload["retrieval_profile"]["engine_label"]
+        assert memory_payload["retrieval_profile"]["bindings"]
         assert "backend_diagnostics" in memory_payload["advanced_refs"]
         assert any(
             item["subject_key"] == "work.project-alpha.status" for item in memory_payload["records"]

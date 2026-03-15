@@ -206,40 +206,59 @@ class MemoryConfig(BaseModel):
 
     backend_mode: Literal["local_only", "memu"] = Field(
         default="local_only",
-        description="Memory 后端模式：local_only 使用本地 SQLite 元数据；memu 启用增强检索。",
+        description=(
+            "Memory 引擎层级：local_only 走内建记忆引擎；"
+            "memu 表示仍需兼容旧 MemU 接入链路。"
+        ),
+    )
+    reasoning_model_alias: str = Field(
+        default="",
+        description="Memory 加工/总结/候选整理所用的模型别名。留空时回退到 main。",
+    )
+    expand_model_alias: str = Field(
+        default="",
+        description="Memory 查询扩写所用的模型别名。留空时回退到 main。",
+    )
+    embedding_model_alias: str = Field(
+        default="",
+        description="Memory 语义检索所用的 embedding 模型别名。留空时回退到内建默认层。",
+    )
+    rerank_model_alias: str = Field(
+        default="",
+        description="Memory 结果重排所用的模型别名。留空时回退到 heuristic rerank。",
     )
     bridge_transport: Literal["http", "command"] = Field(
         default="http",
-        description="MemU transport：http 连接远端 bridge；command 调用本地 bridge 命令。",
+        description="兼容接入 transport：http 连接远端 bridge；command 调用本地 bridge 命令。",
     )
     bridge_url: str = Field(
         default="",
-        description="MemU bridge 基础地址，例如 https://memory.example.com",
+        description="兼容接入的 bridge 基础地址，例如 https://memory.example.com",
     )
     bridge_command: str = Field(
         default="",
-        description="本地 MemU bridge 命令，例如 uv run python scripts/memu_bridge.py",
+        description="兼容接入的本地 bridge 命令，例如 uv run python scripts/memu_bridge.py",
     )
     bridge_command_cwd: str = Field(
         default="",
-        description="执行本地 MemU bridge 命令时的工作目录（可选）",
+        description="执行兼容本地 bridge 命令时的工作目录（可选）",
     )
     bridge_command_timeout_seconds: float = Field(
         default=15.0,
         ge=1.0,
         le=120.0,
-        description="执行本地 MemU bridge 命令的超时时间（秒）",
+        description="执行兼容本地 bridge 命令的超时时间（秒）",
     )
     bridge_api_key_env: str = Field(
         default="",
-        description="MemU bridge API Key 所在环境变量名（可选）",
+        description="兼容 bridge API Key 所在环境变量名（可选）",
         pattern=_OPTIONAL_ENV_NAME_PATTERN,
     )
     bridge_timeout_seconds: float = Field(
         default=5.0,
         ge=1.0,
         le=60.0,
-        description="请求 MemU bridge 的超时时间（秒）",
+        description="请求兼容 bridge 的超时时间（秒）",
     )
     bridge_api_key_header: str = Field(
         default="Authorization",
@@ -663,9 +682,13 @@ def build_config_schema_document(
             },
             "memory": {
                 "title": "Memory",
-                "description": "配置本地 Memory 模式或增强检索的 transport。",
+                "description": "配置 Memory 默认质量层、模型绑定与兼容接入。",
                 "fields": [
                     "memory.backend_mode",
+                    "memory.reasoning_model_alias",
+                    "memory.expand_model_alias",
+                    "memory.embedding_model_alias",
+                    "memory.rerank_model_alias",
                     "memory.bridge_transport",
                     "memory.bridge_url",
                     "memory.bridge_command",
@@ -794,15 +817,43 @@ def build_config_schema_document(
                 "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
             },
             "memory.backend_mode": {
-                "label": "Memory 后端模式",
+                "label": "Memory 引擎层级",
                 "input": "choice",
                 "required": True,
                 "recommended": True,
                 "choices": ["local_only", "memu"],
                 "default": active_memory.backend_mode,
             },
+            "memory.reasoning_model_alias": {
+                "label": "加工模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": True,
+                "default": active_memory.reasoning_model_alias,
+            },
+            "memory.expand_model_alias": {
+                "label": "扩写模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.expand_model_alias,
+            },
+            "memory.embedding_model_alias": {
+                "label": "Embedding 模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.embedding_model_alias,
+            },
+            "memory.rerank_model_alias": {
+                "label": "Rerank 模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.rerank_model_alias,
+            },
             "memory.bridge_transport": {
-                "label": "MemU 接入方式",
+                "label": "兼容接入方式",
                 "input": "choice",
                 "required": True,
                 "recommended": True,
@@ -810,14 +861,14 @@ def build_config_schema_document(
                 "default": active_memory.bridge_transport,
             },
             "memory.bridge_url": {
-                "label": "MemU Bridge 地址",
+                "label": "兼容 Bridge 地址",
                 "input": "text",
                 "required": False,
                 "recommended": False,
                 "default": active_memory.bridge_url,
             },
             "memory.bridge_command": {
-                "label": "MemU 本地命令",
+                "label": "兼容本地命令",
                 "input": "text",
                 "required": False,
                 "recommended": False,
@@ -838,7 +889,7 @@ def build_config_schema_document(
                 "default": active_memory.bridge_command_timeout_seconds,
             },
             "memory.bridge_api_key_env": {
-                "label": "MemU API Key 环境变量名",
+                "label": "兼容 API Key 环境变量名",
                 "input": "env_name",
                 "required": False,
                 "recommended": False,
@@ -849,7 +900,7 @@ def build_config_schema_document(
                 "default": active_memory.bridge_api_key_env,
             },
             "memory.bridge_timeout_seconds": {
-                "label": "Bridge 超时时间（秒）",
+                "label": "兼容 Bridge 超时时间（秒）",
                 "input": "text",
                 "required": False,
                 "recommended": True,

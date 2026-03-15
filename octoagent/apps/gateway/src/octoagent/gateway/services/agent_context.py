@@ -28,6 +28,7 @@ from octoagent.core.models import (
     EventType,
     MemoryNamespace,
     MemoryNamespaceKind,
+    MemoryRetrievalProfile,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
@@ -58,6 +59,9 @@ from octoagent.memory import (
     MemoryService,
     WriteAction,
     init_memory_db,
+)
+from octoagent.provider.dx.memory_retrieval_profile import (
+    apply_retrieval_profile_to_hook_options,
 )
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
@@ -2790,6 +2794,19 @@ class AgentContextService:
             workspace=workspace,
         )
 
+    async def get_memory_retrieval_profile(
+        self,
+        *,
+        project: Project | None,
+        workspace: Workspace | None,
+        backend_status=None,
+    ) -> MemoryRetrievalProfile:
+        return await self._memory_runtime.retrieval_profile_for_scope(
+            project=project,
+            workspace=workspace,
+            backend_status=backend_status,
+        )
+
     async def _resolve_project_scope(
         self,
         *,
@@ -3230,6 +3247,12 @@ class AgentContextService:
                 workspace=workspace,
             )
             backend_status = await memory_service.get_backend_status()
+            retrieval_profile = await self.get_memory_retrieval_profile(
+                project=project,
+                workspace=workspace,
+                backend_status=backend_status,
+            )
+            retrieval_profile_payload = retrieval_profile.model_dump(mode="json")
             if prefetch_mode != "detailed_prefetch":
                 if recall_plan is not None and recall_plan.mode is RecallPlanMode.RECALL:
                     selected_scope_ids = scope_ids[
@@ -3257,13 +3280,16 @@ class AgentContextService:
                                 memory_recall_max_hits(agent_profile, default=4),
                             ),
                         ),
-                        hook_options=build_default_memory_recall_hook_options(
-                            agent_profile=agent_profile,
-                            subject_hint=recall_plan.subject_hint,
-                        ).model_copy(
-                            update={
-                                "focus_terms": list(recall_plan.focus_terms),
-                            }
+                        hook_options=apply_retrieval_profile_to_hook_options(
+                            build_default_memory_recall_hook_options(
+                                agent_profile=agent_profile,
+                                subject_hint=recall_plan.subject_hint,
+                            ).model_copy(
+                                update={
+                                    "focus_terms": list(recall_plan.focus_terms),
+                                }
+                            ),
+                            retrieval_profile,
                         ),
                     )
                     recall_hits = [
@@ -3307,6 +3333,7 @@ class AgentContextService:
                                 if recall.backend_status is not None
                                 else ""
                             ),
+                            "retrieval_profile": retrieval_profile_payload,
                             "pending_replay_count": (
                                 recall.backend_status.pending_replay_count
                                 if recall.backend_status is not None
@@ -3348,6 +3375,7 @@ class AgentContextService:
                         "degraded_reasons": [],
                         "backend": backend_status.active_backend,
                         "backend_state": backend_status.state.value,
+                        "retrieval_profile": retrieval_profile_payload,
                         "pending_replay_count": backend_status.pending_replay_count,
                         "hook_trace": {},
                         "recall_owner_role": agent_runtime.role.value,
@@ -3378,8 +3406,9 @@ class AgentContextService:
                 policy=policy,
                 per_scope_limit=memory_recall_per_scope_limit(agent_profile, default=3),
                 max_hits=memory_recall_max_hits(agent_profile, default=4),
-                hook_options=build_default_memory_recall_hook_options(
-                    agent_profile=agent_profile
+                hook_options=apply_retrieval_profile_to_hook_options(
+                    build_default_memory_recall_hook_options(agent_profile=agent_profile),
+                    retrieval_profile,
                 ),
             )
             recall_hits = [
@@ -3416,6 +3445,7 @@ class AgentContextService:
                 "backend_state": (
                     recall.backend_status.state.value if recall.backend_status is not None else ""
                 ),
+                "retrieval_profile": retrieval_profile_payload,
                 "pending_replay_count": (
                     recall.backend_status.pending_replay_count
                     if recall.backend_status is not None

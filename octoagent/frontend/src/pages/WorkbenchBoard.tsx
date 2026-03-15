@@ -6,6 +6,7 @@ import {
   mapOperatorQuickAction,
 } from "../domains/operator/userFacing";
 import { formatWorkStatusTone } from "../domains/work/presentation";
+import RetrievalBackgroundSection from "../domains/work/RetrievalBackgroundSection";
 import {
   ActionBar,
   InlineCallout,
@@ -418,6 +419,8 @@ export default function WorkbenchBoard() {
   const operatorItems = (snapshot!.resources.sessions.operator_items ?? []).filter(
     (item) => item.state === "pending"
   );
+  const retrievalPlatform = snapshot!.resources.retrieval_platform ?? null;
+  const memory = snapshot!.resources.memory;
   const freshnessReadiness = buildFreshnessReadiness({
     context: snapshot!.resources.context_continuity,
     capabilityPack: snapshot!.resources.capability_pack,
@@ -553,6 +556,37 @@ export default function WorkbenchBoard() {
 
   function updateSplitDraft(workId: string, nextValue: string) {
     setSplitDrafts((state) => ({ ...state, [workId]: nextValue }));
+  }
+
+  async function startEmbeddingMigration() {
+    await submitAction("retrieval.index.start", {
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function cancelEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.cancel", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function cutoverEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.cutover", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function rollbackEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.rollback", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
   }
 
   return (
@@ -742,6 +776,16 @@ export default function WorkbenchBoard() {
       </div>
 
       <div className="wb-section-stack">
+        <RetrievalBackgroundSection
+          retrievalPlatform={retrievalPlatform}
+          memory={memory}
+          busyActionId={busyActionId}
+          onStartMigration={startEmbeddingMigration}
+          onCancelMigration={cancelEmbeddingMigration}
+          onCutoverMigration={cutoverEmbeddingMigration}
+          onRollbackMigration={rollbackEmbeddingMigration}
+        />
+
         <WorkSection
           title="等待处理"
           summary="审批、补充输入和暂停的工作都应该优先看。"

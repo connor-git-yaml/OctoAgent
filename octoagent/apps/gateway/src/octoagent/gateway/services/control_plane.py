@@ -50,6 +50,7 @@ from octoagent.core.models import (
     ControlPlaneSupportStatus,
     ControlPlaneSurface,
     ControlPlaneTargetRef,
+    CorpusKind,
     DelegationPlaneDocument,
     DiagnosticsFailureSummary,
     DiagnosticsSubsystemStatus,
@@ -77,6 +78,7 @@ from octoagent.core.models import (
     ProjectSelectorDocument,
     ProjectSelectorState,
     RecallFrameItem,
+    RetrievalPlatformDocument,
     SessionProjectionDocument,
     SessionProjectionItem,
     SessionProjectionSummary,
@@ -150,7 +152,12 @@ from octoagent.provider.dx.memory_console_service import (
     MemoryConsoleError,
     MemoryConsoleService,
 )
+from octoagent.provider.dx.memory_retrieval_profile import load_memory_retrieval_profile
 from octoagent.provider.dx.onboarding_service import OnboardingService
+from octoagent.provider.dx.retrieval_platform_service import (
+    RetrievalPlatformError,
+    RetrievalPlatformService,
+)
 from octoagent.provider.dx.runtime_activation import (
     RuntimeActivationError,
     RuntimeActivationService,
@@ -213,6 +220,10 @@ class ControlPlaneService:
         self._update_status_store = update_status_store
         self._update_service = update_service
         self._memory_console_service = memory_console_service or MemoryConsoleService(
+            project_root,
+            store_group=store_group,
+        )
+        self._retrieval_platform_service = RetrievalPlatformService(
             project_root,
             store_group=store_group,
         )
@@ -282,6 +293,7 @@ class ControlPlaneService:
             ("pipelines", self.get_skill_pipeline_document),
             ("automation", self.get_automation_document),
             ("diagnostics", self.get_diagnostics_summary),
+            ("retrieval_platform", self.get_retrieval_platform_document),
             ("memory", self.get_memory_console),
             ("imports", self.get_import_workbench),
         )
@@ -2906,6 +2918,27 @@ class ControlPlaneService:
         resolved_workspace_id = workspace_id or (
             selected_workspace.workspace_id if selected_workspace is not None else None
         )
+        resolved_project = (
+            await self._stores.project_store.get_project(resolved_project_id)
+            if resolved_project_id
+            else selected_project
+        )
+        resolved_workspace = (
+            await self._stores.project_store.get_workspace(resolved_workspace_id)
+            if resolved_workspace_id
+            else selected_workspace
+        )
+        backend_status = await self._memory_console_service.get_backend_status(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id,
+        )
+        active_embedding_target, requested_embedding_target = (
+            await self._retrieval_platform_service.get_memory_embedding_targets(
+                project=resolved_project,
+                workspace=resolved_workspace,
+                backend_status=backend_status,
+            )
+        )
         document = await self._memory_console_service.get_memory_console(
             project_id=resolved_project_id,
             workspace_id=resolved_workspace_id,
@@ -2916,6 +2949,41 @@ class ControlPlaneService:
             include_history=include_history,
             include_vault_refs=include_vault_refs,
             limit=limit,
+        )
+        document.retrieval_profile = load_memory_retrieval_profile(
+            self._project_root,
+            backend_status=backend_status,
+            active_embedding_target=active_embedding_target,
+            requested_embedding_target=requested_embedding_target,
+        )
+        if fallback_reason:
+            document.warnings.append(fallback_reason)
+            document.degraded.is_degraded = True
+            if fallback_reason not in document.degraded.reasons:
+                document.degraded.reasons.append(fallback_reason)
+        return document
+
+    async def get_retrieval_platform_document(
+        self,
+        *,
+        project_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> RetrievalPlatformDocument:
+        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        resolved_project_id = project_id or (
+            selected_project.project_id if selected_project is not None else ""
+        )
+        resolved_workspace_id = workspace_id or (
+            selected_workspace.workspace_id if selected_workspace is not None else ""
+        )
+        backend_status = await self._memory_console_service.get_backend_status(
+            project_id=resolved_project_id,
+            workspace_id=resolved_workspace_id or None,
+        )
+        document = await self._retrieval_platform_service.get_document(
+            active_project_id=resolved_project_id,
+            active_workspace_id=resolved_workspace_id,
+            backend_status=backend_status,
         )
         if fallback_reason:
             document.warnings.append(fallback_reason)
@@ -3084,6 +3152,12 @@ class ControlPlaneService:
                 code=exc.code,
                 message=str(exc),
             )
+        except RetrievalPlatformError as exc:
+            result = self._rejected_result(
+                request=request,
+                code=exc.code,
+                message=exc.message,
+            )
         except Exception as exc:  # pragma: no cover - 防御性兜底
             result = self._rejected_result(
                 request=request,
@@ -3190,6 +3264,14 @@ class ControlPlaneService:
             return await self._handle_memory_export_inspect(request)
         if action_id == "memory.restore.verify":
             return await self._handle_memory_restore_verify(request)
+        if action_id == "retrieval.index.start":
+            return await self._handle_retrieval_index_start(request)
+        if action_id == "retrieval.index.cancel":
+            return await self._handle_retrieval_index_cancel(request)
+        if action_id == "retrieval.index.cutover":
+            return await self._handle_retrieval_index_cutover(request)
+        if action_id == "retrieval.index.rollback":
+            return await self._handle_retrieval_index_rollback(request)
         if action_id == "capability.refresh":
             if self._capability_pack_service is not None:
                 await self._capability_pack_service.refresh()
@@ -4252,6 +4334,123 @@ class ControlPlaneService:
                 self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
             ],
             target_refs=self._memory_target_refs(request),
+        )
+
+    async def _handle_retrieval_index_start(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        document = await self._retrieval_platform_service.start_memory_generation_build(
+            actor_id=request.actor.actor_id,
+            actor_label=request.actor.actor_label,
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+        )
+        memory_state = next(
+            (
+                item
+                for item in document.corpora
+                if item.corpus_kind == CorpusKind.MEMORY
+            ),
+            None,
+        )
+        return self._completed_result(
+            request=request,
+            code="RETRIEVAL_BUILD_STARTED",
+            message="已开始准备新的 embedding 索引。",
+            data={
+                "corpus_kind": CorpusKind.MEMORY.value,
+                "state": memory_state.state if memory_state is not None else "unknown",
+                "pending_generation_id": (
+                    memory_state.pending_generation_id if memory_state is not None else ""
+                ),
+            },
+            resource_refs=[
+                self._resource_ref("retrieval_platform", "retrieval:platform"),
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
+        )
+
+    async def _handle_retrieval_index_cancel(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        generation_id = self._param_str(request.params, "generation_id")
+        if not generation_id:
+            raise ControlPlaneActionError(
+                "GENERATION_ID_REQUIRED",
+                "generation_id 不能为空",
+            )
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        await self._retrieval_platform_service.cancel_generation(
+            generation_id=generation_id,
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+        )
+        return self._completed_result(
+            request=request,
+            code="RETRIEVAL_BUILD_CANCELLED",
+            message="已取消新的 embedding 迁移，系统继续使用旧索引。",
+            data={"generation_id": generation_id},
+            resource_refs=[
+                self._resource_ref("retrieval_platform", "retrieval:platform"),
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
+        )
+
+    async def _handle_retrieval_index_cutover(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        generation_id = self._param_str(request.params, "generation_id")
+        if not generation_id:
+            raise ControlPlaneActionError(
+                "GENERATION_ID_REQUIRED",
+                "generation_id 不能为空",
+            )
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        await self._retrieval_platform_service.cutover_generation(
+            generation_id=generation_id,
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+        )
+        return self._completed_result(
+            request=request,
+            code="RETRIEVAL_CUTOVER_COMPLETED",
+            message="已切换到新的 embedding 索引。",
+            data={"generation_id": generation_id},
+            resource_refs=[
+                self._resource_ref("retrieval_platform", "retrieval:platform"),
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
+        )
+
+    async def _handle_retrieval_index_rollback(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        generation_id = self._param_str(request.params, "generation_id")
+        if not generation_id:
+            raise ControlPlaneActionError(
+                "GENERATION_ID_REQUIRED",
+                "generation_id 不能为空",
+            )
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        await self._retrieval_platform_service.rollback_generation(
+            generation_id=generation_id,
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+        )
+        return self._completed_result(
+            request=request,
+            code="RETRIEVAL_ROLLBACK_COMPLETED",
+            message="已回滚到上一版 embedding 索引。",
+            data={"generation_id": generation_id},
+            resource_refs=[
+                self._resource_ref("retrieval_platform", "retrieval:platform"),
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
         )
 
     async def _handle_vault_access_request(
@@ -7214,74 +7413,110 @@ class ControlPlaneService:
             ),
             "memory.backend_mode": ConfigFieldHint(
                 field_path="memory.backend_mode",
-                section="memory-basic",
-                label="Memory 运行方式",
-                description="先决定只用本地记忆，还是启用 MemU 检索层。",
+                section="memory-compat",
+                label="兼容接入层级",
+                description="控制当前实例是否继续走旧 MemU 兼容链路。",
                 widget="select",
                 help_text=(
-                    "首次使用建议先选 local_only；"
-                    "需要 MemU 时，再决定走本地命令还是 HTTP bridge。"
+                    "普通用户默认不需要改这里。只有迁移旧实例、排查兼容链路或接外部 MemU "
+                    "bridge 时，再调整这组字段。"
                 ),
                 order=32,
             ),
+            "memory.reasoning_model_alias": ConfigFieldHint(
+                field_path="memory.reasoning_model_alias",
+                section="memory-models",
+                label="加工模型别名",
+                description="负责片段整理、摘要、候选结论与候选事实加工。",
+                placeholder="main",
+                help_text="留空时默认回退到 main。",
+                order=33,
+            ),
+            "memory.expand_model_alias": ConfigFieldHint(
+                field_path="memory.expand_model_alias",
+                section="memory-models",
+                label="扩写模型别名",
+                description="负责 recall query expansion；不填时回退到 main。",
+                placeholder="main",
+                help_text="适合绑定成本较低、理解查询改写较稳定的 alias。",
+                order=34,
+            ),
+            "memory.embedding_model_alias": ConfigFieldHint(
+                field_path="memory.embedding_model_alias",
+                section="memory-models",
+                label="Embedding 模型别名",
+                description="负责语义检索 projection。留空时走内建默认层。",
+                placeholder="knowledge-embed",
+                help_text="后续切换 embedding 时会触发后台重建，不会立即替换现网索引。",
+                order=35,
+            ),
+            "memory.rerank_model_alias": ConfigFieldHint(
+                field_path="memory.rerank_model_alias",
+                section="memory-models",
+                label="Rerank 模型别名",
+                description="负责召回结果重排；不填时回退到 heuristic。",
+                placeholder="memory-rerank",
+                help_text="没有专门 rerank alias 也可以先留空。",
+                order=36,
+            ),
             "memory.bridge_transport": ConfigFieldHint(
                 field_path="memory.bridge_transport",
-                section="memory-basic",
-                label="MemU 连接方式",
+                section="memory-compat",
+                label="兼容接入方式",
                 description=(
-                    "command 适合本机直接调用 OpenClaw 风格脚本；"
-                    "http 适合连接远端 bridge。"
+                    "command 适合本机直接调用旧脚本链；"
+                    "http 适合连接远端兼容 bridge。"
                 ),
                 widget="select",
-                help_text="如果 MemU 和 Gateway 在同机，优先选 command，减少部署复杂度。",
-                order=34,
+                help_text="普通用户默认不需要动这里。只有迁移旧实例或排查兼容链路时才展开。",
+                order=38,
             ),
             "memory.bridge_url": ConfigFieldHint(
                 field_path="memory.bridge_url",
-                section="memory-basic",
-                label="MemU HTTP 地址",
+                section="memory-compat",
+                label="兼容 HTTP 地址",
                 placeholder="https://memory.example.com",
-                help_text="仅在 http transport 下需要；这里填 bridge 的基础 URL。",
-                order=36,
+                help_text="仅在 http transport 下需要；这里填兼容 bridge 的基础 URL。",
+                order=40,
             ),
             "memory.bridge_command": ConfigFieldHint(
                 field_path="memory.bridge_command",
-                section="memory-basic",
-                label="MemU 本地命令",
+                section="memory-compat",
+                label="兼容本地命令",
                 placeholder="uv run python scripts/memu_bridge.py",
                 help_text="仅在 command transport 下需要；命令会自动追加 health/query 等子命令。",
-                order=38,
+                order=42,
             ),
             "memory.bridge_command_cwd": ConfigFieldHint(
                 field_path="memory.bridge_command_cwd",
-                section="memory-basic",
+                section="memory-compat",
                 label="命令工作目录",
                 placeholder="/path/to/memu-project",
                 help_text="可选。命令依赖本地虚拟环境或脚本相对路径时再填写。",
-                order=40,
+                order=44,
             ),
             "memory.bridge_command_timeout_seconds": ConfigFieldHint(
                 field_path="memory.bridge_command_timeout_seconds",
-                section="memory-basic",
+                section="memory-compat",
                 label="命令超时（秒）",
                 help_text="仅在 command transport 下生效；本机检索通常 10-20 秒就够。",
-                order=42,
+                order=46,
             ),
             "memory.bridge_api_key_env": ConfigFieldHint(
                 field_path="memory.bridge_api_key_env",
-                section="memory-basic",
-                label="MemU API Key 环境变量",
+                section="memory-compat",
+                label="兼容 API Key 环境变量",
                 widget="env-ref",
                 sensitive=True,
                 help_text="仅在 http transport 且 bridge 需要鉴权时填写；只填环境变量名。",
-                order=44,
+                order=48,
             ),
             "memory.bridge_timeout_seconds": ConfigFieldHint(
                 field_path="memory.bridge_timeout_seconds",
-                section="memory-basic",
+                section="memory-compat",
                 label="HTTP 超时（秒）",
                 help_text="仅在 http transport 下生效；网络较慢时可以适度调高。",
-                order=46,
+                order=50,
             ),
             "providers": ConfigFieldHint(
                 field_path="providers",
@@ -9470,6 +9705,34 @@ class ControlPlaneService:
                     risk_hint="high",
                     approval_hint="operator",
                     params_schema={"type": "object", "required": ["snapshot_ref"]},
+                ),
+                definition(
+                    "retrieval.index.start",
+                    "开始 embedding 迁移",
+                    category="memory",
+                    risk_hint="medium",
+                ),
+                definition(
+                    "retrieval.index.cancel",
+                    "取消 embedding 迁移",
+                    category="memory",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["generation_id"]},
+                ),
+                definition(
+                    "retrieval.index.cutover",
+                    "切换到新 embedding 索引",
+                    category="memory",
+                    risk_hint="medium",
+                    params_schema={"type": "object", "required": ["generation_id"]},
+                ),
+                definition(
+                    "retrieval.index.rollback",
+                    "回滚 embedding 索引",
+                    category="memory",
+                    risk_hint="medium",
+                    approval_hint="operator",
+                    params_schema={"type": "object", "required": ["generation_id"]},
                 ),
                 definition("capability.refresh", "刷新能力包", category="capability"),
                 definition("work.refresh", "刷新委派视图", category="delegation"),

@@ -456,7 +456,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert frame.agent_profile_id == "agent-profile-alpha"
     assert frame.recent_summary == "之前已经确认 Alpha 的关键约束和当前里程碑。"
     assert frame.memory_hits == []
-    assert str(frame.budget["memory_recall"]["backend"]).startswith("sqlite")
+    assert str(frame.budget["memory_recall"]["backend"]).startswith("memu")
     assert frame.budget["memory_recall"]["query"] == "请继续推进 Alpha 的方案拆解"
     assert frame.budget["memory_recall"]["expanded_queries"] == []
     assert frame.budget["memory_recall"]["hit_count"] == 0
@@ -822,6 +822,10 @@ async def test_task_service_agent_led_recall_prefers_memu_backend_when_available
     assert search_payload["search_options"]["expanded_queries"][0] == (
         "Alpha continuity constraints milestone plan"
     )
+    assert search_payload["search_options"]["reasoning_target"] == "main"
+    assert search_payload["search_options"]["expand_target"] == "main"
+    assert search_payload["search_options"]["embedding_target"] == "engine-default"
+    assert search_payload["search_options"]["rerank_target"] == "heuristic"
     assert search_payload["search_options"]["rerank_mode"] == "heuristic"
     assert ("resolve_evidence", "memu-plan-hit-1") in bridge.calls
 

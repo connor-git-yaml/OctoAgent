@@ -20,6 +20,7 @@ export type WorkbenchResourceRoute =
   | "pipelines"
   | "automation"
   | "diagnostics"
+  | "retrieval-platform"
   | "memory"
   | "import-workbench";
 
@@ -176,6 +177,13 @@ export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
     endpointPath: "/api/control/resources/diagnostics",
     queryMode: "snapshot-resource",
   },
+  "retrieval-platform": {
+    route: "retrieval-platform",
+    snapshotKey: "retrieval_platform",
+    label: "检索平台",
+    endpointPath: "/api/control/resources/retrieval-platform",
+    queryMode: "snapshot-resource",
+  },
   memory: {
     route: "memory",
     snapshotKey: "memory",
@@ -209,6 +217,7 @@ export const RESOURCE_ROUTE_BY_TYPE: Record<string, WorkbenchResourceRoute> = {
   skill_pipeline: "pipelines",
   automation_job: "automation",
   diagnostics_summary: "diagnostics",
+  retrieval_platform: "retrieval-platform",
   memory_console: "memory",
   import_workbench: "import-workbench",
   import_source: "import-workbench",

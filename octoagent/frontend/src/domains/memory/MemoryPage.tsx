@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
-import type {
-  OperatorActionKind,
-  OperatorInboxItem,
-  RecoverySummary,
-} from "../../types";
 import { formatDateTime } from "../../workbench/utils";
-import MemoryActionsSection from "./MemoryActionsSection";
 import MemoryFiltersSection from "./MemoryFiltersSection";
 import MemoryHeroSection from "./MemoryHeroSection";
 import MemoryInspectorSection from "./MemoryInspectorSection";
+import MemoryRetrievalLifecycleSection from "./MemoryRetrievalLifecycleSection";
 import MemoryResultsSection from "./MemoryResultsSection";
 import {
   buildMemoryDisplayRecords,
@@ -17,7 +12,6 @@ import {
   fieldLabel,
   formatLayerLabel,
   formatPartitionLabel,
-  mapQuickAction,
   readConfigSection,
   type MemoryNarrative,
   uniqueOptions,
@@ -27,8 +21,7 @@ export default function MemoryPage() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const memory = snapshot!.resources.memory;
   const config = snapshot!.resources.config;
-  const diagnostics = snapshot!.resources.diagnostics;
-  const sessions = snapshot!.resources.sessions;
+  const retrievalPlatform = snapshot!.resources.retrieval_platform ?? null;
   const [queryDraft, setQueryDraft] = useState(memory.filters.query);
   const [layerDraft, setLayerDraft] = useState(memory.filters.layer);
   const [partitionDraft, setPartitionDraft] = useState(memory.filters.partition);
@@ -78,8 +71,11 @@ export default function MemoryPage() {
   ]);
   const memoryConfig = readConfigSection(readConfigSection(config.current_value).memory);
   const memoryMode =
-    String(memoryConfig.backend_mode ?? "local_only").trim().toLowerCase() || "local_only";
+    memory.retrieval_profile?.engine_mode === "memu_compat"
+      ? "memu"
+      : String(memoryConfig.backend_mode ?? "local_only").trim().toLowerCase() || "local_only";
   const bridgeTransport =
+    String(memory.retrieval_profile?.transport ?? "").trim().toLowerCase() ||
     String(memoryConfig.bridge_transport ?? "").trim().toLowerCase() ||
     (String(memoryConfig.bridge_command ?? "").trim() ? "command" : "http");
   const bridgeUrl = String(memoryConfig.bridge_url ?? "").trim();
@@ -105,48 +101,30 @@ export default function MemoryPage() {
     missingSetupItems,
     displayRecords.length
   );
-  const operatorItems = sessions.operator_items ?? [];
-  const operatorSummary = sessions.operator_summary;
-  const recoverySummary = diagnostics.recovery_summary as Partial<RecoverySummary>;
-  const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
-  const focusedSession =
-    sessionItems.find((item) => item.session_id === sessions.focused_session_id) ?? null;
-  const canExportFocusedSession = Boolean(sessions.focused_session_id || sessions.focused_thread_id);
-  const exportTargetLabel =
-    focusedSession?.title ||
-    sessions.focused_thread_id ||
-    sessions.focused_session_id ||
-    "未选中会话";
   const selectedRecord =
     displayRecords.find((record) => record.record.record_id === selectedRecordId) ?? null;
-
-  async function handleOperatorAction(item: OperatorInboxItem, kind: OperatorActionKind) {
-    const mapped = mapQuickAction(item, kind);
-    if (!mapped) {
-      return;
-    }
-    await submitAction(mapped.actionId, mapped.params);
-  }
-
-  async function refreshRecoverySummary() {
-    await submitAction("diagnostics.refresh", {});
-  }
-
-  async function handleBackupCreate() {
-    await submitAction("backup.create", { label: "memory-center" });
-  }
-
-  async function handleExportChats() {
-    if (!canExportFocusedSession) {
-      return;
-    }
-    const exportParams = sessions.focused_session_id
-      ? { session_id: sessions.focused_session_id }
-      : { thread_id: sessions.focused_thread_id || undefined };
-    await submitAction("session.export", {
-      ...exportParams,
-    });
-  }
+  const memoryCorpus =
+    retrievalPlatform?.corpora.find((item) => item.corpus_kind === "memory") ?? null;
+  const activeGeneration =
+    retrievalPlatform?.generations.find(
+      (item) => item.generation_id === memoryCorpus?.active_generation_id
+    ) ?? null;
+  const pendingGeneration =
+    retrievalPlatform?.generations.find(
+      (item) => item.generation_id === memoryCorpus?.pending_generation_id
+    ) ?? null;
+  const pendingBuildJob =
+    retrievalPlatform?.build_jobs.find(
+      (item) => item.generation_id === pendingGeneration?.generation_id
+    ) ?? null;
+  const rollbackCandidate =
+    retrievalPlatform?.generations.find(
+      (item) =>
+        item.corpus_kind === "memory" &&
+        !item.is_active &&
+        Boolean(item.rollback_deadline) &&
+        new Date(item.rollback_deadline || "").getTime() > Date.now()
+    ) ?? null;
 
   async function refreshMemory() {
     await submitAction("memory.query", {
@@ -187,6 +165,37 @@ export default function MemoryPage() {
     });
   }
 
+  async function startEmbeddingMigration() {
+    await submitAction("retrieval.index.start", {
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function cancelEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.cancel", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function cutoverEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.cutover", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
+  async function rollbackEmbeddingMigration(generationId: string) {
+    await submitAction("retrieval.index.rollback", {
+      generation_id: generationId,
+      project_id: memory.active_project_id,
+      workspace_id: memory.active_workspace_id,
+    });
+  }
+
   function handleSelectRecord(record: (typeof displayRecords)[number]) {
     setSelectedRecordId(record.record.record_id);
   }
@@ -196,6 +205,7 @@ export default function MemoryPage() {
       <MemoryHeroSection
         memory={memory}
         memoryMode={memoryMode}
+        bridgeTransport={bridgeTransport}
         heroTone={narrative.heroTone}
         heroTitle={narrative.heroTitle}
         heroSummary={narrative.heroSummary}
@@ -203,11 +213,13 @@ export default function MemoryPage() {
         retrievalLabel={narrative.retrievalLabel}
         nextActionTitle={narrative.nextActionTitle}
         nextActionSummary={narrative.nextActionSummary}
+        showNextActionPanel={narrative.showNextActionPanel}
         guideItems={narrative.guideItems}
         hasVisibleRecords={narrative.hasVisibleRecords}
         hasStoredRecords={narrative.hasStoredRecords}
         hasBacklog={narrative.hasBacklog}
         isDegraded={narrative.isDegraded}
+        missingSetupItems={narrative.missingSetupItems}
         busyActionId={busyActionId}
         onResetFilters={resetFilters}
         onFlushMemory={flushMemory}
@@ -219,6 +231,20 @@ export default function MemoryPage() {
           <span>{narrative.memoryWarnings.join("；")}</span>
         </div>
       ) : null}
+
+      <MemoryRetrievalLifecycleSection
+        memory={memory}
+        memoryCorpus={memoryCorpus}
+        activeGeneration={activeGeneration}
+        pendingGeneration={pendingGeneration}
+        pendingBuildJob={pendingBuildJob}
+        rollbackCandidate={rollbackCandidate}
+        busyActionId={busyActionId}
+        onStartMigration={startEmbeddingMigration}
+        onCancelMigration={cancelEmbeddingMigration}
+        onCutoverMigration={cutoverEmbeddingMigration}
+        onRollbackMigration={rollbackEmbeddingMigration}
+      />
 
       <MemoryFiltersSection
         queryDraft={queryDraft}
@@ -264,19 +290,6 @@ export default function MemoryPage() {
           retrievalLabel={narrative.retrievalLabel}
         />
       </div>
-
-      <MemoryActionsSection
-        operatorItems={operatorItems}
-        operatorSummary={operatorSummary}
-        recoverySummary={recoverySummary}
-        exportTargetLabel={exportTargetLabel}
-        canExportFocusedSession={canExportFocusedSession}
-        busyActionId={busyActionId}
-        onOperatorAction={handleOperatorAction}
-        onRefreshRecoverySummary={refreshRecoverySummary}
-        onBackupCreate={handleBackupCreate}
-        onExportChats={handleExportChats}
-      />
     </div>
   );
 }

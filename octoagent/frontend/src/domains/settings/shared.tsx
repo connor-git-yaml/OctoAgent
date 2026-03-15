@@ -150,7 +150,7 @@ export function groupLabel(groupId: string): { title: string; description: strin
     case "memory":
       return {
         title: "Memory",
-        description: "先选记忆的连接方式，再决定默认检索范围和高级召回策略。",
+        description: "先决定默认质量层，再在需要时展开兼容接入和高级召回策略。",
       };
     default:
       return {
@@ -236,10 +236,10 @@ export function optionLabelForHint(hint: ConfigFieldHint, option: string): strin
   }
   if (hint.field_path === "memory.backend_mode") {
     if (option === "local_only") {
-      return "local_only · 只用本地记忆";
+      return "local_only · 内建记忆引擎";
     }
     if (option === "memu") {
-      return "memu · 启用 MemU 检索层";
+      return "memu · 兼容增强接入";
     }
   }
   if (hint.field_path === "memory.bridge_transport") {
@@ -283,14 +283,14 @@ export function buildFieldGuide(
     return {
       title: "怎么选",
       description:
-        "如果你只是想先让系统记住聊天和工作过程，保持 local_only 就够了。只有明确要接 MemU 时，再切到 memu。",
+        "普通用户默认保持 local_only 即可，它会走内建记忆引擎。只有迁移旧实例或明确还要接兼容 MemU 链路时，再切到 memu。",
     };
   }
   if (hint.field_path === "memory.bridge_transport") {
     return {
-      title: "推荐顺序",
+      title: "什么时候才需要",
       description:
-        "同机部署优先选 command，它更接近 OpenClaw 的用法，也少一层独立服务。只有 MemU 在别的机器或容器里时，再选 http。",
+        "这已经属于兼容接入层：同机旧实例优先选 command；只有 bridge 在别的机器或容器里时，再选 http。",
     };
   }
   if (hint.field_path === "memory.bridge_url") {

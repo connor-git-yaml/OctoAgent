@@ -95,6 +95,10 @@ def test_default_values() -> None:
     assert config.channels.telegram.mode == "webhook"
     assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
     assert config.memory.backend_mode == "local_only"
+    assert config.memory.reasoning_model_alias == ""
+    assert config.memory.expand_model_alias == ""
+    assert config.memory.embedding_model_alias == ""
+    assert config.memory.rerank_model_alias == ""
     assert config.memory.bridge_transport == "http"
     assert config.memory.bridge_command == ""
     assert config.memory.bridge_command_timeout_seconds == 15.0
@@ -283,6 +287,10 @@ def test_build_config_schema_document_exposes_memory_defaults_and_secret_target(
     config = _make_config(
         memory=MemoryConfig(
             backend_mode="memu",
+            reasoning_model_alias="main",
+            expand_model_alias="cheap",
+            embedding_model_alias="embed",
+            rerank_model_alias="rerank",
             bridge_transport="command",
             bridge_command="uv run python scripts/memu_bridge.py",
             bridge_command_cwd="/tmp/memu",
@@ -297,14 +305,21 @@ def test_build_config_schema_document_exposes_memory_defaults_and_secret_target(
     document = build_config_schema_document(config)
     memory_section = document.ui_hints["sections"]["memory"]
     memory_backend = document.ui_hints["fields"]["memory.backend_mode"]
+    memory_reasoning = document.ui_hints["fields"]["memory.reasoning_model_alias"]
     memory_transport = document.ui_hints["fields"]["memory.bridge_transport"]
     memory_secret = document.ui_hints["fields"]["memory.bridge_api_key_env"]["secret_target"]
 
     assert "memory.backend_mode" in memory_section["fields"]
+    assert "memory.reasoning_model_alias" in memory_section["fields"]
+    assert "memory.embedding_model_alias" in memory_section["fields"]
     assert "memory.bridge_transport" in memory_section["fields"]
     assert "memory.bridge_command" in memory_section["fields"]
     assert "memory.bridge_search_path" in memory_section["fields"]
     assert memory_backend["default"] == "memu"
+    assert memory_reasoning["default"] == "main"
+    assert document.ui_hints["fields"]["memory.expand_model_alias"]["default"] == "cheap"
+    assert document.ui_hints["fields"]["memory.embedding_model_alias"]["default"] == "embed"
+    assert document.ui_hints["fields"]["memory.rerank_model_alias"]["default"] == "rerank"
     assert memory_transport["default"] == "command"
     assert (
         document.ui_hints["fields"]["memory.bridge_command"]["default"]

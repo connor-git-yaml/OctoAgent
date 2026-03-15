@@ -28,7 +28,7 @@ def test_config_memory_memu_command_writes_command_bridge(tmp_path: Path) -> Non
     )
 
     assert result.exit_code == 0
-    assert "已更新为 MemU 本地命令配置。" in result.output
+    assert "已更新本地兼容命令配置。" in result.output
     assert "跳过 litellm-config.yaml 同步" in result.output
 
     config = load_config(tmp_path)
@@ -75,7 +75,7 @@ def test_config_memory_memu_http_updates_http_bridge_and_preserves_command_field
     )
 
     assert result.exit_code == 0
-    assert "已更新为 MemU HTTP bridge 配置。" in result.output
+    assert "已更新兼容 HTTP Bridge 配置。" in result.output
 
     config = load_config(tmp_path)
     assert config is not None
