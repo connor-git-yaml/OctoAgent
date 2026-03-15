@@ -111,6 +111,23 @@ export interface ExecutionSessionResponse {
   session: ExecutionSessionDocument;
 }
 
+export interface ApprovalListItem {
+  approval_id: string;
+  task_id: string;
+  tool_name: string;
+  tool_args_summary: string;
+  risk_explanation: string;
+  policy_label: string;
+  side_effect_level: string;
+  remaining_seconds: number;
+  created_at: string;
+}
+
+export interface ApprovalsListResponse {
+  approvals: ApprovalListItem[];
+  total: number;
+}
+
 export interface AttachExecutionInputResult {
   task_id: string;
   session_id: string;

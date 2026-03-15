@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   ApiError,
   attachExecutionInput,
+  fetchApprovals,
   fetchTaskDetail,
   fetchTaskExecutionSession,
 } from "../api/client";
@@ -12,6 +13,7 @@ import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } fro
 import { useChatStream } from "../hooks/useChatStream";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import type {
+  ApprovalListItem,
   ExecutionSessionDocument,
   OperatorActionKind,
   OperatorInboxItem,
@@ -24,6 +26,23 @@ import type {
 } from "../types";
 
 const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
+const CHAT_SLASH_COMMANDS = [
+  {
+    value: "/approve",
+    description: "批准一次当前审批",
+    action: "approve_once",
+  },
+  {
+    value: "/approve always",
+    description: "总是批准当前审批",
+    action: "approve_always",
+  },
+  {
+    value: "/deny",
+    description: "拒绝当前审批",
+    action: "deny",
+  },
+] as const;
 
 function ensureArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
@@ -96,6 +115,73 @@ function parseApprovalCommand(
     return "deny";
   }
   return null;
+}
+
+function buildSyntheticApprovalItem(approval: ApprovalListItem): OperatorInboxItem {
+  return {
+    item_id: `approval:${approval.approval_id}`,
+    kind: "approval",
+    state: "pending",
+    title: `${approval.tool_name} 需要审批`,
+    summary: approval.risk_explanation,
+    task_id: approval.task_id,
+    thread_id: "",
+    source_ref: approval.approval_id,
+    created_at: approval.created_at,
+    expires_at: null,
+    pending_age_seconds: null,
+    suggested_actions: ["review_approval_request"],
+    quick_actions: [
+      { kind: "approve_once", label: "批准一次", style: "primary", enabled: true },
+      { kind: "approve_always", label: "总是批准", style: "secondary", enabled: true },
+      { kind: "deny", label: "拒绝", style: "danger", enabled: true },
+    ],
+    recent_action_result: null,
+    metadata: {
+      tool_name: approval.tool_name,
+      tool_args_summary: approval.tool_args_summary,
+      policy_label: approval.policy_label,
+      side_effect_level: approval.side_effect_level,
+    },
+  };
+}
+
+function buildExecutionSessionApprovalItem(
+  approvalId: string,
+  options: {
+    taskId: string;
+    toolName?: string;
+    argsSummary?: string;
+    summary?: string;
+    createdAt?: string;
+  }
+): OperatorInboxItem {
+  const toolName = options.toolName?.trim() || "terminal.exec";
+  return {
+    item_id: `approval:${approvalId}`,
+    kind: "approval",
+    state: "pending",
+    title: `${toolName} 需要审批`,
+    summary:
+      options.summary?.trim() || "这一步需要你确认后才能继续执行，当前聊天里可以直接批准或拒绝。",
+    task_id: options.taskId,
+    thread_id: "",
+    source_ref: approvalId,
+    created_at: options.createdAt || new Date().toISOString(),
+    expires_at: null,
+    pending_age_seconds: null,
+    suggested_actions: ["review_approval_request"],
+    quick_actions: [
+      { kind: "approve_once", label: "批准一次", style: "primary", enabled: true },
+      { kind: "approve_always", label: "总是批准", style: "secondary", enabled: true },
+      { kind: "deny", label: "拒绝", style: "danger", enabled: true },
+    ],
+    recent_action_result: null,
+    metadata: {
+      tool_name: toolName,
+      tool_args_summary: options.argsSummary?.trim() || "",
+    },
+  };
 }
 
 function readExecutionSessionDocument(
@@ -309,6 +395,8 @@ interface ChatTraceEntry {
   summary: string;
   stateLabel?: string;
   tone?: "success" | "warning" | "danger" | "running" | "draft";
+  detailInput?: string;
+  detailOutput?: string;
 }
 
 function summarizeDelegationIntent(work: WorkProjectionItem): string {
@@ -342,6 +430,45 @@ function summarizeText(value: string, maxLength = 120): string {
 function readPayloadString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
   return typeof value === "string" ? value : "";
+}
+
+function readLatestApprovalContext(
+  events: TaskEvent[],
+  workId?: string
+): {
+  toolName?: string;
+  argsSummary?: string;
+  summary?: string;
+  createdAt?: string;
+} | null {
+  const relevantEvents = workId
+    ? events.filter((event) => payloadMatchesWork(event, workId))
+    : events;
+  const latestApprovalRequested = [...relevantEvents]
+    .reverse()
+    .find((event) => String(event.type) === "APPROVAL_REQUESTED");
+  if (latestApprovalRequested) {
+    return {
+      toolName: readPayloadString(latestApprovalRequested.payload ?? {}, "tool_name"),
+      argsSummary: readPayloadString(latestApprovalRequested.payload ?? {}, "args_summary"),
+      summary:
+        readPayloadString(latestApprovalRequested.payload ?? {}, "risk_explanation") ||
+        readPayloadString(latestApprovalRequested.payload ?? {}, "summary"),
+      createdAt: latestApprovalRequested.ts,
+    };
+  }
+  const latestToolStarted = [...relevantEvents]
+    .reverse()
+    .find((event) => String(event.type) === "TOOL_CALL_STARTED");
+  if (!latestToolStarted) {
+    return null;
+  }
+  return {
+    toolName: readPayloadString(latestToolStarted.payload ?? {}, "tool_name"),
+    argsSummary: readPayloadString(latestToolStarted.payload ?? {}, "args_summary"),
+    summary: "系统已经进入高风险工具调用前的等待确认阶段。",
+    createdAt: latestToolStarted.ts,
+  };
 }
 
 function payloadMatchesWork(event: TaskEvent, workId: string): boolean {
@@ -392,6 +519,7 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
     {
       toolName: string;
       argsSummary: string;
+      outputSummary: string;
       stateLabel: string;
       tone: "success" | "warning" | "danger" | "running" | "draft";
       summary: string;
@@ -415,6 +543,7 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
       latestByName.set(toolName, {
         toolName,
         argsSummary,
+        outputSummary: "",
         stateLabel: "调用中",
         tone: "running",
         summary: argsSummary ? `参数：${argsSummary}` : "这次调用还没返回结果。",
@@ -427,6 +556,7 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
       latestByName.set(toolName, {
         toolName,
         argsSummary,
+        outputSummary: errorMessage,
         stateLabel: "失败",
         tone: "danger",
         summary: errorMessage || "这次工具调用失败了。",
@@ -438,6 +568,7 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
     latestByName.set(toolName, {
       toolName,
       argsSummary,
+      outputSummary,
       stateLabel: "已返回",
       tone: "success",
       summary: outputSummary || (argsSummary ? `参数：${argsSummary}` : "工具已返回结果。"),
@@ -454,6 +585,10 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
       stateLabel: item.stateLabel,
       tone: item.tone,
       summary: item.summary,
+      detailInput: item.argsSummary || "这次调用没有记录额外参数。",
+      detailOutput:
+        item.outputSummary ||
+        (item.stateLabel === "调用中" ? "工具还在处理，结果还没返回。" : item.summary),
     }));
   if (entries.length > 0) {
     return entries;
@@ -465,6 +600,8 @@ function buildToolTraceEntries(workEvents: TaskEvent[]): ChatTraceEntry[] {
       stateLabel: "未记录",
       tone: "draft",
       summary: "这轮没有记录到受治理工具事件，说明 Worker 可能直接用模型收口，或这部分调用不在当前任务链里。",
+      detailInput: "没有记录到当前任务链内的受治理工具调用。",
+      detailOutput: "如果这轮本应使用工具，请继续查看模型/审批轨迹，确认是否被策略阻断或提前收口。",
     },
   ];
 }
@@ -480,6 +617,8 @@ function buildApprovalTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null
       stateLabel: "已超时",
       tone: "danger",
       summary: "这一步需要你的确认，但审批超时后已经自动拒绝。",
+      detailInput: readPayloadString(expired.payload ?? {}, "tool_name") || "某个高风险动作",
+      detailOutput: "审批超时，系统已经自动拒绝这一步。",
     };
   }
   const requested = [...workEvents]
@@ -495,6 +634,8 @@ function buildApprovalTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null
       summary: toolName
         ? `这一步想调用 ${toolName}，但继续前需要你确认一次。`
         : "这一步继续前需要你确认一次。",
+      detailInput: toolName || "某个高风险动作",
+      detailOutput: "等待你确认后才会继续往下执行。",
     };
   }
   return null;
@@ -517,6 +658,11 @@ function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
         attempt || step
           ? `已完成一轮模型处理${attempt ? `（attempt ${attempt}` : ""}${step ? ` / step ${step}）` : attempt ? "）" : ""}。`
           : "已完成一轮模型处理。",
+      detailInput:
+        step || attempt
+          ? `step=${step || "unknown"}${attempt ? `, attempt=${attempt}` : ""}`
+          : "模型已接手当前问题。",
+      detailOutput: "本轮模型处理已经完成，并把结果继续交给后续阶段。",
     };
   }
   const failed = [...workEvents]
@@ -529,6 +675,9 @@ function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
       stateLabel: "失败",
       tone: "danger",
       summary: summarizeText(readPayloadString(failed.payload ?? {}, "error_message") || "模型调用失败。", 120),
+      detailInput: "模型已尝试处理当前问题。",
+      detailOutput:
+        summarizeText(readPayloadString(failed.payload ?? {}, "error_message") || "模型调用失败。", 240),
     };
   }
   const started = [...workEvents]
@@ -541,6 +690,8 @@ function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
       stateLabel: "处理中",
       tone: "running",
       summary: "Worker 已进入模型处理阶段。",
+      detailInput: "模型已经接到这轮问题，正在组织下一步输出。",
+      detailOutput: "结果尚未返回。",
     };
   }
   return null;
@@ -561,6 +712,8 @@ function buildButlerTraceEntries(
         stateLabel: "直连工具",
         tone: "running",
         summary: "这轮由主助手直接调用当前挂载的工具处理，没有另起 specialist worker。",
+        detailInput: "当前问题被判定为可以由主助手直接处理。",
+        detailOutput: "这轮不会再另起 specialist worker。",
       },
       {
         id: `${work.work_id}-tools`,
@@ -568,6 +721,8 @@ function buildButlerTraceEntries(
         stateLabel: "已挂载",
         tone: "draft",
         summary: summarizeToolList(ensureArray(work.selected_tools)),
+        detailInput: "主助手当前可直接调用的工具集合。",
+        detailOutput: summarizeToolList(ensureArray(work.selected_tools)),
       },
     ];
     const modelEntry = buildModelTraceEntry(workEvents);
@@ -587,6 +742,8 @@ function buildButlerTraceEntries(
         stateLabel: "已回复",
         tone: "success",
         summary: "主助手已经直接整理好工具结果，并把最终答复返回给用户。",
+        detailInput: "主助手已经拿到足够结果。",
+        detailOutput: "最终答复已经返回给用户。",
       });
     } else if (normalizedTaskStatus === "FAILED") {
       entries.push({
@@ -595,6 +752,8 @@ function buildButlerTraceEntries(
         stateLabel: "失败",
         tone: "danger",
         summary: "这轮直连处理没有顺利完成，主助手没有拿到可直接返回的最终结果。",
+        detailInput: "主助手尝试收口这轮处理。",
+        detailOutput: "这轮没有形成可直接返回的最终答复。",
       });
     }
     return entries;
@@ -607,6 +766,8 @@ function buildButlerTraceEntries(
     stateLabel: "已发送",
     tone: "running",
     summary: summarizeDelegationIntent(work),
+    detailInput: "Butler 已经把这轮问题改写成内部执行目标。",
+    detailOutput: summarizeDelegationIntent(work),
   });
   entries.push({
     id: `${work.work_id}-tools`,
@@ -614,6 +775,8 @@ function buildButlerTraceEntries(
     stateLabel: "已挂载",
     tone: "draft",
     summary: summarizeToolList(ensureArray(work.selected_tools)),
+    detailInput: "这轮委派允许 Worker 使用的工具。",
+    detailOutput: summarizeToolList(ensureArray(work.selected_tools)),
   });
   const latestInbound = [...workEvents]
     .reverse()
@@ -640,6 +803,11 @@ function buildButlerTraceEntries(
       stateLabel: messageType === "RESULT" ? "已收到" : "处理中",
       tone: messageType === "RESULT" ? "success" : "running",
       summary: latestSummary,
+      detailInput:
+        inboundType === "WORKER_RETURNED"
+          ? "Worker 已经把处理状态返回给主助手。"
+          : `收到一条 ${messageType || latestMessageType || "UPDATE"} 回执。`,
+      detailOutput: latestSummary,
     });
   }
   const normalizedTaskStatus = taskStatus.trim().toUpperCase();
@@ -653,6 +821,14 @@ function buildButlerTraceEntries(
         normalizedTaskStatus === "SUCCEEDED"
           ? "主助手已经把内部结果整理成最终答复并返回给用户。"
           : "主助手已经拿到内部结果，正在继续核对和整理最终答复。",
+      detailInput:
+        normalizedTaskStatus === "SUCCEEDED"
+          ? "主助手已经拿到内部结果。"
+          : "主助手已经收到 Worker 的回传结果。",
+      detailOutput:
+        normalizedTaskStatus === "SUCCEEDED"
+          ? "最终答复已经返回给用户。"
+          : "主助手还在继续核对并整理最终回复。",
     });
   }
   return entries;
@@ -672,6 +848,11 @@ function buildWorkerTraceEntries(
         resolveWorkStatus(work) === "RUNNING"
           ? "Worker 已接手这轮内部任务，开始推进执行。"
           : "Worker 已经接手并推进过这轮内部任务。",
+      detailInput: "Worker 已收到主助手下发的任务目标。",
+      detailOutput:
+        resolveWorkStatus(work) === "RUNNING"
+          ? "正在推进执行。"
+          : "这轮内部任务已经进入执行或完成阶段。",
     },
   ];
   const modelEntry = buildModelTraceEntry(workEvents);
@@ -695,6 +876,11 @@ function buildWorkerTraceEntries(
         readPayloadString(returnedEvent.payload, "summary") || "内部角色已把这轮处理状态回传给主助手。",
         120
       ),
+      detailInput: "Worker 已完成这一轮处理并准备回传。",
+      detailOutput: summarizeText(
+        readPayloadString(returnedEvent.payload, "summary") || "内部角色已把这轮处理状态回传给主助手。",
+        240
+      ),
     });
   } else {
     entries.push({
@@ -703,6 +889,8 @@ function buildWorkerTraceEntries(
       stateLabel: "待返回",
       tone: "draft",
       summary: "Worker 还没有把最终处理状态回传给主助手。",
+      detailInput: "Worker 还在执行中。",
+      detailOutput: "主助手暂时还没收到这轮最终状态。",
     });
   }
   return entries;
@@ -836,12 +1024,15 @@ export default function ChatWorkbench() {
   const [showRestoreEscape, setShowRestoreEscape] = useState(false);
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const [executionSession, setExecutionSession] = useState<ExecutionSessionDocument | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalListItem[]>([]);
   const [chatActionNotice, setChatActionNotice] = useState<{
     tone: "info" | "success" | "error";
     title: string;
     message: string;
   } | null>(null);
   const [steeringBusy, setSteeringBusy] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
@@ -1023,6 +1214,10 @@ export default function ChatWorkbench() {
     : "";
   const activeSessionProjectId = activeSession?.project_id ?? "";
   const activeSessionWorkspaceId = activeSession?.workspace_id ?? "";
+  const activeSessionWorkId = readSummaryString(
+    (activeSession?.execution_summary ?? {}) as Record<string, unknown>,
+    "work_id"
+  );
   const pendingConversationProjectId = sessionDocument?.new_conversation_project_id ?? "";
   const pendingConversationWorkspaceId = sessionDocument?.new_conversation_workspace_id ?? "";
   const pendingConversationToken = sessionDocument?.new_conversation_token ?? "";
@@ -1081,12 +1276,40 @@ export default function ChatWorkbench() {
     }
     return false;
   });
-  const activeApprovalItem =
+  const activeApprovalItemFromInbox =
     activeTaskOperatorItems.find((item) =>
       item.quick_actions.some((action) =>
         ["approve_once", "approve_always", "deny"].includes(action.kind)
       )
     ) ?? null;
+  const latestApprovalContext =
+    taskDetail?.events && taskId
+      ? readLatestApprovalContext(
+          taskDetail.events,
+          activeWork?.work_id || activeSessionWorkId
+        )
+      : null;
+  const syntheticApprovalItem =
+    taskId && pendingApprovals.length > 0 ? buildSyntheticApprovalItem(pendingApprovals[0]!) : null;
+  const executionSessionApprovalItem =
+    taskId && executionSession?.pending_approval_id
+      ? buildExecutionSessionApprovalItem(executionSession.pending_approval_id, {
+          taskId,
+          toolName: latestApprovalContext?.toolName,
+          argsSummary: latestApprovalContext?.argsSummary,
+          summary: latestApprovalContext?.summary,
+          createdAt: latestApprovalContext?.createdAt,
+        })
+      : null;
+  const activeApprovalItem =
+    activeApprovalItemFromInbox ?? syntheticApprovalItem ?? executionSessionApprovalItem;
+  const slashCommandMatches = useMemo(() => {
+    const normalized = input.trim().toLowerCase();
+    if (!normalized.startsWith("/")) {
+      return [];
+    }
+    return CHAT_SLASH_COMMANDS.filter((item) => item.value.startsWith(normalized));
+  }, [input]);
   const canSteerCurrentRun =
     Boolean(taskId) &&
     normalizedTaskStatus === "WAITING_INPUT" &&
@@ -1094,7 +1317,6 @@ export default function ChatWorkbench() {
   const inputPlaceholder = canSteerCurrentRun
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
     : "告诉 OctoAgent 你现在要做什么";
-  const submitLabel = canSteerCurrentRun ? "继续这轮" : streaming ? "加入队列" : "发送";
 
   useEffect(() => {
     if (!isRestoringConversation) {
@@ -1110,17 +1332,29 @@ export default function ChatWorkbench() {
   }, [isRestoringConversation]);
 
   useEffect(() => {
+    if (slashCommandMatches.length === 0) {
+      setSelectedCommandIndex(0);
+      return;
+    }
+    setSelectedCommandIndex((current) =>
+      Math.min(Math.max(current, 0), slashCommandMatches.length - 1)
+    );
+  }, [slashCommandMatches]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadDetail() {
       if (!taskId) {
         setTaskDetail(null);
         setExecutionSession(null);
+        setPendingApprovals([]);
         return;
       }
-      const [detailResult, sessionResult] = await Promise.allSettled([
+      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
         fetchTaskDetail(taskId),
         fetchTaskExecutionSession(taskId),
+        fetchApprovals(),
       ]);
       if (cancelled) {
         return;
@@ -1130,6 +1364,11 @@ export default function ChatWorkbench() {
         sessionResult.status === "fulfilled"
           ? readExecutionSessionDocument(sessionResult.value)
           : null
+      );
+      setPendingApprovals(
+        approvalsResult.status === "fulfilled"
+          ? approvalsResult.value.approvals.filter((item) => item.task_id === taskId)
+          : []
       );
     }
 
@@ -1164,9 +1403,10 @@ export default function ChatWorkbench() {
     ];
 
     async function refreshLiveState() {
-      const [detailResult, sessionResult] = await Promise.allSettled([
+      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
         fetchTaskDetail(currentTaskId),
         fetchTaskExecutionSession(currentTaskId),
+        fetchApprovals(),
       ]);
       if (cancelled) {
         return;
@@ -1176,6 +1416,11 @@ export default function ChatWorkbench() {
         sessionResult.status === "fulfilled"
           ? readExecutionSessionDocument(sessionResult.value)
           : null
+      );
+      setPendingApprovals(
+        approvalsResult.status === "fulfilled"
+          ? approvalsResult.value.approvals.filter((item) => item.task_id === currentTaskId)
+          : []
       );
       if (cancelled) {
         return;
@@ -1287,6 +1532,100 @@ export default function ChatWorkbench() {
     }
   }
 
+  async function resolveCurrentApprovalItem(): Promise<OperatorInboxItem | null> {
+    if (activeApprovalItem) {
+      return activeApprovalItem;
+    }
+    if (!taskId) {
+      return null;
+    }
+
+    let nextExecutionSession = executionSession;
+    let nextTaskDetail = taskDetail;
+    let nextApprovals = pendingApprovals;
+
+    const [sessionResult, detailResult, approvalsResult] = await Promise.allSettled([
+      fetchTaskExecutionSession(taskId),
+      fetchTaskDetail(taskId),
+      fetchApprovals(),
+    ]);
+
+    if (sessionResult.status === "fulfilled") {
+      nextExecutionSession = readExecutionSessionDocument(sessionResult.value);
+      setExecutionSession(nextExecutionSession);
+    }
+    if (detailResult.status === "fulfilled") {
+      nextTaskDetail = detailResult.value;
+      setTaskDetail(nextTaskDetail);
+    }
+    if (approvalsResult.status === "fulfilled") {
+      nextApprovals = approvalsResult.value.approvals.filter((item) => item.task_id === taskId);
+      setPendingApprovals(nextApprovals);
+      if (nextApprovals.length > 0) {
+        return buildSyntheticApprovalItem(nextApprovals[0]!);
+      }
+    }
+
+    if (nextExecutionSession?.pending_approval_id) {
+      const refreshedApprovalContext =
+        nextTaskDetail?.events && taskId
+          ? readLatestApprovalContext(nextTaskDetail.events, activeWork?.work_id || activeSessionWorkId)
+          : latestApprovalContext;
+      return buildExecutionSessionApprovalItem(nextExecutionSession.pending_approval_id, {
+        taskId,
+        toolName: refreshedApprovalContext?.toolName,
+        argsSummary: refreshedApprovalContext?.argsSummary,
+        summary: refreshedApprovalContext?.summary,
+        createdAt: refreshedApprovalContext?.createdAt,
+      });
+    }
+
+    return null;
+  }
+
+  function applySlashCommandSuggestion(value: string) {
+    setInput(value);
+    setSelectedCommandIndex(0);
+    window.requestAnimationFrame(() => {
+      if (!inputRef.current) {
+        return;
+      }
+      inputRef.current.focus();
+      inputRef.current.setSelectionRange(value.length, value.length);
+    });
+  }
+
+  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (slashCommandMatches.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedCommandIndex((current) => (current + 1) % slashCommandMatches.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedCommandIndex(
+        (current) => (current - 1 + slashCommandMatches.length) % slashCommandMatches.length
+      );
+      return;
+    }
+    const highlighted = slashCommandMatches[selectedCommandIndex] ?? slashCommandMatches[0];
+    if (!highlighted) {
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      applySlashCommandSuggestion(highlighted.value);
+      return;
+    }
+    if (event.key === "Enter" && input.trim() !== highlighted.value) {
+      event.preventDefault();
+      applySlashCommandSuggestion(highlighted.value);
+    }
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
@@ -1295,16 +1634,17 @@ export default function ChatWorkbench() {
     }
     const approvalCommand = parseApprovalCommand(text);
     if (approvalCommand) {
-      if (!activeApprovalItem) {
+      const approvalItem = await resolveCurrentApprovalItem();
+      if (!approvalItem) {
         setChatActionNotice({
           tone: "error",
           title: "当前没有可处理的审批",
-          message: "这条命令只有在等待你确认时才会生效。",
+          message: "如果你刚才看到需要确认，可能这条审批已经超时，或者当前页面还没拿到最新审批状态。",
         });
         return;
       }
       setInput("");
-      await handleOperatorAction(activeApprovalItem, approvalCommand);
+      await handleOperatorAction(approvalItem, approvalCommand);
       return;
     }
     setInput("");
@@ -1317,6 +1657,16 @@ export default function ChatWorkbench() {
     }
     await sendMessage(text);
   }
+
+  const pendingCommandAction = parseApprovalCommand(input);
+  const hasSlashSuggestionOpen = slashCommandMatches.length > 0;
+  const submitLabel = pendingCommandAction
+    ? "执行命令"
+    : canSteerCurrentRun
+      ? "继续这轮"
+      : streaming
+        ? "加入队列"
+        : "发送";
 
   return (
     <div className="wb-page wb-chat-page">
@@ -1538,9 +1888,11 @@ export default function ChatWorkbench() {
 
             <form className="wb-chat-form" onSubmit={handleSubmit}>
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleInputKeyDown}
                 placeholder={inputPlaceholder}
                 disabled={restoring || steeringBusy}
               />
@@ -1552,6 +1904,25 @@ export default function ChatWorkbench() {
                 {steeringBusy ? "处理中" : submitLabel}
               </button>
             </form>
+            {hasSlashSuggestionOpen ? (
+              <div className="wb-chat-command-menu" role="listbox" aria-label="聊天命令建议">
+                {slashCommandMatches.map((command, index) => (
+                  <button
+                    key={command.value}
+                    type="button"
+                    role="option"
+                    aria-selected={index === selectedCommandIndex}
+                    className={`wb-chat-command-option${
+                      index === selectedCommandIndex ? " is-active" : ""
+                    }`}
+                    onClick={() => applySlashCommandSuggestion(command.value)}
+                  >
+                    <strong>{command.value}</strong>
+                    <span>{command.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {canSteerCurrentRun ? (
               <p className="wb-chat-form-hint">
                 这条输入会直接作为当前执行的补充，不会新开一轮。

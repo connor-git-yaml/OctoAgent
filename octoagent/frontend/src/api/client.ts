@@ -5,6 +5,7 @@
 import type {
   ActionRequestEnvelope,
   ActionResultEnvelope,
+  ApprovalsListResponse,
   AttachExecutionInputResponse,
   BackupBundle,
   ControlPlaneActionResponse,
@@ -473,6 +474,10 @@ export async function fetchTaskExecutionSession(
   return apiFetch<ExecutionSessionResponse>(
     `/api/tasks/${encodeURIComponent(taskId)}/execution`
   );
+}
+
+export async function fetchApprovals(): Promise<ApprovalsListResponse> {
+  return apiFetch<ApprovalsListResponse>("/api/approvals");
 }
 
 export async function attachExecutionInput(

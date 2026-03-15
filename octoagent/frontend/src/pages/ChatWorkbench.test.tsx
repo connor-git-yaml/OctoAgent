@@ -8,6 +8,7 @@ const useWorkbenchMock = vi.fn();
 const useChatStreamMock = vi.fn();
 const fetchTaskDetailMock = vi.fn();
 const fetchTaskExecutionSessionMock = vi.fn();
+const fetchApprovalsMock = vi.fn();
 const attachExecutionInputMock = vi.fn();
 
 vi.mock("../components/shell/WorkbenchLayout", () => ({
@@ -22,6 +23,7 @@ vi.mock("../api/client", () => ({
   fetchTaskDetail: (...args: unknown[]) => fetchTaskDetailMock(...args),
   fetchTaskExecutionSession: (...args: unknown[]) =>
     fetchTaskExecutionSessionMock(...args),
+  fetchApprovals: (...args: unknown[]) => fetchApprovalsMock(...args),
   attachExecutionInput: (...args: unknown[]) => attachExecutionInputMock(...args),
   ApiError: class ApiError extends Error {
     status: number;
@@ -139,6 +141,7 @@ describe("ChatWorkbench", () => {
   beforeEach(() => {
     fetchTaskDetailMock.mockResolvedValue(null);
     fetchTaskExecutionSessionMock.mockResolvedValue({ session: null });
+    fetchApprovalsMock.mockResolvedValue({ approvals: [], total: 0 });
     attachExecutionInputMock.mockResolvedValue({
       result: {
         task_id: "task-default",
@@ -1028,19 +1031,22 @@ describe("ChatWorkbench", () => {
     expect(screen.getByText("接手执行")).toBeInTheDocument();
     expect(screen.getByText("模型处理")).toBeInTheDocument();
     expect(screen.getByText("web.search")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看细节" })).not.toBeInTheDocument();
 
-    const traceButtons = screen.getAllByRole("button", { name: "查看细节" });
-    await userEvent.hover(traceButtons[0]!);
-    expect(await screen.findByText("主助手的委派轨迹")).toBeInTheDocument();
-    expect(screen.getAllByText("委派目标").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("授权工具").length).toBeGreaterThan(0);
+    const dispatchTrigger = screen.getAllByText("委派目标")[0]!;
+    await userEvent.hover(dispatchTrigger);
+    expect(await screen.findByText("输入")).toBeInTheDocument();
+    expect(screen.getByText("Butler 已经把这轮问题改写成内部执行目标。")).toBeInTheDocument();
+    expect(
+      screen.getByText("核实外部事实，优先使用受治理的 Web 工具，再把可直接回复用户的结论带回主助手。")
+    ).toBeInTheDocument();
 
-    await userEvent.unhover(traceButtons[0]!);
-    await userEvent.hover(traceButtons[1]!);
-    expect(await screen.findByText("Research Worker 的处理轨迹")).toBeInTheDocument();
-    expect(screen.getAllByText("web.search").length).toBeGreaterThan(0);
+    await userEvent.unhover(dispatchTrigger);
+    const toolTrigger = screen.getAllByText("web.search")[0]!;
+    await userEvent.hover(toolTrigger);
+    expect(await screen.findByText("输入")).toBeInTheDocument();
+    expect(screen.getByText("q=深圳天气")).toBeInTheDocument();
     expect(screen.getByText("返回了 5 条候选结果。")).toBeInTheDocument();
-    expect(screen.getAllByText("返回主助手").length).toBeGreaterThan(0);
   });
 
   it("内部 worker 已经完成时不会过早显示已回传，而是明确主助手仍在整理", async () => {
@@ -1621,6 +1627,138 @@ describe("ChatWorkbench", () => {
       approval_id: "approval-1",
       mode: "once",
     });
+  });
+
+  it("审批快照缺失时，也会回退到当前执行会话里的 pending approval", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-approve-fallback",
+        thread_id: "thread-approve-fallback",
+        task_id: "task-chat-approve-fallback",
+        title: "审批补发会话",
+        latest_message_summary: "README 查询",
+      },
+    ];
+
+    const submitAction = vi.fn().mockResolvedValue({
+      message: "这轮确认已经处理。",
+      handled_at: "2026-03-15T10:10:03Z",
+    });
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-approve-fallback", role: "user", content: "继续读 README", isStreaming: false }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-chat-approve-fallback",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-chat-approve-fallback",
+        title: "审批补发会话",
+        status: "WAITING_APPROVAL",
+      },
+      events: [
+        {
+          event_id: "event-tool-started",
+          task_seq: 11,
+          ts: "2026-03-15T10:10:00Z",
+          type: "TOOL_CALL_STARTED",
+          actor: "tool",
+          payload: {
+            tool_name: "terminal.exec",
+            args_summary: "cmd=rg --files README.md",
+          },
+        },
+      ],
+      artifacts: [],
+    });
+    fetchTaskExecutionSessionMock.mockResolvedValue({
+      session: {
+        session_id: "exec-approve-fallback",
+        task_id: "task-chat-approve-fallback",
+        state: "WAITING_INPUT",
+        current_step: "waiting approval",
+        pending_approval_id: "approval-fallback-1",
+        requested_input: "请确认是否允许执行只读终端命令",
+        can_attach_input: false,
+        can_cancel: true,
+        metadata: {},
+      },
+    });
+    fetchApprovalsMock.mockResolvedValue({ approvals: [], total: 0 });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    await userEvent.type(
+      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      "/approve"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "执行命令" }));
+
+    expect(submitAction).toHaveBeenCalledWith("operator.approval.resolve", {
+      approval_id: "approval-fallback-1",
+      mode: "once",
+    });
+  });
+
+  it("输入斜杠命令时会给出可筛选的补全列表，并支持键盘补全", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction: vi.fn().mockResolvedValue(null),
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-streaming", role: "agent", content: "正在处理。", isStreaming: true }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: true,
+      restoring: false,
+      error: null,
+      taskId: "task-command-menu",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-command-menu",
+        title: "命令补全会话",
+        status: "RUNNING",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
+    await userEvent.type(input, "/a");
+
+    expect(screen.getByRole("listbox", { name: "聊天命令建议" })).toBeInTheDocument();
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options.map((item) => item.textContent)).toEqual(
+      expect.arrayContaining(["/approve批准一次当前审批", "/approve always总是批准当前审批"])
+    );
+    expect(screen.queryByRole("option", { name: /^\/deny/ })).not.toBeInTheDocument();
+
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(input).toHaveValue("/approve always");
   });
 
   it("等待输入时会把下一条消息作为 steer 附加到当前执行", async () => {

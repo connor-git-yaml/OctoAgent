@@ -15,6 +15,8 @@ interface HoverRevealProps {
   onToggle: (expanded: boolean) => void;
   ariaLabel: string;
   triggerClassName?: string;
+  triggerContent?: ReactNode;
+  wrapperClassName?: string;
 }
 
 export default function HoverReveal({
@@ -24,6 +26,8 @@ export default function HoverReveal({
   onToggle,
   ariaLabel,
   triggerClassName,
+  triggerContent,
+  wrapperClassName,
 }: HoverRevealProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -92,7 +96,7 @@ export default function HoverReveal({
 
   return (
     <div
-      className="wb-hover-reveal"
+      className={`wb-hover-reveal${wrapperClassName ? ` ${wrapperClassName}` : ""}`}
       onMouseEnter={openCard}
       onMouseLeave={scheduleClose}
     >
@@ -105,7 +109,7 @@ export default function HoverReveal({
         onFocus={openCard}
         onBlur={scheduleClose}
       >
-        {label}
+        {triggerContent ?? label}
       </button>
       {expanded && portalReady
         ? createPortal(

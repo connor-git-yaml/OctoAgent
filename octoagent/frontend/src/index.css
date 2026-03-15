@@ -3191,17 +3191,28 @@
   color: rgba(20, 32, 47, 0.78);
 }
 
-.wb-message-trace-trigger {
-  justify-content: flex-start;
-  width: fit-content;
-  min-height: 30px;
-  padding: 0 10px;
-}
-
 .wb-message-trace-inline {
   display: grid;
   gap: 8px;
   margin-top: 2px;
+}
+
+.wb-message-trace-inline-hover {
+  display: block;
+}
+
+.wb-message-trace-inline-trigger {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+
+.wb-message-trace-inline-trigger:hover .wb-message-trace-inline-copy strong,
+.wb-message-trace-inline-trigger:focus-visible .wb-message-trace-inline-copy strong {
+  color: var(--cp-secondary);
 }
 
 .wb-message-trace-inline-item {
@@ -3272,6 +3283,42 @@
   display: grid;
   gap: 10px;
   min-width: min(420px, 80vw);
+}
+
+.wb-message-trace-detail {
+  display: grid;
+  gap: 12px;
+  min-width: min(360px, 72vw);
+}
+
+.wb-message-trace-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-message-trace-detail-block {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(20, 32, 47, 0.04);
+}
+
+.wb-message-trace-detail-block > span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(20, 32, 47, 0.56);
+}
+
+.wb-message-trace-detail-block > p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: rgba(20, 32, 47, 0.86);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .wb-message-trace-title {
@@ -3384,6 +3431,50 @@
 .wb-message-approval.is-agent {
   background: rgba(255, 243, 224, 0.92);
   color: #9a3412;
+}
+
+.wb-chat-command-menu {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(20, 32, 47, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 36px rgba(20, 32, 47, 0.08);
+}
+
+.wb-chat-command-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: rgba(20, 32, 47, 0.03);
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.wb-chat-command-option strong {
+  font-size: 0.9rem;
+  color: var(--cp-ink);
+}
+
+.wb-chat-command-option span {
+  font-size: 0.82rem;
+  color: rgba(20, 32, 47, 0.7);
+}
+
+.wb-chat-command-option:hover,
+.wb-chat-command-option:focus-visible,
+.wb-chat-command-option.is-active {
+  border-color: rgba(34, 133, 119, 0.22);
+  background: rgba(34, 133, 119, 0.08);
+  transform: translateY(-1px);
 }
 
 .wb-topbar-menu {

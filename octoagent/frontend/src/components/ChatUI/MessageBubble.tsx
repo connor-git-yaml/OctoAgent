@@ -16,6 +16,8 @@ interface MessageBubbleTraceEntry {
   summary: string;
   stateLabel?: string;
   tone?: "success" | "warning" | "danger" | "running" | "draft";
+  detailInput?: string;
+  detailOutput?: string;
 }
 
 interface MessageBubbleActivityItem {
@@ -81,19 +83,41 @@ export function MessageBubble({
                           </div>
                           <span>{item.summary}</span>
                           {item.traceEntries && item.traceEntries.length > 0 ? (
-                            <>
-                              <div className="wb-message-trace-inline" aria-label={`${item.actor} 的处理阶段`}>
-                                {item.traceEntries.slice(0, 4).map((entry, traceIndex) => (
-                                  <div key={entry.id} className="wb-message-trace-inline-item">
-                                    <div
-                                      className="wb-message-trace-inline-line"
-                                      aria-hidden={traceIndex === item.traceEntries!.slice(0, 4).length - 1}
-                                    />
-                                    <span
-                                      className={`wb-message-trace-inline-dot is-${entry.tone ?? "draft"}`}
-                                      aria-hidden="true"
-                                    />
-                                    <div className="wb-message-trace-inline-copy">
+                            <div className="wb-message-trace-inline" aria-label={`${item.actor} 的处理阶段`}>
+                              {item.traceEntries.slice(0, 4).map((entry, traceIndex, visibleEntries) => (
+                                <HoverReveal
+                                  key={entry.id}
+                                  label=""
+                                  triggerContent={
+                                    <div className="wb-message-trace-inline-item">
+                                      <div
+                                        className="wb-message-trace-inline-line"
+                                        aria-hidden={traceIndex === visibleEntries.length - 1}
+                                      />
+                                      <span
+                                        className={`wb-message-trace-inline-dot is-${entry.tone ?? "draft"}`}
+                                        aria-hidden="true"
+                                      />
+                                      <div className="wb-message-trace-inline-copy">
+                                        <strong>{entry.label}</strong>
+                                        {entry.stateLabel ? (
+                                          <span className={`wb-status-pill is-${entry.tone ?? "draft"}`}>
+                                            {entry.stateLabel}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  }
+                                  expanded={expandedTraceId === `${item.id}:${entry.id}`}
+                                  onToggle={(expanded) =>
+                                    setExpandedTraceId(expanded ? `${item.id}:${entry.id}` : null)
+                                  }
+                                  ariaLabel={`${item.actor} · ${entry.label} 细节`}
+                                  triggerClassName="wb-message-trace-inline-trigger"
+                                  wrapperClassName="wb-message-trace-inline-hover"
+                                >
+                                  <div className="wb-message-trace-detail">
+                                    <div className="wb-message-trace-head">
                                       <strong>{entry.label}</strong>
                                       {entry.stateLabel ? (
                                         <span className={`wb-status-pill is-${entry.tone ?? "draft"}`}>
@@ -101,50 +125,20 @@ export function MessageBubble({
                                         </span>
                                       ) : null}
                                     </div>
-                                  </div>
-                                ))}
-                              </div>
-                              <HoverReveal
-                                label="查看细节"
-                                expanded={expandedTraceId === item.id}
-                                onToggle={(expanded) =>
-                                  setExpandedTraceId(expanded ? item.id : null)
-                                }
-                                ariaLabel={`${item.actor} 的内部轨迹`}
-                                triggerClassName="wb-button-inline wb-message-trace-trigger"
-                              >
-                                <div className="wb-message-trace">
-                                  {item.traceTitle ? (
-                                    <strong className="wb-message-trace-title">{item.traceTitle}</strong>
-                                  ) : null}
-                                  <div className="wb-message-trace-list">
-                                    {item.traceEntries.map((entry, traceIndex) => (
-                                      <div key={entry.id} className="wb-message-trace-item">
-                                        <div
-                                          className="wb-message-trace-line"
-                                          aria-hidden={traceIndex === item.traceEntries!.length - 1}
-                                        />
-                                        <span
-                                          className={`wb-message-trace-dot is-${entry.tone ?? "draft"}`}
-                                          aria-hidden="true"
-                                        />
-                                        <div className="wb-message-trace-copy">
-                                          <div className="wb-message-trace-head">
-                                            <strong>{entry.label}</strong>
-                                            {entry.stateLabel ? (
-                                              <span className={`wb-status-pill is-${entry.tone ?? "draft"}`}>
-                                                {entry.stateLabel}
-                                              </span>
-                                            ) : null}
-                                          </div>
-                                          <span>{entry.summary}</span>
-                                        </div>
+                                    <div className="wb-message-trace-detail-grid">
+                                      <div className="wb-message-trace-detail-block">
+                                        <span>输入</span>
+                                        <p>{entry.detailInput || "这一步没有额外暴露输入。"} </p>
                                       </div>
-                                    ))}
+                                      <div className="wb-message-trace-detail-block">
+                                        <span>输出</span>
+                                        <p>{entry.detailOutput || entry.summary}</p>
+                                      </div>
+                                    </div>
                                   </div>
-                                </div>
-                              </HoverReveal>
-                            </>
+                                </HoverReveal>
+                              ))}
+                            </div>
                           ) : null}
                         </div>
                       </div>
