@@ -48,7 +48,7 @@ export default function MemoryResultsSection({
               : "先去 Chat 对话或导入历史内容，Memory 才会开始形成可读结论。"}
           </span>
           <div className="wb-inline-actions">
-            <Link className="wb-button wb-button-primary" to="/chat">
+            <Link className="wb-button wb-button-primary" to="/">
               去 Chat
             </Link>
             <button

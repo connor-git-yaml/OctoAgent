@@ -125,7 +125,7 @@ export default function MemoryHeroSection({
 
             <div className="wb-inline-actions wb-inline-actions-wrap">
               {!hasVisibleRecords || !hasStoredRecords ? (
-                <Link className="wb-button wb-button-primary" to="/chat">
+                <Link className="wb-button wb-button-primary" to="/">
                   去 Chat 产生内容
                 </Link>
               ) : null}

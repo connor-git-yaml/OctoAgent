@@ -605,7 +605,7 @@ export default function WorkbenchBoard() {
             >
               刷新 Work
             </button>
-            <Link className="wb-button wb-button-primary" to="/chat">
+            <Link className="wb-button wb-button-primary" to="/">
               去 Chat 发起新任务
             </Link>
           </ActionBar>

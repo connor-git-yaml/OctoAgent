@@ -79,8 +79,6 @@ function buildShellStatus(options: {
 function renderNavDescription(path: string): string {
   switch (path) {
     case "/":
-      return "看现在能不能直接开始";
-    case "/chat":
       return "直接和主助手对话";
     case "/agents":
       return "管理主助手和分工";
@@ -174,7 +172,7 @@ export default function WorkbenchLayout() {
     activeWorkCount,
   });
   const suppressChatSetupReviewBanner =
-    location.pathname === "/chat" &&
+    (location.pathname === "/" || location.pathname === "/chat") &&
     workbench.lastAction?.code === "SETUP_REVIEW_READY";
 
   return (
@@ -189,8 +187,7 @@ export default function WorkbenchLayout() {
 
           <nav className="wb-nav" aria-label="Workbench Navigation">
             {[
-              { to: "/", label: "Home" },
-              { to: "/chat", label: "Chat" },
+              { to: "/", label: "Chat" },
               { to: "/agents", label: "Agents" },
               { to: "/work", label: "Work" },
               { to: "/memory", label: "Memory" },

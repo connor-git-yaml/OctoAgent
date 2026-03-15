@@ -151,7 +151,7 @@ export default function SettingsOverview({
               保存配置
             </button>
           ) : review.ready ? (
-            <Link className="wb-button wb-button-secondary" to="/chat">
+            <Link className="wb-button wb-button-secondary" to="/">
               回聊天验证
             </Link>
           ) : (
@@ -269,7 +269,7 @@ export default function SettingsOverview({
               打开 Agents &gt; Skills / MCP
             </Link>
             {!usingEchoMode && review.ready ? (
-              <Link className="wb-button wb-button-tertiary" to="/chat">
+              <Link className="wb-button wb-button-tertiary" to="/">
                 回聊天验证
               </Link>
             ) : null}
