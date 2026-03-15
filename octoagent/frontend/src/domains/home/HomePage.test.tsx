@@ -192,7 +192,7 @@ describe("HomePage", () => {
     expect(screen.queryByText("系统已经替你记住了多少")).not.toBeInTheDocument();
   });
 
-  it("有待处理事项时会显示真实事项，而不是只显示总数", () => {
+  it("有待处理事项时会把技术态摘要翻译成用户下一步", () => {
     mockWorkbench = {
       snapshot: buildSnapshot({
         setupReady: true,
@@ -204,15 +204,16 @@ describe("HomePage", () => {
             item_id: "alert:1",
             kind: "alert",
             state: "pending",
-            title: "Perplexity MCP 当前失败",
-            summary: "这次联网查询回退到了备用源，建议稍后重试。",
+            title: "任务 Control Plane Audit 需要关注",
+            summary: "drift=no_progress / stalled=75s",
           },
           {
             item_id: "retry:1",
             kind: "retryable_failure",
             state: "pending",
-            title: "天气查询子任务可重试",
-            summary: "上一次子任务失败了，可以重新发起。",
+            title:
+              "任务 请直接读取当前项目 README 的开头，告诉我这个项目一句话是干什么的。不要委托 Worker。 可重试",
+            summary: "worker_runtime_timeout:max_exec",
           },
         ],
       }),
@@ -226,9 +227,15 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "有 2 项事情需要你处理" })).toBeInTheDocument();
-    expect(screen.getByText("提醒：Perplexity MCP 当前失败")).toBeInTheDocument();
-    expect(screen.getByText("可重试失败：天气查询子任务可重试")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "有 2 项事情等你确认" })).toBeInTheDocument();
+    expect(screen.getByText("“任务 Control Plane Audit 需要关注”停住了")).toBeInTheDocument();
+    expect(screen.getByText("“任务 Control Plane Audit 需要关注”已经 1 分 15 秒 没有推进，可能卡住了。")).toBeInTheDocument();
+    expect(screen.getByText("这条任务这次没有在时限内完成")).toBeInTheDocument();
+    expect(
+      screen.getByText("这次尝试已经结束，旧任务不会自己恢复；如果还要继续，需要重新发起一次。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("drift=no_progress / stalled=75s")).not.toBeInTheDocument();
+    expect(screen.queryByText("worker_runtime_timeout:max_exec")).not.toBeInTheDocument();
     expect(screen.queryByText(/审批 0/)).not.toBeInTheDocument();
   });
 

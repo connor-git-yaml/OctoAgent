@@ -2927,10 +2927,10 @@ describe("App workbench routing", () => {
     render(<App />);
 
     await screen.findByRole("heading", {
-      name: "3 条工作正在推进",
+      name: "3 条后台工作还没收尾",
     });
 
-    const activeCard = screen.getAllByText("进行中")[0]?.closest("article");
+    const activeCard = screen.getAllByText("后台未收尾")[0]?.closest("article");
     const doneCard = screen.getAllByText("已结束")[0]?.closest("article");
     expect(activeCard).not.toBeNull();
     expect(doneCard).not.toBeNull();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
+import { describeOperatorItemForUser } from "../operator/userFacing";
 import { PageIntro } from "../../ui/primitives";
 import type { OperatorInboxItem, WorkProjectionItem } from "../../types";
 import { getValueAtPath } from "../../workbench/utils";
@@ -12,12 +13,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   web: "Web",
   wechat: "微信",
   wechat_import: "微信导入",
-};
-const OPERATOR_KIND_LABELS: Record<string, string> = {
-  approval: "审批",
-  alert: "提醒",
-  retryable_failure: "可重试失败",
-  pairing_request: "协作请求",
 };
 const WORKER_LABELS: Record<string, string> = {
   general: "Butler",
@@ -186,24 +181,12 @@ function buildEchoModeGuidance(options: {
   };
 }
 
-function formatOperatorKind(kind: string): string {
-  return OPERATOR_KIND_LABELS[kind] ?? "待处理事项";
-}
-
-function formatOperatorLead(item: OperatorInboxItem): string {
-  const title = item.title.trim();
-  if (title) {
-    return `${formatOperatorKind(item.kind)}：${title}`;
-  }
-  return formatOperatorKind(item.kind);
-}
-
 function formatWorkSummary(work: WorkProjectionItem): string {
   const workerLabel = WORKER_LABELS[work.selected_worker_type] ?? "专门角色";
   if (work.status.toLowerCase() === "running") {
-    return `这项工作还在由 ${workerLabel} 处理中。`;
+    return `这条后台工作还没收尾，目前主要由 ${workerLabel} 继续处理。`;
   }
-  return `这项工作目前状态是 ${work.status.toLowerCase()}。`;
+  return "这条后台工作还没有完全收尾，可以按需回去继续看。";
 }
 
 function buildPrimaryState(options: {
@@ -235,9 +218,9 @@ function buildPrimaryState(options: {
 
   if (options.operatorItems.length > 0) {
     return {
-      title: `有 ${options.operatorItems.length} 项事情需要你处理`,
-      summary: "这些事项不会挡住所有对话，但会影响部分任务、连接或失败恢复。",
-      primaryActionLabel: "去看待处理事项",
+      title: `有 ${options.operatorItems.length} 项事情等你确认`,
+      summary: "先处理卡住提醒、失败重试或确认动作；每一项都会告诉你下一步该点什么。",
+      primaryActionLabel: "去 Work 里处理",
       primaryActionTo: "/work",
       secondaryActionLabel: "继续进入聊天",
       secondaryActionTo: "/chat",
@@ -420,14 +403,18 @@ export default function HomePage() {
             </div>
           ) : operatorItems.length > 0 ? (
             <div className="wb-note-stack">
-              {operatorItems.slice(0, 3).map((item) => (
-                <div key={item.item_id} className="wb-note">
-                  <strong>{formatOperatorLead(item)}</strong>
-                  <span>{item.summary}</span>
-                </div>
-              ))}
+              {operatorItems.slice(0, 3).map((item) => {
+                const userFacingItem = describeOperatorItemForUser(item);
+                return (
+                  <div key={item.item_id} className="wb-note">
+                    <strong>{userFacingItem.title}</strong>
+                    <span>{userFacingItem.summary}</span>
+                    <small>{userFacingItem.nextStep}</small>
+                  </div>
+                );
+              })}
               <Link className="wb-button wb-button-secondary" to="/work">
-                去看待处理事项
+                去 Work 里处理
               </Link>
             </div>
           ) : activeWorks.length > 0 ? (

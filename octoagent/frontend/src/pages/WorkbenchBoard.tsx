@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+import {
+  describeOperatorItemForUser,
+  mapOperatorQuickAction,
+} from "../domains/operator/userFacing";
 import { formatWorkStatusTone } from "../domains/work/presentation";
 import {
   ActionBar,
@@ -10,6 +14,8 @@ import {
 } from "../ui/primitives";
 import type {
   ControlPlaneCapability,
+  OperatorActionKind,
+  OperatorInboxItem,
   WorkProjectionItem,
   WorkerPlanProposal,
 } from "../types";
@@ -117,10 +123,10 @@ function formatWorkSummary(work: WorkProjectionItem): string {
     return "系统已经把它标成升级处理，优先检查原因。";
   }
   if (work.status === "running" || work.status === "assigned" || work.status === "created") {
-    return "正在推进中，重点看拆分、子工作、Worker 方案和最近更新时间。";
+    return "这条后台工作还没收尾；如果聊天已经聊完，也可能只是内部子分支还在继续收尾。";
   }
   if (work.status === "failed" || work.status === "timed_out") {
-    return "这条工作没有顺利完成，通常需要重试或调整方案。";
+    return "这次尝试已经结束；如果还要继续，需要重新发起，而不是等旧任务自己恢复。";
   }
   return "这条工作已经收尾，可回看结果或做清理。";
 }
@@ -409,14 +415,27 @@ function WorkSection({
 export default function WorkbenchBoard() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const works = snapshot!.resources.delegation.works;
+  const operatorItems = (snapshot!.resources.sessions.operator_items ?? []).filter(
+    (item) => item.state === "pending"
+  );
   const freshnessReadiness = buildFreshnessReadiness({
     context: snapshot!.resources.context_continuity,
     capabilityPack: snapshot!.resources.capability_pack,
     works,
   });
-  const pendingTotal = snapshot!.resources.sessions.operator_summary?.total_pending ?? 0;
+  const pendingTotal =
+    operatorItems.length > 0
+      ? operatorItems.length
+      : snapshot!.resources.sessions.operator_summary?.total_pending ?? 0;
   const buckets = bucketWorks(works);
   const sortedWorks = sortWorks(works);
+  const openWorkCount = buckets.active.length + buckets.waiting.length;
+  const activeRootCount = works.filter(
+    (work) =>
+      !work.parent_work_id &&
+      (ACTIVE_WORK_STATUSES.has(work.status) || WAITING_WORK_STATUSES.has(work.status))
+  ).length;
+  const activeChildCount = openWorkCount - activeRootCount;
   const mergeReadyCount = works.filter((work) => work.merge_ready).length;
   const workerTypeCounts = works.reduce<Record<string, number>>((accumulator, work) => {
     accumulator[work.selected_worker_type] =
@@ -451,17 +470,32 @@ export default function WorkbenchBoard() {
   }, [works]);
 
   const heroTitle =
-    buckets.waiting.length > 0
-      ? `先处理 ${buckets.waiting.length} 条等待中的工作`
-      : buckets.active.length > 0
-        ? `${buckets.active.length} 条工作正在推进`
-        : works.length > 0
-          ? "当前没有阻塞中的工作"
-          : "还没有运行中的工作";
+    operatorItems.length > 0
+      ? `有 ${operatorItems.length} 项事情等你确认`
+      : buckets.waiting.length > 0
+        ? `${buckets.waiting.length} 条工作在等你补一步`
+        : openWorkCount > 0
+          ? `${openWorkCount} 条后台工作还没收尾`
+          : works.length > 0
+            ? "当前没有需要你立刻处理的事"
+            : "还没有运行中的工作";
   const heroSummary =
-    works.length > 0
-      ? "先看等待审批或输入的工作，再看运行中的分支、Worker 治理方案和可合并项。"
-      : "当你在 Chat 发起请求后，新 work 会出现在这里；之后可以继续拆分、重试和收尾。";
+    operatorItems.length > 0
+      ? "先处理确认、失败重试或卡住提醒；这里会直接告诉你要点什么。"
+      : works.length > 0
+        ? `这里统计的是还没收尾的后台 work，包含 ${activeRootCount} 个主任务和 ${Math.max(
+            activeChildCount,
+            0
+          )} 个子分支，不等于还有这么多段聊天在继续。`
+        : "当你在 Chat 发起请求后，新 work 会出现在这里；之后可以继续拆分、重试和收尾。";
+
+  async function handleOperatorAction(item: OperatorInboxItem, kind: OperatorActionKind) {
+    const mapped = mapOperatorQuickAction(item, kind);
+    if (!mapped) {
+      return;
+    }
+    await submitAction(mapped.actionId, mapped.params);
+  }
 
   async function handleWorkAction(work: WorkProjectionItem, actionId: string) {
     if (actionId === "work.split") {
@@ -546,14 +580,16 @@ export default function WorkbenchBoard() {
 
       <div className="wb-card-grid wb-card-grid-3">
         <article className="wb-card">
-          <p className="wb-card-label">进行中</p>
-          <strong>{buckets.active.length}</strong>
-          <span>包含 created / assigned / running / escalated</span>
+          <p className="wb-card-label">待你处理</p>
+          <strong>{pendingTotal}</strong>
+          <span>确认、失败重试和卡住提醒会先出现在这里</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">等待处理</p>
-          <strong>{buckets.waiting.length}</strong>
-          <span>审批、输入或暂停都会集中在这里</span>
+          <p className="wb-card-label">后台未收尾</p>
+          <strong>{openWorkCount}</strong>
+          <span>
+            包含 {activeRootCount} 个主任务和 {Math.max(activeChildCount, 0)} 个子分支，不等于还有这么多聊天在继续
+          </span>
         </article>
         <article className="wb-card">
           <p className="wb-card-label">已结束</p>
@@ -567,17 +603,59 @@ export default function WorkbenchBoard() {
           <div className="wb-panel-head">
             <div>
               <p className="wb-card-label">现在最该看</p>
-              <h3>优先处理阻塞或升级项</h3>
+              <h3>{operatorItems.length > 0 ? "先处理待确认事项" : "优先处理阻塞或升级项"}</h3>
             </div>
             <StatusBadge tone={pendingTotal > 0 ? "warning" : "success"}>
-              {pendingTotal > 0 ? `待确认 ${pendingTotal}` : "没有阻塞"}
+              {pendingTotal > 0 ? `待处理 ${pendingTotal}` : "没有待处理事项"}
             </StatusBadge>
           </div>
 
-          {priorityWorks.length === 0 ? (
+          {operatorItems.length > 0 ? (
+            <div className="wb-note-stack">
+              {operatorItems.slice(0, 3).map((item) => {
+                const userFacingItem = describeOperatorItemForUser(item);
+                return (
+                  <div key={item.item_id} className="wb-note">
+                    <strong>{userFacingItem.title}</strong>
+                    <span>{userFacingItem.summary}</span>
+                    <small>{userFacingItem.nextStep}</small>
+                    <div className="wb-inline-actions wb-inline-actions-wrap">
+                      {item.quick_actions.map((action) => {
+                        const mappedAction = mapOperatorQuickAction(item, action.kind);
+                        return (
+                          <button
+                            key={`${item.item_id}-${action.kind}`}
+                            type="button"
+                            className={
+                              action.style === "primary"
+                                ? "wb-button wb-button-primary"
+                                : "wb-button wb-button-secondary"
+                            }
+                            disabled={!action.enabled || busyActionId === mappedAction?.actionId}
+                            onClick={() => void handleOperatorAction(item, action.kind)}
+                          >
+                            {action.label}
+                          </button>
+                        );
+                      })}
+                      {userFacingItem.taskLinkTo ? (
+                        <Link className="wb-button wb-button-tertiary" to={userFacingItem.taskLinkTo}>
+                          打开对应任务
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : priorityWorks.length === 0 ? (
             <div className="wb-empty-state">
-              <strong>没有明显阻塞项</strong>
-              <span>如果想继续推进，可以去 Chat 发起新任务，或检查运行中的工作。</span>
+              <strong>当前没有需要你立刻确认的事项</strong>
+              <span>
+                {openWorkCount > 0
+                  ? `下面还有 ${openWorkCount} 条后台工作没收尾，但这不等于还有 ${openWorkCount} 段聊天在继续。`
+                  : "如果想继续推进，可以去 Chat 发起新任务。"}
+              </span>
             </div>
           ) : (
             <div className="wb-priority-list">
