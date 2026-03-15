@@ -3431,6 +3431,10 @@ class ControlPlaneService:
             return await self._handle_pipeline_resume(request)
         if action_id == "pipeline.retry_node":
             return await self._handle_pipeline_retry_node(request)
+        if action_id == "behavior.read_file":
+            return await self._handle_behavior_read_file(request)
+        if action_id == "behavior.write_file":
+            return await self._handle_behavior_write_file(request)
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {action_id}")
 
     async def _handle_project_select(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -5434,6 +5438,73 @@ class ControlPlaneService:
                 self._resource_ref("skill_pipeline", "pipeline:overview"),
             ],
             target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_behavior_read_file(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        """读取行为文件的内容（从磁盘）。"""
+        file_path = str(request.params.get("file_path", "")).strip()
+        if not file_path:
+            raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
+
+        resolved = (self._project_root / file_path).resolve()
+        project_root_resolved = self._project_root.resolve()
+        if not str(resolved).startswith(str(project_root_resolved)):
+            raise ControlPlaneActionError("INVALID_PATH", "文件路径不在项目根目录内")
+
+        if not resolved.exists():
+            return self._completed_result(
+                request=request,
+                code="BEHAVIOR_FILE_NOT_FOUND",
+                message="文件不存在，可能尚未 materialize",
+                data={"file_path": file_path, "content": "", "exists": False},
+            )
+
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise ControlPlaneActionError(
+                "FILE_READ_ERROR", f"读取文件失败: {exc}"
+            ) from exc
+
+        return self._completed_result(
+            request=request,
+            code="BEHAVIOR_FILE_READ",
+            message="已读取行为文件",
+            data={"file_path": file_path, "content": content, "exists": True},
+        )
+
+    async def _handle_behavior_write_file(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        """写入行为文件内容（到磁盘）。"""
+        file_path = str(request.params.get("file_path", "")).strip()
+        content = str(request.params.get("content", ""))
+        if not file_path:
+            raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
+
+        resolved = (self._project_root / file_path).resolve()
+        project_root_resolved = self._project_root.resolve()
+        if not str(resolved).startswith(str(project_root_resolved)):
+            raise ControlPlaneActionError("INVALID_PATH", "文件路径不在项目根目录内")
+
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_text(content, encoding="utf-8")
+        except Exception as exc:
+            raise ControlPlaneActionError(
+                "FILE_WRITE_ERROR", f"写入文件失败: {exc}"
+            ) from exc
+
+        return self._completed_result(
+            request=request,
+            code="BEHAVIOR_FILE_WRITTEN",
+            message="已保存行为文件",
+            data={"file_path": file_path},
+            resource_refs=[
+                self._resource_ref("agent_profiles", "agent:profiles"),
+            ],
         )
 
     async def _handle_operator_approval(
