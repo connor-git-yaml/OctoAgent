@@ -328,10 +328,7 @@ function formatActorSummary(actor: string, workTitle: string, status: string, la
   if (normalizedActor.includes("dev")) {
     return workTitle ? `正在实现或验证：${workTitle}` : "正在改代码和验证实现。";
   }
-  if (normalizedActor.includes("butler")) {
-    return "正在理解问题、安排下一步，并整理最终回复。";
-  }
-  return workTitle ? `正在处理：${workTitle}` : "正在处理这轮任务。";
+  return workTitle ? `正在处理：${workTitle}` : "正在理解问题、安排下一步，并整理最终回复。";
 }
 
 function formatActivityStateLabel(status: string, latestMessageType: string): string {
@@ -1419,7 +1416,7 @@ export default function ChatWorkbench() {
     (effectiveProjectId !== selectorProjectId || effectiveWorkspaceId !== selectorWorkspaceId);
   const chatScopeBanner = activeSession
     ? activeSessionAgentProfileId && activeSessionAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
-      ? `当前这条会话正在由 ${activeSessionAgentProfileLabel || activeSessionAgentProfileId} 直接处理；如果你想回到默认 Butler，请开始新对话。`
+      ? `当前这条会话正在由 ${activeSessionAgentProfileLabel || activeSessionAgentProfileId} 直接处理；如果你想回到默认助手，请开始新对话。`
       : selectorDiffersFromConversation
         ? `当前会话继续沿用 ${effectiveProjectLabel || effectiveProjectId} / ${
             effectiveWorkspaceLabel || effectiveWorkspaceId
@@ -1430,7 +1427,7 @@ export default function ChatWorkbench() {
     : pendingConversationToken
       ? pendingConversationAgentProfileId &&
         pendingConversationAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
-        ? `下一条消息会直接开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话，不再默认先进入 Butler。`
+        ? `下一条消息会直接开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话，不再默认先进入主助手。`
         : `这段新对话会从 ${effectiveProjectLabel || effectiveProjectId} / ${
             effectiveWorkspaceLabel || effectiveWorkspaceId
           } 创建；首条消息不会再回退到旧的 surface-selected project。`
@@ -2068,7 +2065,7 @@ export default function ChatWorkbench() {
               <span>
                 {recentRestorableSession?.latest_message_summary ||
                   recentRestorableSession?.title ||
-                  "可以继续刚才那条会话，也可以从一条全新的 Butler 会话开始。"}
+                  "可以继续刚才那条会话，也可以开始一条全新会话。"}
               </span>
               <div className="wb-note-stack">
                 <div className="wb-note">
@@ -2076,7 +2073,7 @@ export default function ChatWorkbench() {
                   <span>沿用刚才那条消息链、任务状态和已有上下文。</span>
                 </div>
                 <div className="wb-note">
-                  <strong>开始新的 Butler 会话</strong>
+                  <strong>开始新会话</strong>
                   <span>清掉旧上下文，让这条新问题从默认主助手入口重新开始。</span>
                 </div>
               </div>
@@ -2093,7 +2090,7 @@ export default function ChatWorkbench() {
                   className="wb-button wb-button-secondary"
                   onClick={() => void handleStartFreshConversation()}
                 >
-                  新开 Butler 会话
+                  开始新会话
                 </button>
               </div>
             </div>

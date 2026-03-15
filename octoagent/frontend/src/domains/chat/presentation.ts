@@ -45,12 +45,15 @@ export function formatTaskStatusTone(status: string): string {
   }
 }
 
-export function formatAgentRoleLabel(agent: string): string {
+export function formatAgentRoleLabel(
+  agent: string,
+  opts?: { isMainAgent?: boolean },
+): string {
   const normalized = agent.trim().toLowerCase();
   if (!normalized) {
     return "未分配";
   }
-  if (normalized.includes("butler")) {
+  if (opts?.isMainAgent) {
     return "主助手";
   }
   if (normalized.includes("research")) {

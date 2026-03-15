@@ -15,7 +15,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   wechat_import: "微信导入",
 };
 const WORKER_LABELS: Record<string, string> = {
-  general: "Butler",
+  general: "主助手",
   research: "Research",
   ops: "Ops",
   dev: "Dev",
@@ -150,7 +150,7 @@ function buildAvailabilityImpact(options: {
   if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
     return "普通聊天还能继续，但联网查询、外部连接或后台能力可能会变慢或失败。";
   }
-  return "普通聊天、联网查询和 Butler / Worker 协作都已经可以直接开始。";
+  return "普通聊天、联网查询和多 Agent 协作都已经可以直接开始。";
 }
 
 function buildSessionSummary(summary: string): string {
@@ -433,7 +433,7 @@ export default function HomePage() {
             <div className="wb-note-stack">
               <div className="wb-note">
                 <strong>“帮我把今天下午的工作拆成 3 个优先级，并给我执行顺序。”</strong>
-                <span>让 Butler 先帮你把任务收口成一个可执行顺序。</span>
+                <span>让主助手先帮你把任务收口成一个可执行顺序。</span>
               </div>
               <div className="wb-note">
                 <strong>“深圳今天天气怎么样？我今天穿什么比较合适？”</strong>

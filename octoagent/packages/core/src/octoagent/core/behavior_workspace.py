@@ -204,6 +204,55 @@ def project_instructions_dir(project_root: Path, project_slug: str) -> Path:
     return behavior_project_dir(project_root, project_slug) / "instructions"
 
 
+def ensure_filesystem_skeleton(
+    project_root: Path,
+    project_slug: str = "default",
+    agent_slug: str = "butler",
+) -> list[str]:
+    """在 clean install 后创建 behavior 目录骨架和最小 scaffold 文件。
+
+    返回新创建的路径列表。
+    """
+    root = project_root.resolve()
+    created: list[str] = []
+
+    # 必须存在的目录
+    dirs = [
+        behavior_shared_dir(root),
+        behavior_agent_dir(root, agent_slug),
+        behavior_project_dir(root, project_slug),
+        behavior_project_agent_dir(root, project_slug, agent_slug),
+        project_workspace_dir(root, project_slug),
+        project_data_dir(root, project_slug),
+        project_notes_dir(root, project_slug),
+        project_artifacts_dir(root, project_slug),
+        project_instructions_dir(root, project_slug),
+    ]
+    for d in dirs:
+        if not d.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            created.append(str(d))
+
+    # project.secret-bindings.json
+    sb = project_secret_bindings_path(root, project_slug)
+    if not sb.exists():
+        sb.write_text("{}\n", encoding="utf-8")
+        created.append(str(sb))
+
+    # instructions/README.md
+    readme = project_instructions_dir(root, project_slug) / "README.md"
+    if not readme.exists():
+        readme.write_text(
+            "# Project Instructions\n\n"
+            "把项目级自定义指令放在这个目录。\n"
+            "文件会按字母序加载到 Agent 的 project-shared 行为层。\n",
+            encoding="utf-8",
+        )
+        created.append(str(readme))
+
+    return created
+
+
 def _relative_path_hint(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))

@@ -321,6 +321,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
     )
     app.state.project_migration_run = await migration_service.ensure_default_project()
+
+    # Feature 056: clean install 后补齐文件系统骨架 + 默认 agent profile + bootstrap session
+    from octoagent.core.behavior_workspace import ensure_filesystem_skeleton
+
+    skeleton_created = ensure_filesystem_skeleton(project_root)
+    if skeleton_created:
+        log.info("filesystem_skeleton_created", paths=skeleton_created)
+
+    from .services.startup_bootstrap import ensure_startup_records
+
+    await ensure_startup_records(store_group=store_group, project_root=project_root)
+
     app.state.store_group = store_group
 
     # 初始化 SSEHub

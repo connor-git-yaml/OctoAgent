@@ -574,7 +574,7 @@ describe("ChatWorkbench", () => {
 
     expect(screen.getByText("你有一段最近会话")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "继续最近会话" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始新会话" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "继续最近会话" }));
 

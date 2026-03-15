@@ -54,7 +54,7 @@ export default function SettingsOverview({
   const primarySummary = usingEchoMode
     ? "还没有连接真实模型。先添加一个 Provider，并补 API Key 或 OAuth；没配好前系统会先自动回退。"
     : review.ready
-      ? "当前配置已经够用。先保存这次修改，再回聊天页验证 Butler 的真实回复。"
+      ? "当前配置已经够用。先保存这次修改，再回聊天页验证主助手的真实回复。"
       : "不用一次看完所有配置。先补齐阻塞项，再回来慢慢扩展其他能力。";
   const primaryActionLabel = usingEchoMode
     ? "连接真实模型"
@@ -72,7 +72,7 @@ export default function SettingsOverview({
     : review.ready
       ? [
           "先保存当前配置，确保这次修改已经生效。",
-          "回到聊天页发第一条消息，确认真实模型和 Butler 已经正常响应。",
+          "回到聊天页发第一条消息，确认真实模型和主助手已经正常响应。",
           "如果这轮验证没问题，再回来补渠道、Memory 或更多能力。",
         ]
       : [

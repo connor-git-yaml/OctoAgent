@@ -81,7 +81,7 @@ function renderNavDescription(path: string): string {
     case "/":
       return "看现在能不能直接开始";
     case "/chat":
-      return "直接和 Butler 对话";
+      return "直接和主助手对话";
     case "/agents":
       return "管理主助手和分工";
     case "/work":
