@@ -497,6 +497,7 @@ class WorkerRuntime:
                     console=self._execution_console,
                     work_id=str(envelope.metadata.get("work_id", "")),
                     runtime_kind=runtime_kind,
+                    agent_session_id=str(envelope.metadata.get("agent_session_id", "")),
                     runtime_context=envelope.runtime_context,
                     resume_state_snapshot=envelope.resume_state_snapshot,
                 )

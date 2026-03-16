@@ -549,6 +549,21 @@ class TaskService:
                 compiled_context=compiled_context,
                 runtime_context=runtime_context,
             )
+            # C-3 修复：从 AgentSession.metadata 注入 loaded_skill_names
+            # 使 LLMService._build_loaded_skills_context() 能在每轮对话读取到已加载的 skill
+            if "loaded_skill_names" not in llm_dispatch_metadata:
+                _agent_sid = str(llm_dispatch_metadata.get("agent_session_id", "")).strip()
+                if _agent_sid:
+                    try:
+                        _as = await self._stores.agent_context_store.get_agent_session(
+                            _agent_sid
+                        )
+                        if _as is not None:
+                            _lsn = _as.metadata.get("loaded_skill_names")
+                            if _lsn:
+                                llm_dispatch_metadata["loaded_skill_names"] = _lsn
+                    except Exception:
+                        pass
             request_summary = compiled_context.request_summary
             if self._should_execute_node("model_call_started", resume_from_node):
                 request_artifact_id = await self._store_request_snapshot_artifact(

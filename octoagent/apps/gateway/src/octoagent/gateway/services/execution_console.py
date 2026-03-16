@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 import structlog
 from octoagent.core.models import (
@@ -144,7 +144,7 @@ class ExecutionConsoleService:
         input_policy: HumanInputPolicy,
         backend: ExecutionBackend = ExecutionBackend.DOCKER,
         worker_id: str = "",
-        metadata: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
         message: str = "",
     ) -> ExecutionConsoleSession:
         """注册或覆盖当前 task 的 execution session。"""

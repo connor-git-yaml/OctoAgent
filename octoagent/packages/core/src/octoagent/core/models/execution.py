@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -110,7 +111,7 @@ class ExecutionConsoleSession(BaseModel):
     live: bool = Field(default=False, description="session currently bound in-process")
     can_attach_input: bool = Field(default=False)
     can_cancel: bool = Field(default=False)
-    metadata: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExecutionStreamEvent(BaseModel):

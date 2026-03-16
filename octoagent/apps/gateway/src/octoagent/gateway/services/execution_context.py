@@ -31,6 +31,7 @@ class ExecutionRuntimeContext:
     console: ExecutionConsoleService
     work_id: str = ""
     runtime_kind: str = ""
+    agent_session_id: str = ""
     runtime_context: RuntimeControlContext | None = None
     resume_state_snapshot: dict[str, Any] | None = None
     _resume_input_consumed: bool = field(default=False, init=False, repr=False)

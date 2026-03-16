@@ -2810,23 +2810,55 @@ class CapabilityPackService:
         )
         async def skills(action: str, name: str = "") -> str:
             """管理和使用 SKILL.md 定义的技能。支持列出所有可用技能的摘要，或加载指定技能的完整指令到当前会话。"""
-            # 获取当前 session metadata 用于 load/unload
-            session_metadata = None
+            # 读取 AgentSession.metadata 作为 loaded_skill_names 的持久化层
+            session_metadata: dict[str, Any] | None = None
+            agent_session_id = ""
             try:
                 context = get_current_execution_context()
-                if self._task_runner is not None:
-                    session = await self._task_runner.get_execution_session(context.task_id)
-                    if session is not None:
-                        session_metadata = session.metadata
+                agent_session_id = getattr(context, "agent_session_id", "") or ""
             except Exception:
-                if action in ("load", "unload"):
-                    return f"Error: 无法获取当前会话上下文，{action} 操作需要有效的会话。"
-                # list 操作无需 session，静默降级
-            return await _skills_tool.execute(
+                pass
+
+            if agent_session_id and action in ("load", "unload", "list"):
+                try:
+                    agent_session = await self._stores.agent_context_store.get_agent_session(
+                        agent_session_id
+                    )
+                    if agent_session is not None:
+                        session_metadata = agent_session.metadata
+                except Exception:
+                    pass
+
+            if session_metadata is None and action in ("load", "unload"):
+                return f"Error: 无法获取当前会话上下文，{action} 操作需要有效的会话。"
+
+            result = await _skills_tool.execute(
                 action=action,
                 name=name,
                 session_metadata=session_metadata,
             )
+
+            # 写回 AgentSession.metadata，持久化 loaded_skill_names
+            if (
+                action in ("load", "unload")
+                and agent_session_id
+                and session_metadata is not None
+            ):
+                try:
+                    agent_session = await self._stores.agent_context_store.get_agent_session(
+                        agent_session_id
+                    )
+                    if agent_session is not None:
+                        agent_session.metadata["loaded_skill_names"] = session_metadata.get(
+                            "loaded_skill_names", []
+                        )
+                        from datetime import datetime, UTC
+                        agent_session.updated_at = datetime.now(UTC)
+                        await self._stores.agent_context_store.save_agent_session(agent_session)
+                except Exception as exc:
+                    _log.warning("skill_session_metadata_writeback_failed", error=str(exc))
+
+            return result
 
         for handler in (
             project_inspect,
