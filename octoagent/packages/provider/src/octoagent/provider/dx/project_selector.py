@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from octoagent.core.behavior_workspace import materialize_project_behavior_files
 from octoagent.core.models import Project, ProjectSecretBinding, ProjectSelectorState, Workspace
 from octoagent.core.store import StoreGroup, create_store_group
 from pydantic import BaseModel, Field
@@ -106,6 +107,13 @@ class ProjectSelectorService:
             )
             await store_group.project_store.create_project(project)
             await store_group.project_store.create_workspace(workspace)
+
+            # 为新项目创建 project-shared 行为文件和基础设施
+            materialize_project_behavior_files(
+                self._root,
+                project_slug=normalized_slug,
+                project_name=name.strip(),
+            )
 
             active_changed = False
             if set_active:

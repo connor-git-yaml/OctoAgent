@@ -12,6 +12,7 @@ from typing import Any
 import structlog
 from octoagent.core.behavior_workspace import (
     check_behavior_file_budget,
+    materialize_agent_behavior_files,
     validate_behavior_file_path,
 )
 from octoagent.core.models import (
@@ -5839,6 +5840,13 @@ class ControlPlaneService:
             normalized_profile=review["profile"],
             existing=None,
             origin_kind=WorkerProfileOriginKind.CUSTOM,
+        )
+        # 为新 Agent 创建 agent-private 行为文件
+        materialize_agent_behavior_files(
+            self._project_root,
+            agent_slug=saved.name or saved.profile_id,
+            agent_name=saved.name,
+            is_worker_profile=True,
         )
         return self._completed_result(
             request=request,

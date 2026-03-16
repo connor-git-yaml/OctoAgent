@@ -287,6 +287,144 @@ def ensure_filesystem_skeleton(
     return created
 
 
+def materialize_agent_behavior_files(
+    project_root: Path,
+    *,
+    agent_slug: str,
+    agent_name: str = "",
+    is_worker_profile: bool = False,
+) -> list[str]:
+    """为新 Agent 创建 agent-private 行为文件（writeIfMissing）。
+
+    在新 Worker/Agent 实例化时调用，确保 IDENTITY.md / SOUL.md / HEARTBEAT.md
+    被写入 ``behavior/agents/{agent_slug}/``。已存在的文件不会被覆盖。
+
+    Returns:
+        新创建的文件路径列表。
+    """
+    root = project_root.resolve()
+    slug = normalize_behavior_agent_slug(agent_slug)
+    created: list[str] = []
+
+    for file_id in AGENT_PRIVATE_BEHAVIOR_FILE_IDS:
+        target = behavior_agent_dir(root, slug) / file_id
+        if target.exists():
+            continue
+        try:
+            content = _default_content_for_file(
+                file_id=file_id,
+                is_worker_profile=is_worker_profile,
+                agent_name=agent_name or slug,
+                project_label="当前项目",
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            created.append(str(target))
+        except Exception:
+            log.warning(
+                "agent_behavior_materialize_failed",
+                file_id=file_id,
+                agent_slug=slug,
+                path=str(target),
+            )
+
+    if created:
+        log.info(
+            "agent_behavior_files_materialized",
+            agent_slug=slug,
+            is_worker=is_worker_profile,
+            count=len(created),
+        )
+    return created
+
+
+def materialize_project_behavior_files(
+    project_root: Path,
+    *,
+    project_slug: str,
+    project_name: str = "",
+) -> list[str]:
+    """为新项目创建 project-shared 行为文件和基础设施（writeIfMissing）。
+
+    在新项目创建时调用，确保 PROJECT.md / KNOWLEDGE.md 以及 instructions/README.md、
+    project.secret-bindings.json 和必要目录结构被初始化。已存在的文件不会被覆盖。
+
+    Returns:
+        新创建的文件/目录路径列表。
+    """
+    root = project_root.resolve()
+    slug = _normalize_project_slug(project_slug)
+    label = project_name.strip() or slug
+    created: list[str] = []
+
+    # 确保项目目录结构存在
+    dirs = [
+        behavior_project_dir(root, slug),
+        project_workspace_dir(root, slug),
+        project_data_dir(root, slug),
+        project_notes_dir(root, slug),
+        project_artifacts_dir(root, slug),
+        project_instructions_dir(root, slug),
+    ]
+    for d in dirs:
+        if not d.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            created.append(str(d))
+
+    # project.secret-bindings.json
+    sb = project_secret_bindings_path(root, slug)
+    if not sb.exists():
+        sb.write_text(
+            build_project_secret_bindings_stub(
+                project_name=label, project_slug=slug,
+            ),
+            encoding="utf-8",
+        )
+        created.append(str(sb))
+
+    # instructions/README.md
+    readme = project_instructions_dir(root, slug) / "README.md"
+    if not readme.exists():
+        readme.write_text(
+            build_project_instruction_readme(
+                project_name=label, project_slug=slug,
+            ),
+            encoding="utf-8",
+        )
+        created.append(str(readme))
+
+    # 项目级行为文件
+    for file_id in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
+        target = behavior_project_dir(root, slug) / file_id
+        if target.exists():
+            continue
+        try:
+            content = _default_content_for_file(
+                file_id=file_id,
+                is_worker_profile=False,
+                agent_name="Butler",
+                project_label=label,
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            created.append(str(target))
+        except Exception:
+            log.warning(
+                "project_behavior_materialize_failed",
+                file_id=file_id,
+                project_slug=slug,
+                path=str(target),
+            )
+
+    if created:
+        log.info(
+            "project_behavior_files_materialized",
+            project_slug=slug,
+            count=len(created),
+        )
+    return created
+
+
 def _relative_path_hint(path: Path, root: Path) -> str:
     try:
         return str(path.relative_to(root))
