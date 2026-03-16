@@ -51,11 +51,11 @@ const PROJECT_SHARED_FILE_IDS = new Set(["PROJECT.md", "KNOWLEDGE.md", "USER.md"
 function formatScopeTitle(scope: string): string {
   switch (scope) {
     case "system_shared":
-      return "Shared Files";
+      return "全局共享规则";
     case "agent_private":
-      return "Agent Private";
+      return "Agent 私有配置";
     case "project_shared":
-      return "Project Shared";
+      return "项目共享配置";
     case "project_agent":
       return "Project-Agent Override";
     default:
@@ -737,7 +737,7 @@ export default function AgentCenter() {
             ) : null}
 
             <div className="wb-behavior-scope-grid">
-              {behaviorScopeGroups.map((group) => (
+              {behaviorScopeGroups.filter((group) => group.scope !== "agent_private").map((group) => (
                 <article key={group.scope} className="wb-note wb-behavior-scope-card">
                   <strong>{group.title}</strong>
                   <div className="wb-note-stack">
