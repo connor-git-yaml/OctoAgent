@@ -929,7 +929,7 @@ def resolve_behavior_workspace(
             default_file.model_copy(
                 update={
                     "scope": scope,
-                    "path": path_str,
+                    "path": relative_path or path_str,
                     "editable_mode": editable_mode,
                     "review_mode": review_mode,
                     "content": budget.content,
