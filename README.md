@@ -106,9 +106,15 @@ octo config memory memu-http --bridge-url "https://memory.example.com"
 
 The Web `Settings > Memory` screen uses the same three modes: local memory, MemU via local command, and MemU via HTTP bridge.
 
-Behavior files are also explicit now. The Butler default behavior is driven by
-`AGENTS.md / USER.md / PROJECT.md / TOOLS.md`, with the Web `Settings > Behavior Files`
-screen showing the current effective source chain. The canonical local management path is:
+Behavior files are also explicit now. They live in three layers:
+
+| Layer | Files | Path | What it controls |
+|-------|-------|------|------------------|
+| **Global** (cross-agent) | AGENTS.md, USER.md, TOOLS.md, BOOTSTRAP.md | `behavior/system/` | Agent collaboration rules, user preferences, tool governance, onboarding flow |
+| **Agent** (per-agent) | IDENTITY.md, SOUL.md, HEARTBEAT.md | `behavior/agents/{slug}/` | Agent name & role, personality & tone, self-check & pacing |
+| **Project** (per-project) | PROJECT.md, KNOWLEDGE.md | `projects/{slug}/behavior/` | Project goals & terminology, knowledge map & references |
+
+The Web `Settings > Behavior Files` screen shows the current effective source chain. The canonical local management path is:
 
 ```bash
 octo behavior ls
