@@ -13,6 +13,8 @@ from pathlib import Path
 import structlog
 from octoagent.core.behavior_workspace import (
     build_behavior_bootstrap_template_ids,
+    materialize_agent_behavior_files,
+    resolve_behavior_agent_slug,
 )
 from octoagent.core.models import (
     AgentProfile,
@@ -47,6 +49,15 @@ async def ensure_startup_records(
     await _ensure_bootstrap_session(store_group, project, workspace, owner_profile, agent_profile)
 
     await store_group.conn.commit()
+
+    # agent profile 确定后，用正确的 slug 补齐 agent-private 行为文件
+    agent_slug = resolve_behavior_agent_slug(agent_profile)
+    materialize_agent_behavior_files(
+        project_root,
+        agent_slug=agent_slug,
+        agent_name=agent_profile.name,
+        is_worker_profile=False,
+    )
 
     log.info(
         "startup_records_ensured",

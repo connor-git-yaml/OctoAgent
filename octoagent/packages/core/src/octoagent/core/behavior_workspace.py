@@ -256,7 +256,12 @@ def ensure_filesystem_skeleton(
         created.append(str(readme))
 
     # 行为文件模板 materialize（writeFileIfMissing）
-    for file_id in ALL_BEHAVIOR_FILE_IDS:
+    # 注意：只写 SYSTEM_SHARED 和 PROJECT_SHARED 文件。
+    # AGENT_PRIVATE 文件需要知道真实 agent_slug（来自 AgentProfile），
+    # 由 startup_bootstrap.ensure_startup_records 在 profile 确定后调用
+    # materialize_agent_behavior_files() 来创建。
+    skeleton_file_ids = (*SHARED_BEHAVIOR_FILE_IDS, *PROJECT_SHARED_BEHAVIOR_FILE_IDS)
+    for file_id in skeleton_file_ids:
         scope = _template_scope_for_file(file_id)
         target = _default_behavior_file_path(
             project_root=root,

@@ -80,7 +80,9 @@ def _build_runtime_descriptor(
         workspace_sync_command=[
             "/bin/bash",
             "-lc",
-            "if [ -d .git ]; then git pull --ff-only origin master; fi && uv sync",
+            "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && "
+            "if [ -n \"$GIT_ROOT\" ]; then git -C \"$GIT_ROOT\" pull --ff-only origin master; fi && "
+            "uv sync",
         ],
         frontend_build_command=[
             "/bin/bash",
