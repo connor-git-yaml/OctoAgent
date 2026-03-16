@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import type { McpProviderItem } from "../types";
+
+/* ── draft helpers ─────────────────────────────────────────── */
 
 interface McpProviderDraft {
   provider_id: string;
@@ -61,61 +63,207 @@ function draftFromItem(item: McpProviderItem): McpProviderDraft {
   };
 }
 
+/* ── 状态文案 ────────────────────────────────────────────── */
+
+const STATUS_LABELS: Record<string, string> = {
+  available: "运行中",
+  error: "异常",
+  unconfigured: "未配置",
+  discovering: "发现中",
+  disabled: "已停用",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
+/* ── modal 编辑器 ────────────────────────────────────────── */
+
+function McpProviderModal({
+  mode,
+  draft,
+  busy,
+  error,
+  warnings,
+  onDraftChange,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  mode: "create" | "edit";
+  draft: McpProviderDraft;
+  busy: boolean;
+  error: string | null;
+  warnings: string[];
+  onDraftChange: <K extends keyof McpProviderDraft>(key: K, value: McpProviderDraft[K]) => void;
+  onSave: () => void;
+  onDelete: (() => void) | null;
+  onClose: () => void;
+}) {
+  return document.body
+    ? createPortal(
+        <div
+          className="wb-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+        >
+          <div className="wb-modal-body wb-mcp-modal">
+            <div className="wb-panel-head">
+              <h3>{mode === "create" ? "安装 MCP Provider" : `编辑 ${draft.provider_id}`}</h3>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={onClose}
+              >
+                关闭
+              </button>
+            </div>
+
+            {error ? (
+              <div className="wb-inline-banner is-error">
+                <strong>发现失败</strong>
+                <span>{error}</span>
+              </div>
+            ) : null}
+
+            <div className="wb-agent-form-grid">
+              <label className="wb-field">
+                <span>Provider ID</span>
+                <input
+                  type="text"
+                  value={draft.provider_id}
+                  disabled={mode === "edit"}
+                  onChange={(e) => onDraftChange("provider_id", e.target.value)}
+                  placeholder="例如 local-files"
+                />
+              </label>
+              <label className="wb-field">
+                <span>启用状态</span>
+                <select
+                  value={draft.enabled ? "enabled" : "disabled"}
+                  onChange={(e) => onDraftChange("enabled", e.target.value === "enabled")}
+                >
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </label>
+              <label className="wb-field wb-field-span-2">
+                <span>Command</span>
+                <input
+                  type="text"
+                  value={draft.command}
+                  onChange={(e) => onDraftChange("command", e.target.value)}
+                  placeholder="例如 npx"
+                />
+              </label>
+              <label className="wb-field">
+                <span>Args</span>
+                <textarea
+                  value={draft.args_text}
+                  onChange={(e) => onDraftChange("args_text", e.target.value)}
+                  placeholder="每行一个参数，例如 -y"
+                />
+              </label>
+              <label className="wb-field">
+                <span>工作目录</span>
+                <textarea
+                  value={draft.cwd}
+                  onChange={(e) => onDraftChange("cwd", e.target.value)}
+                  placeholder="可选，例如 /Users/connorlu/project"
+                />
+              </label>
+              <label className="wb-field wb-field-span-2">
+                <span>环境变量</span>
+                <textarea
+                  value={draft.env_text}
+                  onChange={(e) => onDraftChange("env_text", e.target.value)}
+                  placeholder={"每行一个 KEY=VALUE\n例如 PATH=/usr/local/bin"}
+                />
+              </label>
+            </div>
+
+            {warnings.length ? (
+              <div className="wb-note-stack">
+                {warnings.map((w) => (
+                  <div key={w} className="wb-note">
+                    <strong>提醒</strong>
+                    <span>{w}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="wb-inline-actions">
+              <button
+                type="button"
+                className="wb-button wb-button-primary"
+                onClick={onSave}
+                disabled={busy}
+              >
+                {mode === "create" ? "安装" : "保存修改"}
+              </button>
+              {onDelete ? (
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={onDelete}
+                  disabled={busy}
+                >
+                  删除
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+}
+
+/* ── 页面主体 ────────────────────────────────────────────── */
+
 export default function McpProviderCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const catalog = snapshot!.resources.mcp_provider_catalog;
   const items = catalog.items;
-  const [selectedProviderId, setSelectedProviderId] = useState(items[0]?.provider_id ?? "");
-  const [editorMode, setEditorMode] = useState<"existing" | "create">(
-    items[0] ? "existing" : "create"
-  );
-  const [draft, setDraft] = useState<McpProviderDraft>(
-    items[0] ? draftFromItem(items[0]) : emptyDraft()
-  );
 
-  useEffect(() => {
-    const selected =
-      items.find((item) => item.provider_id === selectedProviderId) ?? items[0] ?? null;
-    if (editorMode === "existing" && selected) {
-      setSelectedProviderId(selected.provider_id);
-      setDraft(draftFromItem(selected));
-      return;
-    }
-    if (!selected) {
-      setSelectedProviderId("");
-      setDraft(emptyDraft());
-      setEditorMode("create");
-    }
-  }, [catalog.generated_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<McpProviderDraft>(emptyDraft());
 
-  const selectedItem =
-    items.find((item) => item.provider_id === selectedProviderId) ?? null;
   const busy = busyActionId === "mcp_provider.save" || busyActionId === "mcp_provider.delete";
 
-  function updateDraft<Key extends keyof McpProviderDraft>(
-    key: Key,
-    value: McpProviderDraft[Key]
-  ) {
-    setDraft((current) => ({
-      ...current,
-      [key]: value,
-    }));
-  }
+  // action 完成后自动关闭 modal
+  const [prevBusy, setPrevBusy] = useState(busy);
+  useEffect(() => {
+    if (prevBusy && !busy && modalOpen) {
+      setModalOpen(false);
+    }
+    setPrevBusy(busy);
+  }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function selectItem(item: McpProviderItem) {
-    setEditorMode("existing");
-    setSelectedProviderId(item.provider_id);
-    setDraft(draftFromItem(item));
-  }
-
-  function handleCreate() {
-    setEditorMode("create");
-    setSelectedProviderId("");
+  function openCreate() {
+    setModalMode("create");
+    setEditingProviderId(null);
     setDraft(emptyDraft());
+    setModalOpen(true);
+  }
+
+  function openEdit(item: McpProviderItem) {
+    setModalMode("edit");
+    setEditingProviderId(item.provider_id);
+    setDraft(draftFromItem(item));
+    setModalOpen(true);
+  }
+
+  function updateDraft<K extends keyof McpProviderDraft>(key: K, value: McpProviderDraft[K]) {
+    setDraft((cur) => ({ ...cur, [key]: value }));
   }
 
   async function handleSave() {
-    const result = await submitAction("mcp_provider.save", {
+    await submitAction("mcp_provider.save", {
       provider: {
         provider_id: draft.provider_id,
         command: draft.command,
@@ -125,201 +273,80 @@ export default function McpProviderCenter() {
         enabled: draft.enabled,
       },
     });
-    if (result) {
-      setEditorMode("existing");
-      setSelectedProviderId(draft.provider_id);
-    }
   }
 
   async function handleDelete() {
-    if (!selectedItem) {
-      return;
-    }
-    const result = await submitAction("mcp_provider.delete", {
-      provider_id: selectedItem.provider_id,
+    if (!editingProviderId) return;
+    await submitAction("mcp_provider.delete", {
+      provider_id: editingProviderId,
     });
-    if (result) {
-      handleCreate();
-    }
   }
+
+  const editingItem = editingProviderId
+    ? items.find((i) => i.provider_id === editingProviderId) ?? null
+    : null;
 
   return (
     <div className="wb-page">
-      <section className="wb-hero wb-hero-compact">
-        <div className="wb-hero-copy">
-          <p className="wb-kicker">MCP Providers</p>
-          <h1>把外部能力接成可治理的 MCP Provider</h1>
-          <p>
-            这里负责安装、编辑和删除 MCP Provider。安装完成后，先去
-            <Link to="/agents?view=providers"> Agents &gt; Providers</Link> 决定当前
-            Project 的默认范围，再回 Butler 或 Worker 模板做更细的绑定。
+      {/* 顶栏：标题 + 新建按钮 */}
+      <div className="wb-topbar">
+        <div className="wb-topbar-copy">
+          <h2>MCP Providers</h2>
+          <p className="wb-topbar-meta">
+            已安装 {items.length} · 已启用 {Number(catalog.summary.enabled_count ?? 0)} · 健康{" "}
+            {Number(catalog.summary.healthy_count ?? 0)}
           </p>
-          <div className="wb-chip-row">
-            <span className="wb-chip">已安装 {items.length}</span>
-            <span className="wb-chip">已启用 {Number(catalog.summary.enabled_count ?? 0)}</span>
-            <span className="wb-chip">健康 {Number(catalog.summary.healthy_count ?? 0)}</span>
-          </div>
         </div>
-        <div className="wb-hero-actions">
-          <Link className="wb-button wb-button-secondary" to="/agents?view=providers">
-            返回 Agents &gt; Providers
-          </Link>
-          <Link className="wb-button wb-button-tertiary" to="/agents?view=butler">
-            去 Butler 绑定
-          </Link>
-        </div>
-      </section>
-
-      <div className="wb-split">
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">已安装</p>
-              <h3>MCP Provider 目录</h3>
-            </div>
-            <button type="button" className="wb-button wb-button-primary" onClick={handleCreate}>
-              新建 Provider
-            </button>
-          </div>
-          <div className="wb-note-stack">
-            {items.map((item) => (
-              <button
-                key={item.provider_id}
-                type="button"
-                className={`wb-list-row ${selectedProviderId === item.provider_id ? "is-active" : ""}`}
-                onClick={() => selectItem(item)}
-              >
-                <div>
-                  <strong>{item.label}</strong>
-                  <p>{item.command}</p>
-                  <div className="wb-chip-row">
-                    <span className={`wb-status-pill is-${item.status}`}>{item.status}</span>
-                    <span className="wb-chip">tools {item.tool_count}</span>
-                    <span className="wb-chip">{item.enabled ? "enabled" : "disabled"}</span>
-                  </div>
-                </div>
-                <div className="wb-list-meta">
-                  <strong>{item.provider_id}</strong>
-                  <span>{item.cwd || "stdio"}</span>
-                </div>
-              </button>
-            ))}
-            {items.length === 0 ? (
-              <div className="wb-empty-state">
-                <strong>当前还没有 MCP Provider</strong>
-                <span>右侧填命令、参数和环境变量后保存，系统会自动刷新可发现工具。</span>
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="wb-panel">
-          <div className="wb-panel-head">
-            <div>
-              <p className="wb-card-label">编辑器</p>
-              <h3>{editorMode === "create" ? "安装新的 MCP Provider" : draft.provider_id}</h3>
-            </div>
-            {selectedItem ? (
-              <button
-                type="button"
-                className="wb-button wb-button-tertiary"
-                onClick={() => void handleDelete()}
-                disabled={busy}
-              >
-                删除
-              </button>
-            ) : null}
-          </div>
-
-          {selectedItem?.error ? (
-            <div className="wb-inline-banner is-error">
-              <strong>最近一次发现失败</strong>
-              <span>{selectedItem.error}</span>
-            </div>
-          ) : null}
-
-          <div className="wb-agent-form-grid">
-            <label className="wb-field">
-              <span>Provider ID</span>
-              <input
-                type="text"
-                value={draft.provider_id}
-                disabled={editorMode === "existing"}
-                onChange={(event) => updateDraft("provider_id", event.target.value)}
-                placeholder="例如 local-files"
-              />
-            </label>
-            <label className="wb-field">
-              <span>启用状态</span>
-              <select
-                value={draft.enabled ? "enabled" : "disabled"}
-                onChange={(event) => updateDraft("enabled", event.target.value === "enabled")}
-              >
-                <option value="enabled">启用</option>
-                <option value="disabled">停用</option>
-              </select>
-            </label>
-            <label className="wb-field wb-field-span-2">
-              <span>Command</span>
-              <input
-                type="text"
-                value={draft.command}
-                onChange={(event) => updateDraft("command", event.target.value)}
-                placeholder="例如 npx"
-              />
-            </label>
-            <label className="wb-field">
-              <span>Args</span>
-              <textarea
-                value={draft.args_text}
-                onChange={(event) => updateDraft("args_text", event.target.value)}
-                placeholder="每行一个参数，例如 -y"
-              />
-            </label>
-            <label className="wb-field">
-              <span>工作目录</span>
-              <textarea
-                value={draft.cwd}
-                onChange={(event) => updateDraft("cwd", event.target.value)}
-                placeholder="可选，例如 /Users/connorlu/project"
-              />
-            </label>
-            <label className="wb-field wb-field-span-2">
-              <span>环境变量</span>
-              <textarea
-                value={draft.env_text}
-                onChange={(event) => updateDraft("env_text", event.target.value)}
-                placeholder={"每行一个 KEY=VALUE\n例如 PATH=/usr/local/bin"}
-              />
-            </label>
-          </div>
-
-          {selectedItem?.warnings.length ? (
-            <div className="wb-note-stack">
-              {selectedItem.warnings.map((warning) => (
-                <div key={warning} className="wb-note">
-                  <strong>提醒</strong>
-                  <span>{warning}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <button
-              type="button"
-              className="wb-button wb-button-primary"
-              onClick={() => void handleSave()}
-              disabled={busy}
-            >
-              保存 Provider
-            </button>
-            <button type="button" className="wb-button wb-button-secondary" onClick={handleCreate}>
-              清空表单
-            </button>
-          </div>
-        </section>
+        <button type="button" className="wb-button wb-button-primary" onClick={openCreate}>
+          新建
+        </button>
       </div>
+
+      {/* Provider 列表 */}
+      {items.length === 0 ? (
+        <p className="wb-mcp-empty">当前未安装 MCP Provider</p>
+      ) : (
+        <div className="wb-note-stack">
+          {items.map((item) => (
+            <div key={item.provider_id} className="wb-list-row is-static wb-mcp-row">
+              <div>
+                <strong>{item.label}</strong>
+                <p>{item.command} {item.args.length ? item.args.join(" ") : ""}</p>
+                <div className="wb-chip-row">
+                  <span className={`wb-status-pill is-${item.status}`}>
+                    {statusLabel(item.status)}
+                  </span>
+                  {item.tool_count > 0 ? (
+                    <span className="wb-chip">{item.tool_count} 个工具</span>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={() => openEdit(item)}
+              >
+                编辑
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* modal */}
+      {modalOpen ? (
+        <McpProviderModal
+          mode={modalMode}
+          draft={draft}
+          busy={busy}
+          error={editingItem?.error ?? null}
+          warnings={editingItem?.warnings ?? []}
+          onDraftChange={updateDraft}
+          onSave={() => void handleSave()}
+          onDelete={modalMode === "edit" ? () => void handleDelete() : null}
+          onClose={() => setModalOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
