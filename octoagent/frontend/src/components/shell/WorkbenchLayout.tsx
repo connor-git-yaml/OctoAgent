@@ -82,6 +82,10 @@ function renderNavDescription(path: string): string {
       return "直接和主助手对话";
     case "/agents":
       return "管理主助手和分工";
+    case "/skills":
+      return "查看和管理技能";
+    case "/mcp":
+      return "外部工具和服务连接";
     case "/work":
       return "看进行中的事情";
     case "/memory":
@@ -189,6 +193,8 @@ export default function WorkbenchLayout() {
             {[
               { to: "/", label: "Chat" },
               { to: "/agents", label: "Agents" },
+              { to: "/skills", label: "Skills" },
+              { to: "/mcp", label: "MCP" },
               { to: "/work", label: "Work" },
               { to: "/memory", label: "Memory" },
               { to: "/settings", label: "Settings" },

@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
 import AgentTemplatePicker from "../domains/agents/AgentTemplatePicker";
@@ -670,44 +670,30 @@ export default function AgentCenter() {
 
   return (
     <div className="wb-page wb-agent-management-page">
-      <section className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-kicker">{agentView.currentProjectName}</p>
-            <h1>Agents</h1>
-          </div>
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
-              新建 Agent
-            </button>
-            <Link className="wb-button wb-button-secondary" to="/agents/skills">
-              Skills
-            </Link>
-            <Link className="wb-button wb-button-tertiary" to="/agents/mcp">
-              MCP
-            </Link>
-          </div>
+      {flashMessage ? (
+        <div className="wb-inline-banner is-muted">
+          <strong>{flashMessage}</strong>
         </div>
-        {flashMessage ? (
-          <div className="wb-inline-banner is-muted">
-            <strong>{flashMessage}</strong>
-          </div>
-        ) : null}
-      </section>
+      ) : null}
 
       <section id="agents-behavior-center" ref={behaviorCenterRef} className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">Behavior Files</p>
+            <p className="wb-card-label">{agentView.currentProjectName}</p>
             <h3>行为文件</h3>
           </div>
-          <button
-            type="button"
-            className="wb-button wb-button-tertiary"
-            onClick={() => void refreshSnapshot()}
-          >
-            刷新
-          </button>
+          <div className="wb-inline-actions">
+            <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
+              新建 Agent
+            </button>
+            <button
+              type="button"
+              className="wb-button wb-button-tertiary"
+              onClick={() => void refreshSnapshot()}
+            >
+              刷新
+            </button>
+          </div>
         </div>
 
         {behaviorProfiles.length === 0 || selectedBehaviorProfile === null ? (

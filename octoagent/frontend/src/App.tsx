@@ -38,14 +38,11 @@ export default function App() {
             <Route index element={withRouteSuspense(<ChatWorkbench />)} />
             <Route path="chat" element={<Navigate to="/" replace />} />
             <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
-            <Route
-              path="agents/skills"
-              element={withRouteSuspense(<SkillProviderCenter />)}
-            />
-            <Route
-              path="agents/mcp"
-              element={withRouteSuspense(<McpProviderCenter />)}
-            />
+            <Route path="skills" element={withRouteSuspense(<SkillProviderCenter />)} />
+            <Route path="mcp" element={withRouteSuspense(<McpProviderCenter />)} />
+            {/* 兼容旧路径 */}
+            <Route path="agents/skills" element={<Navigate to="/skills" replace />} />
+            <Route path="agents/mcp" element={<Navigate to="/mcp" replace />} />
             <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
             <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
             <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
