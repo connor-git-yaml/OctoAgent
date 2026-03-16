@@ -677,18 +677,6 @@ export default function AgentCenter() {
           <div>
             <h3>行为文件</h3>
           </div>
-          <div className="wb-inline-actions">
-            <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
-              新建 Agent
-            </button>
-            <button
-              type="button"
-              className="wb-button wb-button-tertiary"
-              onClick={() => void refreshSnapshot()}
-            >
-              刷新
-            </button>
-          </div>
         </div>
 
         {behaviorProfiles.length === 0 || selectedBehaviorProfile === null ? (
@@ -735,8 +723,11 @@ export default function AgentCenter() {
         <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
           <div className="wb-panel-head">
             <div>
-              <p className="wb-card-label">主 Agent</p>
+              <p className="wb-card-label">Agents</p>
             </div>
+            <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
+              新建 Agent
+            </button>
           </div>
           {renderAgentCard(agentView.mainAgent, {
             onEdit: openMainEditor,
