@@ -21,7 +21,7 @@ from .config_commands import _resolve_project_root, config
 from .console_output import create_console, render_panel
 from .project_commands import project_group
 from .secret_commands import secrets_group
-from .update_commands import restart, update, verify
+from .update_commands import restart, stop, update, verify
 
 console = create_console()
 
@@ -90,6 +90,7 @@ main.add_command(backup)
 main.add_command(restore)
 main.add_command(export)
 main.add_command(import_cmd)
+main.add_command(stop)
 main.add_command(update)
 main.add_command(restart)
 main.add_command(verify)
