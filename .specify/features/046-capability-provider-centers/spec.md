@@ -7,7 +7,7 @@ created: "2026-03-13"
 updated: "2026-03-13"
 research_mode: "codebase-scan"
 blueprint_ref: "docs/blueprint.md §2 Constitution；§5.1.4 Skills / Tools；§8.5.6 MCP 工具集成；§8.9.4 多 Provider 扩展；Feature 035/036/044"
-predecessor: "Feature 030（Capability Pack + MCP runtime truth）、Feature 035（Workbench IA）、Feature 036（Guided Setup Governance）、Feature 044（Settings Center Refresh）"
+predecessor: "Feature 030（Capability Pack + MCP runtime truth）、Feature 035（Workbench IA）、Feature 036（Guided Setup Governance）、Feature 044（Settings Center Refresh）、Feature 058（MCP Install Lifecycle — 已实现 npm/pip 安装向导、安装注册表、持久连接池、install/uninstall actions）"
 ---
 
 # Feature Specification: Capability Provider Centers
@@ -106,10 +106,10 @@ predecessor: "Feature 030（Capability Pack + MCP runtime truth）、Feature 035
 
 - **FR-001**: `/settings` MUST 提供 `Skills` 与 `MCP` 两个独立配置入口，并从原有平台设置流中拆出对应能力管理内容。
 - **FR-002**: 系统 MUST 新增独立的 `Skills` 配置页，用于展示、安装、编辑、删除 capability skill providers。
-- **FR-003**: 系统 MUST 新增独立的 `MCP` 配置页，用于展示、安装、编辑、启停、删除 MCP providers，并显示运行状态。
+- **FR-003**: 系统 MUST 新增独立的 `MCP` 配置页，用于展示、安装、编辑、启停、删除 MCP providers，并显示运行状态。[**部分已由 Feature 058 覆盖**: npm/pip 安装向导（McpInstallWizard）、安装来源标签、`mcp_provider.install / install_status / uninstall` control plane actions、安装注册表 `mcp-installs.json`、McpProviderItem 扩展（install_source / install_version / install_path / installed_at）均已实现。046 仅需补齐独立路由 `/settings/mcp`、更精细的运行状态展示与编辑/启停交互。]
 - **FR-004**: `Skills` 页 MUST 区分系统内建条目与用户自定义条目；系统内建条目默认为只读，自定义条目可编辑和删除。
 - **FR-005**: 自定义 skill providers MUST 持久化到 canonical backend 存储，并在 capability pack refresh 后成为真实可用 skill，而不是仅存在于前端展示层。
-- **FR-006**: MCP provider 配置 MUST 继续复用现有 MCP registry 主链，不得新造平行的 tool 注册体系。
+- **FR-006**: MCP provider 配置 MUST 继续复用现有 MCP registry 主链，不得新造平行的 tool 注册体系。[**已由 Feature 058 遵守**: McpInstallerService 安装完成后通过 `McpRegistryService.save_config() + refresh()` 注入配置，未新建平行注册体系。]
 - **FR-007**: 所有新增的 skill / MCP 条目 MUST 以统一的 capability provider item 形式暴露给前端与 Agent 选择层，使用稳定 item ID（如 `skill:<id>`、`mcp:<server>`）。
 - **FR-008**: `Agents` 页面 MUST 提供按 Butler / Worker 模板勾选 capability providers 的交互，并按 `Skills / MCP` 分组展示。
 - **FR-009**: Butler `agent_profile` 与 Worker `worker_profile` MUST 将 capability provider selection 保存在 profile metadata 中，并在 review/apply/publish 后保留。

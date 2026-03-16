@@ -82,6 +82,7 @@ from .execution_context import get_current_execution_context
 from .task_service import TaskService
 
 if TYPE_CHECKING:
+    from .mcp_installer import McpInstallerService
     from .mcp_registry import McpRegistryService
 
 class _WorkerPlanAssignment(BaseModel):
@@ -257,6 +258,7 @@ class CapabilityPackService:
         self._task_runner = None
         self._delegation_plane = None
         self._mcp_registry: McpRegistryService | None = None
+        self._mcp_installer: McpInstallerService | None = None
         self._browser_sessions: dict[str, _BrowserSessionState] = {}
         self._memory_console_service = MemoryConsoleService(
             project_root,
@@ -295,6 +297,9 @@ class CapabilityPackService:
     def bind_mcp_registry(self, mcp_registry: McpRegistryService) -> None:
         self._mcp_registry = mcp_registry
 
+    def bind_mcp_installer(self, mcp_installer: McpInstallerService) -> None:
+        self._mcp_installer = mcp_installer
+
     @property
     def mcp_registry(self) -> McpRegistryService | None:
         return self._mcp_registry
@@ -317,6 +322,13 @@ class CapabilityPackService:
         self._skill_discovery.refresh()
         metas = await self._tool_broker.discover()
         await self._tool_index.rebuild(metas)
+
+        # 构建 MCP server -> install_source 映射（Feature 058）
+        mcp_install_source_map: dict[str, str] = {}
+        if self._mcp_installer is not None:
+            for record in self._mcp_installer.list_installs():
+                mcp_install_source_map[record.server_id] = record.install_source
+
         tools = [
             BundledToolDefinition(
                 tool_name=meta.name,
@@ -336,7 +348,9 @@ class CapabilityPackService:
                 install_hint=self._resolve_tool_install_hint(meta.name),
                 entrypoints=self._resolve_tool_entrypoints(meta.name),
                 runtime_kinds=self._resolve_tool_runtime_kinds(meta.name),
-                metadata=dict(meta.metadata),
+                metadata=self._enrich_mcp_metadata(
+                    dict(meta.metadata), mcp_install_source_map
+                ),
             )
             for meta in metas
         ]
@@ -803,6 +817,7 @@ class CapabilityPackService:
                 "configured_server_count": self._mcp_registry.configured_server_count(),
                 "healthy_server_count": self._mcp_registry.healthy_server_count(),
                 "registered_tool_count": self._mcp_registry.registered_tool_count(),
+                **self._mcp_install_summary(),
             },
             "skills": {
                 "discovered_count": len(self._skill_discovery.list_items()),
@@ -3438,6 +3453,37 @@ class CapabilityPackService:
         if item_id in disabled_item_ids:
             return False, True
         return enabled_by_default, False
+
+    def _mcp_install_summary(self) -> dict[str, int]:
+        """返回 MCP 安装来源统计（Feature 058）。"""
+        if self._mcp_installer is None:
+            return {}
+        records = self._mcp_installer.list_installs()
+        auto_count = sum(
+            1 for r in records if r.install_source and r.install_source != "manual"
+        )
+        return {
+            "auto_installed_count": auto_count,
+            "manual_count": (
+                (self._mcp_registry.configured_server_count() if self._mcp_registry else 0)
+                - auto_count
+            ),
+        }
+
+    @staticmethod
+    def _enrich_mcp_metadata(
+        metadata: dict,
+        install_source_map: dict[str, str],
+    ) -> dict:
+        """将 McpInstallRecord.install_source 注入 MCP 工具元数据。"""
+        if metadata.get("source") != "mcp":
+            return metadata
+        server_name = str(metadata.get("mcp_server_name", "")).strip()
+        if server_name and server_name in install_source_map:
+            metadata["install_source"] = install_source_map[server_name]
+        else:
+            metadata.setdefault("install_source", "manual")
+        return metadata
 
     def _resolve_mcp_mount_policy(self, server_name: str) -> str:
         if self._mcp_registry is None:

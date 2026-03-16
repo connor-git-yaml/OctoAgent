@@ -468,6 +468,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_root=project_root,
     )
     app.state.mcp_installer = mcp_installer
+    app.state.capability_pack_service.bind_mcp_installer(mcp_installer)
 
     await app.state.capability_pack_service.startup()
     if provider_config.llm_mode == "litellm":
