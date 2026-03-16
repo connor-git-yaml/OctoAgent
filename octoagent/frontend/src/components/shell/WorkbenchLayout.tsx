@@ -146,18 +146,10 @@ export default function WorkbenchLayout() {
   }
 
   const snapshot = workbench.snapshot!;
-  const selector = snapshot.resources.project_selector;
   const diagnostics = snapshot.resources.diagnostics;
   const sessions = snapshot.resources.sessions;
   const config = snapshot.resources.config;
   const delegation = snapshot.resources.delegation;
-  const currentProject =
-    selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
-    null;
-  const currentWorkspace =
-    selector.available_workspaces.find(
-      (item) => item.workspace_id === selector.current_workspace_id
-    ) ?? null;
   const pendingTotal = sessions.operator_summary?.total_pending ?? 0;
   const runtimeMode =
     String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
@@ -216,12 +208,6 @@ export default function WorkbenchLayout() {
           </nav>
 
           <div className="wb-sidebar-card">
-            <p className="wb-card-label">当前 Project</p>
-            <strong>{currentProject?.name ?? selector.current_project_id}</strong>
-            <p>{currentWorkspace?.name ?? selector.current_workspace_id}</p>
-          </div>
-
-          <div className="wb-sidebar-card">
             <p className="wb-card-label">当前状态</p>
             <strong>{shellStatus.title}</strong>
             <p>{shellStatus.summary}</p>
@@ -241,10 +227,8 @@ export default function WorkbenchLayout() {
               </button>
               <div className="wb-topbar-copy">
                 <p className="wb-topbar-meta">
-                  当前工作区 {currentWorkspace?.name ?? selector.current_workspace_id} · 更新于{" "}
-                  {formatDateTime(snapshot.generated_at)}
+                  更新于 {formatDateTime(snapshot.generated_at)}
                 </p>
-                <h2>{currentProject?.name ?? "OctoAgent Workbench"}</h2>
               </div>
             </div>
             <div className="wb-topbar-actions">

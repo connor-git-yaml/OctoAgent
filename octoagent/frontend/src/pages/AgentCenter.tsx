@@ -679,7 +679,6 @@ export default function AgentCenter() {
       <section id="agents-behavior-center" ref={behaviorCenterRef} className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">{agentView.currentProjectName}</p>
             <h3>行为文件</h3>
           </div>
           <div className="wb-inline-actions">
@@ -707,21 +706,6 @@ export default function AgentCenter() {
           </div>
         ) : (
           <>
-            {behaviorProfiles.length > 1 ? (
-              <div className="wb-agent-tablist">
-                {behaviorProfiles.map((profile) => (
-                  <button
-                    key={profile.profile_id}
-                    type="button"
-                    className={`wb-agent-tab ${profile.profile_id === selectedBehaviorProfile.profile_id ? "is-active" : ""}`}
-                    onClick={() => setSelectedBehaviorProfileId(profile.profile_id)}
-                  >
-                    <strong>{profile.name}</strong>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
             <div className="wb-behavior-scope-grid">
               {behaviorScopeGroups.filter((group) => group.scope !== "agent_private").map((group) => (
                 <article key={group.scope} className="wb-note wb-behavior-scope-card">
