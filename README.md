@@ -43,7 +43,7 @@ OctoAgent is built to close that gap.
 - Handle freshness and research questions through the Butler decision runtime, with many cases flowing through `Butler -> Research Worker -> Butler` and bounded checks handled directly by Butler with governed tools.
 - Start a fresh Web conversation explicitly instead of silently restoring the previous task/session chain.
 - Inspect runtime truth such as sessions, A2A conversations, memory surfaces, and task status.
-- Operate the system with `octo-start`, `octo-doctor`, `octo restart`, and the Control Plane.
+- Operate the system with `octo-start`, `octo stop`, `octo restart`, `octo-doctor`, and the Control Plane.
 
 ## Who It Is For
 
@@ -114,6 +114,14 @@ screen showing the current effective source chain. The canonical local managemen
 octo behavior ls
 octo behavior show AGENTS
 octo behavior init
+```
+
+To stop or restart the service:
+
+```bash
+octo stop              # graceful shutdown
+octo stop --force      # force kill
+octo restart           # managed restart
 ```
 
 To update a managed local install later:

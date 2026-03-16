@@ -390,10 +390,12 @@ octo update
 
 For a managed install, this is the intended operator path. It updates the local source checkout, syncs backend dependencies, rebuilds the frontend, restarts the runtime, and runs verification.
 
-If you only need to apply already-downloaded changes or configuration updates, restart the runtime:
+To stop or restart the runtime:
 
 ```bash
-octo restart
+octo stop              # graceful shutdown (SIGTERM)
+octo stop --force      # force kill (SIGKILL)
+octo restart           # managed restart
 ```
 
 ### Remote exposure and front-door safety
@@ -490,9 +492,10 @@ Useful local operator commands:
 
 ```bash
 octo update
+octo stop
+octo restart
 octo-doctor
 octo-doctor --live
-octo restart
 python -m octoagent.core rebuild-projections
 ```
 <!-- speckit:section:testing:end -->
