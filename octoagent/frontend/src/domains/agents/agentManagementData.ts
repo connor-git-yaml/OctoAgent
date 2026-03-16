@@ -18,6 +18,13 @@ export interface CapabilityProviderEntry {
   tags: string[];
 }
 
+export interface BehaviorFileInfo {
+  file_id: string;
+  path: string;
+  scope?: string;
+  exists_on_disk?: boolean;
+}
+
 export interface AgentCardViewModel {
   profileId: string;
   name: string;
@@ -36,6 +43,7 @@ export interface AgentCardViewModel {
   sourceLabel: string;
   isMainAgent: boolean;
   removable: boolean;
+  behaviorFiles: BehaviorFileInfo[];
 }
 
 export interface BuiltinAgentTemplateViewModel {
@@ -293,6 +301,18 @@ function formatSourceLabel(profile: WorkerProfileItem): string {
   }
 }
 
+const AGENT_PRIVATE_FILE_IDS = new Set(["IDENTITY.md", "SOUL.md", "HEARTBEAT.md"]);
+
+function extractAgentPrivateBehaviorFiles(profile: WorkerProfileItem): BehaviorFileInfo[] {
+  const files = profile.behavior_system?.path_manifest?.effective_behavior_files;
+  if (!Array.isArray(files)) {
+    return [];
+  }
+  return files.filter(
+    (f) => f.file_id && f.path && AGENT_PRIVATE_FILE_IDS.has(f.file_id)
+  );
+}
+
 function mapProfileToCard(
   profile: WorkerProfileItem,
   projects: ProjectOption[],
@@ -318,6 +338,7 @@ function mapProfileToCard(
     sourceLabel: formatSourceLabel(profile),
     isMainAgent,
     removable: !isMainAgent,
+    behaviorFiles: extractAgentPrivateBehaviorFiles(profile),
   };
 }
 
@@ -378,6 +399,7 @@ export function deriveAgentManagementView(
             : "当前还没有主 Agent",
           isMainAgent: true,
           removable: false,
+          behaviorFiles: fallbackTemplate ? extractAgentPrivateBehaviorFiles(fallbackTemplate) : [],
         };
 
   const projectAgents = currentProjectProfiles

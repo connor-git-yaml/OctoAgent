@@ -185,8 +185,10 @@ function renderAgentCard(
     onEdit: () => void;
     onStartSession?: () => void;
     onDelete?: () => void;
+    onOpenBehaviorFile?: (filePath: string, fileId: string) => void;
     primaryActionLabel: string;
     busyActionId: string | null;
+    activeFilePath?: string;
   }
 ) {
 
@@ -215,6 +217,21 @@ function renderAgentCard(
           </span>
         ))}
       </div>
+      {agent.behaviorFiles.length > 0 && options.onOpenBehaviorFile ? (
+        <div className="wb-chip-row" style={{ marginTop: "0.25rem" }}>
+          {agent.behaviorFiles.map((file) => (
+            <button
+              key={file.file_id}
+              type="button"
+              className={`wb-chip ${options.activeFilePath === file.path ? "is-active" : ""}`}
+              onClick={() => options.onOpenBehaviorFile!(file.path, file.file_id)}
+              style={{ cursor: "pointer" }}
+            >
+              {file.file_id}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="wb-agent-card-actions">
         <button type="button" className="wb-button wb-button-primary" onClick={options.onEdit}>
           {options.primaryActionLabel}
@@ -725,31 +742,11 @@ export default function AgentCenter() {
             onEdit: openMainEditor,
             onStartSession: () =>
               void handleStartAgentSession(agentView.mainAgent.profileId, agentView.mainAgent.name),
+            onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
             primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑" : "建立主 Agent",
             busyActionId,
+            activeFilePath: viewingFilePath,
           })}
-          {/* 主 Agent 的行为文件 */}
-          {behaviorScopeGroups
-            .filter((g) => g.scope === "agent_private")
-            .flatMap((g) => g.files)
-            .length > 0 ? (
-            <div className="wb-chip-row" style={{ marginTop: "0.5rem" }}>
-              {behaviorScopeGroups
-                .filter((g) => g.scope === "agent_private")
-                .flatMap((g) => g.files)
-                .map((file) => (
-                  <button
-                    key={file.file_id}
-                    type="button"
-                    className={`wb-chip ${viewingFilePath === file.path ? "is-active" : ""}`}
-                    onClick={() => void handleOpenBehaviorFile(file.path, file.file_id)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    {file.file_id}
-                  </button>
-                ))}
-            </div>
-          ) : null}
         </section>
 
         {agentView.projectAgents.length > 0 ? (
@@ -766,8 +763,10 @@ export default function AgentCenter() {
                   onEdit: () => openAgentEditor(agent.profileId),
                   onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
                   onDelete: () => void handleDeleteAgent(agent),
+                  onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
                   primaryActionLabel: "编辑",
                   busyActionId,
+                  activeFilePath: viewingFilePath,
                 })
               )}
             </div>

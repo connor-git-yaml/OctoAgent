@@ -996,6 +996,15 @@ class ControlPlaneService:
                 continue
             legacy_works_by_type[work.selected_worker_type.value].append(work)
 
+        # 预备 behavior_system 构建所需的项目/工作区上下文
+        _bs_project_name = selected_project.name if selected_project is not None else ""
+        _bs_project_slug = selected_project.slug if selected_project is not None else ""
+        _bs_workspace_id = selected_workspace.workspace_id if selected_workspace is not None else ""
+        _bs_workspace_slug = selected_workspace.slug if selected_workspace is not None else ""
+        _bs_workspace_root = (
+            selected_workspace.root_path if selected_workspace is not None else ""
+        )
+
         items: list[WorkerProfileViewItem] = []
         for profile in stored_profiles:
             matched_works = sorted(
@@ -1015,6 +1024,22 @@ class ControlPlaneService:
                 )
             if latest is None:
                 warnings.append("当前还没有绑定到这个 profile 的运行中 work。")
+
+            # 为自定义 worker profile 构建 behavior_system
+            agent_profile_mirror = self._build_agent_profile_from_worker_profile(
+                profile=profile,
+                revision=profile.active_revision or profile.draft_revision,
+            )
+            behavior_sys = build_behavior_system_summary(
+                agent_profile=agent_profile_mirror,
+                project_name=_bs_project_name,
+                project_slug=_bs_project_slug,
+                project_root=self._project_root,
+                workspace_id=_bs_workspace_id,
+                workspace_slug=_bs_workspace_slug,
+                workspace_root_path=_bs_workspace_root,
+            )
+
             items.append(
                 WorkerProfileViewItem(
                     profile_id=profile.profile_id,
@@ -1066,6 +1091,7 @@ class ControlPlaneService:
                             else ""
                         ),
                     ),
+                    behavior_system=behavior_sys,
                     warnings=warnings,
                     capabilities=self._worker_profile_control_capabilities(profile.status),
                 )
@@ -1083,6 +1109,26 @@ class ControlPlaneService:
             )
             summary = self._worker_profile_summary(profile.capabilities, profile.default_tool_groups)
             builtin_latest = matched_works[0] if matched_works else None
+
+            # 为 builtin profile 构建 behavior_system（合成临时 AgentProfile）
+            builtin_agent_profile = AgentProfile(
+                profile_id=f"singleton:{worker_type}",
+                scope=AgentProfileScope.SYSTEM,
+                name=self._worker_profile_label(worker_type),
+                model_alias=profile.default_model_alias,
+                tool_profile=profile.default_tool_profile,
+                metadata={"worker_base_archetype": worker_type},
+            )
+            builtin_behavior_sys = build_behavior_system_summary(
+                agent_profile=builtin_agent_profile,
+                project_name=_bs_project_name,
+                project_slug=_bs_project_slug,
+                project_root=self._project_root,
+                workspace_id=_bs_workspace_id,
+                workspace_slug=_bs_workspace_slug,
+                workspace_root_path=_bs_workspace_root,
+            )
+
             items.append(
                 WorkerProfileViewItem(
                     profile_id=f"singleton:{worker_type}",
@@ -1123,6 +1169,7 @@ class ControlPlaneService:
                             else ""
                         ),
                     ),
+                    behavior_system=builtin_behavior_sys,
                     warnings=[] if builtin_latest is not None else ["当前还没有运行中的 work。"],
                     capabilities=self._worker_profile_control_capabilities(
                         WorkerProfileStatus.ACTIVE,

@@ -296,6 +296,7 @@ class WorkerProfileViewItem(BaseModel):
     dynamic_context: WorkerProfileDynamicContext = Field(
         default_factory=WorkerProfileDynamicContext
     )
+    behavior_system: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     capabilities: list[ControlPlaneCapability] = Field(default_factory=list)
 
