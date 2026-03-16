@@ -112,10 +112,7 @@ async def _ensure_agent_profile(
         scope=AgentProfileScope.PROJECT,
         project_id=project.project_id,
         name=f"{project.name} Butler",
-        persona_summary=(
-            f"你是 {project.name} 的默认会话 Agent，"
-            "负责维护目标、上下文、worker 协同与交付节奏。"
-        ),
+        persona_summary="",
         instruction_overlays=[
             "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
             "在上下文不足时显式说明 degraded reason，但继续给出可执行帮助。",

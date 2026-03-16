@@ -184,13 +184,11 @@ function renderAgentCard(
   options: {
     onEdit: () => void;
     onStartSession?: () => void;
-    onPromote?: () => void;
     onDelete?: () => void;
     primaryActionLabel: string;
     busyActionId: string | null;
   }
 ) {
-  const canPromote = typeof options.onPromote === "function" && agent.profileStatus === "已发布";
 
   return (
     <article key={agent.profileId || agent.name} className={`wb-agent-card ${agent.isMainAgent ? "is-main" : ""}`}>
@@ -229,16 +227,6 @@ function renderAgentCard(
             onClick={options.onStartSession}
           >
             直接开启会话
-          </button>
-        ) : null}
-        {canPromote ? (
-          <button
-            type="button"
-            className="wb-button wb-button-secondary"
-            disabled={options.busyActionId === "worker_profile.bind_default"}
-            onClick={options.onPromote}
-          >
-            设为主 Agent
           </button>
         ) : null}
         {typeof options.onDelete === "function" ? (
@@ -626,16 +614,6 @@ export default function AgentCenter() {
     );
   }
 
-  async function handleBindAsMain(profileId: string, name: string) {
-    const result = await submitAction("worker_profile.bind_default", {
-      profile_id: profileId,
-    });
-    if (result) {
-      closeComposer();
-      setFlashMessage(`已把「${name}」设为当前项目的主 Agent。`);
-    }
-  }
-
   async function handleDeleteAgent(agent: AgentCardViewModel) {
     const riskHint =
       agent.activeWorkCount > 0 || agent.attentionWorkCount > 0
@@ -787,7 +765,6 @@ export default function AgentCenter() {
                 renderAgentCard(agent, {
                   onEdit: () => openAgentEditor(agent.profileId),
                   onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
-                  onPromote: () => void handleBindAsMain(agent.profileId, agent.name),
                   onDelete: () => void handleDeleteAgent(agent),
                   primaryActionLabel: "编辑",
                   busyActionId,

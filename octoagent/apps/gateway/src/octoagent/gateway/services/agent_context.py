@@ -2921,10 +2921,7 @@ class AgentContextService:
                 profile_id=profile_id,
                 scope=AgentProfileScope.SYSTEM,
                 name="OctoAgent Butler",
-                persona_summary=(
-                    "你是 OctoAgent Butler，也是负责长期协作节奏的 Agent 管家；"
-                    "你要维护连续上下文、统筹 worker 分工，并优先说明事实与下一步。"
-                ),
+                persona_summary="",
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
                     "在上下文不足时显式说明 degraded reason，但继续给出可执行帮助。",
@@ -2945,13 +2942,7 @@ class AgentContextService:
             scope=AgentProfileScope.PROJECT,
             project_id=project.project_id,
             name=f"{project.name} Butler",
-            persona_summary=(
-                project.description.strip()
-                or (
-                    f"你是 {project.name} project 的 Butler，"
-                    "负责像管家一样维护目标、上下文、worker 协同与交付节奏。"
-                )
-            ),
+            persona_summary="",
             instruction_overlays=[
                 "默认继承当前 project/workspace 绑定与 owner 偏好。",
                 "回复前先利用 recent summary 与 memory hits 保持上下文连续性。",
@@ -3009,10 +3000,7 @@ class AgentContextService:
             scope=worker_profile.scope,
             project_id=worker_profile.project_id,
             name=worker_profile.name,
-            persona_summary=(
-                worker_profile.summary.strip()
-                or f"你是 Root Agent「{worker_profile.name}」，负责按既定边界处理当前目标。"
-            ),
+            persona_summary="",
             instruction_overlays=[
                 "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
                 "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
@@ -3763,7 +3751,6 @@ class AgentContextService:
                 "role": "system",
                 "content": (
                     f"AgentProfile: {agent_profile.name}\n"
-                    f"persona: {truncate_chars(agent_profile.persona_summary or 'N/A', 480)}\n"
                     "instruction_overlays: "
                     f"{self._render_list(agent_profile.instruction_overlays, max_chars=240)}"
                 ),

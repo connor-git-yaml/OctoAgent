@@ -64,7 +64,6 @@ export interface AgentEditorDraft {
   profileId: string;
   projectId: string;
   name: string;
-  persona: string;
   baseArchetype: string;
   modelAlias: string;
   toolProfile: string;
@@ -424,9 +423,6 @@ function buildDraftFromProfileLike(
     profileId: profile?.profile_id ?? "",
     projectId: profile?.project_id || currentProjectId,
     name: profile?.name || `${currentProjectName} Agent`,
-    persona:
-      profile?.summary ||
-      "说明这个 Agent 主要负责什么、什么情况下应该由它来接手。",
     baseArchetype: profile?.static_config.base_archetype || "general",
     modelAlias: profile?.static_config.model_alias || DEFAULT_MODEL_ALIAS,
     toolProfile: profile?.static_config.tool_profile || DEFAULT_TOOL_PROFILE,
@@ -494,7 +490,6 @@ export function buildBlankAgentEditorDraft(
 ): AgentEditorDraft {
   return buildDraftFromProfileLike(null, currentProjectId, currentProjectName, capabilityProviderEntries, {
     name: `${currentProjectName} 新 Agent`,
-    persona: "说明这个 Agent 要负责哪一类工作，以及你希望它保持什么工作方式。",
     originKind: "custom",
   });
 }
@@ -509,7 +504,6 @@ export function buildAgentPayload(
     scope: "project",
     project_id: draft.projectId,
     name: draft.name,
-    summary: draft.persona,
     base_archetype: draft.baseArchetype,
     model_alias: draft.modelAlias,
     tool_profile: draft.toolProfile,

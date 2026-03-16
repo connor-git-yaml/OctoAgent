@@ -256,15 +256,6 @@ export default function AgentEditorSection({
           <small>这里决定的是这个 Agent 属于哪个项目的默认定义；已存在会话不会因此改绑。</small>
         </label>
 
-        <label className="wb-field wb-field-span-2">
-          <span>Persona / 用途说明</span>
-          <textarea
-            className="wb-textarea-prose"
-            value={draft.persona}
-            onChange={(event) => onChangeDraft("persona", event.target.value)}
-          />
-          <small>直接说明它负责什么、什么时候该用它，会比写技术术语更容易理解。</small>
-        </label>
       </div>
 
       <div className="wb-agent-editor-grid">
