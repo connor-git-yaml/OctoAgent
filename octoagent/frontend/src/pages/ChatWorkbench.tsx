@@ -401,7 +401,7 @@ interface ChatTraceEntry {
   detailOutput?: string;
 }
 
-type RestoreChoice = "pending" | "continue" | "new";
+type RestoreChoice = "continue" | "new";
 
 function summarizeDelegationIntent(work: WorkProjectionItem): string {
   const toolNames = ensureArray(work.selected_tools);
@@ -1130,9 +1130,7 @@ export default function ChatWorkbench() {
     sessionDocument?.sessions,
     storedRestoreTaskId,
   ]);
-  const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>(() =>
-    restoreTaskIds.length > 0 ? "pending" : "continue"
-  );
+  const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>("continue");
   const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId } = useChatStream(
     restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
     {
@@ -1165,18 +1163,6 @@ export default function ChatWorkbench() {
   const [approvalNow, setApprovalNow] = useState(() => Date.now());
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const recentRestorableSession = useMemo(() => {
-    if (restoreTaskIds.length === 0) {
-      return null;
-    }
-    const preferredTaskId = restoreTaskIds[0];
-    return (
-      sessions.find((item) => item.task_id === preferredTaskId) ??
-      sessions.find((item) => restoreTaskIds.includes(item.task_id)) ??
-      null
-    );
-  }, [restoreTaskIds, sessions]);
-
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
@@ -1336,14 +1322,8 @@ export default function ChatWorkbench() {
           ]
         : [];
   const isRestoringConversation = restoring && messages.length === 0;
-  const shouldPromptRestoreChoice =
-    restoreChoice === "pending" &&
-    restoreTaskIds.length > 0 &&
-    messages.length === 0 &&
-    !isRestoringConversation &&
-    !taskId;
   const isEmptyConversation =
-    messages.length === 0 && !isRestoringConversation && !shouldPromptRestoreChoice;
+    messages.length === 0 && !isRestoringConversation;
   const shouldShowInlineActivity =
     Boolean(taskId) &&
     (streaming || !hasLoadedTaskStatus || !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus));
@@ -1516,12 +1496,8 @@ export default function ChatWorkbench() {
       setRestoreChoice((current) => (current === "new" ? current : "continue"));
       return;
     }
-    setRestoreChoice((current) => {
-      if (current === "continue" || current === "new") {
-        return current;
-      }
-      return "pending";
-    });
+    // 有可恢复会话时直接进入 continue，不再展示选择界面
+    setRestoreChoice((current) => (current === "new" ? current : "continue"));
   }, [messages.length, restoreTaskIds.length, sessionDocument?.new_conversation_token, taskId]);
 
   useEffect(() => {
@@ -2056,43 +2032,6 @@ export default function ChatWorkbench() {
                   </button>
                 </div>
               ) : null}
-            </div>
-          </div>
-        ) : shouldPromptRestoreChoice ? (
-          <div className="wb-chat-empty-stage">
-            <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-choice-card">
-              <strong>你有一段最近会话</strong>
-              <span>
-                {recentRestorableSession?.latest_message_summary ||
-                  recentRestorableSession?.title ||
-                  "可以继续刚才那条会话，也可以开始一条全新会话。"}
-              </span>
-              <div className="wb-note-stack">
-                <div className="wb-note">
-                  <strong>继续最近会话</strong>
-                  <span>沿用刚才那条消息链、任务状态和已有上下文。</span>
-                </div>
-                <div className="wb-note">
-                  <strong>开始新会话</strong>
-                  <span>清掉旧上下文，让这条新问题从默认主助手入口重新开始。</span>
-                </div>
-              </div>
-              <div className="wb-action-bar wb-chat-restore-actions">
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  onClick={() => setRestoreChoice("continue")}
-                >
-                  继续最近会话
-                </button>
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={() => void handleStartFreshConversation()}
-                >
-                  开始新会话
-                </button>
-              </div>
             </div>
           </div>
         ) : isEmptyConversation ? (

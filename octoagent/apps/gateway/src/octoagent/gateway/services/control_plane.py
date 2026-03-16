@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from octoagent.core.behavior_workspace import (
+    check_behavior_file_budget,
+    validate_behavior_file_path,
+)
 from octoagent.core.models import (
     A2AConversationItem,
     A2AMessageItem,
@@ -5448,10 +5452,10 @@ class ControlPlaneService:
         if not file_path:
             raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
 
-        resolved = (self._project_root / file_path).resolve()
-        project_root_resolved = self._project_root.resolve()
-        if not str(resolved).startswith(str(project_root_resolved)):
-            raise ControlPlaneActionError("INVALID_PATH", "文件路径不在项目根目录内")
+        try:
+            resolved = validate_behavior_file_path(self._project_root, file_path)
+        except ValueError as exc:
+            raise ControlPlaneActionError("INVALID_PATH", str(exc)) from exc
 
         if not resolved.exists():
             return self._completed_result(
@@ -5484,10 +5488,20 @@ class ControlPlaneService:
         if not file_path:
             raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
 
-        resolved = (self._project_root / file_path).resolve()
-        project_root_resolved = self._project_root.resolve()
-        if not str(resolved).startswith(str(project_root_resolved)):
-            raise ControlPlaneActionError("INVALID_PATH", "文件路径不在项目根目录内")
+        try:
+            resolved = validate_behavior_file_path(self._project_root, file_path)
+        except ValueError as exc:
+            raise ControlPlaneActionError("INVALID_PATH", str(exc)) from exc
+
+        # 字符预算检查
+        budget_result = check_behavior_file_budget(file_path, content)
+        if not budget_result["within_budget"]:
+            raise ControlPlaneActionError(
+                "BUDGET_EXCEEDED",
+                f"内容超出字符预算 {budget_result['exceeded_by']} 字符"
+                f"（当前 {budget_result['current_chars']}/"
+                f"预算 {budget_result['budget_chars']}），请精简后重试",
+            )
 
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -5496,6 +5510,15 @@ class ControlPlaneService:
             raise ControlPlaneActionError(
                 "FILE_WRITE_ERROR", f"写入文件失败: {exc}"
             ) from exc
+
+        # 记录事件（FR-018）
+        log = structlog.get_logger("control_plane.behavior")
+        log.info(
+            "behavior_file_written",
+            source="control_plane",
+            file_path=file_path,
+            chars_written=len(content),
+        )
 
         return self._completed_result(
             request=request,

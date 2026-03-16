@@ -66,6 +66,17 @@ from octoagent.tooling import (
 from pydantic import BaseModel, Field
 from ulid import ULID
 
+import structlog
+
+from octoagent.core.behavior_workspace import (
+    BEHAVIOR_FILE_BUDGETS,
+    check_behavior_file_budget,
+    get_behavior_file_review_modes,
+    read_behavior_file_content,
+    validate_behavior_file_path,
+)
+from octoagent.core.models.behavior import BehaviorReviewMode
+
 from .agent_context import build_ambient_runtime_facts, build_default_memory_recall_hook_options
 from .execution_context import get_current_execution_context
 from .task_service import TaskService
@@ -2641,6 +2652,171 @@ class CapabilityPackService:
             )
             return json.dumps(recall.model_dump(mode="json"), ensure_ascii=False)
 
+        # ---- behavior 工具 ----
+
+        # 预构建 review_mode 查找表（file_id -> BehaviorReviewMode）
+        _behavior_review_modes = get_behavior_file_review_modes(include_advanced=True)
+
+        @tool_contract(
+            name="behavior.read_file",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="behavior",
+            tags=["behavior", "file", "read", "context"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://behavior.read_file",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def behavior_read_file(file_path: str) -> str:
+            """读取行为文件当前内容。不存在时返回默认模板。"""
+            file_path = file_path.strip()
+            if not file_path:
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "file_path 不能为空"},
+                    ensure_ascii=False,
+                )
+            try:
+                validate_behavior_file_path(self._project_root, file_path)
+            except ValueError as exc:
+                return json.dumps(
+                    {"error": "INVALID_PATH", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+            try:
+                content, exists, budget_chars = read_behavior_file_content(
+                    self._project_root,
+                    file_path,
+                )
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "FILE_READ_ERROR", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+            result: dict[str, Any] = {
+                "file_path": file_path,
+                "content": content,
+                "exists": exists,
+                "budget_chars": budget_chars,
+                "current_chars": len(content),
+            }
+            if not exists:
+                result["source"] = "default_template"
+            return json.dumps(result, ensure_ascii=False)
+
+        @tool_contract(
+            name="behavior.write_file",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="behavior",
+            tags=["behavior", "file", "write", "context"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://behavior.write_file",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def behavior_write_file(
+            file_path: str,
+            content: str,
+            confirmed: bool = False,
+        ) -> str:
+            """修改行为文件内容。review_mode=review_required 时需用户确认。"""
+            file_path = file_path.strip()
+            if not file_path:
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "file_path 不能为空"},
+                    ensure_ascii=False,
+                )
+            # 路径校验
+            try:
+                resolved = validate_behavior_file_path(self._project_root, file_path)
+            except ValueError as exc:
+                return json.dumps(
+                    {"error": "INVALID_PATH", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+            # 字符预算检查
+            budget_result = check_behavior_file_budget(file_path, content)
+            if not budget_result["within_budget"]:
+                return json.dumps(
+                    {
+                        "file_path": file_path,
+                        "written": False,
+                        "error": "BUDGET_EXCEEDED",
+                        "current_chars": budget_result["current_chars"],
+                        "budget_chars": budget_result["budget_chars"],
+                        "exceeded_by": budget_result["exceeded_by"],
+                        "message": (
+                            f"内容超出字符预算 {budget_result['exceeded_by']} 字符，请精简后重试"
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            # 查找 review_mode
+            file_id = Path(file_path).name
+            review_mode = _behavior_review_modes.get(
+                file_id, BehaviorReviewMode.REVIEW_REQUIRED,
+            )
+
+            # proposal 模式：review_required 且未确认时返回 proposal
+            if review_mode == BehaviorReviewMode.REVIEW_REQUIRED and not confirmed:
+                # 读取当前内容用于对比
+                try:
+                    current_content, exists, _ = read_behavior_file_content(
+                        self._project_root, file_path,
+                    )
+                except Exception:
+                    current_content = ""
+                    exists = False
+                return json.dumps(
+                    {
+                        "file_path": file_path,
+                        "proposal": True,
+                        "review_mode": review_mode.value if hasattr(review_mode, "value") else str(review_mode),
+                        "current_content": current_content,
+                        "proposed_content": content,
+                        "current_chars": len(current_content),
+                        "proposed_chars": len(content),
+                        "budget_chars": budget_result["budget_chars"],
+                        "message": "请向用户展示修改摘要并请求确认，确认后再次调用并设置 confirmed=true",
+                    },
+                    ensure_ascii=False,
+                )
+
+            # 实际写入磁盘（confirmed=true 时直接信任 Agent 传入的 content）
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_text(content, encoding="utf-8")
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "FILE_WRITE_ERROR", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+
+            # 记录 structlog 事件（FR-018）
+            _log = structlog.get_logger("behavior.write_file")
+            _log.info(
+                "behavior_file_written",
+                source="llm_tool",
+                file_path=file_path,
+                chars_written=len(content),
+                file_id=file_id,
+            )
+
+            return json.dumps(
+                {
+                    "file_path": file_path,
+                    "written": True,
+                    "chars_written": len(content),
+                    "budget_chars": budget_result["budget_chars"],
+                },
+                ensure_ascii=False,
+            )
+
         for handler in (
             project_inspect,
             task_inspect,
@@ -2684,6 +2860,8 @@ class CapabilityPackService:
             memory_search,
             memory_citations,
             memory_recall,
+            behavior_read_file,
+            behavior_write_file,
         ):
             await self._tool_broker.try_register(
                 reflect_tool_schema(handler),

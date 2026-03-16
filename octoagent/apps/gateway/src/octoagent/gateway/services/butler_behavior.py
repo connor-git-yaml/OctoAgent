@@ -652,6 +652,77 @@ def render_behavior_system_block(
     )
 
 
+def build_behavior_tool_guide_block(
+    *,
+    workspace: BehaviorWorkspace,
+    is_bootstrap_pending: bool = False,
+) -> str:
+    """生成行为文件工具使用指南 system block。
+
+    从 workspace.files 动态生成，包含：
+    (a) file_id | 用途 | 修改时机 | path_hint 表格
+    (b) behavior.read_file / behavior.write_file 参数说明
+    (c) review_mode 行为说明
+    (d) 存储边界提示
+    (e) 若 is_bootstrap_pending=True，追加 BOOTSTRAP 存储路由 block
+    """
+    # 文件清单表
+    lines = [
+        "[BehaviorToolGuide]",
+        "你可以通过以下工具读写行为文件：",
+        "",
+        "| file_id | 用途 | 修改时机 | path_hint |",
+        "|---------|------|----------|-----------|",
+    ]
+    # 修改时机的静态映射
+    _modification_hints = {
+        "AGENTS.md": "调整 Agent 总体行为约束时",
+        "USER.md": "用户表达新偏好时",
+        "PROJECT.md": "项目语境变化时",
+        "KNOWLEDGE.md": "需要更新知识入口时",
+        "TOOLS.md": "调整工具使用策略时",
+        "BOOTSTRAP.md": "修改初始化问卷流程时",
+        "SOUL.md": "用户自定义语气/风格时",
+        "IDENTITY.md": "用户自定义 Agent 名称/定位时",
+        "HEARTBEAT.md": "调整运行节奏/自检策略时",
+    }
+    for f in workspace.files:
+        hint = _modification_hints.get(f.file_id, "按需修改")
+        # 提取相对路径作为 path_hint
+        relative_path = f.metadata.get("relative_path", f.path)
+        lines.append(f"| {f.file_id} | {f.title} | {hint} | {relative_path} |")
+
+    lines.extend([
+        "",
+        "工具参数：",
+        "- behavior.read_file(file_path): 读取指定行为文件当前内容",
+        "- behavior.write_file(file_path, content, confirmed=false): 修改行为文件",
+        "  - 所有行为文件默认需要用户确认（review_mode=review_required）",
+        "  - 第一次调用时 confirmed=false，系统返回 proposal",
+        "  - 向用户展示修改摘要，用户确认后再次调用 confirmed=true",
+        "",
+        "存储边界：",
+        "- 稳定事实 -> MemoryService / memory tools",
+        "- 规则、人格、偏好 -> behavior files（通过 behavior.write_file）",
+        "- 敏感值 -> SecretService / secret bindings workflow",
+        "- 代码/数据/文档 -> project workspace roots",
+    ])
+
+    if is_bootstrap_pending:
+        lines.extend([
+            "",
+            "[BOOTSTRAP 存储路由]",
+            "当前处于初始化阶段，收集到的信息请按以下路由存储：",
+            "- 称呼/偏好 -> behavior.write_file USER.md",
+            "- Agent 名称/定位 -> behavior.write_file IDENTITY.md",
+            "- 性格/语气 -> behavior.write_file SOUL.md",
+            "- 稳定事实（时区/地点等） -> memory tools",
+            "- 敏感信息 -> SecretService",
+        ])
+
+    return "\n".join(lines)
+
+
 def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundle) -> str:
     tool_universe = runtime_hints.tool_universe
     if tool_universe is None:

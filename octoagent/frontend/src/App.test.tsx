@@ -905,21 +905,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
   };
 }
 
-function buildWorkspace(
-  workspaceId: string,
-  projectId: string,
-  name: string
-) {
-  return {
-    workspace_id: workspaceId,
-    project_id: projectId,
-    slug: workspaceId,
-    name,
-    kind: "primary",
-    root_path: `/tmp/${workspaceId}`,
-  };
-}
-
 function buildSession(taskId: string, workId: string): SessionProjectionItem {
   return {
     session_id: `thread-${taskId}`,

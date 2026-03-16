@@ -454,6 +454,7 @@ export function useChatStream(
       }
       const restoreSignature = candidateTaskIds.join("|");
       if (attemptedRestoreSignatureRef.current === restoreSignature) {
+        setRestoring(false);
         return;
       }
       attemptedRestoreSignatureRef.current = restoreSignature;

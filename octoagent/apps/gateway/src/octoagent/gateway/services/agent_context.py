@@ -10,7 +10,10 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
-from octoagent.core.behavior_workspace import build_behavior_bootstrap_template_ids
+from octoagent.core.behavior_workspace import (
+    build_behavior_bootstrap_template_ids,
+    resolve_behavior_workspace,
+)
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
@@ -68,10 +71,12 @@ from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
 from .butler_behavior import (
+    build_behavior_tool_guide_block,
     build_runtime_hint_bundle,
     is_worker_behavior_profile,
     render_behavior_system_block,
     render_runtime_hint_block,
+    resolve_behavior_pack,
 )
 from .connection_metadata import summarize_control_metadata_for_prompt
 from .context_compaction import (
@@ -3803,6 +3808,30 @@ class AgentContextService:
                     shared_only=is_worker_profile,
                 ),
             },
+            # TODO: resolve_behavior_workspace 也在 render_behavior_system_block 内部
+            # 被调用了一次（通过 resolve_behavior_pack），此处第二次调用造成重复
+            # 的文件系统检查（约 108-144 次 exists() 调用）。后续应重构为只解析一次
+            # workspace，同时传递给 render_behavior_system_block 和
+            # build_behavior_tool_guide_block。
+            {
+                "role": "system",
+                "content": build_behavior_tool_guide_block(
+                    workspace=resolve_behavior_workspace(
+                        project_root=self._project_root,
+                        agent_profile=agent_profile,
+                        project_name=project.name if project is not None else "",
+                        project_slug=project.slug if project is not None else "",
+                        workspace_id=workspace.workspace_id if workspace is not None else "",
+                        workspace_slug=workspace.slug if workspace is not None else "",
+                        workspace_root_path=(
+                            workspace.root_path if workspace is not None else ""
+                        ),
+                    ),
+                    is_bootstrap_pending=(
+                        bootstrap.status is BootstrapSessionStatus.PENDING
+                    ),
+                ),
+            },
             {
                 "role": "system",
                 "content": render_runtime_hint_block(
@@ -3871,7 +3900,10 @@ class AgentContextService:
                 "规则：\n"
                 "1. 每次只问一个问题，等用户回答后再进入下一步\n"
                 "2. 先用简短友好的方式打招呼，然后自然地引出当前步骤的问题\n"
-                "3. 用户回答后，通过 bootstrap.answer 工具保存答案\n"
+                "3. 用户回答后，根据信息类型选择正确的存储方式：\n"
+                "   - 称呼/偏好/规则 -> behavior.write_file 写入对应行为文件\n"
+                "   - 稳定事实 -> memory tools\n"
+                "   - 敏感值 -> SecretService\n"
                 "4. 如果用户想跳过某个步骤，尊重用户意愿并进入下一步\n"
                 "5. 不要一次性列出所有问题\n"
                 f"\n当前步骤: {current_step}\n"

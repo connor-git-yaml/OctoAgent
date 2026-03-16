@@ -6,6 +6,9 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
+
+import structlog
 
 from .models.agent_context import AgentProfile
 from .models.behavior import (
@@ -21,6 +24,8 @@ from .models.behavior import (
     ProjectPathManifestFile,
     StorageBoundaryHints,
 )
+
+log = structlog.get_logger(__name__)
 
 SHARED_BEHAVIOR_FILE_IDS = ("AGENTS.md", "USER.md", "TOOLS.md", "BOOTSTRAP.md")
 PROJECT_SHARED_BEHAVIOR_FILE_IDS = ("PROJECT.md", "KNOWLEDGE.md")
@@ -249,6 +254,35 @@ def ensure_filesystem_skeleton(
             encoding="utf-8",
         )
         created.append(str(readme))
+
+    # 行为文件模板 materialize（writeFileIfMissing）
+    for file_id in ALL_BEHAVIOR_FILE_IDS:
+        scope = _template_scope_for_file(file_id)
+        target = _default_behavior_file_path(
+            project_root=root,
+            project_slug=project_slug,
+            agent_slug=agent_slug,
+            file_id=file_id,
+            scope=scope,
+        )
+        if target.exists():
+            continue
+        try:
+            content = _default_content_for_file(
+                file_id=file_id,
+                is_worker_profile=False,
+                agent_name="Butler",
+                project_label="当前项目",
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            created.append(str(target))
+        except Exception:
+            log.warning(
+                "behavior_template_materialize_failed",
+                file_id=file_id,
+                path=str(target),
+            )
 
     return created
 
@@ -1042,6 +1076,19 @@ def _build_file_templates(*, include_advanced: bool) -> list[_BehaviorFileTempla
     ]
 
 
+def get_behavior_file_review_modes(
+    *, include_advanced: bool = True,
+) -> dict[str, BehaviorReviewMode]:
+    """返回 file_id -> BehaviorReviewMode 映射表（公开 API）。
+
+    用于外部模块获取各行为文件的审查模式，避免直接导入私有 _build_file_templates。
+    """
+    return {
+        tmpl.file_id: tmpl.review_mode
+        for tmpl in _build_file_templates(include_advanced=include_advanced)
+    }
+
+
 def _default_content_for_file(
     *,
     file_id: str,
@@ -1128,3 +1175,124 @@ def _is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
         str(metadata.get("source_kind", "")).strip() == "worker_profile_mirror"
         or bool(str(metadata.get("source_worker_profile_id", "")).strip())
     )
+
+
+# ---------------------------------------------------------------------------
+# 共享辅助函数（跨模块复用：capability_pack / control_plane / butler_behavior）
+# ---------------------------------------------------------------------------
+
+
+def validate_behavior_file_path(project_root: Path, file_path: str) -> Path:
+    """校验行为文件路径安全性，返回 resolved 绝对路径。
+
+    规则：
+    1. file_path 必须是相对路径（不以 / 开头）
+    2. 不允许 .. 路径组件（防止 path traversal）
+    3. resolve 后必须在 project_root 内
+    4. 必须在 behavior 目录体系内（behavior/ 或 projects/*/behavior/）
+
+    Raises:
+        ValueError: 路径不合法或超出安全边界时抛出
+    """
+    stripped = file_path.strip()
+    if not stripped:
+        raise ValueError("file_path 不能为空")
+
+    # 拒绝绝对路径
+    if stripped.startswith("/") or stripped.startswith("\\"):
+        raise ValueError(f"不允许绝对路径: {stripped}")
+
+    # 拒绝 .. 组件
+    parts = Path(stripped).parts
+    if ".." in parts:
+        raise ValueError(f"不允许 path traversal (..): {stripped}")
+
+    resolved = (project_root.resolve() / stripped).resolve()
+    root_resolved = project_root.resolve()
+
+    # 确保在 project_root 内
+    if not str(resolved).startswith(str(root_resolved) + "/") and resolved != root_resolved:
+        raise ValueError(f"路径超出项目根目录: {stripped}")
+
+    # 确保在 behavior 目录体系内
+    relative = str(resolved.relative_to(root_resolved))
+    in_behavior = relative.startswith("behavior/") or relative.startswith("behavior\\")
+    in_project_behavior = bool(
+        re.match(r"projects/[^/]+/behavior(/|\\)", relative)
+    )
+    if not (in_behavior or in_project_behavior):
+        raise ValueError(f"路径不在 behavior 目录体系内: {stripped}")
+
+    return resolved
+
+
+def read_behavior_file_content(
+    project_root: Path,
+    file_path: str,
+    *,
+    agent_slug: str = "butler",
+    project_slug: str = "default",
+) -> tuple[str, bool, int]:
+    """读取行为文件内容，不存在时 fallback 到默认模板。
+
+    Returns:
+        (content, exists_on_disk, budget_chars)
+    """
+    resolved = validate_behavior_file_path(project_root, file_path)
+    # 从路径末段提取 file_id
+    file_id = Path(file_path).name
+    budget_chars = _budget_for_file(file_id)
+
+    if resolved.exists():
+        content = resolved.read_text(encoding="utf-8").strip()
+        return content, True, budget_chars
+
+    # fallback 到默认模板
+    try:
+        content = _default_content_for_file(
+            file_id=file_id,
+            is_worker_profile=False,
+            agent_name="Butler",
+            project_label="当前项目",
+        ).strip()
+    except ValueError:
+        # 非标准 file_id，返回空内容
+        content = ""
+    return content, False, budget_chars
+
+
+class BehaviorBudgetResult(TypedDict):
+    """check_behavior_file_budget 的返回类型。"""
+
+    within_budget: bool
+    current_chars: int
+    budget_chars: int
+    exceeded_by: int
+
+
+def check_behavior_file_budget(file_path: str, content: str) -> BehaviorBudgetResult:
+    """检查内容是否超出字符预算。
+
+    从 file_path 末段提取 file_id，在 BEHAVIOR_FILE_BUDGETS 中查找预算上限。
+    未知 file_id 默认不限制（within_budget=True）。
+    """
+    file_id = Path(file_path).name
+    budget = BEHAVIOR_FILE_BUDGETS.get(file_id)
+    current_chars = len(content)
+
+    if budget is None:
+        # 未知 file_id，不限制
+        return {
+            "within_budget": True,
+            "current_chars": current_chars,
+            "budget_chars": 0,
+            "exceeded_by": 0,
+        }
+
+    exceeded_by = max(0, current_chars - budget)
+    return {
+        "within_budget": current_chars <= budget,
+        "current_chars": current_chars,
+        "budget_chars": budget,
+        "exceeded_by": exceeded_by,
+    }
