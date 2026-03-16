@@ -10,8 +10,11 @@ tags:
   - delegation
 tools_required:
   - subagents.spawn
+  - subagents.list
   - work.split
   - terminal.exec
+  - filesystem.read_text
+  - filesystem.list_dir
 ---
 
 # Coding Agent (OctoAgent Worker Delegation)

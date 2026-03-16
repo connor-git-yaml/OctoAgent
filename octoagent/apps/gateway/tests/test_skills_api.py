@@ -267,12 +267,12 @@ class TestUninstallSkill:
 
     @pytest.mark.asyncio
     async def test_uninstall_builtin_skill(self, skills_client: AsyncClient):
-        """卸载内置 Skill 应返回 403。"""
+        """卸载非 USER 来源的 Skill 应返回 403。"""
         resp = await skills_client.delete("/api/skills/coding-agent")
         assert resp.status_code == 403
 
         data = resp.json()
-        assert "cannot uninstall builtin" in data["detail"].lower()
+        assert "builtin" in data["detail"]
 
     @pytest.mark.asyncio
     async def test_uninstall_nonexistent_skill(self, skills_client: AsyncClient):

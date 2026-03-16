@@ -36,28 +36,28 @@ The LiteLLM Proxy exposes spend tracking via its API:
 ### Total Spend
 
 ```bash
-curl -s http://localhost:4000/spend/logs \
+curl -s ${LITELLM_PROXY_URL:-http://localhost:4000}/spend/logs \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 ```
 
 ### Spend by Model
 
 ```bash
-curl -s "http://localhost:4000/global/spend/models?limit=10" \
+curl -s "${LITELLM_PROXY_URL:-http://localhost:4000}/global/spend/models?limit=10" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 ```
 
 ### Spend by API Key
 
 ```bash
-curl -s "http://localhost:4000/global/spend/keys?limit=10" \
+curl -s "${LITELLM_PROXY_URL:-http://localhost:4000}/global/spend/keys?limit=10" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 ```
 
 ### Date Range Filtering
 
 ```bash
-curl -s "http://localhost:4000/spend/logs?start_date=2026-03-01&end_date=2026-03-16" \
+curl -s "${LITELLM_PROXY_URL:-http://localhost:4000}/spend/logs?start_date=$(date +%Y-%m-01)&end_date=$(date +%Y-%m-%d)" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq .
 ```
 
@@ -67,11 +67,11 @@ To get a quick overview of spending:
 
 ```bash
 # Total spend
-curl -s http://localhost:4000/global/spend/report \
+curl -s ${LITELLM_PROXY_URL:-http://localhost:4000}/global/spend/report \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.total_spend'
 
 # Top models by cost
-curl -s "http://localhost:4000/global/spend/models?limit=5" \
+curl -s "${LITELLM_PROXY_URL:-http://localhost:4000}/global/spend/models?limit=5" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | \
   jq '.[] | "\(.model): $\(.total_spend)"'
 ```

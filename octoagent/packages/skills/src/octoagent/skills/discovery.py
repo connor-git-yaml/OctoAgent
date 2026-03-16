@@ -40,14 +40,18 @@ def split_frontmatter(raw: str) -> tuple[str, str]:
     if not stripped.startswith("---"):
         return "", stripped
 
-    # 查找第二个 '---' 分隔符
-    second_sep = stripped.find("---", 3)
-    if second_sep == -1:
+    # 按行匹配第二个 '---' 分隔符，避免 frontmatter 值中包含 '---' 时误切割
+    lines = stripped.split("\n")
+    if not lines or lines[0].strip() != "---":
         return "", stripped
 
-    frontmatter_str = stripped[3:second_sep].strip()
-    body_str = stripped[second_sep + 3:].strip()
-    return frontmatter_str, body_str
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            frontmatter_str = "\n".join(lines[1:i]).strip()
+            body_str = "\n".join(lines[i + 1:]).strip()
+            return frontmatter_str, body_str
+
+    return "", stripped
 
 
 def parse_frontmatter(frontmatter_str: str) -> dict[str, Any]:
@@ -150,7 +154,10 @@ class SkillDiscovery:
             所有已发现的 SkillMdEntry 列表
         """
         start = time.monotonic()
-        self._cache.clear()
+
+        # 构建新缓存后原子替换，避免并发请求看到空缓存或不完整缓存
+        new_cache: dict[str, SkillMdEntry] = {}
+        old_cache = self._cache
 
         # 按优先级从低到高扫描，后扫描的覆盖先扫描的
         scan_sources = [
@@ -162,6 +169,8 @@ class SkillDiscovery:
         total_found = 0
         total_skipped = 0
 
+        # 临时将 _cache 指向新缓存以便 _scan_directory 写入
+        self._cache = new_cache
         for dir_path, source in scan_sources:
             if dir_path is None or not dir_path.is_dir():
                 continue
@@ -169,6 +178,8 @@ class SkillDiscovery:
             found, skipped = self._scan_directory(dir_path, source)
             total_found += found
             total_skipped += skipped
+
+        # 原子替换完成（self._cache 已指向 new_cache）
 
         elapsed_ms = (time.monotonic() - start) * 1000
         logger.info(

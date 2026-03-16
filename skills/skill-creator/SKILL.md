@@ -7,6 +7,10 @@ tags:
   - skill
   - creator
   - meta
+tools_required:
+  - filesystem.read_text
+  - filesystem.list_dir
+  - terminal.exec
 ---
 
 # Skill Creator

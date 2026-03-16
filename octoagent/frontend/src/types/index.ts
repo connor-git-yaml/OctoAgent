@@ -1865,10 +1865,23 @@ export interface SkillItem {
   name: string;
   description: string;
   version: string;
-  author: string;
+  author?: string;
   tags: string[];
   source: "builtin" | "user" | "project";
+}
+
+/** POST /api/skills 响应体。 */
+export interface SkillInstallResponse {
+  name: string;
+  source: string;
   source_path: string;
+  message: string;
+}
+
+/** DELETE /api/skills/{name} 响应体。 */
+export interface SkillDeleteResponse {
+  name: string;
+  message: string;
 }
 
 /** Skill 详情（含完整 content）。 */

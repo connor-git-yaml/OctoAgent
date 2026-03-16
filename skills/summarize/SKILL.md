@@ -2,6 +2,7 @@
 name: summarize
 description: Summarize or extract text/transcripts from URLs, podcasts, and local files. Use when asked to summarize a URL, article, video, or local document.
 version: 1.0.0
+author: OctoAgent
 tags:
   - summarize
   - extract

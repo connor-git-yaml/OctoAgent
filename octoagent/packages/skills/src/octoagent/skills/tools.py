@@ -109,10 +109,11 @@ class SkillsTool:
             )
 
         # 上下文预算检查
-        current_total = sum(
-            len(self._discovery.get(n).content) if self._discovery.get(n) else 0
-            for n in loaded_names
-        )
+        current_total = 0
+        for n in loaded_names:
+            e = self._discovery.get(n)
+            if e:
+                current_total += len(e.content)
         new_total = current_total + len(entry.content)
         if new_total > _CONTEXT_BUDGET_THRESHOLD:
             return (

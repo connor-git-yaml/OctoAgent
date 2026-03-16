@@ -2,6 +2,7 @@
 name: nano-pdf
 description: Edit PDFs with natural-language instructions using the nano-pdf CLI. Use when asked to edit, modify, or update PDF content on specific pages.
 version: 1.0.0
+author: OctoAgent
 tags:
   - pdf
   - edit

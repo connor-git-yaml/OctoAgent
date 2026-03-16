@@ -2804,7 +2804,9 @@ class CapabilityPackService:
                     if session is not None:
                         session_metadata = session.metadata
             except Exception:
-                pass
+                if action in ("load", "unload"):
+                    return f"Error: 无法获取当前会话上下文，{action} 操作需要有效的会话。"
+                # list 操作无需 session，静默降级
             return await _skills_tool.execute(
                 action=action,
                 name=name,
@@ -2882,6 +2884,7 @@ class CapabilityPackService:
                     "memory",
                     "supervision",
                     "delegation",
+                    "skills",
                 ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
@@ -2900,6 +2903,7 @@ class CapabilityPackService:
                     "automation",
                     "delegation",
                     "mcp",
+                    "skills",
                 ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:ops"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME],
@@ -2920,6 +2924,7 @@ class CapabilityPackService:
                     "document",
                     "media",
                     "mcp",
+                    "skills",
                 ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:research"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
@@ -2941,6 +2946,7 @@ class CapabilityPackService:
                     "document",
                     "media",
                     "mcp",
+                    "skills",
                 ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:dev"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.GRAPH_AGENT],

@@ -27,8 +27,9 @@ from ..deps import get_skill_discovery
 
 log = structlog.get_logger(__name__)
 
-# Skill 名称合法字符：小写字母、数字、连字符，长度 1-64
-_SAFE_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{0,63}$")
+# Skill 名称合法字符：与 skill_models._SKILL_NAME_PATTERN 保持一致
+# 小写字母/数字/连字符，不允许连续连字符、不允许以连字符开头结尾，长度 1-64
+_SAFE_SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def _validate_skill_name(name: str) -> None:
@@ -37,12 +38,12 @@ def _validate_skill_name(name: str) -> None:
     合法名称仅包含小写字母、数字、连字符（kebab-case），
     不允许出现路径分隔符、点号、空白等字符。
     """
-    if not _SAFE_SKILL_NAME_RE.match(name):
+    if not name or len(name) > 64 or not _SAFE_SKILL_NAME_RE.match(name):
         raise HTTPException(
             status_code=400,
             detail=(
                 f"非法 Skill 名称 '{name}'：仅允许小写字母、数字、连字符（kebab-case），"
-                "长度 1-64 字符，且不能以连字符开头"
+                "长度 1-64 字符，不能以连字符开头/结尾，不能有连续连字符"
             ),
         )
 
@@ -97,7 +98,7 @@ class SkillInstallRequest(BaseModel):
     """POST /api/skills 请求体。"""
 
     name: str = Field(description="Skill 名称（kebab-case）")
-    content: str = Field(description="完整的 SKILL.md 文件内容")
+    content: str = Field(description="完整的 SKILL.md 文件内容", max_length=500_000)
 
 
 class SkillInstallResponse(BaseModel):
@@ -148,6 +149,7 @@ async def get_skill(
     discovery: SkillDiscovery = Depends(get_skill_discovery),
 ) -> SkillDetailResponse:
     """获取指定 Skill 的完整信息（包含 content）。"""
+    _validate_skill_name(name)
     entry = discovery.get(name)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
@@ -161,7 +163,7 @@ async def get_skill(
         trigger_patterns=entry.trigger_patterns,
         tools_required=entry.tools_required,
         source=entry.source.value,
-        source_path=entry.source_path,
+        source_path="",  # 不暴露服务器绝对路径
         content=entry.content,
     )
 
@@ -271,10 +273,10 @@ async def uninstall_skill(
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
 
-    if entry.source == SkillSource.BUILTIN:
+    if entry.source != SkillSource.USER:
         raise HTTPException(
             status_code=403,
-            detail=f"Cannot uninstall builtin skill '{name}'. Use a project-level override instead.",
+            detail=f"仅允许卸载用户安装的 Skill。'{name}' 来源为 {entry.source.value}。",
         )
 
     # 删除 Skill 目录（仅允许删除 user_dir 内的目录）

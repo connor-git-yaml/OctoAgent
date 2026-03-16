@@ -2,6 +2,7 @@
 name: github
 description: "GitHub operations via `gh` CLI: issues, PRs, CI runs, code review, API queries. Use when: (1) checking PR status or CI, (2) creating/commenting on issues, (3) listing/filtering PRs or issues, (4) viewing run logs. NOT for: local git operations (use git directly), non-GitHub repos, or cloning (use git clone)."
 version: 1.0.0
+author: OctoAgent
 tags:
   - github
   - git

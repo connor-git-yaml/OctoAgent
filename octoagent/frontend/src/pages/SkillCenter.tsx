@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { SkillDetail, SkillItem, SkillListResponse } from "../types";
+import type { SkillDeleteResponse, SkillDetail, SkillInstallResponse, SkillItem, SkillListResponse } from "../types";
 
 // ============================================================
 // 数据获取
@@ -28,7 +28,7 @@ async function fetchSkillDetail(name: string): Promise<SkillDetail> {
 async function installSkill(
   name: string,
   content: string
-): Promise<{ name: string; message: string }> {
+): Promise<SkillInstallResponse> {
   const resp = await fetch("/api/skills", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -41,7 +41,7 @@ async function installSkill(
   return resp.json();
 }
 
-async function uninstallSkill(name: string): Promise<{ name: string; message: string }> {
+async function uninstallSkill(name: string): Promise<SkillDeleteResponse> {
   const resp = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
@@ -123,9 +123,17 @@ function SkillDetailModal({
   onUninstall: (name: string) => void;
   busy: boolean;
 }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <div
       className="wb-modal-overlay"
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
@@ -219,12 +227,16 @@ function SkillDetailModal({
           </div>
         )}
 
-        {detail.source !== "builtin" && (
+        {detail.source === "user" && (
           <div className="wb-inline-actions" style={{ marginTop: "1rem" }}>
             <button
               type="button"
               className="wb-button wb-button-tertiary"
-              onClick={() => onUninstall(detail.name)}
+              onClick={() => {
+                if (window.confirm(`确认卸载 Skill "${detail.name}"？此操作不可恢复。`)) {
+                  onUninstall(detail.name);
+                }
+              }}
               disabled={busy}
             >
               {busy ? "卸载中..." : "卸载此 Skill"}
@@ -253,6 +265,12 @@ function InstallModal({
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -266,12 +284,18 @@ function InstallModal({
         setName(match[1].trim());
       }
     };
+    reader.onerror = () => setError("文件读取失败，请重试");
     reader.readAsText(file);
   }
 
   function handleSubmit() {
     if (!name.trim()) {
       setError("请输入 Skill 名称");
+      return;
+    }
+    // 客户端 kebab-case 校验（与后端正则一致）
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name.trim()) || name.trim().length > 64) {
+      setError("名称仅支持小写字母、数字和连字符（kebab-case），长度 1-64 字符");
       return;
     }
     if (!content.trim()) {
@@ -285,6 +309,8 @@ function InstallModal({
   return (
     <div
       className="wb-modal-overlay"
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
@@ -399,6 +425,7 @@ export default function SkillCenter() {
   async function handleSelect(name: string) {
     try {
       setBusy(true);
+      setError("");
       const detail = await fetchSkillDetail(name);
       setSelectedDetail(detail);
     } catch (err) {
@@ -411,6 +438,7 @@ export default function SkillCenter() {
   async function handleUninstall(name: string) {
     try {
       setBusy(true);
+      setError("");
       await uninstallSkill(name);
       setSelectedDetail(null);
       await loadSkills();
@@ -424,6 +452,7 @@ export default function SkillCenter() {
   async function handleInstall(name: string, content: string) {
     try {
       setBusy(true);
+      setError("");
       await installSkill(name, content);
       setShowInstall(false);
       await loadSkills();
