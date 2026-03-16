@@ -94,8 +94,6 @@ from octoagent.core.models import (
     SkillGovernanceDocument,
     SkillGovernanceItem,
     SkillPipelineDocument,
-    SkillProviderCatalogDocument,
-    SkillProviderItem,
     Task,
     TaskPointers,
     TaskStatus,
@@ -173,7 +171,6 @@ from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
 from .butler_behavior import build_behavior_system_summary
-from .capability_pack import SkillProviderConfig
 from .connection_metadata import merge_control_metadata
 from .mcp_registry import McpServerConfig
 from .task_service import TaskService
@@ -295,7 +292,6 @@ class ControlPlaneService:
             ("policy_profiles", self.get_policy_profiles_document),
             ("capability_pack", self.get_capability_pack_document),
             ("skill_governance", self.get_skill_governance_document),
-            ("skill_provider_catalog", self.get_skill_provider_catalog_document),
             ("mcp_provider_catalog", self.get_mcp_provider_catalog_document),
             ("setup_governance", self.get_setup_governance_document),
             ("delegation", self.get_delegation_document),
@@ -1805,10 +1801,6 @@ class ControlPlaneService:
             _, selected_project, selected_workspace, _ = await self._resolve_selection()
         elif selected_project is None:
             _, selected_project, _, _ = await self._resolve_selection()
-        if policy_profile_id:
-            effective_policy = self._policy_profile_by_id(policy_profile_id) or DEFAULT_PROFILE
-        else:
-            _, effective_policy = self._resolve_effective_policy_profile(selected_project)
         if self._capability_pack_service is None:
             capability_pack = CapabilityPackDocument(
                 selected_project_id=(
@@ -1834,52 +1826,27 @@ class ControlPlaneService:
             else {}
         )
         items: list[SkillGovernanceItem] = []
-        if config_value is None:
-            config_value = (await self.get_config_schema()).current_value
-        model_aliases_raw = (
-            config_value.get("model_aliases", {}) if isinstance(config_value, dict) else {}
-        )
-        model_aliases = (
-            set(model_aliases_raw.keys()) if isinstance(model_aliases_raw, dict) else set()
-        )
-        for skill in capability_pack.pack.skills:
-            required_profile = str(skill.metadata.get("tool_profile", "standard"))
-            missing_requirements: list[str] = []
-            availability = "available"
-            blocking = False
-            if skill.model_alias not in model_aliases:
-                availability = "degraded"
-                blocking = True
-                missing_requirements.append(f"缺少 model alias: {skill.model_alias}")
-            if not self._tool_profile_allowed(
-                required_profile,
-                effective_policy.allowed_tool_profile.value,
-            ):
-                availability = "policy_blocked"
-                missing_requirements.append(
-                    f"当前安全等级只允许 {effective_policy.allowed_tool_profile.value} 工具。"
+        # Feature 057: 从 SkillDiscovery 获取 Skill 列表
+        if self._capability_pack_service is not None:
+            for entry in self._capability_pack_service.skill_discovery.list_items():
+                items.append(
+                    SkillGovernanceItem(
+                        item_id=f"skill:{entry.name}",
+                        label=entry.name.replace("-", " ").title(),
+                        source_kind=entry.source.value if hasattr(entry, "source") else "builtin",
+                        scope="project",
+                        enabled_by_default=True,
+                        selected=True,
+                        availability="available",
+                        trust_level="trusted",
+                        details={
+                            "skill_id": entry.name,
+                            "description": entry.description,
+                            "tags": list(entry.tags),
+                            "version": entry.version,
+                        },
+                    )
                 )
-            items.append(
-                SkillGovernanceItem(
-                    item_id=f"skill:{skill.skill_id}",
-                    label=skill.label or skill.skill_id,
-                    source_kind="builtin",
-                    scope="project",
-                    enabled_by_default=True,
-                    selected=True,
-                    availability=availability,
-                    trust_level="trusted",
-                    blocking=blocking,
-                    missing_requirements=missing_requirements,
-                    details={
-                        "skill_id": skill.skill_id,
-                        "model_alias": skill.model_alias,
-                        "tools_allowed": list(skill.tools_allowed),
-                        "required_tool_profile": required_profile,
-                        "worker_types": [item.value for item in skill.worker_types],
-                    },
-                )
-            )
 
         mcp_tools: dict[str, list[Any]] = defaultdict(list)
         mcp_configs = {}
@@ -1979,130 +1946,6 @@ class ControlPlaneService:
             degraded=ControlPlaneDegradedState(
                 is_degraded=bool(blocked_items),
                 reasons=["skills_blocked"] if blocked_items else [],
-            ),
-        )
-
-    async def get_skill_provider_catalog_document(self) -> SkillProviderCatalogDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        if self._capability_pack_service is None:
-            return SkillProviderCatalogDocument(
-                active_project_id=selected_project.project_id if selected_project else "",
-                active_workspace_id=selected_workspace.workspace_id if selected_workspace else "",
-                warnings=["capability pack 尚未绑定，无法加载 Skill providers。"],
-                degraded=ControlPlaneDegradedState(
-                    is_degraded=True,
-                    reasons=["capability_pack_unavailable"],
-                ),
-            )
-
-        pack = await self._capability_pack_service.get_pack()
-        custom_configs = {
-            item.provider_id: item
-            for item in self._capability_pack_service.list_skill_provider_configs()
-        }
-        governance = await self.get_skill_governance_document(
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        )
-        governance_map = {item.item_id: item for item in governance.items}
-        items: list[SkillProviderItem] = []
-        for skill in pack.skills:
-            selection_item_id = f"skill:{skill.skill_id}"
-            governance_item = governance_map.get(selection_item_id)
-            metadata = dict(skill.metadata)
-            source_kind = str(metadata.get("source_kind", "builtin")).strip() or "builtin"
-            config = custom_configs.get(skill.skill_id)
-            items.append(
-                SkillProviderItem(
-                    provider_id=skill.skill_id,
-                    label=skill.label or skill.skill_id,
-                    description=skill.description,
-                    source_kind=source_kind,
-                    editable=source_kind != "builtin",
-                    removable=source_kind != "builtin",
-                    enabled=config.enabled if config is not None else True,
-                    availability=governance_item.availability if governance_item else "available",
-                    trust_level=governance_item.trust_level if governance_item else "trusted",
-                    model_alias=skill.model_alias,
-                    worker_type=(
-                        skill.worker_types[0].value if skill.worker_types else "general"
-                    ),
-                    tool_profile=str(metadata.get("tool_profile", "standard")),
-                    permission_mode=str(
-                        metadata.get(
-                            "permission_mode",
-                            config.permission_mode if config is not None else "restrict",
-                        )
-                    ),
-                    tools_allowed=list(skill.tools_allowed),
-                    selection_item_id=selection_item_id,
-                    prompt_template=config.prompt_template if config is not None else "",
-                    install_hint=(
-                        str(metadata.get("install_hint", "")).strip()
-                        or (config.install_hint if config is not None else "")
-                    ),
-                    warnings=(
-                        []
-                        if governance_item is None
-                        else list(governance_item.missing_requirements)
-                    ),
-                    details={
-                        "worker_types": [item.value for item in skill.worker_types],
-                        "pipeline_templates": list(skill.pipeline_templates),
-                    },
-                )
-            )
-        existing_ids = {item.provider_id for item in items}
-        for config in custom_configs.values():
-            if config.provider_id in existing_ids:
-                continue
-            items.append(
-                SkillProviderItem(
-                    provider_id=config.provider_id,
-                    label=config.label,
-                    description=config.description,
-                    source_kind="custom",
-                    editable=True,
-                    removable=True,
-                    enabled=config.enabled,
-                    availability="disabled" if not config.enabled else "unavailable",
-                    trust_level="trusted",
-                    model_alias=config.model_alias,
-                    worker_type=config.worker_type,
-                    tool_profile=config.tool_profile,
-                    permission_mode=config.permission_mode,
-                    tools_allowed=list(config.tools_allowed),
-                    selection_item_id=f"skill:{config.provider_id}",
-                    prompt_template=config.prompt_template,
-                    install_hint=config.install_hint,
-                    warnings=["当前 provider 已停用，不会进入运行时 skill registry。"]
-                    if not config.enabled
-                    else ["当前 provider 未成功注册，请检查字段配置后重新保存。"],
-                    details={},
-                )
-            )
-        return SkillProviderCatalogDocument(
-            active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
-            items=items,
-            summary={
-                "installed_count": len(items),
-                "custom_count": len([item for item in items if item.source_kind != "builtin"]),
-                "builtin_count": len([item for item in items if item.source_kind == "builtin"]),
-            },
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="skill_provider.save",
-                    label="安装 Skill Provider",
-                    action_id="skill_provider.save",
-                )
-            ],
-            warnings=[] if items else ["当前没有已安装的 Skill providers。"],
-            degraded=ControlPlaneDegradedState(
-                is_degraded=not bool(items),
-                reasons=["skill_provider_catalog_empty"] if not items else [],
             ),
         )
 
@@ -3435,10 +3278,6 @@ class ControlPlaneService:
             return await self._handle_policy_profile_select(request)
         if action_id == "skills.selection.save":
             return await self._handle_skills_selection_save(request)
-        if action_id == "skill_provider.save":
-            return await self._handle_skill_provider_save(request)
-        if action_id == "skill_provider.delete":
-            return await self._handle_skill_provider_delete(request)
         if action_id == "mcp_provider.install":
             return await self._handle_mcp_provider_install(request)
         if action_id == "mcp_provider.install_status":
@@ -4009,126 +3848,6 @@ class ControlPlaneService:
                     target_id=selected_project.project_id,
                     label=selected_project.name,
                 )
-            ],
-        )
-
-    async def _handle_skill_provider_save(
-        self,
-        request: ActionRequestEnvelope,
-    ) -> ActionResultEnvelope:
-        if self._capability_pack_service is None:
-            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 未绑定")
-        raw = request.params.get("provider")
-        if not isinstance(raw, Mapping):
-            raise ControlPlaneActionError("SKILL_PROVIDER_REQUIRED", "provider 必须是对象")
-
-        provider_id = self._normalize_provider_id(
-            self._param_str(raw, "provider_id") or self._param_str(raw, "label")
-        )
-        if not provider_id:
-            raise ControlPlaneActionError("SKILL_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
-        existing_builtin_ids = {
-            item.provider_id
-            for item in (await self.get_skill_provider_catalog_document()).items
-            if item.source_kind == "builtin"
-        }
-        if provider_id in existing_builtin_ids:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_BUILTIN_LOCKED",
-                "内置 Skill provider 不能直接编辑，请另存为新的自定义 provider。",
-            )
-        label = self._param_str(raw, "label") or provider_id
-        prompt_template = self._param_str(raw, "prompt_template")
-        if not prompt_template:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_PROMPT_REQUIRED",
-                "prompt_template 不能为空",
-            )
-        available_tool_names = {
-            tool.tool_name for tool in (await self._capability_pack_service.get_pack()).tools
-        }
-        tools_allowed = self._normalize_string_list(raw.get("tools_allowed"))
-        unknown_tools = sorted(set(tools_allowed) - available_tool_names)
-        if unknown_tools:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_TOOL_UNKNOWN",
-                f"未知工具：{unknown_tools[0]}",
-            )
-        worker_type = self._param_str(raw, "worker_type", default="general").lower()
-        if worker_type not in {"general", "ops", "research", "dev"}:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_WORKER_TYPE_INVALID",
-                "worker_type 不合法",
-            )
-        tool_profile = self._param_str(raw, "tool_profile", default="standard").lower()
-        permission_mode = self._param_str(raw, "permission_mode", default="inherit").lower()
-        if tool_profile not in {"minimal", "standard", "privileged"}:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_TOOL_PROFILE_INVALID",
-                "tool_profile 不合法",
-            )
-        if permission_mode not in {"inherit", "restrict"}:
-            raise ControlPlaneActionError(
-                "SKILL_PROVIDER_PERMISSION_MODE_INVALID",
-                "permission_mode 不合法",
-            )
-
-        config = SkillProviderConfig.model_validate(
-            {
-                "provider_id": provider_id,
-                "label": label,
-                "description": self._param_str(raw, "description"),
-                "enabled": self._param_bool(raw, "enabled", default=True),
-                "model_alias": self._param_str(raw, "model_alias", default="main") or "main",
-                "worker_type": worker_type,
-                "tool_profile": tool_profile,
-                "permission_mode": permission_mode,
-                "tools_allowed": tools_allowed,
-                "prompt_template": prompt_template,
-                "install_hint": self._param_str(raw, "install_hint"),
-                "metadata": self._normalize_dict(raw.get("metadata")),
-            }
-        )
-        self._capability_pack_service.save_skill_provider_config(config)
-        await self._capability_pack_service.refresh()
-        document = await self.get_skill_provider_catalog_document()
-        return self._completed_result(
-            request=request,
-            code="SKILL_PROVIDER_SAVED",
-            message="Skill provider 已保存。",
-            data={
-                "provider_id": provider_id,
-                "installed_count": document.summary.get("installed_count", 0),
-            },
-            resource_refs=[
-                self._resource_ref("skill_provider_catalog", "skill-providers:catalog"),
-                self._resource_ref("capability_pack", "capability:bundled"),
-                self._resource_ref("skill_governance", "skills:governance"),
-            ],
-        )
-
-    async def _handle_skill_provider_delete(
-        self,
-        request: ActionRequestEnvelope,
-    ) -> ActionResultEnvelope:
-        if self._capability_pack_service is None:
-            raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 未绑定")
-        provider_id = self._normalize_provider_id(self._param_str(request.params, "provider_id"))
-        if not provider_id:
-            raise ControlPlaneActionError("SKILL_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
-        removed = self._capability_pack_service.delete_skill_provider_config(provider_id)
-        if not removed:
-            raise ControlPlaneActionError("SKILL_PROVIDER_NOT_FOUND", "Skill provider 不存在")
-        await self._capability_pack_service.refresh()
-        return self._completed_result(
-            request=request,
-            code="SKILL_PROVIDER_DELETED",
-            message="Skill provider 已删除。",
-            data={"provider_id": provider_id},
-            resource_refs=[
-                self._resource_ref("skill_provider_catalog", "skill-providers:catalog"),
-                self._resource_ref("capability_pack", "capability:bundled"),
-                self._resource_ref("skill_governance", "skills:governance"),
             ],
         )
 
@@ -9907,22 +9626,6 @@ class ControlPlaneService:
                     category="setup",
                     description="保存当前 project 的 skills / MCP 默认启用范围。",
                     params_schema={"type": "object"},
-                    risk_hint="medium",
-                ),
-                definition(
-                    "skill_provider.save",
-                    "保存 Skill Provider",
-                    category="capability",
-                    description="安装或编辑一个自定义 Skill provider。",
-                    params_schema={"type": "object", "required": ["provider"]},
-                    risk_hint="medium",
-                ),
-                definition(
-                    "skill_provider.delete",
-                    "删除 Skill Provider",
-                    category="capability",
-                    description="删除一个自定义 Skill provider。",
-                    params_schema={"type": "object", "required": ["provider_id"]},
                     risk_hint="medium",
                 ),
                 definition(

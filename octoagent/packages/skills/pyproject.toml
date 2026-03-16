@@ -8,6 +8,7 @@ dependencies = [
     "octoagent-tooling",
     "pydantic>=2.10,<3.0",
     "structlog>=25.1,<26.0",
+    "PyYAML>=6.0,<7.0",
 ]
 
 [tool.uv.sources]

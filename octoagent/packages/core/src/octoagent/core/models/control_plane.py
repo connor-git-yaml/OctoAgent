@@ -552,6 +552,8 @@ class PolicyProfilesDocument(ControlPlaneDocument):
 
 
 class SkillGovernanceItem(BaseModel):
+    """Skill / MCP 治理条目。"""
+
     item_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     source_kind: str = Field(default="builtin")
@@ -569,42 +571,13 @@ class SkillGovernanceItem(BaseModel):
 
 
 class SkillGovernanceDocument(ControlPlaneDocument):
+    """Skill / MCP 治理文档。"""
+
     resource_type: str = "skill_governance"
     resource_id: str = "skills:governance"
     active_project_id: str = Field(default="")
     active_workspace_id: str = Field(default="")
     items: list[SkillGovernanceItem] = Field(default_factory=list)
-    summary: dict[str, Any] = Field(default_factory=dict)
-
-
-class SkillProviderItem(BaseModel):
-    provider_id: str = Field(min_length=1)
-    label: str = Field(min_length=1)
-    description: str = Field(default="")
-    source_kind: str = Field(default="builtin")
-    editable: bool = False
-    removable: bool = False
-    enabled: bool = True
-    availability: str = Field(default="available")
-    trust_level: str = Field(default="trusted")
-    model_alias: str = Field(default="main")
-    worker_type: str = Field(default="general")
-    tool_profile: str = Field(default="standard")
-    permission_mode: str = Field(default="inherit")
-    tools_allowed: list[str] = Field(default_factory=list)
-    selection_item_id: str = Field(default="")
-    prompt_template: str = Field(default="")
-    install_hint: str = Field(default="")
-    warnings: list[str] = Field(default_factory=list)
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
-class SkillProviderCatalogDocument(ControlPlaneDocument):
-    resource_type: str = "skill_provider_catalog"
-    resource_id: str = "skill-providers:catalog"
-    active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
-    items: list[SkillProviderItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
 

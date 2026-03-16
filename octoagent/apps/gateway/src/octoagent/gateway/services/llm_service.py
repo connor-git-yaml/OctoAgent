@@ -20,6 +20,7 @@ from octoagent.provider import (
     TokenUsage,
 )
 from octoagent.skills import (
+    SkillDiscovery,
     SkillExecutionContext,
     SkillManifest,
     SkillPermissionMode,
@@ -186,6 +187,7 @@ class LLMService:
         default_provider: LLMProvider | None = None,
         *,
         skill_runner: SkillRunner | None = None,
+        skill_discovery: SkillDiscovery | None = None,
     ) -> None:
         """初始化 LLM 服务
 
@@ -193,6 +195,8 @@ class LLMService:
             fallback_manager: 包含 primary + fallback 的降级管理器
             alias_registry: 语义 alias 注册表
             default_provider: M0 兼容参数（废弃，仅向后兼容）
+            skill_runner: SkillRunner 实例
+            skill_discovery: Feature 057 SkillDiscovery 实例，用于注入已加载 Skill 到 system prompt
         """
         if fallback_manager is not None:
             # Feature 002 模式
@@ -212,6 +216,7 @@ class LLMService:
         self._providers["echo"] = EchoProvider()
         self._providers["mock"] = MockProvider()
         self._skill_runner = skill_runner
+        self._skill_discovery = skill_discovery
 
     def register(self, alias: str, provider: LLMProvider) -> None:
         """注册 LLM provider -- M0 兼容"""
@@ -300,17 +305,22 @@ class LLMService:
 
         worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
         single_loop_executor = self._metadata_flag(metadata, "single_loop_executor")
+        base_description = self._build_skill_description(
+            worker_type,
+            selected_tools,
+            single_loop_executor=single_loop_executor,
+            prompt=prompt,
+        )
+        # Feature 057: 注入已加载 SKILL.md 内容到 system prompt
+        skill_context = self._build_loaded_skills_context(metadata)
+        if skill_context:
+            base_description = f"{base_description}\n\n{skill_context}"
         manifest = SkillManifest(
             skill_id=f"chat.{worker_type}.inline",
             input_model=_GenericSkillInput,
             output_model=_GenericSkillOutput,
             model_alias=model_alias,
-            description=self._build_skill_description(
-                worker_type,
-                selected_tools,
-                single_loop_executor=single_loop_executor,
-                prompt=prompt,
-            ),
+            description=base_description,
             permission_mode=SkillPermissionMode.INHERIT,
             tools_allowed=selected_tools,
             tool_profile=profile,
@@ -402,6 +412,39 @@ class LLMService:
         if raw in {"ops", "research", "dev", "general"}:
             return raw
         return "general"
+
+    def _build_loaded_skills_context(self, metadata: dict[str, Any]) -> str:
+        """Feature 057: 从 session metadata 读取已加载 Skill 名称，构建注入文本。
+
+        读取 metadata["loaded_skill_names"]，从 SkillDiscovery 缓存获取每个 Skill 的 content，
+        按加载顺序拼接为 system prompt 注入文本。
+
+        Args:
+            metadata: AgentSession.metadata 或调用时传入的 metadata
+
+        Returns:
+            拼接后的 Skill 上下文文本，为空则返回空字符串
+        """
+        if self._skill_discovery is None:
+            return ""
+
+        loaded_names = metadata.get("loaded_skill_names", [])
+        if not isinstance(loaded_names, list) or not loaded_names:
+            return ""
+
+        sections: list[str] = []
+        for name in loaded_names:
+            entry = self._skill_discovery.get(str(name))
+            if entry is None or not entry.content:
+                continue
+            sections.append(
+                f"--- Loaded Skill: {entry.name} ---\n{entry.content}\n--- End Skill: {entry.name} ---"
+            )
+
+        if not sections:
+            return ""
+
+        return "## Active Skills\n\n" + "\n\n".join(sections)
 
     @staticmethod
     def _build_skill_description(

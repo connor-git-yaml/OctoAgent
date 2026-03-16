@@ -286,7 +286,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
                     **dict(project.metadata),
                     "skill_selection": {
                         "selected_item_ids": [],
-                        "disabled_item_ids": ["skill:ops_triage"],
+                        "disabled_item_ids": ["skill:coding-agent"],
                     },
                 },
                 "updated_at": datetime.now(tz=UTC),
@@ -303,7 +303,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
         model_alias="main",
         metadata={
             "capability_provider_selection": {
-                "selected_item_ids": ["skill:ops_triage"],
+                "selected_item_ids": ["skill:coding-agent"],
                 "disabled_item_ids": [],
             }
         },
@@ -315,7 +315,8 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
         project_id="project-default",
         workspace_id="workspace-default",
     )
-    assert "runtime.inspect" not in {item.tool_name for item in base_pack.tools}
+    # Feature 057: 验证 disabled skill 从 pack 的 skills 列表中被过滤
+    assert "coding-agent" not in {item.skill_id for item in base_pack.skills}
 
     task_id, _ = await task_service.create_task(
         NormalizedMessage(

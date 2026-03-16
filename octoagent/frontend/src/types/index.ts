@@ -1006,36 +1006,6 @@ export interface SkillGovernanceDocument extends ControlPlaneDocumentBase {
   summary: Record<string, unknown>;
 }
 
-export interface SkillProviderItem {
-  provider_id: string;
-  label: string;
-  description: string;
-  source_kind: string;
-  editable: boolean;
-  removable: boolean;
-  enabled: boolean;
-  availability: string;
-  trust_level: string;
-  model_alias: string;
-  worker_type: string;
-  tool_profile: string;
-  tools_allowed: string[];
-  selection_item_id: string;
-  prompt_template: string;
-  install_hint: string;
-  warnings: string[];
-  details: Record<string, unknown>;
-}
-
-export interface SkillProviderCatalogDocument extends ControlPlaneDocumentBase {
-  resource_type: "skill_provider_catalog";
-  resource_id: "skill-providers:catalog";
-  active_project_id: string;
-  active_workspace_id: string;
-  items: SkillProviderItem[];
-  summary: Record<string, unknown>;
-}
-
 export interface McpProviderItem {
   provider_id: string;
   label: string;
@@ -1862,7 +1832,6 @@ export interface ControlPlaneSnapshot {
     policy_profiles: PolicyProfilesDocument;
     capability_pack: CapabilityPackDocument;
     skill_governance: SkillGovernanceDocument;
-    skill_provider_catalog: SkillProviderCatalogDocument;
     mcp_provider_catalog: McpProviderCatalogDocument;
     setup_governance: SetupGovernanceDocument;
     delegation: DelegationPlaneDocument;
@@ -1885,4 +1854,32 @@ export interface ControlPlaneActionResponse {
 export interface ControlPlaneEventsResponse {
   contract_version: string;
   events: ControlPlaneEvent[];
+}
+
+// ============================================================
+// Feature 057: Skills Management REST API 类型
+// ============================================================
+
+/** Skill 列表中的单个条目（不含 content）。 */
+export interface SkillItem {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  tags: string[];
+  source: "builtin" | "user" | "project";
+  source_path: string;
+}
+
+/** Skill 详情（含完整 content）。 */
+export interface SkillDetail extends SkillItem {
+  trigger_patterns: string[];
+  tools_required: string[];
+  content: string;
+}
+
+/** GET /api/skills 响应体。 */
+export interface SkillListResponse {
+  items: SkillItem[];
+  total: number;
 }

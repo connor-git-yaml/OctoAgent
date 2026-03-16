@@ -54,6 +54,7 @@ from .routes import (
     message,
     operator_inbox,
     ops,
+    skills,
     stream,
     tasks,
     telegram,
@@ -445,6 +446,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
         tool_broker=tool_broker,
     )
+    # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
+    app.state.skill_discovery = app.state.capability_pack_service.skill_discovery
     # Feature 058: 创建 McpSessionPool 并注入 McpRegistryService
     from .services.mcp_session_pool import McpSessionPool
 
@@ -484,6 +487,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             fallback_manager=fallback_manager,
             alias_registry=alias_registry,
             skill_runner=skill_runner,
+            skill_discovery=app.state.skill_discovery,
         )
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,
@@ -700,6 +704,7 @@ def create_app() -> FastAPI:
     app.include_router(operator_inbox.router, tags=["operator"], dependencies=protected)
     app.include_router(chat.router, tags=["chat"], dependencies=protected)
     app.include_router(control_plane.router, tags=["control-plane"], dependencies=protected)
+    app.include_router(skills.router, dependencies=protected)
 
     # 挂载前端静态文件（frontend/dist/ -> /）
     # 在所有 API 路由之后挂载，确保 API 优先匹配

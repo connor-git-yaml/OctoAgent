@@ -620,31 +620,6 @@ function buildSnapshot(options?: {
           },
         ],
       },
-      skill_provider_catalog: {
-        generated_at: "2026-03-14T10:00:00Z",
-        items: [
-          {
-            provider_id: "workers.review",
-            label: "Worker Review",
-            description: "内置检查能力",
-            source_kind: "builtin",
-            editable: false,
-            removable: false,
-            enabled: true,
-            availability: "available",
-            trust_level: "trusted",
-            model_alias: "main",
-            worker_type: "general",
-            tool_profile: "minimal",
-            tools_allowed: [],
-            selection_item_id: "skill:workers.review",
-            prompt_template: "",
-            install_hint: "",
-            warnings: [],
-            details: {},
-          },
-        ],
-      },
       mcp_provider_catalog: {
         generated_at: "2026-03-14T10:00:00Z",
         items: [

@@ -65,6 +65,15 @@ async def require_front_door_access(
     await guard.authorize(request)
 
 
+def get_skill_discovery(request: Request):
+    """从 app.state 获取 SkillDiscovery 实例。
+
+    Feature 057: SkillDiscovery 在 CapabilityPackService 初始化时创建，
+    挂载到 app.state.skill_discovery 供路由依赖注入使用。
+    """
+    return request.app.state.skill_discovery
+
+
 def get_task_scope_guard(request: Request, store_group=Depends(get_store_group)) -> TaskScopeGuard:
     """获取 raw task routes 的 project/workspace 视图隔离守卫。"""
     project_root = getattr(

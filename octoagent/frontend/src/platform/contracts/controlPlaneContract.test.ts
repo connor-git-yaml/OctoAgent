@@ -71,12 +71,6 @@ describe("controlPlane contract manifest", () => {
           "snapshotKey": "skill_governance",
         },
         {
-          "endpointPath": "/api/control/resources/skill-provider-catalog",
-          "queryMode": "snapshot-resource",
-          "route": "skill-provider-catalog",
-          "snapshotKey": "skill_provider_catalog",
-        },
-        {
           "endpointPath": "/api/control/resources/mcp-provider-catalog",
           "queryMode": "snapshot-resource",
           "route": "mcp-provider-catalog",
@@ -111,6 +105,12 @@ describe("controlPlane contract manifest", () => {
           "queryMode": "snapshot-resource",
           "route": "diagnostics",
           "snapshotKey": "diagnostics",
+        },
+        {
+          "endpointPath": "/api/control/resources/retrieval-platform",
+          "queryMode": "snapshot-resource",
+          "route": "retrieval-platform",
+          "snapshotKey": "retrieval_platform",
         },
         {
           "endpointPath": "/api/control/resources/memory",

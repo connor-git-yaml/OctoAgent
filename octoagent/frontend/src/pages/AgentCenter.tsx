@@ -281,7 +281,6 @@ export default function AgentCenter() {
   const capabilityProviderEntries = useMemo(
     () => buildCapabilityProviderEntries(snapshot!),
     [
-      snapshot!.resources.skill_provider_catalog.generated_at,
       snapshot!.resources.mcp_provider_catalog.generated_at,
       snapshot!.resources.skill_governance.generated_at,
     ]

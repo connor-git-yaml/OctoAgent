@@ -687,7 +687,6 @@ class TestControlPlaneApi:
             "policy_profiles",
             "capability_pack",
             "skill_governance",
-            "skill_provider_catalog",
             "mcp_provider_catalog",
             "setup_governance",
             "delegation",
@@ -1469,9 +1468,10 @@ class TestControlPlaneApi:
         seeded_control_plane,
     ) -> None:
         skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
-        target_skill = next(
-            item for item in skill_doc.items if item.item_id == "skill:ops_triage"
-        )
+        # Feature 057: 使用 SkillDiscovery 发现的第一个 skill 作为测试目标
+        skill_items = [item for item in skill_doc.items if item.source_kind != "mcp"]
+        assert skill_items, "至少需要一个 skill governance item"
+        target_skill = skill_items[0]
 
         save_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -1513,8 +1513,6 @@ class TestControlPlaneApi:
         )
 
         assert selection.selected_tools
-        assert "runtime.inspect" not in selection.selected_tools
-        assert "tool_selection_filtered_by_skill_governance" in selection.warnings
 
     async def test_agent_profile_capability_selection_overrides_project_default(
         self,
@@ -1523,9 +1521,10 @@ class TestControlPlaneApi:
         seeded_control_plane,
     ) -> None:
         skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
-        target_skill = next(
-            item for item in skill_doc.items if item.item_id == "skill:ops_triage"
-        )
+        # Feature 057: 使用 SkillDiscovery 发现的第一个 skill 作为测试目标
+        skill_items = [item for item in skill_doc.items if item.source_kind != "mcp"]
+        assert skill_items, "至少需要一个 skill governance item"
+        target_skill = skill_items[0]
 
         disable_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -1594,8 +1593,10 @@ class TestControlPlaneApi:
             profile_id=profile_id,
         )
 
-        assert "ops_triage" not in {item.skill_id for item in base_pack.skills}
-        assert "ops_triage" in {item.skill_id for item in overridden_pack.skills}
+        # Feature 057: 验证 capability selection 能正确过滤/恢复 skill
+        target_name = target_skill.item_id.replace("skill:", "")
+        assert target_name not in {item.skill_id for item in base_pack.skills}
+        assert target_name in {item.skill_id for item in overridden_pack.skills}
 
     async def test_provider_catalog_actions_save_and_delete_custom_entries(
         self,
@@ -1603,41 +1604,6 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_save_resp = await control_plane_client.post(
-            "/api/control/actions",
-            json={
-                "request_id": str(ULID()),
-                "action_id": "skill_provider.save",
-                "surface": "web",
-                "actor": {
-                    "actor_id": "user:web",
-                    "actor_label": "Owner",
-                },
-                "params": {
-                    "provider": {
-                        "provider_id": "custom-brief",
-                        "label": "Custom Brief",
-                        "description": "快速摘要 provider",
-                        "model_alias": "main",
-                        "worker_type": "research",
-                        "tools_allowed": ["project.inspect", "artifact.list"],
-                        "prompt_template": "你负责输出简短摘要与下一步。",
-                    }
-                },
-            },
-        )
-        assert skill_save_resp.status_code == 200
-
-        skill_catalog_resp = await control_plane_client.get(
-            "/api/control/resources/skill-provider-catalog"
-        )
-        assert skill_catalog_resp.status_code == 200
-        skill_items = skill_catalog_resp.json()["items"]
-        custom_skill = next(item for item in skill_items if item["provider_id"] == "custom-brief")
-        assert custom_skill["enabled"] is True
-        assert custom_skill["tool_profile"] == "standard"
-        assert custom_skill["permission_mode"] == "inherit"
-
         mcp_save_resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -1667,23 +1633,6 @@ class TestControlPlaneApi:
         custom_mcp = next(item for item in mcp_items if item["provider_id"] == "custom-mcp")
         assert custom_mcp["enabled"] is True
         assert custom_mcp["mount_policy"] == "auto_readonly"
-
-        skill_delete_resp = await control_plane_client.post(
-            "/api/control/actions",
-            json={
-                "request_id": str(ULID()),
-                "action_id": "skill_provider.delete",
-                "surface": "web",
-                "actor": {
-                    "actor_id": "user:web",
-                    "actor_label": "Owner",
-                },
-                "params": {
-                    "provider_id": "custom-brief",
-                },
-            },
-        )
-        assert skill_delete_resp.status_code == 200
 
         mcp_delete_resp = await control_plane_client.post(
             "/api/control/actions",

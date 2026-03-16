@@ -13,7 +13,6 @@ export type WorkbenchResourceRoute =
   | "policy-profiles"
   | "capability-pack"
   | "skill-governance"
-  | "skill-provider-catalog"
   | "mcp-provider-catalog"
   | "setup-governance"
   | "delegation"
@@ -128,13 +127,6 @@ export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
     endpointPath: "/api/control/resources/skill-governance",
     queryMode: "snapshot-resource",
   },
-  "skill-provider-catalog": {
-    route: "skill-provider-catalog",
-    snapshotKey: "skill_provider_catalog",
-    label: "Skill Providers",
-    endpointPath: "/api/control/resources/skill-provider-catalog",
-    queryMode: "snapshot-resource",
-  },
   "mcp-provider-catalog": {
     route: "mcp-provider-catalog",
     snapshotKey: "mcp_provider_catalog",
@@ -210,7 +202,6 @@ export const RESOURCE_ROUTE_BY_TYPE: Record<string, WorkbenchResourceRoute> = {
   policy_profiles: "policy-profiles",
   capability_pack: "capability-pack",
   skill_governance: "skill-governance",
-  skill_provider_catalog: "skill-provider-catalog",
   mcp_provider_catalog: "mcp-provider-catalog",
   setup_governance: "setup-governance",
   delegation_plane: "delegation",

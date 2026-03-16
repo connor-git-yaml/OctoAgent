@@ -94,20 +94,6 @@ async def get_control_capability_pack(control_plane=Depends(get_control_plane_se
     )
 
 
-@router.get("/api/control/resources/skill-governance")
-async def get_control_skill_governance(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_skill_governance_document()).model_dump(
-        mode="json", by_alias=True
-    )
-
-
-@router.get("/api/control/resources/skill-provider-catalog")
-async def get_control_skill_provider_catalog(control_plane=Depends(get_control_plane_service)):
-    return (await control_plane.get_skill_provider_catalog_document()).model_dump(
-        mode="json", by_alias=True
-    )
-
-
 @router.get("/api/control/resources/mcp-provider-catalog")
 async def get_control_mcp_provider_catalog(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_mcp_provider_catalog_document()).model_dump(

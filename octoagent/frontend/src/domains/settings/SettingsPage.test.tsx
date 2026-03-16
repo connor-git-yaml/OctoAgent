@@ -518,13 +518,6 @@ function buildSettingsSnapshot(): any {
           },
         ],
       },
-      skill_provider_catalog: {
-        summary: {
-          installed_count: 1,
-          custom_count: 0,
-          builtin_count: 1,
-        },
-      },
       mcp_provider_catalog: {
         summary: {
           installed_count: 0,

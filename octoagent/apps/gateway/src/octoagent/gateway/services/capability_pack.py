@@ -53,7 +53,7 @@ from octoagent.provider.dx.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
-from octoagent.skills import SkillManifest, SkillRegistry
+from octoagent.skills import SkillDiscovery
 from octoagent.tooling import (
     SideEffectLevel,
     ToolBroker,
@@ -83,37 +83,6 @@ from .task_service import TaskService
 
 if TYPE_CHECKING:
     from .mcp_registry import McpRegistryService
-
-_DEFAULT_SKILL_PROVIDER_CONFIG_PATH = Path("data/ops/skill-providers.json")
-
-
-class SkillProviderConfig(BaseModel):
-    provider_id: str = Field(min_length=1)
-    label: str = Field(min_length=1)
-    description: str = Field(default="")
-    enabled: bool = True
-    model_alias: str = Field(default="main")
-    worker_type: str = Field(default="general")
-    tool_profile: str = Field(default="standard")
-    permission_mode: str = Field(default="inherit")
-    tools_allowed: list[str] = Field(default_factory=list)
-    prompt_template: str = Field(min_length=1)
-    install_hint: str = Field(default="")
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class _BuiltinSkillInput(BaseModel):
-    objective: str = Field(min_length=1)
-    context: dict[str, Any] = Field(default_factory=dict)
-
-
-class _BuiltinSkillOutput(BaseModel):
-    content: str = ""
-    complete: bool = True
-    skip_remaining_tools: bool = True
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
 
 class _WorkerPlanAssignment(BaseModel):
     objective: str = Field(min_length=1)
@@ -275,13 +244,11 @@ class CapabilityPackService:
         project_root: Path,
         store_group,
         tool_broker: ToolBroker,
-        skill_registry: SkillRegistry | None = None,
         preferred_tool_index_backend: str = "auto",
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
         self._tool_broker = tool_broker
-        self._skill_registry = skill_registry or SkillRegistry()
         self._tool_index = ToolIndex(preferred_backend=preferred_tool_index_backend)
         self._pack: BundledCapabilityPack | None = None
         self._bootstrapped = False
@@ -299,14 +266,25 @@ class CapabilityPackService:
             project_root,
             store_group=store_group,
         )
+        # Feature 057: SKILL.md 文件系统驱动的 Skill 发现服务
+        # 三级目录：内置 (skills/) > 用户 (~/.octoagent/skills/) > 项目 ({project}/skills/)
+        _repo_root = Path(__file__).resolve().parents[7]  # .../octoagent/apps/gateway/src/octoagent/gateway/services -> repo root
+        _user_skills_dir = Path.home() / ".octoagent" / "skills"
+        _project_skills_dir = project_root / "skills"
+        self._skill_discovery = SkillDiscovery(
+            builtin_dir=_repo_root / "skills",
+            user_dir=_user_skills_dir,
+            project_dir=_project_skills_dir,
+        )
 
     @property
     def tool_broker(self) -> ToolBroker:
         return self._tool_broker
 
     @property
-    def skill_registry(self) -> SkillRegistry:
-        return self._skill_registry
+    def skill_discovery(self) -> SkillDiscovery:
+        """Feature 057: 返回 SkillDiscovery 实例供依赖注入使用。"""
+        return self._skill_discovery
 
     def bind_task_runner(self, task_runner) -> None:
         self._task_runner = task_runner
@@ -324,6 +302,8 @@ class CapabilityPackService:
     async def startup(self) -> None:
         if self._bootstrapped:
             return
+        # Feature 057: 首次启动时扫描 SKILL.md 文件系统
+        self._skill_discovery.scan()
         await self._register_builtin_tools()
         if self._mcp_registry is not None:
             await self._mcp_registry.startup()
@@ -333,7 +313,8 @@ class CapabilityPackService:
     async def refresh(self) -> BundledCapabilityPack:
         if self._mcp_registry is not None:
             await self._mcp_registry.refresh()
-        self._rebuild_skill_registry()
+        # Feature 057: 刷新 SKILL.md 文件系统缓存
+        self._skill_discovery.refresh()
         metas = await self._tool_broker.discover()
         await self._tool_index.rebuild(metas)
         tools = [
@@ -359,25 +340,19 @@ class CapabilityPackService:
             )
             for meta in metas
         ]
+        # Feature 057: 从 SkillDiscovery 构建 BundledSkillDefinition
         skills = [
             BundledSkillDefinition(
-                skill_id=manifest.skill_id,
-                label=(
-                    str(manifest.metadata.get("label", "")).strip()
-                    or manifest.skill_id.replace("_", " ").title()
-                ),
-                description=manifest.description or "",
-                model_alias=manifest.model_alias,
-                permission_mode=manifest.permission_mode.value,
-                worker_types=self._resolve_skill_worker_types(manifest),
-                tools_allowed=list(manifest.tools_allowed),
-                pipeline_templates=["delegation:preflight"],
+                skill_id=entry.name,
+                label=entry.name.replace("-", " ").title(),
+                description=entry.description,
                 metadata={
-                    "tool_profile": manifest.tool_profile.value,
-                    **manifest.metadata,
+                    "source": entry.source.value,
+                    "version": entry.version,
+                    "tags": entry.tags,
                 },
             )
-            for manifest in self._skill_registry.list_skills()
+            for entry in self._skill_discovery.list_items()
         ]
         bootstrap_files = list(self._bootstrap_templates.values())
         fallback_toolset = [
@@ -829,27 +804,10 @@ class CapabilityPackService:
                 "healthy_server_count": self._mcp_registry.healthy_server_count(),
                 "registered_tool_count": self._mcp_registry.registered_tool_count(),
             },
-            "skill_providers": {
-                "config_path": str(self._resolve_skill_provider_config_path()),
-                "installed_count": len(self.list_skill_provider_configs()),
+            "skills": {
+                "discovered_count": len(self._skill_discovery.list_items()),
             },
         }
-
-    def list_skill_provider_configs(self) -> list[SkillProviderConfig]:
-        return self._load_skill_provider_configs()
-
-    def save_skill_provider_config(self, config: SkillProviderConfig) -> None:
-        configs = {item.provider_id: item for item in self._load_skill_provider_configs()}
-        configs[config.provider_id] = config
-        self._write_skill_provider_configs(list(configs.values()))
-
-    def delete_skill_provider_config(self, provider_id: str) -> bool:
-        configs = {item.provider_id: item for item in self._load_skill_provider_configs()}
-        removed = configs.pop(provider_id, None)
-        if removed is None:
-            return False
-        self._write_skill_provider_configs(list(configs.values()))
-        return True
 
     async def review_worker_plan(
         self,
@@ -2817,6 +2775,42 @@ class CapabilityPackService:
                 ensure_ascii=False,
             )
 
+        # Feature 057: skills tool -- LLM 主动发现和加载 SKILL.md
+        from octoagent.skills.tools import SkillsTool as _SkillsTool
+
+        _skills_tool = _SkillsTool(self._skill_discovery)
+
+        @tool_contract(
+            name="skills",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="skills",
+            tags=["skills", "discovery", "knowledge"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://skills",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent"],
+            },
+        )
+        async def skills(action: str, name: str = "") -> str:
+            """管理和使用 SKILL.md 定义的技能。支持列出所有可用技能的摘要，或加载指定技能的完整指令到当前会话。"""
+            # 获取当前 session metadata 用于 load/unload
+            session_metadata = None
+            try:
+                context = get_current_execution_context()
+                if self._task_runner is not None:
+                    session = await self._task_runner.get_execution_session(context.task_id)
+                    if session is not None:
+                        session_metadata = session.metadata
+            except Exception:
+                pass
+            return await _skills_tool.execute(
+                action=action,
+                name=name,
+                session_metadata=session_metadata,
+            )
+
         for handler in (
             project_inspect,
             task_inspect,
@@ -2862,54 +2856,12 @@ class CapabilityPackService:
             memory_recall,
             behavior_read_file,
             behavior_write_file,
+            skills,
         ):
             await self._tool_broker.try_register(
                 reflect_tool_schema(handler),
                 handler,
             )
-
-    def _register_builtin_skills(self) -> None:
-        existing_ids = {item.skill_id for item in self._skill_registry.list_skills()}
-        definitions = [
-            (
-                "ops_triage",
-                "你是 ops worker，优先诊断运行态、恢复策略、可观测性和风险收敛。",
-                ["runtime.inspect", "task.inspect", "work.inspect", "project.inspect"],
-                ToolProfile.MINIMAL,
-                "ops",
-            ),
-            (
-                "research_brief",
-                "你是 research worker，优先收集 artifact、上下文与结论摘要。",
-                ["project.inspect", "task.inspect", "artifact.list", "work.inspect"],
-                ToolProfile.MINIMAL,
-                "research",
-            ),
-            (
-                "dev_patch_plan",
-                "你是 dev worker，优先理解 project/workspace、产物与 work ownership。",
-                ["project.inspect", "task.inspect", "artifact.list", "work.inspect"],
-                ToolProfile.MINIMAL,
-                "dev",
-            ),
-        ]
-        for skill_id, prompt, tools_allowed, tool_profile, worker_type in definitions:
-            if skill_id in existing_ids:
-                continue
-            self._skill_registry.register(
-                SkillManifest(
-                    skill_id=skill_id,
-                    input_model=_BuiltinSkillInput,
-                    output_model=_BuiltinSkillOutput,
-                    description=f"bundled skill for {worker_type}",
-                    description_md=worker_type,
-                    tools_allowed=tools_allowed,
-                    tool_profile=tool_profile,
-                    metadata={"worker_type": worker_type},
-                ),
-                prompt_template=prompt,
-            )
-            existing_ids.add(skill_id)
 
     def _build_worker_profiles(self) -> dict[WorkerType, WorkerCapabilityProfile]:
         return {
@@ -3670,94 +3622,6 @@ class CapabilityPackService:
         if project is not None and workspace is None:
             workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
         return project, workspace
-
-    @staticmethod
-    def _resolve_skill_worker_types(manifest: SkillManifest) -> list[WorkerType]:
-        raw = str(manifest.metadata.get("worker_type", "")).strip().lower()
-        if raw in {member.value for member in WorkerType}:
-            return [WorkerType(raw)]
-        return [WorkerType.GENERAL]
-
-    def _resolve_skill_provider_config_path(self) -> Path:
-        override = os.getenv("OCTOAGENT_SKILL_PROVIDERS_PATH", "").strip()
-        if override:
-            return Path(override)
-        return self._project_root / _DEFAULT_SKILL_PROVIDER_CONFIG_PATH
-
-    def _load_skill_provider_configs(self) -> list[SkillProviderConfig]:
-        path = self._resolve_skill_provider_config_path()
-        if not path.exists():
-            return []
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-        raw_items = payload.get("providers", payload) if isinstance(payload, dict) else payload
-        if not isinstance(raw_items, list):
-            return []
-        configs: list[SkillProviderConfig] = []
-        for item in raw_items:
-            try:
-                configs.append(SkillProviderConfig.model_validate(item))
-            except Exception:
-                continue
-        return configs
-
-    def _write_skill_provider_configs(self, configs: list[SkillProviderConfig]) -> None:
-        path = self._resolve_skill_provider_config_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "providers": [
-                item.model_dump(mode="json", by_alias=True)
-                for item in sorted(configs, key=lambda current: current.provider_id.lower())
-            ]
-        }
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-
-    def _rebuild_skill_registry(self) -> None:
-        current_ids = [item.skill_id for item in self._skill_registry.list_skills()]
-        for skill_id in current_ids:
-            self._skill_registry.unregister(skill_id)
-        self._register_builtin_skills()
-        self._register_custom_skill_providers()
-
-    def _register_custom_skill_providers(self) -> None:
-        existing_ids = {item.skill_id for item in self._skill_registry.list_skills()}
-        for config in self._load_skill_provider_configs():
-            if not config.enabled or config.provider_id in existing_ids:
-                continue
-            try:
-                tool_profile = ToolProfile(str(config.tool_profile).strip().lower() or "standard")
-            except ValueError:
-                tool_profile = ToolProfile.STANDARD
-            worker_type = str(config.worker_type).strip().lower() or "general"
-            permission_mode = str(config.permission_mode).strip().lower() or "inherit"
-            self._skill_registry.register(
-                SkillManifest(
-                    skill_id=config.provider_id,
-                    input_model=_BuiltinSkillInput,
-                    output_model=_BuiltinSkillOutput,
-                    description=config.description or config.label,
-                    model_alias=config.model_alias or "main",
-                    permission_mode=permission_mode,
-                    tools_allowed=list(config.tools_allowed),
-                    tool_profile=tool_profile,
-                    metadata={
-                        "label": config.label,
-                        "worker_type": worker_type,
-                        "source_kind": "custom",
-                        "provider_id": config.provider_id,
-                        "install_hint": config.install_hint,
-                        "permission_mode": permission_mode,
-                        **dict(config.metadata),
-                    },
-                ),
-                prompt_template=config.prompt_template,
-            )
-            existing_ids.add(config.provider_id)
 
     def _resolve_tool_availability(
         self,

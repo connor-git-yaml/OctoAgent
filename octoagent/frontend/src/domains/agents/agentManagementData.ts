@@ -202,21 +202,21 @@ export function buildCapabilityProviderEntries(
     snapshot.resources.skill_governance.items.map((item) => [item.item_id, item])
   ) as Record<string, (typeof snapshot.resources.skill_governance.items)[number]>;
 
-  const skillEntries = snapshot.resources.skill_provider_catalog.items.map((item) => {
-    const governance = governanceById[item.selection_item_id];
-    return {
-      providerId: item.provider_id,
+  // Feature 057: skill entries 直接从 skill_governance 获取
+  const skillEntries = snapshot.resources.skill_governance.items
+    .filter((item) => item.source_kind !== "mcp")
+    .map((item) => ({
+      providerId: item.item_id.replace(/^skill:/, ""),
       label: item.label,
-      description: item.description,
-      selectionItemId: item.selection_item_id,
+      description: "",
+      selectionItemId: item.item_id,
       kind: "skill" as const,
-      defaultSelected: governance?.selected ?? false,
-      enabled: item.enabled,
+      defaultSelected: item.selected,
+      enabled: true,
       availability: item.availability,
-      editable: item.editable,
-      tags: [item.worker_type, item.model_alias, item.tool_profile].filter(Boolean),
-    };
-  });
+      editable: false,
+      tags: [item.source_kind],
+    }));
 
   const mcpEntries = snapshot.resources.mcp_provider_catalog.items.map((item) => {
     const governance = governanceById[item.selection_item_id];

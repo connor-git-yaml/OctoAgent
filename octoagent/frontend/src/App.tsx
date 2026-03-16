@@ -9,7 +9,7 @@ const ChatWorkbench = lazy(() => import("./pages/ChatWorkbench"));
 const MemoryCenter = lazy(() => import("./pages/MemoryCenter"));
 const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
-const SkillProviderCenter = lazy(() => import("./pages/SkillProviderCenter"));
+const SkillCenter = lazy(() => import("./pages/SkillCenter"));
 const TaskDetail = lazy(() => import("./pages/TaskDetail"));
 const WorkbenchBoard = lazy(() => import("./pages/WorkbenchBoard"));
 
@@ -38,7 +38,7 @@ export default function App() {
             <Route index element={withRouteSuspense(<ChatWorkbench />)} />
             <Route path="chat" element={<Navigate to="/" replace />} />
             <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
-            <Route path="skills" element={withRouteSuspense(<SkillProviderCenter />)} />
+            <Route path="skills" element={withRouteSuspense(<SkillCenter />)} />
             <Route path="mcp" element={withRouteSuspense(<McpProviderCenter />)} />
             {/* 兼容旧路径 */}
             <Route path="agents/skills" element={<Navigate to="/skills" replace />} />

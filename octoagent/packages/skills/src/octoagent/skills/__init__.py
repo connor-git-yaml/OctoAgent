@@ -12,7 +12,7 @@ from .exceptions import (
 )
 from .hooks import NoopSkillRunnerHook, SkillRunnerHook
 from .manifest import SkillManifest
-from .models import (
+from .models import (  # noqa: F401 -- SkillRunner 数据模型
     ContextBudgetPolicy,
     ErrorCategory,
     LoopGuardPolicy,
@@ -38,8 +38,10 @@ from .protocols import (
     SkillRunnerProtocol,
     StructuredModelClientProtocol,
 )
+from .discovery import SkillDiscovery
 from .registry import RegisteredSkill, SkillRegistry
 from .runner import SkillRunner
+from .skill_models import SkillListItem, SkillMdEntry, SkillSource
 
 __all__ = [
     "SkillError",
@@ -76,4 +78,9 @@ __all__ = [
     "PipelineExecutionError",
     "PipelineNodeOutcome",
     "SkillPipelineEngine",
+    # SKILL.md 文件系统驱动模型
+    "SkillSource",
+    "SkillMdEntry",
+    "SkillListItem",
+    "SkillDiscovery",
 ]

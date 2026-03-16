@@ -143,10 +143,14 @@ octoagent/
 | Web UI | React + Vite | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway |
 | 可观测 | Logfire + structlog + Event Store | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
 
-## 项目级 Skills（Codex + Claude 通用）
+## Skill 系统（SKILL.md 驱动）
 
-- `milestone-blueprint-split-sync`  
-  - 路径：`skills/milestone-blueprint-split-sync/SKILL.md`  
-  - 用途：把“blueprint 需求提取 -> 里程碑 Feature 并行拆解 -> 调研复核 -> 回写 blueprint -> 一致性校验”固化为可复用流程。  
-  - 触发示例：`使用 [$milestone-blueprint-split-sync](skills/milestone-blueprint-split-sync/SKILL.md) 从 M2/M3 开始拆解并回写 blueprint。`
+Feature 057 重写后的 Skill 系统采用 SKILL.md 文件系统驱动模式：
+- 内置 Skill 位于 `skills/` 目录（8 个，含 coding-agent、github、summarize 等）
+- 用户自定义 Skill 位于 `~/.octoagent/skills/`
+- 项目级 Skill 位于 `{project_root}/skills/`
+- 三级优先级：项目 > 用户 > 内置（同名按优先级覆盖）
+- LLM 通过 `skills` tool 自动发现和加载 Skill，加载后注入 system prompt
+- 管理 API：`GET/POST/DELETE /api/skills`
+- 前端管理界面：`/agents/skills`
 
