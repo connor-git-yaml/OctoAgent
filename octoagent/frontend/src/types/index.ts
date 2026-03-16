@@ -1054,6 +1054,11 @@ export interface McpProviderItem {
   error: string;
   warnings: string[];
   details: Record<string, unknown>;
+  // Feature 058: 安装信息字段
+  install_source: string;
+  install_version: string;
+  install_path: string;
+  installed_at: string;
 }
 
 export interface McpProviderCatalogDocument extends ControlPlaneDocumentBase {

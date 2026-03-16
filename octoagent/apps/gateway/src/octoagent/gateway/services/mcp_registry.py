@@ -77,11 +77,13 @@ class McpRegistryService:
         tool_broker: ToolBroker,
         config_path: Path | None = None,
         server_configs: list[McpServerConfig] | None = None,
+        session_pool: Any | None = None,
     ) -> None:
         self._project_root = project_root
         self._tool_broker = tool_broker
         self._config_path = config_path
         self._server_configs_override = list(server_configs) if server_configs is not None else None
+        self._session_pool = session_pool  # McpSessionPool | None
         self._server_records: dict[str, McpServerRecord] = {}
         self._tool_records: dict[str, McpToolRecord] = {}
         self._registered_tool_names: set[str] = set()
@@ -97,6 +99,11 @@ class McpRegistryService:
 
     async def startup(self) -> None:
         await self.refresh()
+
+    async def shutdown(self) -> None:
+        """优雅关闭所有 MCP server 连接。"""
+        if self._session_pool is not None:
+            await self._session_pool.close_all()
 
     async def refresh(self) -> None:
         configs = self._load_configs()
@@ -115,9 +122,18 @@ class McpRegistryService:
             )
             self._server_records[config.name] = record
             if not config.enabled:
+                # 关闭 disabled server 的持久连接
+                if self._session_pool is not None:
+                    try:
+                        await self._session_pool.close(config.name)
+                    except Exception:
+                        pass
                 continue
 
             try:
+                # 先建立持久连接（如果有 session pool）
+                if self._session_pool is not None:
+                    await self._session_pool.open(config.name, config)
                 tools = await self._discover_server_tools(config)
             except Exception as exc:
                 record.status = "error"
@@ -221,8 +237,16 @@ class McpRegistryService:
             raise RuntimeError(f"mcp server not configured: {server_name}")
         if not config.enabled:
             raise RuntimeError(f"mcp server is disabled: {server_name}")
-        async with self._open_session(config) as session:
+
+        if self._session_pool is not None:
+            # 新路径：使用持久 session
+            session = await self._session_pool.get_session(server_name)
             result = await session.call_tool(source_tool_name, arguments)
+        else:
+            # 旧路径：per-operation fallback
+            async with self._open_session(config) as session:
+                result = await session.call_tool(source_tool_name, arguments)
+
         return self._serialize_tool_result(
             server_name=server_name,
             source_tool_name=source_tool_name,
@@ -322,13 +346,25 @@ class McpRegistryService:
     async def _discover_server_tools(self, config: McpServerConfig) -> list[mcp_types.Tool]:
         tools: list[mcp_types.Tool] = []
         cursor: str | None = None
-        async with self._open_session(config) as session:
+
+        if self._session_pool is not None:
+            # 新路径：使用持久 session
+            session = await self._session_pool.get_session(config.name)
             while True:
                 result = await session.list_tools(cursor=cursor)
                 tools.extend(result.tools)
                 cursor = result.nextCursor
                 if not cursor:
                     break
+        else:
+            # 旧路径：per-operation fallback
+            async with self._open_session(config) as session:
+                while True:
+                    result = await session.list_tools(cursor=cursor)
+                    tools.extend(result.tools)
+                    cursor = result.nextCursor
+                    if not cursor:
+                        break
         return tools
 
     @staticmethod

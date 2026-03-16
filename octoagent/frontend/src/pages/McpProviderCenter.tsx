@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+import McpInstallWizard from "../components/McpInstallWizard";
 import type { McpProviderItem } from "../types";
 
 /* ── draft helpers ─────────────────────────────────────────── */
@@ -232,6 +233,7 @@ export default function McpProviderCenter() {
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [draft, setDraft] = useState<McpProviderDraft>(emptyDraft());
+  const [installWizardOpen, setInstallWizardOpen] = useState(false);
 
   const busy = busyActionId === "mcp_provider.save" || busyActionId === "mcp_provider.delete";
 
@@ -297,9 +299,18 @@ export default function McpProviderCenter() {
             {Number(catalog.summary.healthy_count ?? 0)}
           </p>
         </div>
-        <button type="button" className="wb-button wb-button-primary" onClick={openCreate}>
-          新建
-        </button>
+        <div className="wb-inline-actions">
+          <button
+            type="button"
+            className="wb-button wb-button-primary"
+            onClick={() => setInstallWizardOpen(true)}
+          >
+            安装
+          </button>
+          <button type="button" className="wb-button wb-button-secondary" onClick={openCreate}>
+            手动添加
+          </button>
+        </div>
       </div>
 
       {/* Provider 列表 */}
@@ -316,6 +327,14 @@ export default function McpProviderCenter() {
                   <span className={`wb-status-pill is-${item.status}`}>
                     {statusLabel(item.status)}
                   </span>
+                  {item.install_source && item.install_source !== "manual" ? (
+                    <span className="wb-chip">{item.install_source}</span>
+                  ) : (
+                    <span className="wb-chip">手动配置</span>
+                  )}
+                  {item.install_version ? (
+                    <span className="wb-chip">v{item.install_version}</span>
+                  ) : null}
                   {item.tool_count > 0 ? (
                     <span className="wb-chip">{item.tool_count} 个工具</span>
                   ) : null}
@@ -347,6 +366,14 @@ export default function McpProviderCenter() {
           onClose={() => setModalOpen(false)}
         />
       ) : null}
+
+      {/* 安装向导 */}
+      <McpInstallWizard
+        open={installWizardOpen}
+        onClose={() => setInstallWizardOpen(false)}
+        onComplete={() => setInstallWizardOpen(false)}
+        submitAction={submitAction}
+      />
     </div>
   );
 }

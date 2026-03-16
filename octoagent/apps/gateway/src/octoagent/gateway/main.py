@@ -333,6 +333,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await ensure_startup_records(store_group=store_group, project_root=project_root)
 
+    # Feature 058: 确保 MCP 安装相关目录存在
+    _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
+    _mcp_servers_dir.mkdir(parents=True, exist_ok=True)
+    _ops_dir = project_root / "data" / "ops"
+    _ops_dir.mkdir(parents=True, exist_ok=True)
+
     app.state.store_group = store_group
 
     # 初始化 SSEHub
@@ -439,11 +445,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
         tool_broker=tool_broker,
     )
+    # Feature 058: 创建 McpSessionPool 并注入 McpRegistryService
+    from .services.mcp_session_pool import McpSessionPool
+
+    mcp_session_pool = McpSessionPool()
+    app.state.mcp_session_pool = mcp_session_pool
     app.state.mcp_registry = McpRegistryService(
         project_root=project_root,
         tool_broker=tool_broker,
+        session_pool=mcp_session_pool,
     )
     app.state.capability_pack_service.bind_mcp_registry(app.state.mcp_registry)
+
+    # Feature 058: 创建 McpInstallerService
+    from .services.mcp_installer import McpInstallerService
+
+    mcp_installer = McpInstallerService(
+        registry=app.state.mcp_registry,
+        project_root=project_root,
+    )
+    app.state.mcp_installer = mcp_installer
+
     await app.state.capability_pack_service.startup()
     if provider_config.llm_mode == "litellm":
         skill_runner = SkillRunner(
@@ -571,6 +593,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         automation_store=app.state.control_plane_service.automation_store,
     )
     app.state.control_plane_service.bind_automation_scheduler(app.state.automation_scheduler)
+    # Feature 058: 绑定 McpInstallerService 到 ControlPlaneService 并启动
+    app.state.control_plane_service.bind_mcp_installer(app.state.mcp_installer)
+    await app.state.mcp_installer.startup()
     telegram_service.bind_control_plane_service(app.state.control_plane_service)
     await app.state.automation_scheduler.startup()
 
@@ -614,6 +639,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("watchdog_scheduler_stopped")
     if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
         await app.state.automation_scheduler.shutdown()
+
+    # Feature 058: 关闭 McpInstallerService 和 McpRegistryService（含 session pool）
+    if hasattr(app.state, "mcp_installer") and app.state.mcp_installer:
+        await app.state.mcp_installer.shutdown()
+    if hasattr(app.state, "mcp_registry") and app.state.mcp_registry:
+        await app.state.mcp_registry.shutdown()
 
     # 关闭：清理数据库连接
     update_status_store = getattr(app.state, "update_status_store", None)

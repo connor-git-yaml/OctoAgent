@@ -253,6 +253,10 @@ class ControlPlaneService:
     def bind_automation_scheduler(self, scheduler: Any) -> None:
         self._automation_scheduler = scheduler
 
+    def bind_mcp_installer(self, installer: Any) -> None:
+        """绑定 McpInstallerService（Feature 058: MCP 安装生命周期）。"""
+        self._mcp_installer = installer
+
     async def _sync_web_project_selector_state(
         self,
         *,
@@ -2125,10 +2129,20 @@ class ControlPlaneService:
             selected_workspace=selected_workspace,
         )
         governance_map = {item.item_id: item for item in governance.items}
+
+        # Feature 058: 合并安装注册表数据
+        install_records: dict[str, Any] = {}
+        mcp_installer = getattr(self, "_mcp_installer", None)
+        if mcp_installer is not None:
+            install_records = {
+                r.server_id: r for r in mcp_installer.list_installs()
+            }
+
         items: list[McpProviderItem] = []
         for config in mcp_registry.list_configs():
             record = servers.get(config.name)
             governance_item = governance_map.get(f"mcp:{config.name}")
+            install = install_records.get(config.name)
             items.append(
                 McpProviderItem(
                     provider_id=config.name,
@@ -2159,6 +2173,12 @@ class ControlPlaneService:
                             else ""
                         )
                     },
+                    install_source=str(install.install_source) if install else "",
+                    install_version=install.version if install else "",
+                    install_path=install.install_path if install else "",
+                    installed_at=(
+                        install.installed_at.isoformat() if install else ""
+                    ),
                 )
             )
         return McpProviderCatalogDocument(
@@ -2171,13 +2191,29 @@ class ControlPlaneService:
                 "installed_count": len(items),
                 "enabled_count": len([item for item in items if item.enabled]),
                 "healthy_count": len([item for item in items if item.status == "available"]),
+                "auto_installed_count": len(
+                    [i for i in items if i.install_source and i.install_source != "manual"]
+                ),
+                "manual_count": len(
+                    [i for i in items if not i.install_source or i.install_source == "manual"]
+                ),
             },
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="mcp_provider.save",
-                    label="安装 MCP Provider",
+                    label="手动添加 MCP Provider",
                     action_id="mcp_provider.save",
-                )
+                ),
+                ControlPlaneCapability(
+                    capability_id="mcp_provider.install",
+                    label="安装 MCP Provider",
+                    action_id="mcp_provider.install",
+                ),
+                ControlPlaneCapability(
+                    capability_id="mcp_provider.uninstall",
+                    label="卸载 MCP Provider",
+                    action_id="mcp_provider.uninstall",
+                ),
             ],
             warnings=[] if items else ["当前没有已安装的 MCP providers。"],
             degraded=ControlPlaneDegradedState(
@@ -3403,6 +3439,12 @@ class ControlPlaneService:
             return await self._handle_skill_provider_save(request)
         if action_id == "skill_provider.delete":
             return await self._handle_skill_provider_delete(request)
+        if action_id == "mcp_provider.install":
+            return await self._handle_mcp_provider_install(request)
+        if action_id == "mcp_provider.install_status":
+            return await self._handle_mcp_provider_install_status(request)
+        if action_id == "mcp_provider.uninstall":
+            return await self._handle_mcp_provider_uninstall(request)
         if action_id == "mcp_provider.save":
             return await self._handle_mcp_provider_save(request)
         if action_id == "mcp_provider.delete":
@@ -4085,6 +4127,122 @@ class ControlPlaneService:
             data={"provider_id": provider_id},
             resource_refs=[
                 self._resource_ref("skill_provider_catalog", "skill-providers:catalog"),
+                self._resource_ref("capability_pack", "capability:bundled"),
+                self._resource_ref("skill_governance", "skills:governance"),
+            ],
+        )
+
+    # ── Feature 058: MCP 安装生命周期 action handlers ──────────
+
+    async def _handle_mcp_provider_install(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """启动 MCP server 异步安装任务。"""
+        mcp_installer = getattr(self, "_mcp_installer", None)
+        if mcp_installer is None:
+            raise ControlPlaneActionError("MCP_INSTALLER_UNAVAILABLE", "MCP Installer 未绑定")
+
+        install_source = self._param_str(request.params, "install_source")
+        if install_source not in {"npm", "pip"}:
+            raise ControlPlaneActionError(
+                "MCP_INSTALL_SOURCE_INVALID",
+                f"安装来源不合法: {install_source}（支持 npm/pip）",
+            )
+        package_name = self._param_str(request.params, "package_name")
+        if not package_name:
+            raise ControlPlaneActionError("MCP_PACKAGE_NAME_REQUIRED", "包名不能为空")
+
+        env = self._normalize_dict(request.params.get("env"))
+        env = {str(k): str(v) for k, v in env.items() if str(k).strip()}
+
+        try:
+            task_id = await mcp_installer.install(
+                install_source=install_source,
+                package_name=package_name,
+                env=env,
+            )
+        except ValueError as exc:
+            err_msg = str(exc)
+            if "已安装" in err_msg:
+                raise ControlPlaneActionError("MCP_SERVER_ALREADY_INSTALLED", err_msg) from exc
+            if "格式不合法" in err_msg or "危险字符" in err_msg:
+                raise ControlPlaneActionError("MCP_PACKAGE_NAME_INVALID", err_msg) from exc
+            raise ControlPlaneActionError("MCP_INSTALL_FAILED", err_msg) from exc
+
+        # 计算预期 server_id
+        from .mcp_installer import _slugify_server_id, InstallSource as _IS
+
+        server_id = _slugify_server_id(_IS(install_source), package_name)
+
+        return self._completed_result(
+            request=request,
+            code="MCP_INSTALL_STARTED",
+            message="MCP server 安装已启动",
+            data={"task_id": task_id, "server_id": server_id},
+            resource_refs=[
+                self._resource_ref("mcp_provider_catalog", "mcp-providers:catalog"),
+            ],
+        )
+
+    async def _handle_mcp_provider_install_status(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """查询安装任务进度。"""
+        mcp_installer = getattr(self, "_mcp_installer", None)
+        if mcp_installer is None:
+            raise ControlPlaneActionError("MCP_INSTALLER_UNAVAILABLE", "MCP Installer 未绑定")
+
+        task_id = self._param_str(request.params, "task_id")
+        if not task_id:
+            raise ControlPlaneActionError("MCP_INSTALL_TASK_NOT_FOUND", "task_id 不能为空")
+
+        task = mcp_installer.get_install_status(task_id)
+        if task is None:
+            raise ControlPlaneActionError("MCP_INSTALL_TASK_NOT_FOUND", "安装任务不存在")
+
+        return self._completed_result(
+            request=request,
+            code="MCP_INSTALL_STATUS",
+            message="安装状态查询成功",
+            data={
+                "task_id": task.task_id,
+                "status": str(task.status),
+                "progress_message": task.progress_message,
+                "error": task.error,
+                "result": task.result if task.result else None,
+            },
+        )
+
+    async def _handle_mcp_provider_uninstall(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """卸载已安装 MCP server。"""
+        mcp_installer = getattr(self, "_mcp_installer", None)
+        if mcp_installer is None:
+            raise ControlPlaneActionError("MCP_INSTALLER_UNAVAILABLE", "MCP Installer 未绑定")
+
+        server_id = self._param_str(request.params, "server_id")
+        if not server_id:
+            raise ControlPlaneActionError("MCP_SERVER_ID_REQUIRED", "server_id 不能为空")
+
+        try:
+            result = await mcp_installer.uninstall(server_id)
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "MCP_SERVER_NOT_INSTALLED",
+                str(exc),
+            ) from exc
+
+        return self._completed_result(
+            request=request,
+            code="MCP_SERVER_UNINSTALLED",
+            message="MCP server 已卸载",
+            data=result,
+            resource_refs=[
+                self._resource_ref("mcp_provider_catalog", "mcp-providers:catalog"),
                 self._resource_ref("capability_pack", "capability:bundled"),
                 self._resource_ref("skill_governance", "skills:governance"),
             ],

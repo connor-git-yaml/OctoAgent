@@ -627,6 +627,11 @@ class McpProviderItem(BaseModel):
     error: str = Field(default="")
     warnings: list[str] = Field(default_factory=list)
     details: dict[str, Any] = Field(default_factory=dict)
+    # Feature 058: 安装信息展示字段
+    install_source: str = Field(default="")
+    install_version: str = Field(default="")
+    install_path: str = Field(default="")
+    installed_at: str = Field(default="")
 
 
 class McpProviderCatalogDocument(ControlPlaneDocument):
