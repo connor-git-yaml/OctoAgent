@@ -1,4 +1,5 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
@@ -736,204 +737,193 @@ export default function AgentCenter() {
       </section>
 
       <div className="wb-agent-management-layout">
-        <div className="wb-section-stack">
-          <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
+        <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
+          <div className="wb-panel-head">
+            <div>
+              <p className="wb-card-label">主 Agent</p>
+            </div>
+          </div>
+          {renderAgentCard(agentView.mainAgent, {
+            onEdit: openMainEditor,
+            onStartSession: () =>
+              void handleStartAgentSession(agentView.mainAgent.profileId, agentView.mainAgent.name),
+            primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑" : "建立主 Agent",
+            busyActionId,
+          })}
+          {/* 主 Agent 的行为文件 */}
+          {behaviorScopeGroups
+            .filter((g) => g.scope === "agent_private")
+            .flatMap((g) => g.files)
+            .length > 0 ? (
+            <div className="wb-chip-row" style={{ marginTop: "0.5rem" }}>
+              {behaviorScopeGroups
+                .filter((g) => g.scope === "agent_private")
+                .flatMap((g) => g.files)
+                .map((file) => (
+                  <button
+                    key={file.file_id}
+                    type="button"
+                    className={`wb-chip ${viewingFilePath === file.path ? "is-active" : ""}`}
+                    onClick={() => void handleOpenBehaviorFile(file.path, file.file_id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {file.file_id}
+                  </button>
+                ))}
+            </div>
+          ) : null}
+        </section>
+
+        {agentView.projectAgents.length > 0 ? (
+          <section className="wb-panel">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">主 Agent</p>
+                <p className="wb-card-label">其他 Agent</p>
               </div>
+              <span className="wb-chip">{agentView.projectAgents.length}</span>
             </div>
-            {renderAgentCard(agentView.mainAgent, {
-              onEdit: openMainEditor,
-              onStartSession: () =>
-                void handleStartAgentSession(agentView.mainAgent.profileId, agentView.mainAgent.name),
-              primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑" : "建立主 Agent",
-              busyActionId,
-            })}
-            {/* 主 Agent 的行为文件 */}
-            {behaviorScopeGroups
-              .filter((g) => g.scope === "agent_private")
-              .flatMap((g) => g.files)
-              .length > 0 ? (
-              <div className="wb-chip-row" style={{ marginTop: "0.5rem" }}>
-                {behaviorScopeGroups
-                  .filter((g) => g.scope === "agent_private")
-                  .flatMap((g) => g.files)
-                  .map((file) => (
-                    <button
-                      key={file.file_id}
-                      type="button"
-                      className={`wb-chip ${viewingFilePath === file.path ? "is-active" : ""}`}
-                      onClick={() => void handleOpenBehaviorFile(file.path, file.file_id)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      {file.file_id}
-                    </button>
-                  ))}
-              </div>
-            ) : null}
-          </section>
-
-          {agentView.projectAgents.length > 0 ? (
-            <section className="wb-panel">
-              <div className="wb-panel-head">
-                <div>
-                  <p className="wb-card-label">其他 Agent</p>
-                </div>
-                <span className="wb-chip">{agentView.projectAgents.length}</span>
-              </div>
-              <div className="wb-section-stack">
-                {agentView.projectAgents.map((agent) =>
-                  renderAgentCard(agent, {
-                    onEdit: () => openAgentEditor(agent.profileId),
-                    onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
-                    onPromote: () => void handleBindAsMain(agent.profileId, agent.name),
-                    onDelete: () => void handleDeleteAgent(agent),
-                    primaryActionLabel: "编辑",
-                    busyActionId,
-                  })
-                )}
-              </div>
-            </section>
-          ) : null}
-
-        </div>
-
-        <div className="wb-section-stack">
-          {showTemplatePicker ? (
-            <AgentTemplatePicker
-              currentProjectName={agentView.currentProjectName}
-              templates={agentView.builtinTemplates}
-              onPickTemplate={openTemplateCreate}
-              onPickBlank={openBlankCreate}
-              onCancel={closeComposer}
-            />
-          ) : editorState ? (
-            <AgentEditorSection
-              title={
-                editorState.mode === "main"
-                  ? "主 Agent"
-                  : editorState.draft.profileId
-                    ? editorState.draft.name
-                    : "新建 Agent"
-              }
-              description={
-                editorState.mode === "main"
-                  ? "当前项目默认 Agent。"
-                  : editorState.draft.profileId
-                    ? "编辑 Agent 配置。"
-                    : "创建新 Agent。"
-              }
-              saveLabel={
-                editorState.mode === "main"
-                  ? "保存"
-                  : editorState.draft.profileId
-                    ? "保存"
-                    : "创建"
-              }
-              draft={editorState.draft}
-              review={review}
-              busy={busySaving}
-              projectOptions={projectOptions}
-              modelAliasOptions={modelAliasOptions}
-              toolProfileOptions={toolProfileOptions}
-              toolGroupOptions={toolGroupOptions}
-              toolOptions={toolOptions}
-              policyOptions={policyOptions}
-              skillEntries={skillEntries}
-              mcpEntries={mcpEntries}
-              metadataError={metadataError}
-              onChangeDraft={updateDraft}
-              onToggleDefaultToolGroup={(value) => updateDraftList("defaultToolGroups", value)}
-              onToggleSelectedTool={(value) => updateDraftList("selectedTools", value)}
-              onToggleCapability={updateCapability}
-              onToggleRuntimeKind={(value) => updateDraftList("runtimeKinds", value)}
-              onTogglePolicyRef={(value) => updateDraftList("policyRefs", value)}
-              onSave={() => void handleSave()}
-              onCancel={closeComposer}
-              formatTokenLabel={formatTokenLabel}
-            />
-          ) : viewingFilePath ? (
-            <section className="wb-panel wb-agent-editor-shell">
-              <div className="wb-panel-head">
-                <div>
-                  <p className="wb-card-label">{viewingFileId}</p>
-                  <h3>{viewingFilePath.split("/").pop()}</h3>
-                </div>
-                <div className="wb-inline-actions">
-                  {editingFile ? (
-                    <>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-primary"
-                        disabled={busyActionId === "behavior.write_file"}
-                        onClick={() => void handleSaveBehaviorFile()}
-                      >
-                        保存
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary"
-                        onClick={() => setEditingFile(false)}
-                      >
-                        取消
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="wb-button wb-button-secondary"
-                      onClick={() => {
-                        setEditFileContent(fileContent);
-                        setEditingFile(true);
-                      }}
-                    >
-                      编辑
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary"
-                    onClick={() => setViewingFilePath("")}
-                  >
-                    关闭
-                  </button>
-                </div>
-              </div>
-              {fileContentLoading ? (
-                <div className="wb-empty-state">
-                  <span>加载中…</span>
-                </div>
-              ) : editingFile ? (
-                <textarea
-                  className="wb-textarea-prose wb-behavior-file-editor"
-                  value={editFileContent}
-                  onChange={(e) => setEditFileContent(e.target.value)}
-                  style={{ minHeight: "400px", fontFamily: "monospace", fontSize: "0.85rem" }}
-                />
-              ) : (
-                <pre className="wb-behavior-file-content" style={{ whiteSpace: "pre-wrap", padding: "1rem", fontSize: "0.85rem", lineHeight: "1.6", maxHeight: "600px", overflow: "auto" }}>
-                  {fileContent || "（文件为空或尚未创建）"}
-                </pre>
+            <div className="wb-section-stack">
+              {agentView.projectAgents.map((agent) =>
+                renderAgentCard(agent, {
+                  onEdit: () => openAgentEditor(agent.profileId),
+                  onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
+                  onPromote: () => void handleBindAsMain(agent.profileId, agent.name),
+                  onDelete: () => void handleDeleteAgent(agent),
+                  primaryActionLabel: "编辑",
+                  busyActionId,
+                })
               )}
-            </section>
-          ) : (
-            <section className="wb-panel wb-agent-editor-shell">
-              <div className="wb-empty-state">
-                <strong>选择一个 Agent 进行编辑，或点击行为文件查看内容</strong>
-                <div className="wb-inline-actions">
-                  <button type="button" className="wb-button wb-button-primary" onClick={openMainEditor}>
-                    {agentView.mainAgent.status === "ready" ? "编辑主 Agent" : "建立主 Agent"}
-                  </button>
-                  <button type="button" className="wb-button wb-button-secondary" onClick={openCreatePicker}>
-                    新建 Agent
-                  </button>
-                </div>
-              </div>
-            </section>
-          )}
-        </div>
+            </div>
+          </section>
+        ) : null}
       </div>
+
+      {/* ── Modal: 编辑器 / 模板选择 / 行为文件查看 ── */}
+      {(showTemplatePicker || editorState || viewingFilePath) && document.body ? createPortal(
+        <div className="wb-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeComposer(); }}>
+          <div className="wb-modal-body">
+            {showTemplatePicker ? (
+              <AgentTemplatePicker
+                currentProjectName={agentView.currentProjectName}
+                templates={agentView.builtinTemplates}
+                onPickTemplate={openTemplateCreate}
+                onPickBlank={openBlankCreate}
+                onCancel={closeComposer}
+              />
+            ) : editorState ? (
+              <AgentEditorSection
+                title={
+                  editorState.mode === "main"
+                    ? "主 Agent"
+                    : editorState.draft.profileId
+                      ? editorState.draft.name
+                      : "新建 Agent"
+                }
+                description={
+                  editorState.mode === "main"
+                    ? "当前项目默认 Agent。"
+                    : editorState.draft.profileId
+                      ? "编辑 Agent 配置。"
+                      : "创建新 Agent。"
+                }
+                saveLabel={
+                  editorState.mode === "main"
+                    ? "保存"
+                    : editorState.draft.profileId
+                      ? "保存"
+                      : "创建"
+                }
+                draft={editorState.draft}
+                review={review}
+                busy={busySaving}
+                projectOptions={projectOptions}
+                modelAliasOptions={modelAliasOptions}
+                toolProfileOptions={toolProfileOptions}
+                toolGroupOptions={toolGroupOptions}
+                toolOptions={toolOptions}
+                policyOptions={policyOptions}
+                skillEntries={skillEntries}
+                mcpEntries={mcpEntries}
+                metadataError={metadataError}
+                onChangeDraft={updateDraft}
+                onToggleDefaultToolGroup={(value) => updateDraftList("defaultToolGroups", value)}
+                onToggleSelectedTool={(value) => updateDraftList("selectedTools", value)}
+                onToggleCapability={updateCapability}
+                onToggleRuntimeKind={(value) => updateDraftList("runtimeKinds", value)}
+                onTogglePolicyRef={(value) => updateDraftList("policyRefs", value)}
+                onSave={() => void handleSave()}
+                onCancel={closeComposer}
+                formatTokenLabel={formatTokenLabel}
+              />
+            ) : viewingFilePath ? (
+              <section className="wb-panel wb-agent-editor-shell">
+                <div className="wb-panel-head">
+                  <div>
+                    <p className="wb-card-label">{viewingFileId}</p>
+                    <h3>{viewingFilePath.split("/").pop()}</h3>
+                  </div>
+                  <div className="wb-inline-actions">
+                    {editingFile ? (
+                      <>
+                        <button
+                          type="button"
+                          className="wb-button wb-button-primary"
+                          disabled={busyActionId === "behavior.write_file"}
+                          onClick={() => void handleSaveBehaviorFile()}
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          className="wb-button wb-button-tertiary"
+                          onClick={() => setEditingFile(false)}
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="wb-button wb-button-secondary"
+                        onClick={() => {
+                          setEditFileContent(fileContent);
+                          setEditingFile(true);
+                        }}
+                      >
+                        编辑
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="wb-button wb-button-tertiary"
+                      onClick={() => setViewingFilePath("")}
+                    >
+                      关闭
+                    </button>
+                  </div>
+                </div>
+                {fileContentLoading ? (
+                  <div className="wb-empty-state">
+                    <span>加载中…</span>
+                  </div>
+                ) : editingFile ? (
+                  <textarea
+                    className="wb-textarea-prose wb-behavior-file-editor"
+                    value={editFileContent}
+                    onChange={(e) => setEditFileContent(e.target.value)}
+                    style={{ minHeight: "400px", fontFamily: "monospace", fontSize: "0.85rem" }}
+                  />
+                ) : (
+                  <pre className="wb-behavior-file-content" style={{ whiteSpace: "pre-wrap", padding: "1rem", fontSize: "0.85rem", lineHeight: "1.6", maxHeight: "600px", overflow: "auto" }}>
+                    {fileContent || "（文件为空或尚未创建）"}
+                  </pre>
+                )}
+              </section>
+            ) : null}
+          </div>
+        </div>,
+        document.body
+      ) : null}
     </div>
   );
 }
