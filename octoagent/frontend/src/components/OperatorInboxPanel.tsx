@@ -1,19 +1,7 @@
 import { useMemo } from "react";
 import { useOperatorInbox } from "../hooks/useOperatorInbox";
 import type { OperatorInboxItem } from "../types";
-
-function formatTime(value: string | null | undefined): string {
-  if (!value) {
-    return "-";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { formatDateTimeSafe } from "../utils/formatTime";
 
 function renderMeta(item: OperatorInboxItem): string {
   if (item.kind === "approval") {
@@ -98,8 +86,8 @@ export default function OperatorInboxPanel() {
           </div>
           <div className="muted">关联: {renderMeta(item)}</div>
           <div className="muted">
-            创建于 {formatTime(item.created_at)}
-            {item.expires_at ? ` · 过期 ${formatTime(item.expires_at)}` : ""}
+            创建于 {formatDateTimeSafe(item.created_at)}
+            {item.expires_at ? ` · 过期 ${formatDateTimeSafe(item.expires_at)}` : ""}
           </div>
           {item.recent_action_result ? (
             <div className="notice-inline">

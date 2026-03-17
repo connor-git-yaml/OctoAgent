@@ -1,11 +1,12 @@
 /**
- * TaskDetail 页面 -- 展示任务详情 + 事件时间线
+ * TaskDetail 页面 -- 展示任务详情 + 可视化/Raw Data 双模式
  *
  * 功能：
  * 1. 调用 GET /api/tasks/{id} 获取任务信息 + 事件 + artifacts
  * 2. 展示任务基本信息
- * 3. 事件时间线（类型、时间、payload 摘要）
- * 4. 进行中任务通过 useSSE 实时追加新事件
+ * 3. 可视化模式：PipelineBar + PhaseCardList + ArtifactGrid
+ * 4. Raw Data 模式：事件时间线（类型、时间、payload 摘要）
+ * 5. 进行中任务通过 useSSE 实时追加新事件
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -17,25 +18,16 @@ import {
 } from "../api/client";
 import FrontDoorGate from "../components/FrontDoorGate";
 import { useSSE } from "../hooks/useSSE";
+import {
+  SegmentedToggle,
+  PipelineBar,
+  PhaseCardList,
+  ArtifactGrid,
+} from "../components/TaskVisualization";
+import type { ViewMode } from "../components/TaskVisualization";
+import { classifyEvents, TERMINAL_STATUSES } from "../utils/phaseClassifier";
+import { formatTime } from "../utils/formatTime";
 import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
-
-/** 终态集合 */
-const TERMINAL_STATES: Set<TaskStatus> = new Set([
-  "SUCCEEDED",
-  "FAILED",
-  "CANCELLED",
-  "REJECTED",
-]);
-
-/** 格式化时间 */
-function formatTime(isoString: string): string {
-  const d = new Date(isoString);
-  return d.toLocaleString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
 
 /** 生成 payload 摘要 */
 function payloadSummary(payload: Record<string, unknown>): string {
@@ -59,6 +51,7 @@ export default function TaskDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<ApiError | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("visual");
 
   const loadTask = useCallback(async () => {
     if (!taskId) {
@@ -85,7 +78,7 @@ export default function TaskDetail() {
     void loadTask();
   }, [loadTask]);
 
-  // SSE 事件回调
+  // SSE 事件回调（不改动）
   const handleSSEEvent = useCallback((eventData: SSEEventData) => {
     // 追加新事件到列表（去重）
     setEvents((prev) => {
@@ -110,7 +103,7 @@ export default function TaskDetail() {
   }, []);
 
   // SSE 连接（仅非终态任务）
-  const isTerminal = task ? TERMINAL_STATES.has(task.status) : true;
+  const isTerminal = task ? TERMINAL_STATUSES.has(task.status) : true;
   const { status: sseStatus } = useSSE({
     taskId: taskId || "",
     enabled: !isTerminal && !loading,
@@ -133,6 +126,9 @@ export default function TaskDetail() {
       </div>
     );
   }
+
+  // 可视化模式：调用归类引擎
+  const classified = viewMode === "visual" ? classifyEvents(events, task.status) : null;
 
   return (
     <div>
@@ -164,48 +160,67 @@ export default function TaskDetail() {
         </div>
       </div>
 
-      {/* 事件时间线 */}
-      <h2>Events ({events.length})</h2>
-      <div className="timeline">
-        {events.map((event) => (
-          <div key={event.event_id} className="timeline-item">
-            <span className="event-type">{event.type}</span>
-            <span className="event-time">{formatTime(event.ts)}</span>
-            {Object.keys(event.payload).length > 0 && (
-              <div className="event-payload">{payloadSummary(event.payload)}</div>
-            )}
-          </div>
-        ))}
-      </div>
+      {/* 模式切换 */}
+      <SegmentedToggle value={viewMode} onChange={setViewMode} />
 
-      {/* Artifacts */}
-      {artifacts.length > 0 && (
+      {/* 可视化模式 */}
+      {viewMode === "visual" && classified && (
         <>
-          <h2 style={{ marginTop: "var(--space-lg)" }}>Artifacts ({artifacts.length})</h2>
-          {artifacts.map((artifact) => (
-            <div key={artifact.artifact_id} className="card">
-              <div style={{ fontWeight: 600 }}>{artifact.name}</div>
-              <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
-                {artifact.size} bytes
+          <PipelineBar phases={classified.phases} />
+          <PhaseCardList phases={classified.phases} />
+          {artifacts.length > 0 && (
+            <ArtifactGrid artifacts={artifacts} />
+          )}
+        </>
+      )}
+
+      {/* Raw Data 模式 */}
+      {viewMode === "raw" && (
+        <>
+          {/* 事件时间线 */}
+          <h2>Events ({events.length})</h2>
+          <div className="timeline">
+            {events.map((event) => (
+              <div key={event.event_id} className="timeline-item">
+                <span className="event-type">{event.type}</span>
+                <span className="event-time">{formatTime(event.ts)}</span>
+                {Object.keys(event.payload).length > 0 && (
+                  <div className="event-payload">{payloadSummary(event.payload)}</div>
+                )}
               </div>
-              {artifact.parts.map((part, i) => (
-                <div key={i} style={{ marginTop: "var(--space-sm)" }}>
-                  {part.content && (
-                    <pre style={{
-                      background: "var(--color-bg)",
-                      padding: "var(--space-sm)",
-                      borderRadius: "4px",
-                      fontSize: "12px",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-all",
-                    }}>
-                      {part.content}
-                    </pre>
-                  )}
+            ))}
+          </div>
+
+          {/* Artifacts */}
+          {artifacts.length > 0 && (
+            <>
+              <h2 style={{ marginTop: "var(--space-lg)" }}>Artifacts ({artifacts.length})</h2>
+              {artifacts.map((artifact) => (
+                <div key={artifact.artifact_id} className="card">
+                  <div style={{ fontWeight: 600 }}>{artifact.name}</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                    {artifact.size} bytes
+                  </div>
+                  {artifact.parts.map((part, i) => (
+                    <div key={i} style={{ marginTop: "var(--space-sm)" }}>
+                      {part.content && (
+                        <pre style={{
+                          background: "var(--color-bg)",
+                          padding: "var(--space-sm)",
+                          borderRadius: "4px",
+                          fontSize: "12px",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-all",
+                        }}>
+                          {part.content}
+                        </pre>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
-            </div>
-          ))}
+            </>
+          )}
         </>
       )}
     </div>

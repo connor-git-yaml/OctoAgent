@@ -1896,3 +1896,34 @@ export interface SkillListResponse {
   items: SkillItem[];
   total: number;
 }
+
+// ─── Task 可视化模式类型（Feature 061）───────────────────────────
+
+/** 阶段标识：接收 / 思考 / 执行 / 完成 / 系统（不在进度条展示） */
+export type PhaseId = "received" | "thinking" | "executing" | "completed" | "system";
+
+/** 阶段进度状态 */
+export type PhaseStatus = "pending" | "active" | "done" | "error";
+
+/** 阶段配置（静态，不随运行时变化） */
+export interface PhaseConfig {
+  id: PhaseId;
+  /** 用户可见名称，如"接收" */
+  label: string;
+  /** CSS 变量名，如 "--cp-secondary" */
+  color: string;
+  /** 是否在 PipelineBar 上展示（system 阶段为 false） */
+  userVisible: boolean;
+}
+
+/** 单个阶段的运行时状态 */
+export interface PhaseState {
+  config: PhaseConfig;
+  status: PhaseStatus;
+  events: TaskEvent[];
+}
+
+/** classifyEvents() 返回值 */
+export interface ClassifiedResult {
+  phases: PhaseState[];
+}
