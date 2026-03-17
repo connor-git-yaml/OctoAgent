@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, isFrontDoorApiError } from "../../api/client";
 import type {
   ActionResultEnvelope,
@@ -124,13 +124,18 @@ export function useWorkbenchData(
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<ActionResultEnvelope | null>(null);
 
-  function clearError() {
+  // 用 ref 保存最新 snapshot，避免 useCallback 闭包引用陈旧值
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  const clearError = useCallback(() => {
     setError(null);
     setAuthError(null);
-  }
+  }, []);
 
-  async function refreshSnapshot() {
-    clearError();
+  const refreshSnapshot = useCallback(async () => {
+    setError(null);
+    setAuthError(null);
     try {
       const nextSnapshot = await fetchWorkbenchSnapshot();
       setSnapshot(nextSnapshot);
@@ -140,51 +145,60 @@ export function useWorkbenchData(
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function refreshResources(
-    refs: ControlPlaneResourceRef[] = [],
-    options?: SnapshotResourceLoadOptions
-  ) {
-    if (!snapshot || refs.length === 0) {
-      await refreshSnapshot();
-      return;
-    }
-    try {
-      const result = await refreshWorkbenchSnapshotResources(snapshot, refs, options);
-      setSnapshot(result.snapshot);
-    } catch {
-      await refreshSnapshot();
-    }
-  }
+  const refreshResources = useCallback(
+    async (
+      refs: ControlPlaneResourceRef[] = [],
+      opts?: SnapshotResourceLoadOptions
+    ) => {
+      const current = snapshotRef.current;
+      if (!current || refs.length === 0) {
+        await refreshSnapshot();
+        return;
+      }
+      try {
+        const result = await refreshWorkbenchSnapshotResources(current, refs, opts);
+        setSnapshot(result.snapshot);
+      } catch {
+        await refreshSnapshot();
+      }
+    },
+    [refreshSnapshot]
+  );
 
-  async function submitAction(
-    actionId: string,
-    params: Record<string, unknown>
-  ): Promise<ActionResultEnvelope | null> {
-    setBusyActionId(actionId);
-    clearError();
-    try {
-      const actionRefreshOptions = buildActionRefreshOptions(actionId, params, snapshot);
-      const result = await executeWorkbenchActionWithRefresh(
-        snapshot?.contract_version,
-        actionId,
-        params,
-        {
-          refreshSnapshot,
-          refreshResources: (refs) => refreshResources(refs, actionRefreshOptions),
-        }
-      );
-      setLastAction(result);
-      return result;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `动作执行失败: ${actionId}`);
-      setAuthError(isFrontDoorApiError(err) ? err : null);
-      return null;
-    } finally {
-      setBusyActionId(null);
-    }
-  }
+  const submitAction = useCallback(
+    async (
+      actionId: string,
+      params: Record<string, unknown>
+    ): Promise<ActionResultEnvelope | null> => {
+      setBusyActionId(actionId);
+      setError(null);
+      setAuthError(null);
+      try {
+        const current = snapshotRef.current;
+        const actionRefreshOptions = buildActionRefreshOptions(actionId, params, current);
+        const result = await executeWorkbenchActionWithRefresh(
+          current?.contract_version,
+          actionId,
+          params,
+          {
+            refreshSnapshot,
+            refreshResources: (refs) => refreshResources(refs, actionRefreshOptions),
+          }
+        );
+        setLastAction(result);
+        return result;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `动作执行失败: ${actionId}`);
+        setAuthError(isFrontDoorApiError(err) ? err : null);
+        return null;
+      } finally {
+        setBusyActionId(null);
+      }
+    },
+    [refreshSnapshot, refreshResources]
+  );
 
   useEffect(() => {
     if (options.autoRefresh === false) {
