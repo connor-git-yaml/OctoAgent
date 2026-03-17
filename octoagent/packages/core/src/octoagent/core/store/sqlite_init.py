@@ -758,7 +758,7 @@ _AGENT_CONTEXT_INDEXES = [
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
         "ON agent_sessions(project_id) "
-        "WHERE status = 'active' AND project_id != '';"
+        "WHERE status = 'active' AND project_id != '' AND kind = 'butler_main';"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_agent_sessions_parent_worker "
@@ -963,6 +963,21 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE context_frames "
             "ADD COLUMN memory_namespace_ids TEXT NOT NULL DEFAULT '[]'"
         )
+
+    # 修正 agent_sessions 的 UNIQUE 索引：只对 butler_main 生效，
+    # worker_internal / subagent_internal sessions 不受一个 project 一个 session 的限制。
+    if agent_session_columns:
+        try:
+            await conn.execute(
+                "DROP INDEX IF EXISTS idx_agent_sessions_project_active"
+            )
+            await conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
+                "ON agent_sessions(project_id) "
+                "WHERE status = 'active' AND project_id != '' AND kind = 'butler_main'"
+            )
+        except Exception:
+            pass  # 旧索引可能已被 CREATE TABLE 阶段正确创建
 
 
 async def init_db(conn: aiosqlite.Connection) -> None:
