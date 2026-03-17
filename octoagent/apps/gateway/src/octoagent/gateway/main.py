@@ -46,6 +46,7 @@ from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
 from .routes import (
     approvals,
+    auth_callback,
     cancel,
     chat,
     control_plane,
@@ -700,6 +701,8 @@ def create_app() -> FastAPI:
     app.include_router(execution.router, tags=["execution"], dependencies=protected)
     app.include_router(stream.router, tags=["stream"], dependencies=protected)
     app.include_router(health.router, tags=["health"])
+    # OAuth 回调路由（不需要 front door auth，OAuth redirect 不携带 auth token）
+    app.include_router(auth_callback.router, tags=["auth"])
     app.include_router(ops.router, tags=["ops"], dependencies=protected)
     app.include_router(approvals.router, tags=["approvals"], dependencies=protected)
     app.include_router(operator_inbox.router, tags=["operator"], dependencies=protected)

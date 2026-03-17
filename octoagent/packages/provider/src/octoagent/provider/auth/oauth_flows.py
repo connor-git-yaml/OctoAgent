@@ -25,7 +25,7 @@ from octoagent.core.models.enums import EventType
 from pydantic import BaseModel, Field, SecretStr
 
 from ..exceptions import OAuthFlowError
-from .callback_server import CallbackResult, wait_for_callback
+from .callback_server import CallbackResult, wait_for_callback, wait_for_gateway_callback
 from .credentials import OAuthCredential
 from .environment import EnvironmentContext
 from .events import EventStoreProtocol, emit_oauth_event
@@ -461,6 +461,8 @@ async def run_auth_code_pkce_flow(
     on_auth_url: Callable[[str], Awaitable[None]] | None = None,
     on_status: Callable[[str], None] | None = None,
     event_store: EventStoreProtocol | None = None,
+    *,
+    use_gateway_callback: bool = False,
 ) -> OAuthCredential:
     """执行 Auth Code + PKCE OAuth 流程
 
@@ -526,8 +528,23 @@ async def run_auth_code_pkce_flow(
                 on_status("使用手动模式（远程环境或 --manual-oauth）")
             flow_stage = "manual_callback"
             callback_result = await manual_paste_flow(auth_url, state)
+        elif use_gateway_callback:
+            # Gateway 路由模式：复用 Gateway 端口，无需独立回调服务器
+            flow_stage = "gateway_callback"
+            if on_auth_url:
+                await on_auth_url(auth_url)
+            else:
+                webbrowser.open(auth_url)
+
+            if on_status:
+                on_status("已打开浏览器，等待授权回调（Gateway 路由模式）...")
+
+            callback_result = await wait_for_gateway_callback(
+                expected_state=state,
+                timeout=float(config.timeout_s),
+            )
         else:
-            # 本地模式：自动打开浏览器 + 回调服务器
+            # 独立服务器模式（CLI 降级用）
             flow_stage = "local_callback"
             try:
                 if on_auth_url:
