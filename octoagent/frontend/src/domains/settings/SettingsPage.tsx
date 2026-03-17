@@ -529,9 +529,7 @@ export default function SettingsPage() {
                 getValueAtPath(config.current_value, slot.key) ??
                 ""
             ).trim();
-            const aliasKeys = Object.keys(
-              (getValueAtPath(config.current_value, "model_aliases") as Record<string, unknown>) ?? {}
-            );
+            const aliasKeys = aliasDrafts.map((item) => item.alias).filter((a) => a.trim());
             return (
               <label key={slot.key} className="wb-field">
                 <span>{slot.label}</span>

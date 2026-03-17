@@ -880,7 +880,6 @@ class MemoryRetrievalProfile(BaseModel):
     active_backend_label: str = Field(default="")
     backend_state: str = Field(default="")
     backend_summary: str = Field(default="")
-    uses_compat_bridge: bool = False
     bindings: list[MemoryRetrievalBindingItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

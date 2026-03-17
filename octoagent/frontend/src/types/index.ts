@@ -1412,7 +1412,6 @@ export interface MemoryRetrievalProfile {
   active_backend_label: string;
   backend_state: string;
   backend_summary: string;
-  uses_compat_bridge: boolean;
   bindings: MemoryRetrievalBindingItem[];
   warnings: string[];
 }

@@ -101,7 +101,6 @@ def build_memory_retrieval_profile(
         active_backend_label=active_backend_label,
         backend_state=backend_status.state.value,
         backend_summary=backend_summary,
-        uses_compat_bridge=False,
         bindings=bindings,
         warnings=list(dict.fromkeys(warnings)),
     )

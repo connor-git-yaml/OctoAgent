@@ -101,7 +101,8 @@ export default function MemoryPage() {
     setIncludeHistoryDraft(filters.include_history);
     setIncludeVaultRefsDraft(filters.include_vault_refs);
     setLimitDraft(String(filters.limit || 50));
-  }, [filters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 用 generated_at 代替 filters 对象引用，避免 snapshot 轮询时覆盖用户草稿
+  }, [memory.generated_at]);
 
   const scopeOptions = uniqueOptions([
     "",

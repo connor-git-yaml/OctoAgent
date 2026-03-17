@@ -33,7 +33,6 @@ function buildMemorySnapshot(): any {
           active_backend_label: "本地元数据回退",
           backend_state: "healthy",
           backend_summary: "当前 Memory 以本地 canonical store 为主。",
-          uses_compat_bridge: false,
           warnings: [],
           bindings: [
             {
