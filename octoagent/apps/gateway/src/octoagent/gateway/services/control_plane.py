@@ -997,6 +997,7 @@ class ControlPlaneService:
                     ),
                 ),
                 metadata=dict(profile.metadata),
+                resource_limits=dict(profile.resource_limits),
                 updated_at=profile.updated_at,
             )
             for profile in profiles
@@ -1140,6 +1141,7 @@ class ControlPlaneService:
                         tags=list(profile.tags),
                         capabilities=list(profile.tags),
                         metadata=dict(profile.metadata),
+                        resource_limits=dict(profile.resource_limits),
                     ),
                     dynamic_context=self._build_worker_dynamic_context(
                         matched_works,
@@ -3347,6 +3349,8 @@ class ControlPlaneService:
             )
         if action_id == "agent_profile.save":
             return await self._handle_agent_profile_save(request)
+        if action_id == "agent_profile.update_resource_limits":
+            return await self._handle_update_resource_limits(request)
         if action_id == "policy_profile.select":
             return await self._handle_policy_profile_select(request)
         if action_id == "skills.selection.save":
@@ -6172,6 +6176,9 @@ class ControlPlaneService:
                 metadata=dict(raw.get("metadata", {}))
                 if isinstance(raw.get("metadata"), dict)
                 else {},
+                resource_limits=dict(raw.get("resource_limits", {}))
+                if isinstance(raw.get("resource_limits"), dict)
+                else (dict(existing.resource_limits) if existing else {}),
                 version=(existing.version if existing is not None else 1),
                 created_at=(existing.created_at if existing is not None else datetime.now(tz=UTC)),
                 updated_at=datetime.now(tz=UTC),
@@ -6219,6 +6226,97 @@ class ControlPlaneService:
                     target_type="agent_profile",
                     target_id=saved.profile_id,
                     label=saved.name,
+                )
+            ],
+        )
+
+    async def _handle_update_resource_limits(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """更新 Agent Profile 或 Worker Profile 的 resource_limits 字段。
+
+        支持两种 target_type:
+          - "agent_profile": 更新 AgentProfile.resource_limits
+          - "worker_profile": 更新 WorkerProfile.resource_limits
+        """
+        raw = request.params
+        target_type = self._param_str(raw, "target_type", default="agent_profile")
+        profile_id = self._param_str(raw, "profile_id")
+        if not profile_id:
+            raise ControlPlaneActionError(
+                "PROFILE_ID_REQUIRED", "profile_id 不能为空。"
+            )
+        resource_limits = raw.get("resource_limits")
+        if not isinstance(resource_limits, dict):
+            raise ControlPlaneActionError(
+                "RESOURCE_LIMITS_INVALID",
+                "resource_limits 必须是 dict 类型。",
+            )
+        # 白名单校验：只允许 UsageLimits 已知字段
+        allowed_keys = {
+            "max_steps", "max_request_tokens", "max_response_tokens",
+            "max_tool_calls", "max_budget_usd", "max_duration_seconds",
+            "repeat_signature_threshold",
+        }
+        sanitized: dict[str, Any] = {}
+        for key, value in resource_limits.items():
+            if key in allowed_keys and value is not None:
+                sanitized[key] = value
+
+        resource_refs = []
+        target_label = ""
+
+        if target_type == "worker_profile":
+            existing = await self._get_worker_profile_in_scope(profile_id)
+            updated = existing.model_copy(
+                update={
+                    "resource_limits": sanitized,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            await self._stores.agent_context_store.save_worker_profile(updated)
+            resource_refs = [
+                self._resource_ref("worker_profiles", "worker-profiles:overview"),
+            ]
+            target_label = existing.name
+        else:
+            existing_agent = await self._stores.agent_context_store.get_agent_profile(
+                profile_id
+            )
+            if existing_agent is None:
+                raise ControlPlaneActionError(
+                    "AGENT_PROFILE_NOT_FOUND",
+                    f"找不到 agent profile: {profile_id}",
+                )
+            updated_agent = existing_agent.model_copy(
+                update={
+                    "resource_limits": sanitized,
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            await self._stores.agent_context_store.save_agent_profile(updated_agent)
+            resource_refs = [
+                self._resource_ref("agent_profiles", "agent-profiles:overview"),
+            ]
+            target_label = existing_agent.name
+
+        await self._stores.conn.commit()
+        return self._completed_result(
+            request=request,
+            code="RESOURCE_LIMITS_UPDATED",
+            message="资源限制已更新。",
+            data={
+                "profile_id": profile_id,
+                "target_type": target_type,
+                "resource_limits": sanitized,
+            },
+            resource_refs=resource_refs,
+            target_refs=[
+                ControlPlaneTargetRef(
+                    target_type=target_type,
+                    target_id=profile_id,
+                    label=target_label,
                 )
             ],
         )
@@ -8897,6 +8995,9 @@ class ControlPlaneService:
         metadata = self._normalize_dict(raw.get("metadata"))
         if not metadata:
             metadata = self._normalize_dict(existing_data.get("metadata")) or self._normalize_dict(source_data.get("metadata"))
+        resource_limits = self._normalize_dict(raw.get("resource_limits"))
+        if not resource_limits:
+            resource_limits = self._normalize_dict(existing_data.get("resource_limits")) or self._normalize_dict(source_data.get("resource_limits"))
 
         profile_id = self._param_str(raw, "profile_id")
         if not profile_id:
@@ -8926,6 +9027,7 @@ class ControlPlaneService:
             "policy_refs": policy_refs,
             "tags": tags,
             "metadata": metadata,
+            "resource_limits": resource_limits,
             "origin_kind": (
                 origin_kind.value
                 if origin_kind is not None
@@ -9079,6 +9181,7 @@ class ControlPlaneService:
             "policy_refs": list(profile.policy_refs),
             "tags": list(profile.tags),
             "metadata": dict(profile.metadata),
+            "resource_limits": dict(profile.resource_limits),
             "origin_kind": profile.origin_kind.value,
         }
 
@@ -9144,6 +9247,7 @@ class ControlPlaneService:
                 policy_refs=self._normalize_string_list(normalized_profile.get("policy_refs")),
                 tags=self._normalize_string_list(normalized_profile.get("tags")),
                 metadata=self._normalize_dict(normalized_profile.get("metadata")),
+                resource_limits=self._normalize_dict(normalized_profile.get("resource_limits")),
                 status=status,
                 origin_kind=resolved_origin,
                 draft_revision=draft_revision,

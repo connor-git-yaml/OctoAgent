@@ -129,6 +129,9 @@ export default function SettingsOverview({
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("channels")}>
           渠道
         </button>
+        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("resource-limits")}>
+          资源限制
+        </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
           Memory
         </button>

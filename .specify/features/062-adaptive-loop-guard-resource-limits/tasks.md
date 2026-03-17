@@ -41,7 +41,7 @@ updated: "2026-03-17"
 - [x] **T2.2** `WorkerProfile` 新增 `resource_limits: dict[str, Any]` 字段
 - [x] **T2.3** `sqlite_init.py` 添加 schema 迁移（两张表各加一列）
 - [x] **T2.4** `control_plane.py` `AgentProfileItem` + `WorkerProfileStaticConfig` 新增 `resource_limits` 字段
-- [ ] **T2.5** 前端 TypeScript 类型 `AgentProfileItem` + `WorkerProfileStaticConfig` 同步新增 `resource_limits`
+- [x] **T2.5** 前端 TypeScript 类型 `AgentProfileItem` + `WorkerProfileStaticConfig` 同步新增 `resource_limits`
 - [x] **T2.6** `skill_models.py` `SkillMdEntry` 新增 `resource_limits: dict[str, Any]` 字段
 - [x] **T2.7** `discovery.py` `_parse_skill_file()` 显式提取 frontmatter `resource_limits` 字段
 - [ ] **T2.8** 新建 `skills/limits.py`：实现 `_PRESETS` 常量映射 + `get_preset_limits()` + `merge_usage_limits()` 合并逻辑
@@ -72,8 +72,8 @@ updated: "2026-03-17"
 
 ## Phase 6: Settings 可配置 [P2]
 
-- [ ] **T6.1** `UsageLimits` 默认值支持环境变量读取（`OCTOAGENT_DEFAULT_MAX_STEPS` / `_MAX_BUDGET_USD` / `_MAX_DURATION_SECONDS`）
-- [ ] **T6.2** Settings UI（`domains/settings/` 目录）新增"资源限制"配置区（全局 + per-Agent 选择器）
-- [ ] **T6.3** 后端 `agent_profile.update_resource_limits` action + 广播变更
+- [x] **T6.1** `UsageLimits` 默认值支持环境变量读取（`OCTOAGENT_DEFAULT_MAX_STEPS` / `_MAX_BUDGET_USD` / `_MAX_DURATION_SECONDS`）
+- [x] **T6.2** Settings UI（`domains/settings/` 目录）新增"资源限制"配置区（全局 + per-Agent 选择器）
+- [x] **T6.3** 后端 `agent_profile.update_resource_limits` action + 广播变更
 - [ ] **T6.4** 编写环境变量优先级单元测试（env var > 代码默认值、Settings > env var）
 - [ ] **T6.5** 端到端测试：Settings 修改 → 新请求立即生效
