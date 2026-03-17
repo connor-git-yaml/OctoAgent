@@ -351,6 +351,29 @@ class LLMService:
             return None
 
         if result.status != SkillRunStatus.SUCCEEDED or result.output is None:
+            # Skill 失败时返回友好错误信息，而非回落到 Echo 原文
+            if result.status == SkillRunStatus.FAILED:
+                error_msg = result.error_message or "执行过程中遇到问题"
+                category = result.error_category.value if result.error_category else "unknown"
+                if category == "step_limit_exceeded":
+                    content = (
+                        f"抱歉，我在处理这个请求时执行步骤过多（{result.steps} 步），"
+                        "被安全限制截断了。请尝试拆分为更小的问题，或稍后重试。"
+                    )
+                else:
+                    content = f"抱歉，处理请求时遇到了问题：{error_msg}。请稍后重试。"
+                return ModelCallResult(
+                    content=content,
+                    model_alias=model_alias,
+                    model_name="system",
+                    provider="system",
+                    duration_ms=result.duration_ms,
+                    token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+                    cost_usd=0.0,
+                    cost_unavailable=False,
+                    is_fallback=True,
+                    fallback_reason=f"skill_failed:{category}",
+                )
             return None
 
         meta = result.output.metadata

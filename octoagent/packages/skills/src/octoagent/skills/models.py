@@ -45,7 +45,7 @@ class RetryPolicy(BaseModel):
 class LoopGuardPolicy(BaseModel):
     """循环保护策略。"""
 
-    max_steps: int = Field(default=8, ge=1, le=200)
+    max_steps: int = Field(default=30, ge=1, le=200)
     repeat_signature_threshold: int = Field(default=3, ge=2, le=20)
 
 
