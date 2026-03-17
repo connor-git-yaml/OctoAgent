@@ -16,10 +16,16 @@ from octoagent.core.behavior_workspace import (
     materialize_agent_behavior_files,
     resolve_behavior_agent_slug,
 )
+from ulid import ULID
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
+    AgentRuntime,
     AgentRuntimeRole,
+    AgentRuntimeStatus,
+    AgentSession,
+    AgentSessionKind,
+    AgentSessionStatus,
     BootstrapSession,
     BootstrapSessionStatus,
     OwnerProfile,
@@ -51,6 +57,9 @@ async def ensure_startup_records(
 
     # 回填 default project 的 primary_agent_id（如果尚未设置）
     await _backfill_primary_agent_id(store_group, project)
+
+    # 确保 Butler 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
+    await _ensure_butler_runtime_and_session(store_group, project, workspace, agent_profile)
 
     await store_group.conn.commit()
 
@@ -268,3 +277,61 @@ async def _backfill_primary_agent_id(
         project_id=project.project_id,
         primary_agent_id=butler_runtime.agent_runtime_id,
     )
+
+
+async def _ensure_butler_runtime_and_session(
+    store_group: StoreGroup,
+    project: Project,
+    workspace: Workspace | None,
+    agent_profile: AgentProfile,
+) -> None:
+    """确保 Butler 在 project-default 上有 AgentRuntime + AgentSession。
+
+    多 Session 侧边栏需要 agent_sessions 行才能展示会话列表。
+    """
+    workspace_id = workspace.workspace_id if workspace else ""
+
+    # 查找或创建 Butler Runtime
+    runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        role=AgentRuntimeRole.BUTLER,
+        project_id=project.project_id,
+    )
+    if runtimes:
+        butler_runtime = runtimes[0]
+    else:
+        runtime_id = f"runtime-{str(ULID())}"
+        butler_runtime = AgentRuntime(
+            agent_runtime_id=runtime_id,
+            project_id=project.project_id,
+            workspace_id=workspace_id,
+            agent_profile_id=agent_profile.profile_id,
+            role=AgentRuntimeRole.BUTLER,
+            name=agent_profile.name,
+            persona_summary="",
+            status=AgentRuntimeStatus.ACTIVE,
+        )
+        await store_group.agent_context_store.save_agent_runtime(butler_runtime)
+        # 同步回填 primary_agent_id
+        await store_group.project_store.set_primary_agent(
+            project.project_id, butler_runtime.agent_runtime_id
+        )
+        log.info("butler_runtime_created", runtime_id=runtime_id, project_id=project.project_id)
+
+    # 查找或创建活跃 AgentSession
+    existing_session = await store_group.agent_context_store.get_active_session_for_project(
+        project.project_id,
+        kind=AgentSessionKind.BUTLER_MAIN,
+    )
+    if existing_session is None:
+        session_id = f"session-{str(ULID())}"
+        session = AgentSession(
+            agent_session_id=session_id,
+            agent_runtime_id=butler_runtime.agent_runtime_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+            status=AgentSessionStatus.ACTIVE,
+            project_id=project.project_id,
+            workspace_id=workspace_id,
+            surface="chat",
+        )
+        await store_group.agent_context_store.save_agent_session(session)
+        log.info("butler_session_created", session_id=session_id, project_id=project.project_id)

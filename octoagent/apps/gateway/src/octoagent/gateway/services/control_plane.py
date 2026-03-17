@@ -819,6 +819,52 @@ class ControlPlaneService:
                     },
                 )
             )
+        # ── 第二遍：从 agent_sessions 补充没有 task 的会话 ──
+        # 多 Session 侧边栏需要展示所有活跃会话（跨项目），
+        # 不能只靠 tasks 推导——新创建的 Session 可能还没有任何 task。
+        existing_project_ids = {item.project_id for item in session_items}
+        all_agent_sessions = await self._stores.agent_context_store.list_agent_sessions(
+            limit=50,
+        )
+        for agent_sess in all_agent_sessions:
+            if agent_sess.status != AgentSessionStatus.ACTIVE:
+                continue
+            if agent_sess.project_id in existing_project_ids:
+                continue  # 该 project 已有 task-based 项，跳过
+            # 查找项目名
+            proj = await self._stores.project_store.get_project(agent_sess.project_id)
+            project_name = proj.name if proj else "未命名对话"
+            # 查找 agent profile
+            agent_profile_id = ""
+            runtime = await self._stores.agent_context_store.get_agent_runtime(
+                agent_sess.agent_runtime_id
+            )
+            if runtime is not None:
+                agent_profile_id = runtime.agent_profile_id
+            session_items.append(
+                SessionProjectionItem(
+                    session_id=agent_sess.agent_session_id,
+                    thread_id=agent_sess.thread_id,
+                    task_id="",
+                    parent_task_id="",
+                    parent_work_id="",
+                    title=project_name,
+                    status="created",
+                    channel="web" if agent_sess.surface in ("chat", "web", "") else agent_sess.surface,
+                    requester_id="",
+                    project_id=agent_sess.project_id,
+                    workspace_id=agent_sess.workspace_id,
+                    agent_profile_id=agent_profile_id,
+                    runtime_kind=agent_sess.kind.value,
+                    lane="queue",
+                    latest_message_summary="",
+                    latest_event_at=agent_sess.updated_at,
+                    execution_summary={},
+                    capabilities=[],
+                    detail_refs={},
+                )
+            )
+
         session_items.sort(
             key=lambda item: item.latest_event_at or datetime.min.replace(tzinfo=UTC),
             reverse=True,
