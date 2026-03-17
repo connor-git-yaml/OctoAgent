@@ -100,8 +100,11 @@ def _print_memory_summary(config: OctoAgentConfig) -> None:
     """输出 Memory 配置摘要。"""
     memory = config.memory
     console.print("[bold]Memory[/bold]:")
-    console.print(f"  backend_mode:       {memory.backend_mode}")
-    console.print("  transport:          local sqlite / vault")
+    console.print("  engine:             内建记忆引擎")
+    console.print(f"  reasoning_alias:    {memory.reasoning_model_alias or '(fallback → main)'}")
+    console.print(f"  expand_alias:       {memory.expand_model_alias or '(fallback → main)'}")
+    console.print(f"  embedding_alias:    {memory.embedding_model_alias or '(内建 Qwen3-Embedding-0.6B)'}")
+    console.print(f"  rerank_alias:       {memory.rerank_model_alias or '(heuristic)'}")
 
 
 def _save_memory_patch(
@@ -738,17 +741,8 @@ def memory_show(ctx: click.Context) -> None:
     console.print("══════════════════════════════════════════════")
 
 
-@memory_group.command("local")
-@click.pass_context
-def memory_local(ctx: click.Context) -> None:
-    """切回本地记忆模式。"""
-    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
-    project_root = _resolve_project_root(yaml_path)
-    _save_memory_patch(
-        project_root,
-        patch={"backend_mode": "local_only"},
-        success_message="已切换为本地 Memory 模式。",
-    )
+
+
 
 
 

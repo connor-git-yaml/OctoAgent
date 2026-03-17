@@ -1,10 +1,7 @@
 import type { MemoryConsoleDocument } from "../../types";
-import { formatMemoryMode } from "./shared";
 
 interface MemoryHeroSectionProps {
   memory: MemoryConsoleDocument;
-  memoryMode: string;
-  bridgeTransport: string;
   heroTone: "success" | "warning" | "danger";
   heroTitle: string;
   heroSummary: string;
@@ -14,8 +11,6 @@ interface MemoryHeroSectionProps {
 
 export default function MemoryHeroSection({
   memory,
-  memoryMode,
-  bridgeTransport,
   heroTone,
   heroTitle,
   heroSummary,
@@ -23,8 +18,7 @@ export default function MemoryHeroSection({
   retrievalLabel,
 }: MemoryHeroSectionProps) {
   const retrievalProfile = memory.retrieval_profile;
-  const engineLabel = retrievalProfile?.engine_label || formatMemoryMode(memoryMode);
-  const transportLabel = retrievalProfile?.transport_label || bridgeTransport || "内建";
+  const engineLabel = retrievalProfile?.engine_label || "内建记忆引擎";
 
   return (
     <section className="wb-hero wb-hero-memory">
@@ -38,7 +32,6 @@ export default function MemoryHeroSection({
             状态 {stateLabel}
           </span>
           <span className="wb-chip">检索 {retrievalLabel}</span>
-          <span className="wb-chip">接入 {transportLabel}</span>
         </div>
       </div>
 

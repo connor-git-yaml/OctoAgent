@@ -12,15 +12,8 @@ from .config_schema import OctoAgentConfig
 from .config_wizard import load_config
 
 _BACKEND_LABELS = {
-    "memu": "内建增强检索",
+    "builtin": "内建记忆引擎",
     "sqlite-metadata": "本地元数据回退",
-}
-
-_TRANSPORT_LABELS = {
-    "builtin": "内建",
-    "compat": "兼容链路",
-    "command": "本地命令",
-    "http": "HTTP Bridge",
 }
 
 
@@ -49,15 +42,6 @@ def build_memory_retrieval_profile(
     requested_embedding_target: str | None = None,
 ) -> MemoryRetrievalProfile:
     memory = config.memory if config is not None else None
-    inferred_backend_mode = (
-        "memu"
-        if backend_status.active_backend.strip() == "memu"
-        else "local_only"
-    )
-    backend_mode = (
-        memory.backend_mode if memory is not None else inferred_backend_mode
-    ).strip().lower()
-    transport = _resolve_transport(memory=memory, backend_mode=backend_mode)
     active_backend = backend_status.active_backend.strip() or "sqlite-metadata"
     bindings = [
         _resolve_alias_binding(
@@ -102,33 +86,22 @@ def build_memory_retrieval_profile(
     for item in bindings:
         warnings.extend(item.warnings)
 
-    engine_mode = "builtin" if backend_mode == "local_only" else "memu_compat"
-    engine_label = "内建记忆引擎" if engine_mode == "builtin" else "MemU 兼容链路"
     active_backend_label = _BACKEND_LABELS.get(active_backend, active_backend or "未知路径")
-
-    if engine_mode == "builtin":
-        backend_summary = (
-            "当前 Memory 以本地 canonical store 为主，默认优先使用内建 Qwen3-Embedding-0.6B；若本机运行时暂不可用，再诚实回退到双语 hash embedding 和本地元数据 recall。"
-        )
-    elif active_backend == "memu":
-        backend_summary = (
-            f"当前已经通过 { _TRANSPORT_LABELS.get(transport, transport) } 接上增强记忆链路，页面结果会优先使用增强检索。"
-        )
-    else:
-        backend_summary = (
-            "当前虽然保留了 MemU 兼容配置，但这次页面实际已经回退到本地路径；已有记忆仍然可读。"
-        )
+    backend_summary = (
+        "当前 Memory 以本地 canonical store 为主，默认优先使用内建 Qwen3-Embedding-0.6B；"
+        "若本机运行时暂不可用，再诚实回退到双语 hash embedding 和本地元数据 recall。"
+    )
 
     return MemoryRetrievalProfile(
-        engine_mode=engine_mode,
-        engine_label=engine_label,
-        transport=transport,
-        transport_label=_TRANSPORT_LABELS.get(transport, transport or "内建"),
+        engine_mode="builtin",
+        engine_label="内建记忆引擎",
+        transport="builtin",
+        transport_label="内建",
         active_backend=active_backend,
         active_backend_label=active_backend_label,
         backend_state=backend_status.state.value,
         backend_summary=backend_summary,
-        uses_compat_bridge=engine_mode != "builtin",
+        uses_compat_bridge=False,
         bindings=bindings,
         warnings=list(dict.fromkeys(warnings)),
     )
@@ -155,19 +128,6 @@ def apply_retrieval_profile_to_hook_options(
             "rerank_target": targets.get("rerank", ""),
         }
     )
-
-
-def _resolve_transport(*, memory, backend_mode: str) -> str:
-    if backend_mode == "local_only":
-        return "builtin"
-    if memory is None:
-        return "compat"
-    transport = str(memory.bridge_transport or "").strip().lower()
-    if transport in {"command", "http"}:
-        return transport
-    if str(memory.bridge_command or "").strip():
-        return "command"
-    return "http"
 
 
 def _resolve_alias_binding(
@@ -259,14 +219,12 @@ def _resolve_embedding_binding(
     active_embedding_target: str | None = None,
     requested_embedding_target: str | None = None,
 ) -> MemoryRetrievalBindingItem:
-    fallback_target = "engine-default" if active_backend == "memu" else "sqlite-metadata"
-    fallback_label = (
-        "Qwen3-Embedding-0.6B（默认）" if active_backend == "memu" else "本地元数据回退"
-    )
+    # 内建引擎默认使用 Qwen3-Embedding-0.6B，不可用时自动回退到 hash embedding
+    fallback_target = "engine-default"
+    fallback_label = "Qwen3-Embedding-0.6B（默认）"
     fallback_summary = (
-        "未绑定 embedding 模型时，当前优先由内建 Qwen3-Embedding-0.6B 接管；若本机运行时暂不可用，会自动回退到双语 hash embedding。"
-        if active_backend == "memu"
-        else "未绑定 embedding 模型时，当前主要依赖本地元数据和关键词召回。"
+        "未绑定 embedding 模型时，当前优先由内建 Qwen3-Embedding-0.6B 接管；"
+        "若本机运行时暂不可用，会自动回退到双语 hash embedding。"
     )
     binding = _resolve_alias_binding(
         config=config,

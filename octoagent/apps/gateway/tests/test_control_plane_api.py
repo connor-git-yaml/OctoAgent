@@ -2166,15 +2166,10 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         hints = resp.json()["ui_hints"]
         assert "front_door.mode" in hints
-        assert "memory.backend_mode" in hints
         assert "memory.reasoning_model_alias" in hints
         assert "memory.expand_model_alias" in hints
         assert "memory.embedding_model_alias" in hints
         assert "memory.rerank_model_alias" in hints
-        assert "memory.bridge_transport" in hints
-        assert "memory.bridge_command" in hints
-        assert "memory.bridge_command_cwd" in hints
-        assert "memory.bridge_command_timeout_seconds" in hints
         assert "channels.telegram.dm_policy" in hints
         assert "channels.telegram.group_policy" in hints
         assert "channels.telegram.group_allow_users" in hints

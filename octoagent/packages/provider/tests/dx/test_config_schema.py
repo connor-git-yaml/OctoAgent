@@ -93,7 +93,7 @@ def test_default_values() -> None:
     assert config.channels.telegram.enabled is False
     assert config.channels.telegram.mode == "webhook"
     assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
-    assert config.memory.backend_mode == "local_only"
+    assert config.memory.reasoning_model_alias == ""
 
 
 def test_front_door_config_accepts_comma_separated_cidrs() -> None:

@@ -200,12 +200,24 @@ class RuntimeConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory 默认配置。
 
-    当前仅支持本地模式（SQLite / Vault）。
+    统一使用本地内建引擎模式（SQLite / Vault + Qwen Embedding）。
     """
 
-    backend_mode: Literal["local_only"] = Field(
-        default="local_only",
-        description="Memory 后端模式：local_only 使用本地 SQLite 元数据。",
+    reasoning_model_alias: str = Field(
+        default="",
+        description="记忆加工模型别名（留空时 fallback 到 main）",
+    )
+    expand_model_alias: str = Field(
+        default="",
+        description="查询扩写模型别名（留空时 fallback 到 main）",
+    )
+    embedding_model_alias: str = Field(
+        default="",
+        description="语义检索 embedding 模型别名（留空时使用内建 Qwen3-Embedding-0.6B）",
+    )
+    rerank_model_alias: str = Field(
+        default="",
+        description="结果重排模型别名（留空时使用 heuristic 重排）",
     )
 
 
@@ -585,9 +597,12 @@ def build_config_schema_document(
             },
             "memory": {
                 "title": "Memory",
-                "description": "本地 Memory 配置。",
+                "description": "本地记忆引擎别名配置。",
                 "fields": [
-                    "memory.backend_mode",
+                    "memory.reasoning_model_alias",
+                    "memory.expand_model_alias",
+                    "memory.embedding_model_alias",
+                    "memory.rerank_model_alias",
                 ],
             },
             "security": {
@@ -699,13 +714,33 @@ def build_config_schema_document(
                 },
                 "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
             },
-            "memory.backend_mode": {
-                "label": "Memory 引擎层级",
-                "input": "choice",
-                "required": True,
-                "recommended": True,
-                "choices": ["local_only"],
-                "default": active_memory.backend_mode,
+            "memory.reasoning_model_alias": {
+                "label": "记忆加工模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.reasoning_model_alias,
+            },
+            "memory.expand_model_alias": {
+                "label": "查询扩写模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.expand_model_alias,
+            },
+            "memory.embedding_model_alias": {
+                "label": "语义检索模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.embedding_model_alias,
+            },
+            "memory.rerank_model_alias": {
+                "label": "结果重排模型别名",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_memory.rerank_model_alias,
             },
             "front_door.mode": {
                 "label": "Front-door 模式",

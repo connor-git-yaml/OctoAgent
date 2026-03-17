@@ -10,10 +10,8 @@ import MemoryResultsSection from "./MemoryResultsSection";
 import {
   buildMemoryDisplayRecords,
   buildMemoryNarrative,
-  fieldLabel,
   formatLayerLabel,
   formatPartitionLabel,
-  readConfigSection,
   type MemoryNarrative,
   uniqueOptions,
 } from "./shared";
@@ -80,9 +78,9 @@ export default function MemoryPage() {
       limit: 50,
     },
   };
-  const configResource = config;
   const filters = memoryResource.filters;
   const records = memoryResource.records;
+  const [scopeDraft, setScopeDraft] = useState(filters.scope_id ?? "");
   const [queryDraft, setQueryDraft] = useState(filters.query);
   const [layerDraft, setLayerDraft] = useState(filters.layer);
   const [partitionDraft, setPartitionDraft] = useState(filters.partition);
@@ -96,6 +94,7 @@ export default function MemoryPage() {
   const displayRecords = buildMemoryDisplayRecords(records);
 
   useEffect(() => {
+    setScopeDraft(filters.scope_id ?? "");
     setQueryDraft(filters.query);
     setLayerDraft(filters.layer);
     setPartitionDraft(filters.partition);
@@ -104,6 +103,11 @@ export default function MemoryPage() {
     setLimitDraft(String(filters.limit || 50));
   }, [filters]);
 
+  const scopeOptions = uniqueOptions([
+    "",
+    ...memoryResource.available_scopes,
+    filters.scope_id ?? "",
+  ]);
   const layerOptions = uniqueOptions([
     "",
     ...memoryResource.available_layers,
@@ -118,36 +122,10 @@ export default function MemoryPage() {
     ...memoryResource.available_partitions,
     filters.partition,
   ]);
-  const memoryConfig = readConfigSection(readConfigSection(configResource.current_value).memory);
-  const memoryMode =
-    memoryResource.retrieval_profile?.engine_mode === "memu_compat"
-      ? "memu"
-      : String(memoryConfig.backend_mode ?? "local_only").trim().toLowerCase() || "local_only";
-  const bridgeTransport =
-    String(memoryResource.retrieval_profile?.transport ?? "").trim().toLowerCase() ||
-    String(memoryConfig.bridge_transport ?? "").trim().toLowerCase() ||
-    (String(memoryConfig.bridge_command ?? "").trim() ? "command" : "http");
-  const bridgeUrl = String(memoryConfig.bridge_url ?? "").trim();
-  const bridgeCommand = String(memoryConfig.bridge_command ?? "").trim();
-  const bridgeApiKeyEnv = String(memoryConfig.bridge_api_key_env ?? "").trim();
-  const missingSetupItems =
-    memoryMode === "memu"
-      ? [
-          bridgeTransport === "http" && !bridgeUrl
-            ? fieldLabel(config.ui_hints, "memory.bridge_url", "MemU Bridge 地址")
-            : "",
-          bridgeTransport === "http" && !bridgeApiKeyEnv
-            ? fieldLabel(config.ui_hints, "memory.bridge_api_key_env", "MemU API Key 环境变量")
-            : "",
-          bridgeTransport === "command" && !bridgeCommand
-            ? fieldLabel(config.ui_hints, "memory.bridge_command", "MemU 本地命令")
-            : "",
-        ].filter(Boolean)
-      : [];
   const narrative: MemoryNarrative = buildMemoryNarrative(
     memoryResource,
-    memoryMode,
-    missingSetupItems,
+    "builtin",
+    [],
     displayRecords.length
   );
   const selectedRecord =
@@ -184,6 +162,7 @@ export default function MemoryPage() {
     await submitAction("memory.query", {
       project_id: memoryResource.active_project_id,
       workspace_id: memoryResource.active_workspace_id,
+      scope_id: scopeDraft,
       query: queryDraft.trim(),
       layer: layerDraft,
       partition: partitionDraft,
@@ -194,6 +173,7 @@ export default function MemoryPage() {
   }
 
   async function resetFilters() {
+    setScopeDraft("");
     setQueryDraft("");
     setLayerDraft("");
     setPartitionDraft("");
@@ -203,6 +183,7 @@ export default function MemoryPage() {
     await submitAction("memory.query", {
       project_id: memoryResource.active_project_id,
       workspace_id: memoryResource.active_workspace_id,
+      scope_id: "",
       query: "",
       layer: "",
       partition: "",
@@ -256,8 +237,6 @@ export default function MemoryPage() {
     <div className="wb-page">
       <MemoryHeroSection
         memory={memoryResource}
-        memoryMode={memoryMode}
-        bridgeTransport={bridgeTransport}
         heroTone={narrative.heroTone}
         heroTitle={narrative.heroTitle}
         heroSummary={narrative.heroSummary}
@@ -287,6 +266,8 @@ export default function MemoryPage() {
       />
 
       <MemoryFiltersSection
+        scopeDraft={scopeDraft}
+        scopeOptions={scopeOptions}
         queryDraft={queryDraft}
         layerDraft={layerDraft}
         partitionDraft={partitionDraft}
@@ -298,6 +279,7 @@ export default function MemoryPage() {
         retrievalLabel={narrative.retrievalLabel}
         updatedAt={memoryResource.updated_at}
         busyActionId={busyActionId}
+        onScopeChange={setScopeDraft}
         onQueryChange={setQueryDraft}
         onLayerChange={setLayerDraft}
         onPartitionChange={setPartitionDraft}

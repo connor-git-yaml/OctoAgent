@@ -1,4 +1,26 @@
+const SCOPE_LABELS: Record<string, string> = {
+  project_shared: "项目共享",
+  butler_private: "Butler 私有",
+  worker_private: "Worker 私有",
+};
+
+function formatScopeLabel(scopeId: string): string {
+  if (!scopeId) return "全部作用域";
+  // 尝试从 scope_id 中提取 kind 标签
+  const lower = scopeId.toLowerCase();
+  if (lower.includes("/shared/") || lower.includes("project_shared"))
+    return SCOPE_LABELS.project_shared;
+  if (lower.includes("butler_private") || lower.includes("/butler/"))
+    return SCOPE_LABELS.butler_private;
+  if (lower.includes("/private/")) return SCOPE_LABELS.worker_private;
+  // 截取最后一段作为可读标签
+  const parts = scopeId.split("/");
+  return parts[parts.length - 1] || scopeId;
+}
+
 interface MemoryFiltersSectionProps {
+  scopeDraft: string;
+  scopeOptions: string[];
   queryDraft: string;
   layerDraft: string;
   partitionDraft: string;
@@ -10,6 +32,7 @@ interface MemoryFiltersSectionProps {
   retrievalLabel: string;
   updatedAt: string;
   busyActionId: string | null;
+  onScopeChange: (value: string) => void;
   onQueryChange: (value: string) => void;
   onLayerChange: (value: string) => void;
   onPartitionChange: (value: string) => void;
@@ -24,6 +47,8 @@ interface MemoryFiltersSectionProps {
 }
 
 export default function MemoryFiltersSection({
+  scopeDraft,
+  scopeOptions,
   queryDraft,
   layerDraft,
   partitionDraft,
@@ -35,6 +60,7 @@ export default function MemoryFiltersSection({
   retrievalLabel,
   updatedAt,
   busyActionId,
+  onScopeChange,
   onQueryChange,
   onLayerChange,
   onPartitionChange,
@@ -75,6 +101,19 @@ export default function MemoryFiltersSection({
       </div>
 
       <div className="wb-toolbar-grid">
+        {scopeOptions.length > 1 ? (
+          <label className="wb-field">
+            <span>作用域</span>
+            <select value={scopeDraft} onChange={(event) => onScopeChange(event.target.value)}>
+              {scopeOptions.map((option) => (
+                <option key={option || "all-scopes"} value={option}>
+                  {formatScopeLabel(option)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <label className="wb-field">
           <span>关键词</span>
           <input

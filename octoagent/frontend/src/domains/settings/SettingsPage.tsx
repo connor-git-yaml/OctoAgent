@@ -474,14 +474,14 @@ export default function SettingsPage() {
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Memory</p>
-            <h3>本地记忆状态</h3>
+            <h3>本地记忆引擎</h3>
           </div>
         </div>
 
         <div className="wb-card-grid wb-card-grid-4">
           <article className="wb-card">
-            <p className="wb-card-label">当前模式</p>
-            <strong>本地记忆</strong>
+            <p className="wb-card-label">引擎模式</p>
+            <strong>内建记忆引擎</strong>
             <span>SQLite / Vault</span>
           </article>
           <article className="wb-card">
@@ -507,6 +507,48 @@ export default function SettingsPage() {
             <strong>{memory.summary?.sor_current_count ?? "—"}</strong>
             <span>片段 {memory.summary?.fragment_count ?? "—"}</span>
           </article>
+        </div>
+
+        <div className="wb-panel-head" style={{ marginTop: "1rem" }}>
+          <div>
+            <p className="wb-card-label">别名配置</p>
+            <h4>Memory 模型别名（留空使用默认）</h4>
+          </div>
+        </div>
+        <div className="wb-toolbar-grid">
+          {(
+            [
+              { key: "memory.reasoning_model_alias", label: "记忆加工", fallback: "main（默认）" },
+              { key: "memory.expand_model_alias", label: "查询扩写", fallback: "main（默认）" },
+              { key: "memory.embedding_model_alias", label: "语义检索", fallback: "内建 embedding" },
+              { key: "memory.rerank_model_alias", label: "结果重排", fallback: "heuristic（默认）" },
+            ] as const
+          ).map((slot) => {
+            const currentValue = String(
+              fieldState[slot.key] ??
+                getValueAtPath(config.current_value, slot.key) ??
+                ""
+            ).trim();
+            const aliasKeys = Object.keys(
+              (getValueAtPath(config.current_value, "model_aliases") as Record<string, unknown>) ?? {}
+            );
+            return (
+              <label key={slot.key} className="wb-field">
+                <span>{slot.label}</span>
+                <select
+                  value={currentValue}
+                  onChange={(e) => updateFieldValue(slot.key, e.target.value)}
+                >
+                  <option value="">{slot.fallback}</option>
+                  {aliasKeys.map((alias) => (
+                    <option key={alias} value={alias}>
+                      {alias}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
         </div>
 
         {(memory.warnings ?? []).length > 0 ? (

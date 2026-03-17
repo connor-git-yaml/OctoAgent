@@ -55,7 +55,6 @@ from octoagent.memory import (
     MemoryAccessPolicy,
     MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
-    MemoryPartition,
     MemoryRecallHit,
     MemoryRecallHookOptions,
     MemoryRecallPostFilterMode,
@@ -65,6 +64,7 @@ from octoagent.memory import (
     WriteAction,
     init_memory_db,
 )
+from octoagent.memory.partition_inference import infer_memory_partition
 from octoagent.provider.dx.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
@@ -1249,7 +1249,7 @@ class AgentContextService:
         if frame is not None:
             current_frame = frame
             try:
-                current_frame = await self._record_private_memory_writeback(
+                current_frame = await self._record_memory_writeback(
                     task=task,
                     frame=current_frame,
                     agent_session=agent_session,
@@ -1263,7 +1263,7 @@ class AgentContextService:
                 )
             except Exception as exc:
                 log.warning(
-                    "agent_context_private_memory_writeback_degraded",
+                    "agent_context_memory_writeback_degraded",
                     task_id=task_id,
                     context_frame_id=context_frame_id,
                     error_type=type(exc).__name__,
@@ -1924,7 +1924,7 @@ class AgentContextService:
         )
         await self._stores.conn.commit()
 
-    async def _record_private_memory_writeback(
+    async def _record_memory_writeback(
         self,
         *,
         task: Task,
@@ -1954,7 +1954,7 @@ class AgentContextService:
 
         namespace = await self._resolve_memory_namespace_by_kind(
             frame=frame,
-            kind=MemoryNamespaceKind.WORKER_PRIVATE,
+            kind=MemoryNamespaceKind.PROJECT_SHARED,
         )
         if namespace is None:
             return frame
@@ -1962,6 +1962,12 @@ class AgentContextService:
         scope_id, scope_kind = self._select_writeback_scope(namespace)
         if not scope_id:
             return frame
+
+        # 推断记忆分区：基于用户输入、模型回复和续写摘要的内容主题
+        writeback_text = " ".join(
+            part for part in [latest_user_text, model_response, continuity_summary] if part
+        )
+        inferred_partition = infer_memory_partition(writeback_text)
 
         await init_memory_db(self._stores.conn)
         memory_service = await self.get_memory_service(project=project, workspace=workspace)
@@ -1976,8 +1982,8 @@ class AgentContextService:
                 command_id=str(ULID()),
                 kind=MemoryMaintenanceCommandKind.FLUSH,
                 scope_id=scope_id,
-                partition=MemoryPartition.WORK,
-                reason="worker private memory writeback",
+                partition=inferred_partition,
+                reason="memory writeback",
                 requested_by=f"agent_context:{agent_runtime.agent_runtime_id}",
                 idempotency_key=(
                     f"{frame.context_frame_id}:private_writeback:{response_artifact_id or task.task_id}"
@@ -1989,7 +1995,7 @@ class AgentContextService:
                 ),
                 evidence_refs=evidence_refs,
                 metadata={
-                    "source": "agent_context.worker_private_writeback",
+                    "source": "agent_context.memory_writeback",
                     "task_id": task.task_id,
                     "context_frame_id": frame.context_frame_id,
                     "agent_runtime_id": agent_runtime.agent_runtime_id,
@@ -1997,6 +2003,7 @@ class AgentContextService:
                     "memory_namespace_id": namespace.namespace_id,
                     "namespace_kind": namespace.kind.value,
                     "scope_kind": scope_kind,
+                    "inferred_partition": inferred_partition.value,
                     "request_artifact_ref": request_artifact_id,
                     "response_artifact_ref": response_artifact_id,
                 },
@@ -2025,7 +2032,7 @@ class AgentContextService:
                 {
                     "ref_type": "memory_maintenance_run",
                     "ref_id": run.run_id,
-                    "label": "worker_private_writeback",
+                    "label": "memory_writeback",
                     "metadata": {
                         "scope_id": scope_id,
                         "scope_kind": scope_kind,
@@ -2036,7 +2043,7 @@ class AgentContextService:
                     {
                         "ref_type": "memory_fragment",
                         "ref_id": ref_id,
-                        "label": "worker_private_writeback",
+                        "label": "memory_writeback",
                     }
                     for ref_id in run.fragment_refs
                 ],
@@ -2055,9 +2062,9 @@ class AgentContextService:
                     update={
                         "metadata": {
                             **agent_session.metadata,
-                            "last_private_memory_writeback_run_id": run.run_id,
-                            "last_private_memory_scope_id": scope_id,
-                            "last_private_memory_scope_kind": scope_kind,
+                            "last_memory_writeback_run_id": run.run_id,
+                            "last_memory_scope_id": scope_id,
+                            "last_memory_scope_kind": scope_kind,
                         },
                         "updated_at": datetime.now(tz=UTC),
                     }

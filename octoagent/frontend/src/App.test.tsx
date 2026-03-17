@@ -807,8 +807,8 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         refs: {},
         active_project_id: "project-default",
         active_workspace_id: "workspace-default",
-        backend_id: "memu",
-        retrieval_backend: "memu",
+        backend_id: "sqlite",
+        retrieval_backend: "sqlite-metadata",
         backend_state: "healthy",
         index_health: {},
         filters: {
@@ -3054,7 +3054,7 @@ describe("App workbench routing", () => {
             owner: "Connor",
           },
           requires_vault_authorization: false,
-          retrieval_backend: "memu",
+          retrieval_backend: "sqlite-metadata",
         },
       ],
     };
@@ -3130,67 +3130,4 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("当前有需要注意的情况")).toBeInTheDocument();
   });
 
-  it("Memory 页面会把增强模式缺失的最小配置直接指给用户", async () => {
-    window.history.pushState({}, "", "/memory");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.config.ui_hints = {
-      "memory.bridge_url": {
-        field_path: "memory.bridge_url",
-        section: "memory-basic",
-        label: "MemU Bridge 地址",
-        description: "",
-        widget: "text",
-        placeholder: "https://memory.example.com",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 10,
-      },
-      "memory.bridge_api_key_env": {
-        field_path: "memory.bridge_api_key_env",
-        section: "memory-basic",
-        label: "MemU API Key 环境变量",
-        description: "",
-        widget: "env-ref",
-        placeholder: "MEMU_API_KEY",
-        help_text: "",
-        sensitive: false,
-        multiline: false,
-        order: 20,
-      },
-    };
-    snapshot.resources.config.current_value = {
-      memory: {
-        backend_mode: "memu",
-        bridge_url: "",
-        bridge_api_key_env: "",
-      },
-    };
-    snapshot.resources.memory.summary = {
-      ...snapshot.resources.memory.summary,
-      sor_current_count: 0,
-      fragment_count: 0,
-      vault_ref_count: 0,
-      pending_replay_count: 0,
-    };
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByRole("heading", { name: "增强记忆还没配完整" })).toBeInTheDocument();
-    expect(screen.getByText("补齐 MemU Bridge 地址")).toBeInTheDocument();
-    expect(screen.getByText("补齐 MemU API Key 环境变量")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "打开 Settings > Memory" })[0]!).toHaveAttribute(
-      "href",
-      "/settings#settings-group-memory"
-    );
-  });
 });

@@ -23,14 +23,8 @@ const PARTITION_LABELS: Record<string, string> = {
   contact: "联系人",
 };
 
-const MEMORY_MODE_LABELS: Record<string, string> = {
-  local_only: "本地记忆",
-  memu: "增强记忆",
-};
-
 const RETRIEVAL_LABELS: Record<string, string> = {
-  memu: "增强检索",
-  "sqlite-metadata": "本地回退",
+  "sqlite-metadata": "本地元数据",
 };
 
 const METADATA_LABELS: Record<string, string> = {
@@ -297,13 +291,13 @@ export function formatPartitionLabel(partition: string): string {
   return PARTITION_LABELS[partition] ?? (partition || "未分类");
 }
 
-export function formatMemoryMode(mode: string): string {
-  return MEMORY_MODE_LABELS[mode] ?? "本地记忆";
+export function formatMemoryMode(_mode?: string): string {
+  return "内建记忆引擎";
 }
 
-export function formatRetrievalLabel(value: string, mode: string): string {
+export function formatRetrievalLabel(value: string, _mode?: string): string {
   if (!value) {
-    return formatMemoryMode(mode);
+    return "内建记忆引擎";
   }
   return RETRIEVAL_LABELS[value] ?? value;
 }
@@ -351,8 +345,8 @@ export function describeRecord(record: MemoryRecordProjection): string {
 
 export function uniqueOptions(values: Array<string | undefined>): string[] {
   return values
-    .filter(Boolean)
-    .filter((value, index, all) => all.indexOf(value) === index) as string[];
+    .filter((v): v is string => v !== undefined)
+    .filter((value, index, all) => all.indexOf(value) === index);
 }
 
 export function metadataPreviewEntries(
@@ -472,17 +466,13 @@ export function mapQuickAction(
 
 export function buildMemoryNarrative(
   memory: MemoryConsoleDocument,
-  memoryMode: string,
-  missingSetupItems: string[],
+  _memoryMode: string,
+  _missingSetupItems: string[],
   visibleRecordCount = memory.records.length
 ): MemoryNarrative {
   const retrievalLabel =
     memory.retrieval_profile?.active_backend_label?.trim() ||
-    formatRetrievalLabel(memory.retrieval_backend, memoryMode);
-  const usingFallback =
-    memoryMode === "memu" &&
-    Boolean(memory.retrieval_backend) &&
-    memory.retrieval_backend !== "memu";
+    formatRetrievalLabel(memory.retrieval_backend);
   const isDegraded = memory.backend_state === "degraded" || memory.backend_state === "unavailable";
   const totalStoredRecords =
     memory.summary.sor_current_count +
@@ -499,15 +489,10 @@ export function buildMemoryNarrative(
   let heroSummary = "";
   let stateLabel = "运行中";
 
-  if (missingSetupItems.length > 0) {
-    heroTone = "warning";
-    stateLabel = "待补配置";
-    heroTitle = "增强记忆还没配完整";
-    heroSummary = `缺少 ${missingSetupItems.join("、")}，请到 Settings > Memory 补齐后保存。`;
-  } else if (isDegraded) {
+  if (isDegraded) {
     heroTone = "danger";
-    stateLabel = usingFallback ? "降级回退" : "异常";
-    heroTitle = usingFallback ? "Memory 已回退到本地路径" : "Memory 连接异常";
+    stateLabel = "异常";
+    heroTitle = "Memory 连接异常";
     heroSummary = "已有数据不会丢失。请检查 Settings > Memory 配置是否正确。";
   } else if (!hasVisibleRecords && hasStoredRecords) {
     heroTone = "warning";

@@ -8108,18 +8108,6 @@ class ControlPlaneService:
                 sensitive=True,
                 order=30,
             ),
-            "memory.backend_mode": ConfigFieldHint(
-                field_path="memory.backend_mode",
-                section="memory-compat",
-                label="兼容接入层级",
-                description="控制当前实例是否继续走旧 MemU 兼容链路。",
-                widget="select",
-                help_text=(
-                    "普通用户默认不需要改这里。只有迁移旧实例、排查兼容链路或接外部 MemU "
-                    "bridge 时，再调整这组字段。"
-                ),
-                order=32,
-            ),
             "memory.reasoning_model_alias": ConfigFieldHint(
                 field_path="memory.reasoning_model_alias",
                 section="memory-models",
@@ -8155,65 +8143,6 @@ class ControlPlaneService:
                 placeholder="memory-rerank",
                 help_text="没有专门 rerank alias 也可以先留空。",
                 order=36,
-            ),
-            "memory.bridge_transport": ConfigFieldHint(
-                field_path="memory.bridge_transport",
-                section="memory-compat",
-                label="兼容接入方式",
-                description=(
-                    "command 适合本机直接调用旧脚本链；"
-                    "http 适合连接远端兼容 bridge。"
-                ),
-                widget="select",
-                help_text="普通用户默认不需要动这里。只有迁移旧实例或排查兼容链路时才展开。",
-                order=38,
-            ),
-            "memory.bridge_url": ConfigFieldHint(
-                field_path="memory.bridge_url",
-                section="memory-compat",
-                label="兼容 HTTP 地址",
-                placeholder="https://memory.example.com",
-                help_text="仅在 http transport 下需要；这里填兼容 bridge 的基础 URL。",
-                order=40,
-            ),
-            "memory.bridge_command": ConfigFieldHint(
-                field_path="memory.bridge_command",
-                section="memory-compat",
-                label="兼容本地命令",
-                placeholder="uv run python scripts/memu_bridge.py",
-                help_text="仅在 command transport 下需要；命令会自动追加 health/query 等子命令。",
-                order=42,
-            ),
-            "memory.bridge_command_cwd": ConfigFieldHint(
-                field_path="memory.bridge_command_cwd",
-                section="memory-compat",
-                label="命令工作目录",
-                placeholder="/path/to/memu-project",
-                help_text="可选。命令依赖本地虚拟环境或脚本相对路径时再填写。",
-                order=44,
-            ),
-            "memory.bridge_command_timeout_seconds": ConfigFieldHint(
-                field_path="memory.bridge_command_timeout_seconds",
-                section="memory-compat",
-                label="命令超时（秒）",
-                help_text="仅在 command transport 下生效；本机检索通常 10-20 秒就够。",
-                order=46,
-            ),
-            "memory.bridge_api_key_env": ConfigFieldHint(
-                field_path="memory.bridge_api_key_env",
-                section="memory-compat",
-                label="兼容 API Key 环境变量",
-                widget="env-ref",
-                sensitive=True,
-                help_text="仅在 http transport 且 bridge 需要鉴权时填写；只填环境变量名。",
-                order=48,
-            ),
-            "memory.bridge_timeout_seconds": ConfigFieldHint(
-                field_path="memory.bridge_timeout_seconds",
-                section="memory-compat",
-                label="HTTP 超时（秒）",
-                help_text="仅在 http transport 下生效；网络较慢时可以适度调高。",
-                order=50,
             ),
             "providers": ConfigFieldHint(
                 field_path="providers",

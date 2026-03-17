@@ -21,19 +21,19 @@ function buildMemorySnapshot(): any {
       memory: {
         active_project_id: "project-default",
         active_workspace_id: "workspace-default",
-        retrieval_backend: "memu",
+        retrieval_backend: "sqlite-metadata",
         backend_state: "healthy",
         backend_id: "memory-local",
         retrieval_profile: {
-          engine_mode: "memu_compat",
-          engine_label: "MemU 兼容链路",
-          transport: "http",
-          transport_label: "HTTP Bridge",
-          active_backend: "memu",
-          active_backend_label: "增强检索",
+          engine_mode: "builtin",
+          engine_label: "内建记忆引擎",
+          transport: "builtin",
+          transport_label: "内建",
+          active_backend: "sqlite-metadata",
+          active_backend_label: "本地元数据回退",
           backend_state: "healthy",
-          backend_summary: "当前已经通过 HTTP Bridge 接上增强记忆链路。",
-          uses_compat_bridge: true,
+          backend_summary: "当前 Memory 以本地 canonical store 为主。",
+          uses_compat_bridge: false,
           warnings: [],
           bindings: [
             {
@@ -89,6 +89,7 @@ function buildMemorySnapshot(): any {
         },
         filters: {
           query: "",
+          scope_id: "",
           layer: "",
           partition: "",
           include_history: false,
@@ -124,7 +125,7 @@ function buildMemorySnapshot(): any {
               owner: "Connor",
             },
             requires_vault_authorization: false,
-            retrieval_backend: "memu",
+            retrieval_backend: "sqlite-metadata",
           },
           {
             record_id: "record-bob",
@@ -146,7 +147,7 @@ function buildMemorySnapshot(): any {
               source: "import",
             },
             requires_vault_authorization: false,
-            retrieval_backend: "memu",
+            retrieval_backend: "sqlite-metadata",
           },
           {
             record_id: "record-internal",
@@ -170,7 +171,7 @@ function buildMemorySnapshot(): any {
               tool_name: "bash",
             },
             requires_vault_authorization: false,
-            retrieval_backend: "memu",
+            retrieval_backend: "sqlite-metadata",
           },
         ],
         available_scopes: ["scope-contact"],
@@ -181,20 +182,9 @@ function buildMemorySnapshot(): any {
       },
       config: {
         current_value: {
-          memory: {
-            backend_mode: "memu",
-            bridge_url: "https://memory.example.com",
-            bridge_api_key_env: "MEMU_API_KEY",
-          },
+          memory: {},
         },
-        ui_hints: {
-          "memory.bridge_url": {
-            label: "MemU Bridge 地址",
-          },
-          "memory.bridge_api_key_env": {
-            label: "MemU API Key 环境变量",
-          },
-        },
+        ui_hints: {},
       },
       diagnostics: {
         recovery_summary: {
@@ -253,10 +243,120 @@ describe("MemoryPage", () => {
       expect(submitAction).toHaveBeenCalledWith("memory.query", {
         project_id: "project-default",
         workspace_id: "workspace-default",
+        scope_id: "",
         query: "Alice",
         layer: "sor",
         partition: "contact",
         include_history: true,
+        include_vault_refs: false,
+        limit: 50,
+      })
+    );
+  });
+
+  it("scope 选择器在多 scope 时渲染，切换后提交正确 scope_id", async () => {
+    const snapshot = buildMemorySnapshot();
+    // 提供多个 scope 以触发选择器渲染
+    snapshot.resources.memory.available_scopes = [
+      "memory/shared/butler-main",
+      "memory/private/worker-ops/runtime:abc",
+    ];
+    const submitAction = vi.fn().mockResolvedValue(null);
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    // scope 选择器应该出现
+    const scopeSelect = screen.getByLabelText("作用域");
+    expect(scopeSelect).toBeInTheDocument();
+
+    // 切换到 Worker 私有 scope
+    await userEvent.selectOptions(scopeSelect, "memory/private/worker-ops/runtime:abc");
+    await userEvent.click(screen.getByRole("button", { name: "重新查看" }));
+
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith("memory.query", {
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        scope_id: "memory/private/worker-ops/runtime:abc",
+        query: "",
+        layer: "",
+        partition: "",
+        include_history: false,
+        include_vault_refs: false,
+        limit: 50,
+      })
+    );
+  });
+
+  it("scope 选择器在仅 1 个 scope 时仍渲染，包含「全部作用域」选项", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.available_scopes = ["scope-contact"];
+    mockWorkbench = {
+      snapshot: snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    // 1 个 scope + ""（全部作用域）= 2 个选项 -> 选择器渲染
+    const scopeSelect = screen.getByLabelText("作用域");
+    expect(scopeSelect).toBeInTheDocument();
+
+    // 第一个选项应该是「全部作用域」
+    const options = within(scopeSelect).getAllByRole("option");
+    expect(options[0]).toHaveTextContent("全部作用域");
+    expect(options[0]).toHaveValue("");
+  });
+
+  it("清空筛选按钮重置 scope_id 为空", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.available_scopes = [
+      "memory/shared/butler-main",
+      "memory/private/worker-ops/runtime:abc",
+    ];
+    snapshot.resources.memory.filters.scope_id = "memory/shared/butler-main";
+    const submitAction = vi.fn().mockResolvedValue(null);
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    // 初始 scope 应该被选中
+    expect(screen.getByLabelText("作用域")).toHaveValue("memory/shared/butler-main");
+
+    // 点击清空筛选
+    await userEvent.click(screen.getByRole("button", { name: "清空筛选" }));
+
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith("memory.query", {
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        scope_id: "",
+        query: "",
+        layer: "",
+        partition: "",
+        include_history: false,
         include_vault_refs: false,
         limit: 50,
       })
@@ -401,7 +501,7 @@ describe("MemoryPage", () => {
     expect(screen.queryByText("更多入口")).not.toBeInTheDocument();
   });
 
-  it("hero 展示引擎和接入方式 chip", async () => {
+  it("hero 展示引擎 chip", async () => {
     mockWorkbench = {
       snapshot: buildMemorySnapshot(),
       submitAction: vi.fn(),
@@ -414,8 +514,7 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("引擎 MemU 兼容链路")).toBeInTheDocument();
-    expect(screen.getByText("接入 HTTP Bridge")).toBeInTheDocument();
+    expect(await screen.findByText("引擎 内建记忆引擎")).toBeInTheDocument();
   });
 
   it("会在 Memory 页面展示 embedding 迁移进度，并允许切换到新索引", async () => {

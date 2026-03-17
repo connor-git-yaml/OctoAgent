@@ -57,8 +57,8 @@ def test_profile_uses_builtin_engine_and_main_fallbacks_by_default() -> None:
     assert profile.bindings[0].effective_target == "main"
     assert profile.bindings[0].status == "fallback"
     assert profile.bindings[2].binding_key == "embedding"
-    assert profile.bindings[2].effective_target == "sqlite-metadata"
-    assert profile.bindings[2].effective_label == "本地元数据回退"
+    assert profile.bindings[2].effective_target == "engine-default"
+    assert profile.bindings[2].effective_label == "Qwen3-Embedding-0.6B（默认）"
 
 
 def test_profile_marks_disabled_embedding_alias_as_misconfigured() -> None:
@@ -92,7 +92,6 @@ def test_profile_marks_disabled_embedding_alias_as_misconfigured() -> None:
                 ),
             },
             memory=MemoryConfig(
-                backend_mode="memu",
                 embedding_model_alias="embed",
             ),
         )
@@ -102,12 +101,12 @@ def test_profile_marks_disabled_embedding_alias_as_misconfigured() -> None:
         backend_status=MemoryBackendStatus(
             backend_id="memu",
             state=MemoryBackendState.HEALTHY,
-            active_backend="memu",
+            active_backend="sqlite-metadata",
         ),
     )
 
     embedding = next(item for item in profile.bindings if item.binding_key == "embedding")
-    assert profile.engine_mode == "memu_compat"
+    assert profile.engine_mode == "builtin"
     assert embedding.status == "misconfigured"
     assert embedding.configured_alias == "embed"
     assert embedding.effective_target == "engine-default"
@@ -115,7 +114,8 @@ def test_profile_marks_disabled_embedding_alias_as_misconfigured() -> None:
     assert "Provider 当前已停用" in embedding.warnings[0]
 
 
-def test_profile_infers_memu_runtime_when_config_missing_but_backend_is_active() -> None:
+def test_profile_always_builtin_even_when_config_is_none() -> None:
+    """配置缺失时仍然返回 builtin 引擎模式。"""
     profile = build_memory_retrieval_profile(
         config=None,
         backend_status=MemoryBackendStatus(
@@ -125,8 +125,8 @@ def test_profile_infers_memu_runtime_when_config_missing_but_backend_is_active()
         ),
     )
 
-    assert profile.engine_mode == "memu_compat"
-    assert profile.transport == "compat"
+    assert profile.engine_mode == "builtin"
+    assert profile.transport == "builtin"
     embedding = next(item for item in profile.bindings if item.binding_key == "embedding")
     assert embedding.effective_target == "engine-default"
 
