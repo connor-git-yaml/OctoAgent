@@ -28,6 +28,8 @@ from octoagent.skills import (
     SkillRunStatus,
     extract_mounted_tool_names,
 )
+from octoagent.skills.limits import get_preset_limits, merge_usage_limits
+from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
 from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
 
@@ -289,6 +291,7 @@ class LLMService:
         metadata: dict[str, Any],
         worker_capability: str,
         tool_profile: str,
+        is_degraded_retry: bool = False,
     ) -> ModelCallResult | None:
         if self._skill_runner is None or not task_id or not trace_id:
             return None
@@ -327,6 +330,22 @@ class LLMService:
             tools_allowed=selected_tools,
             tool_profile=profile,
         )
+        # --- Feature 062: 资源限制合并 (T2.10) ---
+        agent_type = "butler" if single_loop_executor else worker_type
+        base_limits = get_preset_limits(agent_type)
+        profile_rl = metadata.get("resource_limits", {})
+        # SKILL.md resource_limits 暂时为空（runtime 未注入时 fallback）
+        skill_rl: dict[str, Any] = {}
+        if self._skill_discovery:
+            loaded_names = metadata.get("loaded_skill_names", [])
+            if isinstance(loaded_names, list):
+                for name in loaded_names:
+                    entry = self._skill_discovery.get(str(name))
+                    if entry and getattr(entry, "resource_limits", None):
+                        skill_rl = entry.resource_limits
+                        break  # 使用第一个有效的 Skill resource_limits
+        usage_limits = merge_usage_limits(base_limits, profile_rl, skill_rl)
+
         execution_context = SkillExecutionContext(
             task_id=task_id,
             trace_id=trace_id,
@@ -338,6 +357,7 @@ class LLMService:
             work_id=str(metadata.get("work_id", "")).strip(),
             conversation_messages=conversation_messages,
             metadata=metadata,
+            usage_limits=usage_limits,
         )
 
         try:
@@ -351,17 +371,13 @@ class LLMService:
             return None
 
         if result.status != SkillRunStatus.SUCCEEDED or result.output is None:
-            # Skill 失败时返回友好错误信息，而非回落到 Echo 原文
-            if result.status == SkillRunStatus.FAILED:
-                error_msg = result.error_message or "执行过程中遇到问题"
-                category = result.error_category.value if result.error_category else "unknown"
-                if category == "step_limit_exceeded":
-                    content = (
-                        f"抱歉，我在处理这个请求时执行步骤过多（{result.steps} 步），"
-                        "被安全限制截断了。请尝试拆分为更小的问题，或稍后重试。"
-                    )
+            # --- Feature 062: STOPPED 状态处理 (T4.4) ---
+            # STOPPED 表示被 StopHook 或用户取消优雅终止，优先返回最后有效输出
+            if result.status == SkillRunStatus.STOPPED:
+                if result.output is not None and result.output.content:
+                    content = result.output.content
                 else:
-                    content = f"抱歉，处理请求时遇到了问题：{error_msg}。请稍后重试。"
+                    content = "请求已被停止。"
                 return ModelCallResult(
                     content=content,
                     model_alias=model_alias,
@@ -369,7 +385,143 @@ class LLMService:
                     provider="system",
                     duration_ms=result.duration_ms,
                     token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-                    cost_usd=0.0,
+                    cost_usd=result.total_cost_usd,
+                    cost_unavailable=False,
+                    is_fallback=False,
+                    fallback_reason="stopped",
+                )
+
+            # --- Feature 062: Error UX 友好中文提示模板 (T1.16) ---
+            # 按 ErrorCategory 分类生成用户可读的错误提示
+            if result.status == SkillRunStatus.FAILED:
+                error_msg = result.error_message or "执行过程中遇到问题"
+                category = result.error_category.value if result.error_category else "unknown"
+                usage = result.usage or {}
+
+                if category == "step_limit_exceeded":
+                    content = (
+                        f"处理步骤较多（{result.steps} 步），已达上限。"
+                        "请尝试拆分为更小的问题。"
+                    )
+                elif category == "token_limit_exceeded":
+                    tokens = usage.get("request_tokens", 0) + usage.get("response_tokens", 0)
+                    content = (
+                        f"本次对话消耗 token 较多（{tokens}），已达上限。"
+                        "建议开启新对话或缩减请求范围。"
+                    )
+                elif category == "tool_call_limit_exceeded":
+                    calls = usage.get("tool_calls", 0)
+                    content = (
+                        f"工具调用次数较多（{calls} 次），已达上限。"
+                        "请尝试更具体的指令。"
+                    )
+                elif category == "budget_exceeded":
+                    budget = usage.get("cost_usd", 0.0)
+                    content = (
+                        f"本次请求成本已达预算上限（${budget:.2f}）。"
+                        "如需继续，请在设置中调整预算限制。"
+                    )
+                elif category == "timeout_exceeded":
+                    seconds = usage.get("duration_seconds", 0)
+                    content = (
+                        f"请求处理时间过长（{seconds}s），已超时。"
+                        "请稍后重试或简化请求。"
+                    )
+                else:
+                    content = f"抱歉，处理请求时遇到了问题：{error_msg}。请稍后重试。"
+
+                # --- Feature 062 Phase 5: 智能降级重试 (T5.2) ---
+                # FAILED 后可降级模型重试一次（is_degraded_retry=True 防止递归）
+                if (
+                    not is_degraded_retry
+                    and manifest.retry_policy.fallback_model_alias
+                    and category in ("step_limit_exceeded", "timeout_exceeded")
+                ):
+                    degraded_steps = min(
+                        int(usage_limits.max_steps * 1.5), _MAX_STEPS_HARD_CEILING
+                    )
+                    degraded_limits = UsageLimits(
+                        max_steps=degraded_steps,
+                        max_request_tokens=usage_limits.max_request_tokens,
+                        max_response_tokens=usage_limits.max_response_tokens,
+                        max_tool_calls=usage_limits.max_tool_calls,
+                        # max_budget_usd 不放宽
+                        max_budget_usd=usage_limits.max_budget_usd,
+                        max_duration_seconds=usage_limits.max_duration_seconds,
+                        repeat_signature_threshold=usage_limits.repeat_signature_threshold,
+                    )
+                    degraded_ctx = SkillExecutionContext(
+                        task_id=task_id,
+                        trace_id=trace_id,
+                        caller=execution_context.caller,
+                        agent_runtime_id=execution_context.agent_runtime_id,
+                        agent_session_id=execution_context.agent_session_id,
+                        work_id=execution_context.work_id,
+                        conversation_messages=conversation_messages,
+                        metadata=metadata,
+                        usage_limits=degraded_limits,
+                    )
+                    degraded_manifest = SkillManifest(
+                        skill_id=manifest.skill_id,
+                        input_model=manifest.input_model,
+                        output_model=manifest.output_model,
+                        model_alias=manifest.retry_policy.fallback_model_alias,
+                        description=manifest.load_description() or "",
+                        permission_mode=manifest.permission_mode,
+                        tools_allowed=list(manifest.tools_allowed),
+                        tool_profile=manifest.tool_profile,
+                    )
+                    try:
+                        retry_result = await self._skill_runner.run(
+                            manifest=degraded_manifest,
+                            execution_context=degraded_ctx,
+                            skill_input={"objective": prompt},
+                            prompt=prompt,
+                        )
+                        if retry_result.status == SkillRunStatus.SUCCEEDED and retry_result.output:
+                            r_meta = retry_result.output.metadata
+                            r_usage = (
+                                r_meta.get("token_usage", {})
+                                if isinstance(r_meta, dict)
+                                else {}
+                            )
+                            return ModelCallResult(
+                                content=retry_result.output.content,
+                                model_alias=manifest.retry_policy.fallback_model_alias,
+                                model_name=str(r_meta.get("model_name", ""))
+                                if isinstance(r_meta, dict)
+                                else "",
+                                provider=str(r_meta.get("provider", ""))
+                                if isinstance(r_meta, dict)
+                                else "",
+                                duration_ms=retry_result.duration_ms,
+                                token_usage=TokenUsage(
+                                    prompt_tokens=int(r_usage.get("prompt_tokens", 0) or 0),
+                                    completion_tokens=int(
+                                        r_usage.get("completion_tokens", 0) or 0
+                                    ),
+                                    total_tokens=int(r_usage.get("total_tokens", 0) or 0),
+                                ),
+                                cost_usd=retry_result.total_cost_usd,
+                                cost_unavailable=bool(
+                                    r_meta.get("cost_unavailable", True)
+                                )
+                                if isinstance(r_meta, dict)
+                                else True,
+                                is_fallback=True,
+                                fallback_reason="degraded_retry",
+                            )
+                    except Exception:
+                        pass  # 降级重试失败，返回原始错误
+
+                return ModelCallResult(
+                    content=content,
+                    model_alias=model_alias,
+                    model_name="system",
+                    provider="system",
+                    duration_ms=result.duration_ms,
+                    token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+                    cost_usd=result.total_cost_usd,
                     cost_unavailable=False,
                     is_fallback=True,
                     fallback_reason=f"skill_failed:{category}",

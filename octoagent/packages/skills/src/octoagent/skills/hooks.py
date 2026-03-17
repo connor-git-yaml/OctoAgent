@@ -10,6 +10,7 @@ from .models import (
     SkillOutputEnvelope,
     SkillRunResult,
     ToolFeedbackMessage,
+    UsageTracker,
 )
 
 
@@ -37,6 +38,14 @@ class SkillRunnerHook(Protocol):
 
     async def after_tool_execute(self, feedback: ToolFeedbackMessage) -> None: ...
 
+    async def should_stop(
+        self,
+        manifest: SkillManifest,
+        context: SkillExecutionContext,
+        tracker: UsageTracker,
+        last_output: SkillOutputEnvelope,
+    ) -> bool: ...
+
 
 class NoopSkillRunnerHook:
     """默认空实现。"""
@@ -63,3 +72,12 @@ class NoopSkillRunnerHook:
 
     async def after_tool_execute(self, feedback: ToolFeedbackMessage) -> None:
         return None
+
+    async def should_stop(
+        self,
+        manifest: SkillManifest,
+        context: SkillExecutionContext,
+        tracker: UsageTracker,
+        last_output: SkillOutputEnvelope,
+    ) -> bool:
+        return False

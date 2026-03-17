@@ -233,6 +233,7 @@ class AgentProfileItem(BaseModel):
     bootstrap_template_ids: list[str] = Field(default_factory=list)
     behavior_system: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
     updated_at: datetime | None = None
 
 
@@ -257,6 +258,7 @@ class WorkerProfileStaticConfig(BaseModel):
     tags: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
 
 
 class WorkerProfileDynamicContext(BaseModel):

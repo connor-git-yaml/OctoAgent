@@ -34,6 +34,8 @@ from .models import (
     SkillRunStatus,
     ToolCallSpec,
     ToolFeedbackMessage,
+    UsageLimits,
+    UsageTracker,
     resolve_effective_tool_allowlist,
 )
 from .protocols import StructuredModelClientProtocol
@@ -67,6 +69,14 @@ class SkillRunner:
     ) -> SkillRunResult:
         """执行 Skill。"""
         start_time = time.monotonic()
+
+        # --- Feature 062: 多维度资源限制 ---
+        limits = execution_context.usage_limits
+        # 向后兼容：如果调用方未设置 usage_limits 但 manifest 有自定义 loop_guard
+        if limits == UsageLimits() and manifest.loop_guard.max_steps != 30:
+            limits = manifest.loop_guard.to_usage_limits()
+        tracker = UsageTracker(start_time=start_time)
+
         attempts = 0
         steps = 0
         retry_failures = 0
@@ -92,9 +102,10 @@ class SkillRunner:
         await self._emit_skill_started(manifest, execution_context)
         await self._call_hook("skill_start", manifest, execution_context)
 
-        while steps < manifest.loop_guard.max_steps:
+        while tracker.check_limits(limits) is None:
             steps += 1
             attempts += 1
+            tracker.steps = steps  # 同步到 tracker
 
             await self._call_hook("before_llm_call", manifest, attempts, steps)
             await self._emit_model_started(manifest, execution_context, attempts, steps)
@@ -111,6 +122,16 @@ class SkillRunner:
                 await self._emit_model_completed(
                     manifest, execution_context, raw_output, attempts, steps
                 )
+                # --- Feature 062: 累加 token/cost 数据 ---
+                if hasattr(raw_output, "token_usage") and raw_output.token_usage:
+                    tracker.request_tokens += int(
+                        raw_output.token_usage.get("prompt_tokens", 0)
+                    )
+                    tracker.response_tokens += int(
+                        raw_output.token_usage.get("completion_tokens", 0)
+                    )
+                if hasattr(raw_output, "cost_usd"):
+                    tracker.cost_usd += float(raw_output.cost_usd or 0.0)
             except Exception as exc:
                 await self._emit_model_failed(
                     manifest, execution_context, str(exc), attempts, steps
@@ -170,7 +191,7 @@ class SkillRunner:
                     last_signature = signature
                     repeat_count = 1
 
-                if repeat_count >= manifest.loop_guard.repeat_signature_threshold:
+                if repeat_count >= limits.repeat_signature_threshold:
                     result = await self._fail_result(
                         manifest=manifest,
                         execution_context=execution_context,
@@ -222,6 +243,7 @@ class SkillRunner:
                     continue
 
                 feedback.extend(tool_feedbacks)
+                tracker.tool_calls += len(output.tool_calls)
 
                 if any(item.is_error for item in tool_feedbacks):
                     retry_failures += 1
@@ -243,6 +265,22 @@ class SkillRunner:
                 # 当前 step 成功完成，清零连续失败计数。
                 retry_failures = 0
 
+            # --- Feature 062 Phase 4: StopHook 检查 ---
+            if await self._check_stop_hooks(manifest, execution_context, tracker, output):
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                result = SkillRunResult(
+                    status=SkillRunStatus.STOPPED,
+                    output=output,
+                    attempts=attempts,
+                    steps=steps,
+                    duration_ms=duration_ms,
+                    usage=tracker.to_dict(),
+                    total_cost_usd=tracker.cost_usd,
+                )
+                await self._emit_usage_report(manifest, execution_context, tracker)
+                await self._call_hook("skill_end", manifest, execution_context, result)
+                return result
+
             if output.complete or output.skip_remaining_tools:
                 retry_failures = 0
                 duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -252,7 +290,10 @@ class SkillRunner:
                     attempts=attempts,
                     steps=steps,
                     duration_ms=duration_ms,
+                    usage=tracker.to_dict(),
+                    total_cost_usd=tracker.cost_usd,
                 )
+                await self._emit_usage_report(manifest, execution_context, tracker)
                 await self._emit_skill_completed(manifest, execution_context, result)
                 await self._call_hook("skill_end", manifest, execution_context, result)
                 return result
@@ -282,14 +323,23 @@ class SkillRunner:
                     return result
                 await self._backoff(manifest)
 
+        # 获取具体的超限类别
+        exceeded = tracker.check_limits(limits)
+        category = exceeded or ErrorCategory.STEP_LIMIT_EXCEEDED
         result = await self._fail_result(
             manifest=manifest,
             execution_context=execution_context,
             start_time=start_time,
             attempts=attempts,
             steps=steps,
-            category=ErrorCategory.STEP_LIMIT_EXCEEDED,
-            error=SkillLoopDetectedError("超过 max_steps 限制"),
+            category=category,
+            error=SkillLoopDetectedError(f"资源限制触发: {category.value}"),
+        )
+        result.usage = tracker.to_dict()
+        result.total_cost_usd = tracker.cost_usd
+        await self._emit_usage_report(manifest, execution_context, tracker)
+        await self._emit_resource_limit_hit(
+            manifest, execution_context, tracker, category, limits
         )
         await self._call_hook("skill_end", manifest, execution_context, result)
         return result
@@ -542,6 +592,71 @@ class SkillRunner:
                 "token_usage": {},
             },
         )
+
+    async def _emit_usage_report(
+        self,
+        manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
+        tracker: UsageTracker,
+    ) -> None:
+        """emit SKILL_USAGE_REPORT 事件，记录 Skill 执行资源消耗。"""
+        await self._emit_event(
+            execution_context=execution_context,
+            event_type=EventType.SKILL_USAGE_REPORT,
+            payload={
+                "skill_id": manifest.skill_id,
+                **tracker.to_dict(),
+            },
+        )
+
+    async def _emit_resource_limit_hit(
+        self,
+        manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
+        tracker: UsageTracker,
+        error_category: ErrorCategory,
+        limits: UsageLimits,
+    ) -> None:
+        """emit RESOURCE_LIMIT_HIT 告警事件，记录超限详情。"""
+        await self._emit_event(
+            execution_context=execution_context,
+            event_type=EventType.RESOURCE_LIMIT_HIT,
+            payload={
+                "skill_id": manifest.skill_id,
+                "error_category": error_category.value,
+                "current_usage": tracker.to_dict(),
+                "limits": {
+                    "max_steps": limits.max_steps,
+                    "max_request_tokens": limits.max_request_tokens,
+                    "max_response_tokens": limits.max_response_tokens,
+                    "max_tool_calls": limits.max_tool_calls,
+                    "max_budget_usd": limits.max_budget_usd,
+                    "max_duration_seconds": limits.max_duration_seconds,
+                },
+            },
+        )
+
+    async def _check_stop_hooks(
+        self,
+        manifest: SkillManifest,
+        context: SkillExecutionContext,
+        tracker: UsageTracker,
+        output: SkillOutputEnvelope,
+    ) -> bool:
+        """检查所有 hook 的 should_stop()。任一返回 True 即返回 True。
+
+        Phase 4 (StopHook) 实现时会在主循环中调用此方法。
+        """
+        for hook in self._hooks:
+            fn = getattr(hook, "should_stop", None)
+            if fn is None:
+                continue
+            try:
+                if await fn(manifest, context, tracker, output):
+                    return True
+            except Exception as exc:
+                logger.warning("stop_hook_failed", error=str(exc))
+        return False
 
     async def _emit_model_failed(
         self,

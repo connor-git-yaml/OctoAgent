@@ -964,6 +964,19 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ADD COLUMN memory_namespace_ids TEXT NOT NULL DEFAULT '[]'"
         )
 
+    # Feature 062: 资源限制字段迁移
+    agent_profile_columns = await _table_columns(conn, "agent_profiles")
+    if agent_profile_columns and "resource_limits" not in agent_profile_columns:
+        await conn.execute(
+            "ALTER TABLE agent_profiles ADD COLUMN resource_limits TEXT NOT NULL DEFAULT '{}'"
+        )
+
+    worker_profile_columns = await _table_columns(conn, "worker_profiles")
+    if worker_profile_columns and "resource_limits" not in worker_profile_columns:
+        await conn.execute(
+            "ALTER TABLE worker_profiles ADD COLUMN resource_limits TEXT NOT NULL DEFAULT '{}'"
+        )
+
     # 修正 agent_sessions 的 UNIQUE 索引：只对 butler_main 生效，
     # worker_internal / subagent_internal sessions 不受一个 project 一个 session 的限制。
     if agent_session_columns:

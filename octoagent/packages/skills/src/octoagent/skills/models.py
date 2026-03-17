@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import time
+import warnings
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
+
+_MAX_STEPS_HARD_CEILING = 500  # 降级重试 clamp 上限
 
 
 class SkillRunStatus(StrEnum):
@@ -14,6 +19,7 @@ class SkillRunStatus(StrEnum):
 
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    STOPPED = "STOPPED"  # 被 StopHook 或用户取消优雅终止
 
 
 class ErrorCategory(StrEnum):
@@ -25,6 +31,10 @@ class ErrorCategory(StrEnum):
     LOOP_DETECTED = "loop_detected"
     STEP_LIMIT_EXCEEDED = "step_limit_exceeded"
     INPUT_VALIDATION_ERROR = "input_validation_error"
+    TOKEN_LIMIT_EXCEEDED = "token_limit_exceeded"
+    TOOL_CALL_LIMIT_EXCEEDED = "tool_call_limit_exceeded"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    TIMEOUT_EXCEEDED = "timeout_exceeded"
 
 
 class SkillPermissionMode(StrEnum):
@@ -40,13 +50,79 @@ class RetryPolicy(BaseModel):
     max_attempts: int = Field(default=3, ge=1, le=20)
     backoff_ms: int = Field(default=500, ge=0, le=60_000)
     upgrade_model_on_fail: bool = Field(default=False)
+    downgrade_scope_on_fail: bool = Field(default=False)
+    fallback_model_alias: str = Field(default="")
 
 
 class LoopGuardPolicy(BaseModel):
-    """循环保护策略。"""
+    """循环保护策略。
+
+    .. deprecated::
+        使用 UsageLimits 替代。将在 6 个月后移除。
+    """
 
     max_steps: int = Field(default=30, ge=1, le=200)
     repeat_signature_threshold: int = Field(default=3, ge=2, le=20)
+
+    def to_usage_limits(self) -> UsageLimits:
+        """转换为 UsageLimits。"""
+        return UsageLimits(
+            max_steps=min(self.max_steps, _MAX_STEPS_HARD_CEILING),
+            repeat_signature_threshold=self.repeat_signature_threshold,
+        )
+
+
+class UsageLimits(BaseModel):
+    """多维度资源限制。任一维度触发即终止执行。"""
+
+    max_steps: int = Field(default=30, ge=1, le=_MAX_STEPS_HARD_CEILING)
+    max_request_tokens: int | None = Field(default=None, ge=1)
+    max_response_tokens: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=1)
+    max_budget_usd: float | None = Field(default=None, ge=0.0)
+    max_duration_seconds: float | None = Field(default=None, ge=1.0)
+    repeat_signature_threshold: int = Field(default=3, ge=2, le=20)
+
+
+@dataclass
+class UsageTracker:
+    """运行时资源消耗追踪。高频更新场景使用 dataclass 避免 Pydantic 校验开销。"""
+
+    steps: int = 0
+    request_tokens: int = 0
+    response_tokens: int = 0
+    tool_calls: int = 0
+    cost_usd: float = 0.0
+    start_time: float = 0.0  # time.monotonic()
+
+    def check_limits(self, limits: UsageLimits) -> ErrorCategory | None:
+        """检查是否超限。返回 None 表示未超限，否则返回对应的 ErrorCategory。"""
+        if self.steps >= limits.max_steps:
+            return ErrorCategory.STEP_LIMIT_EXCEEDED
+        if limits.max_request_tokens and self.request_tokens >= limits.max_request_tokens:
+            return ErrorCategory.TOKEN_LIMIT_EXCEEDED
+        if limits.max_response_tokens and self.response_tokens >= limits.max_response_tokens:
+            return ErrorCategory.TOKEN_LIMIT_EXCEEDED
+        if limits.max_tool_calls and self.tool_calls >= limits.max_tool_calls:
+            return ErrorCategory.TOOL_CALL_LIMIT_EXCEEDED
+        if limits.max_budget_usd is not None and self.cost_usd >= limits.max_budget_usd - 1e-9:
+            return ErrorCategory.BUDGET_EXCEEDED
+        if limits.max_duration_seconds is not None:
+            elapsed = time.monotonic() - self.start_time
+            if elapsed >= limits.max_duration_seconds:
+                return ErrorCategory.TIMEOUT_EXCEEDED
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为 dict，用于写入 SkillRunResult.usage。"""
+        return {
+            "steps": self.steps,
+            "request_tokens": self.request_tokens,
+            "response_tokens": self.response_tokens,
+            "tool_calls": self.tool_calls,
+            "cost_usd": self.cost_usd,
+            "duration_seconds": round(time.monotonic() - self.start_time, 2),
+        }
 
 
 class ContextBudgetPolicy(BaseModel):
@@ -67,6 +143,7 @@ class SkillExecutionContext(BaseModel):
     work_id: str = Field(default="")
     conversation_messages: list[dict[str, str]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    usage_limits: UsageLimits = Field(default_factory=UsageLimits)
 
 
 class ToolCallSpec(BaseModel):
@@ -84,6 +161,10 @@ class SkillOutputEnvelope(BaseModel):
     skip_remaining_tools: bool = Field(default=False)
     tool_calls: list[ToolCallSpec] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    # 例：{"prompt_tokens": 500, "completion_tokens": 120, "total_tokens": 620}
+    cost_usd: float = Field(default=0.0)
+    # LLM 调用成本（美元），从 LiteLLM response 提取
 
 
 class ToolFeedbackMessage(BaseModel):
@@ -108,6 +189,9 @@ class SkillRunResult(BaseModel):
     duration_ms: int = Field(default=0, ge=0)
     error_category: ErrorCategory | None = Field(default=None)
     error_message: str | None = Field(default=None)
+    usage: dict[str, Any] = Field(default_factory=dict)
+    # 由 UsageTracker.to_dict() 生成
+    total_cost_usd: float = Field(default=0.0)
 
 
 class SkillManifestModel(BaseModel):
@@ -125,6 +209,8 @@ class SkillManifestModel(BaseModel):
     description: str | None = Field(default=None)
     description_md: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resource_limits: dict[str, Any] = Field(default_factory=dict)
+    # 从 SKILL.md frontmatter 的 resource_limits 字段读取
 
 
 def extract_mounted_tool_names(metadata: dict[str, Any] | None) -> list[str]:

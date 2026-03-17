@@ -346,6 +346,17 @@ class LiteLLMSkillClient:
                         text_parts.append(str(content_item.get("text", "")))
 
         usage = response_payload.get("usage", {})
+        # 尝试从 LiteLLM response 提取成本（可能在顶层或 usage 子对象中）
+        cost_raw = (
+            response_payload.get("cost")
+            or response_payload.get("_cost")
+            or usage.get("cost")
+            or 0.0
+        )
+        try:
+            cost_value = float(cost_raw)
+        except (TypeError, ValueError):
+            cost_value = 0.0
         metadata = {
             "model_name": str(response_payload.get("model", "") or manifest.model_alias),
             "provider": "openai",
@@ -354,8 +365,8 @@ class LiteLLMSkillClient:
                 "completion_tokens": int(usage.get("output_tokens", 0) or 0),
                 "total_tokens": int(usage.get("total_tokens", 0) or 0),
             },
-            "cost_usd": 0.0,
-            "cost_unavailable": True,
+            "cost_usd": cost_value,
+            "cost_unavailable": cost_value == 0.0,
             "function_call_items": [
                 {
                     "type": "function_call",
@@ -371,20 +382,30 @@ class LiteLLMSkillClient:
     async def _call_proxy(
         self, body: dict[str, Any]
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
-        """调用 LiteLLM Proxy（SSE 流式），返回 (content, tool_calls)。
+        """调用 LiteLLM Proxy（SSE 流式），返回 (content, tool_calls, metadata)。
 
         tool_calls 格式: [{"id": str, "tool_name": str, "arguments": dict}]
+        metadata 包含 token_usage / cost_usd / model_name 等（如可用）。
         """
         content_parts: list[str] = []
         # 按 index 合并流式 tool_call 片段
         tc_raw: dict[int, dict[str, Any]] = {}
+        # 从流末 chunk 提取 token usage
+        usage_data: dict[str, int] = {}
+
+        # 确保 LiteLLM 在流结束时返回 usage 数据
+        body_with_stream = {
+            **body,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
 
         async with (
             httpx.AsyncClient(timeout=self._timeout_s) as client,
             client.stream(
                 "POST",
                 f"{self._proxy_url}/v1/chat/completions",
-                json={**body, "stream": True},
+                json=body_with_stream,
                 headers={
                     "Authorization": f"Bearer {self._master_key}",
                     "Content-Type": "application/json",
@@ -409,6 +430,19 @@ class LiteLLMSkillClient:
                     chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+
+                # 提取流末 usage 数据（LiteLLM 在 stream_options.include_usage=true 时
+                # 会在最终 chunk 返回 usage 字段）
+                chunk_usage = chunk.get("usage")
+                if isinstance(chunk_usage, dict):
+                    usage_data = {
+                        "prompt_tokens": int(chunk_usage.get("prompt_tokens", 0) or 0),
+                        "completion_tokens": int(
+                            chunk_usage.get("completion_tokens", 0) or 0
+                        ),
+                        "total_tokens": int(chunk_usage.get("total_tokens", 0) or 0),
+                    }
+
                 choices = chunk.get("choices", [])
                 if not choices:
                     continue
@@ -443,7 +477,17 @@ class LiteLLMSkillClient:
                     "arguments": arguments,
                 }
             )
-        return content, tool_calls, {}
+
+        # 构建 metadata，包含 token usage 和 cost 信息
+        metadata: dict[str, Any] = {}
+        if usage_data:
+            metadata["token_usage"] = usage_data
+            metadata["model_name"] = str(body.get("model", ""))
+            metadata["provider"] = "litellm"
+            # SSE 路径暂无直接成本数据，标记为不可用
+            metadata["cost_usd"] = 0.0
+            metadata["cost_unavailable"] = True
+        return content, tool_calls, metadata
 
     async def generate(
         self,
@@ -533,7 +577,15 @@ class LiteLLMSkillClient:
                     for tc in tool_calls
                 ],
                 metadata=metadata,
+                token_usage=metadata.get("token_usage", {}),
+                cost_usd=float(metadata.get("cost_usd", 0.0) or 0.0),
             )
         else:
             history.append({"role": "assistant", "content": content})
-            return SkillOutputEnvelope(content=content, complete=True, metadata=metadata)
+            return SkillOutputEnvelope(
+                content=content,
+                complete=True,
+                metadata=metadata,
+                token_usage=metadata.get("token_usage", {}),
+                cost_usd=float(metadata.get("cost_usd", 0.0) or 0.0),
+            )
