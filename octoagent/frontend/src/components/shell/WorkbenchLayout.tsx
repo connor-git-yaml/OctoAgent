@@ -366,12 +366,16 @@ export default function WorkbenchLayout() {
         </div>
 
         {showNewSessionModal && (() => {
-          const agentProfiles = snapshot.resources.agent_profiles;
-          const profiles = Array.isArray(agentProfiles?.profiles) ? agentProfiles.profiles : [];
-          const agentOptions = profiles.map((p) => ({
-            profile_id: p.profile_id,
-            name: p.name,
-          }));
+          // 用 worker_profiles 而非 agent_profiles——每个 WorkerProfile 代表一个唯一 Agent，
+          // 避免 bootstrap AgentProfile 与 mirror AgentProfile 造成重复
+          const workerProfiles = snapshot.resources.worker_profiles;
+          const profiles = Array.isArray(workerProfiles?.profiles) ? workerProfiles.profiles : [];
+          const agentOptions = profiles
+            .filter((p) => p.status === "active")
+            .map((p) => ({
+              profile_id: p.profile_id,
+              name: p.name,
+            }));
 
           const handleCreateSession = async (agentProfileId: string, projectName: string) => {
             setNewSessionBusy(true);
