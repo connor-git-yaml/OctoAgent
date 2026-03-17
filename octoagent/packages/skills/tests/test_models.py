@@ -21,7 +21,7 @@ def test_retry_policy_defaults() -> None:
 
 def test_loop_guard_defaults() -> None:
     policy = LoopGuardPolicy()
-    assert policy.max_steps == 8
+    assert policy.max_steps == 30
     assert policy.repeat_signature_threshold == 3
 
 
