@@ -7,6 +7,7 @@
 - 仅绑定 127.0.0.1（不绑定 0.0.0.0）
 - 收到第一个有效回调后立即关闭
 - 默认 300s 超时后自动关闭
+- 重复发起时自动关闭旧 server，避免端口冲突
 """
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ _ERROR_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+# 模块级追踪：当前活跃的 callback server，用于重复发起时自动关闭旧实例
+_active_server: asyncio.Server | None = None
+_active_future: asyncio.Future[CallbackResult] | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class CallbackResult:
@@ -63,6 +68,22 @@ def _build_http_response(status_code: int, status_text: str, body: str) -> bytes
     return headers.encode("ascii") + body_bytes
 
 
+async def _close_active_server() -> None:
+    """关闭当前活跃的 callback server（如有），释放端口"""
+    global _active_server, _active_future
+    if _active_server is not None:
+        log.info("oauth_callback_server_replacing", reason="新的 OAuth 流程启动，关闭旧 server")
+        _active_server.close()
+        try:
+            await _active_server.wait_closed()
+        except Exception:
+            pass
+        _active_server = None
+    if _active_future is not None and not _active_future.done():
+        _active_future.cancel()
+        _active_future = None
+
+
 async def wait_for_callback(
     port: int = 1455,
     path: str = "/auth/callback",
@@ -77,6 +98,7 @@ async def wait_for_callback(
     - 收到第一个有效 callback 后立即关闭服务器
     - 超时（默认 5 分钟）后自动关闭
     - 返回 HTML 页面告知用户授权结果
+    - 重复调用时自动关闭前一次的 server，避免端口冲突
 
     HTTP 响应规则:
     - 非 /auth/callback 路径 -> HTTP 404
@@ -97,7 +119,13 @@ async def wait_for_callback(
         OAuthFlowError: 超时
         OSError: 端口绑定失败（EADDRINUSE）
     """
+    global _active_server, _active_future
+
+    # 关闭之前残留的 callback server，释放端口
+    await _close_active_server()
+
     result_future: asyncio.Future[CallbackResult] = asyncio.get_event_loop().create_future()
+    _active_future = result_future
 
     async def handle_connection(
         reader: asyncio.StreamReader,
@@ -192,12 +220,12 @@ async def wait_for_callback(
                 await writer.wait_closed()
 
     # 启动服务器（仅绑定 127.0.0.1）
-    # 注意: 端口占用时会抛出 OSError，由调用方捕获并降级
     server = await asyncio.start_server(
         handle_connection,
         host="127.0.0.1",
         port=port,
     )
+    _active_server = server
 
     log.debug("oauth_callback_server_started", port=port, path=path)
 
@@ -213,6 +241,11 @@ async def wait_for_callback(
     finally:
         server.close()
         await server.wait_closed()
+        # 清理模块级引用
+        if _active_server is server:
+            _active_server = None
+        if _active_future is result_future:
+            _active_future = None
         log.debug("oauth_callback_server_closed", port=port)
 
 
