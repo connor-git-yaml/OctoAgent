@@ -77,8 +77,8 @@ class ApprovalManager:
         self,
         event_store: EventStoreProtocol | None = None,
         sse_broadcaster: SSEBroadcasterProtocol | None = None,
-        default_timeout_s: float = 120.0,
-        grace_period_s: float = 15.0,
+        default_timeout_s: float = 600.0,  # 10 分钟，给用户充足的审批时间
+        grace_period_s: float = 30.0,
     ) -> None:
         self._event_store = event_store
         self._sse_broadcaster = sse_broadcaster

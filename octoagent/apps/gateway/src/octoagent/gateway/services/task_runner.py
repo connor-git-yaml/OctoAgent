@@ -65,7 +65,7 @@ class TaskRunner:
         sse_hub,
         llm_service,
         approval_manager=None,
-        timeout_seconds: float = 600.0,
+        timeout_seconds: float = 14400.0,  # 4 小时，需大于 Worker max_execution
         monitor_interval_seconds: float = 5.0,
         completion_notifier: Callable[[str], Awaitable[None]] | None = None,
         worker_runtime_config: WorkerRuntimeConfig | None = None,
