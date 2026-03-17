@@ -3633,6 +3633,16 @@ class OrchestratorService:
         existing = await self._stores.agent_context_store.get_agent_session(session_id)
         if existing is not None:
             return existing
+        # BUTLER_MAIN session 对 project 唯一：优先复用已有的活跃 session，
+        # 避免重复创建导致 UNIQUE constraint 冲突
+        if kind is AgentSessionKind.BUTLER_MAIN and project_id:
+            active_for_project = (
+                await self._stores.agent_context_store.get_active_session_for_project(
+                    project_id, kind=AgentSessionKind.BUTLER_MAIN
+                )
+            )
+            if active_for_project is not None:
+                return active_for_project
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=agent_runtime.agent_runtime_id,
