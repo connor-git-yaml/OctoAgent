@@ -1114,7 +1114,14 @@ export default function ChatWorkbench() {
   const a2aConversations = ensureArray(context.a2a_conversations);
   const storedRestoreTaskId = useMemo(() => readStoredTaskId(), []);
 
-  // 当 URL 指定了 sessionId 时，直接用该 session 的 task_id 来恢复
+  // 当 URL 指定了 sessionId 时，直接用该 session；否则用首个 web session 作为默认
+  const webSessions = useMemo(
+    () => {
+      const web = sessions.filter((s) => s.channel === "web");
+      return web.length > 0 ? web : sessions;
+    },
+    [sessions]
+  );
   const routeSession = useMemo(
     () =>
       routeSessionId
@@ -1122,6 +1129,8 @@ export default function ChatWorkbench() {
         : null,
     [routeSessionId, sessions]
   );
+  // routeSession（URL 指定）或 webSessions[0]（默认首个）——用于 agent 名和标题
+  const currentSession = routeSession || webSessions[0] || null;
 
   const restoreTaskIds = useMemo(() => {
     // URL 指定了特定 session，直接使用其 task_id
@@ -1451,15 +1460,16 @@ export default function ChatWorkbench() {
     normalizedTaskStatus === "WAITING_INPUT" &&
     executionSession?.can_attach_input !== false;
   // 当前 Session 关联的 Agent 名（用于标题和 placeholder）
+  // 优先级：活跃 task session → 当前 route/默认 session → pending conversation → 全局默认
   const effectiveAgentProfileId =
-    activeSessionAgentProfileId || pendingConversationAgentProfileId || defaultRootAgentId;
+    activeSessionAgentProfileId || currentSession?.agent_profile_id || pendingConversationAgentProfileId || defaultRootAgentId;
   const effectiveAgentName =
     workerProfiles.find((p) => p.profile_id === effectiveAgentProfileId)?.name ||
     defaultRootAgent?.name ||
     "OctoAgent";
   // Session 展示名 = 项目名（作为默认）；后续可被别名覆盖
   const sessionDisplayName =
-    (routeSession?.title?.trim()) ||
+    (currentSession?.title?.trim()) ||
     (activeSession?.title?.trim()) ||
     effectiveProjectLabel ||
     "";
