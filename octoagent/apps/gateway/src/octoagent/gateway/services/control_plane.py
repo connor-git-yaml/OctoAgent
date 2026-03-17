@@ -4185,6 +4185,16 @@ class ControlPlaneService:
                 env_name: credential.access_token.get_secret_value(),
             },
         )
+
+        # OAuth 成功后自动同步 litellm-config.yaml
+        # 确保 LiteLLM Proxy 能路由模型（含 account_id headers 等）
+        try:
+            config = load_config(self._project_root)
+            generate_litellm_config(config, self._project_root)
+            log.info("oauth_litellm_config_synced")
+        except Exception as exc:
+            log.warning("oauth_litellm_config_sync_failed", error=str(exc))
+
         return self._completed_result(
             request=request,
             code="OPENAI_OAUTH_CONNECTED",
