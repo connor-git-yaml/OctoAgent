@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import os
@@ -1052,18 +1053,35 @@ class CapabilityPackService:
             )
             return root.resolve()
 
-        def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
+        def _resolve_workspace_path(
+            workspace_root: Path,
+            raw_path: str,
+            *,
+            allow_home_read: bool = False,
+        ) -> Path:
             normalized = raw_path.strip()
             candidate = (
                 Path(normalized)
                 if normalized
                 else workspace_root
             )
+            # 展开 ~ 前缀
+            if str(candidate).startswith("~"):
+                candidate = candidate.expanduser()
             if not candidate.is_absolute():
                 candidate = workspace_root / candidate
             resolved = candidate.resolve()
             if resolved != workspace_root and not resolved.is_relative_to(workspace_root):
-                raise RuntimeError("path escapes current workspace root")
+                # 只读操作允许访问用户 HOME 目录下的路径
+                # （如 ~/.claude/mcp-servers/、~/.config/ 等）
+                home = Path.home().resolve()
+                if allow_home_read and resolved.is_relative_to(home):
+                    return resolved
+                raise RuntimeError(
+                    f"path escapes workspace root ({workspace_root}). "
+                    f"filesystem 工具仅能访问 workspace 内路径，"
+                    f"如需访问外部路径可使用 terminal.exec"
+                )
             return resolved
 
         def _truncate_text(value: str, *, limit: int = 4000) -> str:
@@ -1240,10 +1258,10 @@ class CapabilityPackService:
             path: str = ".",
             max_entries: int = 50,
         ) -> str:
-            """列出当前 workspace 内目录内容。"""
+            """列出目录内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
             workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path)
+            target = _resolve_workspace_path(workspace_root, path, allow_home_read=True)
             if not target.exists():
                 raise RuntimeError(f"path not found: {target}")
             if not target.is_dir():
@@ -1287,12 +1305,16 @@ class CapabilityPackService:
             path: str,
             max_chars: int = 4000,
         ) -> str:
-            """读取当前 workspace 内文本文件内容。"""
+            """读取文本文件内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
             workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path)
+            target = _resolve_workspace_path(workspace_root, path, allow_home_read=True)
             if not target.exists():
-                raise RuntimeError(f"path not found: {target}")
+                # 返回结构化的 "不存在" 响应，而非抛异常，让 Agent 更容易处理
+                return json.dumps(
+                    {"exists": False, "path": str(target), "error": "file not found"},
+                    ensure_ascii=False,
+                )
             if not target.is_file():
                 raise RuntimeError(f"path is not a file: {target}")
             content = target.read_text(encoding="utf-8")
@@ -1322,7 +1344,7 @@ class CapabilityPackService:
         async def terminal_exec(
             command: str,
             cwd: str = ".",
-            timeout_seconds: float = 15.0,
+            timeout_seconds: float = 30.0,
             max_output_chars: int = 4000,
         ) -> str:
             """在当前 workspace 内执行受治理终端命令。"""
@@ -1331,37 +1353,50 @@ class CapabilityPackService:
             working_dir = _resolve_workspace_path(workspace_root, cwd)
             if not working_dir.exists() or not working_dir.is_dir():
                 raise RuntimeError(f"cwd is not a directory: {working_dir}")
-            bounded_timeout = max(1.0, min(timeout_seconds, 120.0))
+            # 超时上限 600s（对齐 MCP 安装等长命令场景）
+            bounded_timeout = max(1.0, min(timeout_seconds, 600.0))
             bounded_limit = max(200, min(max_output_chars, 20_000))
+            cwd_label = "." if working_dir == workspace_root else str(
+                working_dir.relative_to(workspace_root)
+            )
+
+            # 使用 asyncio subprocess 避免阻塞事件循环
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/sh", "-lc", command,
+                cwd=str(working_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            timed_out = False
             try:
-                completed = subprocess.run(
-                    ["/bin/sh", "-lc", command],
-                    cwd=str(working_dir),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=bounded_timeout,
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=bounded_timeout,
                 )
-                payload = {
-                    "workspace_root": str(workspace_root),
-                    "cwd": "." if working_dir == workspace_root else str(working_dir.relative_to(workspace_root)),
-                    "command": command,
-                    "returncode": completed.returncode,
-                    "stdout": _truncate_text(completed.stdout, limit=bounded_limit),
-                    "stderr": _truncate_text(completed.stderr, limit=bounded_limit),
-                    "timed_out": False,
-                }
-            except subprocess.TimeoutExpired as exc:
-                payload = {
-                    "workspace_root": str(workspace_root),
-                    "cwd": "." if working_dir == workspace_root else str(working_dir.relative_to(workspace_root)),
-                    "command": command,
-                    "returncode": None,
-                    "stdout": _truncate_text(str(exc.stdout or ""), limit=bounded_limit),
-                    "stderr": _truncate_text(str(exc.stderr or ""), limit=bounded_limit),
-                    "timed_out": True,
-                    "timeout_seconds": bounded_timeout,
-                }
+            except asyncio.TimeoutError:
+                # 超时后先尝试 terminate，给 2s 优雅退出，不行再 kill
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                stdout_bytes = b""
+                stderr_bytes = b""
+                timed_out = True
+
+            stdout_text = (stdout_bytes or b"").decode("utf-8", errors="replace")
+            stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace")
+            payload = {
+                "workspace_root": str(workspace_root),
+                "cwd": cwd_label,
+                "command": command,
+                "returncode": proc.returncode,
+                "stdout": _truncate_text(stdout_text, limit=bounded_limit),
+                "stderr": _truncate_text(stderr_text, limit=bounded_limit),
+                "timed_out": timed_out,
+            }
+            if timed_out:
+                payload["timeout_seconds"] = bounded_timeout
             return json.dumps(payload, ensure_ascii=False)
 
         @tool_contract(
