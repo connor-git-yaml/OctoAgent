@@ -1850,6 +1850,10 @@ export default function ChatWorkbench() {
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // IME 正在组合（如中文输入法按 Enter 确认候选词）时，不拦截按键
+    if (event.nativeEvent.isComposing || event.key === "Process") {
+      return;
+    }
     if (event.key === "ArrowDown") {
       if (slashCommandMatches.length === 0) {
         return;
