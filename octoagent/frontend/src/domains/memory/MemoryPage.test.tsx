@@ -283,15 +283,15 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("这页暂时还没拿到完整的 Memory 快照")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "回到 Chat" })).toHaveAttribute("href", "/chat");
+    expect(screen.getByText("Memory 数据暂时不可用")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "回到 Chat" })).toHaveAttribute("href", "/");
 
-    await userEvent.click(screen.getByRole("button", { name: "重新加载 Memory" }));
+    await userEvent.click(screen.getByRole("button", { name: "重新加载" }));
 
     expect(refreshSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it("支持切换记录并在右侧 inspector 显示详情", async () => {
+  it("点击记录卡片弹出详情 modal", async () => {
     mockWorkbench = {
       snapshot: buildMemorySnapshot(),
       submitAction: vi.fn(),
@@ -304,17 +304,22 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    const aliceHeading = await screen.findByRole("heading", { name: "Alice" });
-    const aliceInspector = aliceHeading.closest("section");
-    expect(aliceInspector).not.toBeNull();
-    expect(within(aliceInspector!).getByText(/Alice 偏好异步沟通/)).toBeInTheDocument();
+    // 点击 Bob 的记录卡片，弹出详情 modal
+    const bobCard = (await screen.findByText("Bob")).closest("article") as HTMLElement;
+    expect(bobCard).not.toBeNull();
+    await userEvent.click(bobCard);
 
-    await userEvent.click(screen.getByRole("button", { name: "查看 Bob 详情" }));
+    // modal 中应该展示 Bob 的详情
+    const modalHeading = await screen.findByRole("heading", { name: "Bob" });
+    const modalBody = modalHeading.closest(".wb-modal-body") as HTMLElement;
+    expect(modalBody).not.toBeNull();
+    expect(within(modalBody).getByText("Bob 需要每周汇总。")).toBeInTheDocument();
 
-    const bobHeading = await screen.findByRole("heading", { name: "Bob" });
-    const bobInspector = bobHeading.closest("section");
-    expect(bobInspector).not.toBeNull();
-    expect(within(bobInspector!).getByText("Bob 需要每周汇总。")).toBeInTheDocument();
+    // 关闭 modal
+    await userEvent.click(within(modalBody).getByRole("button", { name: "关闭" }));
+    await waitFor(() =>
+      expect(screen.queryByText("关闭")).not.toBeInTheDocument()
+    );
   });
 
   it("会过滤内部技术写回记录并展示派生细节", async () => {
@@ -357,19 +362,23 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "3 条可读记忆" })).toBeInTheDocument();
+    // 3 条可见记忆（Alice + Bob + 派生，internal 被过滤）
+    expect(await screen.findByRole("heading", { name: "3 条记忆" })).toBeInTheDocument();
     expect(screen.queryByText(/worker_tool:bash:artifact-7/)).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "查看 Alice 协作偏好 详情" }));
+    // 点击派生记录卡片弹出 modal
+    const derivedCard = screen.getByText("Alice 协作偏好").closest("article") as HTMLElement;
+    expect(derivedCard).not.toBeNull();
+    await userEvent.click(derivedCard);
 
-    const derivedHeading = await screen.findByRole("heading", { name: "Alice 协作偏好" });
-    const derivedInspector = derivedHeading.closest("section");
-    expect(derivedInspector).not.toBeNull();
-    expect(within(derivedInspector!).getByText("ToM 判断 · 置信度 82%")).toBeInTheDocument();
-    expect(within(derivedInspector!).getByText("更偏好异步")).toBeInTheDocument();
+    const modalHeading = await screen.findByRole("heading", { name: "Alice 协作偏好" });
+    const modalBody = modalHeading.closest(".wb-modal-body") as HTMLElement;
+    expect(modalBody).not.toBeNull();
+    expect(within(modalBody).getByText("ToM 判断 · 置信度 82%")).toBeInTheDocument();
+    expect(within(modalBody).getByText("更偏好异步")).toBeInTheDocument();
   });
 
-  it("只保留真正需要处理的 Memory 提示，并移除无关的全局待办区", async () => {
+  it("简化后的 hero 不再展示下一步引导面板", async () => {
     mockWorkbench = {
       snapshot: buildMemorySnapshot(),
       submitAction: vi.fn(),
@@ -382,15 +391,17 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "还有新的内容待整理" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "整理最新记忆" })).toBeInTheDocument();
-    expect(screen.queryByText("现在就能使用")).not.toBeInTheDocument();
-    expect(screen.queryByText("继续积累内容")).not.toBeInTheDocument();
-    expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
-    expect(screen.queryByText("备份与恢复")).not.toBeInTheDocument();
+    // hero 区存在且展示正常状态
+    expect(await screen.findByText("Memory")).toBeInTheDocument();
+
+    // 不再有下一步引导和已删除的面板
+    expect(screen.queryByText("下一步")).not.toBeInTheDocument();
+    expect(screen.queryByText("为什么这样判断")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前视图")).not.toBeInTheDocument();
+    expect(screen.queryByText("更多入口")).not.toBeInTheDocument();
   });
 
-  it("会展示当前实际生效的检索画像，而不是只靠模式猜状态", async () => {
+  it("hero 展示引擎和接入方式 chip", async () => {
     mockWorkbench = {
       snapshot: buildMemorySnapshot(),
       submitAction: vi.fn(),
@@ -405,10 +416,6 @@ describe("MemoryPage", () => {
 
     expect(await screen.findByText("引擎 MemU 兼容链路")).toBeInTheDocument();
     expect(screen.getByText("接入 HTTP Bridge")).toBeInTheDocument();
-    expect(screen.getByText("记忆加工")).toBeInTheDocument();
-    expect(screen.getByText("当前优先用 main 做记忆加工、总结和候选整理。")).toBeInTheDocument();
-    expect(screen.getByText("语义检索")).toBeInTheDocument();
-    expect(screen.getByText("Qwen3-Embedding-0.6B（默认）")).toBeInTheDocument();
   });
 
   it("会在 Memory 页面展示 embedding 迁移进度，并允许切换到新索引", async () => {
@@ -529,7 +536,7 @@ describe("MemoryPage", () => {
     });
   });
 
-  it("没有积压时会隐藏下一步区，避免继续提醒已完成事项", async () => {
+  it("没有积压时 hero 标题显示现行结论数", async () => {
     const snapshot = buildMemorySnapshot();
     snapshot.resources.memory.summary.fragment_count = 0;
     snapshot.resources.memory.summary.pending_replay_count = 0;
@@ -546,9 +553,7 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "Memory 当前记住了 2 条现行结论" })).toBeInTheDocument();
-    expect(screen.queryByText("下一步")).not.toBeInTheDocument();
-    expect(screen.queryByText("整理最新记忆")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "2 条现行结论" })).toBeInTheDocument();
   });
 
   it("sessions 缺少会话列表时不会因为 focused session 查找而崩溃", async () => {
@@ -567,7 +572,7 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "2 条可读记忆" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "2 条记忆" })).toBeInTheDocument();
     expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
   });
 });

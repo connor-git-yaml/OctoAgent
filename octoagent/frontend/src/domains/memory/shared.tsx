@@ -50,12 +50,6 @@ const OPERATOR_KIND_LABELS: Record<string, string> = {
   alert: "提醒",
 };
 
-export interface MemoryGuideItem {
-  title: string;
-  summary: string;
-  state: "done" | "todo" | "optional";
-}
-
 export interface MemoryDisplayRecord {
   record: MemoryRecordProjection;
   title: string;
@@ -72,18 +66,8 @@ export interface MemoryNarrative {
   heroTitle: string;
   heroSummary: string;
   stateLabel: string;
-  nextActionTitle: string;
-  nextActionSummary: string;
-  showNextActionPanel: boolean;
-  guideItems: MemoryGuideItem[];
-  missingSetupItems: string[];
   retrievalLabel: string;
-  usingFallback: boolean;
-  isDegraded: boolean;
-  hasVisibleRecords: boolean;
   hasStoredRecords: boolean;
-  hasBacklog: boolean;
-  totalStoredRecords: number;
   memoryWarnings: string[];
 }
 
@@ -504,138 +488,45 @@ export function buildMemoryNarrative(
     memory.summary.sor_current_count +
     memory.summary.fragment_count +
     memory.summary.vault_ref_count;
-  const backlogCount = Math.max(memory.summary.pending_replay_count, memory.summary.fragment_count);
   const hasStoredRecords = totalStoredRecords > 0;
-  const hasBacklog =
-    memory.summary.fragment_count > 0 || memory.summary.pending_replay_count > 0;
   const hasVisibleRecords = visibleRecordCount > 0;
   const memoryWarnings = uniqueOptions(
     [...memory.warnings, ...(memory.retrieval_profile?.warnings ?? [])].map(normalizeMemoryWarning)
   );
 
-  const hasActiveFilters =
-    Boolean(memory.filters.query.trim()) ||
-    Boolean(memory.filters.layer) ||
-    Boolean(memory.filters.partition) ||
-    memory.filters.include_history ||
-    memory.filters.include_vault_refs;
-
   let heroTone: MemoryNarrative["heroTone"] = "success";
-  let heroTitle = "Memory 正在帮你保留关键上下文";
-  let heroSummary =
-    "你现在看到的是系统已经整理成可读结论的内容，可以直接用来判断它记住了什么。";
+  let heroTitle = "Memory";
+  let heroSummary = "";
   let stateLabel = "运行中";
-  let nextActionTitle = "下一步建议";
-  let nextActionSummary =
-    "继续在 Chat 里对话，或导入一段历史消息；Memory 会把这些内容整理成你能读懂的结论。";
-  let showNextActionPanel = true;
-  const guideItems: MemoryGuideItem[] = [];
 
   if (missingSetupItems.length > 0) {
     heroTone = "warning";
     stateLabel = "待补配置";
     heroTitle = "增强记忆还没配完整";
-    heroSummary = `你已经选择了增强记忆，但还缺少 ${missingSetupItems.join("、")}。补齐后保存，再回到这里刷新即可。`;
-    nextActionSummary =
-      "如果你只是想先让基础 Memory 工作，也可以保持本地记忆模式，不需要额外服务。";
-    guideItems.push(
-      ...missingSetupItems.map((item) => ({
-        title: `补齐 ${item}`,
-        summary: "去 Settings > Memory 填好这项并保存配置，然后回到本页刷新。",
-        state: "todo" as const,
-      }))
-    );
+    heroSummary = `缺少 ${missingSetupItems.join("、")}，请到 Settings > Memory 补齐后保存。`;
   } else if (isDegraded) {
     heroTone = "danger";
-    stateLabel = usingFallback ? "降级回退" : "当前异常";
-    heroTitle = usingFallback ? "Memory 目前在本地回退运行" : "Memory 当前连接不稳定";
-    heroSummary = usingFallback
-      ? "增强记忆已经配置过，但这次暂时回退到了本地路径。已有结论还能看，跨会话检索可能暂时不完整。"
-      : "当前结果可能不完整，但已有数据不会丢。建议先检查 Settings 里的 Memory 配置，再决定是否打开 Advanced 排查。";
-    nextActionSummary =
-      "优先检查 Memory 设置里的模式、接入方式，以及 Bridge 地址 / 本地命令 / API Key 是否匹配；如果提醒还在，再去 Advanced 看运行诊断。";
-    guideItems.push(
-      {
-        title: "先确认 Memory 设置",
-        summary: "打开 Settings > Memory，确认当前模式、接入方式和最小配置是否仍然正确。",
-        state: "todo",
-      },
-      {
-        title: "需要时再打开 Advanced",
-        summary: "只有在设置看起来正确、提醒仍然持续时，才需要进入高级诊断页面继续排查。",
-        state: "optional",
-      }
-    );
+    stateLabel = usingFallback ? "降级回退" : "异常";
+    heroTitle = usingFallback ? "Memory 已回退到本地路径" : "Memory 连接异常";
+    heroSummary = "已有数据不会丢失。请检查 Settings > Memory 配置是否正确。";
   } else if (!hasVisibleRecords && hasStoredRecords) {
     heroTone = "warning";
-    stateLabel = "正在工作";
-    heroTitle = hasActiveFilters
-      ? "Memory 在工作，只是当前筛选太窄"
-      : "Memory 已有内容，但当前视图还没命中可读结果";
-    heroSummary = hasActiveFilters
-      ? "系统里已经有记忆，只是这次筛选没有命中。先清空条件再看一遍。"
-      : "当前项目里已经有片段或结论，但这次视图没有命中可读摘要。可以先切换记忆类型，或者直接清空筛选。";
-    nextActionSummary = "先清空筛选重新看一遍；如果最近刚有新消息或导入，也可以整理一次最新记忆。";
-    guideItems.push(
-      {
-        title: "先清空筛选",
-        summary: "大多数“什么都没看到”的情况，只是筛选条件太窄，不代表 Memory 没在工作。",
-        state: "todo",
-      },
-    );
-    if (hasBacklog) {
-      guideItems.push({
-        title: "整理最新记忆",
-        summary: "如果刚完成聊天或导入，整理一次会让新片段更快变成可读结论。",
-        state: "optional",
-      });
-    }
+    stateLabel = "运行中";
+    heroTitle = "当前筛选没有命中记忆";
+    heroSummary = "系统里已有记忆，试试调整或清空筛选条件。";
   } else if (hasVisibleRecords) {
     heroTone = "success";
     stateLabel = memory.backend_state === "syncing" ? "更新中" : "运行中";
     heroTitle =
       memory.summary.sor_current_count > 0
-        ? `Memory 当前记住了 ${memory.summary.sor_current_count} 条现行结论`
-        : "Memory 已经开始整理你的上下文";
-    heroSummary =
-      memoryMode === "memu" && !usingFallback
-        ? "增强记忆已经接通。你可以直接阅读这些结论，必要时再回到 Settings 微调检索策略。"
-        : "基础记忆已经在工作。继续聊天、导入或整理片段，系统会把更多内容沉淀成可读结论。";
-    if (hasBacklog) {
-      nextActionTitle = "还有新的内容待整理";
-      nextActionSummary =
-        "现在这些记忆已经能直接看，但最近新增的片段还没完全沉淀成结论。需要时再整理一次即可。";
-      guideItems.push({
-        title: "整理最新记忆",
-        summary: `当前还有 ${backlogCount} 条片段或积压待处理，整理后会更快变成稳定结论。`,
-        state: "todo",
-      });
-    } else {
-      showNextActionPanel = false;
-      nextActionTitle = "";
-      nextActionSummary = "";
-    }
+        ? `${memory.summary.sor_current_count} 条现行结论`
+        : "Memory 正在整理上下文";
+    heroSummary = "";
   } else {
     heroTone = "warning";
     stateLabel = "已就绪";
-    heroTitle = "Memory 已经就绪，等第一批内容进入";
-    heroSummary =
-      memoryMode === "local_only"
-        ? "现在是本地记忆模式，不需要额外服务。先去 Chat 对话或导入一段历史，回来这里就能看到结果。"
-        : "增强记忆已经配置完成，但当前还没有足够内容形成可读结论。先去聊天或导入，再回来刷新。";
-    nextActionSummary =
-      "最短路径是先产生内容，再回来查看；只有明确需要跨会话检索时，才需要继续折腾增强记忆。";
-    guideItems.push(
-      {
-        title: "先去产生第一批内容",
-        summary: "去 Chat 发起一段对话，或者导入一段历史消息，再回来刷新本页。",
-        state: "todo",
-      },
-    );
-  }
-
-  if (guideItems.length === 0) {
-    showNextActionPanel = false;
+    heroTitle = "还没有记忆内容";
+    heroSummary = "去 Chat 对话或导入历史内容后，这里会出现记忆。";
   }
 
   return {
@@ -643,18 +534,8 @@ export function buildMemoryNarrative(
     heroTitle,
     heroSummary,
     stateLabel,
-    nextActionTitle,
-    nextActionSummary,
-    showNextActionPanel,
-    guideItems,
-    missingSetupItems,
     retrievalLabel,
-    usingFallback,
-    isDegraded,
-    hasVisibleRecords,
     hasStoredRecords,
-    hasBacklog,
-    totalStoredRecords,
     memoryWarnings,
   };
 }

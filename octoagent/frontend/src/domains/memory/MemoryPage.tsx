@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { formatDateTime } from "../../workbench/utils";
+import MemoryDetailModal from "./MemoryDetailModal";
 import MemoryFiltersSection from "./MemoryFiltersSection";
 import MemoryHeroSection from "./MemoryHeroSection";
-import MemoryInspectorSection from "./MemoryInspectorSection";
 import MemoryRetrievalLifecycleSection from "./MemoryRetrievalLifecycleSection";
 import MemoryResultsSection from "./MemoryResultsSection";
 import {
@@ -28,10 +28,10 @@ export default function MemoryPage() {
       <div className="wb-page">
         <section className="wb-panel">
           <div className="wb-empty-state">
-            <strong>这页暂时还没拿到完整的 Memory 快照</strong>
+            <strong>Memory 数据暂时不可用</strong>
             <span>
-              现在先不要在这里猜状态。你可以先重新加载；如果只是想处理审批或继续当前任务，先回
-              Chat 也可以。
+              可能是后端服务尚未启动或快照加载失败。请检查后端是否正常运行，然后重新加载。
+              如果问题持续，可到 Advanced 页面查看诊断信息。
             </span>
             <div className="wb-inline-actions wb-inline-actions-wrap">
               <button
@@ -39,13 +39,13 @@ export default function MemoryPage() {
                 className="wb-button wb-button-primary"
                 onClick={() => void refreshSnapshot()}
               >
-                重新加载 Memory
+                重新加载
               </button>
-              <Link className="wb-button wb-button-secondary" to="/chat">
+              <Link className="wb-button wb-button-secondary" to="/">
                 回到 Chat
               </Link>
               <Link className="wb-button wb-button-tertiary" to="/advanced">
-                去 Advanced 看诊断
+                去 Advanced 诊断
               </Link>
             </div>
           </div>
@@ -91,6 +91,7 @@ export default function MemoryPage() {
     filters.include_vault_refs
   );
   const [limitDraft, setLimitDraft] = useState(String(filters.limit || 50));
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState("");
   const displayRecords = buildMemoryDisplayRecords(records);
 
@@ -102,19 +103,6 @@ export default function MemoryPage() {
     setIncludeVaultRefsDraft(filters.include_vault_refs);
     setLimitDraft(String(filters.limit || 50));
   }, [filters]);
-
-  useEffect(() => {
-    if (displayRecords.length === 0) {
-      setSelectedRecordId("");
-      return;
-    }
-    const hasSelectedRecord = displayRecords.some(
-      (record) => record.record.record_id === selectedRecordId
-    );
-    if (!hasSelectedRecord) {
-      setSelectedRecordId(displayRecords[0]!.record.record_id);
-    }
-  }, [displayRecords, selectedRecordId]);
 
   const layerOptions = uniqueOptions([
     "",
@@ -164,6 +152,8 @@ export default function MemoryPage() {
   );
   const selectedRecord =
     displayRecords.find((record) => record.record.record_id === selectedRecordId) ?? null;
+
+  // retrieval lifecycle 数据
   const rpCorpora = retrievalPlatform?.corpora ?? [];
   const rpGenerations = retrievalPlatform?.generations ?? [];
   const rpBuildJobs = retrievalPlatform?.build_jobs ?? [];
@@ -222,13 +212,6 @@ export default function MemoryPage() {
     });
   }
 
-  async function flushMemory() {
-    await submitAction("memory.flush", {
-      project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
-    });
-  }
-
   async function startEmbeddingMigration() {
     await submitAction("retrieval.index.start", {
       project_id: memoryResource.active_project_id,
@@ -262,7 +245,12 @@ export default function MemoryPage() {
 
   function handleSelectRecord(record: (typeof displayRecords)[number]) {
     setSelectedRecordId(record.record.record_id);
+    setShowDetailModal(true);
   }
+
+  const handleCloseModal = useCallback(() => {
+    setShowDetailModal(false);
+  }, []);
 
   return (
     <div className="wb-page">
@@ -275,23 +263,11 @@ export default function MemoryPage() {
         heroSummary={narrative.heroSummary}
         stateLabel={narrative.stateLabel}
         retrievalLabel={narrative.retrievalLabel}
-        nextActionTitle={narrative.nextActionTitle}
-        nextActionSummary={narrative.nextActionSummary}
-        showNextActionPanel={narrative.showNextActionPanel}
-        guideItems={narrative.guideItems}
-        hasVisibleRecords={narrative.hasVisibleRecords}
-        hasStoredRecords={narrative.hasStoredRecords}
-        hasBacklog={narrative.hasBacklog}
-        isDegraded={narrative.isDegraded}
-        missingSetupItems={narrative.missingSetupItems}
-        busyActionId={busyActionId}
-        onResetFilters={resetFilters}
-        onFlushMemory={flushMemory}
       />
 
       {narrative.memoryWarnings.length > 0 ? (
         <div className="wb-inline-banner is-error">
-          <strong>当前有需要注意的情况</strong>
+          <strong>注意</strong>
           <span>{narrative.memoryWarnings.join("；")}</span>
         </div>
       ) : null}
@@ -335,25 +311,20 @@ export default function MemoryPage() {
         formatDateTime={formatDateTime}
       />
 
-      <div className="wb-memory-layout">
-        <MemoryResultsSection
-          memory={memoryResource}
-          records={displayRecords}
-          selectedRecordId={selectedRecordId}
-          hasStoredRecords={narrative.hasStoredRecords}
-          busyActionId={busyActionId}
-          onResetFilters={resetFilters}
-          onSelectRecord={handleSelectRecord}
-        />
+      <MemoryResultsSection
+        memory={memoryResource}
+        records={displayRecords}
+        hasStoredRecords={narrative.hasStoredRecords}
+        busyActionId={busyActionId}
+        onResetFilters={resetFilters}
+        onSelectRecord={handleSelectRecord}
+      />
 
-        <MemoryInspectorSection
-          memory={memoryResource}
-          selectedRecord={selectedRecord}
-          layerOptions={layerOptions}
-          partitionOptions={partitionOptions}
-          retrievalLabel={narrative.retrievalLabel}
-        />
-      </div>
+      <MemoryDetailModal
+        selectedRecord={selectedRecord}
+        open={showDetailModal}
+        onClose={handleCloseModal}
+      />
     </div>
   );
 }

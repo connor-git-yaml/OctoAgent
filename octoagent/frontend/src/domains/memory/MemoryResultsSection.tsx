@@ -10,7 +10,6 @@ import {
 interface MemoryResultsSectionProps {
   memory: MemoryConsoleDocument;
   records: MemoryDisplayRecord[];
-  selectedRecordId: string;
   hasStoredRecords: boolean;
   busyActionId: string | null;
   onResetFilters: () => Promise<void>;
@@ -20,7 +19,6 @@ interface MemoryResultsSectionProps {
 export default function MemoryResultsSection({
   memory,
   records,
-  selectedRecordId,
   hasStoredRecords,
   busyActionId,
   onResetFilters,
@@ -30,8 +28,8 @@ export default function MemoryResultsSection({
     <section className="wb-panel">
       <div className="wb-panel-head">
         <div>
-          <p className="wb-card-label">现在记住了什么</p>
-          <h3>{records.length} 条可读记忆</h3>
+          <p className="wb-card-label">记忆列表</p>
+          <h3>{records.length} 条记忆</h3>
         </div>
         <div className="wb-chip-row">
           <span className="wb-chip">需授权 {memory.summary.vault_ref_count}</span>
@@ -41,11 +39,11 @@ export default function MemoryResultsSection({
 
       {records.length === 0 ? (
         <div className="wb-empty-state">
-          <strong>{hasStoredRecords ? "当前视图没有命中可读记忆" : "当前还没有可读记忆"}</strong>
+          <strong>{hasStoredRecords ? "当前筛选没有命中记忆" : "还没有记忆"}</strong>
           <span>
             {hasStoredRecords
-              ? "先清空筛选，或者整理最新记忆后再看一遍。"
-              : "先去 Chat 对话或导入历史内容，Memory 才会开始形成可读结论。"}
+              ? "试试清空筛选条件。"
+              : "去 Chat 对话或导入历史内容后，这里会出现记忆。"}
           </span>
           <div className="wb-inline-actions">
             <Link className="wb-button wb-button-primary" to="/">
@@ -65,12 +63,13 @@ export default function MemoryResultsSection({
         <div className="wb-record-list">
           {records.map((displayRecord) => {
             const { record } = displayRecord;
-            const isSelected = record.record_id === selectedRecordId;
 
             return (
               <article
                 key={record.record_id}
-                className={`wb-memory-card ${isSelected ? "is-selected" : ""}`}
+                className="wb-memory-card"
+                onClick={() => onSelectRecord(displayRecord)}
+                style={{ cursor: "pointer" }}
               >
                 <div className="wb-memory-head">
                   <div>
@@ -115,17 +114,6 @@ export default function MemoryResultsSection({
                     ))}
                   </div>
                 ) : null}
-
-                <div className="wb-inline-actions">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-tertiary wb-button-inline"
-                    aria-label={`查看 ${displayRecord.title} 详情`}
-                    onClick={() => onSelectRecord(displayRecord)}
-                  >
-                    {isSelected ? "正在查看" : "查看详情"}
-                  </button>
-                </div>
               </article>
             );
           })}
