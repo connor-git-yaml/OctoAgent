@@ -2393,6 +2393,135 @@ class CapabilityPackService:
             )
 
         @tool_contract(
+            name="mcp.install",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="mcp",
+            tags=["mcp", "install"],
+            worker_types=["ops", "dev", "general"],
+            manifest_ref="builtin://mcp.install",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
+            },
+        )
+        async def mcp_install(
+            install_source: str,
+            package_name: str,
+            env: str = "{}",
+        ) -> str:
+            """安装一个 MCP server 并自动注册。
+
+            Args:
+                install_source: 安装来源，"npm" 或 "pip"
+                package_name: 包名，如 "@anthropic/mcp-server-perplexity" 或 "mcp-server-fetch"
+                env: JSON 格式的环境变量，如 '{"API_KEY": "sk-xxx"}'
+            """
+            if self._mcp_installer is None:
+                return json.dumps(
+                    {"error": "MCP Installer 未绑定，无法安装 MCP server"},
+                    ensure_ascii=False,
+                )
+            try:
+                env_dict = json.loads(env) if env and env.strip() != "{}" else {}
+            except json.JSONDecodeError as exc:
+                return json.dumps(
+                    {"error": f"env 参数 JSON 格式不合法: {exc}"},
+                    ensure_ascii=False,
+                )
+            try:
+                task_id = await self._mcp_installer.install(
+                    install_source=install_source,
+                    package_name=package_name,
+                    env=env_dict,
+                )
+                return json.dumps(
+                    {
+                        "status": "install_started",
+                        "task_id": task_id,
+                        "message": f"安装任务已启动，使用 mcp.install_status 查询进度（task_id={task_id}）",
+                    },
+                    ensure_ascii=False,
+                )
+            except ValueError as exc:
+                return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps(
+                    {"error": f"安装启动失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+        @tool_contract(
+            name="mcp.install_status",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="mcp",
+            tags=["mcp", "install", "status"],
+            worker_types=["ops", "dev", "general"],
+            manifest_ref="builtin://mcp.install_status",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
+            },
+        )
+        async def mcp_install_status(task_id: str) -> str:
+            """查询 MCP server 安装任务的进度。
+
+            Args:
+                task_id: 由 mcp.install 返回的安装任务 ID
+            """
+            if self._mcp_installer is None:
+                return json.dumps(
+                    {"error": "MCP Installer 未绑定"},
+                    ensure_ascii=False,
+                )
+            task = self._mcp_installer.get_install_status(task_id)
+            if task is None:
+                return json.dumps(
+                    {"error": f"安装任务 {task_id} 不存在"},
+                    ensure_ascii=False,
+                )
+            return json.dumps(task.model_dump(mode="json"), ensure_ascii=False, default=str)
+
+        @tool_contract(
+            name="mcp.uninstall",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="mcp",
+            tags=["mcp", "uninstall"],
+            worker_types=["ops", "dev", "general"],
+            manifest_ref="builtin://mcp.uninstall",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
+            },
+        )
+        async def mcp_uninstall(server_id: str) -> str:
+            """卸载已安装的 MCP server。
+
+            Args:
+                server_id: 要卸载的 MCP server ID（通过 mcp.servers.list 查看）
+            """
+            if self._mcp_installer is None:
+                return json.dumps(
+                    {"error": "MCP Installer 未绑定"},
+                    ensure_ascii=False,
+                )
+            try:
+                result = await self._mcp_installer.uninstall(server_id)
+                return json.dumps(
+                    {"status": "uninstalled", **result},
+                    ensure_ascii=False,
+                )
+            except ValueError as exc:
+                return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            except Exception as exc:
+                return json.dumps(
+                    {"error": f"卸载失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+        @tool_contract(
             name="pdf.inspect",
             side_effect_level=SideEffectLevel.NONE,
             tool_profile=ToolProfile.MINIMAL,
@@ -3008,6 +3137,7 @@ class CapabilityPackService:
                     "memory",
                     "supervision",
                     "delegation",
+                    "mcp",
                     "skills",
                 ],
                 bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
@@ -3807,6 +3937,10 @@ class CapabilityPackService:
             not self._browser_sessions
         ):
             return BuiltinToolAvailabilityStatus.DEGRADED
+        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
+            if self._mcp_installer is None:
+                return BuiltinToolAvailabilityStatus.UNAVAILABLE
+            return BuiltinToolAvailabilityStatus.AVAILABLE
         if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
             if self._mcp_registry is None:
                 return BuiltinToolAvailabilityStatus.UNAVAILABLE
@@ -3838,6 +3972,10 @@ class CapabilityPackService:
             not self._browser_sessions
         ):
             return "browser_session_missing"
+        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
+            if self._mcp_installer is None:
+                return "mcp_installer_unbound"
+            return ""
         if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
             if self._mcp_registry is None:
                 return "mcp_registry_unbound"
@@ -3855,6 +3993,10 @@ class CapabilityPackService:
             mcp_status, _mcp_reason, mcp_hint = self._mcp_registry.get_tool_status(tool_name)
             if mcp_status is not None:
                 return mcp_hint
+        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
+            if self._mcp_installer is None:
+                return "McpInstallerService 未绑定，检查 Gateway 初始化流程"
+            return ""
         if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
             if self._mcp_registry is None:
                 return "绑定 McpRegistryService 后才能发现 MCP servers"
