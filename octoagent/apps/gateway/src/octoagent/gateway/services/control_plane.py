@@ -3251,13 +3251,6 @@ class ControlPlaneService:
                 success_code="MEMORY_REINDEX_COMPLETED",
                 success_message="已执行 Memory reindex。",
             )
-        if action_id == "memory.bridge.reconnect":
-            return await self._handle_memory_maintenance(
-                request,
-                kind=MemoryMaintenanceCommandKind.BRIDGE_RECONNECT,
-                success_code="MEMORY_BRIDGE_RECONNECT_COMPLETED",
-                success_message="已执行 Memory bridge reconnect。",
-            )
         if action_id == "memory.sync.resume":
             return await self._handle_memory_maintenance(
                 request,
@@ -10240,12 +10233,6 @@ class ControlPlaneService:
                 definition(
                     "memory.reindex",
                     "执行 Memory Reindex",
-                    category="memory",
-                    risk_hint="medium",
-                ),
-                definition(
-                    "memory.bridge.reconnect",
-                    "重连 Memory Bridge",
                     category="memory",
                     risk_hint="medium",
                 ),

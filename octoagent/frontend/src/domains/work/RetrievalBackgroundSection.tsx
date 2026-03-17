@@ -42,22 +42,25 @@ function selectMemoryLifecycle(retrievalPlatform: RetrievalPlatformDocument | nu
   pendingBuildJob: IndexBuildJob | null;
   rollbackCandidate: IndexGeneration | null;
 } {
+  const corpora = retrievalPlatform?.corpora ?? [];
+  const generations = retrievalPlatform?.generations ?? [];
+  const buildJobs = retrievalPlatform?.build_jobs ?? [];
   const memoryCorpus =
-    retrievalPlatform?.corpora.find((item) => item.corpus_kind === "memory") ?? null;
+    corpora.find((item) => item.corpus_kind === "memory") ?? null;
   const activeGeneration =
-    retrievalPlatform?.generations.find(
+    generations.find(
       (item) => item.generation_id === memoryCorpus?.active_generation_id
     ) ?? null;
   const pendingGeneration =
-    retrievalPlatform?.generations.find(
+    generations.find(
       (item) => item.generation_id === memoryCorpus?.pending_generation_id
     ) ?? null;
   const pendingBuildJob =
-    retrievalPlatform?.build_jobs.find(
+    buildJobs.find(
       (item) => item.generation_id === pendingGeneration?.generation_id
     ) ?? null;
   const rollbackCandidate =
-    retrievalPlatform?.generations.find(
+    generations.find(
       (item) =>
         item.corpus_kind === "memory" &&
         !item.is_active &&
