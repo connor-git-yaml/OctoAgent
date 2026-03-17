@@ -23,7 +23,6 @@ import type {
   TaskDetailResponse,
   TaskEvent,
   WorkProjectionItem,
-  WorkspaceOption,
 } from "../types";
 
 const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
@@ -197,10 +196,6 @@ function readExecutionSessionDocument(
 
 function resolveProjectName(projects: ProjectOption[], projectId: string): string {
   return projects.find((item) => item.project_id === projectId)?.name ?? projectId;
-}
-
-function resolveWorkspaceName(workspaces: WorkspaceOption[], workspaceId: string): string {
-  return workspaces.find((item) => item.workspace_id === workspaceId)?.name ?? workspaceId;
 }
 
 function pushRestoreTaskId(taskIds: string[], taskId: string | undefined): void {
@@ -1109,7 +1104,7 @@ export default function ChatWorkbench() {
   const sessionDocument = snapshot!.resources.sessions;
   const projectSelector = snapshot!.resources.project_selector;
   const availableProjects = ensureArray(projectSelector?.available_projects);
-  const availableWorkspaces = ensureArray(projectSelector?.available_workspaces);
+
   const sessions = ensureArray(sessionDocument?.sessions);
   const workerProfilesDocument = snapshot!.resources.worker_profiles;
   const workerProfiles = ensureArray(workerProfilesDocument?.profiles);
@@ -1371,65 +1366,19 @@ export default function ChatWorkbench() {
     activeConversationWorkerSessionId ? { label: "执行会话", value: activeConversationWorkerSessionId } : null,
     activeContextFrame?.context_frame_id ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id } : null,
   ].filter((item): item is { label: string; value: string } => Boolean(item));
-  const selectorProjectId = projectSelector?.current_project_id ?? "";
-  const selectorWorkspaceId = projectSelector?.current_workspace_id ?? "";
-  const selectorProjectLabel = selectorProjectId
-    ? resolveProjectName(availableProjects, selectorProjectId)
-    : "";
-  const selectorWorkspaceLabel = selectorWorkspaceId
-    ? resolveWorkspaceName(availableWorkspaces, selectorWorkspaceId)
-    : "";
   const activeSessionProjectId = activeSession?.project_id ?? "";
-  const activeSessionWorkspaceId = activeSession?.workspace_id ?? "";
   const activeSessionWorkId = readSummaryString(
     (activeSession?.execution_summary ?? {}) as Record<string, unknown>,
     "work_id"
   );
   const pendingConversationProjectId = sessionDocument?.new_conversation_project_id ?? "";
-  const pendingConversationWorkspaceId = sessionDocument?.new_conversation_workspace_id ?? "";
-  const pendingConversationToken = sessionDocument?.new_conversation_token ?? "";
   const pendingConversationAgentProfileId =
     sessionDocument?.new_conversation_agent_profile_id ?? "";
   const effectiveProjectId =
-    activeSessionProjectId || pendingConversationProjectId || selectorProjectId;
-  const effectiveWorkspaceId =
-    activeSessionWorkspaceId || pendingConversationWorkspaceId || selectorWorkspaceId;
+    activeSessionProjectId || pendingConversationProjectId || (projectSelector?.current_project_id ?? "");
   const effectiveProjectLabel = effectiveProjectId
     ? resolveProjectName(availableProjects, effectiveProjectId)
     : "";
-  const effectiveWorkspaceLabel = effectiveWorkspaceId
-    ? resolveWorkspaceName(availableWorkspaces, effectiveWorkspaceId)
-    : "";
-  const activeSessionAgentProfileLabel =
-    workerProfiles.find((profile) => profile.profile_id === activeSessionAgentProfileId)
-      ?.name ?? activeSessionAgentProfileId;
-  const pendingConversationAgentProfileLabel =
-    workerProfiles.find((profile) => profile.profile_id === pendingConversationAgentProfileId)
-      ?.name ?? pendingConversationAgentProfileId;
-  const hasPinnedConversationScope =
-    Boolean(activeSessionProjectId || activeSessionWorkspaceId) ||
-    Boolean(pendingConversationToken && (pendingConversationProjectId || pendingConversationWorkspaceId));
-  const selectorDiffersFromConversation =
-    Boolean(hasPinnedConversationScope) &&
-    (effectiveProjectId !== selectorProjectId || effectiveWorkspaceId !== selectorWorkspaceId);
-  const chatScopeBanner = activeSession
-    ? activeSessionAgentProfileId && activeSessionAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
-      ? `当前这条会话正在由 ${activeSessionAgentProfileLabel || activeSessionAgentProfileId} 直接处理；如果你想回到默认助手，请开始新对话。`
-      : selectorDiffersFromConversation
-        ? `当前会话继续沿用 ${effectiveProjectLabel || effectiveProjectId} / ${
-            effectiveWorkspaceLabel || effectiveWorkspaceId
-          }；顶部当前 Project 选择只影响新的会话和项目默认配置。`
-        : `当前会话已经绑定到 ${effectiveProjectLabel || effectiveProjectId} / ${
-            effectiveWorkspaceLabel || effectiveWorkspaceId
-          }。`
-    : pendingConversationToken
-      ? pendingConversationAgentProfileId &&
-        pendingConversationAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
-        ? `下一条消息会直接开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话，不再默认先进入主助手。`
-        : `这段新对话会从 ${effectiveProjectLabel || effectiveProjectId} / ${
-            effectiveWorkspaceLabel || effectiveWorkspaceId
-          } 创建；首条消息不会再回退到旧的 surface-selected project。`
-      : "";
   const operatorItems = ensureArray(sessionDocument?.operator_items);
   const activeTaskOperatorItems = operatorItems.filter((item) => {
     if (item.state && String(item.state).trim().toLowerCase() !== "pending") {
@@ -1501,9 +1450,22 @@ export default function ChatWorkbench() {
     Boolean(taskId) &&
     normalizedTaskStatus === "WAITING_INPUT" &&
     executionSession?.can_attach_input !== false;
+  // 当前 Session 关联的 Agent 名（用于标题和 placeholder）
+  const effectiveAgentProfileId =
+    activeSessionAgentProfileId || pendingConversationAgentProfileId || defaultRootAgentId;
+  const effectiveAgentName =
+    workerProfiles.find((p) => p.profile_id === effectiveAgentProfileId)?.name ||
+    defaultRootAgent?.name ||
+    "OctoAgent";
+  // Session 展示名 = 项目名（作为默认）；后续可被别名覆盖
+  const sessionDisplayName =
+    (routeSession?.title?.trim()) ||
+    (activeSession?.title?.trim()) ||
+    effectiveProjectLabel ||
+    "";
   const inputPlaceholder = canSteerCurrentRun
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
-    : "告诉 OctoAgent 你现在要做什么";
+    : `告诉 ${effectiveAgentName} 你现在要做什么`;
 
   useEffect(() => {
     if (messages.length > 0 || taskId) {
@@ -1949,47 +1911,8 @@ export default function ChatWorkbench() {
       >
         <div className="wb-panel-head wb-chat-head">
           <div className="wb-chat-head-copy">
-            <p className="wb-card-label">Chat</p>
-            <h3>{conversationTitle}</h3>
-            <p className="wb-chat-head-summary">
-              {isEmptyConversation
-                ? "直接告诉 OctoAgent 你想完成什么。"
-                : hasLoadedTaskStatus
-                  ? `当前状态：${taskStatusLabel}`
-                  : "这轮对话已经进入处理流程。"}
-            </p>
-            <div className="wb-chip-row">
-              {effectiveProjectId ? (
-                <span className="wb-chip">
-                  会话项目 {effectiveProjectLabel || effectiveProjectId}
-                </span>
-              ) : null}
-              {effectiveWorkspaceId ? (
-                <span className="wb-chip">
-                  Workspace {effectiveWorkspaceLabel || effectiveWorkspaceId}
-                </span>
-              ) : null}
-              {activeSessionAgentProfileId &&
-              activeSessionAgentProfileId !== (defaultRootAgent?.profile_id ?? "") ? (
-                <span className="wb-chip is-warning">
-                  会话角色 {activeSessionAgentProfileLabel || activeSessionAgentProfileId}
-                </span>
-              ) : null}
-              {!activeSession && pendingConversationToken ? (
-                <span className="wb-chip is-warning">
-                  {pendingConversationAgentProfileId &&
-                  pendingConversationAgentProfileId !== (defaultRootAgent?.profile_id ?? "")
-                    ? `待开启 ${pendingConversationAgentProfileLabel || pendingConversationAgentProfileId} 会话`
-                    : "新会话起点已冻结"}
-                </span>
-              ) : null}
-              {selectorDiffersFromConversation ? (
-                <span className="wb-chip is-warning">
-                  顶部选择 {selectorProjectLabel || selectorProjectId} /{" "}
-                  {selectorWorkspaceLabel || selectorWorkspaceId}
-                </span>
-              ) : null}
-            </div>
+            <h3>{sessionDisplayName || conversationTitle}</h3>
+            <p className="wb-chat-head-summary">{effectiveAgentName}</p>
           </div>
           <div className="wb-chat-head-actions">
             {taskId || messages.length > 0 ? (
@@ -2026,13 +1949,6 @@ export default function ChatWorkbench() {
           </div>
         </div>
 
-        {chatScopeBanner ? (
-          <div className="wb-inline-banner is-muted">
-            <strong>项目绑定</strong>
-            <span>{chatScopeBanner}</span>
-          </div>
-        ) : null}
-
         {isRestoringConversation ? (
           <div className="wb-chat-empty-stage is-restoring">
             <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-card">
@@ -2054,10 +1970,6 @@ export default function ChatWorkbench() {
           </div>
         ) : isEmptyConversation ? (
           <div className="wb-chat-empty-stage">
-            <div className="wb-empty-state wb-chat-empty-card">
-              <strong>开始第一条消息</strong>
-              <span>比如直接告诉 OctoAgent 你今天要完成什么，它会从这里接手。</span>
-            </div>
             {error ? (
               <InlineCallout title="刚才没有发送成功" tone="error">
                 {error}
@@ -2068,7 +1980,7 @@ export default function ChatWorkbench() {
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleInputKeyDown}
-                placeholder="告诉 OctoAgent 你现在要做什么"
+                placeholder={inputPlaceholder}
                 disabled={streaming}
                 rows={3}
               />
