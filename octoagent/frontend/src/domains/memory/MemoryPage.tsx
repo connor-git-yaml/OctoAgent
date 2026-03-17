@@ -53,17 +53,36 @@ export default function MemoryPage() {
       </div>
     );
   }
-  const memoryResource = memory;
-  const configResource = config;
-  const filters = memoryResource.filters ?? {
-    query: "",
-    layer: "",
-    partition: "",
-    include_history: false,
-    include_vault_refs: false,
-    limit: 50,
+  const defaultSummary = {
+    sor_current_count: 0,
+    sor_history_count: 0,
+    fragment_count: 0,
+    pending_replay_count: 0,
+    vault_ref_count: 0,
+    proposal_count: 0,
+    scope_count: 0,
   };
-  const records = Array.isArray(memoryResource.records) ? memoryResource.records : [];
+  const memoryResource = {
+    ...memory,
+    summary: memory.summary ?? defaultSummary,
+    warnings: memory.warnings ?? [],
+    available_scopes: memory.available_scopes ?? [],
+    available_layers: memory.available_layers ?? [],
+    available_partitions: memory.available_partitions ?? [],
+    records: memory.records ?? [],
+    filters: memory.filters ?? {
+      query: "",
+      scope_id: "",
+      layer: "",
+      partition: "",
+      include_history: false,
+      include_vault_refs: false,
+      limit: 50,
+    },
+  };
+  const configResource = config;
+  const filters = memoryResource.filters;
+  const records = memoryResource.records;
   const [queryDraft, setQueryDraft] = useState(filters.query);
   const [layerDraft, setLayerDraft] = useState(filters.layer);
   const [partitionDraft, setPartitionDraft] = useState(filters.partition);
@@ -99,7 +118,7 @@ export default function MemoryPage() {
 
   const layerOptions = uniqueOptions([
     "",
-    ...(Array.isArray(memoryResource.available_layers) ? memoryResource.available_layers : []),
+    ...memoryResource.available_layers,
     filters.layer,
     "sor",
     "fragment",
@@ -108,9 +127,7 @@ export default function MemoryPage() {
   ]);
   const partitionOptions = uniqueOptions([
     "",
-    ...(Array.isArray(memoryResource.available_partitions)
-      ? memoryResource.available_partitions
-      : []),
+    ...memoryResource.available_partitions,
     filters.partition,
   ]);
   const memoryConfig = readConfigSection(readConfigSection(configResource.current_value).memory);
