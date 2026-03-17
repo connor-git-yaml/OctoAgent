@@ -18,7 +18,6 @@ export type FieldErrors = Record<string, string>;
 export type SkillSelectionState = Record<string, boolean>;
 
 export const DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32\n::1/128";
-export const DEFAULT_MEMORY_TIMEOUT = "5";
 
 export interface FieldGuide {
   title: string;
@@ -234,110 +233,18 @@ export function optionLabelForHint(hint: ConfigFieldHint, option: string): strin
       return "litellm · 连接真实模型";
     }
   }
-  if (hint.field_path === "memory.backend_mode") {
-    if (option === "local_only") {
-      return "local_only · 内建记忆引擎";
-    }
-    if (option === "memu") {
-      return "memu · 兼容增强接入";
-    }
-  }
-  if (hint.field_path === "memory.bridge_transport") {
-    if (option === "http") {
-      return "http · 远端 bridge";
-    }
-    if (option === "command") {
-      return "command · 本地命令";
-    }
-  }
   return option;
 }
 
 export function buildFieldGuide(
   hint: ConfigFieldHint,
-  usingEchoMode: boolean
+  _usingEchoMode: boolean
 ): FieldGuide | null {
-  if (hint.field_path === "memory.bridge_api_key_env") {
-    return {
-      title: "安全建议",
-      description:
-        "这里只有在 HTTP bridge 需要鉴权时才填写，而且仍然只填环境变量名。如果暂时不需要鉴权，可以留空。",
-    };
-  }
   if (hint.widget === "env-ref") {
     return {
       title: "怎么填",
       description:
         "这里只填写环境变量名，不要把真实 token 或 API Key 直接贴进来。真实值应放在 ~/.octoagent/.env 或 ~/.octoagent/.env.litellm 里。",
-    };
-  }
-  if (hint.field_path === "runtime.llm_mode") {
-    return {
-      title: "推荐选择",
-      description: usingEchoMode
-        ? "首次体验建议先保持 echo，这样不需要额外配置模型，也能跑通 Web 和任务流。"
-        : "当你准备接入真实模型时，再切换到 litellm 并补齐 Provider 与模型别名。",
-    };
-  }
-  if (hint.field_path === "memory.backend_mode") {
-    return {
-      title: "怎么选",
-      description:
-        "普通用户默认保持 local_only 即可，它会走内建记忆引擎。只有迁移旧实例或明确还要接兼容 MemU 链路时，再切到 memu。",
-    };
-  }
-  if (hint.field_path === "memory.bridge_transport") {
-    return {
-      title: "什么时候才需要",
-      description:
-        "这已经属于兼容接入层：同机旧实例优先选 command；只有 bridge 在别的机器或容器里时，再选 http。",
-    };
-  }
-  if (hint.field_path === "memory.bridge_url") {
-    return {
-      title: "这里填什么",
-      description:
-        "这里只填 HTTP bridge 的基础地址，不要自己拼 `/memory/search` 之类的接口路径。常见写法是 https://memory.example.com。",
-      exampleLabel: "示例",
-      example: "https://memory.example.com",
-    };
-  }
-  if (hint.field_path === "memory.bridge_command") {
-    return {
-      title: "这里填什么",
-      description:
-        "这里填本地可执行命令本身，例如 `uv run python scripts/memu_bridge.py`。系统会在后面自动追加 `health`、`query` 之类的子命令。",
-      exampleLabel: "示例",
-      example: "uv run python scripts/memu_bridge.py",
-    };
-  }
-  if (hint.field_path === "memory.bridge_command_cwd") {
-    return {
-      title: "什么时候需要",
-      description:
-        "只有当命令依赖项目内相对路径、虚拟环境或本地模型权重目录时才需要填写。否则留空即可。",
-    };
-  }
-  if (hint.field_path === "memory.bridge_command_timeout_seconds") {
-    return {
-      title: "推荐范围",
-      description:
-        "本地命令通常 10-20 秒足够。如果命令内部还要做扩写或 rerank，可以略微调高，但不建议超过 30 秒。",
-      actions: [
-        { label: "恢复 15 秒", value: "15" },
-        { label: "改成 20 秒", value: "20" },
-      ],
-    };
-  }
-  if (hint.field_path === "memory.bridge_timeout_seconds") {
-    return {
-      title: "推荐范围",
-      description:
-        "这是 HTTP bridge 的超时。一般 5 秒足够；如果 bridge 在异地或经常冷启动，可以调到 8-10 秒。不是越大越好，过大只会让失败反馈更慢。",
-      actions: [
-        { label: "恢复 5 秒", value: DEFAULT_MEMORY_TIMEOUT },
-        { label: "改成 8 秒", value: "8" },
-      ],
     };
   }
   if (hint.field_path === "providers" || hint.field_path === "model_aliases") {
@@ -356,24 +263,6 @@ export function buildFieldGuide(
     return {
       title: "填写格式",
       description: "每行一项。可以填 Telegram 用户 ID、群组 ID 或用户名，按字段含义分别填写。",
-    };
-  }
-  if (hint.field_path.startsWith("memory.bridge_")) {
-    if (
-      hint.field_path !== "memory.bridge_url" &&
-      hint.field_path !== "memory.bridge_api_key_env" &&
-      hint.field_path !== "memory.bridge_timeout_seconds" &&
-      hint.field_path !== "memory.bridge_transport" &&
-      hint.field_path !== "memory.bridge_command" &&
-      hint.field_path !== "memory.bridge_command_cwd" &&
-      hint.field_path !== "memory.bridge_command_timeout_seconds"
-    ) {
-      return null;
-    }
-    return {
-      title: "什么时候才需要改",
-      description:
-        "只有当你的 bridge API 路径或鉴权方式跟默认约定不一致时才需要调整。大多数情况下保留默认值即可。",
     };
   }
   return null;

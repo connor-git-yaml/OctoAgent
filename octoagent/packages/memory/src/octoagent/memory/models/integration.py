@@ -254,7 +254,6 @@ class MemoryMaintenanceCommandKind(StrEnum):
     REINDEX = "reindex"
     REPLAY = "replay"
     SYNC_RESUME = "sync_resume"
-    BRIDGE_RECONNECT = "bridge_reconnect"
 
 
 class MemoryMaintenanceCommand(BaseModel):

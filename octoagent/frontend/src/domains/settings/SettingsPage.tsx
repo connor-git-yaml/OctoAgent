@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { categoryForHint, getValueAtPath } from "../../workbench/utils";
 import type { ConfigFieldHint, SetupReviewSummary } from "../../types";
@@ -28,92 +28,8 @@ import {
   type ProviderDraftItem,
 } from "./shared";
 
-const MEMORY_HTTP_BASIC_FIELDS = new Set([
-  "memory.backend_mode",
-  "memory.bridge_transport",
-  "memory.bridge_url",
-  "memory.bridge_api_key_env",
-  "memory.bridge_timeout_seconds",
-]);
-
 const DEFAULT_GATEWAY_PROXY_URL = "http://localhost:4000";
 const DEFAULT_GATEWAY_MASTER_KEY_ENV = "LITELLM_MASTER_KEY";
-
-const MEMORY_COMMAND_BASIC_FIELDS = new Set([
-  "memory.backend_mode",
-  "memory.bridge_transport",
-  "memory.bridge_command",
-  "memory.bridge_command_cwd",
-  "memory.bridge_command_timeout_seconds",
-]);
-
-const MEMORY_BINDING_FIELDS = [
-  {
-    fieldPath: "memory.reasoning_model_alias",
-    label: "记忆加工",
-    description: "整理片段、摘要、候选结论与候选事实时优先使用。",
-    fallbackLabel: "使用 main（默认）",
-  },
-  {
-    fieldPath: "memory.expand_model_alias",
-    label: "查询扩写",
-    description: "把用户问题扩成更适合 recall 的查询表达。",
-    fallbackLabel: "使用 main（默认）",
-  },
-  {
-    fieldPath: "memory.embedding_model_alias",
-    label: "语义检索",
-    description: "绑定专用 embedding alias；未绑定时回退到内建默认层。",
-    fallbackLabel: "使用内建 embedding（默认）",
-  },
-  {
-    fieldPath: "memory.rerank_model_alias",
-    label: "结果重排",
-    description: "对召回结果做更稳定的最终排序。",
-    fallbackLabel: "使用 heuristic（默认）",
-  },
-] as const;
-
-function resolveMemoryLabel(memoryMode: string, memoryTransport: string): string {
-  if (memoryMode !== "memu") {
-    return "内建记忆引擎";
-  }
-  return memoryTransport === "command" ? "增强记忆（本地兼容）" : "增强记忆（远端兼容）";
-}
-
-function resolveMemorySummary(memoryMode: string, memoryTransport: string): string {
-  if (memoryMode !== "memu") {
-    return "本地治理 + 默认 retrieval 层";
-  }
-  return memoryTransport === "command" ? "本地 MemU 兼容接入" : "远端 MemU 兼容接入";
-}
-
-function resolveIndexStageLabel(stage: string): string {
-  switch (stage) {
-    case "queued":
-      return "待开始";
-    case "scanning":
-      return "扫描中";
-    case "embedding":
-      return "生成向量中";
-    case "writing_projection":
-      return "写入 projection";
-    case "catching_up":
-      return "追平增量";
-    case "validating":
-      return "校验中";
-    case "ready_to_cutover":
-      return "待切换";
-    case "completed":
-      return "已完成";
-    case "cancelled":
-      return "已取消";
-    case "failed":
-      return "失败";
-    default:
-      return "处理中";
-  }
-}
 
 export default function SettingsPage() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
@@ -163,11 +79,6 @@ export default function SettingsPage() {
       groups[key] = [...(groups[key] ?? []), hint];
       return groups;
     }, {});
-  const memoryHints = groupedHints.memory ?? [];
-  const memoryModelHints = memoryHints.filter((hint) => hint.section === "memory-models");
-  const memoryCompatHints = memoryHints.filter((hint) => hint.section === "memory-compat");
-  const memoryAdvancedHints = memoryHints.filter((hint) => hint.section === "memory-advanced");
-  const hasMemoryModelBindings = memoryModelHints.length > 0;
   const otherGroupIds = ["channels", "advanced"].filter(
     (groupId) => (groupedHints[groupId] ?? []).length > 0
   );
@@ -410,70 +321,6 @@ export default function SettingsPage() {
     busyActionId === "setup.apply" ||
     busyActionId === "setup.quick_connect" ||
     busyActionId === "provider.oauth.openai_codex";
-  const memoryMode =
-    String(
-      fieldState["memory.backend_mode"] ??
-        getValueAtPath(config.current_value, "memory.backend_mode") ??
-        "local_only"
-    )
-      .trim()
-      .toLowerCase() || "local_only";
-  const memoryTransport =
-    String(
-      fieldState["memory.bridge_transport"] ??
-        getValueAtPath(config.current_value, "memory.bridge_transport") ??
-        "http"
-    )
-      .trim()
-      .toLowerCase() || "http";
-  const usingMemu = memoryMode === "memu";
-  const usingCommandTransport = usingMemu && memoryTransport === "command";
-  const usingHttpTransport = usingMemu && memoryTransport !== "command";
-  const visibleMemoryCompatHints = memoryCompatHints.filter((hint) => {
-    if (!usingMemu) {
-      return hint.field_path === "memory.backend_mode";
-    }
-    if (usingCommandTransport) {
-      return MEMORY_COMMAND_BASIC_FIELDS.has(hint.field_path);
-    }
-    return MEMORY_HTTP_BASIC_FIELDS.has(hint.field_path);
-  });
-  const visibleMemoryAdvancedHints = usingHttpTransport ? memoryAdvancedHints : [];
-  const memoryLabel = resolveMemoryLabel(memoryMode, memoryTransport);
-  const memorySummaryLabel = resolveMemorySummary(memoryMode, memoryTransport);
-  const retrievalBusy = String(busyActionId ?? "").startsWith("retrieval.index.");
-  const aliasOptions = Array.from(
-    new Set(aliasDrafts.map((item) => item.alias.trim()).filter((value) => value.length > 0))
-  );
-  function readStringField(fieldPath: string, fallback = ""): string {
-    return String(fieldState[fieldPath] ?? getValueAtPath(config.current_value, fieldPath) ?? fallback).trim();
-  }
-  function resolveBindingSummary(
-    fieldPath: string,
-    fallbackLabel: string
-  ): { value: string; label: string } {
-    const value = readStringField(fieldPath);
-    return {
-      value,
-      label: value || fallbackLabel,
-    };
-  }
-  const activeEmbeddingLabel =
-    activeMemoryGeneration?.label ||
-    activeMemoryGeneration?.profile_target ||
-    resolveBindingSummary("memory.embedding_model_alias", "内建 embedding（默认）").label;
-  const desiredEmbeddingLabel =
-    memoryCorpus?.desired_profile_target ||
-    resolveBindingSummary("memory.embedding_model_alias", "内建 embedding（默认）").label;
-  const pendingStageLabel = pendingMemoryBuildJob
-    ? resolveIndexStageLabel(pendingMemoryBuildJob.stage)
-    : "待开始";
-  const pendingPercent = Math.max(0, Math.min(100, pendingMemoryBuildJob?.percent_complete ?? 0));
-  const showMigrationCard =
-    memoryCorpus !== null &&
-    (Boolean(memoryCorpus.pending_generation_id) ||
-      memoryCorpus.state === "migration_deferred" ||
-      rollbackCandidate !== null);
   const reviewNextActions = review.next_actions.slice(0, 3);
 
   function updateFieldValue(fieldPath: string, value: string | boolean) {
@@ -629,11 +476,6 @@ export default function SettingsPage() {
         usingEchoMode={usingEchoMode}
         review={review}
         selector={selector}
-        providerDraftCount={providerDrafts.length}
-        activeProvidersCount={activeProviders.length}
-        aliasDraftCount={aliasDrafts.length}
-        memoryLabel={memoryLabel}
-        memoryStatus={memory.backend_state || memory.status}
         onQuickConnect={() => void handleQuickConnect()}
         onReview={() => void handleReview()}
         onApply={() => void handleApply()}
@@ -642,7 +484,6 @@ export default function SettingsPage() {
       />
 
       <SettingsProviderSection
-        usingEchoMode={usingEchoMode}
         providerDrafts={providerDrafts}
         aliasDrafts={aliasDrafts}
         defaultProvider={defaultProvider}
@@ -665,34 +506,19 @@ export default function SettingsPage() {
         }}
       />
 
-      <div className="wb-inline-banner is-muted">
-        <strong>Agent 与 Behavior 管理已移到 Agents</strong>
-        <span>
-          Skill / MCP Provider、Behavior Files、Project Path Manifest 和当前项目的 Agent 默认行为，
-          现在统一放在 Agents 页面维护。
-        </span>
-        <Link className="wb-button wb-button-tertiary wb-button-inline" to="/agents">
-          打开 Agents
-        </Link>
-      </div>
-
       <section id="settings-group-memory" className="wb-panel">
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Memory</p>
-            <h3>平台级 Memory 与检索质量</h3>
-            <div className="wb-chip-row">
-              <span className="wb-chip">平台级</span>
-              <span className="wb-chip">影响默认 recall 与未来知识库</span>
-            </div>
+            <h3>本地记忆状态</h3>
           </div>
         </div>
 
         <div className="wb-card-grid wb-card-grid-4">
           <article className="wb-card">
             <p className="wb-card-label">当前模式</p>
-            <strong>{memoryLabel}</strong>
-            <span>{memorySummaryLabel}</span>
+            <strong>本地记忆</strong>
+            <span>SQLite / Vault</span>
           </article>
           <article className="wb-card">
             <p className="wb-card-label">当前状态</p>
@@ -703,10 +529,11 @@ export default function SettingsPage() {
             <p className="wb-card-label">语义检索</p>
             <strong>
               {
-                resolveBindingSummary(
-                  "memory.embedding_model_alias",
-                  "内建 embedding（默认）"
-                ).label
+                String(
+                  fieldState["memory.embedding_model_alias"] ??
+                    getValueAtPath(config.current_value, "memory.embedding_model_alias") ??
+                    ""
+                ).trim() || "内建 embedding（默认）"
               }
             </strong>
             <span>换模型时会后台重建索引</span>
@@ -723,238 +550,6 @@ export default function SettingsPage() {
             <strong>Memory 当前有提醒</strong>
             <span>{memory.warnings.join("；")}</span>
           </div>
-        ) : (
-          <div className="wb-inline-banner is-muted">
-            <strong>推荐做法</strong>
-            <span>
-              先让默认层跑起来，再按质量需求补 `加工 / 扩写 / embedding / rerank` 模型别名。
-              只有迁移旧实例或排查兼容问题时，才需要展开下面的兼容接入设置。
-            </span>
-          </div>
-        )}
-
-        {showMigrationCard ? (
-          <div className="wb-card wb-retrieval-progress-card">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">Embedding 迁移</p>
-                <h3>在线查询继续使用旧索引，直到新索引切换完成</h3>
-              </div>
-              {memoryCorpus ? (
-                <div className="wb-chip-row">
-                  <span className="wb-chip">{memoryCorpus.state}</span>
-                  {pendingMemoryBuildJob ? (
-                    <span className="wb-chip">{pendingStageLabel}</span>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="wb-card-grid wb-card-grid-3">
-              <article className="wb-card">
-                <p className="wb-card-label">当前在线索引</p>
-                <strong>{activeEmbeddingLabel}</strong>
-                <span>现在所有 recall 仍继续用这一层。</span>
-              </article>
-              <article className="wb-card">
-                <p className="wb-card-label">目标 embedding</p>
-                <strong>{desiredEmbeddingLabel}</strong>
-                <span>
-                  {pendingMemoryGeneration
-                    ? "新索引准备好后再 cutover。"
-                    : "修改 embedding 绑定后会在这里生成新一代索引。"}
-                </span>
-              </article>
-              <article className="wb-card">
-                <p className="wb-card-label">当前阶段</p>
-                <strong>
-                  {pendingMemoryBuildJob
-                    ? pendingStageLabel
-                    : memoryCorpus?.state === "migration_deferred"
-                      ? "等待重新发起"
-                      : rollbackCandidate
-                        ? "可回滚"
-                        : "空闲"}
-                </strong>
-                <span>
-                  {pendingMemoryBuildJob?.summary ||
-                    memoryCorpus?.summary ||
-                    "当前没有进行中的迁移。"}
-                </span>
-              </article>
-            </div>
-
-            {pendingMemoryBuildJob ? (
-              <div className="wb-progress-card">
-                <div className="wb-progress-track" aria-hidden="true">
-                  <div
-                    className="wb-progress-fill"
-                    style={{ width: `${pendingPercent}%` }}
-                  />
-                </div>
-                <div className="wb-progress-meta">
-                  <span>
-                    {pendingMemoryBuildJob.processed_items}/{pendingMemoryBuildJob.total_items || "?"}
-                  </span>
-                  <span>{pendingPercent}%</span>
-                </div>
-              </div>
-            ) : null}
-
-            {memoryCorpus?.warnings.length ? (
-              <div className="wb-note">
-                <strong>迁移提醒</strong>
-                <span>{memoryCorpus.warnings.join("；")}</span>
-              </div>
-            ) : null}
-
-            <div className="wb-chip-row">
-              {pendingMemoryGeneration ? (
-                pendingMemoryBuildJob?.stage === "ready_to_cutover" ? (
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    disabled={retrievalBusy}
-                    onClick={() =>
-                      handleCutoverEmbeddingMigration(pendingMemoryGeneration.generation_id)
-                    }
-                  >
-                    切换到新索引
-                  </button>
-                ) : pendingMemoryBuildJob?.stage === "queued" ? (
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    disabled={retrievalBusy}
-                    onClick={() => {
-                      void handleStartEmbeddingMigration();
-                    }}
-                  >
-                    开始迁移
-                  </button>
-                ) : null
-              ) : memoryCorpus?.state === "migration_deferred" ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-primary"
-                  disabled={retrievalBusy}
-                  onClick={() => {
-                    void handleStartEmbeddingMigration();
-                  }}
-                >
-                  重新发起迁移
-                </button>
-              )
-              : null}
-
-              {pendingMemoryBuildJob?.can_cancel && pendingMemoryGeneration ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-secondary"
-                  disabled={retrievalBusy}
-                  onClick={() =>
-                    handleCancelEmbeddingMigration(pendingMemoryGeneration.generation_id)
-                  }
-                >
-                  取消迁移
-                </button>
-              ) : null}
-
-              {rollbackCandidate ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  disabled={retrievalBusy}
-                  onClick={() =>
-                    handleRollbackEmbeddingMigration(rollbackCandidate.generation_id)
-                  }
-                >
-                  回滚到上一版
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {hasMemoryModelBindings ? (
-          <>
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">模型绑定</p>
-                <h3>先决定默认质量层，再考虑是否升级</h3>
-              </div>
-            </div>
-            <div className="wb-form-grid">
-              {MEMORY_BINDING_FIELDS.map((item) => {
-                const binding = resolveBindingSummary(item.fieldPath, item.fallbackLabel);
-                const selectOptions = binding.value
-                  ? Array.from(new Set([...aliasOptions, binding.value]))
-                  : aliasOptions;
-                return (
-                  <label key={item.fieldPath} className="wb-field">
-                    <span>{item.label}</span>
-                    <small>{item.description}</small>
-                    <select
-                      aria-label={item.label}
-                      value={binding.value}
-                      onChange={(event) => updateFieldValue(item.fieldPath, event.target.value)}
-                    >
-                      <option value="">{item.fallbackLabel}</option>
-                      {selectOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                    <small>当前生效：{binding.label}</small>
-                  </label>
-                );
-              })}
-            </div>
-
-            <div className="wb-note-stack">
-              <div className="wb-note">
-                <strong>最小可用</strong>
-                <span>只要 `main` alias 可用，Memory 就能先完成基础加工与基础 recall。</span>
-              </div>
-              <div className="wb-note">
-                <strong>语义检索升级</strong>
-                <span>
-                  如果你后来补了专用 embedding alias，系统会走后台重建；切换完成前仍继续使用旧索引。
-                </span>
-              </div>
-            </div>
-          </>
-        ) : null}
-
-        {(visibleMemoryCompatHints.length > 0 || visibleMemoryAdvancedHints.length > 0) ? (
-          <details className="wb-field-guide wb-field-guide-disclosure">
-            <summary>兼容接入（仅迁移旧 MemU bridge 或排障时需要）</summary>
-            <p>
-              这组字段属于兼容层，不是普通用户首次使用 Memory 的必要条件。只有你明确还在沿用旧
-              command / http bridge，或需要排查兼容链路时，再展开修改。
-            </p>
-            {visibleMemoryCompatHints.length > 0 ? (
-              <SettingsHintFields
-                hints={visibleMemoryCompatHints}
-                schema={config.schema}
-                fieldState={fieldState}
-                fieldErrors={fieldErrors}
-                usingEchoMode={usingEchoMode}
-                onFieldValueChange={updateFieldValue}
-              />
-            ) : null}
-            {visibleMemoryAdvancedHints.length > 0 ? (
-              <SettingsHintFields
-                hints={visibleMemoryAdvancedHints}
-                schema={config.schema}
-                fieldState={fieldState}
-                fieldErrors={fieldErrors}
-                usingEchoMode={usingEchoMode}
-                onFieldValueChange={updateFieldValue}
-              />
-            ) : null}
-          </details>
         ) : null}
       </section>
 
@@ -990,7 +585,7 @@ export default function SettingsPage() {
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">保存检查</p>
-            <h3>先看风险，再决定保存或一键接入</h3>
+            <h3>风险检查与保存</h3>
           </div>
         </div>
 
@@ -1005,14 +600,6 @@ export default function SettingsPage() {
                   <span>当前没有额外提示。</span>
                 )}
               </div>
-            </div>
-            <div className="wb-note">
-              <strong>当前状态</strong>
-              <span>
-                {usingEchoMode
-                  ? "当前还没有连接真实模型；没配好前系统会先自动回退。"
-                  : "当前会优先使用你配置好的 Provider 和模型别名。"}
-              </span>
             </div>
             {review.agent_autonomy_risks.length > 0 ? (
               <div className="wb-note">
@@ -1035,10 +622,6 @@ export default function SettingsPage() {
               <span className={`wb-status-pill ${review.ready ? "is-ready" : "is-warning"}`}>
                 {review.ready ? "Ready" : "Needs review"}
               </span>
-            </div>
-            <div className="wb-note">
-              <strong>检查配置</strong>
-              <span>先执行 `setup.review`，确认阻塞项和风险摘要。</span>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
               <button

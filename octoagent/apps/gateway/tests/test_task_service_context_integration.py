@@ -63,7 +63,6 @@ from octoagent.memory import (
     MemorySearchHit,
     MemorySearchOptions,
     MemoryService,
-    MemUBackend,
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
@@ -139,73 +138,6 @@ class PlannerAwareLLMService(RecordingLLMService):
             cost_unavailable=False,
             is_fallback=False,
             fallback_reason="",
-        )
-
-
-class _PlannerMemUBridge:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, object]] = []
-
-    async def is_available(self) -> bool:
-        return True
-
-    async def get_status(self) -> MemoryBackendStatus:
-        self.calls.append(("get_status", "memu"))
-        return MemoryBackendStatus(
-            backend_id="memu",
-            active_backend="memu",
-            state=MemoryBackendState.HEALTHY,
-        )
-
-    async def search(
-        self,
-        scope_id: str,
-        *,
-        query: str | None = None,
-        policy: MemoryAccessPolicy | None = None,
-        limit: int = 10,
-        search_options: MemorySearchOptions | None = None,
-    ) -> list[MemorySearchHit]:
-        _ = policy, limit
-        self.calls.append(
-            (
-                "search",
-                {
-                    "scope_id": scope_id,
-                    "query": query or "",
-                    "search_options": (
-                        search_options.model_dump(mode="json")
-                        if search_options is not None
-                        else None
-                    ),
-                },
-            )
-        )
-        return [
-            MemorySearchHit(
-                record_id="memu-plan-hit-1",
-                layer=MemoryLayer.SOR,
-                scope_id=scope_id,
-                partition=MemoryPartition.WORK,
-                summary="MemU 命中了 Alpha continuity 相关长期约束。",
-                subject_key="alpha-constraint",
-                created_at=datetime.now(tz=UTC),
-                metadata={"backend_used": "memu"},
-            )
-        ]
-
-    async def resolve_evidence(
-        self,
-        query: MemoryEvidenceQuery,
-    ) -> MemoryEvidenceProjection:
-        self.calls.append(("resolve_evidence", query.record_id))
-        return MemoryEvidenceProjection(
-            record_id=query.record_id,
-            fragment_refs=[],
-            artifact_refs=["artifact-memu-1"],
-            proposal_refs=[],
-            derived_refs=[],
-            maintenance_run_refs=[],
         )
 
 
@@ -818,95 +750,6 @@ async def test_task_service_agent_led_recall_uses_model_planned_query(
 
     await store_group.conn.close()
 
-
-async def test_task_service_agent_led_recall_prefers_memu_backend_when_available(
-    tmp_path: Path,
-) -> None:
-    store_group = await create_store_group(
-        str(tmp_path / "f051-agent-led-memu.db"),
-        str(tmp_path / "artifacts"),
-    )
-    await _seed_project_context(store_group)
-    await store_group.agent_context_store.save_agent_profile(
-        AgentProfile(
-            profile_id="agent-profile-alpha",
-            scope=AgentProfileScope.PROJECT,
-            project_id="project-alpha",
-            name="Alpha Agent",
-            persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
-            instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
-            context_budget_policy={
-                "memory_recall": {
-                    "planner_enabled": True,
-                }
-            },
-        )
-    )
-    await store_group.conn.commit()
-
-    bridge = _PlannerMemUBridge()
-    memu_service = MemoryService(
-        store_group.conn,
-        backend=MemUBackend(bridge),
-    )
-
-    service = TaskService(store_group, SSEHub())
-
-    async def fake_get_memory_service(self, *, project, workspace):
-        _ = project, workspace
-        return memu_service
-
-    service._agent_context.get_memory_service = MethodType(  # type: ignore[method-assign]
-        fake_get_memory_service,
-        service._agent_context,
-    )
-
-    llm_service = PlannerAwareLLMService()
-    message = NormalizedMessage(
-        channel="web",
-        thread_id="thread-alpha",
-        scope_id="chat:web:thread-alpha",
-        text="请继续推进 Alpha 的方案拆解",
-        idempotency_key="f051-agent-led-memu-001",
-    )
-    task_id, created = await service.create_task(message)
-    assert created is True
-
-    await service.process_task_with_llm(
-        task_id=task_id,
-        user_text=message.text,
-        llm_service=llm_service,
-        dispatch_metadata=await service.get_latest_user_metadata(task_id),
-    )
-
-    frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
-    assert len(frames) == 1
-    frame = frames[0]
-    assert frame.budget["memory_recall"]["backend"] == "memu"
-    assert frame.budget["memory_recall"]["backend_state"] == "healthy"
-    assert frame.budget["memory_recall"]["agent_led_recall_executed"] is True
-    assert frame.memory_hits[0]["record_id"] == "memu-plan-hit-1"
-    assert frame.memory_hits[0]["citation"].endswith("/sor/alpha-constraint")
-    assert frame.memory_hits[0]["metadata"]["backend_used"] == "memu"
-    assert frame.budget["memory_recall"]["recall_evidence_bundle"]["backend"] == "memu"
-    assert frame.budget["memory_recall"]["recall_evidence_bundle"]["citations"][0].endswith(
-        "/sor/alpha-constraint"
-    )
-    search_call = next(item for item in bridge.calls if item[0] == "search")
-    search_payload = search_call[1]
-    assert isinstance(search_payload, dict)
-    assert search_payload["query"] == "Alpha continuity constraints milestone plan"
-    assert search_payload["search_options"]["expanded_queries"][0] == (
-        "Alpha continuity constraints milestone plan"
-    )
-    assert search_payload["search_options"]["reasoning_target"] == "main"
-    assert search_payload["search_options"]["expand_target"] == "main"
-    assert search_payload["search_options"]["embedding_target"] == "engine-default"
-    assert search_payload["search_options"]["rerank_target"] == "heuristic"
-    assert search_payload["search_options"]["rerank_mode"] == "heuristic"
-    assert ("resolve_evidence", "memu-plan-hit-1") in bridge.calls
-
-    await store_group.conn.close()
 
 
 async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phase(

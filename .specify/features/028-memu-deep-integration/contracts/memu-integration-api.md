@@ -1,5 +1,7 @@
 # Contract: MemU Integration API
 
+> **已废弃（2026-03-17）**：MemU bridge 实现已整体移除。本 contract 仅作历史参考。
+
 ## 1. Contract Scope
 
 本 contract 冻结 Feature 028 对外提供的 backend integration surface，供已交付的 Feature 027（Memory Console / Vault authorized retrieval）与 Feature 026（Control Plane diagnostics/actions hook）兼容消费。

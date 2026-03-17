@@ -1,5 +1,7 @@
 # Data Model: Feature 028 — MemU Deep Integration
 
+> **已废弃（2026-03-17）**：MemU bridge 实现已整体移除。部分数据模型（如 `MemoryBackendStatus`、`MemorySyncBatch`、`MemoryMaintenanceRun` 等）仍保留在代码中，但 bridge 相关字段已无效。
+
 ## 核心对象
 
 ### `MemoryBackendStatus`

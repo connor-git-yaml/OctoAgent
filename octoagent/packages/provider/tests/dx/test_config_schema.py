@@ -14,7 +14,6 @@ from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     ConfigParseError,
     FrontDoorConfig,
-    MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
@@ -95,15 +94,6 @@ def test_default_values() -> None:
     assert config.channels.telegram.mode == "webhook"
     assert config.channels.telegram.bot_token_env == "TELEGRAM_BOT_TOKEN"
     assert config.memory.backend_mode == "local_only"
-    assert config.memory.reasoning_model_alias == ""
-    assert config.memory.expand_model_alias == ""
-    assert config.memory.embedding_model_alias == ""
-    assert config.memory.rerank_model_alias == ""
-    assert config.memory.bridge_transport == "http"
-    assert config.memory.bridge_command == ""
-    assert config.memory.bridge_command_timeout_seconds == 15.0
-    assert config.memory.bridge_timeout_seconds == 5.0
-    assert config.memory.bridge_search_path == "/memory/search"
 
 
 def test_front_door_config_accepts_comma_separated_cidrs() -> None:
@@ -281,59 +271,6 @@ def test_build_config_schema_document_uses_canonical_provider_target_key() -> No
 
     assert secret_target["target_key"] == "providers.anthropic.api_key_env"
     assert secret_target["target_key_template"] == "providers.{provider_id}.api_key_env"
-
-
-def test_build_config_schema_document_exposes_memory_defaults_and_secret_target() -> None:
-    config = _make_config(
-        memory=MemoryConfig(
-            backend_mode="memu",
-            reasoning_model_alias="main",
-            expand_model_alias="cheap",
-            embedding_model_alias="embed",
-            rerank_model_alias="rerank",
-            bridge_transport="command",
-            bridge_command="uv run python scripts/memu_bridge.py",
-            bridge_command_cwd="/tmp/memu",
-            bridge_command_timeout_seconds=18.0,
-            bridge_url="https://memory.example.com",
-            bridge_api_key_env="MEMU_API_KEY",
-            bridge_timeout_seconds=8.0,
-            bridge_search_path="/memory/query",
-        )
-    )
-
-    document = build_config_schema_document(config)
-    memory_section = document.ui_hints["sections"]["memory"]
-    memory_backend = document.ui_hints["fields"]["memory.backend_mode"]
-    memory_reasoning = document.ui_hints["fields"]["memory.reasoning_model_alias"]
-    memory_transport = document.ui_hints["fields"]["memory.bridge_transport"]
-    memory_secret = document.ui_hints["fields"]["memory.bridge_api_key_env"]["secret_target"]
-
-    assert "memory.backend_mode" in memory_section["fields"]
-    assert "memory.reasoning_model_alias" in memory_section["fields"]
-    assert "memory.embedding_model_alias" in memory_section["fields"]
-    assert "memory.bridge_transport" in memory_section["fields"]
-    assert "memory.bridge_command" in memory_section["fields"]
-    assert "memory.bridge_search_path" in memory_section["fields"]
-    assert memory_backend["default"] == "memu"
-    assert memory_reasoning["default"] == "main"
-    assert document.ui_hints["fields"]["memory.expand_model_alias"]["default"] == "cheap"
-    assert document.ui_hints["fields"]["memory.embedding_model_alias"]["default"] == "embed"
-    assert document.ui_hints["fields"]["memory.rerank_model_alias"]["default"] == "rerank"
-    assert memory_transport["default"] == "command"
-    assert (
-        document.ui_hints["fields"]["memory.bridge_command"]["default"]
-        == "uv run python scripts/memu_bridge.py"
-    )
-    assert document.ui_hints["fields"]["memory.bridge_command_cwd"]["default"] == "/tmp/memu"
-    assert (
-        document.ui_hints["fields"]["memory.bridge_command_timeout_seconds"]["default"]
-        == 18.0
-    )
-    assert document.ui_hints["fields"]["memory.bridge_timeout_seconds"]["default"] == 8.0
-    assert document.ui_hints["fields"]["memory.bridge_search_path"]["default"] == "/memory/query"
-    assert memory_secret["target_kind"] == "memory"
-    assert memory_secret["target_key"] == "memory.bridge_api_key_env"
 
 
 def test_from_yaml_invalid_syntax() -> None:

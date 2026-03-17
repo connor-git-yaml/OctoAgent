@@ -96,58 +96,12 @@ def _load_or_default(project_root: Path) -> OctoAgentConfig:
     return OctoAgentConfig(updated_at=date.today().isoformat())
 
 
-def _resolve_required_value(
-    value: str | None,
-    *,
-    prompt_text: str,
-    error_message: str,
-    default: str | None = None,
-) -> str:
-    """解析必填 CLI 参数；缺失时在 TTY 下交互提示。"""
-    resolved = (value or "").strip()
-    if resolved:
-        return resolved
-    if sys.stdin.isatty():
-        prompted = click.prompt(prompt_text, default=default, type=str)
-        return prompted.strip()
-    raise click.ClickException(error_message)
-
-
 def _print_memory_summary(config: OctoAgentConfig) -> None:
     """输出 Memory 配置摘要。"""
     memory = config.memory
     console.print("[bold]Memory[/bold]:")
     console.print(f"  backend_mode:       {memory.backend_mode}")
-    console.print(
-        "  reasoning_alias:   "
-        f"{memory.reasoning_model_alias or 'main（默认）'}"
-    )
-    console.print(
-        "  expand_alias:      "
-        f"{memory.expand_model_alias or 'main（默认）'}"
-    )
-    console.print(
-        "  embedding_alias:   "
-        f"{memory.embedding_model_alias or 'builtin（默认）'}"
-    )
-    console.print(
-        "  rerank_alias:      "
-        f"{memory.rerank_model_alias or 'heuristic（默认）'}"
-    )
-    if memory.backend_mode != "memu":
-        console.print("  compat_transport:   builtin")
-        return
-    console.print(f"  compat_transport:   {memory.bridge_transport}")
-    if memory.bridge_transport == "command":
-        console.print(f"  compat_command:     {memory.bridge_command or '-'}")
-        console.print(f"  compat_command_cwd: {memory.bridge_command_cwd or '-'}")
-        console.print(
-            f"  compat_timeout:     {memory.bridge_command_timeout_seconds:g} 秒"
-        )
-        return
-    console.print(f"  compat_url:         {memory.bridge_url or '-'}")
-    console.print(f"  compat_api_key_env: {memory.bridge_api_key_env or '-'}")
-    console.print(f"  compat_timeout:     {memory.bridge_timeout_seconds:g} 秒")
+    console.print("  transport:          local sqlite / vault")
 
 
 def _save_memory_patch(
@@ -761,7 +715,7 @@ def alias_set(
 
 @config.group("memory")
 def memory_group() -> None:
-    """管理内建 Memory 引擎与旧兼容接入方式"""
+    """管理 Memory 后端配置"""
 
 
 @memory_group.command("show")
@@ -796,87 +750,6 @@ def memory_local(ctx: click.Context) -> None:
         success_message="已切换为本地 Memory 模式。",
     )
 
-
-@memory_group.command("memu-http")
-@click.option("--bridge-url", default=None, help="兼容 HTTP Bridge 基础地址")
-@click.option(
-    "--api-key-env",
-    default=None,
-    help="兼容 HTTP Bridge 的 API Key 环境变量名（可选）",
-)
-@click.option("--timeout", type=float, default=None, help="HTTP 请求超时（秒）")
-@click.pass_context
-def memory_memu_http(
-    ctx: click.Context,
-    bridge_url: str | None,
-    api_key_env: str | None,
-    timeout: float | None,
-) -> None:
-    """配置兼容 HTTP Bridge。"""
-    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
-    project_root = _resolve_project_root(yaml_path)
-    resolved_url = _resolve_required_value(
-        bridge_url,
-        prompt_text="兼容 HTTP Bridge 地址",
-        error_message="缺少 --bridge-url，且当前终端无法交互输入。",
-        default="https://memory.example.com",
-    )
-    if timeout is not None and timeout <= 0:
-        raise click.ClickException("--timeout 必须大于 0。")
-
-    patch: dict[str, object] = {
-        "backend_mode": "memu",
-        "bridge_transport": "http",
-        "bridge_url": resolved_url,
-    }
-    if api_key_env is not None:
-        patch["bridge_api_key_env"] = api_key_env.strip()
-    if timeout is not None:
-        patch["bridge_timeout_seconds"] = timeout
-    _save_memory_patch(
-        project_root,
-        patch=patch,
-        success_message="已更新兼容 HTTP Bridge 配置。",
-    )
-
-
-@memory_group.command("memu-command")
-@click.option("--command", "command_value", default=None, help="本地兼容 Bridge 命令")
-@click.option("--cwd", default=None, help="执行命令时的工作目录")
-@click.option("--timeout", type=float, default=None, help="命令执行超时（秒）")
-@click.pass_context
-def memory_memu_command(
-    ctx: click.Context,
-    command_value: str | None,
-    cwd: str | None,
-    timeout: float | None,
-) -> None:
-    """配置本地兼容命令桥接。"""
-    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
-    project_root = _resolve_project_root(yaml_path)
-    resolved_command = _resolve_required_value(
-        command_value,
-        prompt_text="兼容 Bridge 本地命令",
-        error_message="缺少 --command，且当前终端无法交互输入。",
-        default="uv run python scripts/memu_bridge.py",
-    )
-    if timeout is not None and timeout <= 0:
-        raise click.ClickException("--timeout 必须大于 0。")
-
-    patch: dict[str, object] = {
-        "backend_mode": "memu",
-        "bridge_transport": "command",
-        "bridge_command": resolved_command,
-    }
-    if cwd is not None:
-        patch["bridge_command_cwd"] = cwd.strip()
-    if timeout is not None:
-        patch["bridge_command_timeout_seconds"] = timeout
-    _save_memory_patch(
-        project_root,
-        patch=patch,
-        success_message="已更新本地兼容命令配置。",
-    )
 
 
 # ---------------------------------------------------------------------------

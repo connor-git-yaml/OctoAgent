@@ -8,11 +8,6 @@ interface SettingsOverviewProps {
   usingEchoMode: boolean;
   review: SetupReviewSummary;
   selector: ProjectSelectorDocument;
-  providerDraftCount: number;
-  activeProvidersCount: number;
-  aliasDraftCount: number;
-  memoryLabel: string;
-  memoryStatus: string;
   onQuickConnect: () => void;
   onReview: () => void;
   onApply: () => void;
@@ -24,11 +19,6 @@ export default function SettingsOverview({
   usingEchoMode,
   review,
   selector,
-  providerDraftCount,
-  activeProvidersCount,
-  aliasDraftCount,
-  memoryLabel,
-  memoryStatus,
   onQuickConnect,
   onReview,
   onApply,
@@ -36,7 +26,6 @@ export default function SettingsOverview({
   onScrollToSection,
 }: SettingsOverviewProps) {
   const reviewBlockingCount = review.blocking_reasons.length;
-  const echoReady = usingEchoMode && review.ready;
   const currentProject =
     selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
     null;
@@ -49,19 +38,13 @@ export default function SettingsOverview({
     : review.ready
       ? "现在已经可以回聊天验证"
       : `还差 ${Math.max(reviewBlockingCount, 1)} 项才能稳定开始`;
-  const primarySummary = usingEchoMode
-    ? "还没有连接真实模型。先添加一个 Provider，并补 API Key 或 OAuth；没配好前系统会先自动回退。"
-    : review.ready
-      ? "当前配置已经够用。先保存这次修改，再回聊天页验证主助手的真实回复。"
-      : "不用一次看完所有配置。先补齐阻塞项，再回来慢慢扩展其他能力。";
   const primaryActionLabel = usingEchoMode
     ? "连接真实模型"
     : review.ready
       ? "保存后回聊天验证"
       : "先检查阻塞项";
-  const minimumStatusValue = usingEchoMode ? "未连接真实模型" : "已连接真实模型";
   const statusChipLabel = usingEchoMode
-    ? echoReady
+    ? review.ready
       ? "可以先保存"
       : `还差 ${reviewBlockingCount} 项`
     : review.ready
@@ -77,14 +60,14 @@ export default function SettingsOverview({
         <div className="wb-hero-copy">
           <p className="wb-kicker">Settings</p>
           <h1>{primaryTitle}</h1>
-          <p>{primarySummary}</p>
           <div className="wb-chip-row">
-            <span className="wb-chip">{minimumStatusValue}</span>
             <span className="wb-chip">
-              当前项目默认 {currentProject?.name ?? selector.current_project_id} /{" "}
+              {usingEchoMode ? "未连接真实模型" : "已连接真实模型"}
+            </span>
+            <span className="wb-chip">
+              {currentProject?.name ?? selector.current_project_id} /{" "}
               {currentWorkspace?.name ?? selector.current_workspace_id}
             </span>
-            <span className="wb-chip">Providers / Memory = 平台级</span>
             <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`} role="status">
               {statusChipLabel}
             </span>
@@ -130,103 +113,6 @@ export default function SettingsOverview({
               保存配置
             </button>
           )}
-        </div>
-      </section>
-
-      <section className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">作用域说明</p>
-            <h3>这里改的是平台设置和项目默认，不是某一条会话本身</h3>
-          </div>
-        </div>
-        <div className="wb-note-stack">
-          <div className="wb-note">
-            <strong>平台级</strong>
-            <span>Models & Providers、Memory 默认质量层会影响整个平台默认运行面。</span>
-          </div>
-          <div className="wb-note">
-            <strong>Agent 与行为</strong>
-            <span>Agent 模板、Behavior Files 和 Provider 绑定统一放在 Agents 页面维护。</span>
-          </div>
-          <div className="wb-note">
-            <strong>已有会话</strong>
-            <span>
-              已经创建的会话会继续沿用自己的 session-scoped project / workspace 绑定。
-            </span>
-          </div>
-        </div>
-      </section>
-
-      <section className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <p className="wb-card-label">完整配置还在下面</p>
-            <h3>只有你需要继续细配时，再往下看</h3>
-          </div>
-          <div className="wb-inline-actions wb-inline-actions-wrap">
-            <button
-              type="button"
-              className="wb-button wb-button-secondary"
-              onClick={onReview}
-              disabled={connectBusy}
-            >
-              先检查配置
-            </button>
-            <Link
-              className="wb-button wb-button-tertiary"
-              to="/agents?view=behavior"
-            >
-              打开 Agents &gt; Behavior
-            </Link>
-            <Link
-              className="wb-button wb-button-tertiary"
-              to="/agents/skills"
-            >
-              打开 Agents &gt; Skills / MCP
-            </Link>
-            {!usingEchoMode && review.ready ? (
-              <Link className="wb-button wb-button-tertiary" to="/">
-                回聊天验证
-              </Link>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="wb-note-stack">
-          <div className="wb-note">
-            <strong>这页下面还有什么</strong>
-            <span>
-              Providers、模型别名、Memory 默认质量层和渠道连接都还在下面；只想先用起来，不必一次看完。
-            </span>
-          </div>
-          <div className="wb-note">
-            <strong>哪些内容已经移走了</strong>
-            <span>
-              Behavior Files、Agent 模板和当前 Project 的默认 Agent 配置，统一去 Agents &gt; Behavior；
-              Skill / MCP Provider 的安装和 Provider 绑定，统一去 Agents &gt; Skills / MCP。
-            </span>
-          </div>
-        </div>
-
-        <div className="wb-card-grid wb-card-grid-3">
-          <article className="wb-card">
-            <p className="wb-card-label">模型与别名</p>
-            <strong>{activeProvidersCount} 个已启用 Provider</strong>
-            <span>当前草稿 {providerDraftCount}</span>
-            <span>模型别名 {aliasDraftCount}</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">记忆连接</p>
-            <strong>{memoryLabel}</strong>
-            <span>{memoryStatus}</span>
-            <span>Memory 默认质量层和兼容接入都仍在本页处理。</span>
-          </article>
-          <article className="wb-card">
-            <p className="wb-card-label">Agent 能力入口</p>
-            <strong>Agents &gt; Behavior / Skills / MCP</strong>
-            <span>行为文件去 Behavior，Skills / MCP 和 Provider 绑定去对应 Agent 页面。</span>
-          </article>
         </div>
       </section>
 

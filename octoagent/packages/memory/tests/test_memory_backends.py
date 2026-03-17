@@ -6,7 +6,6 @@ from octoagent.memory import (
     DerivedMemoryQuery,
     EvidenceRef,
     FragmentRecord,
-    MemoryAccessPolicy,
     MemoryBackendState,
     MemoryBackendStatus,
     MemoryEvidenceProjection,
@@ -20,113 +19,10 @@ from octoagent.memory import (
     MemoryPartition,
     MemorySearchHit,
     MemorySyncBatch,
-    MemUBackend,
     SorRecord,
     VaultRecord,
 )
 from octoagent.memory.service import MemoryService
-
-
-class TestMemUBackend:
-    async def test_adapter_delegates_to_bridge(self):
-        bridge = _FakeMemUBridge()
-        backend = MemUBackend(bridge)
-        now = datetime.now(UTC)
-        fragment = FragmentRecord(
-            fragment_id="01JFRAG_MEMU_0000000001",
-            scope_id="work/project-x",
-            partition=MemoryPartition.WORK,
-            content="fragment summary",
-            evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
-            created_at=now,
-        )
-        sor = SorRecord(
-            memory_id="01JSOR_MEMU_00000000001",
-            scope_id="work/project-x",
-            partition=MemoryPartition.WORK,
-            subject_key="work.project-x.status",
-            content="running",
-            version=1,
-            evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
-            created_at=now,
-            updated_at=now,
-        )
-        vault = VaultRecord(
-            vault_id="01JVAULT_MEMU_00000001",
-            scope_id="profile/user",
-            partition=MemoryPartition.HEALTH,
-            subject_key="profile.user.health.note",
-            summary="health note updated",
-            content_ref="vault://proposal/123",
-            evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
-            created_at=now,
-        )
-
-        await backend.sync_fragment(fragment)
-        await backend.sync_sor(sor)
-        await backend.sync_vault(vault)
-        status = await backend.get_status()
-        sync_result = await backend.sync_batch(
-            MemorySyncBatch(
-                batch_id="batch-1",
-                scope_id="work/project-x",
-                fragments=[fragment],
-                sor_records=[sor],
-                vault_records=[vault],
-                created_at=now,
-            )
-        )
-        ingest_result = await backend.ingest_batch(
-            MemoryIngestBatch(
-                ingest_id="ingest-1",
-                scope_id="work/project-x",
-                partition=MemoryPartition.WORK,
-                items=[
-                    MemoryIngestItem(
-                        item_id="item-1",
-                        modality="text",
-                        artifact_ref="artifact-1",
-                    )
-                ],
-            )
-        )
-        derived = await backend.list_derivations(DerivedMemoryQuery(scope_id="work/project-x"))
-        evidence = await backend.resolve_evidence(
-            MemoryEvidenceQuery(record_id=fragment.fragment_id, layer=MemoryLayer.FRAGMENT)
-        )
-        maintenance = await backend.run_maintenance(
-            MemoryMaintenanceCommand(
-                command_id="command-1",
-                kind=MemoryMaintenanceCommandKind.FLUSH,
-                scope_id="work/project-x",
-            )
-        )
-        hits = await backend.search(
-            "work/project-x",
-            query="running",
-            policy=MemoryAccessPolicy(),
-            limit=10,
-        )
-
-        assert status.backend_id == "memu"
-        assert sync_result.synced_fragments == 1
-        assert ingest_result.ingest_id == "ingest-1"
-        assert derived.backend_used == "memu"
-        assert evidence.record_id == fragment.fragment_id
-        assert maintenance.status is MemoryMaintenanceRunStatus.COMPLETED
-        assert bridge.calls == [
-            ("sync_fragment", fragment.fragment_id),
-            ("sync_sor", sor.memory_id),
-            ("sync_vault", vault.vault_id),
-            ("get_status", "memu"),
-            ("sync_batch", "batch-1"),
-            ("ingest_batch", "ingest-1"),
-            ("list_derivations", "work/project-x"),
-            ("resolve_evidence", fragment.fragment_id),
-            ("run_maintenance", "command-1"),
-            ("search", "work/project-x"),
-        ]
-        assert len(hits) == 1
 
 
 class TestMemoryServiceBackendFallback:
@@ -465,120 +361,6 @@ class TestMemoryServiceBackendFallback:
         current = await memory_store.get_current_sor("work/project-x", "work.project-x.summary")
         assert current is None
 
-    async def test_bridge_reconnect_invokes_backend_maintenance(self, memory_conn):
-        backend = _ReconnectBackend()
-        service = MemoryService(memory_conn, backend=backend)
-
-        run = await service.run_memory_maintenance(
-            MemoryMaintenanceCommand(
-                command_id="memory-bridge-reconnect-1",
-                kind=MemoryMaintenanceCommandKind.BRIDGE_RECONNECT,
-                scope_id="work/project-x",
-            )
-        )
-
-        assert backend.maintenance_calls == ["memory-bridge-reconnect-1"]
-        assert run.backend_used == "memu"
-        assert run.metadata["active_backend"] == "memu"
-
-
-class _FakeMemUBridge:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-
-    async def is_available(self) -> bool:
-        return True
-
-    async def get_status(self) -> MemoryBackendStatus:
-        self.calls.append(("get_status", "memu"))
-        return MemoryBackendStatus(
-            backend_id="memu",
-            state=MemoryBackendState.HEALTHY,
-            active_backend="memu",
-        )
-
-    async def search(self, scope_id: str, *, query=None, policy=None, limit=10, search_options=None):
-        self.calls.append(("search", scope_id))
-        _ = query, policy, limit, search_options
-        return [
-            MemorySearchHit(
-                record_id="memu-hit-1",
-                layer=MemoryLayer.SOR,
-                scope_id=scope_id,
-                partition=MemoryPartition.WORK,
-                summary="running",
-                created_at=datetime.now(UTC),
-            )
-        ]
-
-    async def sync_batch(self, batch: MemorySyncBatch):
-        self.calls.append(("sync_batch", batch.batch_id))
-        return type(
-            "_SyncResult",
-            (),
-            {
-                "synced_fragments": len(batch.fragments),
-                "synced_sor_records": len(batch.sor_records),
-                "synced_vault_records": len(batch.vault_records),
-                "replayed_tombstones": len(batch.tombstones),
-                "backend_state": MemoryBackendState.HEALTHY,
-            },
-        )()
-
-    async def ingest_batch(self, batch: MemoryIngestBatch):
-        self.calls.append(("ingest_batch", batch.ingest_id))
-        return type(
-            "_IngestResult",
-            (),
-            {
-                "ingest_id": batch.ingest_id,
-                "fragment_refs": [],
-                "derived_refs": [],
-                "proposal_drafts": [],
-                "warnings": [],
-                "errors": [],
-                "backend_state": MemoryBackendState.HEALTHY,
-            },
-        )()
-
-    async def list_derivations(self, query: DerivedMemoryQuery):
-        self.calls.append(("list_derivations", query.scope_id))
-        return type(
-            "_DerivedProjection",
-            (),
-            {
-                "backend_used": "memu",
-                "backend_state": MemoryBackendState.HEALTHY,
-                "items": [],
-                "next_cursor": "",
-                "degraded_reason": "",
-            },
-        )()
-
-    async def resolve_evidence(self, query: MemoryEvidenceQuery):
-        self.calls.append(("resolve_evidence", query.record_id))
-        return MemoryEvidenceProjection(record_id=query.record_id)
-
-    async def run_maintenance(self, command: MemoryMaintenanceCommand):
-        self.calls.append(("run_maintenance", command.command_id))
-        return type(
-            "_MaintenanceRun",
-            (),
-            {
-                "status": MemoryMaintenanceRunStatus.COMPLETED,
-            },
-        )()
-
-    async def sync_fragment(self, fragment: FragmentRecord) -> None:
-        self.calls.append(("sync_fragment", fragment.fragment_id))
-
-    async def sync_sor(self, record: SorRecord) -> None:
-        self.calls.append(("sync_sor", record.memory_id))
-
-    async def sync_vault(self, record: VaultRecord) -> None:
-        self.calls.append(("sync_vault", record.vault_id))
-
-
 class _FailingBackend:
     backend_id = "memu"
     memory_engine_contract_version = "1.0.0"
@@ -718,44 +500,6 @@ class _RecoverableSyncBackend(_FailingBackend):
                 "synced_sor_records": len(batch.sor_records),
                 "synced_vault_records": len(batch.vault_records),
                 "replayed_tombstones": len(batch.tombstones),
-                "backend_state": MemoryBackendState.HEALTHY,
-            },
-        )()
-
-
-class _ReconnectBackend(_FailingBackend):
-    def __init__(self) -> None:
-        self.maintenance_calls: list[str] = []
-
-    async def get_status(self) -> MemoryBackendStatus:
-        return MemoryBackendStatus(
-            backend_id="memu",
-            state=MemoryBackendState.HEALTHY,
-            active_backend="memu",
-        )
-
-    async def run_maintenance(self, command: MemoryMaintenanceCommand):
-        self.maintenance_calls.append(command.command_id)
-        now = datetime.now(UTC)
-        return type(
-            "_ReconnectRun",
-            (),
-            {
-                "run_id": f"reconnect:{command.command_id}",
-                "command_id": command.command_id,
-                "kind": command.kind,
-                "scope_id": command.scope_id,
-                "partition": command.partition,
-                "status": MemoryMaintenanceRunStatus.COMPLETED,
-                "backend_used": "memu",
-                "fragment_refs": [],
-                "proposal_refs": [],
-                "derived_refs": [],
-                "diagnostic_refs": ["memory:backend-status"],
-                "error_summary": "",
-                "metadata": {"reconnected": True},
-                "started_at": now,
-                "finished_at": now,
                 "backend_state": MemoryBackendState.HEALTHY,
             },
         )()
