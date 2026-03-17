@@ -253,6 +253,7 @@ class CapabilityPackService:
         self._tool_broker = tool_broker
         self._tool_index = ToolIndex(preferred_backend=preferred_tool_index_backend)
         self._pack: BundledCapabilityPack | None = None
+        self._pack_revision: int = 0
         self._bootstrapped = False
         self._profile_map = self._build_worker_profiles()
         self._bootstrap_templates = self._build_bootstrap_templates()
@@ -388,7 +389,17 @@ class CapabilityPackService:
             fallback_toolset=fallback_toolset,
             degraded_reason=self._tool_index.degraded_reason,
         )
+        self._pack_revision += 1
         return self._pack
+
+    @property
+    def pack_revision(self) -> int:
+        """当前 pack 版本号，MCP 安装/卸载等导致 refresh 时递增。"""
+        return self._pack_revision
+
+    def invalidate_pack(self) -> None:
+        """标记 pack 缓存过期，下次 get_pack 会重新构建。"""
+        self._pack = None
 
     async def get_pack(
         self,
@@ -2481,7 +2492,28 @@ class CapabilityPackService:
                     {"error": f"安装任务 {task_id} 不存在"},
                     ensure_ascii=False,
                 )
-            return json.dumps(task.model_dump(mode="json"), ensure_ascii=False, default=str)
+            result = task.model_dump(mode="json")
+            # 安装完成后自动刷新 capability pack，让新 MCP 工具立即可发现
+            if task.status == "completed":
+                try:
+                    await self.refresh()
+                    mcp_tools = [
+                        t.tool_name
+                        for t in (self._pack.tools if self._pack else [])
+                        if t.tool_name.startswith("mcp.") and t.tool_name not in {
+                            "mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh",
+                            "mcp.install", "mcp.install_status", "mcp.uninstall",
+                        }
+                    ]
+                    result["available_mcp_tools"] = mcp_tools
+                    result["hint"] = (
+                        "安装已完成，新的 MCP 工具已注册。"
+                        "你现在可以直接使用上面列出的 MCP 工具。"
+                        "如果当前对话无法调用，请在新对话中使用。"
+                    )
+                except Exception:
+                    pass
+            return json.dumps(result, ensure_ascii=False, default=str)
 
         @tool_contract(
             name="mcp.uninstall",
@@ -3101,6 +3133,9 @@ class CapabilityPackService:
             mcp_servers_list,
             mcp_tools_list,
             mcp_tools_refresh,
+            mcp_install,
+            mcp_install_status,
+            mcp_uninstall,
             pdf_inspect,
             image_inspect,
             tts_speak,
@@ -3244,7 +3279,9 @@ class CapabilityPackService:
                     "不要把自己叫作 general worker。\n"
                     "你的职责是先梳理目标、上下文和下一步，再在策略允许和用户授权范围内创建、拆分、合并、删除"
                     "或重划分 worker。\n"
-                    "优先自己使用当前已挂载的受治理 web / filesystem / terminal 工具完成有界任务；"
+                    "优先自己使用当前已挂载的受治理工具完成有界任务；"
+                    "当已挂载工具中包含 mcp.* 前缀的工具时，优先使用 MCP 工具而非内置同功能工具"
+                    "（例如 mcp.*.web_search 优先于 web.search，mcp.*.research 优先于 web.fetch）；"
                     "只有在并行执行、专业化分工、权限隔离或上下文隔离明显更有利时，"
                     "再委派给 research / dev / ops worker。\n"
                     "如果问题已经进入长期、复杂、持续推进的 specialist lane，"
@@ -3279,8 +3316,9 @@ class CapabilityPackService:
                 applies_to_worker_types=[WorkerType.RESEARCH],
                 content=(
                     "你是 research worker，优先分析上下文、产物和证据。\n"
-                    "如果问题依赖今天、最新公开信息、官网、网页资料或外部文档，优先使用受治理 "
-                    "web.search / web.fetch / browser.* 收集证据；"
+                    "如果问题依赖今天、最新公开信息、官网、网页资料或外部文档，"
+                    "优先使用已挂载的 mcp.* 搜索/研究工具（如 mcp.*.web_search / mcp.*.research），"
+                    "若无 MCP 搜索工具则使用受治理 web.search / web.fetch / browser.* 收集证据；"
                     "如果 project 内已有文档或文件线索，也可结合 filesystem 读取已有材料，"
                     "并在结果中说明来源与不确定性。"
                 ),

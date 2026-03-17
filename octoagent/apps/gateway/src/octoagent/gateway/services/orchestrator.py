@@ -747,7 +747,14 @@ class OrchestratorService:
         if not self._is_single_loop_butler_eligible(request):
             return request
         metadata = dict(request.metadata)
-        if self._metadata_flag(metadata, "single_loop_executor"):
+        # 如果 capability pack 已刷新（如 MCP 安装完成），需要重新解析工具列表
+        pack_rev = (
+            self._delegation_plane.capability_pack.pack_revision
+            if self._delegation_plane is not None
+            else 0
+        )
+        stored_rev = metadata.get("_pack_revision", 0)
+        if self._metadata_flag(metadata, "single_loop_executor") and pack_rev == stored_rev:
             return request
         worker_type = self._resolve_single_loop_worker_type(request)
         selection = await self._resolve_single_loop_tool_selection(
@@ -798,6 +805,7 @@ class OrchestratorService:
                 selection.model_dump(mode="json") if selection is not None else {}
             ),
             "butler_execution_mode": "single_loop",
+            "_pack_revision": pack_rev,
         }
         if selection is not None and selection.effective_tool_universe is not None:
             if selection.effective_tool_universe.profile_id:
