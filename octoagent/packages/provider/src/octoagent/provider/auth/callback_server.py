@@ -1,13 +1,15 @@
 """本地 OAuth 回调服务器 -- 对齐 contracts/auth-oauth-pkce-api.md SS4, FR-003
 
-使用 asyncio.start_server 实现轻量 HTTP 服务器，
-在 OAuth 流程期间监听本地端口接收授权回调。
+提供两种回调接收模式:
+1. **Gateway 路由模式（推荐）**: 由 FastAPI 路由接收回调，通过 shared future 传递结果。
+   无需独立端口，彻底避免端口冲突。Web UI 和 CLI 均可使用。
+2. **独立 server 模式（降级）**: 在独立端口启动临时 HTTP 服务器。
+   仅在 Gateway 路由不可用时使用（如 CLI 独立运行）。
 
 安全约束:
 - 仅绑定 127.0.0.1（不绑定 0.0.0.0）
 - 收到第一个有效回调后立即关闭
 - 默认 300s 超时后自动关闭
-- 重复发起时自动关闭旧 server，避免端口冲突
 """
 
 from __future__ import annotations
@@ -42,10 +44,6 @@ _ERROR_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-# 模块级追踪：当前活跃的 callback server，用于重复发起时自动关闭旧实例
-_active_server: asyncio.Server | None = None
-_active_future: asyncio.Future[CallbackResult] | None = None
-
 
 @dataclass(frozen=True, slots=True)
 class CallbackResult:
@@ -54,6 +52,111 @@ class CallbackResult:
     code: str  # 授权码
     state: str  # state 参数（用于 CSRF 验证）
 
+
+# ---------------------------------------------------------------------------
+# Gateway 路由模式: 共享 pending flow（模块级单例）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _PendingOAuthFlow:
+    """跟踪一个正在进行的 OAuth 流程"""
+    expected_state: str
+    future: asyncio.Future[CallbackResult]
+
+
+# 当前活跃的 OAuth 流程（同一时间只允许一个）
+_pending_flow: _PendingOAuthFlow | None = None
+
+
+def register_pending_flow(expected_state: str) -> asyncio.Future[CallbackResult]:
+    """注册一个新的 OAuth 流程等待回调。
+
+    如果已有正在等待的流程，自动取消旧的（新的覆盖旧的）。
+    返回 Future，OAuth 流程 await 它来获取回调结果。
+    """
+    global _pending_flow
+    if _pending_flow is not None:
+        if not _pending_flow.future.done():
+            _pending_flow.future.cancel()
+            log.info("oauth_pending_flow_replaced", reason="新 OAuth 流程覆盖旧的")
+        _pending_flow = None
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future[CallbackResult] = loop.create_future()
+    _pending_flow = _PendingOAuthFlow(expected_state=expected_state, future=future)
+    log.debug("oauth_pending_flow_registered", state_prefix=expected_state[:8])
+    return future
+
+
+def resolve_pending_flow(code: str, state: str) -> tuple[bool, str]:
+    """Gateway 路由调用此函数传递回调结果。
+
+    Returns:
+        (success, message) — success=True 表示匹配成功，False 表示失败原因。
+    """
+    global _pending_flow
+    if _pending_flow is None:
+        return False, "没有正在进行的 OAuth 流程"
+
+    if _pending_flow.expected_state != state:
+        return False, "state 参数不匹配，可能存在 CSRF 风险，请重新授权"
+
+    if _pending_flow.future.done():
+        return False, "OAuth 流程已完成或已取消"
+
+    _pending_flow.future.set_result(CallbackResult(code=code, state=state))
+    log.info("oauth_pending_flow_resolved")
+    return True, "授权成功"
+
+
+def cancel_pending_flow() -> None:
+    """取消当前挂起的 OAuth 流程。"""
+    global _pending_flow
+    if _pending_flow is not None and not _pending_flow.future.done():
+        _pending_flow.future.cancel()
+    _pending_flow = None
+
+
+async def wait_for_gateway_callback(
+    expected_state: str,
+    timeout: float = 300.0,
+) -> CallbackResult:
+    """等待 Gateway 路由传递回调结果。
+
+    与 wait_for_callback 不同：不启动独立 server，而是注册一个 shared future，
+    由 Gateway 的 /auth/callback 路由在收到回调时 resolve。
+
+    Args:
+        expected_state: 预期的 state 参数值
+        timeout: 超时时间（秒）
+
+    Returns:
+        CallbackResult
+
+    Raises:
+        OAuthFlowError: 超时或被取消
+    """
+    future = register_pending_flow(expected_state)
+    try:
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except TimeoutError as exc:
+        raise OAuthFlowError(
+            f"OAuth 回调超时（{timeout}s），请重试",
+            provider="",
+        ) from exc
+    except asyncio.CancelledError:
+        raise OAuthFlowError(
+            "OAuth 流程被新的授权请求取代，请重新授权",
+            provider="",
+        )
+    finally:
+        cancel_pending_flow()
+
+
+# ---------------------------------------------------------------------------
+# 独立 server 模式（降级 / CLI 使用）
+# ---------------------------------------------------------------------------
 
 def _build_http_response(status_code: int, status_text: str, body: str) -> bytes:
     """构建简单的 HTTP 响应"""
@@ -68,43 +171,13 @@ def _build_http_response(status_code: int, status_text: str, body: str) -> bytes
     return headers.encode("ascii") + body_bytes
 
 
-async def _close_active_server() -> None:
-    """关闭当前活跃的 callback server（如有），释放端口"""
-    global _active_server, _active_future
-    if _active_server is not None:
-        log.info("oauth_callback_server_replacing", reason="新的 OAuth 流程启动，关闭旧 server")
-        _active_server.close()
-        try:
-            await _active_server.wait_closed()
-        except Exception:
-            pass
-        _active_server = None
-    if _active_future is not None and not _active_future.done():
-        _active_future.cancel()
-        _active_future = None
-
-
 async def wait_for_callback(
     port: int = 1455,
     path: str = "/auth/callback",
     expected_state: str = "",
     timeout: float = 300.0,
 ) -> CallbackResult:
-    """启动临时 HTTP 服务器等待 OAuth callback
-
-    实现要求:
-    - 仅绑定 127.0.0.1（不绑定 0.0.0.0）
-    - 验证 callback 中的 state 参数与 expected_state 一致
-    - 收到第一个有效 callback 后立即关闭服务器
-    - 超时（默认 5 分钟）后自动关闭
-    - 返回 HTML 页面告知用户授权结果
-    - 重复调用时自动关闭前一次的 server，避免端口冲突
-
-    HTTP 响应规则:
-    - 非 /auth/callback 路径 -> HTTP 404
-    - 缺少 code 或 state 参数 -> HTTP 400
-    - state 不匹配 -> HTTP 400
-    - 成功 -> HTTP 200 + 成功提示 HTML
+    """启动临时 HTTP 服务器等待 OAuth callback（独立 server 模式）
 
     Args:
         port: 监听端口（默认 1455）
@@ -119,13 +192,7 @@ async def wait_for_callback(
         OAuthFlowError: 超时
         OSError: 端口绑定失败（EADDRINUSE）
     """
-    global _active_server, _active_future
-
-    # 关闭之前残留的 callback server，释放端口
-    await _close_active_server()
-
     result_future: asyncio.Future[CallbackResult] = asyncio.get_event_loop().create_future()
-    _active_future = result_future
 
     async def handle_connection(
         reader: asyncio.StreamReader,
@@ -133,21 +200,16 @@ async def wait_for_callback(
     ) -> None:
         """处理单个 HTTP 连接"""
         try:
-            # 读取 HTTP 请求行
-            request_line = await asyncio.wait_for(
-                reader.readline(), timeout=10.0
-            )
+            request_line = await asyncio.wait_for(reader.readline(), timeout=10.0)
             if not request_line:
                 return
 
             request_str = request_line.decode("ascii", errors="replace").strip()
-            # 读取剩余 headers（丢弃）
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=5.0)
                 if line == b"\r\n" or line == b"\n" or not line:
                     break
 
-            # 解析请求方法和路径
             parts = request_str.split(" ")
             if len(parts) < 2:
                 writer.write(_build_http_response(400, "Bad Request", "无效请求"))
@@ -157,28 +219,19 @@ async def wait_for_callback(
             request_path = parts[1]
             parsed = urlparse(request_path)
 
-            # 路由: 非回调路径 -> 404
             if parsed.path != path:
-                writer.write(
-                    _build_http_response(404, "Not Found", "未找到页面")
-                )
+                writer.write(_build_http_response(404, "Not Found", "未找到页面"))
                 await writer.drain()
                 return
 
-            # 解析查询参数
             query_params = parse_qs(parsed.query)
             code_values = query_params.get("code", [])
             state_values = query_params.get("state", [])
 
-            # 缺少 code 或 state -> 400
             if not code_values or not state_values:
                 error_msg = "缺少必需的 code 或 state 参数"
                 writer.write(
-                    _build_http_response(
-                        400,
-                        "Bad Request",
-                        _ERROR_HTML.format(message=error_msg),
-                    )
+                    _build_http_response(400, "Bad Request", _ERROR_HTML.format(message=error_msg))
                 )
                 await writer.drain()
                 log.warning("oauth_callback_missing_params", path=request_path)
@@ -187,24 +240,16 @@ async def wait_for_callback(
             code = code_values[0]
             state = state_values[0]
 
-            # state 不匹配 -> 400
             if expected_state and state != expected_state:
                 error_msg = "state 参数不匹配，可能存在 CSRF 风险，请重新授权"
                 writer.write(
-                    _build_http_response(
-                        400,
-                        "Bad Request",
-                        _ERROR_HTML.format(message=error_msg),
-                    )
+                    _build_http_response(400, "Bad Request", _ERROR_HTML.format(message=error_msg))
                 )
                 await writer.drain()
                 log.warning("oauth_callback_state_mismatch")
                 return
 
-            # 成功 -> 200 + 设置结果
-            writer.write(
-                _build_http_response(200, "OK", _SUCCESS_HTML)
-            )
+            writer.write(_build_http_response(200, "OK", _SUCCESS_HTML))
             await writer.drain()
 
             if not result_future.done():
@@ -219,18 +264,15 @@ async def wait_for_callback(
             with _suppress_connection_error():
                 await writer.wait_closed()
 
-    # 启动服务器（仅绑定 127.0.0.1）
     server = await asyncio.start_server(
         handle_connection,
         host="127.0.0.1",
         port=port,
     )
-    _active_server = server
 
     log.debug("oauth_callback_server_started", port=port, path=path)
 
     try:
-        # 等待结果或超时
         result = await asyncio.wait_for(result_future, timeout=timeout)
         return result
     except TimeoutError as exc:
@@ -241,11 +283,6 @@ async def wait_for_callback(
     finally:
         server.close()
         await server.wait_closed()
-        # 清理模块级引用
-        if _active_server is server:
-            _active_server = None
-        if _active_future is result_future:
-            _active_future = None
         log.debug("oauth_callback_server_closed", port=port)
 
 

@@ -62,12 +62,12 @@ class OAuthProviderConfig(BaseModel):
         description="请求的 OAuth scopes",
     )
     redirect_uri: str = Field(
-        default="http://localhost:1455/auth/callback",
-        description="OAuth 回调 URI",
+        default="http://localhost:8000/auth/callback",
+        description="OAuth 回调 URI（默认使用 Gateway 端口）",
     )
     redirect_port: int = Field(
-        default=1455,
-        description="本地回调服务器监听端口",
+        default=8000,
+        description="本地回调服务器监听端口（Gateway 路由模式下使用 Gateway 端口）",
     )
 
     # === 能力 ===
@@ -153,8 +153,8 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
         client_id="app_EMoamEEZ73f0CkXaXp7hrann",
         client_id_env="OCTOAGENT_CODEX_CLIENT_ID",
         scopes=["openid", "profile", "email", "offline_access"],
-        redirect_uri="http://localhost:1455/auth/callback",
-        redirect_port=1455,
+        redirect_uri="http://localhost:8000/auth/callback",
+        redirect_port=8000,
         supports_refresh=False,
         extra_auth_params={
             "codex_cli_simplified_flow": "true",
