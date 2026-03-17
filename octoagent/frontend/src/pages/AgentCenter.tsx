@@ -757,7 +757,7 @@ export default function AgentCenter() {
 
       {/* ── Modal: 编辑器 / 模板选择 / 行为文件查看 ── */}
       {(showTemplatePicker || editorState || viewingFilePath) && document.body ? createPortal(
-        <div className="wb-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeComposer(); }}>
+        <div className="wb-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && e.detail > 0) closeComposer(); }}>
           <div className="wb-modal-body">
             {showTemplatePicker ? (
               <AgentTemplatePicker

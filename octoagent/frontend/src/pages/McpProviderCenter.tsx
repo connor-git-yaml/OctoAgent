@@ -106,10 +106,11 @@ function McpProviderModal({
         <div
           className="wb-modal-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget) onClose();
+            // 仅响应真实指针点击（detail > 0），排除键盘或输入法触发的合成 click
+            if (e.target === e.currentTarget && e.detail > 0) onClose();
           }}
         >
-          <div className="wb-modal-body wb-mcp-modal">
+          <div className="wb-modal-body wb-mcp-modal" onKeyDown={(e) => e.stopPropagation()}>
             <div className="wb-panel-head">
               <h3>{mode === "create" ? "安装 MCP Provider" : `编辑 ${draft.provider_id}`}</h3>
               <button

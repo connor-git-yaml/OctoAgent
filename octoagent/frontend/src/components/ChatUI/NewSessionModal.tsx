@@ -55,7 +55,8 @@ export default function NewSessionModal({
     <div
       className="wb-modal-overlay"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) {
+        // 仅响应真实指针点击（detail > 0），排除键盘或输入法触发的合成 click
+        if (e.target === e.currentTarget && !busy && e.detail > 0) {
           onClose();
         }
       }}
