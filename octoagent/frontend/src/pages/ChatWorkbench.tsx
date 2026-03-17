@@ -1137,7 +1137,12 @@ export default function ChatWorkbench() {
     if (routeSessionId && routeSession?.task_id) {
       return [routeSession.task_id];
     }
-    // 默认行为：使用 focused session 和 stored task id
+    // URL 指定了 session 但该 session 没有 task_id（如 Worker/A2A session）——
+    // 不应 fallback 到其他 session 的消息，返回空数组显示空聊天
+    if (routeSessionId && routeSession) {
+      return [];
+    }
+    // 默认行为（无 URL 参数）：使用 focused session 和 stored task id
     const taskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
     if (storedRestoreTaskId && !taskIds.includes(storedRestoreTaskId)) {
       taskIds.unshift(storedRestoreTaskId);
