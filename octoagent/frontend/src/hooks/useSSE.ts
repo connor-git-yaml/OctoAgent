@@ -69,7 +69,7 @@ export function useSSE({ taskId, enabled, onEvent }: UseSSEOptions): UseSSERetur
       }
     };
 
-    // 监听所有事件类型
+    // 监听所有事件类型（含审批事件，保证 per-task 视图能实时展示审批状态）
     const eventTypes = [
       "TASK_CREATED",
       "USER_MESSAGE",
@@ -78,6 +78,13 @@ export function useSSE({ taskId, enabled, onEvent }: UseSSEOptions): UseSSERetur
       "MODEL_CALL_FAILED",
       "STATE_TRANSITION",
       "ARTIFACT_CREATED",
+      "APPROVAL_REQUESTED",
+      "APPROVAL_EXPIRED",
+      "APPROVAL_APPROVED",
+      "APPROVAL_REJECTED",
+      "TOOL_CALL_STARTED",
+      "TOOL_CALL_COMPLETED",
+      "TOOL_CALL_FAILED",
       "ERROR",
     ];
 

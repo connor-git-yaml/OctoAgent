@@ -1158,7 +1158,7 @@ export default function ChatWorkbench() {
   // 避免 stale token 把消息路由到错误的 project。
   // Token 只在通过 NewSessionModal 创建全新会话时使用。
   const hasExistingSession = Boolean(routeSessionId) || restoreTaskIds.length > 0;
-  const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId } = useChatStream(
+  const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
     restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
     {
       activeProjectId: currentSession?.project_id || projectSelector?.current_project_id || "",
@@ -1443,8 +1443,20 @@ export default function ChatWorkbench() {
           }
         )
       : null;
+  // SSE 直通审批项：从 useChatStream 的 liveApproval 直接构造，不依赖 REST 轮询
+  const liveApprovalItem =
+    liveApproval && liveApproval.approvalId
+      ? buildExecutionSessionApprovalItem(liveApproval.approvalId, {
+          taskId: liveApproval.taskId || taskId || "",
+          toolName: liveApproval.toolName,
+          argsSummary: liveApproval.toolArgsSummary,
+          summary: liveApproval.riskExplanation,
+          createdAt: liveApproval.createdAt,
+          expiresAt: liveApproval.expiresAt || null,
+        })
+      : null;
   const activeApprovalItem =
-    activeApprovalItemFromInbox ?? syntheticApprovalItem ?? executionSessionApprovalItem;
+    activeApprovalItemFromInbox ?? syntheticApprovalItem ?? executionSessionApprovalItem ?? liveApprovalItem;
   const activeApprovalExpiresAtMs = activeApprovalItem?.expires_at
     ? Date.parse(activeApprovalItem.expires_at)
     : Number.NaN;
@@ -1651,6 +1663,38 @@ export default function ChatWorkbench() {
       window.clearInterval(timer);
     };
   }, [taskId, shouldPollLiveState]);
+
+  // SSE 审批事件触发立即刷新（不等 3s 轮询）
+  useEffect(() => {
+    if (approvalSignal === 0 || !taskId) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
+        fetchTaskDetail(taskId),
+        fetchTaskExecutionSession(taskId),
+        fetchApprovals(),
+      ]);
+      if (cancelled) {
+        return;
+      }
+      if (detailResult.status === "fulfilled") {
+        setTaskDetail(detailResult.value);
+      }
+      if (sessionResult.status === "fulfilled") {
+        setExecutionSession(readExecutionSessionDocument(sessionResult.value));
+      }
+      if (approvalsResult.status === "fulfilled") {
+        setPendingApprovals(
+          approvalsResult.value.approvals.filter((item) => item.task_id === taskId)
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [approvalSignal, taskId]);
 
   useEffect(() => {
     setChatActionNotice(null);

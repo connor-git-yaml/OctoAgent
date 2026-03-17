@@ -29,6 +29,18 @@ export type { ChatMessage, ChatRestoreTarget, ChatSendOptions, MessageRole } fro
 
 const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
 
+/** SSE 推送的审批事件快照（直接从事件 payload 构造，不依赖 REST 轮询） */
+export interface SSEApprovalSnapshot {
+  approvalId: string;
+  taskId: string;
+  toolName: string;
+  toolArgsSummary: string;
+  riskExplanation: string;
+  sideEffectLevel: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 /** Hook 返回值 */
 export interface UseChatStreamReturn {
   /** 消息列表 */
@@ -45,6 +57,10 @@ export interface UseChatStreamReturn {
   resetConversation: () => Promise<void>;
   /** 当前 task ID */
   taskId: string | null;
+  /** SSE 实时推送的待审批快照（非 null 时表示有活跃审批） */
+  liveApproval: SSEApprovalSnapshot | null;
+  /** 审批事件信号（每次审批状态变化时递增，可用于触发外部刷新） */
+  approvalSignal: number;
 }
 
 interface UseChatStreamOptions {
@@ -139,6 +155,8 @@ export function useChatStream(
   const [taskId, setTaskId] = useState<string | null>(() =>
     options.deferStoredTaskIdRestore ? null : readStoredTaskId()
   );
+  const [liveApproval, setLiveApproval] = useState<SSEApprovalSnapshot | null>(null);
+  const [approvalSignal, setApprovalSignal] = useState(0);
   const [pendingConversationScope, setPendingConversationScope] =
     useState<PendingConversationScope | null>(() => buildPendingConversationScope(sessionScope));
   const [suppressedRestoreSignature, setSuppressedRestoreSignature] = useState<string | null>(
@@ -328,7 +346,7 @@ export function useChatStream(
               setStreaming(false);
             }
 
-            // 检查审批请求
+            // 检查审批请求——直接从 SSE payload 构造审批快照，不依赖 REST 轮询
             if (
               eventData.type === "approval:requested" ||
               eventData.type === "APPROVAL_REQUESTED"
@@ -342,6 +360,34 @@ export function useChatStream(
                 )
               );
               setStreaming(true);
+              // 从 SSE 事件 payload 直接构造审批快照
+              const p = (eventData.payload ?? {}) as Record<string, unknown>;
+              const approvalId = typeof p.approval_id === "string" ? p.approval_id : "";
+              if (approvalId) {
+                setLiveApproval({
+                  approvalId,
+                  taskId: typeof p.task_id === "string" ? p.task_id : "",
+                  toolName: typeof p.tool_name === "string" ? p.tool_name : "",
+                  toolArgsSummary: typeof p.tool_args_summary === "string" ? p.tool_args_summary : "",
+                  riskExplanation: typeof p.risk_explanation === "string" ? p.risk_explanation : "",
+                  sideEffectLevel: typeof p.side_effect_level === "string" ? p.side_effect_level : "",
+                  createdAt: typeof p.created_at === "string" ? p.created_at : "",
+                  expiresAt: typeof p.expires_at === "string" ? p.expires_at : "",
+                });
+                setApprovalSignal((n) => n + 1);
+              }
+            }
+
+            // 审批已解决/过期——清除 liveApproval
+            if (
+              eventData.type === "APPROVAL_EXPIRED" ||
+              eventData.type === "APPROVAL_APPROVED" ||
+              eventData.type === "APPROVAL_REJECTED" ||
+              eventData.type === "approval:resolved" ||
+              eventData.type === "approval:expired"
+            ) {
+              setLiveApproval(null);
+              setApprovalSignal((n) => n + 1);
             }
 
             // 终态检测
@@ -353,14 +399,19 @@ export function useChatStream(
           }
         };
 
-        // 监听各类事件
+        // 监听各类事件（含审批全生命周期）
         const eventTypes = [
           "MODEL_CALL_COMPLETED",
           "MODEL_CALL_STARTED",
           "MODEL_CALL_FAILED",
           "STATE_TRANSITION",
           "APPROVAL_REQUESTED",
+          "APPROVAL_EXPIRED",
+          "APPROVAL_APPROVED",
+          "APPROVAL_REJECTED",
           "approval:requested",
+          "approval:resolved",
+          "approval:expired",
           "ERROR",
         ];
         for (const type of eventTypes) {
@@ -520,5 +571,7 @@ export function useChatStream(
     sendMessage,
     resetConversation,
     taskId,
+    liveApproval,
+    approvalSignal,
   };
 }
