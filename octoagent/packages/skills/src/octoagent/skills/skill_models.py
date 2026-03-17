@@ -49,6 +49,7 @@ class SkillMdEntry(BaseModel):
         default_factory=dict, description="原始 YAML frontmatter"
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
 
     @field_validator("name")
     @classmethod

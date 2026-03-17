@@ -374,6 +374,7 @@ class SkillDiscovery:
                 content=body,
                 raw_frontmatter=data,
                 metadata=data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {},
+                resource_limits=data.get("resource_limits", {}) if isinstance(data.get("resource_limits"), dict) else {},
             )
         except Exception as exc:
             logger.warning(

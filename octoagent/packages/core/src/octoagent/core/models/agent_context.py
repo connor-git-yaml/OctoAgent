@@ -102,6 +102,7 @@ class AgentProfile(BaseModel):
     context_budget_policy: dict[str, Any] = Field(default_factory=dict)
     bootstrap_template_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
     version: int = Field(default=1, ge=1)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
@@ -125,6 +126,7 @@ class WorkerProfile(BaseModel):
     policy_refs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
     status: WorkerProfileStatus = WorkerProfileStatus.DRAFT
     origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.CUSTOM
     draft_revision: int = Field(default=0, ge=0)

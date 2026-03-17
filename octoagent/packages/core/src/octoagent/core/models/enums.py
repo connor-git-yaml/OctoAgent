@@ -171,6 +171,10 @@ class EventType(StrEnum):
     PIPELINE_RUN_UPDATED = "PIPELINE_RUN_UPDATED"
     PIPELINE_CHECKPOINT_SAVED = "PIPELINE_CHECKPOINT_SAVED"
 
+    # Feature 062: 资源限制事件
+    SKILL_USAGE_REPORT = "SKILL_USAGE_REPORT"      # Skill 执行资源消耗报告
+    RESOURCE_LIMIT_HIT = "RESOURCE_LIMIT_HIT"      # 资源限制触发告警
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""
