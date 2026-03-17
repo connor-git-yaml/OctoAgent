@@ -86,26 +86,9 @@ export default function SettingsPage() {
     retrievalPlatform?.corpora.find(
       (item) => item.corpus_kind === "memory"
     ) ?? null;
-  const activeMemoryGeneration =
-    retrievalPlatform?.generations.find(
-      (item) => item.generation_id === memoryCorpus?.active_generation_id
-    ) ?? null;
-  const pendingMemoryGeneration =
-    retrievalPlatform?.generations.find(
-      (item) => item.generation_id === memoryCorpus?.pending_generation_id
-    ) ?? null;
-  const pendingMemoryBuildJob =
-    retrievalPlatform?.build_jobs.find(
-      (item) => item.generation_id === pendingMemoryGeneration?.generation_id
-    ) ?? null;
-  const rollbackCandidate =
-    retrievalPlatform?.generations.find(
-      (item) =>
-        item.corpus_kind === "memory" &&
-        !item.is_active &&
-        Boolean(item.rollback_deadline) &&
-        new Date(item.rollback_deadline || "").getTime() > Date.now()
-    ) ?? null;
+  // memoryCorpus / retrievalPlatform 的 generation 相关变量暂不使用，
+  // 待 Retrieval Platform 迁移管理 UI 合入后恢复
+  void memoryCorpus;
   const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
   const providerDrafts = parseProviderDrafts(fieldState.providers);
   const aliasDrafts = normalizeAliasDrafts(parseAliasDrafts(fieldState.model_aliases));
@@ -284,36 +267,7 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleStartEmbeddingMigration() {
-    await submitAction("retrieval.index.start", {
-      project_id: selector.current_project_id,
-      workspace_id: selector.current_workspace_id,
-    });
-  }
-
-  async function handleCancelEmbeddingMigration(generationId: string) {
-    await submitAction("retrieval.index.cancel", {
-      generation_id: generationId,
-      project_id: selector.current_project_id,
-      workspace_id: selector.current_workspace_id,
-    });
-  }
-
-  async function handleCutoverEmbeddingMigration(generationId: string) {
-    await submitAction("retrieval.index.cutover", {
-      generation_id: generationId,
-      project_id: selector.current_project_id,
-      workspace_id: selector.current_workspace_id,
-    });
-  }
-
-  async function handleRollbackEmbeddingMigration(generationId: string) {
-    await submitAction("retrieval.index.rollback", {
-      generation_id: generationId,
-      project_id: selector.current_project_id,
-      workspace_id: selector.current_workspace_id,
-    });
-  }
+  // Retrieval Platform 迁移管理 handler 暂不使用，待 UI 合入后恢复
 
   const usingEchoMode = activeProviders.length === 0;
   const connectBusy =
