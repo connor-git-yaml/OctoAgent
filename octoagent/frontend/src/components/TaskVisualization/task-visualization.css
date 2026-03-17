@@ -404,3 +404,329 @@
 .tv-phase-event-enter {
   animation: tv-slide-in 0.3s ease-out;
 }
+
+/* ─── RoundFlowCard ───────────────────────────────────────── */
+
+.tv-round-card {
+  background: var(--cp-card);
+  border-radius: var(--cp-radius-md);
+  padding: var(--cp-space-4);
+  margin-bottom: var(--cp-space-3);
+  box-shadow: 0 1px 3px rgba(23, 33, 43, 0.05);
+}
+
+.tv-round-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cp-space-2);
+  margin-bottom: var(--cp-space-3);
+  flex-wrap: wrap;
+}
+
+.tv-round-index {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cp-primary);
+  background: var(--cp-soft);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.tv-round-message {
+  font-size: 13px;
+  color: var(--cp-ink);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-round-time {
+  font-size: 11px;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 水平滚动容器 */
+.tv-round-flow-scroll {
+  overflow-x: auto;
+  padding-bottom: var(--cp-space-2);
+  -webkit-overflow-scrolling: touch;
+}
+
+.tv-round-flow {
+  display: flex;
+  align-items: flex-start;
+  min-width: min-content;
+  padding: var(--cp-space-2) 0;
+}
+
+/* ─── 流程图节点 ──────────────────────────────────────────── */
+
+.tv-flow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tv-flow-node-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.tv-flow-node:hover .tv-flow-node-circle {
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.tv-flow-node-text {
+  font-size: 10px;
+  color: var(--cp-muted);
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* 节点颜色 */
+.tv-flow-node--success .tv-flow-node-circle {
+  background: var(--cp-success-soft);
+}
+
+.tv-flow-node--error .tv-flow-node-circle {
+  background: var(--cp-danger-soft);
+}
+
+.tv-flow-node--running .tv-flow-node-circle {
+  background: rgba(183, 106, 43, 0.15);
+  animation: tv-pulse 1.5s ease-in-out infinite;
+}
+
+.tv-flow-node--neutral .tv-flow-node-circle {
+  background: var(--cp-soft);
+}
+
+/* 连接线 */
+.tv-flow-connector {
+  width: 20px;
+  height: 2px;
+  background: var(--cp-border);
+  margin-top: 15px; /* 与 circle 中心对齐 (32/2 - 1) */
+  flex-shrink: 0;
+}
+
+/* 折叠按钮 */
+.tv-flow-collapse-btn {
+  background: var(--cp-soft);
+  border: 1px dashed var(--cp-border);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--cp-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.tv-flow-collapse-btn:hover {
+  background: var(--cp-card-strong);
+}
+
+/* 轮次统计 */
+.tv-round-stats {
+  font-size: 11px;
+  color: var(--cp-muted);
+  margin-top: var(--cp-space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--cp-space-3);
+}
+
+/* ─── NodeDetailModal ─────────────────────────────────────── */
+
+.tv-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: tv-fade-in 0.15s ease-out;
+}
+
+.tv-modal {
+  background: var(--cp-card-strong);
+  border-radius: var(--cp-radius-md);
+  width: min(560px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  animation: tv-scale-in 0.15s ease-out;
+}
+
+.tv-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--cp-space-4);
+  border-bottom: 1px solid var(--cp-border);
+  position: sticky;
+  top: 0;
+  background: var(--cp-card-strong);
+  z-index: 1;
+}
+
+.tv-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  margin: 0;
+}
+
+.tv-modal-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--cp-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.tv-modal-close:hover {
+  background: var(--cp-soft);
+  color: var(--cp-ink);
+}
+
+.tv-modal-body {
+  padding: var(--cp-space-4);
+}
+
+.tv-modal-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--cp-space-2);
+  margin-bottom: var(--cp-space-3);
+}
+
+.tv-modal-meta-row {
+  display: flex;
+  gap: var(--cp-space-3);
+  font-size: 13px;
+}
+
+.tv-modal-meta-key {
+  color: var(--cp-muted);
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.tv-modal-section {
+  margin-bottom: var(--cp-space-4);
+}
+
+.tv-modal-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--cp-space-2);
+}
+
+.tv-modal-content-text {
+  font-size: 13px;
+  color: var(--cp-ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--cp-soft);
+  padding: var(--cp-space-3);
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.tv-modal-error {
+  background: var(--cp-danger-soft);
+  color: var(--cp-danger);
+  padding: var(--cp-space-3);
+  border-radius: 6px;
+  font-size: 13px;
+  margin-top: var(--cp-space-2);
+}
+
+.tv-modal-payload-details {
+  margin-top: var(--cp-space-3);
+}
+
+.tv-modal-payload-details summary {
+  font-size: 12px;
+  color: var(--cp-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.tv-modal-payload-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  margin-top: var(--cp-space-2);
+  margin-bottom: var(--cp-space-1);
+}
+
+.tv-modal-payload {
+  background: var(--cp-soft);
+  padding: var(--cp-space-3);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: var(--cp-space-2);
+}
+
+.tv-modal-image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cp-space-3);
+}
+
+.tv-modal-image {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: var(--cp-soft);
+}
+
+@keyframes tv-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tv-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}

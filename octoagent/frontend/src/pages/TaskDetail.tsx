@@ -4,12 +4,12 @@
  * 功能：
  * 1. 调用 GET /api/tasks/{id} 获取任务信息 + 事件 + artifacts
  * 2. 展示任务基本信息
- * 3. 可视化模式：PipelineBar + PhaseCardList + ArtifactGrid
+ * 3. 可视化模式：PipelineBar（总览）+ 按轮次拆分的流程图 + 点击弹框
  * 4. Raw Data 模式：事件时间线（类型、时间、payload 摘要）
  * 5. 进行中任务通过 useSSE 实时追加新事件
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ApiError,
@@ -21,11 +21,13 @@ import { useSSE } from "../hooks/useSSE";
 import {
   SegmentedToggle,
   PipelineBar,
-  PhaseCardList,
-  ArtifactGrid,
+  RoundFlowCard,
+  NodeDetailModal,
 } from "../components/TaskVisualization";
 import type { ViewMode } from "../components/TaskVisualization";
 import { classifyEvents, TERMINAL_STATUSES } from "../utils/phaseClassifier";
+import { splitIntoRounds } from "../utils/roundSplitter";
+import type { FlowNode } from "../utils/roundSplitter";
 import { formatTime } from "../utils/formatTime";
 import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
 
@@ -52,6 +54,7 @@ export default function TaskDetail() {
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<ApiError | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("visual");
+  const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
 
   const loadTask = useCallback(async () => {
     if (!taskId) {
@@ -110,6 +113,16 @@ export default function TaskDetail() {
     onEvent: handleSSEEvent,
   });
 
+  // 可视化数据（hooks 必须在 early return 之前）
+  const classified = useMemo(
+    () => (task && viewMode === "visual" ? classifyEvents(events, task.status) : null),
+    [events, task, viewMode],
+  );
+  const rounds = useMemo(
+    () => (viewMode === "visual" ? splitIntoRounds(events, artifacts) : []),
+    [events, artifacts, viewMode],
+  );
+
   if (loading) {
     return <div className="loading">Loading task...</div>;
   }
@@ -126,9 +139,6 @@ export default function TaskDetail() {
       </div>
     );
   }
-
-  // 可视化模式：调用归类引擎
-  const classified = viewMode === "visual" ? classifyEvents(events, task.status) : null;
 
   return (
     <div>
@@ -167,10 +177,17 @@ export default function TaskDetail() {
       {viewMode === "visual" && classified && (
         <>
           <PipelineBar phases={classified.phases} />
-          <PhaseCardList phases={classified.phases} />
-          {artifacts.length > 0 && (
-            <ArtifactGrid artifacts={artifacts} />
-          )}
+          {rounds.map((round) => (
+            <RoundFlowCard
+              key={round.id}
+              round={round}
+              onNodeClick={setSelectedNode}
+            />
+          ))}
+          <NodeDetailModal
+            node={selectedNode}
+            onClose={() => setSelectedNode(null)}
+          />
         </>
       )}
 

@@ -1086,7 +1086,7 @@ describe("App workbench routing", () => {
         path: "/settings",
         assertRoute: async () => {
           expect(
-            await screen.findByRole("heading", { name: "先添加可用的模型 Provider" })
+            await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" })
           ).toBeInTheDocument();
         },
       },
@@ -1252,10 +1252,9 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
-    expect(await screen.findByText("Agent 与 Behavior 管理已移到 Agents")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
 
     await waitFor(() =>
@@ -1401,7 +1400,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
     await userEvent.click(screen.getAllByRole("button", { name: "连接真实模型" })[0]);
 
     await waitFor(() =>
@@ -1663,13 +1662,12 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
-    // 概览 chip 显示"未连接真实模型"，Provider 区域显示"体验模式"
+    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
+    // 概览 chip 显示"未连接真实模型"
     expect(screen.getByText("未连接真实模型")).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
-    expect(screen.getByText("体验模式")).toBeInTheDocument();
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
@@ -1761,7 +1759,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
+    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
     await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
 
@@ -2014,7 +2012,7 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "先添加可用的模型 Provider" })
+      await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" })
     ).toBeInTheDocument();
 
     await waitFor(() => {

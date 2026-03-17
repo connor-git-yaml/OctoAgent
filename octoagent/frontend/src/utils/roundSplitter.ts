@@ -1,0 +1,466 @@
+/**
+ * 轮次拆分引擎 -- 将事件流按 USER_MESSAGE 切分为轮次，
+ * 配对 started/completed 事件，生成流程图节点。
+ *
+ * 每轮以一条 USER_MESSAGE 为起点，包含后续的思考、执行、产物直至下一条 USER_MESSAGE。
+ * 最终返回倒序排列（最新轮次在前）。
+ */
+
+import type { TaskEvent, Artifact } from "../types";
+import { TERMINAL_STATUSES } from "./phaseClassifier";
+
+// ─── 流程图节点类型 ──────────────────────────────────────────
+
+export type FlowNodeKind =
+  | "message"
+  | "llm"
+  | "tool"
+  | "skill"
+  | "worker"
+  | "memory"
+  | "artifact"
+  | "completion"
+  | "decision"
+  | "a2a"
+  | "approval"
+  | "error"
+  | "other";
+
+export type FlowNodeStatus = "success" | "error" | "running" | "neutral";
+
+export interface FlowNode {
+  id: string;
+  kind: FlowNodeKind;
+  label: string;
+  status: FlowNodeStatus;
+  events: TaskEvent[];
+  artifact?: Artifact;
+  ts: string;
+}
+
+export interface Round {
+  id: string;
+  index: number;
+  triggerMessage: string;
+  nodes: FlowNode[];
+  startTime: string;
+  endTime?: string;
+}
+
+// ─── 配对规则：STARTED -> COMPLETED/FAILED ──────────────────
+
+const PAIR_MAP: Record<string, string[]> = {
+  MODEL_CALL_STARTED: ["MODEL_CALL_COMPLETED", "MODEL_CALL_FAILED"],
+  TOOL_CALL_STARTED: ["TOOL_CALL_COMPLETED", "TOOL_CALL_FAILED"],
+  SKILL_STARTED: ["SKILL_COMPLETED", "SKILL_FAILED"],
+  WORKER_DISPATCHED: ["WORKER_RETURNED"],
+  MEMORY_RECALL_SCHEDULED: ["MEMORY_RECALL_COMPLETED", "MEMORY_RECALL_FAILED"],
+};
+
+const COMPLETION_TYPES = new Set(Object.values(PAIR_MAP).flat());
+
+// 可见事件类型（其余一律隐藏）
+const VISIBLE_TYPES = new Set([
+  "USER_MESSAGE",
+  "TASK_CREATED",
+  "MODEL_CALL_STARTED",
+  "MODEL_CALL_COMPLETED",
+  "MODEL_CALL_FAILED",
+  "TOOL_CALL_STARTED",
+  "TOOL_CALL_COMPLETED",
+  "TOOL_CALL_FAILED",
+  "SKILL_STARTED",
+  "SKILL_COMPLETED",
+  "SKILL_FAILED",
+  "WORKER_DISPATCHED",
+  "WORKER_RETURNED",
+  "MEMORY_RECALL_SCHEDULED",
+  "MEMORY_RECALL_COMPLETED",
+  "MEMORY_RECALL_FAILED",
+  "ARTIFACT_CREATED",
+  "STATE_TRANSITION",
+  "ORCH_DECISION",
+  "A2A_MESSAGE_SENT",
+  "A2A_MESSAGE_RECEIVED",
+  "APPROVAL_REQUESTED",
+  "APPROVAL_APPROVED",
+  "APPROVAL_REJECTED",
+  "APPROVAL_EXPIRED",
+  "ERROR",
+]);
+
+// ─── 主入口 ──────────────────────────────────────────────────
+
+export function splitIntoRounds(
+  events: TaskEvent[],
+  artifacts: Artifact[],
+): Round[] {
+  const sorted = [...events].sort((a, b) => a.task_seq - b.task_seq);
+
+  // 按 USER_MESSAGE 切分
+  const rawRounds: TaskEvent[][] = [];
+  let current: TaskEvent[] = [];
+
+  for (const event of sorted) {
+    if (event.type === "USER_MESSAGE" && current.length > 0) {
+      rawRounds.push(current);
+      current = [event];
+    } else {
+      current.push(event);
+    }
+  }
+  if (current.length > 0) rawRounds.push(current);
+
+  // 构建 artifact 映射
+  const artifactMap = new Map(artifacts.map((a) => [a.artifact_id, a]));
+
+  // 转换为 Round，倒序（最新在前）
+  const rounds = rawRounds.map((roundEvents, i) =>
+    buildRound(roundEvents, i + 1, artifactMap),
+  );
+  return rounds.reverse();
+}
+
+// ─── 构建单个 Round ──────────────────────────────────────────
+
+function buildRound(
+  events: TaskEvent[],
+  index: number,
+  artifactMap: Map<string, Artifact>,
+): Round {
+  const trigger =
+    events.find((e) => e.type === "USER_MESSAGE") || events[0];
+  const message =
+    trigger.type === "USER_MESSAGE"
+      ? str(trigger.payload?.content ?? trigger.payload?.text, 80)
+      : "任务创建";
+
+  const nodes = buildFlowNodes(events, artifactMap);
+
+  return {
+    id: trigger.event_id,
+    index,
+    triggerMessage: message,
+    nodes,
+    startTime: trigger.ts,
+    endTime: events[events.length - 1]?.ts,
+  };
+}
+
+// ─── 构建流程图节点 ──────────────────────────────────────────
+
+function buildFlowNodes(
+  events: TaskEvent[],
+  artifactMap: Map<string, Artifact>,
+): FlowNode[] {
+  const nodes: FlowNode[] = [];
+  const consumed = new Set<string>();
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (consumed.has(event.event_id)) continue;
+
+    // STATE_TRANSITION：只显示终态迁移
+    if (event.type === "STATE_TRANSITION") {
+      const toStatus = String(event.payload?.to_status || "");
+      if (!TERMINAL_STATUSES.has(toStatus)) continue;
+      consumed.add(event.event_id);
+      nodes.push(makeCompletionNode(event, toStatus));
+      continue;
+    }
+
+    // 隐藏不在可见列表中的事件
+    if (!VISIBLE_TYPES.has(event.type)) continue;
+
+    // 配对型事件（STARTED → 查找后续 COMPLETED/FAILED）
+    const completionTypes = PAIR_MAP[event.type];
+    if (completionTypes) {
+      consumed.add(event.event_id);
+      const completion = findCompletion(events, i + 1, completionTypes, consumed);
+      if (completion) {
+        consumed.add(completion.event_id);
+        nodes.push(makePairedNode(event, completion));
+      } else {
+        nodes.push(makeRunningNode(event));
+      }
+      continue;
+    }
+
+    // 已被配对消耗的 completion 事件（孤儿完成事件 → 独立节点）
+    if (COMPLETION_TYPES.has(event.type)) {
+      if (consumed.has(event.event_id)) continue;
+      consumed.add(event.event_id);
+      nodes.push(makeOrphanNode(event));
+      continue;
+    }
+
+    // TASK_CREATED：同轮有 USER_MESSAGE 时跳过
+    if (event.type === "TASK_CREATED") {
+      if (events.some((e) => e.type === "USER_MESSAGE")) continue;
+      consumed.add(event.event_id);
+      nodes.push({
+        id: event.event_id,
+        kind: "message",
+        label: "任务创建",
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      });
+      continue;
+    }
+
+    // 普通事件
+    consumed.add(event.event_id);
+    nodes.push(makeSingleNode(event, artifactMap));
+  }
+
+  return nodes;
+}
+
+function findCompletion(
+  events: TaskEvent[],
+  startIdx: number,
+  completionTypes: string[],
+  consumed: Set<string>,
+): TaskEvent | undefined {
+  for (let j = startIdx; j < events.length; j++) {
+    const c = events[j];
+    if (consumed.has(c.event_id)) continue;
+    if (completionTypes.includes(c.type)) return c;
+  }
+  return undefined;
+}
+
+// ─── 节点构建器 ──────────────────────────────────────────────
+
+function makePairedNode(start: TaskEvent, end: TaskEvent): FlowNode {
+  const isFailed = end.type.endsWith("_FAILED");
+  const kind = inferKind(start.type);
+  return {
+    id: start.event_id,
+    kind,
+    label: pairedLabel(kind, start, end),
+    status: isFailed ? "error" : "success",
+    events: [start, end],
+    ts: start.ts,
+  };
+}
+
+function makeRunningNode(start: TaskEvent): FlowNode {
+  const kind = inferKind(start.type);
+  return {
+    id: start.event_id,
+    kind,
+    label: runningLabel(kind, start),
+    status: "running",
+    events: [start],
+    ts: start.ts,
+  };
+}
+
+function makeOrphanNode(event: TaskEvent): FlowNode {
+  const kind = inferKind(event.type);
+  const isFailed = event.type.endsWith("_FAILED");
+  return {
+    id: event.event_id,
+    kind,
+    label: singleLabel(kind, event),
+    status: isFailed ? "error" : "success",
+    events: [event],
+    ts: event.ts,
+  };
+}
+
+function makeCompletionNode(event: TaskEvent, toStatus: string): FlowNode {
+  const info: Record<string, { label: string; status: FlowNodeStatus }> = {
+    SUCCEEDED: { label: "成功", status: "success" },
+    FAILED: { label: "失败", status: "error" },
+    CANCELLED: { label: "已取消", status: "error" },
+    REJECTED: { label: "已拒绝", status: "error" },
+  };
+  const { label, status } = info[toStatus] || { label: toStatus, status: "neutral" as const };
+  return {
+    id: event.event_id,
+    kind: "completion",
+    label,
+    status,
+    events: [event],
+    ts: event.ts,
+  };
+}
+
+function makeSingleNode(
+  event: TaskEvent,
+  artifactMap: Map<string, Artifact>,
+): FlowNode {
+  switch (event.type) {
+    case "USER_MESSAGE":
+      return {
+        id: event.event_id,
+        kind: "message",
+        label: str(event.payload?.content ?? event.payload?.text, 30) || "消息",
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      };
+
+    case "ARTIFACT_CREATED": {
+      const artifactId = String(event.payload?.artifact_id || "");
+      const artifact = artifactMap.get(artifactId);
+      return {
+        id: event.event_id,
+        kind: "artifact",
+        label:
+          str(event.payload?.artifact_name ?? event.payload?.name ?? artifact?.name, 20) ||
+          "产物",
+        status: "success",
+        events: [event],
+        artifact,
+        ts: event.ts,
+      };
+    }
+
+    case "ORCH_DECISION":
+      return {
+        id: event.event_id,
+        kind: "decision",
+        label: str(event.payload?.decision, 20) || "调度决策",
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      };
+
+    case "A2A_MESSAGE_SENT":
+    case "A2A_MESSAGE_RECEIVED":
+      return {
+        id: event.event_id,
+        kind: "a2a",
+        label: event.type === "A2A_MESSAGE_SENT" ? "A2A 发送" : "A2A 接收",
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      };
+
+    case "APPROVAL_REQUESTED":
+      return {
+        id: event.event_id,
+        kind: "approval",
+        label: "等待审批",
+        status: "running",
+        events: [event],
+        ts: event.ts,
+      };
+    case "APPROVAL_APPROVED":
+      return {
+        id: event.event_id,
+        kind: "approval",
+        label: "已审批",
+        status: "success",
+        events: [event],
+        ts: event.ts,
+      };
+    case "APPROVAL_REJECTED":
+    case "APPROVAL_EXPIRED":
+      return {
+        id: event.event_id,
+        kind: "approval",
+        label: event.type === "APPROVAL_REJECTED" ? "审批拒绝" : "审批过期",
+        status: "error",
+        events: [event],
+        ts: event.ts,
+      };
+
+    case "ERROR":
+      return {
+        id: event.event_id,
+        kind: "error",
+        label: str(event.payload?.message ?? event.payload?.error, 20) || "错误",
+        status: "error",
+        events: [event],
+        ts: event.ts,
+      };
+
+    default:
+      return {
+        id: event.event_id,
+        kind: "other",
+        label: event.type,
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      };
+  }
+}
+
+// ─── 辅助函数 ────────────────────────────────────────────────
+
+function inferKind(eventType: string): FlowNodeKind {
+  if (eventType.startsWith("MODEL_CALL")) return "llm";
+  if (eventType.startsWith("TOOL_CALL")) return "tool";
+  if (eventType.startsWith("SKILL_")) return "skill";
+  if (eventType.startsWith("WORKER_")) return "worker";
+  if (eventType.startsWith("MEMORY_RECALL")) return "memory";
+  return "other";
+}
+
+function pairedLabel(kind: FlowNodeKind, start: TaskEvent, end: TaskEvent): string {
+  const dur = fmtDuration(start, end);
+  switch (kind) {
+    case "llm": {
+      const model = str(end.payload?.model_name ?? start.payload?.model_alias, 16);
+      return model ? `${model} ${dur}` : `LLM ${dur}`;
+    }
+    case "tool": {
+      const tool = str(end.payload?.tool_name ?? start.payload?.tool_name, 22);
+      return tool || `工具 ${dur}`;
+    }
+    case "skill": {
+      const skill = str(end.payload?.skill_id ?? start.payload?.skill_id, 22);
+      return skill || `Skill ${dur}`;
+    }
+    case "worker":
+      return `Worker ${dur}`;
+    case "memory":
+      return `记忆检索 ${dur}`;
+    default:
+      return `${kind} ${dur}`;
+  }
+}
+
+function runningLabel(kind: FlowNodeKind, event: TaskEvent): string {
+  switch (kind) {
+    case "llm":
+      return str(event.payload?.model_alias, 16) || "LLM 调用中…";
+    case "tool":
+      return str(event.payload?.tool_name, 22) || "工具执行中…";
+    case "skill":
+      return str(event.payload?.skill_id, 22) || "Skill 执行中…";
+    case "worker":
+      return "Worker 执行中…";
+    case "memory":
+      return "记忆检索中…";
+    default:
+      return `${event.type}…`;
+  }
+}
+
+function singleLabel(kind: FlowNodeKind, event: TaskEvent): string {
+  if (kind === "llm") return str(event.payload?.model_name, 16) || "LLM";
+  if (kind === "tool") return str(event.payload?.tool_name, 22) || "工具";
+  if (kind === "skill") return str(event.payload?.skill_id, 22) || "Skill";
+  return event.type;
+}
+
+function str(value: unknown, maxLen?: number): string {
+  if (value == null) return "";
+  const s = String(value).trim();
+  return maxLen && s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
+}
+
+function fmtDuration(start: TaskEvent, end: TaskEvent): string {
+  const ms = Number(end.payload?.duration_ms);
+  if (ms > 0) return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+  const diff = new Date(end.ts).getTime() - new Date(start.ts).getTime();
+  if (diff > 0) return diff >= 1000 ? `${(diff / 1000).toFixed(1)}s` : `${diff}ms`;
+  return "";
+}

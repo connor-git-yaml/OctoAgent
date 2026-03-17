@@ -550,30 +550,17 @@ describe("SettingsPage", () => {
     expect(screen.getByText("还没有 Provider")).toBeInTheDocument();
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "先添加可用的模型 Provider" })).toBeInTheDocument();
-    // 概览区块显示作用域说明和导航提示（替代旧版分层优先级文案）
-    expect(
-      screen.getByRole("heading", { name: "这里改的是平台设置和项目默认，不是某一条会话本身" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "只有你需要继续细配时，再往下看" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "平台级 Memory 与检索质量" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "记忆加工" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "语义检索" })).toHaveDisplayValue(
-      "使用内建 embedding（默认）"
-    );
-    expect(screen.getByText("兼容接入（仅迁移旧 MemU bridge 或排障时需要）")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
     expect(screen.getByDisplayValue("main")).toBeInTheDocument();
     expect(screen.getByDisplayValue("cheap")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "记忆加工" })).toHaveDisplayValue("使用 main（默认）");
   });
 
   it("保存时会自动补齐内部 LiteLLM 运行配置", async () => {
@@ -608,52 +595,15 @@ describe("SettingsPage", () => {
     expect(draft.secret_values.LITELLM_MASTER_KEY).toBeTruthy();
   });
 
-  it("展示 embedding 迁移卡片，并支持切换到新索引", async () => {
+  it("retrieval platform 迁移 UI 暂未启用（void retrievalPlatform）", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.retrieval_platform.corpora[0].pending_generation_id = "gen-memory-next";
     snapshot.resources.retrieval_platform.corpora[0].desired_profile_id = "alias:knowledge-embed";
     snapshot.resources.retrieval_platform.corpora[0].desired_profile_target = "knowledge-embed";
     snapshot.resources.retrieval_platform.corpora[0].state = "migration_pending";
-    snapshot.resources.retrieval_platform.generations.push({
-      generation_id: "gen-memory-next",
-      corpus_kind: "memory",
-      profile_id: "alias:knowledge-embed",
-      profile_target: "knowledge-embed",
-      label: "Memory · knowledge-embed",
-      status: "ready_to_cutover",
-      is_active: false,
-      build_job_id: "job-memory-next",
-      previous_generation_id: "gen-memory-active",
-      created_at: "2026-03-13T16:10:00Z",
-      updated_at: "2026-03-13T16:20:00Z",
-      activated_at: null,
-      completed_at: "2026-03-13T16:20:00Z",
-      rollback_deadline: null,
-      warnings: ["配置已更新；切换前仍继续使用旧索引。"],
-      metadata: {},
-    });
-    snapshot.resources.retrieval_platform.build_jobs.push({
-      job_id: "job-memory-next",
-      corpus_kind: "memory",
-      generation_id: "gen-memory-next",
-      stage: "ready_to_cutover",
-      summary: "新索引已经准备好，等待切换。",
-      total_items: 42,
-      processed_items: 42,
-      percent_complete: 100,
-      eta_seconds: null,
-      can_cancel: true,
-      latest_error: "",
-      latest_maintenance_run_id: "run-memory-next",
-      created_at: "2026-03-13T16:10:00Z",
-      updated_at: "2026-03-13T16:20:00Z",
-      completed_at: null,
-      metadata: {},
-    });
-    const submitAction = vi.fn().mockResolvedValue({});
     mockWorkbench = {
       snapshot,
-      submitAction,
+      submitAction: vi.fn(),
       busyActionId: null,
     };
 
@@ -663,18 +613,11 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "在线查询继续使用旧索引，直到新索引切换完成" })).toBeInTheDocument();
-    expect(screen.getByText("Memory · 内建默认层（当前先走本地元数据）")).toBeInTheDocument();
-    expect(screen.getByText("knowledge-embed")).toBeInTheDocument();
-    expect(screen.getAllByText("待切换").length).toBeGreaterThan(0);
-
-    await userEvent.click(screen.getByRole("button", { name: "切换到新索引" }));
-
-    expect(submitAction).toHaveBeenCalledWith("retrieval.index.cutover", {
-      generation_id: "gen-memory-next",
-      project_id: "project-default",
-      workspace_id: "workspace-default",
-    });
+    // 迁移管理 UI 暂未启用，不应渲染切换按钮或迁移状态
+    expect(screen.queryByRole("button", { name: "切换到新索引" })).not.toBeInTheDocument();
+    // Memory 区块仍然正常渲染基础状态卡片
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByText("ready")).toBeInTheDocument();
   });
 
   it("支持触发 OpenAI Auth 连接动作", async () => {
@@ -765,7 +708,7 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("link", { name: "回聊天验证" })).not.toBeInTheDocument();
   });
 
-  it("Memory 兼容接入会按 command transport 收敛字段", async () => {
+  it("Memory 区块展示基础状态卡片而非兼容接入表单", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.config.current_value.memory.backend_mode = "memu";
     snapshot.resources.config.current_value.memory.bridge_transport = "command";
@@ -785,19 +728,16 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    await userEvent.click(
-      screen.getByText("兼容接入（仅迁移旧 MemU bridge 或排障时需要）")
-    );
-
-    expect(screen.getByDisplayValue("uv run python scripts/memu_bridge.py")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("/tmp/memu")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("18")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("https://memory.example.com")).not.toBeInTheDocument();
-    expect(screen.queryByDisplayValue("/memory/search")).not.toBeInTheDocument();
-    expect(screen.getAllByText("增强记忆（本地兼容）").length).toBeGreaterThan(0);
+    // 当前 Memory 区块只展示静态卡片，不渲染兼容接入表单
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByText("本地记忆")).toBeInTheDocument();
+    expect(screen.getByText("SQLite / Vault")).toBeInTheDocument();
+    // 兼容接入表单字段不应在 Memory 区块中渲染
+    expect(screen.queryByDisplayValue("uv run python scripts/memu_bridge.py")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("/tmp/memu")).not.toBeInTheDocument();
   });
 
-  it("Memory 模型绑定会进入保存草稿", async () => {
+  it("Memory 区块展示 embedding 和结论统计", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.config.current_value.providers = [
       {
@@ -814,25 +754,10 @@ describe("SettingsPage", () => {
         model: "openrouter/auto",
         description: "主模型",
       },
-      embed: {
-        provider: "openrouter",
-        model: "text-embedding-3-large",
-        description: "embedding",
-      },
-      rerank: {
-        provider: "openrouter",
-        model: "rerank-v1",
-        description: "rerank",
-      },
     } as never;
-    const submitAction = vi.fn().mockResolvedValue({
-      data: {
-        review: snapshot.resources.setup_governance.review,
-      },
-    });
     mockWorkbench = {
       snapshot,
-      submitAction,
+      submitAction: vi.fn(),
       busyActionId: null,
     };
 
@@ -842,22 +767,15 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "记忆加工" }), "main");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "语义检索" }), "embed");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "结果重排" }), "rerank");
-
-    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
-
-    await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
-
-    const draft = submitAction.mock.calls[0][1].draft;
-    expect(draft.config.memory.reasoning_model_alias).toBe("main");
-    expect(draft.config.memory.embedding_model_alias).toBe("embed");
-    expect(draft.config.memory.rerank_model_alias).toBe("rerank");
-    expect(draft.config.memory.expand_model_alias).toBe("");
+    // Memory 区块正常渲染静态状态卡片
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByText("内建 embedding（默认）")).toBeInTheDocument();
+    expect(screen.getByText("换模型时会后台重建索引")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument(); // sor_current_count
+    expect(screen.getByText(/片段 2/)).toBeInTheDocument(); // fragment_count
   });
 
-  it("把 Agent 与 Behavior 管理入口迁到 Agents 页面", async () => {
+  it("Settings 页面不包含 Agent / Behavior 管理入口", () => {
     mockWorkbench = {
       snapshot: buildSettingsSnapshot(),
       submitAction: vi.fn(),
@@ -870,13 +788,14 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Agent 与 Behavior 管理已移到 Agents")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "打开 Agents > Behavior" })).toHaveAttribute(
-      "href",
-      "/agents?view=behavior"
-    );
-    expect(screen.getByRole("link", { name: "打开 Agents > Skills / MCP" })).toBeInTheDocument();
+    // Settings 页面聚焦 Provider / Memory / 渠道，不包含 Agent 或 Behavior 管理
     expect(screen.queryByText("安全与能力")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Behavior/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Agents/ })).not.toBeInTheDocument();
+    // 确认核心区块正常渲染
+    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
   });
 
   it("不再在 Settings 页面展示只读 Behavior Files 视图", () => {
@@ -892,13 +811,14 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Providers / Memory = 平台级")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "这里改的是平台设置和项目默认，不是某一条会话本身" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("Agent 模板、Behavior Files 和 Provider 绑定统一放在 Agents 页面维护。")).toBeInTheDocument();
+    // Settings 页面不包含 Behavior Files 相关内容
     expect(screen.queryByText("当前项目默认行为现在来自显式文件与运行时 hints")).not.toBeInTheDocument();
     expect(screen.queryByText("octo behavior ls")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Behavior Files/)).not.toBeInTheDocument();
+    // 确认 Settings 页面只聚焦 Providers / Memory / 渠道 / 保存检查
+    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
   });
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {
