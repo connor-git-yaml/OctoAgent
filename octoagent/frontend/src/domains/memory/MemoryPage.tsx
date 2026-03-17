@@ -147,22 +147,25 @@ export default function MemoryPage() {
   );
   const selectedRecord =
     displayRecords.find((record) => record.record.record_id === selectedRecordId) ?? null;
+  const rpCorpora = retrievalPlatform?.corpora ?? [];
+  const rpGenerations = retrievalPlatform?.generations ?? [];
+  const rpBuildJobs = retrievalPlatform?.build_jobs ?? [];
   const memoryCorpus =
-    retrievalPlatform?.corpora.find((item) => item.corpus_kind === "memory") ?? null;
+    rpCorpora.find((item) => item.corpus_kind === "memory") ?? null;
   const activeGeneration =
-    retrievalPlatform?.generations.find(
+    rpGenerations.find(
       (item) => item.generation_id === memoryCorpus?.active_generation_id
     ) ?? null;
   const pendingGeneration =
-    retrievalPlatform?.generations.find(
+    rpGenerations.find(
       (item) => item.generation_id === memoryCorpus?.pending_generation_id
     ) ?? null;
   const pendingBuildJob =
-    retrievalPlatform?.build_jobs.find(
+    rpBuildJobs.find(
       (item) => item.generation_id === pendingGeneration?.generation_id
     ) ?? null;
   const rollbackCandidate =
-    retrievalPlatform?.generations.find(
+    rpGenerations.find(
       (item) =>
         item.corpus_kind === "memory" &&
         !item.is_active &&
