@@ -82,13 +82,9 @@ export default function SettingsPage() {
   const otherGroupIds = ["channels", "advanced"].filter(
     (groupId) => (groupedHints[groupId] ?? []).length > 0
   );
-  const memoryCorpus =
-    retrievalPlatform?.corpora.find(
-      (item) => item.corpus_kind === "memory"
-    ) ?? null;
   // memoryCorpus / retrievalPlatform 的 generation 相关变量暂不使用，
   // 待 Retrieval Platform 迁移管理 UI 合入后恢复
-  void memoryCorpus;
+  void retrievalPlatform;
   const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
   const providerDrafts = parseProviderDrafts(fieldState.providers);
   const aliasDrafts = normalizeAliasDrafts(parseAliasDrafts(fieldState.model_aliases));
