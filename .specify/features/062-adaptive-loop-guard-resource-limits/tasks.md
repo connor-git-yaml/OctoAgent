@@ -12,7 +12,7 @@ updated: "2026-03-17"
 - [x] **T0.1** 在 `skills/models.py` 给 `SkillOutputEnvelope` 新增 `token_usage: dict[str, int]` 和 `cost_usd: float` 字段
 - [x] **T0.2** 修改 `litellm_client.py` SSE 流式路径：设 `stream_options: {"include_usage": true}`，从最终 chunk 提取 token usage + cost 写入 `SkillOutputEnvelope`
 - [x] **T0.3** 修改 `litellm_client.py` Responses API 路径：从 response 提取 usage + cost（替代硬编码 `cost_usd=0.0`）
-- [ ] **T0.4** 编写 `tests/test_litellm_token_data.py`：SSE / Responses 两条路径均返回 token 数据 + SkillOutputEnvelope 默认值回归
+- [x] **T0.4** 编写 `tests/test_litellm_token_data.py`：SSE / Responses 两条路径均返回 token 数据 + SkillOutputEnvelope 默认值回归
 
 ## Phase 1: UsageLimits 模型 + SkillRunner 集成 [P0]
 
@@ -33,7 +33,7 @@ updated: "2026-03-17"
 - [x] **T1.15** 在 `runner.py` 结束时 emit `SKILL_USAGE_REPORT` 事件 + 超限时 emit `RESOURCE_LIMIT_HIT` 事件
 - [x] **T1.16** 在 `llm_service.py` 新增 4 种 ErrorCategory 的中文友好提示模板
 - [x] **T1.17** 编写 `tests/test_usage_limits.py` 单元测试（各维度独立/组合触发、to_usage_limits、超时、浮点容差、to_dict）
-- [ ] **T1.18** 编写 SkillRunner 集成测试：不同维度超限时返回正确 ErrorCategory + 友好提示
+- [x] **T1.18** 编写 SkillRunner 集成测试：不同维度超限时返回正确 ErrorCategory + 友好提示
 
 ## Phase 2: per-Profile 差异化配置 [P0]
 
@@ -68,7 +68,7 @@ updated: "2026-03-17"
 
 - [x] **T5.1** `RetryPolicy` 新增 `downgrade_scope_on_fail: bool` + `fallback_model_alias: str`
 - [x] **T5.2** `llm_service.py` 实现降级逻辑：FAILED → 切模型 → `max_steps = min(int(max_steps * 1.5), _MAX_STEPS_HARD_CEILING)` → **`max_budget_usd` 不放宽** → `is_degraded_retry=True` → 重试一次
-- [ ] **T5.3** 编写 `tests/test_degradation_retry.py`（降级成功 / 防递归 / max_steps clamp / budget 不放宽）
+- [x] **T5.3** 编写 `tests/test_degradation_retry.py`（降级成功 / 防递归 / max_steps clamp / budget 不放宽）
 
 ## Phase 6: Settings 可配置 [P2]
 
@@ -76,4 +76,4 @@ updated: "2026-03-17"
 - [x] **T6.2** Settings UI（`domains/settings/` 目录）新增"资源限制"配置区（全局 + per-Agent 选择器）
 - [x] **T6.3** 后端 `agent_profile.update_resource_limits` action + 广播变更
 - [x] **T6.4** 编写环境变量优先级单元测试（env var > 代码默认值、Settings > env var）
-- [ ] **T6.5** 端到端测试：Settings 修改 → 新请求立即生效
+- [x] **T6.5** 端到端测试：Settings 修改 → 新请求立即生效
