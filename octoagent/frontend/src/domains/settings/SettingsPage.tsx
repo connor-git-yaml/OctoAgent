@@ -6,6 +6,7 @@ import type { ConfigFieldHint, SetupReviewSummary } from "../../types";
 import SettingsHintFields from "./SettingsHintFields";
 import SettingsOverview from "./SettingsOverview";
 import SettingsProviderSection from "./SettingsProviderSection";
+import SettingsResourceLimitsSection from "./SettingsResourceLimitsSection";
 import {
   CUSTOM_PROVIDER_FIELD_PATHS,
   buildConfigPayload,
@@ -454,6 +455,19 @@ export default function SettingsPage() {
         onOpenAIOAuthConnect={async () => {
           await handleOpenAIOAuthConnect();
         }}
+      />
+
+      <SettingsResourceLimitsSection
+        agentProfiles={snapshot!.resources.agent_profiles ?? null}
+        workerProfiles={snapshot!.resources.worker_profiles ?? null}
+        onSubmit={async (targetType, profileId, limits) => {
+          await submitAction("agent_profile.update_resource_limits", {
+            target_type: targetType,
+            profile_id: profileId,
+            resource_limits: limits,
+          });
+        }}
+        busy={busyActionId === "agent_profile.update_resource_limits"}
       />
 
       <section id="settings-group-memory" className="wb-panel">

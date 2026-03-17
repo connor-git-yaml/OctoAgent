@@ -670,6 +670,7 @@ export interface AgentProfileItem {
   memory_access_policy?: Record<string, unknown>;
   context_budget_policy?: Record<string, unknown>;
   metadata: Record<string, unknown>;
+  resource_limits?: Record<string, unknown>;
   updated_at: string | null;
 }
 
@@ -697,6 +698,7 @@ export interface WorkerProfileStaticConfig {
   tags: string[];
   capabilities: string[];
   metadata: Record<string, unknown>;
+  resource_limits?: Record<string, unknown>;
 }
 
 export interface WorkerProfileDynamicContext {
