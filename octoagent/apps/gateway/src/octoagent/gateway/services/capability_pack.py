@@ -1329,8 +1329,49 @@ class CapabilityPackService:
             )
 
         @tool_contract(
+            name="filesystem.write_text",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="filesystem",
+            tags=["filesystem", "file", "write"],
+            worker_types=["ops", "dev", "general"],
+            manifest_ref="builtin://filesystem.write_text",
+            metadata={
+                "entrypoints": ["agent_runtime"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def filesystem_write_text(
+            path: str,
+            content: str,
+            create_dirs: bool = True,
+        ) -> str:
+            """在 workspace 内创建或覆盖文本文件。自动创建中间目录。"""
+
+            workspace_root = await _resolve_workspace_root()
+            target = _resolve_workspace_path(workspace_root, path)
+            if target.is_dir():
+                raise RuntimeError(f"path is a directory, not a file: {target}")
+            if create_dirs:
+                target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            relative = str(target.relative_to(workspace_root))
+            return json.dumps(
+                {
+                    "workspace_root": str(workspace_root),
+                    "path": relative,
+                    "bytes_written": len(content.encode("utf-8")),
+                    "created_dirs": create_dirs and not target.parent.exists(),
+                },
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
             name="terminal.exec",
-            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            # REVERSIBLE: 默认策略自动放行，避免 node -v/grep 等只读命令
+            # 也被审批拦截。真正高危操作由 Policy Profile 的 irreversible
+            # 规则或 Skill 层的 Side-effect Two-Phase 保护。
+            side_effect_level=SideEffectLevel.REVERSIBLE,
             tool_profile=ToolProfile.STANDARD,
             tool_group="terminal",
             tags=["terminal", "command", "exec"],
@@ -2901,6 +2942,7 @@ class CapabilityPackService:
             artifact_list,
             filesystem_list_dir,
             filesystem_read_text,
+            filesystem_write_text,
             terminal_exec,
             runtime_inspect,
             runtime_now,
