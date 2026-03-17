@@ -143,7 +143,7 @@ function SkillDetailModal({
         justifyContent: "center",
         zIndex: 1000,
       }}
-      onClick={onClose}
+      onClick={(e) => { if (e.target === e.currentTarget && e.detail > 0) onClose(); }}
     >
       <div
         className="wb-panel"
@@ -320,7 +320,7 @@ function InstallModal({
         justifyContent: "center",
         zIndex: 1000,
       }}
-      onClick={onClose}
+      onClick={(e) => { if (e.target === e.currentTarget && e.detail > 0) onClose(); }}
     >
       <div
         className="wb-panel"

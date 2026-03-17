@@ -173,10 +173,15 @@ export default function McpInstallWizard({
         <div
           className="wb-modal-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget && step !== "installing") onClose();
+            // 仅响应真实指针点击（detail > 0），排除键盘或输入法触发的合成 click
+            if (e.target === e.currentTarget && step !== "installing" && e.detail > 0) onClose();
           }}
         >
-          <div className="wb-modal-body wb-mcp-modal" style={{ maxWidth: 520 }}>
+          <div
+            className="wb-modal-body wb-mcp-modal"
+            style={{ maxWidth: 520 }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             <div className="wb-panel-head">
               <h3>安装 MCP Server</h3>
               {step !== "installing" && (
