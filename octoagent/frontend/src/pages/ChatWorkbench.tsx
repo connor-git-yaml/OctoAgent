@@ -1578,31 +1578,40 @@ export default function ChatWorkbench() {
     };
   }, [taskId]);
 
+  // 用 ref 持有最新 snapshot 资源引用，避免将频繁变化的值放入 useEffect 依赖
+  // 导致 setInterval 被反复重建，产生请求风暴
+  const snapshotResourcesRef = useRef(snapshot!.resources);
+  snapshotResourcesRef.current = snapshot!.resources;
+  const refreshResourcesRef = useRef(refreshResources);
+  refreshResourcesRef.current = refreshResources;
+
   useEffect(() => {
     if (!taskId) {
       return;
     }
     let cancelled = false;
     const currentTaskId = taskId;
-    const resources = [
-      {
-        resource_type: snapshot!.resources.sessions.resource_type,
-        resource_id: snapshot!.resources.sessions.resource_id,
-        schema_version: snapshot!.resources.sessions.schema_version,
-      },
-      {
-        resource_type: snapshot!.resources.delegation.resource_type,
-        resource_id: snapshot!.resources.delegation.resource_id,
-        schema_version: snapshot!.resources.delegation.schema_version,
-      },
-      {
-        resource_type: snapshot!.resources.context_continuity.resource_type,
-        resource_id: snapshot!.resources.context_continuity.resource_id,
-        schema_version: snapshot!.resources.context_continuity.schema_version,
-      },
-    ];
 
     async function refreshLiveState() {
+      const res = snapshotResourcesRef.current;
+      const resources = [
+        {
+          resource_type: res.sessions.resource_type,
+          resource_id: res.sessions.resource_id,
+          schema_version: res.sessions.schema_version,
+        },
+        {
+          resource_type: res.delegation.resource_type,
+          resource_id: res.delegation.resource_id,
+          schema_version: res.delegation.schema_version,
+        },
+        {
+          resource_type: res.context_continuity.resource_type,
+          resource_id: res.context_continuity.resource_id,
+          schema_version: res.context_continuity.schema_version,
+        },
+      ];
+
       const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
         fetchTaskDetail(currentTaskId),
         fetchTaskExecutionSession(currentTaskId),
@@ -1625,7 +1634,7 @@ export default function ChatWorkbench() {
       if (cancelled) {
         return;
       }
-      await refreshResources(resources);
+      await refreshResourcesRef.current(resources);
     }
 
     void refreshLiveState();
@@ -1635,23 +1644,13 @@ export default function ChatWorkbench() {
 
     const timer = window.setInterval(() => {
       void refreshLiveState();
-    }, 1200);
+    }, 3000);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [
-    taskId,
-    shouldPollLiveState,
-    refreshResources,
-    snapshot!.resources.context_continuity.resource_id,
-    snapshot!.resources.context_continuity.schema_version,
-    snapshot!.resources.delegation.resource_id,
-    snapshot!.resources.delegation.schema_version,
-    snapshot!.resources.sessions.resource_id,
-    snapshot!.resources.sessions.schema_version,
-  ]);
+  }, [taskId, shouldPollLiveState]);
 
   useEffect(() => {
     setChatActionNotice(null);
