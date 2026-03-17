@@ -1910,8 +1910,9 @@ export default function ChatWorkbench() {
         className={`wb-panel wb-chat-panel wb-chat-shell ${isEmptyConversation ? "is-empty" : ""}`}
       >
         <div className="wb-panel-head wb-chat-head">
-          <div className="wb-chat-head-copy">
+          <div className="wb-chat-head-copy wb-chat-head-inline">
             <h3>{sessionDisplayName || conversationTitle}</h3>
+            <span className="wb-chat-head-sep">/</span>
             <p className="wb-chat-head-summary">{effectiveAgentName}</p>
           </div>
           <div className="wb-chat-head-actions">

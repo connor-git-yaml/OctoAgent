@@ -1253,7 +1253,8 @@
   gap: 8px;
   padding: 6px 12px;
   border-radius: 10px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(20, 32, 47, 0.06);
+  border-left: 3px solid transparent;
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -1288,6 +1289,13 @@
 }
 
 .wb-nav-session-status {
+  font-size: 0.68rem;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wb-nav-session-agent {
   font-size: 0.68rem;
   color: var(--cp-muted);
   white-space: nowrap;
@@ -2853,8 +2861,26 @@
   min-width: 0;
 }
 
+.wb-chat-head-copy.wb-chat-head-inline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wb-chat-head-inline h3 {
+  margin: 0;
+}
+
+.wb-chat-head-sep {
+  color: var(--cp-muted, rgba(20, 32, 47, 0.3));
+  font-weight: 300;
+  font-size: 1rem;
+}
+
 .wb-chat-head-summary {
   font-size: 0.94rem;
+  color: var(--cp-muted, rgba(20, 32, 47, 0.55));
 }
 
 .wb-chat-activity {

@@ -101,19 +101,6 @@ function renderNavDescription(path: string): string {
   }
 }
 
-const SESSION_STATUS_LABELS: Record<string, string> = {
-  running: "进行中",
-  waiting_input: "等待输入",
-  waiting_approval: "等待审批",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-};
-
-function formatSessionStatus(status: string): string {
-  return SESSION_STATUS_LABELS[status.toLowerCase()] ?? status;
-}
-
 function formatSessionTitle(session: SessionProjectionItem): string {
   if (session.title?.trim()) {
     return session.title.trim();
@@ -123,51 +110,57 @@ function formatSessionTitle(session: SessionProjectionItem): string {
     : "未命名对话";
 }
 
+// 基于 agent_profile_id 的稳定色板——同一 Agent 始终同色
+const SESSION_ACCENT_PALETTE = [
+  "#1f6a5b", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444",
+  "#06b6d4", "#ec4899", "#10b981", "#6366f1", "#f97316",
+];
+
+function sessionAccentColor(agentProfileId: string): string {
+  let hash = 0;
+  for (let i = 0; i < agentProfileId.length; i++) {
+    hash = agentProfileId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return SESSION_ACCENT_PALETTE[Math.abs(hash) % SESSION_ACCENT_PALETTE.length];
+}
+
 function ChatNavSection({
   sessions,
   currentPath,
   onNavigate,
   onNewSession,
+  resolveAgentName,
 }: {
   sessions: SessionProjectionDocument;
   currentPath: string;
   onNavigate: () => void;
   onNewSession: () => void;
+  resolveAgentName: (agentProfileId: string) => string;
 }) {
   const navigate = useNavigate();
   const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
   // 只展示 web 渠道的 session，如果没有 web session 才退化到全部
   const webSessions = sessionItems.filter((item) => item.channel === "web");
   const displaySessions = webSessions.length > 0 ? webSessions : sessionItems;
-  const isChatActive = currentPath === "/" || currentPath.startsWith("/chat");
 
   return (
     <div className="wb-nav-group">
-      <NavLink
-        to="/"
-        end
-        className={({ isActive }) =>
-          `wb-nav-item ${isActive || isChatActive ? "is-active" : ""}`
-        }
-        onClick={onNavigate}
-      >
-        <strong>Chat</strong>
-        <span>{renderNavDescription("/")}</span>
-      </NavLink>
-
       <div className="wb-nav-session-list">
         {displaySessions.map((session) => {
           const sessionPath = `/chat/${session.session_id}`;
-          const isActive = currentPath === sessionPath;
+          const isActive = currentPath === sessionPath
+            || (currentPath === "/" && session === displaySessions[0]);
           const statusNormalized = session.status?.toLowerCase() ?? "";
           const isRunning = ["running", "waiting_input", "waiting_approval"].includes(
             statusNormalized
           );
+          const accent = sessionAccentColor(session.agent_profile_id);
           return (
             <button
               type="button"
               key={session.session_id}
               className={`wb-nav-session-item ${isActive ? "is-active" : ""} ${isRunning ? "is-running" : ""}`}
+              style={{ borderLeftColor: accent }}
               onClick={() => {
                 navigate(sessionPath);
                 onNavigate();
@@ -176,8 +169,8 @@ function ChatNavSection({
               <span className="wb-nav-session-title">
                 {formatSessionTitle(session)}
               </span>
-              <span className="wb-nav-session-status">
-                {formatSessionStatus(session.status)}
+              <span className="wb-nav-session-agent">
+                {resolveAgentName(session.agent_profile_id)}
               </span>
             </button>
           );
@@ -248,6 +241,12 @@ export default function WorkbenchLayout() {
   const sessions = snapshot.resources.sessions;
   const config = snapshot.resources.config;
   const delegation = snapshot.resources.delegation;
+  const workerProfiles = snapshot.resources.worker_profiles;
+  const workerProfileList = Array.isArray(workerProfiles?.profiles) ? workerProfiles.profiles : [];
+  const resolveAgentName = (agentProfileId: string): string => {
+    const match = workerProfileList.find((p) => p.profile_id === agentProfileId);
+    return match?.name || "Agent";
+  };
   const pendingTotal = sessions.operator_summary?.total_pending ?? 0;
   const runtimeMode =
     String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
@@ -285,6 +284,7 @@ export default function WorkbenchLayout() {
               currentPath={location.pathname}
               onNavigate={() => setNavOpen(false)}
               onNewSession={() => setShowNewSessionModal(true)}
+              resolveAgentName={resolveAgentName}
             />
             {[
               { to: "/agents", label: "Agents" },
