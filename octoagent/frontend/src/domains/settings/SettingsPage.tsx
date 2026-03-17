@@ -490,15 +490,15 @@ export default function SettingsPage() {
           </article>
           <article className="wb-card">
             <p className="wb-card-label">当前结论</p>
-            <strong>{memory.summary.sor_current_count}</strong>
-            <span>片段 {memory.summary.fragment_count}</span>
+            <strong>{memory.summary?.sor_current_count ?? "—"}</strong>
+            <span>片段 {memory.summary?.fragment_count ?? "—"}</span>
           </article>
         </div>
 
-        {memory.warnings.length > 0 ? (
+        {(memory.warnings ?? []).length > 0 ? (
           <div className="wb-inline-banner is-error" role="alert">
             <strong>Memory 当前有提醒</strong>
-            <span>{memory.warnings.join("；")}</span>
+            <span>{(memory.warnings ?? []).join("；")}</span>
           </div>
         ) : null}
       </section>
