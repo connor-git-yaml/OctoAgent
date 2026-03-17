@@ -10,19 +10,7 @@ import {
   triggerVerify,
 } from "../api/client";
 import type { RecoverySummary, UpdateAttemptSummary } from "../types";
-
-function formatTime(value: string | null | undefined): string {
-  if (!value) {
-    return "未记录";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { formatDateTimeSafe } from "../utils/formatTime";
 
 function drillLabel(summary: RecoverySummary | null): string {
   const status = summary?.latest_recovery_drill?.status;
@@ -204,14 +192,14 @@ export default function RecoveryPanel() {
       <div className="recovery-grid">
         <div className="recovery-item">
           <div className="muted">最近备份</div>
-          <strong>{formatTime(summary?.latest_backup?.created_at)}</strong>
+          <strong>{formatDateTimeSafe(summary?.latest_backup?.created_at, "未记录")}</strong>
           <div className="muted">{summary?.latest_backup?.output_path || "尚未创建 backup"}</div>
         </div>
         <div className="recovery-item">
           <div className="muted">恢复演练</div>
           <strong>{drillLabel(summary)}</strong>
           <div className="muted">
-            {formatTime(summary?.latest_recovery_drill?.checked_at)}
+            {formatDateTimeSafe(summary?.latest_recovery_drill?.checked_at, "未记录")}
           </div>
         </div>
       </div>
@@ -233,7 +221,7 @@ export default function RecoveryPanel() {
         <div className="recovery-item">
           <div className="muted">最近升级</div>
           <strong>{updateLabel(updateSummary)}</strong>
-          <div className="muted">{formatTime(updateSummary?.started_at)}</div>
+          <div className="muted">{formatDateTimeSafe(updateSummary?.started_at, "未记录")}</div>
         </div>
         <div className="recovery-item">
           <div className="muted">当前阶段</div>

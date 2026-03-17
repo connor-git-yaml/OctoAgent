@@ -1,0 +1,406 @@
+/**
+ * Task 可视化模式样式 -- tv- 前缀，复用 --cp-* design tokens
+ */
+
+/* ─── SegmentedToggle ──────────────────────────────────────── */
+
+.tv-segmented {
+  display: inline-flex;
+  gap: 0;
+  background: var(--cp-soft);
+  border-radius: var(--cp-radius-md);
+  padding: 3px;
+  margin-bottom: var(--cp-space-4);
+}
+
+.tv-segmented-option {
+  padding: var(--cp-space-2) var(--cp-space-4);
+  border: none;
+  background: transparent;
+  color: var(--cp-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: calc(var(--cp-radius-md) - 2px);
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.tv-segmented-option:hover {
+  color: var(--cp-ink);
+}
+
+.tv-segmented-option--active {
+  background: var(--cp-card-strong);
+  color: var(--cp-ink);
+  box-shadow: 0 1px 3px rgba(23, 33, 43, 0.1);
+  font-weight: 600;
+}
+
+/* ─── PipelineBar ──────────────────────────────────────────── */
+
+.tv-pipeline-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: var(--cp-space-4) 0;
+  margin-bottom: var(--cp-space-5);
+}
+
+.tv-pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.tv-pipeline-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cp-space-2);
+  position: relative;
+}
+
+.tv-pipeline-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* 节点状态：pending -- 空心灰色 */
+.tv-pipeline-circle--pending {
+  background: transparent;
+  border: 2px solid var(--cp-border);
+  color: var(--cp-border);
+}
+
+/* 节点状态：done -- 实心绿色 + 勾号 */
+.tv-pipeline-circle--done {
+  background: var(--cp-success);
+  border: 2px solid var(--cp-success);
+  color: #fff;
+}
+
+.tv-pipeline-circle--done::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 13px;
+  border: solid #fff;
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+/* 节点状态：active -- 呼吸动画 */
+.tv-pipeline-circle--active {
+  background: var(--cp-primary);
+  border: 2px solid var(--cp-primary);
+  color: #fff;
+  animation: tv-pulse 1.5s ease-in-out infinite;
+}
+
+.tv-pipeline-circle--active::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* 节点状态：error -- 实心红色 + 叉号 */
+.tv-pipeline-circle--error {
+  background: var(--cp-danger);
+  border: 2px solid var(--cp-danger);
+  color: #fff;
+}
+
+.tv-pipeline-circle--error::after {
+  content: "\00d7";
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+}
+
+/* 节点标签 */
+.tv-pipeline-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  transition: color 0.3s;
+}
+
+.tv-pipeline-label--done {
+  color: var(--cp-success);
+}
+
+.tv-pipeline-label--active {
+  color: var(--cp-primary);
+  font-weight: 600;
+}
+
+.tv-pipeline-label--error {
+  color: var(--cp-danger);
+}
+
+/* 连线 */
+.tv-pipeline-line {
+  width: 48px;
+  height: 2px;
+  margin: 0 var(--cp-space-2);
+  /* 默认状态：偏移到 circle 中心对齐 */
+  margin-bottom: 22px;
+  transition: background 0.3s;
+}
+
+.tv-pipeline-line--done {
+  background: var(--cp-success);
+}
+
+.tv-pipeline-line--pending {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--cp-border) 0,
+    var(--cp-border) 6px,
+    transparent 6px,
+    transparent 10px
+  );
+}
+
+/* 呼吸动画 */
+@keyframes tv-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(183, 106, 43, 0.3); }
+  50% { opacity: 0.75; box-shadow: 0 0 0 8px rgba(183, 106, 43, 0); }
+}
+
+/* ─── PhaseCard ────────────────────────────────────────────── */
+
+.tv-phase-card {
+  background: var(--cp-card);
+  border-radius: var(--cp-radius-md);
+  border-left: 4px solid var(--cp-border);
+  padding: var(--cp-space-4);
+  margin-bottom: var(--cp-space-3);
+  box-shadow: 0 1px 3px rgba(23, 33, 43, 0.05);
+  transition: border-color 0.3s;
+}
+
+.tv-phase-card--received {
+  border-left-color: var(--cp-secondary);
+}
+
+.tv-phase-card--thinking {
+  border-left-color: var(--cp-primary);
+}
+
+.tv-phase-card--executing {
+  border-left-color: var(--cp-secondary-ink);
+}
+
+.tv-phase-card--completed {
+  border-left-color: var(--cp-success);
+}
+
+.tv-phase-card--error {
+  border-left-color: var(--cp-danger);
+}
+
+.tv-phase-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--cp-space-2);
+  margin-bottom: var(--cp-space-3);
+}
+
+.tv-phase-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.tv-phase-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  flex: 1;
+}
+
+.tv-phase-time-range {
+  font-size: 11px;
+  color: var(--cp-muted);
+  white-space: nowrap;
+}
+
+/* 事件摘要列表 */
+.tv-phase-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cp-space-2);
+}
+
+.tv-phase-event {
+  font-size: 13px;
+  color: var(--cp-ink);
+  line-height: 1.5;
+  padding: var(--cp-space-1) var(--cp-space-2);
+  background: var(--cp-soft);
+  border-radius: 6px;
+}
+
+.tv-phase-event-label {
+  font-weight: 500;
+  margin-right: var(--cp-space-1);
+}
+
+.tv-phase-event-value {
+  color: var(--cp-muted);
+}
+
+.tv-phase-event-time {
+  font-size: 11px;
+  color: var(--cp-muted);
+  margin-left: var(--cp-space-2);
+}
+
+.tv-phase-event-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.tv-phase-event-badge--success {
+  background: var(--cp-success-soft);
+  color: var(--cp-success);
+}
+
+.tv-phase-event-badge--danger {
+  background: var(--cp-danger-soft);
+  color: var(--cp-danger);
+}
+
+.tv-phase-event-badge--warning {
+  background: var(--cp-warning-soft);
+  color: var(--cp-warning);
+}
+
+/* 折叠/展开按钮 */
+.tv-phase-expand-btn {
+  display: inline-block;
+  background: none;
+  border: none;
+  color: var(--cp-primary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: var(--cp-space-1) 0;
+  font-weight: 500;
+}
+
+.tv-phase-expand-btn:hover {
+  text-decoration: underline;
+}
+
+/* ─── PhaseCardList ────────────────────────────────────────── */
+
+.tv-phase-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ─── ArtifactGrid ─────────────────────────────────────────── */
+
+.tv-artifact-section {
+  margin-top: var(--cp-space-5);
+}
+
+.tv-artifact-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cp-ink);
+  margin-bottom: var(--cp-space-3);
+}
+
+.tv-artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.tv-artifact-card {
+  background: var(--cp-card);
+  border-radius: var(--cp-radius-md);
+  padding: var(--cp-space-3) var(--cp-space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--cp-space-3);
+  box-shadow: 0 1px 3px rgba(23, 33, 43, 0.05);
+  transition: box-shadow 0.2s;
+}
+
+.tv-artifact-card:hover {
+  box-shadow: 0 2px 8px rgba(23, 33, 43, 0.1);
+}
+
+.tv-artifact-icon {
+  font-size: 24px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cp-soft);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.tv-artifact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.tv-artifact-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cp-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-artifact-size {
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+
+/* ─── slide-in 动画 ────────────────────────────────────────── */
+
+@keyframes tv-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tv-phase-event-enter {
+  animation: tv-slide-in 0.3s ease-out;
+}

@@ -667,27 +667,20 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "当前项目默认会先用这一个" })).toBeInTheDocument();
-    const mainAgentSection = screen
-      .getByRole("heading", { name: "当前项目默认会先用这一个" })
-      .closest("section") as HTMLElement | null;
-    expect(mainAgentSection).not.toBeNull();
-    expect(within(mainAgentSection!).getAllByText("家庭主 Agent").length).toBeGreaterThan(0);
+    // 当前组件展示「行为文件」标题和 Agents 标签
+    expect(await screen.findByRole("heading", { name: "行为文件" })).toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
+
+    // 主 Agent 卡片应带 "主 Agent" 标记
+    expect(screen.getByText("主 Agent")).toBeInTheDocument();
+    expect(screen.getAllByText("家庭主 Agent").length).toBeGreaterThan(0);
+
+    // 项目内其他 Agent 也应出现
     expect(screen.getByText("NAS 巡检")).toBeInTheDocument();
 
-    const projectAgentSection = screen
-      .getByRole("heading", { name: "按职责拆开的辅助 Agent" })
-      .closest("section") as HTMLElement | null;
-    const builtinLaneSection = screen
-      .getByRole("heading", { name: "需要时，单独和专长 Agent 开一条会话" })
-      .closest("section") as HTMLElement | null;
-
-    expect(projectAgentSection).not.toBeNull();
-    expect(builtinLaneSection).not.toBeNull();
-    expect(within(projectAgentSection!).queryByText("Butler Root Agent")).not.toBeInTheDocument();
-    expect(within(projectAgentSection!).queryByText("Research Root Agent")).not.toBeInTheDocument();
-    expect(within(builtinLaneSection!).getByText("Butler Root Agent")).toBeInTheDocument();
+    // 内建模板不应出现在主页 Agent 列表里
+    expect(screen.queryByText("Butler Root Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research Root Agent")).not.toBeInTheDocument();
   });
 
   it("点击新建 Agent 后才展示模板选择，并进入结构化编辑页", async () => {
@@ -705,14 +698,16 @@ describe("AgentCenter", () => {
 
     await userEvent.click((await screen.findAllByRole("button", { name: "新建 Agent" }))[0]);
 
+    // 模板选择弹窗
     expect(await screen.findByRole("heading", { name: "先选一个起点，再补最少必要信息" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "从空白开始" })).toBeInTheDocument();
 
+    // 选择通用协作模板
     await userEvent.click(screen.getByRole("button", { name: /通用协作 模板/ }));
 
+    // 进入编辑器
     expect(await screen.findByRole("heading", { name: "新建 Agent" })).toBeInTheDocument();
     expect(screen.getByLabelText(/名称/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Persona \/ 用途说明/)).toBeInTheDocument();
     expect(screen.getByText("使用的模型")).toBeInTheDocument();
     expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
     expect(screen.getByText("默认工具组")).toBeInTheDocument();
@@ -765,7 +760,8 @@ describe("AgentCenter", () => {
     await userEvent.type(nameInput, "资料整理助手");
 
     await userEvent.click(screen.getByLabelText(/Worker Review/));
-    await userEvent.click(screen.getByRole("button", { name: "创建 Agent" }));
+    // 编辑器中创建新 Agent 的保存按钮文案是 "创建"
+    await userEvent.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
@@ -861,7 +857,8 @@ describe("AgentCenter", () => {
 
     await userEvent.click(screen.getByRole("checkbox", { name: /legacy group/i }));
     await userEvent.click(screen.getByRole("checkbox", { name: /legacy\.inspect/i }));
-    await userEvent.click(screen.getByRole("button", { name: "保存 Agent" }));
+    // 编辑已有 Agent 时保存按钮文案是 "保存"
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
@@ -939,7 +936,8 @@ describe("AgentCenter", () => {
     expect(agentCard).not.toBeNull();
 
     await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
-    await userEvent.click(await screen.findByRole("button", { name: "保存 Agent" }));
+    // 编辑已有 Agent 时保存按钮文案是 "保存"
+    await userEvent.click(await screen.findByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
@@ -1003,16 +1001,18 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("当前还在使用 通用协作 模板")).toBeInTheDocument();
-    expect(screen.getByText("当前项目还没有自己的主 Agent")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "需要时，单独和专长 Agent 开一条会话" })).toBeInTheDocument();
-    expect(screen.getByText("Research Root Agent")).toBeInTheDocument();
+    // 主 Agent 卡片的状态 pill 在 isMainAgent 时总是显示 "主 Agent"
+    // 此时 status 为 needs_setup，按钮文案为 "建立主 Agent"
+    expect(await screen.findByText("主 Agent")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "建立主 Agent" }).length).toBeGreaterThan(0);
 
+    // 点击「建立主 Agent」按钮进入编辑器
     await userEvent.click((await screen.findAllByRole("button", { name: "建立主 Agent" }))[0]);
     const nameInput = await screen.findByLabelText(/名称/);
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "家庭主 Agent");
-    await userEvent.click(screen.getByRole("button", { name: "保存主 Agent" }));
+    // 编辑主 Agent 时保存按钮文案是 "保存"
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
@@ -1026,7 +1026,7 @@ describe("AgentCenter", () => {
     });
   });
 
-  it("支持把普通 Agent 设为主 Agent，并在删除前确认", async () => {
+  it("支持删除普通 Agent，删除前弹出确认", async () => {
     const submitAction = vi.fn(async () => ({ data: {} }));
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -1045,13 +1045,7 @@ describe("AgentCenter", () => {
     const agentCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
 
-    await userEvent.click(within(agentCard!).getByRole("button", { name: "设为主 Agent" }));
-    await waitFor(() => {
-      expect(submitAction).toHaveBeenCalledWith("worker_profile.bind_default", {
-        profile_id: "project-home:nas",
-      });
-    });
-
+    // 当前组件中，非主 Agent 卡片有"删除"按钮
     await userEvent.click(within(agentCard!).getByRole("button", { name: "删除" }));
     expect(confirmSpy).toHaveBeenCalled();
     await waitFor(() => {
@@ -1061,13 +1055,13 @@ describe("AgentCenter", () => {
     });
   });
 
-  it("可以显式开启专长 Agent 的独立会话，而不是继续偷偷 Pin 当前聊天", async () => {
+  it("可以从 Agent 卡片直接开启会话并跳转到聊天页", async () => {
     const submitAction = vi.fn(async () => ({
       data: {
-        new_conversation_token: "token-research",
+        new_conversation_token: "token-nas",
         project_id: "project-home",
         workspace_id: "project-home-workspace",
-        agent_profile_id: "singleton:research",
+        agent_profile_id: "project-home:nas",
       },
     }));
 
@@ -1083,14 +1077,14 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const researchCard = (await screen.findByText("Research Root Agent")).closest(".wb-agent-card") as HTMLElement | null;
-    expect(researchCard).not.toBeNull();
+    const agentCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(agentCard).not.toBeNull();
 
-    await userEvent.click(within(researchCard!).getByRole("button", { name: "直接开启会话" }));
+    await userEvent.click(within(agentCard!).getByRole("button", { name: "直接开启会话" }));
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith("session.new", {
-        agent_profile_id: "singleton:research",
+        agent_profile_id: "project-home:nas",
       });
       expect(navigateMock).toHaveBeenCalledWith("/");
     });
@@ -1136,56 +1130,12 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const currentAgentCard = await screen.findByText("当前 Agent");
+    // 切换后应看到新项目的主 Agent，看不到旧项目的
     expect(screen.getAllByText("工作主 Agent").length).toBeGreaterThan(0);
-    expect(within(currentAgentCard.closest("article")!).queryByText("家庭主 Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("家庭主 Agent")).not.toBeInTheDocument();
   });
 
-  it("会提示当前聚焦会话属于别的项目，不会被这里的默认 Agent 配置回写", async () => {
-    const snapshot = buildSnapshot();
-    snapshot.resources.sessions = {
-      focused_session_id: "session-work",
-      sessions: [
-        {
-          session_id: "session-work",
-          thread_id: "thread-work",
-          task_id: "task-work",
-          parent_task_id: "",
-          parent_work_id: "",
-          title: "工作排障",
-          status: "RUNNING",
-          channel: "web",
-          requester_id: "owner",
-          project_id: "project-work",
-          workspace_id: "project-work-workspace",
-          runtime_kind: "worker",
-          latest_message_summary: "继续处理工作项目问题",
-          latest_event_at: "2026-03-14T10:00:00Z",
-          execution_summary: {},
-          capabilities: [],
-          detail_refs: {},
-        },
-      ],
-    };
-    useWorkbenchMock.mockReturnValue({
-      snapshot,
-      submitAction: vi.fn(),
-      busyActionId: null,
-    });
-
-    render(
-      <MemoryRouter>
-        <AgentCenter />
-      </MemoryRouter>
-    );
-
-    expect(
-      await screen.findByText(/当前聚焦会话属于「工作项目 \/ Work Workspace」/)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/不会反向改写那个会话/)).toBeInTheDocument();
-  });
-
-  it("会把系统内建运行时模板单独展示，避免和项目 Agent 列表混淆", async () => {
+  it("Agent 卡片里的元信息（模型、工具组数量等）和行为文件 chip 都正确呈现", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
       submitAction: vi.fn(),
@@ -1198,22 +1148,24 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "需要时，单独和专长 Agent 开一条会话" })).toBeInTheDocument();
-    const builtinLaneSection = screen
-      .getByRole("heading", { name: "需要时，单独和专长 Agent 开一条会话" })
-      .closest("section") as HTMLElement | null;
-    expect(builtinLaneSection).not.toBeNull();
-    expect(within(builtinLaneSection!).getByText("Butler Root Agent")).toBeInTheDocument();
-    expect(within(builtinLaneSection!).getByText("Research Root Agent")).toBeInTheDocument();
+    // 主 Agent 卡片应包含模型 alias、工具组数量和固定工具数量
+    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(mainCard).not.toBeNull();
+    // 模型信息渲染为 "模型 main" 在同一个 span 里，用文本内容匹配
+    expect(
+      within(mainCard!).getByText((_, node) => node?.textContent === "模型 main")
+    ).toBeInTheDocument();
+    // 默认工具组 2（project, session）
+    expect(
+      within(mainCard!).getByText((_, node) => node?.textContent === "默认工具组 2")
+    ).toBeInTheDocument();
   });
 
-  it("在 Agents 页面展示 Behavior Center、路径清单和存储边界", async () => {
-    const refreshSnapshot = vi.fn().mockResolvedValue(undefined);
+  it("行为文件面板展示全局共享和项目共享 scope 组", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
       submitAction: vi.fn(),
       busyActionId: null,
-      refreshSnapshot,
     });
 
     render(
@@ -1222,61 +1174,47 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "把共享规则、Agent 私有文件和 Project 覆盖放在一个地方看清楚",
-      })
-    ).toBeInTheDocument();
-    expect(screen.getByText("Project Path Manifest")).toBeInTheDocument();
-    expect(screen.getByText("Storage Boundaries")).toBeInTheDocument();
-    expect(screen.getByText("Bootstrap & Templates")).toBeInTheDocument();
-    expect(screen.getByText("Bootstrap 问卷与落点")).toBeInTheDocument();
-    expect(screen.getByText("Shared Files")).toBeInTheDocument();
-    expect(screen.getByText("Agent Private")).toBeInTheDocument();
-    expect(screen.getByText("Project Shared")).toBeInTheDocument();
+    // 当前组件的行为文件面板标题
+    expect(await screen.findByRole("heading", { name: "行为文件" })).toBeInTheDocument();
+
+    // 行为文件面板展示 scope 分组卡片（agent_private 被过滤掉）
+    expect(screen.getByText("全局共享规则")).toBeInTheDocument();
+    expect(screen.getByText("项目共享配置")).toBeInTheDocument();
     expect(screen.getByText("Project-Agent Override")).toBeInTheDocument();
-    const sharedScopeCard = screen.getByText("Shared Files").closest("article") as HTMLElement | null;
-    const agentPrivateCard = screen.getByText("Agent Private").closest("article") as HTMLElement | null;
-    const manifestCard = screen.getByText("Project Path Manifest").closest("article") as HTMLElement | null;
-    expect(sharedScopeCard).not.toBeNull();
-    expect(agentPrivateCard).not.toBeNull();
-    expect(manifestCard).not.toBeNull();
-    expect(within(sharedScopeCard!).getByText((_, node) => node?.textContent === "behavior/system/AGENTS.md · 已存在 · 会被 Worker 看到")).toBeInTheDocument();
-    expect(within(agentPrivateCard!).getByText((_, node) => node?.textContent === "behavior/agents/butler/IDENTITY.md · 已存在 · 只影响当前 Agent")).toBeInTheDocument();
-    expect(
-      within(manifestCard!).getAllByText((_, node) =>
-        node?.textContent?.includes("projects/home/project.secret-bindings.json") ?? false
-      ).length
-    ).toBeGreaterThan(0);
-    const storageCard = screen.getByText("Storage Boundaries").closest("article") as HTMLElement | null;
-    expect(storageCard).not.toBeNull();
-    expect(within(storageCard!).getByText("MemoryService")).toBeInTheDocument();
-    expect(within(storageCard!).getByText("SecretService")).toBeInTheDocument();
-    expect(within(storageCard!).getByText("behavior_files")).toBeInTheDocument();
-    expect(within(storageCard!).getByText("workspace / data / notes / artifacts")).toBeInTheDocument();
-    const bootstrapCard = screen.getByText("Bootstrap & Templates").closest("article") as HTMLElement | null;
-    expect(bootstrapCard).not.toBeNull();
-    expect(within(bootstrapCard!).getByText("Shared Templates")).toBeInTheDocument();
-    expect(within(bootstrapCard!).getByText(/AGENTS\.md \/ USER\.md \/ TOOLS\.md \/ BOOTSTRAP\.md/)).toBeInTheDocument();
-    expect(within(bootstrapCard!).getByText("Agent Private Templates")).toBeInTheDocument();
-    expect(within(bootstrapCard!).getByText(/IDENTITY\.md \/ SOUL\.md \/ HEARTBEAT\.md/)).toBeInTheDocument();
-    const questionnaireCard = screen.getByText("Bootstrap 问卷与落点").closest("article") as HTMLElement | null;
-    expect(questionnaireCard).not.toBeNull();
-    expect(within(questionnaireCard!).getByText("assistant_identity")).toBeInTheDocument();
-    expect(within(questionnaireCard!).getByText(/路由：behavior · 目标：IDENTITY\.md/)).toBeInTheDocument();
-    expect(within(questionnaireCard!).getByText("secret_routing")).toBeInTheDocument();
-    expect(
-      within(questionnaireCard!).getByText(/路由：secrets · 目标：projects\/home\/project\.secret-bindings\.json/)
-    ).toBeInTheDocument();
-    expect(screen.getByText("Effective View & Governance")).toBeInTheDocument();
-    expect(screen.getByText("octo behavior show AGENTS --project project-home --agent butler")).toBeInTheDocument();
-    expect(
-      screen.getByText("octo behavior edit AGENTS --scope system --project project-home --agent butler")
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新控制面" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "复制命令" }).length).toBeGreaterThan(0);
 
-    await userEvent.click(within(screen.getByText("Project-Agent Override").closest("article") as HTMLElement).getByRole("button", { name: /TOOLS\.md/i }));
-    expect(screen.getByText("octo behavior diff TOOLS --scope project-agent --project project-home --agent butler")).toBeInTheDocument();
+    // 各分组卡片中展示对应的文件 ID
+    const sharedCard = screen.getByText("全局共享规则").closest("article") as HTMLElement | null;
+    expect(sharedCard).not.toBeNull();
+    expect(within(sharedCard!).getByText("AGENTS.md")).toBeInTheDocument();
+
+    const projectSharedCard = screen.getByText("项目共享配置").closest("article") as HTMLElement | null;
+    expect(projectSharedCard).not.toBeNull();
+    expect(within(projectSharedCard!).getByText("PROJECT.md")).toBeInTheDocument();
+  });
+
+  it("编辑器中的 Skills/MCP 能力绑定链接指向正确的管理路由", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    // 打开主 Agent 编辑器
+    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
+
+    // 编辑器中 Skills 和 MCP 区域的「去管理」链接
+    // AgentEditorSection 中 renderCapabilityGroup 使用 /agents/skills 和 /agents/mcp
+    // App.tsx 已配置旧路径重定向到 /skills 和 /mcp
+    const manageLinks = await screen.findAllByRole("link", { name: "去管理" });
+    expect(manageLinks.length).toBe(2);
+    expect(manageLinks[0]).toHaveAttribute("href", "/agents/skills");
+    expect(manageLinks[1]).toHaveAttribute("href", "/agents/mcp");
   });
 });

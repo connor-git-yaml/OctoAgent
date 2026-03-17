@@ -128,8 +128,9 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "去设置完成连接" })).toBeInTheDocument();
+    // buildPrimaryState 在 echo 模式下返回的标题和按钮文案
+    expect(screen.getByRole("heading", { name: "模型未连接" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "前往设置" })).toBeInTheDocument();
     expect(screen.getByText("当前还没有接入真实模型。")).toBeInTheDocument();
     expect(screen.queryByText("背景记忆")).not.toBeInTheDocument();
     expect(screen.queryByText("当前提醒")).not.toBeInTheDocument();
@@ -153,7 +154,8 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "先连上一个真实模型" })).toBeInTheDocument();
+    // echo 模式（setupReady=true）下，buildPrimaryState 仍走 echo 分支
+    expect(screen.getByRole("heading", { name: "模型未连接" })).toBeInTheDocument();
     expect(screen.getByText("当前配置已经可以保存，但还没有切到真实模型。")).toBeInTheDocument();
     expect(
       screen.getByText("打开 Settings，连接 Provider 并切到真实模型后，再回来发第一条真实消息。")
@@ -183,7 +185,8 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "现在可以直接开始聊天" })).toBeInTheDocument();
+    // 系统完全就绪时，buildPrimaryState 返回 "就绪"
+    expect(screen.getByRole("heading", { name: "就绪" })).toBeInTheDocument();
     expect(
       screen.getByText("“深圳今天天气怎么样？我今天穿什么比较合适？”")
     ).toBeInTheDocument();
@@ -227,7 +230,8 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "有 2 项事情等你确认" })).toBeInTheDocument();
+    // buildPrimaryState 在有 operatorItems 时返回 "N 项待处理"
+    expect(screen.getByRole("heading", { name: "2 项待处理" })).toBeInTheDocument();
     expect(screen.getByText("“任务 Control Plane Audit 需要关注”停住了")).toBeInTheDocument();
     expect(screen.getByText("“任务 Control Plane Audit 需要关注”已经 1 分 15 秒 没有推进，可能卡住了。")).toBeInTheDocument();
     expect(screen.getByText("这条任务这次没有在时限内完成")).toBeInTheDocument();

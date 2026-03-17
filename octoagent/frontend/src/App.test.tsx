@@ -965,7 +965,8 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "开始一段对话" })).toBeInTheDocument();
+    // 首页直接是 ChatWorkbench，h3 默认显示项目名
+    expect(await screen.findByRole("heading", { name: "Default Project" })).toBeInTheDocument();
   });
 
   it("Agents 路由提供主 Agent 与 Work Agent 管理入口", async () => {
@@ -1004,12 +1005,11 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    // 重构后 Agents 页首个 heading 是"行为文件"，并保留"新建 Agent"按钮
     expect(
-      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
+      await screen.findByRole("heading", { name: "行为文件" })
     ).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "新建 Agent" }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "当前项目默认会先用这一个" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "按职责拆开的辅助 Agent" })).toBeInTheDocument();
   });
 
   it("Advanced 路由默认先展示高级概览，再按需展开 legacy 控制台", async () => {
@@ -1067,16 +1067,18 @@ describe("App workbench routing", () => {
       {
         path: "/",
         assertRoute: async () => {
+          // 首页直接是 ChatWorkbench，h3 默认显示项目名
           expect(
-            await screen.findByRole("heading", { name: "开始一段对话" })
+            await screen.findByRole("heading", { name: "Default Project" })
           ).toBeInTheDocument();
         },
       },
       {
         path: "/agents",
         assertRoute: async () => {
+          // 重构后 Agents 页首个 heading 是"行为文件"
           expect(
-            await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
+            await screen.findByRole("heading", { name: "行为文件" })
           ).toBeInTheDocument();
         },
       },
@@ -1599,14 +1601,16 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    // 重构后 Agents 页首个 heading 是"行为文件"
     expect(
-      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
+      await screen.findByRole("heading", { name: "行为文件" })
     ).toBeInTheDocument();
-    await userEvent.click((await screen.findAllByRole("button", { name: "编辑主 Agent" }))[0]!);
+    // 主 Agent 卡片的操作按钮统一为"编辑"，编辑器内保存按钮为"保存"
+    await userEvent.click((await screen.findAllByRole("button", { name: "编辑" }))[0]!);
     const nameInput = (await screen.findByLabelText(/名称/)) as HTMLInputElement;
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "新的主 Agent");
-    await userEvent.click(screen.getByRole("button", { name: "保存主 Agent" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await screen.findByText("刚才的操作没有成功。");
     expect(nameInput.value).toBe("新的主 Agent");
@@ -1660,12 +1664,12 @@ describe("App workbench routing", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "先添加可用的模型 Provider" });
-    expect(screen.getByText("还没有连接真实模型")).toBeInTheDocument();
+    // 概览 chip 显示"未连接真实模型"，Provider 区域显示"体验模式"
+    expect(screen.getByText("未连接真实模型")).toBeInTheDocument();
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
-    expect(screen.queryByText("体验模式")).not.toBeInTheDocument();
-    expect(screen.getByText("Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。")).toBeInTheDocument();
+    expect(screen.getByText("体验模式")).toBeInTheDocument();
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
@@ -1959,12 +1963,14 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
+    // 重构后 Agents 页首个 heading 是"行为文件"
     expect(
-      await screen.findByRole("heading", { name: "当前项目的 Agent 管理" })
+      await screen.findByRole("heading", { name: "行为文件" })
     ).toBeInTheDocument();
-    await userEvent.click((await screen.findAllByRole("button", { name: "编辑主 Agent" }))[0]!);
+    // 主 Agent 卡片的操作按钮统一为"编辑"，编辑器内保存按钮为"保存"
+    await userEvent.click((await screen.findAllByRole("button", { name: "编辑" }))[0]!);
     await userEvent.click(screen.getByRole("checkbox", { name: /运行检查/ }));
-    await userEvent.click(screen.getByRole("button", { name: "保存主 Agent" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
       expect(
@@ -2545,7 +2551,8 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("帮我整理这周的发布安排")).toBeInTheDocument();
     expect(await screen.findByText("这周先锁定范围，再排发布时间表。")).toBeInTheDocument();
     expect(screen.queryByText("这是中间 skill 的内部摘要。")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "历史对话" })).toBeInTheDocument();
+    // h3 现在优先显示 session.title（buildSession 生成的标题）
+    expect(screen.getByRole("heading", { name: "Task task-chat-restore" })).toBeInTheDocument();
   });
 
   it("重新进入 Chat 时会优先恢复最近的 Web 会话", async () => {

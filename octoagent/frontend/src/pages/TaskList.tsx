@@ -14,18 +14,7 @@ import { fetchTasks } from "../api/client";
 import OperatorInboxPanel from "../components/OperatorInboxPanel";
 import RecoveryPanel from "../components/RecoveryPanel";
 import type { TaskSummary } from "../types";
-
-/** 格式化时间为可读字符串 */
-function formatTime(isoString: string): string {
-  const d = new Date(isoString);
-  return d.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+import { formatDateTime } from "../utils/formatTime";
 
 export default function TaskList() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
@@ -115,7 +104,7 @@ export default function TaskList() {
             <span className="task-title">{task.title}</span>
             <span className={`status-badge ${task.status}`}>{task.status}</span>
             <span className="task-time" style={{ marginLeft: "var(--space-md)" }}>
-              {formatTime(task.created_at)}
+              {formatDateTime(task.created_at)}
             </span>
           </div>
         ))}

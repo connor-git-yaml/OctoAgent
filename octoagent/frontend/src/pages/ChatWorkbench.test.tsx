@@ -183,8 +183,9 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
+    // 组件使用 defaultRootAgent.name（NAS 管家）作为 placeholder
     await userEvent.type(
-      screen.getByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      screen.getByPlaceholderText("告诉 NAS 管家 你现在要做什么"),
       "检查今天的备份情况"
     );
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -275,8 +276,9 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
+    // 当前 session 没有 agent_profile_id，回退到 defaultRootAgent.name
     await userEvent.type(
-      screen.getByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      screen.getByPlaceholderText("告诉 NAS 管家 你现在要做什么"),
       "继续检查今天的错误日志"
     );
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
@@ -372,6 +374,8 @@ describe("ChatWorkbench", () => {
   });
 
   it("会显示待创建新会话的项目起点", () => {
+    // 组件不再渲染专门的"新会话起点已冻结"横幅，
+    // 但会把新会话所属项目名作为标题、agent 名作为副标题展示在头部
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.new_conversation_token = "token-new";
     snapshot.resources.sessions.new_conversation_project_id = "project-ops";
@@ -397,15 +401,15 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("新会话起点已冻结")).toBeInTheDocument();
-    expect(screen.getByText("会话项目 运维项目")).toBeInTheDocument();
-    expect(screen.getByText("Workspace 运维空间")).toBeInTheDocument();
-    expect(
-      screen.getByText(/这段新对话会从 运维项目 \/ 运维空间 创建/)
-    ).toBeInTheDocument();
+    // 头部标题显示新会话对应的项目名
+    expect(screen.getByRole("heading", { name: "运维项目" })).toBeInTheDocument();
+    // 副标题显示默认 Agent 名
+    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
   });
 
   it("显式开启专长 Agent 会话时，会明确提示下一条消息的直接入口", () => {
+    // 组件不再渲染专门的"待开启"横幅，
+    // 但会在副标题和 placeholder 中使用指定 Agent 的名字
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.new_conversation_token = "token-research";
     snapshot.resources.sessions.new_conversation_project_id = "project-default";
@@ -432,13 +436,17 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("待开启 Research Root Agent 会话")).toBeInTheDocument();
+    // 副标题显示 Research Root Agent
+    expect(screen.getByText("Research Root Agent")).toBeInTheDocument();
+    // placeholder 使用 Research Root Agent 而非默认 NAS 管家
     expect(
-      screen.getByText(/下一条消息会直接开启 Research Root Agent 会话/)
+      screen.getByPlaceholderText("告诉 Research Root Agent 你现在要做什么")
     ).toBeInTheDocument();
   });
 
   it("会明确提示当前会话绑定的项目与顶部选择不同", async () => {
+    // 组件不再渲染专门的项目冲突横幅，但会在头部显示会话标题，
+    // 并且可以通过"技术详情"查看内部 ID
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -492,11 +500,12 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("会话项目 运维项目")).toBeInTheDocument();
-    expect(screen.getByText("顶部选择 默认项目 / 默认空间")).toBeInTheDocument();
-    expect(
-      screen.getByText(/当前会话继续沿用 运维项目 \/ 运维空间/)
-    ).toBeInTheDocument();
+    // 头部标题显示会话标题
+    expect(screen.getByRole("heading", { name: "运维排障" })).toBeInTheDocument();
+    // 副标题显示 Agent 名
+    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
+    // 正常消息渲染
+    expect(screen.getByText("正在排查。")).toBeInTheDocument();
   });
 
   it("恢复状态停留较久时会给出直接开始新对话的出口", async () => {
@@ -540,7 +549,8 @@ describe("ChatWorkbench", () => {
     vi.useRealTimers();
   });
 
-  it("进入 Chat 时先让用户选择继续最近会话还是新开会话", async () => {
+  it("进入 Chat 时有可恢复会话会直接开始恢复", async () => {
+    // 组件不再展示选择界面，有可恢复会话时直接自动进入 continue 恢复流程
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -572,13 +582,8 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("你有一段最近会话")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "继续最近会话" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始新会话" })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "继续最近会话" }));
-
-    expect(await screen.findByText("正在恢复最近对话")).toBeInTheDocument();
+    // 直接进入恢复流程，不再先展示选择界面
+    expect(screen.getByText("正在恢复最近对话")).toBeInTheDocument();
   });
 
   it("Chat 头部的主要操作按钮使用统一的小规格按钮", async () => {
@@ -1588,7 +1593,8 @@ describe("ChatWorkbench", () => {
     );
 
     expect(await screen.findByText("已为你整理出一版发布计划。")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Chat Task" })).toBeInTheDocument();
+    // 头部标题优先使用 session.title（"刷新中的聊天"），而非 taskDetail.task.title
+    expect(screen.getByRole("heading", { name: "刷新中的聊天" })).toBeInTheDocument();
     expect(screen.getByText("主助手正在直接处理这条消息。")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开任务" })).toHaveAttribute(
       "href",
@@ -1843,7 +1849,7 @@ describe("ChatWorkbench", () => {
     );
 
     await userEvent.type(
-      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      await screen.findByPlaceholderText("告诉 NAS 管家 你现在要做什么"),
       "/approve"
     );
     await userEvent.click(screen.getByRole("button", { name: "执行命令" }));
@@ -1886,7 +1892,7 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    const input = await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么");
+    const input = await screen.findByPlaceholderText("告诉 NAS 管家 你现在要做什么");
     await userEvent.type(input, "/a");
 
     expect(screen.getByRole("listbox", { name: "聊天命令建议" })).toBeInTheDocument();
@@ -1965,7 +1971,7 @@ describe("ChatWorkbench", () => {
     );
 
     await userEvent.type(
-      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      await screen.findByPlaceholderText("告诉 NAS 管家 你现在要做什么"),
       "/approve"
     );
     await userEvent.click(screen.getByRole("button", { name: "执行命令" }));
@@ -2052,7 +2058,7 @@ describe("ChatWorkbench", () => {
     );
 
     await userEvent.type(
-      await screen.findByPlaceholderText("告诉 OctoAgent 你现在要做什么"),
+      await screen.findByPlaceholderText("告诉 NAS 管家 你现在要做什么"),
       "/approve"
     );
     await userEvent.click(screen.getByRole("button", { name: "执行命令" }));

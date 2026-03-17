@@ -551,12 +551,14 @@ describe("SettingsPage", () => {
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "先添加可用的模型 Provider" })).toBeInTheDocument();
-    expect(screen.getByText("现在只管这 3 件事")).toBeInTheDocument();
-    expect(screen.getByText("这些事情现在不用急")).toBeInTheDocument();
-    expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
+    // 概览区块显示作用域说明和导航提示（替代旧版分层优先级文案）
     expect(
-      screen.getByText("Gateway 地址、内部代理密钥和运行参数都由系统自己处理，不需要手动填写。")
+      screen.getByRole("heading", { name: "这里改的是平台设置和项目默认，不是某一条会话本身" })
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "只有你需要继续细配时，再往下看" })
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "平台级 Memory 与检索质量" })).toBeInTheDocument();
