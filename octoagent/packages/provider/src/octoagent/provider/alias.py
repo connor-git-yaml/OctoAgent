@@ -60,6 +60,12 @@ def _get_default_aliases() -> list[AliasConfig]:
             description="摘要生成（轻量）",
         ),
         AliasConfig(
+            name="compaction",
+            category="cheap",
+            runtime_group="cheap",
+            description="上下文压缩（推荐轻量模型如 haiku / gpt-4o-mini）",
+        ),
+        AliasConfig(
             name="planner",
             category="main",
             runtime_group="main",

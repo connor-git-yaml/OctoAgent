@@ -354,6 +354,11 @@ export default function SettingsProviderSection({
                           onUpdateAliasAt(index, { description: event.target.value })
                         }
                       />
+                      {item.alias === "compaction" ? (
+                        <small>
+                          上下文压缩（推荐轻量模型如 haiku / gpt-4o-mini）。Fallback: compaction → summarizer → main
+                        </small>
+                      ) : null}
                     </label>
                     <label className="wb-field">
                       <span>推理强度</span>

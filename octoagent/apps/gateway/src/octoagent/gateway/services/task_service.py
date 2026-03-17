@@ -89,6 +89,7 @@ from .connection_metadata import (
     normalize_control_metadata,
     normalize_input_metadata,
 )
+from .context_budget import ContextBudgetPlanner
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
 from .runtime_control import runtime_context_from_metadata
@@ -109,6 +110,7 @@ class TaskService:
         self._sse_hub = sse_hub
         self._context_compaction = ContextCompactionService(store_group)
         self._agent_context = AgentContextService(store_group)
+        self._budget_planner = ContextBudgetPlanner(config=self._context_compaction._config)
 
     async def create_task(self, message: NormalizedMessage) -> tuple[str, bool]:
         """创建任务（消息接收入口）
@@ -575,7 +577,7 @@ class TaskService:
                         execution_context.session_id if execution_context is not None else None
                     ),
                 )
-                if compiled_context.compacted:
+                if compiled_context.compacted and compiled_context.summary_text:
                     await self._record_context_compaction_once(
                         task_id=task_id,
                         trace_id=trace_id,
@@ -690,6 +692,13 @@ class TaskService:
                         source="llm-response",
                     )
                     if compiled_context is not None and compiled_context.context_frame_id:
+                        # Feature 060 Phase 4: 获取 per-session 锁用于 rolling_summary 写保护
+                        _resp_session_id = str(llm_dispatch_metadata.get("agent_session_id", "")).strip()
+                        _resp_session_lock = (
+                            self._context_compaction.get_compaction_lock(_resp_session_id)
+                            if _resp_session_id
+                            else None
+                        )
                         try:
                             await self._agent_context.record_response_context(
                                 task_id=task_id,
@@ -699,6 +708,7 @@ class TaskService:
                                 latest_user_text=compiled_context.latest_user_text,
                                 model_response=llm_result.content,
                                 recent_summary=compiled_context.recent_summary,
+                                session_lock=_resp_session_lock,
                             )
                         except Exception as exc:
                             log.warning(
@@ -707,6 +717,31 @@ class TaskService:
                                 error_type=type(exc).__name__,
                                 error=str(exc),
                             )
+                        # Feature 060 Phase 4: 预判下轮是否超限，触发后台压缩
+                        if _resp_session_id and not self._context_compaction.has_pending_compaction(_resp_session_id):
+                            try:
+                                _bg_budget = self._budget_planner.plan(
+                                    max_input_tokens=self._context_compaction._config.max_input_tokens,
+                                    loaded_skill_names=llm_dispatch_metadata.get("loaded_skill_names", []) or [],
+                                    memory_top_k=6,
+                                )
+                                if compiled_context.final_tokens > _bg_budget.conversation_budget * 0.6:
+                                    await self._context_compaction.schedule_background_compaction(
+                                        agent_session_id=_resp_session_id,
+                                        task_id=task_id,
+                                        llm_service=llm_service,
+                                        conversation_budget=_bg_budget.conversation_budget,
+                                        dispatch_metadata=llm_dispatch_metadata,
+                                        worker_capability=worker_capability,
+                                        tool_profile=tool_profile,
+                                    )
+                            except Exception as exc:
+                                log.warning(
+                                    "background_compaction_schedule_failed",
+                                    task_id=task_id,
+                                    error_type=type(exc).__name__,
+                                    error=str(exc),
+                                )
                     if delayed_recall_request_artifact_id:
                         await self._materialize_delayed_recall_once(
                             task_id=task_id,
@@ -1079,6 +1114,54 @@ class TaskService:
         resolved_runtime_context = runtime_context or runtime_context_from_metadata(
             dispatch_metadata
         )
+
+        # Feature 060 Phase 4: 消费后台压缩结果（如果有）
+        agent_session_id_hint = str(dispatch_metadata.get("agent_session_id", "")).strip()
+        if agent_session_id_hint:
+            bg_result = await self._context_compaction.await_compaction_result(
+                agent_session_id_hint,
+            )
+            if bg_result is not None and bg_result.compacted:
+                log.info(
+                    "background_compaction_consumed",
+                    task_id=task_id,
+                    session=agent_session_id_hint,
+                    compaction_version=bg_result.compaction_version,
+                )
+
+        # Feature 060: 统一预算规划
+        loaded_skill_names = dispatch_metadata.get("loaded_skill_names", [])
+        if not isinstance(loaded_skill_names, list):
+            loaded_skill_names = []
+        budget = self._budget_planner.plan(
+            max_input_tokens=self._context_compaction._config.max_input_tokens,
+            loaded_skill_names=loaded_skill_names,
+            memory_top_k=6,
+        )
+
+        # Feature 060 Phase 3: 加载已有压缩状态（用于三层压缩增量合并）
+        existing_archive_text = ""
+        existing_compressed_layers: list[dict[str, Any]] = []
+        existing_compaction_version = "v1"
+        try:
+            frames = await self._stores.agent_context_store.list_context_frames(
+                task_id=task_id, limit=1,
+            )
+            if frames:
+                _sess = await self._stores.agent_context_store.get_agent_session(
+                    frames[0].agent_session_id,
+                )
+                if _sess is not None:
+                    (
+                        existing_archive_text,
+                        existing_compressed_layers,
+                        existing_compaction_version,
+                    ) = ContextCompactionService._parse_compaction_state(
+                        _sess.metadata, _sess.rolling_summary,
+                    )
+        except Exception:
+            pass
+
         compiled = await self._context_compaction.build_context(
             task_id=task_id,
             fallback_user_text=fallback_user_text,
@@ -1086,10 +1169,22 @@ class TaskService:
             dispatch_metadata=dispatch_metadata,
             worker_capability=worker_capability,
             tool_profile=tool_profile,
+            conversation_budget=budget.conversation_budget,
+            existing_archive_text=existing_archive_text,
+            existing_compressed_layers=existing_compressed_layers,
+            existing_compaction_version=existing_compaction_version,
         )
         task = await self._stores.task_store.get_task(task_id)
         if task is None:
             return compiled
+
+        # Feature 060: 获取 Skill 内容文本（从 LLMService 迁移）
+        loaded_skills_content = ""
+        if hasattr(llm_service, "_build_loaded_skills_context"):
+            loaded_skills_content = llm_service._build_loaded_skills_context(
+                dispatch_metadata
+            )
+
         recall_plan = await self._build_memory_recall_plan(
             task_id=task_id,
             trace_id=trace_id,
@@ -1101,6 +1196,27 @@ class TaskService:
             tool_profile=tool_profile,
             runtime_context=resolved_runtime_context,
         )
+
+        # Feature 060 Phase 5: 加载当前 task 的最近进度笔记
+        progress_notes: list[dict[str, Any]] | None = None
+        try:
+            from octoagent.tooling.progress_note import load_recent_progress_notes
+
+            _notes = await load_recent_progress_notes(
+                task_id=task_id,
+                artifact_store=self._stores.artifact_store,
+                limit=5,
+            )
+            if _notes:
+                progress_notes = _notes
+        except Exception as exc:
+            log.warning(
+                "progress_note_load_degraded",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
         try:
             return await self._agent_context.build_task_context(
                 task=task,
@@ -1109,6 +1225,9 @@ class TaskService:
                 worker_capability=worker_capability,
                 runtime_context=resolved_runtime_context,
                 recall_plan=recall_plan,
+                budget_allocation=budget,
+                loaded_skills_content=loaded_skills_content,
+                progress_notes=progress_notes,
             )
         except Exception as exc:
             log.warning(
@@ -1259,6 +1378,7 @@ class TaskService:
                     summary_text=compiled.summary_text,
                     summary_artifact_id=summary_artifact.artifact_id,
                     compacted_messages=compiled.messages,
+                    compaction_version=compiled.compaction_version,
                 )
             except Exception as exc:
                 log.warning(
@@ -1288,6 +1408,11 @@ class TaskService:
                     request_artifact_ref=request_artifact_id or None,
                     memory_flush_run_id=memory_flush_run_id or None,
                     reason=compiled.compaction_reason,
+                    fallback_used=compiled.fallback_used,
+                    fallback_chain=compiled.fallback_chain,
+                    compaction_phases=compiled.compaction_phases,
+                    layers=compiled.layers,
+                    compaction_version=compiled.compaction_version,
                 ).model_dump(),
                 trace_id=trace_id,
                 causality=EventCausality(idempotency_key=f"{compaction_idempotency_key}:event"),

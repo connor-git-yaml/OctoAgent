@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -79,6 +80,7 @@ from .butler_behavior import (
     resolve_behavior_pack,
 )
 from .connection_metadata import summarize_control_metadata_for_prompt
+from .context_budget import BudgetAllocation
 from .context_compaction import (
     CompiledTaskContext,
     ContextCompactionConfig,
@@ -492,6 +494,9 @@ class AgentContextService:
         worker_capability: str | None = None,
         runtime_context: RuntimeControlContext | None = None,
         recall_plan: RecallPlan | None = None,
+        budget_allocation: BudgetAllocation | None = None,
+        loaded_skills_content: str = "",
+        progress_notes: list[dict[str, Any]] | None = None,
     ) -> CompiledTaskContext:
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
@@ -550,6 +555,11 @@ class AgentContextService:
             worker_capability=worker_capability,
             dispatch_metadata=dispatch_metadata,
             runtime_context=runtime_context,
+            loaded_skills_content=loaded_skills_content,
+            skill_injection_budget=(
+                budget_allocation.skill_injection_budget if budget_allocation is not None else 0
+            ),
+            progress_notes=progress_notes,
         )
         degraded_reasons.extend(prompt_budget_reasons)
         degraded_reason = "; ".join(dict.fromkeys(item for item in degraded_reasons if item))
@@ -806,6 +816,8 @@ class AgentContextService:
             compaction_reason=compiled.compaction_reason,
             summary_text=compiled.summary_text,
             summary_model_alias=compiled.summary_model_alias,
+            fallback_used=compiled.fallback_used,
+            fallback_chain=list(compiled.fallback_chain),
             compressed_turn_count=compiled.compressed_turn_count,
             kept_turn_count=compiled.kept_turn_count,
             context_frame_id=frame.context_frame_id,
@@ -819,6 +831,9 @@ class AgentContextService:
             memory_hits=[self._memory_hit_payload(item) for item in memory_hits],
             degraded_reason=degraded_reason,
             source_refs=source_refs,
+            compaction_phases=list(compiled.compaction_phases),
+            layers=list(compiled.layers),
+            compaction_version=compiled.compaction_version,
         )
 
     async def build_recall_planning_context(
@@ -1061,6 +1076,7 @@ class AgentContextService:
         latest_user_text: str,
         model_response: str,
         recent_summary: str = "",
+        session_lock: asyncio.Lock | None = None,
     ) -> None:
         task = await self._stores.task_store.get_task(task_id)
         if task is None:
@@ -1141,81 +1157,90 @@ class AgentContextService:
         await self._stores.agent_context_store.save_session_context(updated)
         agent_session = None
         if frame is not None and frame.agent_session_id:
-            agent_session = await self._stores.agent_context_store.get_agent_session(
-                frame.agent_session_id
-            )
-            if agent_session is not None:
-                response_preview = truncate_chars(" ".join(model_response.split()), 240)
-                await self._append_agent_session_turn(
-                    agent_session_id=agent_session.agent_session_id,
-                    task_id=task_id,
-                    kind=AgentSessionTurnKind.USER_MESSAGE,
-                    role="user",
-                    summary=truncate_chars(" ".join(latest_user_text.split()), 480),
-                    metadata={"source": "task_response_context"},
-                    dedupe_key=(
-                        f"request:{request_artifact_id}:user"
-                        if request_artifact_id
-                        else f"task:{task_id}:user:{response_artifact_id}"
-                    ),
+            # Feature 060 Phase 4: 获取 per-session 锁，防止与后台压缩并发写入 rolling_summary
+            async def _update_agent_session() -> None:
+                nonlocal agent_session
+                agent_session = await self._stores.agent_context_store.get_agent_session(
+                    frame.agent_session_id
                 )
-                await self._append_agent_session_turn(
-                    agent_session_id=agent_session.agent_session_id,
-                    task_id=task_id,
-                    kind=AgentSessionTurnKind.ASSISTANT_MESSAGE,
-                    role="assistant",
-                    summary=truncate_chars(" ".join(model_response.split()), 720),
-                    artifact_ref=response_artifact_id,
-                    metadata={
-                        "source": "task_response_context",
-                        "request_artifact_ref": request_artifact_id,
-                        "response_artifact_ref": response_artifact_id,
-                    },
-                    dedupe_key=(
-                        f"response:{response_artifact_id}:assistant"
-                        if response_artifact_id
-                        else f"task:{task_id}:assistant:{request_artifact_id}"
-                    ),
-                )
-                replay = await self.build_agent_session_replay_projection(
-                    agent_session=agent_session
-                )
-                recent_transcript = list(replay.transcript_entries)
-                if not recent_transcript:
-                    recent_transcript = self._append_session_transcript_entries(
-                        existing_entries=(
-                            agent_session.recent_transcript
-                            or agent_session.metadata.get("recent_transcript", [])
-                        ),
+                if agent_session is not None:
+                    response_preview = truncate_chars(" ".join(model_response.split()), 240)
+                    await self._append_agent_session_turn(
+                        agent_session_id=agent_session.agent_session_id,
                         task_id=task_id,
-                        latest_user_text=latest_user_text,
-                        model_response=model_response,
+                        kind=AgentSessionTurnKind.USER_MESSAGE,
+                        role="user",
+                        summary=truncate_chars(" ".join(latest_user_text.split()), 480),
+                        metadata={"source": "task_response_context"},
+                        dedupe_key=(
+                            f"request:{request_artifact_id}:user"
+                            if request_artifact_id
+                            else f"task:{task_id}:user:{response_artifact_id}"
+                        ),
                     )
-                agent_session = agent_session.model_copy(
-                    update={
-                        "last_context_frame_id": context_frame_id,
-                        "last_recall_frame_id": frame.recall_frame_id or "",
-                        "recent_transcript": recent_transcript,
-                        "rolling_summary": merged_summary,
-                        "metadata": {
-                            **dict(agent_session.metadata),
+                    await self._append_agent_session_turn(
+                        agent_session_id=agent_session.agent_session_id,
+                        task_id=task_id,
+                        kind=AgentSessionTurnKind.ASSISTANT_MESSAGE,
+                        role="assistant",
+                        summary=truncate_chars(" ".join(model_response.split()), 720),
+                        artifact_ref=response_artifact_id,
+                        metadata={
+                            "source": "task_response_context",
+                            "request_artifact_ref": request_artifact_id,
+                            "response_artifact_ref": response_artifact_id,
+                        },
+                        dedupe_key=(
+                            f"response:{response_artifact_id}:assistant"
+                            if response_artifact_id
+                            else f"task:{task_id}:assistant:{request_artifact_id}"
+                        ),
+                    )
+                    replay = await self.build_agent_session_replay_projection(
+                        agent_session=agent_session
+                    )
+                    recent_transcript = list(replay.transcript_entries)
+                    if not recent_transcript:
+                        recent_transcript = self._append_session_transcript_entries(
+                            existing_entries=(
+                                agent_session.recent_transcript
+                                or agent_session.metadata.get("recent_transcript", [])
+                            ),
+                            task_id=task_id,
+                            latest_user_text=latest_user_text,
+                            model_response=model_response,
+                        )
+                    agent_session = agent_session.model_copy(
+                        update={
+                            "last_context_frame_id": context_frame_id,
+                            "last_recall_frame_id": frame.recall_frame_id or "",
                             "recent_transcript": recent_transcript,
                             "rolling_summary": merged_summary,
-                            "latest_model_reply_summary": response_summary,
-                            "latest_model_reply_preview": (
-                                replay.latest_model_reply_preview or response_preview
-                            ),
-                            "session_replay_source": replay.source,
-                            "session_replay_tool_lines": list(replay.tool_exchange_lines),
-                            "session_replay_sanitize_notes": {
-                                "dropped_orphan_tool_calls": replay.dropped_orphan_tool_calls,
-                                "dropped_orphan_tool_results": replay.dropped_orphan_tool_results,
+                            "metadata": {
+                                **dict(agent_session.metadata),
+                                "recent_transcript": recent_transcript,
+                                "rolling_summary": merged_summary,
+                                "latest_model_reply_summary": response_summary,
+                                "latest_model_reply_preview": (
+                                    replay.latest_model_reply_preview or response_preview
+                                ),
+                                "session_replay_source": replay.source,
+                                "session_replay_tool_lines": list(replay.tool_exchange_lines),
+                                "session_replay_sanitize_notes": {
+                                    "dropped_orphan_tool_calls": replay.dropped_orphan_tool_calls,
+                                    "dropped_orphan_tool_results": replay.dropped_orphan_tool_results,
+                                },
                             },
-                        },
-                        "updated_at": datetime.now(tz=UTC),
-                    }
-                )
-                await self._stores.agent_context_store.save_agent_session(agent_session)
+                            "updated_at": datetime.now(tz=UTC),
+                        }
+                    )
+                    await self._stores.agent_context_store.save_agent_session(agent_session)
+
+            if session_lock is not None:
+                async with session_lock:
+                    await _update_agent_session()
+            else:
+                await _update_agent_session()
         if frame is not None:
             current_frame = frame
             try:
@@ -1742,6 +1767,8 @@ class AgentContextService:
         summary_text: str,
         summary_artifact_id: str,
         compacted_messages: list[dict[str, str]],
+        compaction_version: str = "",
+        compressed_layers: list[dict[str, Any]] | None = None,
     ) -> None:
         if not context_frame_id or not summary_text.strip():
             return
@@ -1813,6 +1840,11 @@ class AgentContextService:
                         },
                     }
                 )
+                # Feature 060 Phase 3: 持久化三层压缩状态
+                if compaction_version:
+                    metadata["compaction_version"] = compaction_version
+                if compressed_layers is not None:
+                    metadata["compressed_layers"] = compressed_layers
                 await self._stores.agent_context_store.save_agent_session(
                     agent_session.model_copy(
                         update={
@@ -3729,6 +3761,9 @@ class AgentContextService:
         dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
         include_runtime_context: bool = True,
+        loaded_skills_content: str = "",
+        skill_injection_budget: int = 0,
+        progress_notes: list[dict] | None = None,
     ) -> tuple[list[dict[str, str]], list[str]]:
         ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
             owner_profile=owner_profile,
@@ -3956,6 +3991,64 @@ class AgentContextService:
                     ),
                 }
             )
+        # Feature 060: LoadedSkills 系统块（Skill 内容从 LLMService 迁入预算体系）
+        if loaded_skills_content:
+            # 按 skill_injection_budget 截断超出部分
+            skill_text = loaded_skills_content
+            if skill_injection_budget > 0:
+                from .context_compaction import estimate_text_tokens as _est_tokens
+
+                skill_tokens = _est_tokens(skill_text)
+                if skill_tokens > skill_injection_budget:
+                    # 按加载顺序保留 Skill，截断超出部分
+                    from .llm_service import SKILL_SECTION_SEPARATOR
+                    sections = skill_text.split(SKILL_SECTION_SEPARATOR)
+                    kept_sections: list[str] = []
+                    running_tokens = 0
+                    truncated_skills: list[str] = []
+                    for i, section in enumerate(sections):
+                        if i == 0 and section.startswith("## Active Skills"):
+                            kept_sections.append(section)
+                            running_tokens += _est_tokens(section)
+                            continue
+                        sec_tokens = _est_tokens(section)
+                        if running_tokens + sec_tokens <= skill_injection_budget:
+                            kept_sections.append(section)
+                            running_tokens += sec_tokens
+                        else:
+                            # 提取 Skill 名称用于审计
+                            skill_name = section.split(" ---")[0].strip() if " ---" in section else "unknown"
+                            truncated_skills.append(skill_name)
+                    if truncated_skills:
+                        block_reasons_list = [f"skill_truncated:{name}" for name in truncated_skills]
+                        skill_text = SKILL_SECTION_SEPARATOR.join(kept_sections)
+                        skill_text += f"\n\n[已截断 {len(truncated_skills)} 个 Skill: {', '.join(truncated_skills)}]"
+                        # block_reasons 会在外层记录
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": skill_text,
+                }
+            )
+
+        # Feature 060: ProgressNotes 系统块（Worker 进度笔记）
+        if progress_notes:
+            notes_text = "## Progress Notes\n\n"
+            for note in progress_notes[-5:]:  # 最近 5 条
+                step_id = note.get("step_id", "unknown")
+                status = note.get("status", "unknown")
+                description = note.get("description", "")
+                notes_text += f"- [{step_id}] {status}: {description}\n"
+                next_steps = note.get("next_steps", [])
+                if next_steps:
+                    notes_text += f"  Next: {', '.join(next_steps)}\n"
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": notes_text.rstrip(),
+                }
+            )
+
         research_handoff = self._build_research_handoff_block(dispatch_metadata)
         if research_handoff:
             blocks.append(
@@ -4072,6 +4165,9 @@ class AgentContextService:
         worker_capability: str | None,
         dispatch_metadata: dict[str, Any],
         runtime_context: RuntimeControlContext | None,
+        loaded_skills_content: str = "",
+        skill_injection_budget: int = 0,
+        progress_notes: list[dict] | None = None,
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]
         if recent_summary:
@@ -4090,44 +4186,65 @@ class AgentContextService:
             dict.fromkeys([len(memory_hits), min(len(memory_hits), 2), 1 if memory_hits else 0, 0])
         )
         include_runtime_options = [True, False]
-        replay_options = [
-            self._trim_session_replay_projection(
-                session_replay,
-                dialogue_limit=None,
-                tool_limit=None,
-                include_summary=True,
-                include_reply_preview=True,
-            ),
-            self._trim_session_replay_projection(
-                session_replay,
-                dialogue_limit=8,
-                tool_limit=6,
-                include_summary=True,
-                include_reply_preview=True,
-            ),
-            self._trim_session_replay_projection(
-                session_replay,
-                dialogue_limit=6,
-                tool_limit=4,
-                include_summary=True,
-                include_reply_preview=True,
-            ),
-            self._trim_session_replay_projection(
-                session_replay,
-                dialogue_limit=4,
-                tool_limit=3,
-                include_summary=True,
-                include_reply_preview=False,
-            ),
-            self._trim_session_replay_projection(
-                session_replay,
-                dialogue_limit=3,
-                tool_limit=2,
-                include_summary=False,
-                include_reply_preview=False,
-            ),
-            None,
-        ]
+
+        # Feature 060 Phase 3: 当有三层压缩的 Compressed 层时，SessionReplay 收窄
+        # 不再回放当前 session 内的中期历史（已由 Compressed 层覆盖）
+        has_compressed_layers = compiled.compaction_version == "v2" and any(
+            layer.get("layer_id") == "compressed" and layer.get("entry_count", 0) > 0
+            for layer in compiled.layers
+        )
+
+        if has_compressed_layers:
+            # 收窄选项：只保留 session summary，不回放 dialogue
+            replay_options = [
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=0,
+                    tool_limit=0,
+                    include_summary=True,
+                    include_reply_preview=False,
+                ),
+                None,
+            ]
+        else:
+            replay_options = [
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=None,
+                    tool_limit=None,
+                    include_summary=True,
+                    include_reply_preview=True,
+                ),
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=8,
+                    tool_limit=6,
+                    include_summary=True,
+                    include_reply_preview=True,
+                ),
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=6,
+                    tool_limit=4,
+                    include_summary=True,
+                    include_reply_preview=True,
+                ),
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=4,
+                    tool_limit=3,
+                    include_summary=True,
+                    include_reply_preview=False,
+                ),
+                self._trim_session_replay_projection(
+                    session_replay,
+                    dialogue_limit=3,
+                    tool_limit=2,
+                    include_summary=False,
+                    include_reply_preview=False,
+                ),
+                None,
+            ]
 
         best_result: tuple[
             list[dict[str, str]],
@@ -4167,6 +4284,9 @@ class AgentContextService:
                             dispatch_metadata=dispatch_metadata,
                             runtime_context=runtime_context,
                             include_runtime_context=include_runtime_context,
+                            loaded_skills_content=loaded_skills_content,
+                            skill_injection_budget=skill_injection_budget,
+                            progress_notes=progress_notes,
                         )
                         system_tokens = estimate_messages_tokens(blocks)
                         delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])

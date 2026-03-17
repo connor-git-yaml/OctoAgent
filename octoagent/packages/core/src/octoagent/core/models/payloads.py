@@ -99,6 +99,22 @@ class ContextCompactionCompletedPayload(BaseModel):
     request_artifact_ref: str | None = Field(default=None)
     memory_flush_run_id: str | None = Field(default=None)
     reason: str = Field(default="")
+    # Feature 060: fallback 链审计字段
+    fallback_used: bool = Field(default=False, description="是否触发了 fallback")
+    fallback_chain: list[str] = Field(
+        default_factory=list, description="实际走过的 alias 链"
+    )
+    # Feature 060 Phase 2: 两阶段压缩审计字段
+    compaction_phases: list[dict[str, Any]] = Field(
+        default_factory=list, description="两阶段压缩执行详情"
+    )
+    # Feature 060 Phase 3: 三层压缩审计字段
+    layers: list[dict[str, Any]] = Field(
+        default_factory=list, description="各压缩层级审计信息"
+    )
+    compaction_version: str = Field(
+        default="", description="压缩版本: v1(扁平) | v2(三层)"
+    )
 
 
 class MemoryRecallScheduledPayload(BaseModel):

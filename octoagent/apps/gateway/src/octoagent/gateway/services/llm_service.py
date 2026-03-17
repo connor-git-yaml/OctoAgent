@@ -31,6 +31,10 @@ from octoagent.skills import (
 from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
 
+# Skill 注入格式常量（agent_context.py 依赖此格式解析和截断）
+SKILL_SECTION_PREFIX = "--- Loaded Skill: "
+SKILL_SECTION_SEPARATOR = "\n\n" + SKILL_SECTION_PREFIX
+
 # ============================================================
 # M0 遗留类型（废弃，保留供旧测试兼容）
 # ============================================================
@@ -311,10 +315,8 @@ class LLMService:
             single_loop_executor=single_loop_executor,
             prompt=prompt,
         )
-        # Feature 057: 注入已加载 SKILL.md 内容到 system prompt
-        skill_context = self._build_loaded_skills_context(metadata)
-        if skill_context:
-            base_description = f"{base_description}\n\n{skill_context}"
+        # Feature 060: Skill 内容已迁移到 _build_system_blocks() 的 LoadedSkills 系统块
+        # 不再在此处追加，避免双重注入。_build_loaded_skills_context() 保留供外部获取文本。
         manifest = SkillManifest(
             skill_id=f"chat.{worker_type}.inline",
             input_model=_GenericSkillInput,
@@ -438,7 +440,7 @@ class LLMService:
             if entry is None or not entry.content:
                 continue
             sections.append(
-                f"--- Loaded Skill: {entry.name} ---\n{entry.content}\n--- End Skill: {entry.name} ---"
+                f"{SKILL_SECTION_PREFIX}{entry.name} ---\n{entry.content}\n--- End Skill: {entry.name} ---"
             )
 
         if not sections:
