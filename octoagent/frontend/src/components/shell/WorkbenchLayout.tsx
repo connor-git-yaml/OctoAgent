@@ -1,7 +1,9 @@
 import { createContext, useContext, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import NewSessionModal from "../ChatUI/NewSessionModal";
 import FrontDoorGate from "../FrontDoorGate";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
+import type { SessionProjectionDocument, SessionProjectionItem } from "../../types";
 import { formatDateTime, getValueAtPath } from "../../workbench/utils";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
@@ -99,10 +101,106 @@ function renderNavDescription(path: string): string {
   }
 }
 
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  running: "进行中",
+  waiting_input: "等待输入",
+  waiting_approval: "等待审批",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+
+function formatSessionStatus(status: string): string {
+  return SESSION_STATUS_LABELS[status.toLowerCase()] ?? status;
+}
+
+function formatSessionTitle(session: SessionProjectionItem): string {
+  if (session.title?.trim()) {
+    return session.title.trim();
+  }
+  return session.latest_message_summary?.trim()
+    ? session.latest_message_summary.slice(0, 30)
+    : "未命名对话";
+}
+
+function ChatNavSection({
+  sessions,
+  currentPath,
+  onNavigate,
+  onNewSession,
+}: {
+  sessions: SessionProjectionDocument;
+  currentPath: string;
+  onNavigate: () => void;
+  onNewSession: () => void;
+}) {
+  const navigate = useNavigate();
+  const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+  // 只展示 web 渠道的 session，如果没有 web session 才退化到全部
+  const webSessions = sessionItems.filter((item) => item.channel === "web");
+  const displaySessions = webSessions.length > 0 ? webSessions : sessionItems;
+  const isChatActive = currentPath === "/" || currentPath.startsWith("/chat");
+
+  return (
+    <div className="wb-nav-group">
+      <NavLink
+        to="/"
+        end
+        className={({ isActive }) =>
+          `wb-nav-item ${isActive || isChatActive ? "is-active" : ""}`
+        }
+        onClick={onNavigate}
+      >
+        <strong>Chat</strong>
+        <span>{renderNavDescription("/")}</span>
+      </NavLink>
+
+      <div className="wb-nav-session-list">
+        {displaySessions.map((session) => {
+          const sessionPath = `/chat/${session.session_id}`;
+          const isActive = currentPath === sessionPath;
+          const statusNormalized = session.status?.toLowerCase() ?? "";
+          const isRunning = ["running", "waiting_input", "waiting_approval"].includes(
+            statusNormalized
+          );
+          return (
+            <button
+              type="button"
+              key={session.session_id}
+              className={`wb-nav-session-item ${isActive ? "is-active" : ""} ${isRunning ? "is-running" : ""}`}
+              onClick={() => {
+                navigate(sessionPath);
+                onNavigate();
+              }}
+            >
+              <span className="wb-nav-session-title">
+                {formatSessionTitle(session)}
+              </span>
+              <span className="wb-nav-session-status">
+                {formatSessionStatus(session.status)}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className="wb-nav-session-item wb-nav-session-new"
+          onClick={onNewSession}
+        >
+          + 新建对话
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkbenchLayout() {
   const workbench = useWorkbenchData();
   const [navOpen, setNavOpen] = useState(false);
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
+  const [newSessionBusy, setNewSessionBusy] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   if (workbench.loading && workbench.snapshot === null) {
     return (
@@ -168,7 +266,7 @@ export default function WorkbenchLayout() {
     activeWorkCount,
   });
   const suppressChatSetupReviewBanner =
-    (location.pathname === "/" || location.pathname === "/chat") &&
+    (location.pathname === "/" || location.pathname.startsWith("/chat")) &&
     workbench.lastAction?.code === "SETUP_REVIEW_READY";
 
   return (
@@ -182,8 +280,13 @@ export default function WorkbenchLayout() {
             </div>
 
           <nav className="wb-nav" aria-label="Workbench Navigation">
+            <ChatNavSection
+              sessions={sessions}
+              currentPath={location.pathname}
+              onNavigate={() => setNavOpen(false)}
+              onNewSession={() => setShowNewSessionModal(true)}
+            />
             {[
-              { to: "/", label: "Chat" },
               { to: "/agents", label: "Agents" },
               { to: "/skills", label: "Skills" },
               { to: "/mcp", label: "MCP" },
@@ -261,6 +364,40 @@ export default function WorkbenchLayout() {
 
           <Outlet />
         </div>
+
+        {showNewSessionModal && (() => {
+          const agentProfiles = snapshot.resources.agent_profiles;
+          const profiles = Array.isArray(agentProfiles?.profiles) ? agentProfiles.profiles : [];
+          const agentOptions = profiles.map((p) => ({
+            profile_id: p.profile_id,
+            name: p.name,
+          }));
+
+          const handleCreateSession = async (agentProfileId: string, projectName: string) => {
+            setNewSessionBusy(true);
+            try {
+              const result = await workbench.submitAction("session.create_with_project", {
+                agent_profile_id: agentProfileId,
+                project_name: projectName,
+              });
+              if (result?.data?.session_id) {
+                setShowNewSessionModal(false);
+                navigate(`/chat/${result.data.session_id}`);
+              }
+            } finally {
+              setNewSessionBusy(false);
+            }
+          };
+
+          return (
+            <NewSessionModal
+              agents={agentOptions}
+              busy={newSessionBusy}
+              onConfirm={handleCreateSession}
+              onClose={() => setShowNewSessionModal(false)}
+            />
+          );
+        })()}
       </div>
     </WorkbenchContext.Provider>
   );

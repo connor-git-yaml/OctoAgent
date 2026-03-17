@@ -12,7 +12,9 @@ from typing import Any
 import structlog
 from octoagent.core.behavior_workspace import (
     check_behavior_file_budget,
+    ensure_filesystem_skeleton,
     materialize_agent_behavior_files,
+    resolve_behavior_agent_slug,
     validate_behavior_file_path,
 )
 from octoagent.core.models import (
@@ -27,9 +29,13 @@ from octoagent.core.models import (
     AgentProfileItem,
     AgentProfileScope,
     AgentProfilesDocument,
+    AgentRuntime,
     AgentRuntimeItem,
+    AgentRuntimeRole,
+    AgentRuntimeStatus,
     AgentSession,
     AgentSessionContinuityItem,
+    AgentSessionKind,
     AgentSessionStatus,
     AutomationJob,
     AutomationJobDocument,
@@ -78,6 +84,7 @@ from octoagent.core.models import (
     PipelineRunItem,
     PolicyProfileItem,
     PolicyProfilesDocument,
+    Project,
     ProjectBindingType,
     ProjectOption,
     ProjectSelectorDocument,
@@ -113,6 +120,7 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkerProfileViewItem,
     WorkProjectionItem,
+    Workspace,
     WorkspaceOption,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
@@ -1030,6 +1038,14 @@ class ControlPlaneService:
                 profile=profile,
                 revision=profile.active_revision or profile.draft_revision,
             )
+            # 确保 agent-private 行为文件存在（lazy materialization）
+            _agent_slug = resolve_behavior_agent_slug(agent_profile_mirror)
+            materialize_agent_behavior_files(
+                self._project_root,
+                agent_slug=_agent_slug,
+                agent_name=profile.name,
+                is_worker_profile=True,
+            )
             behavior_sys = build_behavior_system_summary(
                 agent_profile=agent_profile_mirror,
                 project_name=_bs_project_name,
@@ -1118,6 +1134,14 @@ class ControlPlaneService:
                 model_alias=profile.default_model_alias,
                 tool_profile=profile.default_tool_profile,
                 metadata={"worker_base_archetype": worker_type},
+            )
+            # 确保 agent-private 行为文件存在（lazy materialization）
+            _builtin_slug = resolve_behavior_agent_slug(builtin_agent_profile)
+            materialize_agent_behavior_files(
+                self._project_root,
+                agent_slug=_builtin_slug,
+                agent_name=self._worker_profile_label(worker_type),
+                is_worker_profile=True,
             )
             builtin_behavior_sys = build_behavior_system_summary(
                 agent_profile=builtin_agent_profile,
@@ -3237,6 +3261,8 @@ class ControlPlaneService:
             return await self._handle_session_unfocus(request)
         if action_id == "session.new":
             return await self._handle_session_new(request)
+        if action_id == "session.create_with_project":
+            return await self._handle_session_create_with_project(request)
         if action_id == "session.reset":
             return await self._handle_session_reset(request)
         if action_id == "session.export":
@@ -3245,6 +3271,14 @@ class ControlPlaneService:
             return await self._handle_session_interrupt(request)
         if action_id == "session.resume":
             return await self._handle_session_resume(request)
+        if action_id == "agent.list_available_models":
+            return await self._handle_agent_list_models(request)
+        if action_id == "agent.list_worker_archetypes":
+            return await self._handle_agent_list_archetypes(request)
+        if action_id == "agent.list_tool_profiles":
+            return await self._handle_agent_list_tool_profiles(request)
+        if action_id == "agent.create_worker_with_project":
+            return await self._handle_agent_create_worker_with_project(request)
         if action_id == "operator.approval.resolve":
             return await self._handle_operator_approval(request)
         if action_id == "operator.alert.ack":
@@ -4759,6 +4793,471 @@ class ControlPlaneService:
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=target_refs,
+        )
+
+    async def _handle_session_create_with_project(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """创建新 Project + Session + 行为文件骨架，返回 session_id 和 conversation token。"""
+        import re
+
+        # 参数解析
+        agent_profile_id = str(request.params.get("agent_profile_id", "")).strip()
+        project_name = str(request.params.get("project_name", "")).strip()
+        if not project_name:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_CREATE_MISSING_NAME",
+                message="请为新对话输入一个名字。",
+            )
+        if not agent_profile_id:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_CREATE_MISSING_AGENT",
+                message="请选择一个 Agent 来承接新对话。",
+            )
+
+        # 验证 Agent Profile 存在
+        worker_profiles = await self.get_worker_profiles_document()
+        matched_profile = next(
+            (item for item in worker_profiles.profiles if item.profile_id == agent_profile_id),
+            None,
+        )
+        if matched_profile is None:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_AGENT_PROFILE_NOT_FOUND",
+                message="指定的 Agent 当前不可用，无法作为新会话入口。",
+            )
+
+        # 生成 slug 并校验唯一性
+        slug = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "-", project_name.lower()).strip("-") or "session"
+        # 如果 slug 完全不含 ascii 字母，用 ULID 后缀
+        if not re.search(r"[a-z0-9]", slug):
+            slug = f"session-{str(ULID())[-6:]}"
+
+        existing_project = await self._stores.project_store.get_project_by_slug(slug)
+        if existing_project is not None:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_CREATE_DUPLICATE_NAME",
+                message=f"同名项目「{project_name}」已存在，请换个名字。",
+            )
+
+        # 查找 Agent 对应的 AgentRuntime（找 primary_agent_id 回填用）
+        agent_profile = await self._stores.agent_context_store.get_agent_profile(agent_profile_id)
+        agent_runtime_id = ""
+        if agent_profile is not None:
+            runtimes = await self._stores.agent_context_store.list_agent_runtimes(
+                project_id=agent_profile.project_id or None,
+            )
+            for runtime in runtimes:
+                if runtime.agent_profile_id == agent_profile_id:
+                    agent_runtime_id = runtime.agent_runtime_id
+                    break
+
+        # 创建 Project
+        now = datetime.now(tz=UTC)
+        project_id = f"project-{str(ULID())}"
+        project = Project(
+            project_id=project_id,
+            slug=slug,
+            name=project_name,
+            description=f"由用户创建的会话项目：{project_name}",
+            status="active",
+            is_default=False,
+            default_agent_profile_id=agent_profile_id,
+            primary_agent_id=agent_runtime_id,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.project_store.create_project(project)
+
+        # 创建 Workspace
+        workspace_id = f"workspace-{str(ULID())}"
+        workspace = Workspace(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            slug="primary",
+            name="Primary",
+            kind="primary",
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.project_store.create_workspace(workspace)
+
+        # 创建行为文件骨架
+        ensure_filesystem_skeleton(
+            self._project_root,
+            project_slug=slug,
+        )
+        if agent_profile is not None:
+            agent_slug = resolve_behavior_agent_slug(agent_profile)
+            materialize_agent_behavior_files(
+                self._project_root,
+                agent_slug=agent_slug,
+                agent_name=agent_profile.name,
+                is_worker_profile=False,
+            )
+
+        # 确保有真实的 AgentRuntime（FK 约束要求 agent_runtime_id 必须存在）
+        if not agent_runtime_id:
+            new_runtime = AgentRuntime(
+                agent_runtime_id=f"runtime-{str(ULID())}",
+                project_id=project_id,
+                workspace_id=workspace_id,
+                agent_profile_id=agent_profile_id,
+                role=AgentRuntimeRole.BUTLER,
+                name=agent_profile.name if agent_profile else project_name,
+                persona_summary="",
+                status=AgentRuntimeStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+            )
+            await self._stores.agent_context_store.save_agent_runtime(new_runtime)
+            agent_runtime_id = new_runtime.agent_runtime_id
+            # 回填 primary_agent_id
+            project.primary_agent_id = agent_runtime_id
+            await self._stores.project_store.set_primary_agent(project_id, agent_runtime_id)
+
+        # 创建 AgentSession
+        session_id = f"session-{str(ULID())}"
+        session = AgentSession(
+            agent_session_id=session_id,
+            agent_runtime_id=agent_runtime_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+            status=AgentSessionStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.agent_context_store.save_agent_session(session)
+
+        # 生成 conversation token 并更新 state
+        token = str(ULID())
+        state = self._state_store.load().model_copy(
+            update={
+                "focused_session_id": session_id,
+                "focused_thread_id": "",
+                "new_conversation_token": token,
+                "new_conversation_project_id": project_id,
+                "new_conversation_workspace_id": workspace_id,
+                "new_conversation_agent_profile_id": agent_profile_id,
+                "updated_at": now,
+            }
+        )
+        self._state_store.save(state)
+
+        await self._stores.conn.commit()
+
+        return self._completed_result(
+            request=request,
+            code="SESSION_CREATED_WITH_PROJECT",
+            message=f"已创建对话「{project_name}」",
+            data={
+                "session_id": session_id,
+                "project_id": project_id,
+                "workspace_id": workspace_id,
+                "new_conversation_token": token,
+                "agent_profile_id": agent_profile_id,
+            },
+            resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+            target_refs=[
+                ControlPlaneTargetRef(target_type="session", target_id=session_id),
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 4: 主 Agent 查询 + 管理工具
+    # ------------------------------------------------------------------
+
+    async def _handle_agent_list_models(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """返回已配置的模型别名列表，供主 Agent 选择。"""
+        config = load_config(self._project_root)
+        if config is None:
+            return self._completed_result(
+                request=request,
+                code="AGENT_MODELS_LISTED",
+                message="尚未配置 octoagent.yaml",
+                data={"model_aliases": {}},
+            )
+        aliases: dict[str, dict[str, str]] = {}
+        for alias_key, alias_val in config.model_aliases.items():
+            aliases[alias_key] = {
+                "provider": alias_val.provider,
+                "model": alias_val.model,
+                "description": alias_val.description,
+            }
+        return self._completed_result(
+            request=request,
+            code="AGENT_MODELS_LISTED",
+            message=f"共 {len(aliases)} 个模型别名",
+            data={"model_aliases": aliases},
+        )
+
+    async def _handle_agent_list_archetypes(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """返回内建 Worker archetype 列表。"""
+        archetypes = [
+            {
+                "type": "general",
+                "label": "通用",
+                "description": "通用 Worker，适合多数场景",
+            },
+            {
+                "type": "ops",
+                "label": "运维",
+                "description": "侧重运维操作（文件系统、Docker、监控）",
+            },
+            {
+                "type": "research",
+                "label": "调研",
+                "description": "侧重信息搜集、网络检索、文档分析",
+            },
+            {
+                "type": "dev",
+                "label": "开发",
+                "description": "侧重代码编写、测试、构建流程",
+            },
+        ]
+        return self._completed_result(
+            request=request,
+            code="AGENT_ARCHETYPES_LISTED",
+            message=f"共 {len(archetypes)} 个内建 archetype",
+            data={"archetypes": archetypes},
+        )
+
+    async def _handle_agent_list_tool_profiles(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """返回工具权限等级列表。"""
+        profiles = [
+            {
+                "profile": "minimal",
+                "label": "最小",
+                "description": "只读工具（查询、检索）",
+            },
+            {
+                "profile": "standard",
+                "label": "标准",
+                "description": "读写工具（文件操作、记忆写入）",
+            },
+            {
+                "profile": "privileged",
+                "label": "特权",
+                "description": "外部 API、Docker 执行、shell 命令",
+            },
+        ]
+        return self._completed_result(
+            request=request,
+            code="AGENT_TOOL_PROFILES_LISTED",
+            message=f"共 {len(profiles)} 个权限等级",
+            data={"tool_profiles": profiles},
+        )
+
+    async def _handle_agent_create_worker_with_project(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """主 Agent 创建 Worker + Project + Session + 行为文件。"""
+        import re
+
+        # 参数解析
+        worker_name = str(request.params.get("worker_name", "")).strip()
+        project_name = str(request.params.get("project_name", "")).strip()
+        archetype = str(request.params.get("archetype", "general")).strip()
+        model_alias = str(request.params.get("model_alias", "main")).strip()
+        tool_profile = str(request.params.get("tool_profile", "minimal")).strip()
+        project_goal = str(request.params.get("project_goal", "")).strip()
+        instruction_overlays = request.params.get("instruction_overlays", [])
+        if not isinstance(instruction_overlays, list):
+            instruction_overlays = []
+
+        if not worker_name:
+            return self._rejected_result(
+                request=request,
+                code="WORKER_CREATE_MISSING_NAME",
+                message="请为新 Worker 输入名称。",
+            )
+        if not project_name:
+            project_name = worker_name
+
+        # 验证 archetype
+        valid_archetypes = {"general", "ops", "research", "dev"}
+        if archetype not in valid_archetypes:
+            return self._rejected_result(
+                request=request,
+                code="WORKER_CREATE_INVALID_ARCHETYPE",
+                message=f"archetype 必须是 {', '.join(sorted(valid_archetypes))} 之一。",
+            )
+
+        # 验证 tool_profile
+        valid_profiles = {"minimal", "standard", "privileged"}
+        if tool_profile not in valid_profiles:
+            return self._rejected_result(
+                request=request,
+                code="WORKER_CREATE_INVALID_TOOL_PROFILE",
+                message=f"tool_profile 必须是 {', '.join(sorted(valid_profiles))} 之一。",
+            )
+
+        # 验证 model_alias 存在
+        config = load_config(self._project_root)
+        if config is not None and model_alias not in config.model_aliases:
+            available = ", ".join(sorted(config.model_aliases.keys()))
+            return self._rejected_result(
+                request=request,
+                code="WORKER_CREATE_INVALID_MODEL",
+                message=f"模型别名 '{model_alias}' 不存在，可选：{available}",
+            )
+
+        now = datetime.now(tz=UTC)
+
+        # 创建 WorkerProfile
+        worker_profile_id = f"worker-profile-{str(ULID())}"
+        worker_profile = WorkerProfile(
+            profile_id=worker_profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="",  # 后面回填
+            name=worker_name,
+            summary=project_goal or f"{worker_name} Worker",
+            base_archetype=archetype,
+            instruction_overlays=[str(o) for o in instruction_overlays],
+            model_alias=model_alias,
+            tool_profile=tool_profile,
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.agent_context_store.save_worker_profile(worker_profile)
+
+        # 从 WorkerProfile 同步生成 AgentProfile
+        agent_profile_id = f"agent-profile-{worker_profile_id}"
+        agent_profile = AgentProfile(
+            profile_id=agent_profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="",
+            name=worker_name,
+            persona_summary=project_goal,
+            instruction_overlays=[str(o) for o in instruction_overlays],
+            model_alias=model_alias,
+            tool_profile=tool_profile,
+        )
+        await self._stores.agent_context_store.save_agent_profile(agent_profile)
+
+        # 创建 Project
+        slug = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "-", project_name.lower()).strip("-") or "worker"
+        if not re.search(r"[a-z0-9]", slug):
+            slug = f"worker-{str(ULID())[-6:]}"
+
+        # 避免 slug 冲突
+        existing = await self._stores.project_store.get_project_by_slug(slug)
+        if existing is not None:
+            slug = f"{slug}-{str(ULID())[-6:]}"
+
+        project_id = f"project-{str(ULID())}"
+        project = Project(
+            project_id=project_id,
+            slug=slug,
+            name=project_name,
+            description=project_goal or f"Worker「{worker_name}」的工作空间",
+            status="active",
+            is_default=False,
+            default_agent_profile_id=agent_profile_id,
+            primary_agent_id="",  # Worker 的 runtime_id 创建后回填
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.project_store.create_project(project)
+
+        # 回填 WorkerProfile 的 project_id
+        worker_profile.project_id = project_id
+        await self._stores.agent_context_store.save_worker_profile(worker_profile)
+        agent_profile.project_id = project_id
+        await self._stores.agent_context_store.save_agent_profile(agent_profile)
+
+        # 创建 Workspace
+        workspace_id = f"workspace-{str(ULID())}"
+        workspace = Workspace(
+            workspace_id=workspace_id,
+            project_id=project_id,
+            slug="primary",
+            name="Primary",
+            kind="primary",
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.project_store.create_workspace(workspace)
+
+        # 创建行为文件骨架
+        ensure_filesystem_skeleton(
+            self._project_root,
+            project_slug=slug,
+        )
+        agent_slug = resolve_behavior_agent_slug(agent_profile)
+        materialize_agent_behavior_files(
+            self._project_root,
+            agent_slug=agent_slug,
+            agent_name=worker_name,
+            is_worker_profile=True,
+        )
+
+        # 创建 Worker AgentRuntime（FK 约束要求 agent_runtime_id 必须存在）
+        runtime_id = f"runtime-{str(ULID())}"
+        worker_runtime = AgentRuntime(
+            agent_runtime_id=runtime_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            agent_profile_id=agent_profile_id,
+            worker_profile_id=worker_profile_id,
+            role=AgentRuntimeRole.WORKER,
+            name=worker_name,
+            persona_summary=project_goal,
+            status=AgentRuntimeStatus.ACTIVE,
+            metadata={"worker_base_archetype": archetype},
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.agent_context_store.save_agent_runtime(worker_runtime)
+
+        # 创建 AgentSession
+        session_id = f"session-{str(ULID())}"
+        session = AgentSession(
+            agent_session_id=session_id,
+            agent_runtime_id=runtime_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            kind=AgentSessionKind.WORKER_INTERNAL,
+            status=AgentSessionStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stores.agent_context_store.save_agent_session(session)
+
+        # 回填 Project 的 primary_agent_id
+        await self._stores.project_store.set_primary_agent(project_id, runtime_id)
+
+        await self._stores.conn.commit()
+
+        return self._completed_result(
+            request=request,
+            code="WORKER_CREATED_WITH_PROJECT",
+            message=f"已创建 Worker「{worker_name}」+ 项目「{project_name}」",
+            data={
+                "worker_profile_id": worker_profile_id,
+                "agent_profile_id": agent_profile_id,
+                "project_id": project_id,
+                "workspace_id": workspace_id,
+                "session_id": session_id,
+                "runtime_id": runtime_id,
+            },
+            resource_refs=[
+                self._resource_ref("worker_profiles", "worker_profiles:overview"),
+                self._resource_ref("session_projection", "sessions:overview"),
+            ],
         )
 
     async def _handle_session_reset(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -7912,6 +8411,14 @@ class ControlPlaneService:
             existing=existing,
         )
         await self._stores.agent_context_store.save_agent_profile(mirrored)
+        # 同步时确保 agent-private 行为文件存在
+        _slug = resolve_behavior_agent_slug(mirrored)
+        materialize_agent_behavior_files(
+            self._project_root,
+            agent_slug=_slug,
+            agent_name=profile.name,
+            is_worker_profile=True,
+        )
         return mirrored
 
     async def _bind_worker_profile_as_default(
@@ -9759,7 +10266,12 @@ class ControlPlaneService:
                 definition("session.focus", "聚焦会话", category="sessions"),
                 definition("session.unfocus", "取消聚焦会话", category="sessions"),
                 definition("session.new", "开始新对话", category="sessions"),
+                definition("session.create_with_project", "创建对话（含 Project）", category="sessions"),
                 definition("session.reset", "重置会话 continuity", category="sessions"),
+                definition("agent.list_available_models", "查询可用模型别名", category="agent_management"),
+                definition("agent.list_worker_archetypes", "查询 Worker archetype", category="agent_management"),
+                definition("agent.list_tool_profiles", "查询工具权限等级", category="agent_management"),
+                definition("agent.create_worker_with_project", "创建 Worker + Project", category="agent_management"),
                 definition("session.export", "导出会话", category="sessions"),
                 definition(
                     "session.interrupt",

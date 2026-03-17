@@ -19,6 +19,7 @@ from octoagent.core.behavior_workspace import (
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
+    AgentRuntimeRole,
     BootstrapSession,
     BootstrapSessionStatus,
     OwnerProfile,
@@ -47,6 +48,9 @@ async def ensure_startup_records(
     owner_profile = await _ensure_owner_profile(store_group)
     agent_profile = await _ensure_agent_profile(store_group, project)
     await _ensure_bootstrap_session(store_group, project, workspace, owner_profile, agent_profile)
+
+    # 回填 default project 的 primary_agent_id（如果尚未设置）
+    await _backfill_primary_agent_id(store_group, project)
 
     await store_group.conn.commit()
 
@@ -237,3 +241,30 @@ async def _ensure_bootstrap_session(
     )
     await store_group.agent_context_store.save_bootstrap_session(session)
     return session
+
+
+async def _backfill_primary_agent_id(
+    store_group: StoreGroup,
+    project: Project,
+) -> None:
+    """回填 Project 的 primary_agent_id（Butler AgentRuntime）。"""
+    if project.primary_agent_id:
+        return
+
+    # 查找该 Project 的 Butler AgentRuntime
+    runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        role=AgentRuntimeRole.BUTLER,
+        project_id=project.project_id,
+    )
+    if not runtimes:
+        return
+
+    butler_runtime = runtimes[0]
+    await store_group.project_store.set_primary_agent(
+        project.project_id, butler_runtime.agent_runtime_id
+    )
+    log.info(
+        "backfill_primary_agent_id",
+        project_id=project.project_id,
+        primary_agent_id=butler_runtime.agent_runtime_id,
+    )

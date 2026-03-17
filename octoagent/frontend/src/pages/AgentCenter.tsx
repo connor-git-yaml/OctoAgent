@@ -198,7 +198,6 @@ function renderAgentCard(
         <span className={`wb-status-pill ${agent.status === "needs_setup" ? "is-warning" : "is-ready"}`}>
           {agent.isMainAgent ? "主 Agent" : agent.profileStatus}
         </span>
-        <span className="wb-chip">{agent.sourceLabel}</span>
       </div>
       <div className="wb-agent-card-body">
         <strong>{agent.name}</strong>
@@ -265,7 +264,7 @@ function renderAgentCard(
 }
 
 export default function AgentCenter() {
-  const { snapshot, submitAction, busyActionId, refreshSnapshot } = useWorkbench();
+  const { snapshot, submitAction, busyActionId } = useWorkbench();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const behaviorCenterRef = useRef<HTMLElement | null>(null);
@@ -721,8 +720,9 @@ export default function AgentCenter() {
       <div className="wb-agent-management-layout">
         <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
           <div className="wb-panel-head">
-            <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <p className="wb-card-label">Agents</p>
+              <span className="wb-chip">{1 + agentView.projectAgents.length}</span>
             </div>
             <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
               新建 Agent
@@ -737,16 +737,7 @@ export default function AgentCenter() {
             busyActionId,
             activeFilePath: viewingFilePath,
           })}
-        </section>
-
-        {agentView.projectAgents.length > 0 ? (
-          <section className="wb-panel">
-            <div className="wb-panel-head">
-              <div>
-                <p className="wb-card-label">其他 Agent</p>
-              </div>
-              <span className="wb-chip">{agentView.projectAgents.length}</span>
-            </div>
+          {agentView.projectAgents.length > 0 ? (
             <div className="wb-section-stack">
               {agentView.projectAgents.map((agent) =>
                 renderAgentCard(agent, {
@@ -760,8 +751,8 @@ export default function AgentCenter() {
                 })
               )}
             </div>
-          </section>
-        ) : null}
+          ) : null}
+        </section>
       </div>
 
       {/* ── Modal: 编辑器 / 模板选择 / 行为文件查看 ── */}

@@ -37,6 +37,7 @@ export default function App() {
           <Route path="/" element={<WorkbenchLayout />}>
             <Route index element={withRouteSuspense(<ChatWorkbench />)} />
             <Route path="chat" element={<Navigate to="/" replace />} />
+            <Route path="chat/:sessionId" element={withRouteSuspense(<ChatWorkbench />)} />
             <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
             <Route path="skills" element={withRouteSuspense(<SkillCenter />)} />
             <Route path="mcp" element={withRouteSuspense(<McpProviderCenter />)} />

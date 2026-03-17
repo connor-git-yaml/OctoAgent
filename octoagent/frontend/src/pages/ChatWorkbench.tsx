@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   ApiError,
   attachExecutionInput,
@@ -1104,6 +1104,7 @@ function buildWorkerActivity(
 }
 
 export default function ChatWorkbench() {
+  const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
   const { snapshot, refreshResources, submitAction, busyActionId } = useWorkbench();
   const sessionDocument = snapshot!.resources.sessions;
   const projectSelector = snapshot!.resources.project_selector;
@@ -1117,13 +1118,30 @@ export default function ChatWorkbench() {
   const contextFrames = ensureArray(context.frames);
   const a2aConversations = ensureArray(context.a2a_conversations);
   const storedRestoreTaskId = useMemo(() => readStoredTaskId(), []);
+
+  // 当 URL 指定了 sessionId 时，直接用该 session 的 task_id 来恢复
+  const routeSession = useMemo(
+    () =>
+      routeSessionId
+        ? sessions.find((item) => item.session_id === routeSessionId) ?? null
+        : null,
+    [routeSessionId, sessions]
+  );
+
   const restoreTaskIds = useMemo(() => {
+    // URL 指定了特定 session，直接使用其 task_id
+    if (routeSessionId && routeSession?.task_id) {
+      return [routeSession.task_id];
+    }
+    // 默认行为：使用 focused session 和 stored task id
     const taskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
     if (storedRestoreTaskId && !taskIds.includes(storedRestoreTaskId)) {
       taskIds.unshift(storedRestoreTaskId);
     }
     return taskIds;
   }, [
+    routeSessionId,
+    routeSession?.task_id,
     sessionDocument?.focused_session_id,
     sessionDocument?.focused_thread_id,
     sessionDocument?.new_conversation_token,

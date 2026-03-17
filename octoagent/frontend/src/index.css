@@ -1235,6 +1235,77 @@
   background: linear-gradient(135deg, rgba(31, 106, 91, 0.1), rgba(183, 106, 43, 0.08));
 }
 
+.wb-nav-group {
+  display: grid;
+  gap: 0;
+}
+
+.wb-nav-session-list {
+  display: grid;
+  gap: 2px;
+  padding: 4px 0 8px 18px;
+}
+
+.wb-nav-session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.wb-nav-session-item:hover {
+  background: rgba(31, 106, 91, 0.06);
+  border-color: rgba(31, 106, 91, 0.1);
+}
+
+.wb-nav-session-item.is-active {
+  background: rgba(31, 106, 91, 0.12);
+  border-color: rgba(31, 106, 91, 0.2);
+}
+
+.wb-nav-session-item.is-running .wb-nav-session-status {
+  color: var(--cp-accent, #1f6a5b);
+}
+
+.wb-nav-session-title {
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.wb-nav-session-status {
+  font-size: 0.68rem;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wb-nav-session-new {
+  color: var(--cp-muted);
+  font-size: 0.78rem;
+  justify-content: center;
+  border-style: dashed;
+}
+
+.wb-nav-session-new:hover {
+  color: var(--cp-accent, #1f6a5b);
+  border-color: rgba(31, 106, 91, 0.2);
+}
+
 .wb-sidebar-grid,
 .wb-card-grid {
   display: grid;

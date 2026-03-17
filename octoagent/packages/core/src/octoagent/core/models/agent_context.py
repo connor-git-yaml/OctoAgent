@@ -64,6 +64,7 @@ class AgentSessionKind(StrEnum):
     BUTLER_MAIN = "butler_main"
     WORKER_INTERNAL = "worker_internal"
     DIRECT_WORKER = "direct_worker"
+    SUBAGENT_INTERNAL = "subagent_internal"
 
 
 class AgentSessionStatus(StrEnum):
@@ -237,6 +238,8 @@ class AgentSession(BaseModel):
     thread_id: str = Field(default="")
     legacy_session_id: str = Field(default="")
     parent_agent_session_id: str = Field(default="")
+    parent_worker_runtime_id: str = Field(default="")
+    """Subagent 所属 Worker 的 AgentRuntime ID（仅 SUBAGENT_INTERNAL 类型使用）。"""
     work_id: str = Field(default="")
     a2a_conversation_id: str = Field(default="")
     last_context_frame_id: str = Field(default="")

@@ -77,6 +77,8 @@ class Project(BaseModel):
     status: ProjectStatus = ProjectStatus.ACTIVE
     is_default: bool = False
     default_agent_profile_id: str = ""
+    primary_agent_id: str = Field(default="")
+    """该 Project 的 Agent0（主负责人），指向 AgentRuntime ID。"""
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)

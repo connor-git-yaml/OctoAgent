@@ -166,7 +166,8 @@ CREATE TABLE IF NOT EXISTS projects (
     default_agent_profile_id TEXT NOT NULL DEFAULT '',
     metadata     TEXT NOT NULL DEFAULT '{}',
     created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL
+    updated_at   TEXT NOT NULL,
+    primary_agent_id TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -462,6 +463,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL,
     closed_at                TEXT,
+    parent_worker_runtime_id TEXT NOT NULL DEFAULT '',
 
     FOREIGN KEY (agent_runtime_id) REFERENCES agent_runtimes(agent_runtime_id)
 );
@@ -754,6 +756,16 @@ _AGENT_CONTEXT_INDEXES = [
         "ON agent_sessions(legacy_session_id, updated_at DESC);"
     ),
     (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
+        "ON agent_sessions(project_id) "
+        "WHERE status = 'active' AND project_id != '';"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_agent_sessions_parent_worker "
+        "ON agent_sessions(parent_worker_runtime_id, status) "
+        "WHERE parent_worker_runtime_id != '';"
+    ),
+    (
         "CREATE INDEX IF NOT EXISTS idx_agent_session_turns_session_seq "
         "ON agent_session_turns(agent_session_id, turn_seq ASC);"
     ),
@@ -867,6 +879,10 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE projects ADD COLUMN default_agent_profile_id TEXT NOT NULL DEFAULT ''"
         )
+    if project_columns and "primary_agent_id" not in project_columns:
+        await conn.execute(
+            "ALTER TABLE projects ADD COLUMN primary_agent_id TEXT NOT NULL DEFAULT ''"
+        )
 
     work_columns = await _table_columns(conn, "works")
     if work_columns and "agent_profile_id" not in work_columns:
@@ -918,6 +934,11 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE agent_sessions "
             "ADD COLUMN rolling_summary TEXT NOT NULL DEFAULT ''"
+        )
+    if agent_session_columns and "parent_worker_runtime_id" not in agent_session_columns:
+        await conn.execute(
+            "ALTER TABLE agent_sessions "
+            "ADD COLUMN parent_worker_runtime_id TEXT NOT NULL DEFAULT ''"
         )
 
     agent_session_turn_columns = await _table_columns(conn, "agent_session_turns")

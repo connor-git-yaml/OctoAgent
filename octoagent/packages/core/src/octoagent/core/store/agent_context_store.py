@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
@@ -537,9 +537,10 @@ class SqliteAgentContextStore:
                 workspace_id, surface, thread_id, legacy_session_id,
                 parent_agent_session_id, work_id, a2a_conversation_id,
                 last_context_frame_id, last_recall_frame_id, recent_transcript,
-                rolling_summary, metadata, created_at, updated_at, closed_at
+                rolling_summary, metadata, created_at, updated_at, closed_at,
+                parent_worker_runtime_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
@@ -558,7 +559,8 @@ class SqliteAgentContextStore:
                 rolling_summary = excluded.rolling_summary,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at,
-                closed_at = excluded.closed_at
+                closed_at = excluded.closed_at,
+                parent_worker_runtime_id = excluded.parent_worker_runtime_id
             """,
             (
                 session.agent_session_id,
@@ -581,6 +583,7 @@ class SqliteAgentContextStore:
                 session.created_at.isoformat(),
                 session.updated_at.isoformat(),
                 session.closed_at.isoformat() if session.closed_at else None,
+                session.parent_worker_runtime_id,
             ),
         )
         return session
@@ -629,6 +632,77 @@ class SqliteAgentContextStore:
             """,
             tuple([*args, limit]),
         )
+        return [self._row_to_agent_session(row) for row in rows]
+
+    async def close_active_sessions_for_project(self, project_id: str) -> int:
+        """关闭指定 Project 的所有活跃 Session（保证 Project-Session 一一对应）。
+
+        返回关闭的 Session 数量。
+        """
+        now = datetime.now(tz=UTC).isoformat()
+        await self._conn.execute(
+            """
+            UPDATE agent_sessions
+            SET status = 'closed', closed_at = ?, updated_at = ?
+            WHERE project_id = ? AND status = 'active'
+            """,
+            (now, now, project_id),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def get_active_session_for_project(
+        self,
+        project_id: str,
+        kind: AgentSessionKind | None = None,
+    ) -> AgentSession | None:
+        """获取指定 Project 的活跃 Session。"""
+        if kind is not None:
+            row = await self._fetchone(
+                """
+                SELECT * FROM agent_sessions
+                WHERE project_id = ? AND status = 'active' AND kind = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (project_id, kind.value),
+            )
+        else:
+            row = await self._fetchone(
+                """
+                SELECT * FROM agent_sessions
+                WHERE project_id = ? AND status = 'active'
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (project_id,),
+            )
+        return self._row_to_agent_session(row) if row is not None else None
+
+    async def list_subagent_sessions(
+        self,
+        parent_worker_runtime_id: str,
+        *,
+        status: AgentSessionStatus | None = None,
+    ) -> list[AgentSession]:
+        """列出指定 Worker 的 Subagent Session。"""
+        if status is not None:
+            rows = await self._fetchall(
+                """
+                SELECT * FROM agent_sessions
+                WHERE parent_worker_runtime_id = ? AND status = ?
+                ORDER BY created_at DESC
+                """,
+                (parent_worker_runtime_id, status.value),
+            )
+        else:
+            rows = await self._fetchall(
+                """
+                SELECT * FROM agent_sessions
+                WHERE parent_worker_runtime_id = ?
+                ORDER BY created_at DESC
+                """,
+                (parent_worker_runtime_id,),
+            )
         return [self._row_to_agent_session(row) for row in rows]
 
     async def save_agent_session_turn(self, turn: AgentSessionTurn) -> AgentSessionTurn:
@@ -1268,6 +1342,11 @@ class SqliteAgentContextStore:
             updated_at=datetime.fromisoformat(row["updated_at"]),
             closed_at=(
                 datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None
+            ),
+            parent_worker_runtime_id=(
+                row["parent_worker_runtime_id"]
+                if "parent_worker_runtime_id" in row.keys()
+                else ""
             ),
         )
 

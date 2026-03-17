@@ -2646,6 +2646,19 @@ class AgentContextService:
                 },
             )
         )
+        # Project-Session 严格一一对应：创建新 Session 前关闭该 Project 的旧活跃 Session
+        effective_project_id = session.project_id
+        if existing is None and effective_project_id:
+            closed = await self._stores.agent_context_store.close_active_sessions_for_project(
+                effective_project_id
+            )
+            if closed:
+                log.info(
+                    "session_one_to_one_enforced",
+                    project_id=effective_project_id,
+                    closed_count=closed,
+                    new_session_id=session.agent_session_id,
+                )
         await self._stores.agent_context_store.save_agent_session(session)
         return session
 

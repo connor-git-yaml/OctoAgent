@@ -329,3 +329,45 @@
   line-height: 1.45;
   word-break: break-all;
 }
+
+/* 表单元素 */
+.wb-form-label {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--cp-ink);
+}
+
+.wb-input,
+.wb-select {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(20, 32, 47, 0.14);
+  background: rgba(255, 255, 255, 0.96);
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--cp-ink);
+  box-sizing: border-box;
+  transition: border-color 120ms ease;
+}
+
+.wb-input:focus,
+.wb-select:focus {
+  outline: none;
+  border-color: rgba(31, 106, 91, 0.4);
+}
+
+.wb-input:disabled,
+.wb-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.wb-form-error {
+  font-size: 0.82rem;
+  color: #c2410c;
+}

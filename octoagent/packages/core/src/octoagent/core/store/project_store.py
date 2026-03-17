@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -32,9 +32,10 @@ class SqliteProjectStore:
             """
             INSERT INTO projects (
                 project_id, slug, name, description, status, is_default,
-                default_agent_profile_id, metadata, created_at, updated_at
+                default_agent_profile_id, metadata, created_at, updated_at,
+                primary_agent_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id) DO UPDATE SET
                 slug = excluded.slug,
                 name = excluded.name,
@@ -43,7 +44,8 @@ class SqliteProjectStore:
                 is_default = excluded.is_default,
                 default_agent_profile_id = excluded.default_agent_profile_id,
                 metadata = excluded.metadata,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                primary_agent_id = excluded.primary_agent_id
             """,
             (
                 project.project_id,
@@ -56,6 +58,7 @@ class SqliteProjectStore:
                 json.dumps(project.metadata, ensure_ascii=False),
                 project.created_at.isoformat(),
                 project.updated_at.isoformat(),
+                project.primary_agent_id,
             ),
         )
         return project
@@ -65,9 +68,10 @@ class SqliteProjectStore:
             """
             INSERT OR IGNORE INTO projects (
                 project_id, slug, name, description, status, is_default,
-                default_agent_profile_id, metadata, created_at, updated_at
+                default_agent_profile_id, metadata, created_at, updated_at,
+                primary_agent_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project.project_id,
@@ -80,6 +84,7 @@ class SqliteProjectStore:
                 json.dumps(project.metadata, ensure_ascii=False),
                 project.created_at.isoformat(),
                 project.updated_at.isoformat(),
+                project.primary_agent_id,
             ),
         )
         created = await self._get_changes()
@@ -122,6 +127,24 @@ class SqliteProjectStore:
         )
         rows = await cursor.fetchall()
         return [self._row_to_project(row) for row in rows]
+
+    async def list_projects_by_agent(self, agent_runtime_id: str) -> list[Project]:
+        """查询指定 Agent 作为主负责人的所有 Project。"""
+        cursor = await self._conn.execute(
+            "SELECT * FROM projects WHERE primary_agent_id = ? ORDER BY created_at ASC",
+            (agent_runtime_id,),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_project(row) for row in rows]
+
+    async def set_primary_agent(
+        self, project_id: str, agent_runtime_id: str
+    ) -> None:
+        """设置 Project 的主负责人 Agent。"""
+        await self._conn.execute(
+            "UPDATE projects SET primary_agent_id = ?, updated_at = ? WHERE project_id = ?",
+            (agent_runtime_id, datetime.now(tz=UTC).isoformat(), project_id),
+        )
 
     async def create_workspace(self, workspace: Workspace) -> tuple[Workspace, bool]:
         await self._conn.execute(
@@ -614,6 +637,7 @@ class SqliteProjectStore:
             metadata=json.loads(row[7]),
             created_at=datetime.fromisoformat(row[8]),
             updated_at=datetime.fromisoformat(row[9]),
+            primary_agent_id=row[10] if len(row) > 10 else "",
         )
 
     @staticmethod
