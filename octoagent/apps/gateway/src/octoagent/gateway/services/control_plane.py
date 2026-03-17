@@ -8277,62 +8277,6 @@ class ControlPlaneService:
                 widget="string-list",
                 order=115,
             ),
-            "memory.bridge_api_key_header": ConfigFieldHint(
-                field_path="memory.bridge_api_key_header",
-                section="memory-advanced",
-                label="API Key Header 名称",
-                help_text="大多数服务保持 Authorization 即可。",
-                order=120,
-            ),
-            "memory.bridge_api_key_scheme": ConfigFieldHint(
-                field_path="memory.bridge_api_key_scheme",
-                section="memory-advanced",
-                label="API Key 前缀",
-                help_text="大多数服务保持 Bearer；如果你的 bridge 不需要前缀，可以留空。",
-                order=122,
-            ),
-            "memory.bridge_health_path": ConfigFieldHint(
-                field_path="memory.bridge_health_path",
-                section="memory-advanced",
-                label="健康检查路径",
-                order=124,
-            ),
-            "memory.bridge_search_path": ConfigFieldHint(
-                field_path="memory.bridge_search_path",
-                section="memory-advanced",
-                label="检索路径",
-                order=126,
-            ),
-            "memory.bridge_sync_path": ConfigFieldHint(
-                field_path="memory.bridge_sync_path",
-                section="memory-advanced",
-                label="同步路径",
-                order=128,
-            ),
-            "memory.bridge_ingest_path": ConfigFieldHint(
-                field_path="memory.bridge_ingest_path",
-                section="memory-advanced",
-                label="写入路径",
-                order=130,
-            ),
-            "memory.bridge_derivations_path": ConfigFieldHint(
-                field_path="memory.bridge_derivations_path",
-                section="memory-advanced",
-                label="派生查询路径",
-                order=132,
-            ),
-            "memory.bridge_evidence_path": ConfigFieldHint(
-                field_path="memory.bridge_evidence_path",
-                section="memory-advanced",
-                label="证据链路径",
-                order=134,
-            ),
-            "memory.bridge_maintenance_path": ConfigFieldHint(
-                field_path="memory.bridge_maintenance_path",
-                section="memory-advanced",
-                label="维护任务路径",
-                order=136,
-            ),
         }
         return hints
 

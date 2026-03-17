@@ -55,6 +55,7 @@ from octoagent.memory import (
     MemoryAccessPolicy,
     MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
+    MemoryPartition,
     MemoryRecallHit,
     MemoryRecallHookOptions,
     MemoryRecallPostFilterMode,
