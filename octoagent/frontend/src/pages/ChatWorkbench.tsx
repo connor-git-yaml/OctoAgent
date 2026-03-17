@@ -1153,16 +1153,22 @@ export default function ChatWorkbench() {
     storedRestoreTaskId,
   ]);
   const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>("continue");
+
+  // 当 URL 指向已有 session 或已有 restore task 时，不传 newConversationToken——
+  // 避免 stale token 把消息路由到错误的 project。
+  // Token 只在通过 NewSessionModal 创建全新会话时使用。
+  const hasExistingSession = Boolean(routeSessionId) || restoreTaskIds.length > 0;
   const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId } = useChatStream(
     restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
     {
-      activeProjectId: projectSelector?.current_project_id ?? "",
-      activeWorkspaceId: projectSelector?.current_workspace_id ?? "",
-      newConversationToken: sessionDocument?.new_conversation_token ?? "",
-      newConversationProjectId: sessionDocument?.new_conversation_project_id ?? "",
-      newConversationWorkspaceId: sessionDocument?.new_conversation_workspace_id ?? "",
-      newConversationAgentProfileId:
-        sessionDocument?.new_conversation_agent_profile_id ?? "",
+      activeProjectId: currentSession?.project_id || projectSelector?.current_project_id || "",
+      activeWorkspaceId: currentSession?.workspace_id || projectSelector?.current_workspace_id || "",
+      newConversationToken: hasExistingSession ? "" : (sessionDocument?.new_conversation_token ?? ""),
+      newConversationProjectId: hasExistingSession ? "" : (sessionDocument?.new_conversation_project_id ?? ""),
+      newConversationWorkspaceId: hasExistingSession ? "" : (sessionDocument?.new_conversation_workspace_id ?? ""),
+      newConversationAgentProfileId: hasExistingSession
+        ? ""
+        : (sessionDocument?.new_conversation_agent_profile_id ?? ""),
     },
     {
       deferStoredTaskIdRestore:

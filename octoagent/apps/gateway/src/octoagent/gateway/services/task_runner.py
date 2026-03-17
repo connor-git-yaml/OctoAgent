@@ -254,6 +254,26 @@ class TaskRunner:
             await self._notify_completion(job.task_id)
             return
 
+        # task 仍在 CREATED 说明 dispatch 可能在 A2A 准备阶段崩溃了，直接推进到 FAILED。
+        # CREATED 不具备 resume 条件，直接标记失败可以避免无限卡住。
+        if task.status == TaskStatus.CREATED:
+            log.warning(
+                "recover_orphan_created_task",
+                task_id=job.task_id,
+                reason="job 为 RUNNING 但 task 仍为 CREATED，dispatch 可能异常中断",
+            )
+            await self._stores.task_job_store.mark_failed(
+                job.task_id,
+                "orphan_created_task_dispatch_failed",
+            )
+            await self._orchestrator._ensure_task_failed(
+                job.task_id,
+                f"trace-{job.task_id}",
+                "任务在调度阶段意外中断，网关重启后自动清理。请重新发起请求。",
+            )
+            await self._notify_completion(job.task_id)
+            return
+
         resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
         if resume_result.ok:
             self._cancellation_registry.ensure(job.task_id)
@@ -489,19 +509,43 @@ class TaskRunner:
         dispatch_envelope: DispatchEnvelope | None = None,
     ) -> None:
         service = TaskService(self._stores, self._sse_hub)
-        if dispatch_envelope is None:
-            metadata = await service.get_latest_user_metadata(task_id)
-            result = await self._orchestrator.dispatch(
+        try:
+            if dispatch_envelope is None:
+                metadata = await service.get_latest_user_metadata(task_id)
+                result = await self._orchestrator.dispatch(
+                    task_id=task_id,
+                    user_text=user_text,
+                    model_alias=model_alias,
+                    resume_from_node=resume_from_node,
+                    resume_state_snapshot=resume_state_snapshot,
+                    tool_profile=str(metadata.get("tool_profile", "standard")).strip() or "standard",
+                    metadata=metadata,
+                )
+            else:
+                result = await self._orchestrator.dispatch_prepared(dispatch_envelope)
+        except Exception as exc:
+            # 防御性兜底：dispatch 内部任何未捕获异常都不能让 job 永远停在 RUNNING。
+            # 记录完整异常后把 task 和 job 都标记为 FAILED，确保前端和 drift detector 能看到终态。
+            log.error(
+                "run_job_dispatch_exception",
                 task_id=task_id,
-                user_text=user_text,
-                model_alias=model_alias,
-                resume_from_node=resume_from_node,
-                resume_state_snapshot=resume_state_snapshot,
-                tool_profile=str(metadata.get("tool_profile", "standard")).strip() or "standard",
-                metadata=metadata,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=True,
             )
-        else:
-            result = await self._orchestrator.dispatch_prepared(dispatch_envelope)
+            error_summary = f"dispatch_exception:{type(exc).__name__}:{str(exc)[:200]}"
+            try:
+                await self._stores.task_job_store.mark_failed(task_id, error_summary)
+            except Exception:
+                log.warning("run_job_mark_failed_fallback", task_id=task_id, exc_info=True)
+            try:
+                await self._orchestrator._ensure_task_failed(
+                    task_id, f"trace-{task_id}", error_summary,
+                )
+            except Exception:
+                log.warning("run_job_mark_task_failed_fallback", task_id=task_id, exc_info=True)
+            return
+
         task = await service.get_task(task_id)
         if task is None:
             await self._stores.task_job_store.mark_failed(task_id, "task_missing_after_processing")

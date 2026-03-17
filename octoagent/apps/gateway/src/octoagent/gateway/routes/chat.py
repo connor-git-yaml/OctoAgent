@@ -89,12 +89,24 @@ async def _resolve_chat_scope_snapshot(
     new_conversation_token = str(body.new_conversation_token or "").strip()
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
 
-    state = ControlPlaneStateStore(_resolve_project_root(request)).load()
+    cp_store = ControlPlaneStateStore(_resolve_project_root(request))
+    state = cp_store.load()
     if new_conversation_token and new_conversation_token == state.new_conversation_token:
         project_id = state.new_conversation_project_id.strip() or project_id
         workspace_id = state.new_conversation_workspace_id.strip() or workspace_id
         requested_agent_profile_id = (
             requested_agent_profile_id or state.new_conversation_agent_profile_id.strip()
+        )
+        # 消费后立即清除 token，防止 stale token 被后续请求重复使用
+        cp_store.save(
+            state.model_copy(
+                update={
+                    "new_conversation_token": "",
+                    "new_conversation_project_id": "",
+                    "new_conversation_workspace_id": "",
+                    "new_conversation_agent_profile_id": "",
+                }
+            )
         )
     elif not body.task_id:
         project_id = project_id or state.selected_project_id.strip()
