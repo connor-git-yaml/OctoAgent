@@ -448,6 +448,33 @@ class LLMService:
 
         return "## Active Skills\n\n" + "\n\n".join(sections)
 
+    def _build_skill_catalog_context(self, metadata: dict[str, Any]) -> str:
+        """构建 Skill 目录摘要（name + description），自动注入 system prompt。
+
+        对齐 Claude Code 两阶段加载模式：Phase 1 摘要先行，LLM 看到后自主决定
+        是否通过 skills action=load 加载完整内容。已加载的 Skill 不重复列出。
+        """
+        if self._skill_discovery is None:
+            return ""
+
+        items = self._skill_discovery.list_items()
+        if not items:
+            return ""
+
+        loaded_names = set(metadata.get("loaded_skill_names", []))
+
+        lines = ["## Available Skills\n"]
+        for item in items:
+            marker = " [loaded]" if item.name in loaded_names else ""
+            lines.append(f"- **{item.name}**{marker}: {item.description}")
+
+        lines.append("")
+        lines.append(
+            "Use `skills action=load name=<name>` to load a skill's full instructions "
+            "into this session."
+        )
+        return "\n".join(lines)
+
     @staticmethod
     def _build_skill_description(
         worker_type: str,
