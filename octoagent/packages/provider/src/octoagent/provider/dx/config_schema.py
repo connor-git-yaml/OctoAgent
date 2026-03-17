@@ -200,109 +200,12 @@ class RuntimeConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory 默认配置。
 
-    用于 Web / Gateway 的 Memory Settings 页面与 runtime fallback。
-    project binding 仍然优先；当未绑定时，允许使用 octoagent.yaml 中的配置作为兜底。
+    当前仅支持本地模式（SQLite / Vault）。
     """
 
-    backend_mode: Literal["local_only", "memu"] = Field(
+    backend_mode: Literal["local_only"] = Field(
         default="local_only",
-        description=(
-            "Memory 引擎层级：local_only 走内建记忆引擎；"
-            "memu 表示仍需兼容旧 MemU 接入链路。"
-        ),
-    )
-    reasoning_model_alias: str = Field(
-        default="",
-        description="Memory 加工/总结/候选整理所用的模型别名。留空时回退到 main。",
-    )
-    expand_model_alias: str = Field(
-        default="",
-        description="Memory 查询扩写所用的模型别名。留空时回退到 main。",
-    )
-    embedding_model_alias: str = Field(
-        default="",
-        description="Memory 语义检索所用的 embedding 模型别名。留空时回退到内建默认层。",
-    )
-    rerank_model_alias: str = Field(
-        default="",
-        description="Memory 结果重排所用的模型别名。留空时回退到 heuristic rerank。",
-    )
-    bridge_transport: Literal["http", "command"] = Field(
-        default="http",
-        description="兼容接入 transport：http 连接远端 bridge；command 调用本地 bridge 命令。",
-    )
-    bridge_url: str = Field(
-        default="",
-        description="兼容接入的 bridge 基础地址，例如 https://memory.example.com",
-    )
-    bridge_command: str = Field(
-        default="",
-        description="兼容接入的本地 bridge 命令，例如 uv run python scripts/memu_bridge.py",
-    )
-    bridge_command_cwd: str = Field(
-        default="",
-        description="执行兼容本地 bridge 命令时的工作目录（可选）",
-    )
-    bridge_command_timeout_seconds: float = Field(
-        default=15.0,
-        ge=1.0,
-        le=120.0,
-        description="执行兼容本地 bridge 命令的超时时间（秒）",
-    )
-    bridge_api_key_env: str = Field(
-        default="",
-        description="兼容 bridge API Key 所在环境变量名（可选）",
-        pattern=_OPTIONAL_ENV_NAME_PATTERN,
-    )
-    bridge_timeout_seconds: float = Field(
-        default=5.0,
-        ge=1.0,
-        le=60.0,
-        description="请求兼容 bridge 的超时时间（秒）",
-    )
-    bridge_api_key_header: str = Field(
-        default="Authorization",
-        min_length=1,
-        description="MemU bridge API Key 使用的请求头名称",
-    )
-    bridge_api_key_scheme: str = Field(
-        default="Bearer",
-        description="MemU bridge API Key 前缀；不需要前缀时可留空",
-    )
-    bridge_health_path: str = Field(
-        default="/health",
-        min_length=1,
-        description="健康检查路径",
-    )
-    bridge_search_path: str = Field(
-        default="/memory/search",
-        min_length=1,
-        description="检索路径",
-    )
-    bridge_sync_path: str = Field(
-        default="/memory/sync",
-        min_length=1,
-        description="同步路径",
-    )
-    bridge_ingest_path: str = Field(
-        default="/memory/ingest",
-        min_length=1,
-        description="写入 ingest 路径",
-    )
-    bridge_derivations_path: str = Field(
-        default="/memory/derivations/query",
-        min_length=1,
-        description="派生记忆查询路径",
-    )
-    bridge_evidence_path: str = Field(
-        default="/memory/evidence/resolve",
-        min_length=1,
-        description="证据链查询路径",
-    )
-    bridge_maintenance_path: str = Field(
-        default="/memory/maintenance",
-        min_length=1,
-        description="维护任务路径",
+        description="Memory 后端模式：local_only 使用本地 SQLite 元数据。",
     )
 
 
@@ -682,29 +585,9 @@ def build_config_schema_document(
             },
             "memory": {
                 "title": "Memory",
-                "description": "配置 Memory 默认质量层、模型绑定与兼容接入。",
+                "description": "本地 Memory 配置。",
                 "fields": [
                     "memory.backend_mode",
-                    "memory.reasoning_model_alias",
-                    "memory.expand_model_alias",
-                    "memory.embedding_model_alias",
-                    "memory.rerank_model_alias",
-                    "memory.bridge_transport",
-                    "memory.bridge_url",
-                    "memory.bridge_command",
-                    "memory.bridge_command_cwd",
-                    "memory.bridge_command_timeout_seconds",
-                    "memory.bridge_api_key_env",
-                    "memory.bridge_timeout_seconds",
-                    "memory.bridge_api_key_header",
-                    "memory.bridge_api_key_scheme",
-                    "memory.bridge_health_path",
-                    "memory.bridge_search_path",
-                    "memory.bridge_sync_path",
-                    "memory.bridge_ingest_path",
-                    "memory.bridge_derivations_path",
-                    "memory.bridge_evidence_path",
-                    "memory.bridge_maintenance_path",
                 ],
             },
             "security": {
@@ -821,153 +704,8 @@ def build_config_schema_document(
                 "input": "choice",
                 "required": True,
                 "recommended": True,
-                "choices": ["local_only", "memu"],
+                "choices": ["local_only"],
                 "default": active_memory.backend_mode,
-            },
-            "memory.reasoning_model_alias": {
-                "label": "加工模型别名",
-                "input": "text",
-                "required": False,
-                "recommended": True,
-                "default": active_memory.reasoning_model_alias,
-            },
-            "memory.expand_model_alias": {
-                "label": "扩写模型别名",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.expand_model_alias,
-            },
-            "memory.embedding_model_alias": {
-                "label": "Embedding 模型别名",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.embedding_model_alias,
-            },
-            "memory.rerank_model_alias": {
-                "label": "Rerank 模型别名",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.rerank_model_alias,
-            },
-            "memory.bridge_transport": {
-                "label": "兼容接入方式",
-                "input": "choice",
-                "required": True,
-                "recommended": True,
-                "choices": ["http", "command"],
-                "default": active_memory.bridge_transport,
-            },
-            "memory.bridge_url": {
-                "label": "兼容 Bridge 地址",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_url,
-            },
-            "memory.bridge_command": {
-                "label": "兼容本地命令",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_command,
-            },
-            "memory.bridge_command_cwd": {
-                "label": "本地命令工作目录",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_command_cwd,
-            },
-            "memory.bridge_command_timeout_seconds": {
-                "label": "本地命令超时时间（秒）",
-                "input": "text",
-                "required": False,
-                "recommended": True,
-                "default": active_memory.bridge_command_timeout_seconds,
-            },
-            "memory.bridge_api_key_env": {
-                "label": "兼容 API Key 环境变量名",
-                "input": "env_name",
-                "required": False,
-                "recommended": False,
-                "secret_target": {
-                    "target_kind": "memory",
-                    "target_key": "memory.bridge_api_key_env",
-                },
-                "default": active_memory.bridge_api_key_env,
-            },
-            "memory.bridge_timeout_seconds": {
-                "label": "兼容 Bridge 超时时间（秒）",
-                "input": "text",
-                "required": False,
-                "recommended": True,
-                "default": active_memory.bridge_timeout_seconds,
-            },
-            "memory.bridge_api_key_header": {
-                "label": "API Key Header",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_api_key_header,
-            },
-            "memory.bridge_api_key_scheme": {
-                "label": "API Key 前缀",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_api_key_scheme,
-            },
-            "memory.bridge_health_path": {
-                "label": "健康检查路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_health_path,
-            },
-            "memory.bridge_search_path": {
-                "label": "检索路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_search_path,
-            },
-            "memory.bridge_sync_path": {
-                "label": "同步路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_sync_path,
-            },
-            "memory.bridge_ingest_path": {
-                "label": "写入路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_ingest_path,
-            },
-            "memory.bridge_derivations_path": {
-                "label": "派生查询路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_derivations_path,
-            },
-            "memory.bridge_evidence_path": {
-                "label": "证据链路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_evidence_path,
-            },
-            "memory.bridge_maintenance_path": {
-                "label": "维护任务路径",
-                "input": "text",
-                "required": False,
-                "recommended": False,
-                "default": active_memory.bridge_maintenance_path,
             },
             "front_door.mode": {
                 "label": "Front-door 模式",

@@ -1,5 +1,7 @@
 # Implementation Plan: Feature 028 — MemU Deep Integration
 
+> **已废弃（2026-03-17）**：MemU bridge 实现已整体移除。本计划仅作历史参考。
+
 **Branch**: `028-memu-deep-integration` | **Date**: 2026-03-08 | **Spec**: `.specify/features/028-memu-deep-integration/spec.md`
 **Input**: `.specify/features/028-memu-deep-integration/spec.md` + `research/research-synthesis.md`
 

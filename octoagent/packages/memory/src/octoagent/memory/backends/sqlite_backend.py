@@ -340,8 +340,6 @@ class SqliteMemoryBackend(MemoryBackend):
             MemoryMaintenanceCommandKind.SYNC_RESUME,
         }:
             metadata["replay_required"] = pending_backlog > 0
-        elif command.kind is MemoryMaintenanceCommandKind.BRIDGE_RECONNECT:
-            metadata["bridge_state"] = "sqlite-only"
 
         return MemoryMaintenanceRun(
             run_id=f"sqlite-maintenance:{command.command_id}",

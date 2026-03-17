@@ -16,7 +16,9 @@ predecessor: "Feature 027（Memory Console 产品化）、Feature 035（Workbenc
 **Created**: 2026-03-13  
 **Updated**: 2026-03-14
 **Status**: Implemented
-**Input**: 重构 `/memory` 页面。去掉用户无法理解的开发/调试术语与 raw ID；清楚告诉用户 Memory 现在有没有工作、为什么这样判断、以及要让各项功能跑起来应该配置或执行什么；配置说明必须尽量精简，并明确指向 Settings 中的对应入口，同时支持 `local_only / memu + command / memu + http` 三条配置路径。
+**Input**: 重构 `/memory` 页面。去掉用户无法理解的开发/调试术语与 raw ID；清楚告诉用户 Memory 现在有没有工作、为什么这样判断、以及要让各项功能跑起来应该配置或执行什么；配置说明必须尽量精简，并明确指向 Settings 中的对应入口。
+
+> **2026-03-17 更新**：MemU bridge 实现已整体移除。Memory 配置已简化为 `local_only` 单一模式，以下涉及 `memu + command / memu + http` 的场景和验收条件仅作历史参考。
 
 ## Problem Statement
 

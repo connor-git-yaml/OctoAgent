@@ -2,15 +2,20 @@
 feature_id: "028"
 title: "MemU Deep Integration"
 milestone: "M3"
-status: "Implemented"
+status: "Deprecated"
 created: "2026-03-08"
-updated: "2026-03-08"
+updated: "2026-03-17"
 research_mode: "full"
 blueprint_ref: "docs/m3-feature-split.md Feature 028；docs/blueprint.md §8.7.4 / M3；Feature 020 Memory Core；Feature 025-B；Feature 026；Feature 027"
 predecessor: "Feature 020 / Feature 025-B / Feature 026 / Feature 027"
 ---
 
 # Feature Specification: MemU Deep Integration
+
+> **已废弃（2026-03-17）**：MemU bridge 实现（`HttpMemUBridge`、`CommandMemUBridge`、`MemUBackend`）已整体移除。
+> Memory backend 已简化为 SQLite-only 本地模式。本 spec 仅作历史设计参考，不再指导实现。
+> 其中 evidence-aligned ingest、派生层（Category/ToM/Relation）、maintenance 等概念仍保留在 `MemoryService` 中，
+> 但不再依赖外部 bridge 服务。后续高级检索能力将通过 LanceDB 等嵌入式向量引擎实现。
 
 **Feature Branch**: `028-memu-deep-integration`  
 **Created**: 2026-03-08  

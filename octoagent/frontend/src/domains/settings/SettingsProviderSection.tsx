@@ -13,7 +13,6 @@ interface ProviderOption {
 }
 
 interface SettingsProviderSectionProps {
-  usingEchoMode: boolean;
   providerDrafts: ProviderDraftItem[];
   aliasDrafts: ModelAliasDraftItem[];
   defaultProvider: ProviderDraftItem;
@@ -35,7 +34,6 @@ interface SettingsProviderSectionProps {
 }
 
 export default function SettingsProviderSection({
-  usingEchoMode,
   providerDrafts,
   aliasDrafts,
   defaultProvider,
@@ -55,43 +53,17 @@ export default function SettingsProviderSection({
   onRemoveAliasDraft,
   onOpenAIOAuthConnect,
 }: SettingsProviderSectionProps) {
-  const activeProvidersCount = providerDrafts.filter((item) => item.enabled).length;
-
   return (
     <>
       <section id="settings-group-models" className="wb-panel">
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Models & Providers</p>
-            <h3>先添加可用的模型 Provider</h3>
-            <p className="wb-panel-copy">
-              没配真实模型时，系统会先自动回退。你只需要在这里补 Provider、API Key 或 OAuth。
-            </p>
-            <div className="wb-chip-row">
-              <span className="wb-chip">平台级</span>
-              <span className="wb-chip">会影响新的默认模型路由</span>
-            </div>
+            <h3>模型 Provider 管理</h3>
           </div>
         </div>
 
         <div className="wb-provider-layout">
-          <div className="wb-provider-card">
-            <div className="wb-provider-card-head">
-              <div>
-                <p className="wb-card-label">连接状态</p>
-                <strong>{usingEchoMode ? "未连接" : "已连接"}</strong>
-              </div>
-              <span className={`wb-status-pill ${usingEchoMode ? "is-warning" : "is-ready"}`}>
-                {usingEchoMode ? "体验模式" : `${activeProvidersCount} 个 Provider`}
-              </span>
-            </div>
-            {usingEchoMode ? (
-              <p className="wb-panel-copy">
-                添加至少一个 Provider 并填写 API Key 后保存即可切换到真实模型。
-              </p>
-            ) : null}
-          </div>
-
           <div className="wb-provider-card">
             <div className="wb-provider-card-head">
               <div>
@@ -301,7 +273,6 @@ export default function SettingsProviderSection({
           <div>
             <p className="wb-card-label">模型别名</p>
             <h3>别名只引用 provider + model</h3>
-            <p className="wb-panel-copy">业务侧统一使用 alias，底层 Provider 和模型切换都在这里完成。</p>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
             <button

@@ -701,9 +701,6 @@ class MemoryService:
             MemoryMaintenanceCommandKind.SYNC_RESUME,
         }:
             return await self._run_replay_maintenance(command)
-        if command.kind is MemoryMaintenanceCommandKind.BRIDGE_RECONNECT:
-            return await self._run_bridge_reconnect(command)
-
         backend = await self._select_backend_for_advanced_calls()
         try:
             run = await backend.run_maintenance(command)
@@ -1342,107 +1339,6 @@ class MemoryService:
                 MemoryBackendState.HEALTHY
                 if status is MemoryMaintenanceRunStatus.COMPLETED
                 else MemoryBackendState.DEGRADED
-            ),
-        )
-        await self._store.insert_maintenance_run(run)
-        await self._conn.commit()
-        return run
-
-    async def _run_bridge_reconnect(
-        self,
-        command: MemoryMaintenanceCommand,
-    ) -> MemoryMaintenanceRun:
-        started_at = datetime.now(UTC)
-        if self._backend.backend_id == self._fallback_backend.backend_id:
-            run = MemoryMaintenanceRun(
-                run_id=str(ULID()),
-                command_id=command.command_id,
-                kind=command.kind,
-                scope_id=command.scope_id,
-                partition=command.partition,
-                status=MemoryMaintenanceRunStatus.DEGRADED,
-                backend_used=self._fallback_backend.backend_id,
-                diagnostic_refs=["memory:backend-status"],
-                error_summary="当前没有可重连的高级 memory backend。",
-                metadata=dict(command.metadata),
-                started_at=started_at,
-                finished_at=datetime.now(UTC),
-                backend_state=MemoryBackendState.DEGRADED,
-            )
-            await self._store.insert_maintenance_run(run)
-            await self._conn.commit()
-            return run
-
-        try:
-            reconnect_run = await self._backend.run_maintenance(command)
-            status = await self._backend.get_status()
-        except Exception as exc:
-            self._mark_backend_degraded(
-                "BACKEND_RECONNECT_FAILED",
-                str(exc) or "高级 memory backend reconnect 失败。",
-            )
-            status = MemoryBackendStatus(
-                backend_id=self._backend.backend_id,
-                state=MemoryBackendState.UNAVAILABLE,
-                active_backend=self._fallback_backend.backend_id,
-                failure_code="BACKEND_RECONNECT_FAILED",
-                message=str(exc),
-            )
-            reconnect_run = None
-
-        pending_backlog = await self._store.count_pending_sync_backlog()
-        run_status = (
-            MemoryMaintenanceRunStatus.COMPLETED
-            if (
-                reconnect_run is not None
-                and reconnect_run.status is MemoryMaintenanceRunStatus.COMPLETED
-                and status.state is MemoryBackendState.HEALTHY
-                and pending_backlog == 0
-            )
-            else MemoryMaintenanceRunStatus.DEGRADED
-        )
-        if run_status is MemoryMaintenanceRunStatus.COMPLETED:
-            self._mark_backend_healthy()
-        run = MemoryMaintenanceRun(
-            run_id=(reconnect_run.run_id if reconnect_run is not None else str(ULID())),
-            command_id=command.command_id,
-            kind=command.kind,
-            scope_id=command.scope_id,
-            partition=command.partition,
-            status=run_status,
-            backend_used=self._backend.backend_id,
-            fragment_refs=(reconnect_run.fragment_refs if reconnect_run is not None else []),
-            proposal_refs=(reconnect_run.proposal_refs if reconnect_run is not None else []),
-            derived_refs=(reconnect_run.derived_refs if reconnect_run is not None else []),
-            diagnostic_refs=[
-                *(reconnect_run.diagnostic_refs if reconnect_run is not None else []),
-                "memory:backend-status",
-            ],
-            error_summary=(
-                ""
-                if run_status is MemoryMaintenanceRunStatus.COMPLETED
-                else (
-                    status.message
-                    or (
-                        "bridge reconnect 已执行，但仍存在待 replay backlog。"
-                        if pending_backlog > 0
-                        else ""
-                    )
-                )
-            ),
-            metadata={
-                **(reconnect_run.metadata if reconnect_run is not None else {}),
-                **command.metadata,
-                "backend_state": status.state.value,
-                "active_backend": status.active_backend,
-                "pending_backlog": pending_backlog,
-            },
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            backend_state=(
-                MemoryBackendState.RECOVERING
-                if status.state is MemoryBackendState.HEALTHY and pending_backlog > 0
-                else status.state
             ),
         )
         await self._store.insert_maintenance_run(run)
