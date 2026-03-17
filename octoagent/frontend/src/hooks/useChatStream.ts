@@ -166,6 +166,31 @@ export function useChatStream(
   const activeAgentMessageIdRef = useRef<string | null>(null);
   const attemptedRestoreSignatureRef = useRef<string | null>(null);
   const restoreTaskIdSignature = (restoreTarget?.taskIds ?? []).join("|");
+  const prevRestoreSignatureRef = useRef(restoreTaskIdSignature);
+
+  // Session 切换时清空旧状态，让 restore effect 能重新加载新会话消息
+  useEffect(() => {
+    const prev = prevRestoreSignatureRef.current;
+    prevRestoreSignatureRef.current = restoreTaskIdSignature;
+    if (prev === restoreTaskIdSignature) {
+      return;
+    }
+    // restoreTaskIdSignature 变化说明用户切换了 Session
+    // 关闭旧 SSE 连接
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    activeAgentMessageIdRef.current = null;
+    // 重置消息和任务状态，让后续 restore effect 重新触发
+    setMessages([]);
+    setTaskId(null);
+    setStreaming(false);
+    setError(null);
+    setLiveApproval(null);
+    setSuppressedRestoreSignature(null);
+    attemptedRestoreSignatureRef.current = null;
+  }, [restoreTaskIdSignature]);
 
   const spawnAgentPlaceholder = useCallback(() => {
     const placeholderId = `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
