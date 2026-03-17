@@ -844,7 +844,7 @@ class ControlPlaneService:
             session_items.append(
                 SessionProjectionItem(
                     session_id=agent_sess.agent_session_id,
-                    thread_id=agent_sess.thread_id,
+                    thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
                     task_id="",
                     parent_task_id="",
                     parent_work_id="",
