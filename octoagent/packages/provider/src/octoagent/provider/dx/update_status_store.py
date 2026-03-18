@@ -6,8 +6,12 @@ import json
 import os
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeVar
+
+# 活跃 update 超过此秒数视为孤儿进程残留，自动清理
+_STALE_ACTIVE_ATTEMPT_SECONDS = 600  # 10 分钟
 
 from filelock import FileLock
 from octoagent.core.models import (
@@ -124,6 +128,11 @@ class UpdateStatusStore:
             UpdateOverallStatus.FAILED,
             UpdateOverallStatus.ACTION_REQUIRED,
         ):
+            self.clear_active_attempt()
+            return None
+        # 孤儿进程检测：如果活跃 attempt 超时且状态仍非终态，说明进程已被 kill，自动清理
+        age = (datetime.now(timezone.utc) - attempt.started_at).total_seconds()
+        if age > _STALE_ACTIVE_ATTEMPT_SECONDS:
             self.clear_active_attempt()
             return None
         return attempt
