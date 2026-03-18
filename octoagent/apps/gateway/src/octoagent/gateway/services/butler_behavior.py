@@ -10,6 +10,8 @@ from typing import Any
 from octoagent.core.behavior_workspace import (
     BEHAVIOR_FILE_BUDGETS,
     BEHAVIOR_OVERLAY_ORDER,
+    BehaviorLoadProfile,
+    get_profile_allowlist,
     resolve_behavior_workspace,
 )
 from octoagent.core.behavior_workspace import (
@@ -34,6 +36,44 @@ from octoagent.core.models import (
     RuntimeHintBundle,
     ToolUniverseHints,
 )
+
+# ---------------------------------------------------------------------------
+# Feature 063 T2.4: Session 级 BehaviorPack 缓存
+# ---------------------------------------------------------------------------
+# 缓存键 = (profile_id, project_slug, project_root_str, load_profile_value, workspace_root_str)
+# 写入行为文件后通过 invalidate_behavior_pack_cache() 清除。
+_behavior_pack_cache: dict[tuple[str, str, str, str, str], BehaviorPack] = {}
+
+
+def invalidate_behavior_pack_cache(
+    *,
+    project_root: Path | str | None = None,
+) -> int:
+    """清除行为文件缓存。
+
+    Args:
+        project_root: 如果提供，仅清除该 project_root 相关的条目；
+                      否则清除全部缓存。
+
+    Returns:
+        被清除的缓存条目数。
+    """
+    if project_root is None:
+        count = len(_behavior_pack_cache)
+        _behavior_pack_cache.clear()
+        return count
+
+    root_str = str(Path(project_root).resolve())
+    keys_to_remove = [k for k in _behavior_pack_cache if k[2] == root_str]
+    for k in keys_to_remove:
+        del _behavior_pack_cache[k]
+    return len(keys_to_remove)
+
+
+def behavior_pack_cache_size() -> int:
+    """返回当前缓存条目数（供测试和诊断使用）。"""
+    return len(_behavior_pack_cache)
+
 
 _WEATHER_QUERY_TOKENS = ("天气", "weather", "气温", "温度", "下雨", "降雨", "体感", "穿衣")
 _WEATHER_LOCATION_STOPWORDS = (
@@ -230,7 +270,24 @@ def resolve_behavior_pack(
     workspace_id: str = "",
     workspace_slug: str = "",
     workspace_root_path: Path | str | None = None,
+    load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> BehaviorPack:
+    # Feature 063 T2.4: 缓存命中检查
+    resolved_root = str((project_root or Path.cwd()).resolve())
+    resolved_workspace = (
+        str(Path(workspace_root_path).resolve()) if workspace_root_path else ""
+    )
+    cache_key = (
+        agent_profile.profile_id,
+        project_slug,
+        resolved_root,
+        load_profile.value,
+        resolved_workspace,
+    )
+    cached = _behavior_pack_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     metadata = dict(agent_profile.metadata)
     filesystem_pack = _resolve_filesystem_behavior_pack(
         agent_profile=agent_profile,
@@ -240,31 +297,37 @@ def resolve_behavior_pack(
         workspace_id=workspace_id,
         workspace_slug=workspace_slug,
         workspace_root_path=workspace_root_path,
+        load_profile=load_profile,
     )
     if filesystem_pack is not None:
+        _behavior_pack_cache[cache_key] = filesystem_pack
         return filesystem_pack
 
     raw_pack = metadata.get("behavior_pack")
     if isinstance(raw_pack, dict):
         try:
             pack = BehaviorPack.model_validate(raw_pack)
-            if pack.layers:
-                return pack
-            return pack.model_copy(
-                update={
-                    "layers": build_behavior_layers(pack.files),
-                    "source_chain": pack.source_chain
-                    or ["agent_profile.metadata:behavior_pack"],
-                }
-            )
+            if not pack.layers:
+                pack = pack.model_copy(
+                    update={
+                        "layers": build_behavior_layers(pack.files),
+                        "source_chain": pack.source_chain
+                        or ["agent_profile.metadata:behavior_pack"],
+                    }
+                )
+            _behavior_pack_cache[cache_key] = pack
+            return pack
         except Exception:
             pass
 
-    files = build_default_behavior_pack_files(
+    all_files = build_default_behavior_pack_files(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
     )
+    # Feature 063: 在 fallback 路径也应用 load_profile 过滤
+    profile_allowlist = get_profile_allowlist(load_profile)
+    files = [f for f in all_files if f.file_id in profile_allowlist]
     source_chain = ["default_behavior_templates"]
     if agent_profile.scope.value == "project" and project_slug:
         source_chain.append(f"project:{project_slug}")
@@ -274,7 +337,7 @@ def resolve_behavior_pack(
         "fallback_requires_boundary_note": True,
         "delegate_after_clarification_for_realtime": True,
     }
-    return BehaviorPack(
+    result = BehaviorPack(
         pack_id=f"behavior-pack:{agent_profile.profile_id}",
         profile_id=agent_profile.profile_id,
         scope=agent_profile.scope.value,
@@ -288,6 +351,8 @@ def resolve_behavior_pack(
             "file_budgets": dict(BEHAVIOR_FILE_BUDGETS),
         },
     )
+    _behavior_pack_cache[cache_key] = result
+    return result
 
 
 def build_default_behavior_pack_files(
@@ -396,16 +461,27 @@ def build_tool_universe_hints(
 
 
 def build_behavior_slice_envelope(pack: BehaviorPack) -> BehaviorSliceEnvelope:
-    shared_files = [item for item in pack.files if item.share_with_workers]
+    """构建 Worker 行为切片信封。
+
+    Feature 063 T2.6: 改用 BehaviorLoadProfile.WORKER 白名单过滤，
+    替代原有的 ad-hoc share_with_workers 过滤。
+    """
+    worker_allowlist = get_profile_allowlist(BehaviorLoadProfile.WORKER)
+    # 同时保持 share_with_workers 兼容：取交集
+    shared_files = [
+        item for item in pack.files
+        if item.share_with_workers and item.file_id in worker_allowlist
+    ]
     shared_ids = [item.file_id for item in shared_files]
     shared_layers = build_behavior_layers(shared_files)
     return BehaviorSliceEnvelope(
-        summary="Worker 仅继承可共享的行为切片，不继承 Butler 私有偏好全集。",
+        summary="Worker 仅继承 WORKER profile 定义的行为子集，不继承 Butler 私有偏好全集。",
         shared_file_ids=shared_ids,
         layers=shared_layers,
         metadata={
             "shared_file_count": len(shared_files),
             "private_file_count": len(pack.files) - len(shared_files),
+            "load_profile": BehaviorLoadProfile.WORKER.value,
         },
     )
 
@@ -574,7 +650,7 @@ def render_behavior_system_block(
     workspace_id: str = "",
     workspace_slug: str = "",
     workspace_root_path: Path | str | None = None,
-    shared_only: bool = False,
+    load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> str:
     pack = resolve_behavior_pack(
         agent_profile=agent_profile,
@@ -584,9 +660,12 @@ def render_behavior_system_block(
         workspace_id=workspace_id,
         workspace_slug=workspace_slug,
         workspace_root_path=workspace_root_path,
+        load_profile=load_profile,
     )
     effective_layers = (
-        build_behavior_slice_envelope(pack).layers if shared_only else pack.layers
+        build_behavior_slice_envelope(pack).layers
+        if load_profile == BehaviorLoadProfile.WORKER
+        else pack.layers
     )
     path_manifest = dict(pack.metadata.get("path_manifest", {}))
     storage_boundary_hints = dict(pack.metadata.get("storage_boundary_hints", {}))
@@ -989,6 +1068,7 @@ def _resolve_filesystem_behavior_pack(
     workspace_id: str = "",
     workspace_slug: str = "",
     workspace_root_path: Path | str | None = None,
+    load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> BehaviorPack | None:
     if project_root is None:
         return None
@@ -1002,6 +1082,7 @@ def _resolve_filesystem_behavior_pack(
         workspace_slug=workspace_slug,
         project_runtime_root=workspace_root_path,
         workspace_root_path=workspace_root_path,
+        load_profile=load_profile,
     )
 
     return _build_behavior_pack_from_workspace(

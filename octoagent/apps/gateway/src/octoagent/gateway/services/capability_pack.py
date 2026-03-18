@@ -75,8 +75,10 @@ import structlog
 
 from octoagent.core.behavior_workspace import (
     BEHAVIOR_FILE_BUDGETS,
+    BOOTSTRAP_COMPLETED_MARKER,
     check_behavior_file_budget,
     get_behavior_file_review_modes,
+    mark_onboarding_completed,
     read_behavior_file_content,
     validate_behavior_file_path,
 )
@@ -3145,15 +3147,39 @@ class CapabilityPackService:
                 file_id=file_id,
             )
 
-            return json.dumps(
-                {
-                    "file_path": file_path,
-                    "written": True,
-                    "chars_written": len(content),
-                    "budget_chars": budget_result["budget_chars"],
-                },
-                ensure_ascii=False,
+            # Feature 063 T1.4: 路径 A — 检测 BOOTSTRAP.md 的 <!-- COMPLETED --> 标记
+            onboarding_completed = False
+            if file_id == "BOOTSTRAP.md" and BOOTSTRAP_COMPLETED_MARKER in content:
+                try:
+                    mark_onboarding_completed(self._project_root)
+                    onboarding_completed = True
+                    _log.info(
+                        "onboarding_completed_via_marker",
+                        file_path=file_path,
+                    )
+                except Exception:
+                    _log.warning(
+                        "onboarding_completion_mark_failed",
+                        file_path=file_path,
+                    )
+
+            # Feature 063 T2.4: 所有副作用完成后 invalidate 缓存
+            # 确保 onboarding 标记等状态变更已落盘，避免缓存重建读到过期状态
+            from octoagent.gateway.services.butler_behavior import (
+                invalidate_behavior_pack_cache,
             )
+
+            invalidate_behavior_pack_cache(project_root=self._project_root)
+
+            result_payload: dict[str, Any] = {
+                "file_path": file_path,
+                "written": True,
+                "chars_written": len(content),
+                "budget_chars": budget_result["budget_chars"],
+            }
+            if onboarding_completed:
+                result_payload["onboarding_completed"] = True
+            return json.dumps(result_payload, ensure_ascii=False)
 
         # Feature 057: skills tool -- LLM 主动发现和加载 SKILL.md
         from octoagent.skills.tools import SkillsTool as _SkillsTool

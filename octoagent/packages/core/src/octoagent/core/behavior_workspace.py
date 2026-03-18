@@ -1,10 +1,18 @@
-"""Feature 055: Behavior workspace 文件解析。"""
+"""Feature 055: Behavior workspace 文件解析。
+
+Feature 063 扩展: Bootstrap 生命周期管理 + BehaviorLoadProfile 差异化加载。
+"""
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import TypedDict
 
@@ -79,6 +87,280 @@ PROJECT_SHARED_BOOTSTRAP_TEMPLATE_IDS = tuple(
 PROJECT_AGENT_BOOTSTRAP_TEMPLATE_IDS = tuple(
     f"behavior:project_agent:{file_id}" for file_id in PROJECT_AGENT_OVERLAY_FILE_IDS
 )
+
+# Feature 063: Bootstrap 完成标记
+BOOTSTRAP_COMPLETED_MARKER = "<!-- COMPLETED -->"
+
+# Feature 063: 行为文件总大小警告阈值（字符）
+_BEHAVIOR_SIZE_WARNING_THRESHOLD = 15000
+
+
+# ---------------------------------------------------------------------------
+# Feature 063: BehaviorLoadProfile — 差异化加载
+# ---------------------------------------------------------------------------
+
+
+class BehaviorLoadProfile(str, Enum):
+    """Agent 角色对应的行为文件加载级别。"""
+
+    FULL = "full"  # Butler：全部 9 个文件
+    WORKER = "worker"  # Worker：AGENTS + TOOLS + IDENTITY + PROJECT + KNOWLEDGE
+    MINIMAL = "minimal"  # Subagent：AGENTS + TOOLS + IDENTITY + USER
+
+
+_PROFILE_ALLOWLIST: dict[BehaviorLoadProfile, frozenset[str]] = {
+    BehaviorLoadProfile.FULL: frozenset(ALL_BEHAVIOR_FILE_IDS),
+    BehaviorLoadProfile.WORKER: frozenset({
+        "AGENTS.md", "TOOLS.md", "IDENTITY.md", "PROJECT.md", "KNOWLEDGE.md",
+    }),
+    BehaviorLoadProfile.MINIMAL: frozenset({
+        "AGENTS.md", "TOOLS.md", "IDENTITY.md", "USER.md",
+    }),
+}
+
+
+def get_profile_allowlist(profile: BehaviorLoadProfile) -> frozenset[str]:
+    """返回指定 load_profile 对应的 file_id 白名单（公共 API）。"""
+    return _PROFILE_ALLOWLIST[profile]
+
+
+# ---------------------------------------------------------------------------
+# Feature 063: OnboardingState — Bootstrap 生命周期
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OnboardingState:
+    """Bootstrap 引导状态，持久化到 .onboarding-state.json。"""
+
+    bootstrap_seeded_at: str | None = None
+    onboarding_completed_at: str | None = None
+
+    def is_completed(self) -> bool:
+        return self.onboarding_completed_at is not None
+
+
+def _onboarding_state_path(project_root: Path) -> Path:
+    """返回 onboarding 状态文件路径。"""
+    return project_root.resolve() / "behavior" / ".onboarding-state.json"
+
+
+def load_onboarding_state(
+    project_root: Path,
+    *,
+    bootstrap_file_path: Path | None = None,
+) -> OnboardingState:
+    """读取 onboarding 状态，含被动完成检测（路径 B：文件删除触发）。
+
+    如果 bootstrap_seeded_at 存在但 BOOTSTRAP.md 已不在磁盘上，
+    自动标记 onboarding 完成。
+    """
+    state_path = _onboarding_state_path(project_root)
+    state = OnboardingState()
+
+    if state_path.exists():
+        try:
+            raw = json.loads(state_path.read_text(encoding="utf-8"))
+            state.bootstrap_seeded_at = raw.get("bootstrap_seeded_at")
+            state.onboarding_completed_at = raw.get("onboarding_completed_at")
+        except (json.JSONDecodeError, OSError):
+            log.warning("onboarding_state_read_failed", path=str(state_path))
+    else:
+        # Legacy 兼容检测（T1.7）：无 state 文件但项目已在使用
+        state = _detect_legacy_onboarding_completion(project_root)
+        if state.is_completed():
+            save_onboarding_state(project_root, state)
+            return state
+
+    # 路径 B（T1.5）：文件删除触发完成
+    if state.bootstrap_seeded_at and not state.onboarding_completed_at:
+        if bootstrap_file_path is None:
+            bootstrap_file_path = (
+                project_root.resolve() / "behavior" / "system" / "BOOTSTRAP.md"
+            )
+        if not bootstrap_file_path.exists():
+            state.onboarding_completed_at = datetime.now(timezone.utc).isoformat()
+            save_onboarding_state(project_root, state)
+            log.info(
+                "onboarding_completed_via_file_deletion",
+                bootstrap_path=str(bootstrap_file_path),
+            )
+
+    return state
+
+
+def save_onboarding_state(project_root: Path, state: OnboardingState) -> None:
+    """原子写入 onboarding 状态文件（先写 .tmp 再 rename）。"""
+    state_path = _onboarding_state_path(project_root)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "bootstrap_seeded_at": state.bootstrap_seeded_at,
+        "onboarding_completed_at": state.onboarding_completed_at,
+    }
+    # 原子写入：先写临时文件再 rename
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(state_path.parent), suffix=".tmp", prefix=".onboarding-state-",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, str(state_path))
+    except Exception:
+        # 清理临时文件
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def mark_onboarding_completed(project_root: Path) -> OnboardingState:
+    """将 onboarding 标记为已完成。"""
+    state = load_onboarding_state(project_root)
+    if not state.onboarding_completed_at:
+        state.onboarding_completed_at = datetime.now(timezone.utc).isoformat()
+        save_onboarding_state(project_root, state)
+        log.info("onboarding_completed_via_marker", project_root=str(project_root))
+    return state
+
+
+def _detect_legacy_onboarding_completion(project_root: Path) -> OnboardingState:
+    """Legacy 兼容检测（T1.7）：无 state 文件时推断 onboarding 是否已完成。
+
+    指标 1：IDENTITY.md 内容已被修改（与默认模板不同）
+    指标 2：存在历史 session 记录（data/ 目录非空）
+    """
+    root = project_root.resolve()
+    state = OnboardingState()
+
+    # 指标 1：检查 IDENTITY.md 是否已被修改
+    identity_paths = [
+        root / "behavior" / "agents" / "butler" / "IDENTITY.md",
+    ]
+    identity_modified = False
+    for identity_path in identity_paths:
+        if identity_path.exists():
+            try:
+                content = identity_path.read_text(encoding="utf-8").strip()
+                # 检查是否仍为默认模板内容
+                default_marker = "当前 Agent 名称："
+                if content and default_marker not in content:
+                    identity_modified = True
+                    break
+                # 即使包含默认标记，如果长度比默认模板长很多，也视为已修改
+                if len(content) > 200:
+                    identity_modified = True
+                    break
+            except OSError:
+                pass
+
+    # 指标 2：检查 data/ 目录是否非空（有历史 session）
+    data_dir = root / "data"
+    has_sessions = False
+    if data_dir.exists():
+        try:
+            has_sessions = any(data_dir.iterdir())
+        except OSError:
+            pass
+
+    if identity_modified or has_sessions:
+        now = datetime.now(timezone.utc).isoformat()
+        state.bootstrap_seeded_at = now  # 回填
+        state.onboarding_completed_at = now
+        log.info(
+            "legacy_onboarding_completion_detected",
+            identity_modified=identity_modified,
+            has_sessions=has_sessions,
+        )
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Feature 063: Head/Tail 截断策略
+# ---------------------------------------------------------------------------
+
+
+def truncate_behavior_content(content: str, budget: int) -> str:
+    """按 head/tail 策略截断行为文件内容。
+
+    保留 70% 头部 + 20% 尾部 + 中间插入截断标记。
+    最小预算 64 字符——低于此阈值返回空字符串。
+    """
+    content = content.strip()
+    if len(content) <= budget:
+        return content
+    if budget < 64:
+        return ""
+
+    # 截断标记本身需要的空间（估算）
+    marker_template = (
+        "\n\n[... 中间内容已截断（原文 {total} 字符，预算 {budget} 字符），"
+        "完整内容请通过 behavior.read_file 读取 ...]\n\n"
+    )
+    marker = marker_template.format(total=len(content), budget=budget)
+    marker_len = len(marker)
+
+    usable = budget - marker_len
+    if usable < 40:
+        # 预算太紧，只保留头部
+        return content[:budget]
+
+    head_len = int(usable * 0.7)
+    tail_len = int(usable * 0.2)
+    # 剩余给 marker
+    head = content[:head_len].rstrip()
+    tail = content[-tail_len:].lstrip() if tail_len > 0 else ""
+
+    return head + marker + tail
+
+
+# ---------------------------------------------------------------------------
+# Feature 063: 行为文件总大小测量
+# ---------------------------------------------------------------------------
+
+
+def measure_behavior_total_size(
+    project_root: Path,
+    agent_slug: str = "butler",
+) -> dict[str, int]:
+    """测量所有行为文件的字符总量。
+
+    Returns:
+        {"file_id": char_count, ..., "__total__": total_chars}
+    """
+    root = project_root.resolve()
+    sizes: dict[str, int] = {}
+    total = 0
+
+    system_dir = behavior_shared_dir(root)
+    agent_dir_path = behavior_agent_dir(root, agent_slug)
+
+    for file_id in ALL_BEHAVIOR_FILE_IDS:
+        # 尝试多个可能的路径
+        candidates = []
+        if file_id in SHARED_BEHAVIOR_FILE_IDS:
+            candidates.append(system_dir / file_id)
+        if file_id in AGENT_PRIVATE_BEHAVIOR_FILE_IDS:
+            candidates.append(agent_dir_path / file_id)
+        if file_id in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
+            # 默认 project
+            candidates.append(root / "projects" / "default" / "behavior" / file_id)
+
+        char_count = 0
+        for path in candidates:
+            if path.exists():
+                try:
+                    char_count = len(path.read_text(encoding="utf-8"))
+                    break
+                except OSError:
+                    pass
+        sizes[file_id] = char_count
+        total += char_count
+
+    sizes["__total__"] = total
+    return sizes
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +564,15 @@ def ensure_filesystem_skeleton(
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             created.append(str(target))
+            # T1.2: 创建 BOOTSTRAP.md 时写入 bootstrap_seeded_at
+            if file_id == "BOOTSTRAP.md":
+                try:
+                    state = load_onboarding_state(root)
+                    if not state.bootstrap_seeded_at:
+                        state.bootstrap_seeded_at = datetime.now(timezone.utc).isoformat()
+                        save_onboarding_state(root, state)
+                except Exception:
+                    log.warning("onboarding_state_seed_failed", path=str(target))
         except Exception:
             log.warning(
                 "behavior_template_materialize_failed",
@@ -525,6 +816,7 @@ def _read_behavior_file(path: Path) -> str:
 
 
 def _apply_behavior_budget(*, file_id: str, content: str) -> _BehaviorBudgetResult:
+    """应用字符预算限制，超出时使用 head/tail 截断策略（Feature 063 T2.3）。"""
     normalized = content.strip()
     original_char_count = len(normalized)
     budget_chars = _budget_for_file(file_id)
@@ -537,7 +829,8 @@ def _apply_behavior_budget(*, file_id: str, content: str) -> _BehaviorBudgetResu
             truncated=False,
             truncation_reason="",
         )
-    effective = normalized[:budget_chars].rstrip()
+    # Feature 063: 改用 head/tail 截断（70% 头 + 20% 尾 + 中间标记）
+    effective = truncate_behavior_content(normalized, budget_chars)
     return _BehaviorBudgetResult(
         content=effective,
         budget_chars=budget_chars,
@@ -766,6 +1059,7 @@ def resolve_behavior_workspace(
     workspace_slug: str = "",
     project_runtime_root: Path | str | None = None,
     workspace_root_path: Path | str | None = None,
+    load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
     data_root_path: Path | str | None = None,
     notes_root_path: Path | str | None = None,
     artifacts_root_path: Path | str | None = None,
@@ -845,6 +1139,11 @@ def resolve_behavior_workspace(
         if item.file_id not in defaults
     }
 
+    # Feature 063: 加载 onboarding 状态（用于 BOOTSTRAP.md 跳过判断）
+    onboarding_state = load_onboarding_state(root)
+    # Feature 063: load_profile 白名单
+    profile_allowlist = _PROFILE_ALLOWLIST[load_profile]
+
     files: list[BehaviorWorkspaceFile] = []
     used_project_agent = False
     used_project_agent_local = False
@@ -859,6 +1158,14 @@ def resolve_behavior_workspace(
     used_default = False
 
     for file_id in ALL_BEHAVIOR_FILE_IDS:
+        # Feature 063 T2.2: BehaviorLoadProfile 过滤
+        if file_id not in profile_allowlist:
+            continue
+
+        # Feature 063 T1.3: 跳过已完成的 BOOTSTRAP.md
+        if file_id == "BOOTSTRAP.md" and onboarding_state.is_completed():
+            continue
+
         default_file = defaults.get(file_id) or advanced_defaults.get(file_id)
         if default_file is None:
             continue
@@ -1292,6 +1599,9 @@ def _default_content_for_file(
             "用户事实进入 Memory；Agent 名称/性格进入 behavior proposal；"
             "敏感信息进入 secret bindings workflow，不写进任何 md / json 行为文件。"
             "当需要修改 behavior files 时，先根据 project_path_manifest 确认 canonical path。"
+            "\n\n## 完成引导\n\n"
+            "当你完成上述所有引导步骤后，使用 behavior.write_file 将本文件内容替换为\n"
+            "`<!-- COMPLETED -->` 来标记引导已完成。此后本文件不再注入你的上下文。"
         )
     if file_id == "SOUL.md":
         return (

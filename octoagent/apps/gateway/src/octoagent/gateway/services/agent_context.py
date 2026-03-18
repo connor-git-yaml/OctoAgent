@@ -80,6 +80,7 @@ from .butler_behavior import (
     render_runtime_hint_block,
     resolve_behavior_pack,
 )
+from octoagent.core.behavior_workspace import BehaviorLoadProfile
 from .connection_metadata import summarize_control_metadata_for_prompt
 from .context_budget import BudgetAllocation
 from .context_compaction import (
@@ -3785,6 +3786,12 @@ class AgentContextService:
             surface=task.requester.channel or "chat",
         )
         is_worker_profile = is_worker_behavior_profile(agent_profile)
+        # Feature 063: 根据 Agent 角色确定行为文件加载级别
+        effective_load_profile = (
+            BehaviorLoadProfile.WORKER
+            if is_worker_profile
+            else BehaviorLoadProfile.FULL
+        )
         include_detailed_recall = memory_prefetch_mode == "detailed_prefetch"
         runtime_hints = build_runtime_hint_bundle(
             user_text=current_user_text,
@@ -3855,7 +3862,8 @@ class AgentContextService:
                     workspace_id=workspace.workspace_id if workspace is not None else "",
                     workspace_slug=workspace.slug if workspace is not None else "",
                     workspace_root_path=workspace.root_path if workspace is not None else "",
-                    shared_only=is_worker_profile,
+                    # Feature 063 T2.7: 根据 Agent 角色选择 load_profile
+                    load_profile=effective_load_profile,
                 ),
             },
             # TODO: resolve_behavior_workspace 也在 render_behavior_system_block 内部
@@ -3876,6 +3884,8 @@ class AgentContextService:
                         workspace_root_path=(
                             workspace.root_path if workspace is not None else ""
                         ),
+                        # Feature 063: 透传 load_profile
+                        load_profile=effective_load_profile,
                     ),
                     is_bootstrap_pending=(
                         bootstrap.status is BootstrapSessionStatus.PENDING

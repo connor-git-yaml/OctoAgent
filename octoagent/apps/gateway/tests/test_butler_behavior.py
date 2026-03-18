@@ -17,6 +17,7 @@ from octoagent.core.models import (
     WorkerType,
 )
 from octoagent.gateway.services.butler_behavior import (
+    behavior_pack_cache_size,
     build_behavior_slice_envelope,
     build_behavior_system_summary,
     build_runtime_hint_bundle,
@@ -24,6 +25,7 @@ from octoagent.gateway.services.butler_behavior import (
     contains_explicit_location,
     decide_butler_decision,
     decide_clarification,
+    invalidate_behavior_pack_cache,
     render_behavior_system_block,
     render_runtime_hint_block,
     resolve_behavior_pack,
@@ -67,13 +69,14 @@ def _build_worker_profile() -> AgentProfile:
     )
 
 
-def test_resolve_behavior_pack_builds_default_files_layers_and_worker_slice() -> None:
+def test_resolve_behavior_pack_builds_default_files_layers_and_worker_slice(tmp_path: Path) -> None:
     profile = _build_profile()
 
     pack = resolve_behavior_pack(
         agent_profile=profile,
         project_name="Default Project",
         project_slug="default-project",
+        project_root=tmp_path,
     )
     slice_envelope = build_behavior_slice_envelope(pack)
 
@@ -85,20 +88,19 @@ def test_resolve_behavior_pack_builds_default_files_layers_and_worker_slice() ->
         BehaviorLayerKind.COMMUNICATION,
         BehaviorLayerKind.SOLVING,
     ]
+    # Feature 063: WORKER profile 白名单过滤（AGENTS + TOOLS + IDENTITY + PROJECT + KNOWLEDGE）
+    # 与 share_with_workers 取交集，IDENTITY 是 advanced（不在默认 pack），
+    # USER 和 BOOTSTRAP 不在 WORKER allowlist
     assert slice_envelope.shared_file_ids == [
         "AGENTS.md",
-        "USER.md",
         "PROJECT.md",
         "KNOWLEDGE.md",
         "TOOLS.md",
-        "BOOTSTRAP.md",
     ]
     assert [item.layer for item in slice_envelope.layers] == [
         BehaviorLayerKind.ROLE,
-        BehaviorLayerKind.COMMUNICATION,
         BehaviorLayerKind.SOLVING,
         BehaviorLayerKind.TOOL_BOUNDARY,
-        BehaviorLayerKind.BOOTSTRAP,
     ]
 
 
@@ -124,13 +126,12 @@ def test_behavior_summary_and_block_expose_effective_sources() -> None:
     )
 
     assert "default_behavior_templates" in summary["source_chain"]
+    # Feature 063: WORKER profile 白名单过滤
     assert summary["worker_slice"]["shared_file_ids"] == [
         "AGENTS.md",
-        "USER.md",
         "PROJECT.md",
         "KNOWLEDGE.md",
         "TOOLS.md",
-        "BOOTSTRAP.md",
     ]
     assert "direct_answer" in summary["decision_modes"]
     assert "effective_location_hint" in summary["runtime_hint_fields"]
@@ -201,19 +202,23 @@ def test_worker_behavior_block_uses_worker_identity_and_shared_slice_only() -> N
         project_name="Default Project",
         project_slug="default-project",
     )
+    from octoagent.core.behavior_workspace import BehaviorLoadProfile
+
     block = render_behavior_system_block(
         agent_profile=profile,
         project_name="Default Project",
         project_slug="default-project",
-        shared_only=True,
+        load_profile=BehaviorLoadProfile.WORKER,
     )
 
     assert pack.files[0].title == "行为总约束"
     assert "specialist Worker" in pack.files[0].content
     assert "Butler 负责默认会话总控" in pack.files[0].content
-    assert "communication:" in block
-    assert "bootstrap:" in block
+    # Feature 063: WORKER profile 不含 USER.md（communication 层）和 BOOTSTRAP.md（bootstrap 层）
+    assert "communication:" not in block
+    assert "bootstrap:" not in block
     assert "tool_boundary:" in block
+    assert "role:" in block
 
 
 def test_resolve_behavior_pack_prefers_project_and_system_workspace_files(tmp_path: Path) -> None:
@@ -401,11 +406,14 @@ def test_render_runtime_hint_block_exposes_effective_location_and_followup_conte
     assert "ToolUniverseHints:" in block
 
 
-def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_worker_lanes() -> None:
+def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_worker_lanes(
+    tmp_path: Path,
+) -> None:
     pack = resolve_behavior_pack(
         agent_profile=_build_profile(),
         project_name="Default Project",
         project_slug="default-project",
+        project_root=tmp_path,
     )
 
     files = {item.file_id: item for item in pack.files}
@@ -472,3 +480,63 @@ def test_render_runtime_hint_block_exposes_tool_universe_hints() -> None:
     assert "web.search(mounted)" in block
     assert "browser.open(blocked:tool_profile_not_allowed)" in block
     assert "tool_universe_note: resolved_before_butler_decision" in block
+
+
+# ============================================================================
+# Feature 063 T2.4: Session 级 BehaviorPack 缓存
+# ============================================================================
+
+
+def test_behavior_pack_cache_hit_returns_same_object(tmp_path: Path) -> None:
+    """第二次调用 resolve_behavior_pack 应返回缓存对象（同一引用）。"""
+    invalidate_behavior_pack_cache()  # 确保干净起始状态
+    profile = _build_profile()
+    kwargs = {
+        "agent_profile": profile,
+        "project_name": "Default Project",
+        "project_slug": "default-project",
+        "project_root": tmp_path,
+    }
+    pack1 = resolve_behavior_pack(**kwargs)
+    pack2 = resolve_behavior_pack(**kwargs)
+    assert pack1 is pack2  # 同一引用，说明命中了缓存
+    invalidate_behavior_pack_cache()
+
+
+def test_behavior_pack_cache_invalidate_forces_rebuild(tmp_path: Path) -> None:
+    """invalidate 后再次调用应返回新对象（不同引用）。"""
+    invalidate_behavior_pack_cache()
+    profile = _build_profile()
+    kwargs = {
+        "agent_profile": profile,
+        "project_name": "Default Project",
+        "project_slug": "default-project",
+        "project_root": tmp_path,
+    }
+    pack1 = resolve_behavior_pack(**kwargs)
+
+    count = invalidate_behavior_pack_cache(project_root=tmp_path)
+    assert count >= 1
+
+    pack2 = resolve_behavior_pack(**kwargs)
+    assert pack1 is not pack2  # 新对象
+    # 内容应相同
+    assert {f.file_id for f in pack1.files} == {f.file_id for f in pack2.files}
+    invalidate_behavior_pack_cache()
+
+
+def test_behavior_pack_cache_invalidate_all(tmp_path: Path) -> None:
+    """不传 project_root 时清除全部缓存。"""
+    invalidate_behavior_pack_cache()
+    profile = _build_profile()
+    resolve_behavior_pack(
+        agent_profile=profile,
+        project_name="Default Project",
+        project_slug="default-project",
+        project_root=tmp_path,
+    )
+    assert behavior_pack_cache_size() >= 1
+
+    count = invalidate_behavior_pack_cache()
+    assert count >= 1
+    assert behavior_pack_cache_size() == 0
