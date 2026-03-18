@@ -215,6 +215,11 @@ class ApprovalRequest(BaseModel):
         ...,
         description="关联的 Task ID",
     )
+    # Feature 061: Agent 实例级隔离，always 覆盖绑定到 agent_runtime_id
+    agent_runtime_id: str = Field(
+        default="",
+        description="Agent 实例 ID（Feature 061: 用于 always 覆盖的实例级隔离）",
+    )
     tool_name: str = Field(
         ...,
         description="触发审批的工具名称",
@@ -487,3 +492,68 @@ class ChatSendResponse(BaseModel):
     task_id: str
     status: str = "accepted"
     stream_url: str
+
+
+# ============================================================
+# Feature 061: 审批覆盖模型
+# ============================================================
+
+
+class ApprovalOverride(BaseModel):
+    """审批覆盖记录 — 持久化用户 always 授权决策
+
+    绑定到 agent_runtime_id（Agent 实例级隔离）。
+    跨进程重启后通过 SQLite 恢复。
+
+    对齐 CLR-001 决策: 方案 A，SQLite 表 approval_overrides。
+    对齐 CLR-002: always 授权绑定到 agent_runtime_id，不同 Agent 实例互相独立。
+    """
+
+    id: int | None = Field(
+        default=None,
+        description="自增主键（SQLite 自动生成）",
+    )
+    agent_runtime_id: str = Field(
+        description="Agent 实例 ID（如 Butler、Worker）",
+    )
+    tool_name: str = Field(
+        description="工具名称（如 docker.run）",
+    )
+    decision: str = Field(
+        default="always",
+        description="授权决策（当前仅 always）",
+    )
+    created_at: str = Field(
+        description="创建时间 ISO 格式",
+    )
+
+    @classmethod
+    def create(cls, agent_runtime_id: str, tool_name: str) -> ApprovalOverride:
+        """工厂方法: 创建新的 always 覆盖记录"""
+        return cls(
+            agent_runtime_id=agent_runtime_id,
+            tool_name=tool_name,
+            decision="always",
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+
+class ApprovalOverrideListResponse(BaseModel):
+    """GET /api/approval-overrides 响应
+
+    Feature 061 T-016: 返回 always 覆盖列表。
+    """
+
+    overrides: list[ApprovalOverride]
+    total: int
+
+
+class ApprovalOverrideDeleteResponse(BaseModel):
+    """DELETE /api/approval-overrides 响应
+
+    Feature 061 T-016: 撤销 always 覆盖的操作结果。
+    """
+
+    success: bool
+    message: str
+    error: str | None = None

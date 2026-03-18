@@ -182,6 +182,8 @@ class CompiledTaskContext:
     effective_agent_profile_id: str = ""
     effective_agent_runtime_id: str = ""
     effective_agent_session_id: str = ""
+    # Feature 061: Agent 权限 Preset（从 AgentRuntime 继承）
+    permission_preset: str = "normal"
     system_blocks: list[dict[str, str]] = field(default_factory=list)
     recent_summary: str = ""
     recall_frame_id: str = ""

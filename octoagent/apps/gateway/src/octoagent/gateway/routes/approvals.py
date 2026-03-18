@@ -1,24 +1,34 @@
-"""Approvals REST API 路由 -- T036, T037
+"""Approvals REST API 路由 -- T036, T037, Feature 061
 
 对齐 contracts/policy-api.md §1.1, §1.2。
 GET /api/approvals -- 获取待审批列表 (FR-018)
 POST /api/approve/{approval_id} -- 提交审批决策 (FR-019)
+
+Feature 061 T-016:
+GET /api/approval-overrides -- 获取 always 覆盖列表
+DELETE /api/approval-overrides/{override_id} -- 撤销单条覆盖
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from octoagent.policy.models import (
     ApprovalListItem,
+    ApprovalOverrideDeleteResponse,
+    ApprovalOverrideListResponse,
     ApprovalResolveRequest,
     ApprovalResolveResponse,
     ApprovalsListResponse,
 )
 
-from ..deps import get_approval_manager
+from ..deps import get_approval_manager, get_approval_override_cache, get_approval_override_repo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -114,5 +124,78 @@ async def resolve_approval(
             approval_id=approval_id,
             decision=body.decision.value,
             message="Approval resolved successfully",
+        ).model_dump(),
+    )
+
+
+# ============================================================
+# Feature 061 T-016: 审批覆盖管理 API
+# ============================================================
+
+
+@router.get("/api/approval-overrides", response_model=ApprovalOverrideListResponse)
+async def list_approval_overrides(
+    agent_runtime_id: str | None = Query(
+        default=None,
+        description="按 Agent 实例 ID 过滤（可选）",
+    ),
+    override_repo=Depends(get_approval_override_repo),
+) -> ApprovalOverrideListResponse:
+    """获取 always 覆盖列表
+
+    Feature 061 T-016: 展示当前所有（或指定 Agent 的）always 授权记录。
+    支持通过 ?agent_runtime_id=xxx 按 Agent 过滤。
+    """
+    if agent_runtime_id:
+        overrides = await override_repo.load_overrides(agent_runtime_id)
+    else:
+        overrides = await override_repo.load_all_overrides()
+
+    return ApprovalOverrideListResponse(
+        overrides=overrides,
+        total=len(overrides),
+    )
+
+
+@router.delete(
+    "/api/approval-overrides/{agent_runtime_id}/{tool_name}",
+    response_model=ApprovalOverrideDeleteResponse,
+)
+async def delete_approval_override(
+    agent_runtime_id: str,
+    tool_name: str,
+    override_repo=Depends(get_approval_override_repo),
+    override_cache=Depends(get_approval_override_cache),
+) -> JSONResponse:
+    """撤销单条 always 覆盖
+
+    Feature 061 T-016: 通过 agent_runtime_id + tool_name 复合键撤销。
+    同时清除内存缓存，下次工具调用将重新触发审批。
+    """
+    removed = await override_repo.remove_override(agent_runtime_id, tool_name)
+
+    if not removed:
+        return JSONResponse(
+            status_code=404,
+            content=ApprovalOverrideDeleteResponse(
+                success=False,
+                message=f"Override not found for agent='{agent_runtime_id}', tool='{tool_name}'",
+                error="override_not_found",
+            ).model_dump(),
+        )
+
+    logger.info(
+        "approval_override_revoked_via_api",
+        extra={
+            "agent_runtime_id": agent_runtime_id,
+            "tool_name": tool_name,
+        },
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content=ApprovalOverrideDeleteResponse(
+            success=True,
+            message=f"Override for agent='{agent_runtime_id}', tool='{tool_name}' has been revoked",
         ).model_dump(),
     )

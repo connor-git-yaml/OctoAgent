@@ -33,6 +33,22 @@ def get_approval_manager(request: Request) -> ApprovalManager:
     return request.app.state.approval_manager
 
 
+def get_approval_override_repo(request: Request):
+    """从 app.state 获取 ApprovalOverrideRepository 实例
+
+    Feature 061 T-016: 供审批覆盖管理 API 使用。
+    """
+    return request.app.state.approval_override_repo
+
+
+def get_approval_override_cache(request: Request):
+    """从 app.state 获取 ApprovalOverride 内存缓存实例
+
+    Feature 061 T-016: 删除覆盖时同步清除内存缓存。
+    """
+    return request.app.state.approval_override_cache
+
+
 def get_execution_console_service(request: Request):
     """从 app.state 获取 ExecutionConsoleService。"""
     return request.app.state.execution_console

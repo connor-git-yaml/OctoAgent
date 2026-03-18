@@ -5129,6 +5129,9 @@ class ControlPlaneService:
         instruction_overlays = request.params.get("instruction_overlays", [])
         if not isinstance(instruction_overlays, list):
             instruction_overlays = []
+        # Feature 061 T-030: permission_preset + role_card 参数
+        permission_preset = str(request.params.get("permission_preset", "normal")).strip().lower()
+        role_card = str(request.params.get("role_card", "")).strip()
 
         if not worker_name:
             return self._rejected_result(
@@ -5155,6 +5158,15 @@ class ControlPlaneService:
                 request=request,
                 code="WORKER_CREATE_INVALID_TOOL_PROFILE",
                 message=f"tool_profile 必须是 {', '.join(sorted(valid_profiles))} 之一。",
+            )
+
+        # Feature 061 T-030: 验证 permission_preset
+        valid_presets = {"minimal", "normal", "full"}
+        if permission_preset not in valid_presets:
+            return self._rejected_result(
+                request=request,
+                code="WORKER_CREATE_INVALID_PRESET",
+                message=f"permission_preset 必须是 {', '.join(sorted(valid_presets))} 之一。",
             )
 
         # 验证 model_alias 存在
@@ -5271,6 +5283,8 @@ class ControlPlaneService:
             name=worker_name,
             persona_summary=project_goal,
             status=AgentRuntimeStatus.ACTIVE,
+            permission_preset=permission_preset,
+            role_card=role_card,
             metadata={"worker_base_archetype": archetype},
             created_at=now,
             updated_at=now,

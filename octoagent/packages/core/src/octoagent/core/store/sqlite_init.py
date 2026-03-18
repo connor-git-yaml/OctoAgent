@@ -434,6 +434,8 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
     name               TEXT NOT NULL DEFAULT '',
     persona_summary    TEXT NOT NULL DEFAULT '',
     status             TEXT NOT NULL DEFAULT 'active',
+    permission_preset  TEXT NOT NULL DEFAULT 'normal',
+    role_card          TEXT NOT NULL DEFAULT '',
     metadata           TEXT NOT NULL DEFAULT '{}',
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
@@ -674,6 +676,32 @@ CREATE TABLE IF NOT EXISTS skill_pipeline_checkpoints (
     FOREIGN KEY (task_id) REFERENCES tasks(task_id)
 );
 """
+
+# Feature 061: 审批覆盖持久化表
+# 存储用户 "always" 授权决策，绑定到 Agent 实例
+_APPROVAL_OVERRIDES_DDL = """
+CREATE TABLE IF NOT EXISTS approval_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_runtime_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    decision TEXT NOT NULL DEFAULT 'always',
+    created_at TEXT NOT NULL,
+    UNIQUE(agent_runtime_id, tool_name)
+);
+"""
+
+_APPROVAL_OVERRIDES_INDEXES = [
+    # 按 Agent 实例查询索引
+    (
+        "CREATE INDEX IF NOT EXISTS idx_overrides_agent "
+        "ON approval_overrides(agent_runtime_id);"
+    ),
+    # 按工具名查询索引（管理界面用）
+    (
+        "CREATE INDEX IF NOT EXISTS idx_overrides_tool "
+        "ON approval_overrides(tool_name);"
+    ),
+]
 
 _PROJECT_INDEXES = [
     (
@@ -977,6 +1005,19 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE worker_profiles ADD COLUMN resource_limits TEXT NOT NULL DEFAULT '{}'"
         )
 
+    # Feature 061: agent_runtimes 新增 permission_preset 和 role_card 列
+    agent_runtime_columns = await _table_columns(conn, "agent_runtimes")
+    if agent_runtime_columns and "permission_preset" not in agent_runtime_columns:
+        await conn.execute(
+            "ALTER TABLE agent_runtimes "
+            "ADD COLUMN permission_preset TEXT NOT NULL DEFAULT 'normal'"
+        )
+    if agent_runtime_columns and "role_card" not in agent_runtime_columns:
+        await conn.execute(
+            "ALTER TABLE agent_runtimes "
+            "ADD COLUMN role_card TEXT NOT NULL DEFAULT ''"
+        )
+
     # 修正 agent_sessions 的 UNIQUE 索引：只对 butler_main 生效，
     # worker_internal / subagent_internal sessions 不受一个 project 一个 session 的限制。
     if agent_session_columns:
@@ -1035,6 +1076,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_RECALL_FRAMES_DDL)
     await conn.execute(_SKILL_PIPELINE_RUNS_DDL)
     await conn.execute(_SKILL_PIPELINE_CHECKPOINTS_DDL)
+    await conn.execute(_APPROVAL_OVERRIDES_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1048,6 +1090,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _PROJECT_INDEXES
         + _WORK_INDEXES
         + _AGENT_CONTEXT_INDEXES
+        + _APPROVAL_OVERRIDES_INDEXES
     ):
         await conn.execute(idx_sql)
 

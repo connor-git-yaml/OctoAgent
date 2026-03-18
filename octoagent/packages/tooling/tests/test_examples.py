@@ -89,23 +89,28 @@ class TestFileWriteToolEndToEnd:
         tools_minimal = await broker.discover(profile=ToolProfile.MINIMAL)
         assert not any(t.name == "file_write" for t in tools_minimal)
 
-    async def test_irreversible_no_checkpoint_rejected(self, mock_event_store) -> None:
-        """FR-010a: irreversible 工具无 PolicyCheckpoint 被拒绝"""
+    async def test_irreversible_no_checkpoint_allowed_feature_061(
+        self, mock_event_store
+    ) -> None:
+        """Feature 061: FR-010a 硬拒绝已移除，权限检查由 Hook Chain 驱动
+
+        无 Hook 注册时 irreversible 工具可正常执行（Hook Chain 为空 = 不拦截）。
+        实际权限由 PresetBeforeHook 控制（需在上层注册）。
+        """
         from octoagent.tooling._examples.file_write_tool import file_write
 
         meta = reflect_tool_schema(file_write)
         broker = ToolBroker(event_store=mock_event_store)
         await broker.register(meta, file_write)
 
-        # 无 PolicyCheckpoint 注册，执行 irreversible 工具应被拒绝
+        # Feature 061: 无 Hook 时不再硬拒绝，工具正常执行
         result = await broker.execute(
             "file_write",
             {"path": "/tmp/test.txt", "content": "hello"},
             _make_context(),
         )
-        assert result.is_error is True
-        assert "FR-010a" in result.error
-        assert "safe by default" in result.error
+        assert result.is_error is False
+        assert "Written" in result.output
 
 
 class TestIrreversibleWithCheckpoint:

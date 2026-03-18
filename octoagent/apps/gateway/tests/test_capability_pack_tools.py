@@ -44,6 +44,7 @@ from octoagent.tooling import (
     ToolBroker,
     ToolProfile,
 )
+from octoagent.tooling.models import PermissionPreset
 
 
 def _write_mcp_echo_server(path: Path) -> None:
@@ -216,35 +217,29 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         tts_tool = next(item for item in pack.tools if item.tool_name == "tts.speak")
         assert tts_tool.availability.value in {"available", "install_required"}
 
+        # Feature 061 T-028: 所有 WorkerType 共享统一 default_tool_groups
         general_profile = capability_pack.get_worker_profile(WorkerType.GENERAL)
-        assert general_profile.default_tool_groups == [
-            "project",
-            "artifact",
-            "document",
-            "session",
-            "filesystem",
-            "terminal",
-            "network",
-            "browser",
-            "memory",
-            "supervision",
-            "delegation",
-        ]
-        pack = await capability_pack.get_pack()
-        general_bootstrap = next(
-            item for item in pack.bootstrap_files if item.file_id == "bootstrap:general"
-        )
-        assert "Butler" in general_bootstrap.content
-        assert "不要把自己叫作 general worker" in general_bootstrap.content
-        assert "优先自己使用当前已挂载的受治理 web / filesystem / terminal 工具完成有界任务" in general_bootstrap.content
-        assert "specialist lane" in general_bootstrap.content
-        assert "今天、天气、最新资料、官网、网页信息" in general_bootstrap.content
+        assert "project" in general_profile.default_tool_groups
+        assert "filesystem" in general_profile.default_tool_groups
+        assert "terminal" in general_profile.default_tool_groups
+        assert "mcp" in general_profile.default_tool_groups
+        assert "skills" in general_profile.default_tool_groups
+        # 统一 profile 包含所有分组
+        assert "runtime" in general_profile.default_tool_groups
+        assert "automation" in general_profile.default_tool_groups
 
+        pack = await capability_pack.get_pack()
+        # Feature 061 T-028: 仅保留 bootstrap:shared，移除 type-specific 模板
         shared_bootstrap = next(
             item for item in pack.bootstrap_files if item.file_id == "bootstrap:shared"
         )
         assert "Current Datetime Local" in shared_bootstrap.content
-        assert "Default Tool Profile" in shared_bootstrap.content
+        assert "capability pack" in shared_bootstrap.content
+        # bootstrap:general 已移除
+        general_bootstraps = [
+            item for item in pack.bootstrap_files if item.file_id == "bootstrap:general"
+        ]
+        assert len(general_bootstraps) == 0
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -318,6 +313,7 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
             trace_id=f"trace-{task_id}",
             caller="worker:butler",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -387,20 +383,10 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
         assert "Owner Timezone: Asia/Shanghai" in joined
         assert "Surface: web" in joined
         assert "Worker Type: research" in joined
-        assert "Default Tool Groups:" in joined
-        for group in (
-            "project",
-            "artifact",
-            "session",
-            "filesystem",
-            "network",
-            "browser",
-            "memory",
-            "document",
-            "media",
-            "mcp",
-        ):
-            assert group in joined
+        # Feature 061 T-028: bootstrap:shared 不再包含 Default Tool Groups/Profile
+        # 工具可见性由 Deferred Tools + PermissionPreset 控制
+        assert "capability pack" in joined
+        assert "ToolBroker / Policy / audit" in joined
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -519,6 +505,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
                 profile=ToolProfile.MINIMAL,
+                permission_preset=PermissionPreset.MINIMAL,
             ),
         )
         echo_result = await tool_broker.execute(
@@ -529,6 +516,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
                 profile=ToolProfile.STANDARD,
+                permission_preset=PermissionPreset.NORMAL,
             ),
         )
 
@@ -689,6 +677,7 @@ async def test_web_search_tool_returns_parsed_results(
                 trace_id=f"trace-{task_id}",
                 caller="tests",
                 profile=ToolProfile.MINIMAL,
+                permission_preset=PermissionPreset.MINIMAL,
             ),
         )
 
@@ -758,6 +747,7 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
                 trace_id=f"trace-{task_id}",
                 caller="tests",
                 profile=ToolProfile.MINIMAL,
+                permission_preset=PermissionPreset.MINIMAL,
             ),
         )
 
@@ -827,6 +817,7 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
             trace_id=f"trace-{task_id}",
             caller="worker:test",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -952,6 +943,7 @@ async def test_subagent_management_tools_list_kill_and_steer_descendants(
             trace_id=f"trace-{task_id}",
             caller="worker:test",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         child_task_id, created = await task_service.create_task(
@@ -1121,6 +1113,7 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
             trace_id=f"trace-{task_id}",
             caller="worker:test",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1220,6 +1213,7 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.MINIMAL,
+            permission_preset=PermissionPreset.MINIMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1288,6 +1282,7 @@ async def test_workers_review_uses_standard_profile_for_freshness_queries(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.MINIMAL,
+            permission_preset=PermissionPreset.MINIMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1364,6 +1359,7 @@ async def test_runtime_now_tool_returns_owner_local_time_payload(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.MINIMAL,
+            permission_preset=PermissionPreset.MINIMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1429,6 +1425,7 @@ async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.MINIMAL,
+            permission_preset=PermissionPreset.MINIMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1493,6 +1490,7 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1578,6 +1576,7 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1660,6 +1659,7 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
             trace_id=f"trace-{task_id}",
             caller="worker:test",
             profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
         )
 
         with bind_execution_context(runtime_context):
@@ -1683,6 +1683,186 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
         user_event = next(event for event in events if event.type.value == "USER_MESSAGE")
         assert user_event.payload["text_preview"] == "请先读取 API 现状，再输出研究摘要"
         assert user_event.payload["control_metadata"]["child_title"] == "研究子任务"
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+# ============================================================
+# Feature 061 T-031: Bootstrap 简化单元测试
+# ============================================================
+
+
+async def test_bootstrap_shared_only_no_type_specific_templates(
+    tmp_path: Path,
+) -> None:
+    """US-003 场景 2: 4 个独立模板不再存在 — 仅 bootstrap:shared"""
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        pack = await capability_pack.get_pack()
+
+        # 只有 bootstrap:shared
+        template_ids = {f.file_id for f in pack.bootstrap_files}
+        assert template_ids == {"bootstrap:shared"}
+
+        # 不应有 type-specific 模板
+        for type_id in ["bootstrap:general", "bootstrap:ops", "bootstrap:research", "bootstrap:dev"]:
+            assert type_id not in template_ids
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_bootstrap_shared_template_no_redundant_fields(
+    tmp_path: Path,
+) -> None:
+    """US-003 场景 4: shared 模板无冗余字段（不含 Default Tool Profile/Groups）"""
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        pack = await capability_pack.get_pack()
+        shared = next(f for f in pack.bootstrap_files if f.file_id == "bootstrap:shared")
+
+        # 核心元信息仍存在
+        assert "Project:" in shared.content
+        assert "Workspace:" in shared.content
+        assert "Current Datetime Local:" in shared.content
+        assert "Worker Type:" in shared.content
+        assert "ToolBroker / Policy / audit" in shared.content
+
+        # 冗余字段已移除
+        assert "Default Tool Profile:" not in shared.content
+        assert "Default Tool Groups:" not in shared.content
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_bootstrap_shared_renders_for_all_worker_types(
+    tmp_path: Path,
+) -> None:
+    """bootstrap:shared 对所有 WorkerType 都能正确渲染"""
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        await store_group.agent_context_store.save_owner_profile(
+            OwnerProfile(
+                owner_profile_id="owner-profile-default",
+                timezone="Asia/Shanghai",
+                locale="zh-CN",
+            )
+        )
+
+        for wtype in [WorkerType.GENERAL, WorkerType.OPS, WorkerType.RESEARCH, WorkerType.DEV]:
+            rendered = await capability_pack.render_bootstrap_context(
+                worker_type=wtype,
+                project_id="project-default",
+                workspace_id="workspace-default",
+                surface="web",
+            )
+            assert len(rendered) == 1  # 只有 shared
+            content = rendered[0]["content"]
+            assert f"Worker Type: {wtype.value}" in content
+            assert "capability pack" in content
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_unified_worker_profiles_share_same_tool_groups(
+    tmp_path: Path,
+) -> None:
+    """Feature 061 T-028: 所有 WorkerType 共享同一 default_tool_groups"""
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        general = capability_pack.get_worker_profile(WorkerType.GENERAL)
+        ops = capability_pack.get_worker_profile(WorkerType.OPS)
+        research = capability_pack.get_worker_profile(WorkerType.RESEARCH)
+        dev = capability_pack.get_worker_profile(WorkerType.DEV)
+
+        # 所有类型共享相同的 tool_groups
+        assert general.default_tool_groups == ops.default_tool_groups
+        assert general.default_tool_groups == research.default_tool_groups
+        assert general.default_tool_groups == dev.default_tool_groups
+
+        # 包含所有必要分组
+        required_groups = {"project", "filesystem", "terminal", "memory", "mcp", "skills", "runtime"}
+        assert required_groups.issubset(set(general.default_tool_groups))
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_bootstrap_token_budget_within_limit(
+    tmp_path: Path,
+) -> None:
+    """SC-006: bootstrap 总量 <= 200 tokens"""
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        await store_group.agent_context_store.save_owner_profile(
+            OwnerProfile(
+                owner_profile_id="owner-profile-default",
+                timezone="Asia/Shanghai",
+                locale="zh-CN",
+            )
+        )
+        rendered = await capability_pack.render_bootstrap_context(
+            worker_type=WorkerType.GENERAL,
+            project_id="project-default",
+            workspace_id="workspace-default",
+            surface="web",
+        )
+
+        total_chars = sum(len(item["content"]) for item in rendered)
+        # 粗略估算: 1 token ~ 4 字符（混合中英文）
+        estimated_tokens = total_chars / 3
+        assert estimated_tokens <= 200, (
+            f"Bootstrap 估算 token 数 {estimated_tokens:.0f} 超过 200 限制。"
+            f" 总字符: {total_chars}"
+        )
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

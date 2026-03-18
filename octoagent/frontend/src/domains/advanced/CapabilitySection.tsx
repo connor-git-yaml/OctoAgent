@@ -111,8 +111,8 @@ export default function CapabilitySection({
                         <strong>{staticConfig.base_archetype || "-"}</strong>
                         <span>Model</span>
                         <strong>{staticConfig.model_alias || "-"}</strong>
-                        <span>Tool Profile</span>
-                        <strong>{staticConfig.tool_profile || "-"}</strong>
+                        <span>Permission Preset</span>
+                        <strong>{staticConfig.permission_preset || staticConfig.tool_profile || "-"}</strong>
                         <span>Runtime</span>
                         <strong>{runtimeKinds.join(", ") || "-"}</strong>
                       </div>
@@ -333,31 +333,47 @@ export default function CapabilitySection({
             <p className="eyebrow">Bundled Tools</p>
             <h3>{capabilityPack.pack.tools.length}</h3>
           </div>
+          <div className="wb-chip-row">
+            <span className="wb-chip is-success">
+              Core {capabilityPack.pack.tools.filter((t) => t.tier === "core").length}
+            </span>
+            <span className="wb-chip">
+              Deferred {capabilityPack.pack.tools.filter((t) => t.tier !== "core").length}
+            </span>
+          </div>
         </div>
         <div className="event-list">
-          {capabilityPack.pack.tools.map((tool) => (
-            <div key={tool.tool_name} className="event-item">
-              <div>
-                <strong>{tool.tool_name}</strong>
-                <p>{tool.description || tool.tool_group}</p>
-                <p className="muted">
-                  Entrypoints {tool.entrypoints.join(", ") || "-"} · Runtime{" "}
-                  {tool.runtime_kinds.join(", ") || "-"}
-                </p>
-                {tool.availability_reason || tool.install_hint ? (
+          {capabilityPack.pack.tools.map((tool) => {
+            const tier = tool.tier;
+            const sideEffect = tool.side_effect_level;
+            return (
+              <div key={tool.tool_name} className="event-item">
+                <div>
+                  <strong>{tool.tool_name}</strong>
+                  <p>{tool.description || tool.tool_group}</p>
                   <p className="muted">
-                    {tool.availability_reason || tool.install_hint}
+                    Entrypoints {tool.entrypoints.join(", ") || "-"} · Runtime{" "}
+                    {tool.runtime_kinds.join(", ") || "-"}
+                    {sideEffect ? ` · SideEffect ${sideEffect}` : ""}
                   </p>
-                ) : null}
+                  {tool.availability_reason || tool.install_hint ? (
+                    <p className="muted">
+                      {tool.availability_reason || tool.install_hint}
+                    </p>
+                  ) : null}
+                </div>
+                <div style={{ display: "grid", gap: "0.25rem", justifyItems: "end" }}>
+                  <span className={`tone-chip ${statusTone(tool.availability)}`}>
+                    {tool.availability}
+                  </span>
+                  <span className={`wb-chip ${tier === "core" ? "is-success" : ""}`}>
+                    {tier === "core" ? "Core" : "Deferred"}
+                  </span>
+                  <small>{tool.tags.join(", ") || tool.tool_profile}</small>
+                </div>
               </div>
-              <div style={{ display: "grid", gap: "0.25rem", justifyItems: "end" }}>
-                <span className={`tone-chip ${statusTone(tool.availability)}`}>
-                  {tool.availability}
-                </span>
-                <small>{tool.tags.join(", ") || tool.tool_profile}</small>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </article>
     </section>

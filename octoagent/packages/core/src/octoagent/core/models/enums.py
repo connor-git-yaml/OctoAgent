@@ -175,6 +175,14 @@ class EventType(StrEnum):
     SKILL_USAGE_REPORT = "SKILL_USAGE_REPORT"      # Skill 执行资源消耗报告
     RESOURCE_LIMIT_HIT = "RESOURCE_LIMIT_HIT"      # 资源限制触发告警
 
+    # Feature 061: 权限 Preset + Deferred Tools 事件
+    PRESET_CHECK = "PRESET_CHECK"                            # Preset 权限检查
+    APPROVAL_OVERRIDE_HIT = "APPROVAL_OVERRIDE_HIT"          # always 覆盖命中
+    TOOL_SEARCH_EXECUTED = "TOOL_SEARCH_EXECUTED"            # tool_search 工具执行
+    TOOL_PROMOTED = "TOOL_PROMOTED"                          # Deferred 工具提升为 Active
+    TOOL_DEMOTED = "TOOL_DEMOTED"                            # Active 工具回退为 Deferred
+    TOOL_INDEX_DEGRADED = "TOOL_INDEX_DEGRADED"              # ToolIndex 降级
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

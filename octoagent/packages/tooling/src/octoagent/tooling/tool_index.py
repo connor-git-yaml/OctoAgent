@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from octoagent.core.models import DynamicToolSelection, ToolIndexHit, ToolIndexQuery
 from ulid import ULID
 
-from .models import ToolMeta, ToolProfile, profile_allows
+from .models import ToolMeta, ToolProfile, ToolSearchHit, ToolSearchResult, ToolTier, profile_allows
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+")
 _EMBED_DIM = 96
@@ -246,6 +247,131 @@ class ToolIndex:
             backend=self._backend.backend_name,
             is_fallback=is_fallback,
             warnings=warnings,
+        )
+
+    async def search_for_deferred(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> ToolSearchResult:
+        """Feature 061 T-019: 搜索 Deferred 工具并返回完整 ToolMeta（含 schema）
+
+        复用现有 cosine + BM25 混合打分。
+        降级逻辑：ToolIndex 不可用或零命中时回退全量 Deferred 名称列表。
+
+        Args:
+            query: 自然语言查询
+            limit: 最大返回数量
+
+        Returns:
+            ToolSearchResult 含匹配结果、降级标志、后端信息、延迟
+        """
+        start_ns = time.monotonic_ns()
+
+        if not query or not query.strip():
+            elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+            return ToolSearchResult(
+                query=query or "",
+                results=[],
+                total_deferred=self._count_deferred(),
+                is_fallback=False,
+                backend=self._backend.backend_name,
+                latency_ms=elapsed_ms,
+            )
+
+        # 构建 ToolIndexQuery 并检索
+        index_query = ToolIndexQuery(query=query.strip(), limit=limit)
+
+        try:
+            hits = await self._backend.query(index_query)
+        except Exception:
+            # ToolIndex 不可用 → 降级返回全量 Deferred 名称列表
+            elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+            return self._fallback_deferred_list(query, limit, elapsed_ms)
+
+        # 仅保留 Deferred 层级的工具（CORE 工具已在 context 中）
+        deferred_hits = [
+            h for h in hits
+            if self._find_record(h.tool_name) is not None
+            and self._find_record(h.tool_name).meta.tier == ToolTier.DEFERRED  # type: ignore[union-attr]
+        ]
+
+        if not deferred_hits:
+            # 零命中 → 降级返回全量 Deferred 名称列表
+            elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+            return self._fallback_deferred_list(query, limit, elapsed_ms)
+
+        # 转换为 ToolSearchHit（含完整 schema）
+        results: list[ToolSearchHit] = []
+        for hit in deferred_hits[:limit]:
+            record = self._find_record(hit.tool_name)
+            if record is None:
+                continue
+            meta = record.meta
+            results.append(
+                ToolSearchHit(
+                    tool_name=meta.name,
+                    description=meta.description,
+                    parameters_schema=dict(meta.parameters_json_schema),
+                    score=hit.score,
+                    side_effect_level=meta.side_effect_level.value,
+                    tool_group=meta.tool_group,
+                    tags=list(meta.tags),
+                )
+            )
+
+        elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+
+        return ToolSearchResult(
+            query=query,
+            results=results,
+            total_deferred=self._count_deferred(),
+            is_fallback=False,
+            backend=self._backend.backend_name,
+            latency_ms=elapsed_ms,
+        )
+
+    def _find_record(self, tool_name: str) -> ToolIndexRecord | None:
+        """通过工具名查找内部记录"""
+        for record in self._records:
+            if record.meta.name == tool_name:
+                return record
+        return None
+
+    def _count_deferred(self) -> int:
+        """计算 Deferred 工具总数"""
+        return sum(1 for r in self._records if r.meta.tier == ToolTier.DEFERRED)
+
+    def _fallback_deferred_list(
+        self,
+        query: str,
+        limit: int,
+        elapsed_ms: int,
+    ) -> ToolSearchResult:
+        """降级: 返回全量 Deferred 工具名称列表"""
+        deferred_records = [
+            r for r in self._records if r.meta.tier == ToolTier.DEFERRED
+        ]
+        results = [
+            ToolSearchHit(
+                tool_name=r.meta.name,
+                description=r.meta.description,
+                parameters_schema=dict(r.meta.parameters_json_schema),
+                score=0.0,
+                side_effect_level=r.meta.side_effect_level.value,
+                tool_group=r.meta.tool_group,
+                tags=list(r.meta.tags),
+            )
+            for r in deferred_records[:limit]
+        ]
+        return ToolSearchResult(
+            query=query,
+            results=results,
+            total_deferred=len(deferred_records),
+            is_fallback=True,
+            backend=self._backend.backend_name,
+            latency_ms=elapsed_ms,
         )
 
     def _build_backend(self, preferred_backend: str) -> ToolIndexBackend:

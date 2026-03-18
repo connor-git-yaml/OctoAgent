@@ -6,7 +6,7 @@
 
 import pytest
 from octoagent.tooling.decorators import tool_contract
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel, ToolProfile, ToolTier
 
 
 class TestToolContractDecorator:
@@ -185,3 +185,48 @@ class TestToolContractDecorator:
             )
             async def t(x: str) -> str:
                 return x
+
+    # ============================================================
+    # Feature 061 T-018a: tier 参数测试
+    # ============================================================
+
+    def test_tier_default_deferred(self) -> None:
+        """未指定 tier → 默认 DEFERRED"""
+
+        @tool_contract(
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="system",
+        )
+        async def echo(text: str) -> str:
+            return text
+
+        assert echo._tool_meta["tier"] == ToolTier.DEFERRED  # type: ignore[attr-defined]
+
+    def test_tier_explicit_core(self) -> None:
+        """显式指定 tier=CORE"""
+
+        @tool_contract(
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="system",
+            tier=ToolTier.CORE,
+        )
+        async def tool_search(query: str) -> str:
+            return query
+
+        assert tool_search._tool_meta["tier"] == ToolTier.CORE  # type: ignore[attr-defined]
+
+    def test_tier_explicit_deferred(self) -> None:
+        """显式指定 tier=DEFERRED"""
+
+        @tool_contract(
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="filesystem",
+            tier=ToolTier.DEFERRED,
+        )
+        async def write_file(path: str, content: str) -> str:
+            return "ok"
+
+        assert write_file._tool_meta["tier"] == ToolTier.DEFERRED  # type: ignore[attr-defined]

@@ -463,9 +463,10 @@ class SqliteAgentContextStore:
             INSERT INTO agent_runtimes (
                 agent_runtime_id, project_id, workspace_id, agent_profile_id,
                 worker_profile_id, role, name, persona_summary, status,
+                permission_preset, role_card,
                 metadata, created_at, updated_at, archived_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_runtime_id) DO UPDATE SET
                 project_id = excluded.project_id,
                 workspace_id = excluded.workspace_id,
@@ -475,6 +476,8 @@ class SqliteAgentContextStore:
                 name = excluded.name,
                 persona_summary = excluded.persona_summary,
                 status = excluded.status,
+                permission_preset = excluded.permission_preset,
+                role_card = excluded.role_card,
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at,
                 archived_at = excluded.archived_at
@@ -489,6 +492,8 @@ class SqliteAgentContextStore:
                 runtime.name,
                 runtime.persona_summary,
                 runtime.status.value,
+                runtime.permission_preset,
+                runtime.role_card,
                 self._dump(runtime.metadata),
                 runtime.created_at.isoformat(),
                 runtime.updated_at.isoformat(),
@@ -1325,6 +1330,8 @@ class SqliteAgentContextStore:
             name=row["name"],
             persona_summary=row["persona_summary"],
             status=AgentRuntimeStatus(row["status"]),
+            permission_preset=row["permission_preset"] if "permission_preset" in row.keys() else "normal",
+            role_card=row["role_card"] if "role_card" in row.keys() else "",
             metadata=cls._load(row["metadata"], {}),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),

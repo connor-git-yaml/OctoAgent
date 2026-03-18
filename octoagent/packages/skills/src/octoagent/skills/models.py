@@ -144,6 +144,11 @@ class SkillExecutionContext(BaseModel):
     agent_runtime_id: str = Field(default="")
     agent_session_id: str = Field(default="")
     work_id: str = Field(default="")
+    # Feature 061: Agent 实例级权限 Preset（决定工具调用的 allow/ask 策略）
+    permission_preset: str = Field(
+        default="normal",
+        description="Agent 权限 Preset（minimal/normal/full）",
+    )
     conversation_messages: list[dict[str, str]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     usage_limits: UsageLimits = Field(default_factory=UsageLimits)

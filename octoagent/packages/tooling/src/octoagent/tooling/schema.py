@@ -15,7 +15,7 @@ from pydantic.json_schema import GenerateJsonSchema
 from pydantic_ai._function_schema import function_schema
 
 from .exceptions import SchemaReflectionError
-from .models import ToolMeta
+from .models import ToolMeta, ToolTier
 
 
 def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
@@ -79,6 +79,7 @@ def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
         worker_types=tool_meta_dict.get("worker_types", []),
         manifest_ref=tool_meta_dict.get("manifest_ref", ""),
         metadata=tool_meta_dict.get("metadata", {}),
+        tier=tool_meta_dict.get("tier", ToolTier.DEFERRED),
     )
 
 

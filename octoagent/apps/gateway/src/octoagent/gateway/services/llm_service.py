@@ -30,7 +30,9 @@ from octoagent.skills import (
 )
 from octoagent.skills.limits import get_global_defaults, merge_usage_limits
 from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
-from octoagent.tooling.models import ToolProfile
+from octoagent.tooling.models import ToolProfile, ToolSearchResult
+
+from .tool_promotion import ToolPromotionService
 from pydantic import BaseModel, Field
 
 # Skill 注入格式常量（agent_context.py 依赖此格式解析和截断）
@@ -194,6 +196,7 @@ class LLMService:
         *,
         skill_runner: SkillRunner | None = None,
         skill_discovery: SkillDiscovery | None = None,
+        tool_promotion_service: ToolPromotionService | None = None,
     ) -> None:
         """初始化 LLM 服务
 
@@ -203,6 +206,7 @@ class LLMService:
             default_provider: M0 兼容参数（废弃，仅向后兼容）
             skill_runner: SkillRunner 实例
             skill_discovery: Feature 057 SkillDiscovery 实例，用于注入已加载 Skill 到 system prompt
+            tool_promotion_service: Feature 061 工具提升服务，追踪 Deferred → Active 状态
         """
         if fallback_manager is not None:
             # Feature 002 模式
@@ -223,6 +227,8 @@ class LLMService:
         self._providers["mock"] = MockProvider()
         self._skill_runner = skill_runner
         self._skill_discovery = skill_discovery
+        # Feature 061 T-022: 工具提升服务
+        self._tool_promotion = tool_promotion_service
 
     def register(self, alias: str, provider: LLMProvider) -> None:
         """注册 LLM provider -- M0 兼容"""
@@ -300,6 +306,31 @@ class LLMService:
         if not selected_tools:
             return None
 
+        # Feature 061 T-035/T-036: 同步已加载 Skill 的 tools_required 提升/回退
+        loaded_skill_names = metadata.get("loaded_skill_names", [])
+        if (
+            isinstance(loaded_skill_names, list)
+            and loaded_skill_names
+            and self._tool_promotion is not None
+            and self._skill_discovery is not None
+        ):
+            await self.sync_skill_tool_promotions(
+                loaded_skill_names,
+                task_id=task_id or "",
+                trace_id=trace_id or "",
+            )
+
+        # Feature 061 T-022: 合并已提升的工具到 selected_tools
+        if self._tool_promotion is not None:
+            promoted_names = self._tool_promotion.active_tool_names
+            if promoted_names:
+                # 去重合并：promoted 工具追加到 selected_tools 末尾
+                existing = set(selected_tools)
+                for name in promoted_names:
+                    if name not in existing:
+                        selected_tools.append(name)
+                        existing.add(name)
+
         conversation_messages = self._coerce_messages(prompt_or_messages)
         prompt = self._coerce_prompt(prompt_or_messages)
         if not prompt:
@@ -354,6 +385,8 @@ class LLMService:
             agent_runtime_id=str(metadata.get("agent_runtime_id", "")).strip(),
             agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
             work_id=str(metadata.get("work_id", "")).strip(),
+            # Feature 061: 从 metadata 获取 Agent 权限 Preset
+            permission_preset=str(metadata.get("permission_preset", "normal")).strip() or "normal",
             conversation_messages=conversation_messages,
             metadata=metadata,
             usage_limits=usage_limits,
@@ -453,6 +486,8 @@ class LLMService:
                         agent_runtime_id=execution_context.agent_runtime_id,
                         agent_session_id=execution_context.agent_session_id,
                         work_id=execution_context.work_id,
+                        # Feature 061: 继承原始权限 Preset，避免降级重试时回退为 normal
+                        permission_preset=execution_context.permission_preset,
                         conversation_messages=conversation_messages,
                         metadata=metadata,
                         usage_limits=degraded_limits,
@@ -548,6 +583,134 @@ class LLMService:
     @staticmethod
     def _parse_selected_tools(metadata: dict[str, Any]) -> list[str]:
         return extract_mounted_tool_names(metadata)
+
+    async def process_tool_search_results(
+        self,
+        search_result_json: str,
+        *,
+        task_id: str = "",
+        trace_id: str = "",
+    ) -> list[str]:
+        """Feature 061 T-022: 处理 tool_search 返回的结果，提升工具到 Active
+
+        在 LLM 调用 tool_search 后，上层应调用此方法将搜索到的工具
+        注册为 promoted，使其在下一个 run_step 中以完整 schema 注入。
+
+        Args:
+            search_result_json: tool_search 返回的 JSON 字符串
+            task_id: 关联任务 ID
+            trace_id: 追踪标识
+
+        Returns:
+            新增提升的工具名称列表
+        """
+        if self._tool_promotion is None:
+            return []
+
+        try:
+            import json
+            data = json.loads(search_result_json)
+            result = ToolSearchResult.model_validate(data)
+        except Exception:
+            return []
+
+        tool_names = [hit.tool_name for hit in result.results]
+        if not tool_names:
+            return []
+
+        return await self._tool_promotion.promote_from_search(
+            tool_names,
+            query=result.query,
+            task_id=task_id,
+            trace_id=trace_id,
+        )
+
+    @property
+    def tool_promotion_service(self) -> ToolPromotionService | None:
+        """Feature 061: 返回工具提升服务实例"""
+        return self._tool_promotion
+
+    async def sync_skill_tool_promotions(
+        self,
+        loaded_skill_names: list[str],
+        *,
+        task_id: str = "",
+        trace_id: str = "",
+    ) -> tuple[list[str], list[str]]:
+        """Feature 061 T-035/T-036: 同步已加载 Skill 的 tools_required 到工具提升状态
+
+        对比当前 promotion state 中所有 skill:* 来源与最新的 loaded_skill_names，
+        自动提升新加载 Skill 的工具、回退已卸载 Skill 的工具。
+
+        Args:
+            loaded_skill_names: 当前 session 已加载的 Skill 名称列表
+            task_id: 关联任务 ID
+            trace_id: 追踪标识
+
+        Returns:
+            (newly_promoted, demoted) 元组：新提升的工具名列表、回退的工具名列表
+        """
+        if self._tool_promotion is None or self._skill_discovery is None:
+            return [], []
+
+        loaded_set = set(loaded_skill_names)
+        newly_promoted: list[str] = []
+        demoted: list[str] = []
+
+        # T-035: 提升新加载 Skill 的 tools_required
+        for skill_name in loaded_skill_names:
+            entry = self._skill_discovery.get(skill_name)
+            if entry is None or not entry.tools_required:
+                continue
+            # 检查该 Skill 是否已有对应 source，避免重复提升
+            source = f"skill:{skill_name}"
+            tools_to_promote = []
+            for tool_name in entry.tools_required:
+                sources = self._tool_promotion.state.promoted_tools.get(tool_name, [])
+                if source not in sources:
+                    tools_to_promote.append(tool_name)
+            if tools_to_promote:
+                promoted = await self._tool_promotion.promote_from_skill(
+                    tools_to_promote,
+                    skill_name=skill_name,
+                    task_id=task_id,
+                    trace_id=trace_id,
+                )
+                newly_promoted.extend(promoted)
+
+        # T-036: 回退已卸载 Skill 的 tools_required
+        # 收集当前 promotion state 中所有 skill:* 来源
+        tracked_skill_sources: set[str] = set()
+        for _tool_name, sources in self._tool_promotion.state.promoted_tools.items():
+            for src in sources:
+                if src.startswith("skill:"):
+                    tracked_skill_sources.add(src)
+
+        # 找出已不在 loaded_skill_names 中的 Skill
+        for source in tracked_skill_sources:
+            skill_name = source.removeprefix("skill:")
+            if skill_name in loaded_set:
+                continue
+            # 该 Skill 已卸载，回退其 tools_required
+            entry = self._skill_discovery.get(skill_name)
+            if entry is None:
+                # Skill 定义不存在，通过遍历 promotion state 找到关联工具
+                tools_with_source = [
+                    tn for tn, srcs in list(self._tool_promotion.state.promoted_tools.items())
+                    if source in srcs
+                ]
+            else:
+                tools_with_source = list(entry.tools_required)
+            if tools_with_source:
+                demoted_tools = await self._tool_promotion.demote_from_skill(
+                    tools_with_source,
+                    skill_name=skill_name,
+                    task_id=task_id,
+                    trace_id=trace_id,
+                )
+                demoted.extend(demoted_tools)
+
+        return newly_promoted, demoted
 
     @staticmethod
     def _coerce_messages(

@@ -120,6 +120,38 @@ class TestSkillMdEntry:
         assert entry.raw_frontmatter == {}
         assert entry.metadata == {}
 
+    def test_tools_required_with_values(self):
+        """tools_required 正常列表应正确解析。"""
+        entry = SkillMdEntry(
+            name="coding-agent",
+            description="A coding agent skill",
+            tools_required=["filesystem.write_text", "terminal.exec", "docker.run"],
+        )
+        assert entry.tools_required == [
+            "filesystem.write_text",
+            "terminal.exec",
+            "docker.run",
+        ]
+
+    def test_tools_required_empty_list(self):
+        """tools_required 空列表应正确处理。"""
+        entry = SkillMdEntry(
+            name="summarize",
+            description="Summarize content",
+            tools_required=[],
+        )
+        assert entry.tools_required == []
+
+    def test_tools_required_nonexistent_tool_names(self):
+        """tools_required 包含不存在的工具名仍可解析（验证在运行时进行）。"""
+        entry = SkillMdEntry(
+            name="test-skill",
+            description="Test",
+            tools_required=["nonexistent.tool", "another.fake.tool"],
+        )
+        assert len(entry.tools_required) == 2
+        assert "nonexistent.tool" in entry.tools_required
+
 
 class TestSkillListItem:
     """SkillListItem 模型测试。"""

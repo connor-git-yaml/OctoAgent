@@ -34,6 +34,7 @@ from .pipeline import (
     SkillPipelineEngine,
 )
 from .protocols import (
+    ApprovalBridgeProtocol,
     SkillRegistryProtocol,
     SkillRunnerProtocol,
     StructuredModelClientProtocol,
@@ -72,6 +73,7 @@ __all__ = [
     "StructuredModelClientProtocol",
     "SkillRunnerProtocol",
     "SkillRegistryProtocol",
+    "ApprovalBridgeProtocol",
     "RegisteredSkill",
     "SkillRegistry",
     "SkillRunner",

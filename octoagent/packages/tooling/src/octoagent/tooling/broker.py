@@ -32,7 +32,6 @@ from .models import (
     FailMode,
     RegisterToolResult,
     RegistryDiagnostic,
-    SideEffectLevel,
     ToolMeta,
     ToolProfile,
     ToolResult,
@@ -233,17 +232,16 @@ class ToolBroker:
         args: dict[str, Any],
         context: ExecutionContext,
     ) -> ToolResult:
-        """执行工具调用（FR-010/010a/012/013）
+        """执行工具调用（FR-010/012/013 + Feature 061）
 
         完整执行链路：
-        1. 查找工具 + Profile 权限检查
-        2. FR-010a: irreversible 无 PolicyCheckpoint? 拒绝
-        3. 生成 TOOL_CALL_STARTED 事件
-        4. 执行 before hook 链
-        5. 执行工具（含超时 + sync->async 包装）
-        6. 执行 after hook 链
-        7. 生成 COMPLETED/FAILED 事件
-        8. 返回 ToolResult
+        1. 查找工具
+        2. 生成 TOOL_CALL_STARTED 事件
+        3. 执行 before hook 链（含 PresetBeforeHook 权限检查）
+        4. 执行工具（含超时 + sync->async 包装）
+        5. 执行 after hook 链
+        6. 生成 COMPLETED/FAILED 事件
+        7. 返回 ToolResult
 
         Args:
             tool_name: 目标工具名称
@@ -268,47 +266,11 @@ class ToolBroker:
 
         meta, handler = entry
 
-        # Profile 权限检查
-        if not profile_allows(meta.tool_profile, context.profile):
-            duration = time.monotonic() - start_time
-            return ToolResult(
-                output="",
-                is_error=True,
-                error=(
-                    f"Profile violation: tool '{tool_name}' requires "
-                    f"{meta.tool_profile}, context has {context.profile}"
-                ),
-                duration=duration,
-                tool_name=tool_name,
-            )
+        # Feature 061: 权限检查完全由 Hook Chain 驱动
+        # （PresetBeforeHook + ApprovalOverrideHook）
+        # 不再硬编码 profile_allows() 和 FR-010a 强制拒绝。
 
-        # 步骤 2: FR-010a 强制拒绝逻辑
-        if meta.side_effect_level == SideEffectLevel.IRREVERSIBLE:
-            has_policy_checkpoint = self._has_policy_checkpoint()
-            if not has_policy_checkpoint:
-                duration = time.monotonic() - start_time
-                await self._emit_failed_event(
-                    tool_name=tool_name,
-                    context=context,
-                    duration=duration,
-                    error_type="rejection",
-                    error_message=(
-                        "No policy checkpoint registered for irreversible tool. "
-                        "FR-010a: safe by default"
-                    ),
-                )
-                return ToolResult(
-                    output="",
-                    is_error=True,
-                    error=(
-                        "No policy checkpoint registered for irreversible tool. "
-                        "FR-010a: safe by default"
-                    ),
-                    duration=duration,
-                    tool_name=tool_name,
-                )
-
-        # 步骤 3: 生成 TOOL_CALL_STARTED 事件
+        # 步骤 2: 生成 TOOL_CALL_STARTED 事件
         started_ok = await self._emit_started_event(
             tool_name=tool_name, meta=meta, args=args, context=context
         )
@@ -322,7 +284,7 @@ class ToolBroker:
                 tool_name=tool_name,
             )
 
-        # 步骤 4: 执行 before hook 链
+        # 步骤 3: 执行 before hook 链（含 PresetBeforeHook 权限检查）
         current_args = dict(args)
         for hook in self._before_hooks:
             try:
@@ -375,7 +337,7 @@ class ToolBroker:
                         error=str(e),
                     )
 
-        # 步骤 5: 执行工具
+        # 步骤 4: 执行工具
         try:
             raw_output = await self._invoke_handler(handler, current_args, meta.timeout_seconds)
             output_str = str(raw_output) if raw_output is not None else ""
@@ -419,7 +381,7 @@ class ToolBroker:
                 tool_name=tool_name,
             )
 
-        # 步骤 6: 执行 after hook 链
+        # 步骤 5: 执行 after hook 链
         for hook in self._after_hooks:
             try:
                 result = await hook.after_execute(meta, result, context)
@@ -446,7 +408,7 @@ class ToolBroker:
                         error=str(e),
                     )
 
-        # 步骤 7: 生成 COMPLETED 事件（如果未出错）
+        # 步骤 6: 生成 COMPLETED 事件（如果未出错）
         if not result.is_error:
             await self._emit_completed_event(
                 tool_name=tool_name,

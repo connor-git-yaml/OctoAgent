@@ -21,6 +21,7 @@ from octoagent.core.models.event import Event, EventCausality
 from octoagent.tooling.models import SideEffectLevel
 from ulid import ULID
 
+from .approval_override_store import ApprovalOverrideCache, ApprovalOverrideRepository
 from .models import (
     ApprovalDecision,
     ApprovalExpiredEventPayload,
@@ -79,6 +80,9 @@ class ApprovalManager:
         sse_broadcaster: SSEBroadcasterProtocol | None = None,
         default_timeout_s: float = 600.0,  # 10 分钟，给用户充足的审批时间
         grace_period_s: float = 30.0,
+        *,
+        override_repo: ApprovalOverrideRepository | None = None,
+        override_cache: ApprovalOverrideCache | None = None,
     ) -> None:
         self._event_store = event_store
         self._sse_broadcaster = sse_broadcaster
@@ -88,7 +92,11 @@ class ApprovalManager:
         # 内存状态: approval_id -> PendingApproval
         self._pending: dict[str, PendingApproval] = {}
 
-        # allow-always 白名单: tool_name -> True（M1 仅内存，不持久化）
+        # Feature 061: always 覆盖委托给 Cache + Repository
+        # 旧的 _allow_always 全局 dict 保留为兼容 fallback
+        self._override_repo = override_repo
+        self._override_cache = override_cache or ApprovalOverrideCache()
+        # 兼容旧逻辑: 无 agent_runtime_id 时回退到全局白名单
         self._allow_always: dict[str, bool] = {}
 
     # ============================================================
@@ -119,11 +127,16 @@ class ApprovalManager:
             )
             return self._pending[request.approval_id].record
 
-        # 检查 allow-always 白名单
-        if self._allow_always.get(request.tool_name):
+        # Feature 061: 检查 always 覆盖（优先使用 Cache，兼容旧全局白名单）
+        agent_rid = getattr(request, "agent_runtime_id", "") or ""
+        if (
+            agent_rid
+            and self._override_cache.has(agent_rid, request.tool_name)
+        ) or self._allow_always.get(request.tool_name):
             logger.info(
-                "工具 '%s' 在 allow-always 白名单中，自动批准",
+                "工具 '%s' 在 always 覆盖中（agent=%s），自动批准",
                 request.tool_name,
+                agent_rid or "global",
             )
             record = ApprovalRecord(
                 request=request,
@@ -286,14 +299,34 @@ class ApprovalManager:
             pending.timer_handle.cancel()
             pending.timer_handle = None
 
-        # allow-always: 加入白名单
+        # Feature 061: allow-always 写入 Cache + Repository（Agent 实例级隔离）
         if decision == ApprovalDecision.ALLOW_ALWAYS:
             tool_name = pending.record.request.tool_name
-            self._allow_always[tool_name] = True
-            logger.info(
-                "工具 '%s' 已加入 allow-always 白名单",
-                tool_name,
-            )
+            agent_rid = getattr(pending.record.request, "agent_runtime_id", "") or ""
+            if agent_rid:
+                # 写入内存缓存
+                self._override_cache.set(agent_rid, tool_name)
+                # 异步写入 SQLite 持久化
+                if self._override_repo is not None:
+                    try:
+                        await self._override_repo.save_override(agent_rid, tool_name)
+                    except Exception:
+                        logger.warning(
+                            "always 覆盖写入持久化失败（缓存已更新）",
+                            exc_info=True,
+                        )
+                logger.info(
+                    "工具 '%s' 已加入 always 覆盖（agent=%s）",
+                    tool_name,
+                    agent_rid,
+                )
+            else:
+                # 兼容旧逻辑: 无 agent_runtime_id 时回退全局白名单
+                self._allow_always[tool_name] = True
+                logger.info(
+                    "工具 '%s' 已加入 allow-always 全局白名单",
+                    tool_name,
+                )
 
         # 设置 asyncio.Event（唤醒等待方）
         pending.event.set()
@@ -456,12 +489,15 @@ class ApprovalManager:
     # ============================================================
 
     async def recover_from_store(self) -> int:
-        """启动恢复: 从 Event Store 恢复未完成的审批
+        """启动恢复: 从 Event Store 恢复未完成的审批 + 从 SQLite 恢复 always 覆盖
 
         Returns:
             恢复的 pending 审批数量
 
         """
+        # Feature 061: 从 ApprovalOverrideRepository 恢复 always 覆盖到缓存
+        await self._recover_overrides_from_repo()
+
         recovered = 0
         now = datetime.now(UTC)
 
@@ -539,6 +575,24 @@ class ApprovalManager:
             recovered += 1
         logger.info("审批恢复完成: 恢复 %d 个 pending 审批", recovered)
         return recovered
+
+    async def _recover_overrides_from_repo(self) -> None:
+        """Feature 061: 从 ApprovalOverrideRepository 恢复 always 覆盖到内存缓存"""
+        if self._override_repo is None:
+            return
+        try:
+            all_overrides = await self._override_repo.load_all_overrides()
+            if all_overrides:
+                self._override_cache.load_from_records(all_overrides)
+                logger.info(
+                    "always 覆盖恢复完成: 加载 %d 条记录到缓存",
+                    len(all_overrides),
+                )
+        except Exception:
+            logger.warning(
+                "always 覆盖恢复失败，缓存可能不完整",
+                exc_info=True,
+            )
 
     # ============================================================
     # 查询方法（供 REST API 使用）

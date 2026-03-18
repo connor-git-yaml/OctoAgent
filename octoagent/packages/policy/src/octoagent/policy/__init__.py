@@ -9,6 +9,9 @@ from __future__ import annotations
 # ApprovalManager
 from .approval_manager import ApprovalManager
 
+# Feature 061: ApprovalOverride 持久化 + 缓存
+from .approval_override_store import ApprovalOverrideCache, ApprovalOverrideRepository
+
 # 评估器
 from .evaluators.global_rule import global_rule
 from .evaluators.profile_filter import profile_filter
@@ -22,6 +25,9 @@ from .models import (
     ApprovalDecision,
     ApprovalExpiredEventPayload,
     ApprovalListItem,
+    ApprovalOverride,
+    ApprovalOverrideDeleteResponse,
+    ApprovalOverrideListResponse,
     ApprovalRecord,
     ApprovalRequest,
     ApprovalRequestedEventPayload,
@@ -88,6 +94,12 @@ __all__ = [
     "global_rule",
     # ApprovalManager
     "ApprovalManager",
+    # Feature 061: ApprovalOverride
+    "ApprovalOverride",
+    "ApprovalOverrideListResponse",
+    "ApprovalOverrideDeleteResponse",
+    "ApprovalOverrideRepository",
+    "ApprovalOverrideCache",
     # PolicyCheckHook
     "PolicyCheckHook",
     # PolicyEngine 门面类

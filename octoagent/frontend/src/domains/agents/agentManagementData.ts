@@ -34,6 +34,8 @@ export interface AgentCardViewModel {
   projectId: string;
   projectName: string;
   modelAlias: string;
+  /** Feature 061: 权限 Preset 显示标签 */
+  permissionPreset: string;
   defaultToolGroups: string[];
   selectedTools: string[];
   activeWorkCount: number;
@@ -75,6 +77,10 @@ export interface AgentEditorDraft {
   baseArchetype: string;
   modelAlias: string;
   toolProfile: string;
+  /** Feature 061: 权限 Preset（minimal/normal/full），取代 toolProfile */
+  permissionPreset: string;
+  /** Feature 061: 角色卡片（简短角色描述） */
+  roleCard: string;
   defaultToolGroups: string[];
   selectedTools: string[];
   capabilitySelection: Record<string, boolean>;
@@ -109,6 +115,8 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_TOOL_PROFILE = "standard";
+/** Feature 061: 默认权限 Preset */
+const DEFAULT_PERMISSION_PRESET = "normal";
 const DEFAULT_MODEL_ALIAS = "main";
 const DEFAULT_RUNTIME_KINDS = ["worker"];
 
@@ -158,6 +166,17 @@ export function formatAgentStatus(status: string): string {
 
 export function formatAgentArchetype(archetype: string): string {
   return ARCHETYPE_LABELS[archetype] ?? formatTokenLabel(archetype);
+}
+
+/** Feature 061: 权限 Preset 用户友好标签 */
+const PRESET_LABELS: Record<string, string> = {
+  minimal: "保守模式",
+  normal: "标准模式",
+  full: "完全信任",
+};
+
+export function formatPermissionPreset(preset: string): string {
+  return PRESET_LABELS[preset] ?? formatTokenLabel(preset);
 }
 
 export function formatProjectName(projects: ProjectOption[], projectId: string): string {
@@ -327,6 +346,7 @@ function mapProfileToCard(
     projectId: profile.project_id,
     projectName: formatProjectName(projects, profile.project_id),
     modelAlias: profile.static_config.model_alias || DEFAULT_MODEL_ALIAS,
+    permissionPreset: profile.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
     defaultToolGroups: profile.static_config.default_tool_groups ?? [],
     selectedTools: profile.static_config.selected_tools ?? [],
     activeWorkCount: Math.max(profile.dynamic_context.active_work_count || 0, 0),
@@ -388,6 +408,7 @@ export function deriveAgentManagementView(
           projectId: currentProjectId,
           projectName: currentProjectName,
           modelAlias: fallbackTemplate?.static_config.model_alias || DEFAULT_MODEL_ALIAS,
+          permissionPreset: fallbackTemplate?.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
           defaultToolGroups: fallbackTemplate?.static_config.default_tool_groups ?? [],
           selectedTools: fallbackTemplate?.static_config.selected_tools ?? [],
           activeWorkCount: 0,
@@ -448,6 +469,8 @@ function buildDraftFromProfileLike(
     baseArchetype: profile?.static_config.base_archetype || "general",
     modelAlias: profile?.static_config.model_alias || DEFAULT_MODEL_ALIAS,
     toolProfile: profile?.static_config.tool_profile || DEFAULT_TOOL_PROFILE,
+    permissionPreset: profile?.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
+    roleCard: profile?.static_config.role_card || "",
     defaultToolGroups: profile?.static_config.default_tool_groups ?? [],
     selectedTools: profile?.static_config.selected_tools ?? [],
     capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
@@ -529,6 +552,8 @@ export function buildAgentPayload(
     base_archetype: draft.baseArchetype,
     model_alias: draft.modelAlias,
     tool_profile: draft.toolProfile,
+    permission_preset: draft.permissionPreset,
+    role_card: draft.roleCard,
     default_tool_groups: uniqueStrings(draft.defaultToolGroups),
     selected_tools: uniqueStrings(draft.selectedTools),
     runtime_kinds: uniqueStrings(draft.runtimeKinds),

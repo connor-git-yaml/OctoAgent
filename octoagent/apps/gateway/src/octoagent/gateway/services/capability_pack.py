@@ -64,6 +64,10 @@ from octoagent.tooling import (
     reflect_tool_schema,
     tool_contract,
 )
+from octoagent.tooling.hooks import ApprovalOverrideHook, PresetBeforeHook
+from octoagent.tooling.models import CoreToolSet, DeferredToolEntry, ToolTier
+
+from .tool_search_tool import create_tool_search_handler
 from pydantic import BaseModel, Field
 from ulid import ULID
 
@@ -237,6 +241,56 @@ class _HtmlSnapshotParser(HTMLParser):
         )
 
 
+class _ApprovalOverrideMemoryCache:
+    """Feature 061: ApprovalOverride 内存缓存
+
+    实现 ApprovalOverrideCacheProtocol（hooks 依赖的接口），
+    运行时 O(1) 查询，避免每次工具调用都查 SQLite。
+    key = (agent_runtime_id, tool_name) → True
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str], bool] = {}
+
+    def has(self, agent_runtime_id: str, tool_name: str) -> bool:
+        """检查缓存中是否存在 always 覆盖"""
+        return self._cache.get((agent_runtime_id, tool_name), False)
+
+    def set(self, agent_runtime_id: str, tool_name: str) -> None:
+        """设置缓存条目"""
+        self._cache[(agent_runtime_id, tool_name)] = True
+
+    def remove(self, agent_runtime_id: str, tool_name: str) -> None:
+        """移除缓存条目"""
+        self._cache.pop((agent_runtime_id, tool_name), None)
+
+    def load_from_records(self, records: list) -> None:
+        """从 ApprovalOverride 记录批量加载缓存"""
+        for record in records:
+            self._cache[(record.agent_runtime_id, record.tool_name)] = True
+
+    def clear_agent(self, agent_runtime_id: str) -> None:
+        """清除指定 Agent 的所有缓存条目"""
+        keys_to_remove = [k for k in self._cache if k[0] == agent_runtime_id]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+    def clear_tool(self, tool_name: str) -> None:
+        """清除指定工具的所有缓存条目"""
+        keys_to_remove = [k for k in self._cache if k[1] == tool_name]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+    @property
+    def size(self) -> int:
+        """缓存条目总数"""
+        return len(self._cache)
+
+    def list_for_agent(self, agent_runtime_id: str) -> list[str]:
+        """列出指定 Agent 的所有 always 授权工具名"""
+        return [tn for (rid, tn) in self._cache if rid == agent_runtime_id]
+
+
 class CapabilityPackService:
     """统一管理 bundled tools / skills / ToolIndex / worker bootstrap。"""
 
@@ -247,6 +301,7 @@ class CapabilityPackService:
         store_group,
         tool_broker: ToolBroker,
         preferred_tool_index_backend: str = "auto",
+        approval_override_cache: _ApprovalOverrideMemoryCache | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -262,6 +317,9 @@ class CapabilityPackService:
         self._mcp_registry: McpRegistryService | None = None
         self._mcp_installer: McpInstallerService | None = None
         self._browser_sessions: dict[str, _BrowserSessionState] = {}
+        # Feature 061: ApprovalOverride 内存缓存（给 Hook 使用）
+        # 外部传入时与 ApprovalManager 共享同一实例
+        self._approval_override_cache = approval_override_cache or _ApprovalOverrideMemoryCache()
         self._memory_console_service = MemoryConsoleService(
             project_root,
             store_group=store_group,
@@ -306,11 +364,30 @@ class CapabilityPackService:
     def mcp_registry(self) -> McpRegistryService | None:
         return self._mcp_registry
 
+    @property
+    def approval_override_cache(self) -> _ApprovalOverrideMemoryCache:
+        """Feature 061: 返回 ApprovalOverride 内存缓存实例。"""
+        return self._approval_override_cache
+
     async def startup(self) -> None:
         if self._bootstrapped:
             return
         # Feature 057: 首次启动时扫描 SKILL.md 文件系统
         self._skill_discovery.scan()
+        # Feature 061: 注册权限检查 Hooks 到 ToolBroker
+        event_store = getattr(self._stores, "event_store", None)
+        self._tool_broker.add_hook(
+            ApprovalOverrideHook(
+                cache=self._approval_override_cache,
+                event_store=event_store,
+            )
+        )
+        self._tool_broker.add_hook(
+            PresetBeforeHook(
+                event_store=event_store,
+                override_cache=self._approval_override_cache,
+            )
+        )
         await self._register_builtin_tools()
         if self._mcp_registry is not None:
             await self._mcp_registry.startup()
@@ -422,6 +499,57 @@ class CapabilityPackService:
 
     def get_worker_profile(self, worker_type: WorkerType) -> WorkerCapabilityProfile:
         return self._profile_map.get(worker_type, self._profile_map[WorkerType.GENERAL])
+
+    @property
+    def tool_index(self) -> ToolIndex:
+        """Feature 061: 返回 ToolIndex 实例供 tool_search 等使用。"""
+        return self._tool_index
+
+    async def build_tool_context(
+        self,
+        *,
+        core_tool_set: CoreToolSet | None = None,
+    ) -> tuple[list[Any], list[DeferredToolEntry]]:
+        """Feature 061 T-021: 按 ToolTier 将工具分为 Core 和 Deferred 两组
+
+        Core Tools → 完整 ToolMeta 列表（用于构建 FunctionToolset JSON Schema）
+        Deferred Tools → {name, one_line_desc} 精简列表（注入 system prompt）
+
+        使用 CoreToolSet.default() 确定初始 Core 清单，
+        也可通过 core_tool_set 参数自定义。
+
+        Args:
+            core_tool_set: 自定义 Core Tools 清单，默认使用 CoreToolSet.default()
+
+        Returns:
+            (core_tool_metas, deferred_entries) 二元组:
+            - core_tool_metas: Core 工具的完整 ToolMeta 列表
+            - deferred_entries: Deferred 工具的精简列表
+        """
+        await self.startup()
+
+        effective_core_set = core_tool_set or CoreToolSet.default()
+        all_metas = await self._tool_broker.discover()
+
+        core_metas: list[Any] = []
+        deferred_entries: list[DeferredToolEntry] = []
+
+        for meta in all_metas:
+            if effective_core_set.is_core(meta.name):
+                core_metas.append(meta)
+            else:
+                # 截断描述到 80 字符
+                desc = (meta.description or meta.name)[:80].strip()
+                deferred_entries.append(
+                    DeferredToolEntry(
+                        name=meta.name,
+                        one_line_desc=desc,
+                        tool_group=meta.tool_group,
+                        side_effect_level=meta.side_effect_level.value,
+                    )
+                )
+
+        return core_metas, deferred_entries
 
     async def resolve_worker_binding(
         self,
@@ -3153,29 +3281,48 @@ class CapabilityPackService:
                 handler,
             )
 
+        # Feature 061 T-020/T-021: 注册 tool_search 核心工具
+        event_store = getattr(self._stores, "event_store", None)
+        tool_search_handler = create_tool_search_handler(
+            tool_index=self._tool_index,
+            event_store=event_store,
+        )
+        await self._tool_broker.try_register(
+            reflect_tool_schema(tool_search_handler),
+            tool_search_handler,
+        )
+
     def _build_worker_profiles(self) -> dict[WorkerType, WorkerCapabilityProfile]:
+        # Feature 061 T-028: 统一工具分组 — WorkerType 不再作为工具过滤维度
+        # 所有 Worker 类型共享同一套 default_tool_groups（全量工具分组），
+        # 工具可见性由 Deferred Tools 分层 + PermissionPreset 控制。
+        # WorkerType 保留为分类标签（UI 显示、统计），不影响工具集。
+        _UNIFIED_TOOL_GROUPS = [
+            "project",
+            "artifact",
+            "document",
+            "session",
+            "filesystem",
+            "terminal",
+            "network",
+            "browser",
+            "memory",
+            "supervision",
+            "delegation",
+            "mcp",
+            "skills",
+            "runtime",
+            "automation",
+            "media",
+        ]
         return {
             WorkerType.GENERAL: WorkerCapabilityProfile(
                 worker_type=WorkerType.GENERAL,
                 capabilities=["llm_generation", "general"],
                 default_model_alias="main",
                 default_tool_profile="standard",
-                default_tool_groups=[
-                    "project",
-                    "artifact",
-                    "document",
-                    "session",
-                    "filesystem",
-                    "terminal",
-                    "network",
-                    "browser",
-                    "memory",
-                    "supervision",
-                    "delegation",
-                    "mcp",
-                    "skills",
-                ],
-                bootstrap_file_ids=["bootstrap:shared", "bootstrap:general"],
+                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
+                bootstrap_file_ids=["bootstrap:shared"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
             ),
             WorkerType.OPS: WorkerCapabilityProfile(
@@ -3183,18 +3330,8 @@ class CapabilityPackService:
                 capabilities=["ops", "runtime", "automation", "recovery"],
                 default_model_alias="main",
                 default_tool_profile="standard",
-                default_tool_groups=[
-                    "runtime",
-                    "session",
-                    "project",
-                    "filesystem",
-                    "terminal",
-                    "automation",
-                    "delegation",
-                    "mcp",
-                    "skills",
-                ],
-                bootstrap_file_ids=["bootstrap:shared", "bootstrap:ops"],
+                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
+                bootstrap_file_ids=["bootstrap:shared"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME],
             ),
             WorkerType.RESEARCH: WorkerCapabilityProfile(
@@ -3202,20 +3339,8 @@ class CapabilityPackService:
                 capabilities=["research", "analysis", "summarize"],
                 default_model_alias="main",
                 default_tool_profile="standard",
-                default_tool_groups=[
-                    "project",
-                    "artifact",
-                    "session",
-                    "filesystem",
-                    "network",
-                    "browser",
-                    "memory",
-                    "document",
-                    "media",
-                    "mcp",
-                    "skills",
-                ],
-                bootstrap_file_ids=["bootstrap:shared", "bootstrap:research"],
+                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
+                bootstrap_file_ids=["bootstrap:shared"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
             ),
             WorkerType.DEV: WorkerCapabilityProfile(
@@ -3223,31 +3348,26 @@ class CapabilityPackService:
                 capabilities=["dev", "code", "patch", "test"],
                 default_model_alias="main",
                 default_tool_profile="standard",
-                default_tool_groups=[
-                    "project",
-                    "artifact",
-                    "session",
-                    "filesystem",
-                    "terminal",
-                    "delegation",
-                    "runtime",
-                    "browser",
-                    "document",
-                    "media",
-                    "mcp",
-                    "skills",
-                ],
-                bootstrap_file_ids=["bootstrap:shared", "bootstrap:dev"],
+                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
+                bootstrap_file_ids=["bootstrap:shared"],
                 runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.GRAPH_AGENT],
             ),
         }
 
     def _build_bootstrap_templates(self) -> dict[str, WorkerBootstrapFile]:
+        # Feature 061 T-028: 移除 4 个 WorkerType 专属模板
+        # 仅保留 bootstrap:shared 共享元信息（~50 tokens）。
+        # 角色化行为引导由 AgentRuntime.role_card 承担（T-029）。
         return {
             "bootstrap:shared": WorkerBootstrapFile(
                 file_id="bootstrap:shared",
                 path_hint="bootstrap/shared.md",
-                applies_to_worker_types=[WorkerType.GENERAL],
+                applies_to_worker_types=[
+                    WorkerType.GENERAL,
+                    WorkerType.OPS,
+                    WorkerType.RESEARCH,
+                    WorkerType.DEV,
+                ],
                 content=(
                     "你当前运行在 OctoAgent 内建 capability pack。\n"
                     "Project: {{project_name}} ({{project_slug}} / {{project_id}})\n"
@@ -3260,79 +3380,11 @@ class CapabilityPackService:
                     "Surface: {{surface}}\n"
                     "Worker Type: {{worker_type}}\n"
                     "Capabilities: {{worker_capabilities}}\n"
-                    "Default Tool Profile: {{default_tool_profile}}\n"
-                    "Default Tool Groups: {{default_tool_groups}}\n"
                     "Runtime Kinds: {{runtime_kinds}}\n"
                     "Ambient Degraded Reasons: {{ambient_degraded_reasons}}\n"
                     "必须继续走 ToolBroker / Policy / audit，不得绕过治理面。"
                 ),
                 metadata={"scope": "shared"},
-            ),
-            "bootstrap:general": WorkerBootstrapFile(
-                file_id="bootstrap:general",
-                path_hint="bootstrap/general.md",
-                applies_to_worker_types=[WorkerType.GENERAL],
-                content=(
-                    "你是 OctoAgent 的 Butler（主 Agent / supervisor），"
-                    "也是负责长期协作节奏的 Agent 管家。\n"
-                    "内部 runtime 仍可能把你的 worker_type 标成 general，但对外统一自称 Butler，"
-                    "不要把自己叫作 general worker。\n"
-                    "你的职责是先梳理目标、上下文和下一步，再在策略允许和用户授权范围内创建、拆分、合并、删除"
-                    "或重划分 worker。\n"
-                    "优先自己使用当前已挂载的受治理工具完成有界任务；"
-                    "当已挂载工具中包含 mcp.* 前缀的工具时，优先使用 MCP 工具而非内置同功能工具"
-                    "（例如 mcp.*.web_search 优先于 web.search，mcp.*.research 优先于 web.fetch）；"
-                    "只有在并行执行、专业化分工、权限隔离或上下文隔离明显更有利时，"
-                    "再委派给 research / dev / ops worker。\n"
-                    "如果问题已经进入长期、复杂、持续推进的 specialist lane，"
-                    "优先沿用同一条 lane，保持 worker 上下文和权限边界连续。\n"
-                    "即使决定委派，也要先把目标、上下文、工具边界和返回契约重写清楚，"
-                    "不要把用户原话原封不动转发给 worker。\n"
-                    "面对 under-specified 请求时，"
-                    "先判断是否缺真实待办、地点、预算、比较标准等关键输入；"
-                    "优先补最关键的 1-2 个条件，不要先给伪完整答案。\n"
-                    "当当前工具面已经足够时，不要为了形式上的分层强行再委派一层。\n"
-                    "遇到今天、天气、最新资料、官网、网页信息这类依赖实时外部事实的问题时，"
-                    "先判断是否缺城市、对象名等关键参数；"
-                    "如果系统已有受治理 worker/web/browser 路径，"
-                    "不要直接把自己表述成没有实时能力。"
-                ),
-                metadata={"worker_type": "general"},
-            ),
-            "bootstrap:ops": WorkerBootstrapFile(
-                file_id="bootstrap:ops",
-                path_hint="bootstrap/ops.md",
-                applies_to_worker_types=[WorkerType.OPS],
-                content=(
-                    "你是 ops worker，优先 runtime / diagnostics / recovery。\n"
-                    "如果任务涉及状态页、控制台、网页健康检查或最新运行事实，可使用受治理 "
-                    "runtime / web / filesystem / terminal 工具，并明确记录来源与限制。"
-                ),
-                metadata={"worker_type": "ops"},
-            ),
-            "bootstrap:research": WorkerBootstrapFile(
-                file_id="bootstrap:research",
-                path_hint="bootstrap/research.md",
-                applies_to_worker_types=[WorkerType.RESEARCH],
-                content=(
-                    "你是 research worker，优先分析上下文、产物和证据。\n"
-                    "如果问题依赖今天、最新公开信息、官网、网页资料或外部文档，"
-                    "优先使用已挂载的 mcp.* 搜索/研究工具（如 mcp.*.web_search / mcp.*.research），"
-                    "若无 MCP 搜索工具则使用受治理 web.search / web.fetch / browser.* 收集证据；"
-                    "如果 project 内已有文档或文件线索，也可结合 filesystem 读取已有材料，"
-                    "并在结果中说明来源与不确定性。"
-                ),
-                metadata={"worker_type": "research"},
-            ),
-            "bootstrap:dev": WorkerBootstrapFile(
-                file_id="bootstrap:dev",
-                path_hint="bootstrap/dev.md",
-                applies_to_worker_types=[WorkerType.DEV],
-                content=(
-                    "你是 dev worker，优先改动方案、补丁和验证。"
-                    "可使用受治理 filesystem / terminal / browser 工具完成代码阅读、命令验证和修复闭环。"
-                ),
-                metadata={"worker_type": "dev"},
             ),
         }
 

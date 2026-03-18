@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
-from octoagent.tooling.models import ExecutionContext
+from octoagent.tooling.models import ExecutionContext, PermissionPreset
 from octoagent.tooling.protocols import EventStoreProtocol, ToolBrokerProtocol
 from pydantic import BaseModel, ValidationError
 from ulid import ULID
@@ -39,7 +39,7 @@ from .models import (
     UsageTracker,
     resolve_effective_tool_allowlist,
 )
-from .protocols import StructuredModelClientProtocol
+from .protocols import ApprovalBridgeProtocol, StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
 
@@ -58,11 +58,14 @@ class SkillRunner:
         tool_broker: ToolBrokerProtocol,
         event_store: EventStoreProtocol | None = None,
         hooks: list[SkillRunnerHook] | None = None,
+        approval_bridge: ApprovalBridgeProtocol | None = None,
     ) -> None:
         self._model_client = model_client
         self._tool_broker = tool_broker
         self._event_store = event_store
         self._hooks = hooks or [NoopSkillRunnerHook()]
+        # Feature 061: ask 信号桥接
+        self._approval_bridge = approval_bridge
 
     async def run(
         self,
@@ -377,6 +380,11 @@ class SkillRunner:
 
             await self._call_hook("before_tool_execute", call.tool_name, call.arguments)
 
+            # Feature 061: 将 permission_preset 从 SkillExecutionContext 传递到 ExecutionContext
+            try:
+                _preset = PermissionPreset(execution_context.permission_preset)
+            except ValueError:
+                _preset = PermissionPreset.NORMAL
             tool_context = ExecutionContext(
                 task_id=execution_context.task_id,
                 trace_id=execution_context.trace_id,
@@ -385,9 +393,15 @@ class SkillRunner:
                 agent_session_id=execution_context.agent_session_id,
                 work_id=execution_context.work_id,
                 profile=manifest.tool_profile,
+                permission_preset=_preset,
             )
             tool_result = await self._tool_broker.execute(
                 call.tool_name, call.arguments, tool_context
+            )
+
+            # Feature 061 T-014: "ask:" 前缀信号桥接
+            tool_result = await self._handle_ask_bridge(
+                tool_result, call, tool_context
             )
 
             feedback = self._build_tool_feedback(
@@ -400,6 +414,63 @@ class SkillRunner:
                 break
 
         return results
+
+    async def _handle_ask_bridge(
+        self,
+        tool_result: Any,
+        call: ToolCallSpec,
+        tool_context: ExecutionContext,
+    ) -> Any:
+        """Feature 061 T-014: 识别 ask: 前缀，桥接到 ApprovalManager
+
+        当 ToolBroker 返回 is_error=True 且 error 以 "ask:" 开头时，
+        桥接到 ApprovalManager 审批流：
+        - approve/always → 重新执行工具调用
+        - deny/timeout → 返回拒绝信息给 LLM
+        """
+        if not tool_result.is_error:
+            return tool_result
+        error_msg = str(tool_result.error or "")
+        if not error_msg.startswith("ask:"):
+            return tool_result
+        if self._approval_bridge is None:
+            # 无审批桥接，原样返回 ask 错误
+            return tool_result
+
+        try:
+            decision = await self._approval_bridge.handle_ask(
+                tool_name=call.tool_name,
+                ask_reason=error_msg,
+                agent_runtime_id=tool_context.agent_runtime_id,
+                task_id=tool_context.task_id,
+            )
+        except Exception:
+            logger.warning(
+                "ask_bridge_failed",
+                tool_name=call.tool_name,
+                exc_info=True,
+            )
+            return tool_result
+
+        if decision in ("approve", "always"):
+            # 审批通过 → 重新执行工具调用
+            logger.info(
+                "ask_bridge_approved",
+                tool_name=call.tool_name,
+                decision=decision,
+            )
+            retried = await self._tool_broker.execute(
+                call.tool_name, call.arguments, tool_context
+            )
+            return retried
+
+        # deny / timeout → 将拒绝信息返回给 LLM
+        logger.info(
+            "ask_bridge_denied",
+            tool_name=call.tool_name,
+            decision=decision,
+        )
+        return tool_result
 
     @staticmethod
     def _build_tool_feedback(

@@ -397,19 +397,28 @@ class TestBrokerExecution:
         assert result.is_error is False
         assert result.output == "sync hello"
 
-    async def test_execute_profile_violation(self, mock_event_store) -> None:
-        """Profile 权限检查拒绝"""
+    async def test_execute_profile_violation_now_allowed(
+        self, mock_event_store
+    ) -> None:
+        """Feature 061: Profile 硬拒绝已移除，工具现在可执行
+
+        权限检查完全由 Hook Chain（PresetBeforeHook）驱动。
+        不注册 Hook 的情况下，所有工具均可执行。
+        """
         from octoagent.tooling.broker import ToolBroker
 
         broker = ToolBroker(event_store=mock_event_store)
-        # read_file_tool 需要 standard，但 context 是 minimal
-        await broker.register(reflect_tool_schema(read_file_tool), read_file_tool)
+        await broker.register(
+            reflect_tool_schema(read_file_tool), read_file_tool
+        )
 
         ctx = self._make_context(profile=ToolProfile.MINIMAL)
-        result = await broker.execute("read_file_tool", {"path": "/tmp/test"}, ctx)
+        result = await broker.execute(
+            "read_file_tool", {"path": "/tmp/test"}, ctx
+        )
 
-        assert result.is_error is True
-        assert "Profile violation" in result.error
+        # Feature 061: 不注册 PresetBeforeHook 时，所有工具可执行
+        assert result.is_error is False
 
     async def test_execute_tool_not_found(self, mock_event_store) -> None:
         """工具未找到"""
@@ -423,18 +432,91 @@ class TestBrokerExecution:
         assert result.is_error is True
         assert "not found" in result.error
 
-    async def test_fr010a_irreversible_no_checkpoint_rejected(self, mock_event_store) -> None:
-        """FR-010a: irreversible 无 PolicyCheckpoint 拒绝"""
+    async def test_fr010a_removed_in_feature_061(
+        self, mock_event_store
+    ) -> None:
+        """Feature 061: FR-010a 硬拒绝已移除
+
+        irreversible 工具不再因缺少 PolicyCheckpoint 而被硬拒绝。
+        权限检查由 PresetBeforeHook 的 ask 机制替代。
+        """
         from octoagent.tooling.broker import ToolBroker
 
         broker = ToolBroker(event_store=mock_event_store)
-        await broker.register(reflect_tool_schema(write_file_tool), write_file_tool)
+        await broker.register(
+            reflect_tool_schema(write_file_tool), write_file_tool
+        )
 
         ctx = self._make_context()
         result = await broker.execute(
-            "write_file_tool", {"path": "/tmp/out", "content": "data"}, ctx
+            "write_file_tool",
+            {"path": "/tmp/out", "content": "data"},
+            ctx,
+        )
+
+        # Feature 061: 不注册 PresetBeforeHook 时，
+        # irreversible 工具也可执行
+        assert result.is_error is False
+
+    async def test_preset_hook_soft_deny_irreversible(
+        self, mock_event_store
+    ) -> None:
+        """Feature 061: PresetBeforeHook 对 NORMAL+irreversible → ask"""
+        from octoagent.tooling.broker import ToolBroker
+        from octoagent.tooling.hooks import PresetBeforeHook
+        from octoagent.tooling.models import PermissionPreset
+
+        broker = ToolBroker(event_store=mock_event_store)
+        await broker.register(
+            reflect_tool_schema(write_file_tool), write_file_tool
+        )
+        broker.add_hook(
+            PresetBeforeHook(event_store=mock_event_store)
+        )
+
+        ctx = ExecutionContext(
+            task_id="t1",
+            trace_id="tr1",
+            caller="test",
+            profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
+        )
+        result = await broker.execute(
+            "write_file_tool",
+            {"path": "/tmp/out", "content": "data"},
+            ctx,
         )
 
         assert result.is_error is True
-        assert "policy checkpoint" in result.error.lower()
-        assert "FR-010a" in result.error
+        assert result.error.startswith("ask:")
+
+    async def test_full_preset_allows_irreversible(
+        self, mock_event_store
+    ) -> None:
+        """Feature 061: FULL Preset + irreversible → allow"""
+        from octoagent.tooling.broker import ToolBroker
+        from octoagent.tooling.hooks import PresetBeforeHook
+        from octoagent.tooling.models import PermissionPreset
+
+        broker = ToolBroker(event_store=mock_event_store)
+        await broker.register(
+            reflect_tool_schema(write_file_tool), write_file_tool
+        )
+        broker.add_hook(
+            PresetBeforeHook(event_store=mock_event_store)
+        )
+
+        ctx = ExecutionContext(
+            task_id="t1",
+            trace_id="tr1",
+            caller="test",
+            profile=ToolProfile.PRIVILEGED,
+            permission_preset=PermissionPreset.FULL,
+        )
+        result = await broker.execute(
+            "write_file_tool",
+            {"path": "/tmp/out", "content": "data"},
+            ctx,
+        )
+
+        assert result.is_error is False

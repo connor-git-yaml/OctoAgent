@@ -282,3 +282,144 @@ async def test_llm_service_preserves_structured_messages_in_real_skill_runner_pa
     assert request_body["input"][0]["content"][0]["text"] == "第一轮问题"
     assert request_body["input"][1]["content"][0]["text"] == "assistant-response-1"
     assert request_body["input"][2]["content"][0]["text"] == "第二轮追问"
+
+
+# ============================================================
+# Feature 061 T-022a: DynamicToolset 集成单元测试
+# ============================================================
+
+
+from octoagent.gateway.services.tool_promotion import ToolPromotionService
+
+
+async def test_promoted_tools_merged_into_selected_tools() -> None:
+    """tool_search 结果提升的工具在下一个 run_step 中注入 tools_allowed"""
+    fallback = _FakeFallbackManager()
+    skill_runner = _FakeSkillRunner(_build_skill_result("工具已注入。"))
+    promotion_service = ToolPromotionService()
+
+    # 预先提升一个工具
+    await promotion_service.promote("docker.run", "tool_search:docker")
+
+    service = LLMService(
+        fallback_manager=fallback,
+        skill_runner=skill_runner,  # type: ignore[arg-type]
+        tool_promotion_service=promotion_service,
+    )
+
+    result = await service.call(
+        "运行 docker 容器",
+        model_alias="main",
+        task_id="task-promo",
+        trace_id="trace-promo",
+        metadata={
+            "selected_tools_json": '["project.inspect"]',
+            "selected_worker_type": "general",
+        },
+        worker_capability="llm_generation",
+        tool_profile="standard",
+    )
+
+    assert result.content == "工具已注入。"
+    # 验证 skill_runner 收到的 tools_allowed 包含 promoted 工具
+    assert len(skill_runner.calls) == 1
+    manifest = skill_runner.calls[0]["manifest"]
+    assert "project.inspect" in manifest.tools_allowed
+    assert "docker.run" in manifest.tools_allowed
+
+
+async def test_process_tool_search_results_promotes_tools() -> None:
+    """process_tool_search_results 正确提升搜索到的工具"""
+    promotion_service = ToolPromotionService()
+    service = LLMService(
+        tool_promotion_service=promotion_service,
+    )
+
+    search_json = json.dumps({
+        "query": "docker container",
+        "results": [
+            {
+                "tool_name": "docker.run",
+                "description": "运行容器",
+                "parameters_schema": {"type": "object"},
+                "score": 0.9,
+            },
+            {
+                "tool_name": "docker.stop",
+                "description": "停止容器",
+                "parameters_schema": {"type": "object"},
+                "score": 0.8,
+            },
+        ],
+        "is_fallback": False,
+        "backend": "in_memory",
+    })
+
+    newly = await service.process_tool_search_results(search_json)
+
+    assert set(newly) == {"docker.run", "docker.stop"}
+    assert promotion_service.is_promoted("docker.run")
+    assert promotion_service.is_promoted("docker.stop")
+
+
+async def test_process_tool_search_results_without_promotion_service() -> None:
+    """未配置 tool_promotion_service 时返回空列表"""
+    service = LLMService()  # 无 tool_promotion_service
+
+    newly = await service.process_tool_search_results('{"query":"test","results":[]}')
+    assert newly == []
+
+
+async def test_promoted_tools_no_duplicates() -> None:
+    """promoted 工具不与 selected_tools 重复"""
+    fallback = _FakeFallbackManager()
+    skill_runner = _FakeSkillRunner(_build_skill_result("ok"))
+    promotion_service = ToolPromotionService()
+
+    # 提升的工具与 selected_tools 有重叠
+    await promotion_service.promote("project.inspect", "tool_search:project")
+
+    service = LLMService(
+        fallback_manager=fallback,
+        skill_runner=skill_runner,  # type: ignore[arg-type]
+        tool_promotion_service=promotion_service,
+    )
+
+    await service.call(
+        "test",
+        model_alias="main",
+        task_id="task-dup",
+        trace_id="trace-dup",
+        metadata={
+            "selected_tools_json": '["project.inspect","task.inspect"]',
+            "selected_worker_type": "general",
+        },
+        worker_capability="llm_generation",
+        tool_profile="standard",
+    )
+
+    assert len(skill_runner.calls) == 1
+    manifest = skill_runner.calls[0]["manifest"]
+    # 不应重复
+    assert manifest.tools_allowed.count("project.inspect") == 1
+
+
+async def test_tool_promotion_state_tracked() -> None:
+    """ToolPromotionState 引用计数正确追踪"""
+    promotion_service = ToolPromotionService()
+
+    # tool_search 和 skill 都提升同一工具
+    await promotion_service.promote("docker.run", "tool_search:q1")
+    await promotion_service.promote("docker.run", "skill:coding")
+
+    assert promotion_service.is_promoted("docker.run")
+
+    # 移除 tool_search 来源 → 还有 skill 来源 → 不回退
+    result = await promotion_service.demote("docker.run", "tool_search:q1")
+    assert result is False
+    assert promotion_service.is_promoted("docker.run")
+
+    # 移除 skill 来源 → 无其他来源 → 回退
+    result = await promotion_service.demote("docker.run", "skill:coding")
+    assert result is True
+    assert not promotion_service.is_promoted("docker.run")

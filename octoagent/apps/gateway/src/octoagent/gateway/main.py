@@ -372,6 +372,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
         sse_broadcaster=approval_broadcaster,
     )
+    # Feature 061 T-016: 创建 ApprovalOverride 持久化 + 缓存
+    from octoagent.policy.approval_override_store import (
+        ApprovalOverrideCache,
+        ApprovalOverrideRepository,
+    )
+
+    approval_override_cache = ApprovalOverrideCache()
+    approval_override_repo = ApprovalOverrideRepository(
+        conn=store_group.conn,
+        cache=approval_override_cache,
+        event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+    )
+    # 注入到 ApprovalManager（PolicyEngine 内部创建的实例）
+    policy_engine.approval_manager._override_repo = approval_override_repo
+    policy_engine.approval_manager._override_cache = approval_override_cache
+    app.state.approval_override_repo = approval_override_repo
+    app.state.approval_override_cache = approval_override_cache
+
     await policy_engine.startup()
     app.state.policy_engine = policy_engine
     app.state.approval_manager = policy_engine.approval_manager
@@ -446,6 +464,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_root=project_root,
         store_group=store_group,
         tool_broker=tool_broker,
+        approval_override_cache=approval_override_cache,
     )
     # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
     app.state.skill_discovery = app.state.capability_pack_service.skill_discovery

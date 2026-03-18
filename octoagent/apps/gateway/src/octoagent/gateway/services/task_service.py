@@ -880,6 +880,9 @@ class TaskService:
                 merged["recall_frame_id"] = compiled_context.recall_frame_id
             if compiled_context.memory_namespace_ids and "memory_namespace_ids" not in merged:
                 merged["memory_namespace_ids"] = list(compiled_context.memory_namespace_ids)
+            # Feature 061: 传递 permission_preset 到 LLM dispatch metadata
+            if compiled_context.permission_preset and "permission_preset" not in merged:
+                merged["permission_preset"] = compiled_context.permission_preset
         if runtime_context is not None and runtime_context.work_id and not str(
             merged.get("work_id", "")
         ).strip():

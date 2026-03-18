@@ -282,6 +282,32 @@ export default function AgentEditorSection({
         </div>
       </div>
 
+      <div className="wb-agent-editor-grid">
+        <label className="wb-field">
+          <span>权限模式</span>
+          <select
+            value={draft.permissionPreset}
+            onChange={(event) => onChangeDraft("permissionPreset", event.target.value)}
+          >
+            <option value="minimal">保守模式 — 只读操作直接执行，其余需要你确认</option>
+            <option value="normal">标准模式 — 读写操作直接执行，不可逆操作需要确认</option>
+            <option value="full">完全信任 — 所有操作直接执行，不需要确认</option>
+          </select>
+          <small>决定这个 Agent 执行工具时需不需要你先确认。大多数情况选标准模式就好。</small>
+        </label>
+
+        <label className="wb-field">
+          <span>角色描述</span>
+          <textarea
+            value={draft.roleCard}
+            onChange={(event) => onChangeDraft("roleCard", event.target.value)}
+            placeholder="简单说明这个 Agent 的职责和擅长领域，帮助它更好地理解自己的定位。"
+            rows={3}
+          />
+          <small>留空也可以，Agent 会用默认通用身份工作。</small>
+        </label>
+      </div>
+
       <div className="wb-note-stack">
         <div className="wb-panel-head">
           <div>

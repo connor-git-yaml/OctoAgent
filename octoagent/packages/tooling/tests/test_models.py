@@ -1,23 +1,40 @@
-"""数据模型测试 -- Phase 2 Foundational
+"""数据模型测试 -- Phase 2 Foundational + Feature 061
 
 验证枚举值、ToolMeta 构建/序列化、ToolResult 必含字段、
 ToolProfile 层级比较、CheckResult 默认值等。
+Feature 061: PermissionPreset / PresetDecision / ToolTier 枚举、
+PRESET_POLICY 矩阵、preset_decision()、兼容映射等。
 """
 
+import warnings
+
 from octoagent.tooling.models import (
+    PRESET_POLICY,
     PROFILE_LEVELS,
+    TOOL_PROFILE_TO_PRESET,
     BeforeHookResult,
     CheckResult,
+    CoreToolSet,
+    DeferredToolEntry,
     ExecutionContext,
     FailMode,
     HookType,
+    PermissionPreset,
+    PresetCheckResult,
+    PresetDecision,
     RegisterToolResult,
     RegistryDiagnostic,
     SideEffectLevel,
     ToolCall,
     ToolMeta,
     ToolProfile,
+    ToolPromotionState,
     ToolResult,
+    ToolSearchHit,
+    ToolSearchResult,
+    ToolTier,
+    migrate_tool_profile_to_preset,
+    preset_decision,
     profile_allows,
 )
 
@@ -288,3 +305,414 @@ class TestRegistryDiagnostic:
         )
         assert diagnostic.tool_name == "echo"
         assert diagnostic.error_type == "ToolRegistrationError"
+
+
+# ============================================================
+# Feature 061: 新增枚举和数据模型测试
+# ============================================================
+
+
+class TestPermissionPreset:
+    """PermissionPreset 枚举测试"""
+
+    def test_values(self) -> None:
+        assert PermissionPreset.MINIMAL == "minimal"
+        assert PermissionPreset.NORMAL == "normal"
+        assert PermissionPreset.FULL == "full"
+
+    def test_enum_count(self) -> None:
+        assert len(PermissionPreset) == 3
+
+
+class TestPresetDecision:
+    """PresetDecision 枚举测试"""
+
+    def test_values(self) -> None:
+        assert PresetDecision.ALLOW == "allow"
+        assert PresetDecision.ASK == "ask"
+
+    def test_no_deny(self) -> None:
+        """确认没有 DENY 值"""
+        assert len(PresetDecision) == 2
+        values = {d.value for d in PresetDecision}
+        assert "deny" not in values
+
+
+class TestToolTier:
+    """ToolTier 枚举测试"""
+
+    def test_values(self) -> None:
+        assert ToolTier.CORE == "core"
+        assert ToolTier.DEFERRED == "deferred"
+
+    def test_enum_count(self) -> None:
+        assert len(ToolTier) == 2
+
+
+class TestPresetPolicy:
+    """PRESET_POLICY 矩阵和 preset_decision() 测试"""
+
+    def test_matrix_has_all_combinations(self) -> None:
+        """矩阵覆盖 3×3 = 9 个组合"""
+        assert len(PRESET_POLICY) == 3
+        for preset in PermissionPreset:
+            assert len(PRESET_POLICY[preset]) == 3
+
+    def test_minimal_none_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.MINIMAL, SideEffectLevel.NONE
+        ) == PresetDecision.ALLOW
+
+    def test_minimal_reversible_ask(self) -> None:
+        assert preset_decision(
+            PermissionPreset.MINIMAL, SideEffectLevel.REVERSIBLE
+        ) == PresetDecision.ASK
+
+    def test_minimal_irreversible_ask(self) -> None:
+        assert preset_decision(
+            PermissionPreset.MINIMAL, SideEffectLevel.IRREVERSIBLE
+        ) == PresetDecision.ASK
+
+    def test_normal_none_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.NORMAL, SideEffectLevel.NONE
+        ) == PresetDecision.ALLOW
+
+    def test_normal_reversible_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.NORMAL, SideEffectLevel.REVERSIBLE
+        ) == PresetDecision.ALLOW
+
+    def test_normal_irreversible_ask(self) -> None:
+        assert preset_decision(
+            PermissionPreset.NORMAL, SideEffectLevel.IRREVERSIBLE
+        ) == PresetDecision.ASK
+
+    def test_full_none_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.FULL, SideEffectLevel.NONE
+        ) == PresetDecision.ALLOW
+
+    def test_full_reversible_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.FULL, SideEffectLevel.REVERSIBLE
+        ) == PresetDecision.ALLOW
+
+    def test_full_irreversible_allow(self) -> None:
+        assert preset_decision(
+            PermissionPreset.FULL, SideEffectLevel.IRREVERSIBLE
+        ) == PresetDecision.ALLOW
+
+
+class TestToolProfileToPresetMapping:
+    """ToolProfile → PermissionPreset 兼容映射测试"""
+
+    def test_mapping_completeness(self) -> None:
+        """映射覆盖所有 ToolProfile 值"""
+        for profile in ToolProfile:
+            assert profile in TOOL_PROFILE_TO_PRESET
+
+    def test_minimal_maps_to_minimal(self) -> None:
+        assert (
+            TOOL_PROFILE_TO_PRESET[ToolProfile.MINIMAL]
+            == PermissionPreset.MINIMAL
+        )
+
+    def test_standard_maps_to_normal(self) -> None:
+        assert (
+            TOOL_PROFILE_TO_PRESET[ToolProfile.STANDARD]
+            == PermissionPreset.NORMAL
+        )
+
+    def test_privileged_maps_to_full(self) -> None:
+        assert (
+            TOOL_PROFILE_TO_PRESET[ToolProfile.PRIVILEGED]
+            == PermissionPreset.FULL
+        )
+
+    def test_migrate_known_values(self) -> None:
+        assert (
+            migrate_tool_profile_to_preset("minimal")
+            == PermissionPreset.MINIMAL
+        )
+        assert (
+            migrate_tool_profile_to_preset("standard")
+            == PermissionPreset.NORMAL
+        )
+        assert (
+            migrate_tool_profile_to_preset("privileged")
+            == PermissionPreset.FULL
+        )
+
+    def test_migrate_case_insensitive(self) -> None:
+        assert (
+            migrate_tool_profile_to_preset("STANDARD")
+            == PermissionPreset.NORMAL
+        )
+        assert (
+            migrate_tool_profile_to_preset(" Standard ")
+            == PermissionPreset.NORMAL
+        )
+
+    def test_migrate_unknown_falls_back_to_minimal(self) -> None:
+        assert (
+            migrate_tool_profile_to_preset("unknown")
+            == PermissionPreset.MINIMAL
+        )
+        assert (
+            migrate_tool_profile_to_preset("")
+            == PermissionPreset.MINIMAL
+        )
+
+
+class TestPresetCheckResult:
+    """PresetCheckResult 数据模型测试"""
+
+    def test_construction(self) -> None:
+        result = PresetCheckResult(
+            agent_runtime_id="agent-1",
+            tool_name="docker.run",
+            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            permission_preset=PermissionPreset.NORMAL,
+            decision=PresetDecision.ASK,
+        )
+        assert result.agent_runtime_id == "agent-1"
+        assert result.decision == PresetDecision.ASK
+        assert result.override_hit is False
+
+    def test_serialization_roundtrip(self) -> None:
+        result = PresetCheckResult(
+            agent_runtime_id="agent-1",
+            tool_name="docker.run",
+            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            permission_preset=PermissionPreset.NORMAL,
+            decision=PresetDecision.ASK,
+            override_hit=True,
+        )
+        data = result.model_dump()
+        restored = PresetCheckResult(**data)
+        assert restored == result
+
+
+class TestDeferredToolEntry:
+    """DeferredToolEntry 数据模型测试"""
+
+    def test_construction(self) -> None:
+        entry = DeferredToolEntry(
+            name="docker.run",
+            one_line_desc="在 Docker 容器中运行命令",
+        )
+        assert entry.name == "docker.run"
+        assert entry.tool_group == ""
+
+    def test_max_length_enforced(self) -> None:
+        """one_line_desc 不超过 80 字符"""
+        import pydantic
+
+        try:
+            DeferredToolEntry(
+                name="test",
+                one_line_desc="x" * 81,
+            )
+            assert False, "应抛出验证错误"
+        except pydantic.ValidationError:
+            pass
+
+    def test_exactly_80_chars_ok(self) -> None:
+        entry = DeferredToolEntry(
+            name="test",
+            one_line_desc="x" * 80,
+        )
+        assert len(entry.one_line_desc) == 80
+
+
+class TestCoreToolSet:
+    """CoreToolSet 数据模型测试"""
+
+    def test_default_contains_tool_search(self) -> None:
+        """FR-018: tool_search 必须在 Core Tools 清单中"""
+        defaults = CoreToolSet.default()
+        assert "tool_search" in defaults.tool_names
+
+    def test_default_has_10_tools(self) -> None:
+        defaults = CoreToolSet.default()
+        assert len(defaults.tool_names) == 10
+
+    def test_is_core(self) -> None:
+        ts = CoreToolSet(tool_names=["tool_search", "echo"])
+        assert ts.is_core("tool_search") is True
+        assert ts.is_core("echo") is True
+        assert ts.is_core("docker.run") is False
+
+    def test_classify(self) -> None:
+        ts = CoreToolSet(tool_names=["tool_search"])
+        assert ts.classify("tool_search") == ToolTier.CORE
+        assert ts.classify("docker.run") == ToolTier.DEFERRED
+
+    def test_min_length_enforced(self) -> None:
+        import pydantic
+
+        try:
+            CoreToolSet(tool_names=[])
+            assert False, "应抛出验证错误"
+        except pydantic.ValidationError:
+            pass
+
+
+class TestToolSearchHitAndResult:
+    """ToolSearchHit + ToolSearchResult 数据模型测试"""
+
+    def test_hit_construction(self) -> None:
+        hit = ToolSearchHit(
+            tool_name="docker.run",
+            description="运行 Docker 容器",
+            parameters_schema={"type": "object"},
+            score=0.95,
+        )
+        assert hit.tool_name == "docker.run"
+        assert hit.score == 0.95
+
+    def test_result_construction(self) -> None:
+        result = ToolSearchResult(
+            query="run docker",
+            results=[
+                ToolSearchHit(
+                    tool_name="docker.run",
+                    description="运行",
+                    parameters_schema={},
+                )
+            ],
+            total_deferred=30,
+            backend="in_memory",
+        )
+        assert len(result.results) == 1
+        assert result.total_deferred == 30
+        assert result.is_fallback is False
+
+    def test_result_serialization(self) -> None:
+        result = ToolSearchResult(query="test", is_fallback=True)
+        data = result.model_dump()
+        restored = ToolSearchResult(**data)
+        assert restored == result
+
+
+class TestToolPromotionState:
+    """ToolPromotionState 数据模型测试"""
+
+    def test_promote_first_source(self) -> None:
+        state = ToolPromotionState()
+        assert state.promote("docker.run", "tool_search:q1") is True
+        assert state.is_promoted("docker.run") is True
+
+    def test_promote_duplicate_source(self) -> None:
+        """重复 promote 同一来源不重复计数"""
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        assert state.promote("docker.run", "tool_search:q1") is False
+
+    def test_promote_multiple_sources(self) -> None:
+        state = ToolPromotionState()
+        assert state.promote("docker.run", "tool_search:q1") is True
+        assert state.promote("docker.run", "skill:coding") is False
+
+    def test_demote_single_source(self) -> None:
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        assert state.demote("docker.run", "tool_search:q1") is True
+        assert state.is_promoted("docker.run") is False
+
+    def test_demote_partial_multi_source(self) -> None:
+        """多来源 promote → 部分 demote → 不回退"""
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        state.promote("docker.run", "skill:coding")
+        assert state.demote("docker.run", "tool_search:q1") is False
+        assert state.is_promoted("docker.run") is True
+
+    def test_demote_all_sources(self) -> None:
+        """多来源 promote → 全部 demote → 回退"""
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        state.promote("docker.run", "skill:coding")
+        state.demote("docker.run", "tool_search:q1")
+        assert state.demote("docker.run", "skill:coding") is True
+        assert state.is_promoted("docker.run") is False
+
+    def test_active_tool_names(self) -> None:
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        state.promote("web.browse", "skill:research")
+        assert sorted(state.active_tool_names) == [
+            "docker.run",
+            "web.browse",
+        ]
+
+    def test_demote_nonexistent_source(self) -> None:
+        """demote 不存在的来源 → 不崩溃"""
+        state = ToolPromotionState()
+        state.promote("docker.run", "tool_search:q1")
+        assert state.demote("docker.run", "unknown") is False
+
+
+class TestToolMetaWithTier:
+    """ToolMeta 新增 tier 字段测试"""
+
+    def test_default_tier_deferred(self) -> None:
+        meta = ToolMeta(
+            name="test",
+            description="test",
+            parameters_json_schema={},
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="system",
+        )
+        assert meta.tier == ToolTier.DEFERRED
+
+    def test_explicit_tier_core(self) -> None:
+        meta = ToolMeta(
+            name="test",
+            description="test",
+            parameters_json_schema={},
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="system",
+            tier=ToolTier.CORE,
+        )
+        assert meta.tier == ToolTier.CORE
+
+
+class TestExecutionContextWithPreset:
+    """ExecutionContext 新增 permission_preset 字段测试"""
+
+    def test_default_preset(self) -> None:
+        ctx = ExecutionContext(task_id="t1", trace_id="tr1")
+        assert ctx.permission_preset == PermissionPreset.MINIMAL
+
+    def test_custom_preset(self) -> None:
+        ctx = ExecutionContext(
+            task_id="t1",
+            trace_id="tr1",
+            permission_preset=PermissionPreset.FULL,
+        )
+        assert ctx.permission_preset == PermissionPreset.FULL
+
+    def test_profile_still_works(self) -> None:
+        """profile 字段保留兼容"""
+        ctx = ExecutionContext(
+            task_id="t1",
+            trace_id="tr1",
+            profile=ToolProfile.STANDARD,
+        )
+        assert ctx.profile == ToolProfile.STANDARD
+
+
+class TestProfileAllowsDeprecation:
+    """profile_allows() 废弃警告测试"""
+
+    def test_emits_deprecation_warning(self) -> None:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            profile_allows(ToolProfile.MINIMAL, ToolProfile.MINIMAL)
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "preset_decision" in str(w[0].message)

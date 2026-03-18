@@ -221,6 +221,16 @@ class AgentRuntime(BaseModel):
     name: str = Field(default="")
     persona_summary: str = Field(default="")
     status: AgentRuntimeStatus = AgentRuntimeStatus.ACTIVE
+    # Feature 061: 权限 Preset（minimal/normal/full），决定工具调用的 allow/ask 策略
+    permission_preset: str = Field(
+        default="normal",
+        description="权限 Preset（minimal/normal/full）",
+    )
+    # Feature 061: 角色卡片，替代 WorkerType 多模板的角色引导
+    role_card: str = Field(
+        default="",
+        description="Agent 角色卡片文本",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)

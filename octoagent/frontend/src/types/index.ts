@@ -685,11 +685,17 @@ export interface AgentProfilesDocument extends ControlPlaneDocumentBase {
 export type WorkerProfileOriginKind = "builtin" | "custom" | "cloned" | "extracted";
 export type WorkerProfileStatus = "draft" | "active" | "archived";
 
+export type PermissionPreset = "minimal" | "normal" | "full";
+
 export interface WorkerProfileStaticConfig {
   base_archetype: string;
   summary: string;
   model_alias: string;
   tool_profile: string;
+  /** Feature 061: Agent 实例级权限 Preset（取代 tool_profile） */
+  permission_preset: PermissionPreset;
+  /** Feature 061: Agent 角色卡片（简短角色描述） */
+  role_card: string;
   default_tool_groups: string[];
   selected_tools: string[];
   runtime_kinds: string[];
@@ -1092,12 +1098,18 @@ export interface EffectiveToolUniverse {
   warnings: string[];
 }
 
+export type ToolTier = "core" | "deferred";
+
 export interface BundledToolDefinition {
   tool_name: string;
   label: string;
   description: string;
   tool_group: string;
   tool_profile: string;
+  /** Feature 061: 工具层级（core/deferred） */
+  tier: ToolTier;
+  /** Feature 061: 副作用等级（none/reversible/irreversible） */
+  side_effect_level: string;
   tags: string[];
   worker_types: WorkerType[];
   manifest_ref: string;

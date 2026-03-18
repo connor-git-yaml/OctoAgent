@@ -497,6 +497,7 @@ class AgentContextService:
         budget_allocation: BudgetAllocation | None = None,
         loaded_skills_content: str = "",
         progress_notes: list[dict[str, Any]] | None = None,
+        deferred_tools_text: str = "",
     ) -> CompiledTaskContext:
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
@@ -560,6 +561,8 @@ class AgentContextService:
                 budget_allocation.skill_injection_budget if budget_allocation is not None else 0
             ),
             progress_notes=progress_notes,
+            deferred_tools_text=deferred_tools_text,
+            role_card=agent_runtime.role_card if agent_runtime is not None else "",
         )
         degraded_reasons.extend(prompt_budget_reasons)
         degraded_reason = "; ".join(dict.fromkeys(item for item in degraded_reasons if item))
@@ -824,6 +827,8 @@ class AgentContextService:
             effective_agent_profile_id=agent_profile.profile_id,
             effective_agent_runtime_id=agent_runtime.agent_runtime_id,
             effective_agent_session_id=agent_session.agent_session_id,
+            # Feature 061: 传递 permission_preset 到 CompiledTaskContext
+            permission_preset=getattr(agent_runtime, "permission_preset", "normal") or "normal",
             system_blocks=system_blocks,
             recent_summary=recent_summary,
             recall_frame_id=recall_frame.recall_frame_id,
@@ -3764,6 +3769,8 @@ class AgentContextService:
         loaded_skills_content: str = "",
         skill_injection_budget: int = 0,
         progress_notes: list[dict] | None = None,
+        deferred_tools_text: str = "",
+        role_card: str = "",
     ) -> tuple[list[dict[str, str]], list[str]]:
         ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
             owner_profile=owner_profile,
@@ -3875,6 +3882,15 @@ class AgentContextService:
                 ),
             },
         ]
+        # Feature 061: Deferred Tools 名称列表注入
+        # 让 LLM 知道有哪些工具可通过 tool_search 搜索后使用
+        if deferred_tools_text:
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": deferred_tools_text,
+                }
+            )
         if owner_overlay is not None:
             blocks.append(
                 {
@@ -3952,6 +3968,16 @@ class AgentContextService:
                 "content": bootstrap_block_content,
             }
         )
+        # Feature 061 T-029: 角色卡片注入（替代 WorkerType 多模板的角色引导）
+        # 角色卡片是 Agent 实例级自定义描述（~100-150 tokens），
+        # 从 AgentRuntime.role_card 读取。是引导而非硬约束。
+        if role_card:
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": f"RoleCard:\n{role_card}",
+                }
+            )
         if recent_summary:
             blocks.append(
                 {
@@ -4168,6 +4194,8 @@ class AgentContextService:
         loaded_skills_content: str = "",
         skill_injection_budget: int = 0,
         progress_notes: list[dict] | None = None,
+        deferred_tools_text: str = "",
+        role_card: str = "",
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]
         if recent_summary:
@@ -4287,6 +4315,8 @@ class AgentContextService:
                             loaded_skills_content=loaded_skills_content,
                             skill_injection_budget=skill_injection_budget,
                             progress_notes=progress_notes,
+                            deferred_tools_text=deferred_tools_text,
+                            role_card=role_card,
                         )
                         system_tokens = estimate_messages_tokens(blocks)
                         delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])

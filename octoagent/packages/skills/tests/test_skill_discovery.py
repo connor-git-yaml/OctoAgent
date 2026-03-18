@@ -323,3 +323,43 @@ class TestSkillDiscovery:
         sd = SkillDiscovery(builtin_dir=skill_dirs["builtin"])
         result = sd.scan()
         assert result == []
+
+    def test_tools_required_parsing(self, skill_dirs):
+        """tools_required 字段应从 frontmatter 正确解析。"""
+        _write_skill(
+            skill_dirs["builtin"],
+            "coding-agent",
+            extra_fields="tools_required:\n  - docker.run\n  - terminal.exec\n",
+        )
+        sd = SkillDiscovery(builtin_dir=skill_dirs["builtin"])
+        sd.scan()
+
+        entry = sd.get("coding-agent")
+        assert entry is not None
+        assert entry.tools_required == ["docker.run", "terminal.exec"]
+
+    def test_tools_required_empty_or_missing(self, skill_dirs):
+        """未声明 tools_required 的 Skill 应默认为空列表。"""
+        _write_skill(skill_dirs["builtin"], "simple-skill")
+        sd = SkillDiscovery(builtin_dir=skill_dirs["builtin"])
+        sd.scan()
+
+        entry = sd.get("simple-skill")
+        assert entry is not None
+        assert entry.tools_required == []
+
+    def test_tools_required_nonexistent_tools(self, skill_dirs):
+        """tools_required 包含不存在的工具名仍可解析（运行时记录警告）。"""
+        _write_skill(
+            skill_dirs["builtin"],
+            "test-skill",
+            extra_fields="tools_required:\n  - nonexistent.tool\n  - another.fake\n",
+        )
+        sd = SkillDiscovery(builtin_dir=skill_dirs["builtin"])
+        sd.scan()
+
+        entry = sd.get("test-skill")
+        assert entry is not None
+        assert len(entry.tools_required) == 2
+        assert "nonexistent.tool" in entry.tools_required
+        assert "another.fake" in entry.tools_required
