@@ -1917,6 +1917,10 @@ describe("App workbench routing", () => {
       if (url.includes("/api/control/snapshot")) {
         return Promise.resolve(jsonResponse(snapshot));
       }
+      // Feature 061: 编辑器打开时会 fetch 审批覆盖列表
+      if (url.includes("/api/approval-overrides")) {
+        return Promise.resolve(jsonResponse({ overrides: [], total: 0 }));
+      }
       if (url.includes("/api/control/actions") && init?.method === "POST") {
         const body = String(init.body ?? "");
         if (body.includes('"action_id":"worker_profile.review"')) {
@@ -1979,7 +1983,6 @@ describe("App workbench routing", () => {
     ).toBeInTheDocument();
     // 主 Agent 卡片的操作按钮统一为"编辑"，编辑器内保存按钮为"保存"
     await userEvent.click((await screen.findAllByRole("button", { name: "编辑" }))[0]!);
-    await userEvent.click(screen.getByRole("checkbox", { name: /运行检查/ }));
     await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -1996,7 +1999,7 @@ describe("App workbench routing", () => {
       .find((body) => body.includes('"action_id":"worker_profile.review"'));
 
     expect(actionBody).toContain('"default_tool_groups":["project"]');
-    expect(actionBody).toContain('"selected_tools":["project.inspect","runtime.inspect"]');
+    expect(actionBody).toContain('"selected_tools":["project.inspect"]');
     expect(actionBody).toContain('"base_archetype":"general"');
   });
 

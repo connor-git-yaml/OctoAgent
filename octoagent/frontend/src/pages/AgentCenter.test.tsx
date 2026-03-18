@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AgentCenter from "./AgentCenter";
 
 const useWorkbenchMock = vi.fn();
@@ -649,8 +649,17 @@ function buildSnapshot(options?: {
 }
 
 describe("AgentCenter", () => {
+  beforeEach(() => {
+    // 模拟 fetch 以支持审批覆盖 API 调用
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ overrides: [], total: 0 }),
+    }));
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     navigateMock.mockReset();
   });
 
@@ -710,9 +719,9 @@ describe("AgentCenter", () => {
     expect(screen.getByLabelText(/名称/)).toBeInTheDocument();
     expect(screen.getByText("使用的模型")).toBeInTheDocument();
     expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
-    expect(screen.getByText("默认工具组")).toBeInTheDocument();
-    expect(screen.getByText("固定工具")).toBeInTheDocument();
-    expect(screen.getByText("Skills 能力绑定")).toBeInTheDocument();
+    // Feature 061: 新编辑器展示行为文件和已授权工具
+    expect(screen.getAllByText("行为文件").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("已授权工具")).toBeInTheDocument();
   });
 
   it("保存新 Agent 时会先 review，再发布为当前项目 Agent", async () => {
@@ -759,7 +768,6 @@ describe("AgentCenter", () => {
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "资料整理助手");
 
-    await userEvent.click(screen.getByLabelText(/Worker Review/));
     // 编辑器中创建新 Agent 的保存按钮文案是 "创建"
     await userEvent.click(screen.getByRole("button", { name: "创建" }));
 
@@ -789,55 +797,36 @@ describe("AgentCenter", () => {
     });
   });
 
-  it("编辑已有 Agent 时仍能取消已经失效的工具组和固定工具", async () => {
-    const submitAction = vi.fn(async (actionId: string) => {
-      if (actionId === "worker_profile.review") {
+  it("编辑器展示审批覆盖列表并支持撤销", async () => {
+    // 模拟审批覆盖 API 返回数据
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (typeof url === "string" && url.includes("/api/approval-overrides") && (!options || options.method !== "DELETE")) {
         return {
-          data: {
-            review: {
-              can_save: true,
-              ready: true,
-              warnings: [],
-              blocking_reasons: [],
-              next_actions: ["可以直接保存。"],
-            },
-          },
+          ok: true,
+          json: async () => ({
+            overrides: [
+              {
+                id: 1,
+                agent_runtime_id: "butler-001",
+                tool_name: "docker.run",
+                decision: "always",
+                created_at: "2026-03-14T12:00:00Z",
+              },
+            ],
+            total: 1,
+          }),
         };
       }
-      if (actionId === "worker_profile.apply") {
-        return {
-          data: {
-            profile_id: "project-home:legacy-agent",
-          },
-        };
+      if (options?.method === "DELETE") {
+        return { ok: true, json: async () => ({ success: true, message: "已撤销" }) };
       }
-      return { data: {} };
+      return { ok: true, json: async () => ({}) };
     });
+    vi.stubGlobal("fetch", fetchMock);
 
     useWorkbenchMock.mockReturnValue({
-      snapshot: buildSnapshot({
-        customAgents: [
-          {
-            profile_id: "project-home:main",
-            name: "家庭主 Agent",
-            summary: "负责默认聊天入口和日常协调。",
-            status: "active",
-            model_alias: "main",
-            default_tool_groups: ["project"],
-            selected_tools: ["project.inspect"],
-          },
-          {
-            profile_id: "project-home:legacy-agent",
-            name: "历史工具 Agent",
-            summary: "还带着已经失效的旧工具配置。",
-            status: "active",
-            model_alias: "reasoning",
-            default_tool_groups: ["project", "legacy-group"],
-            selected_tools: ["project.inspect", "legacy.inspect"],
-          },
-        ],
-      }),
-      submitAction,
+      snapshot: buildSnapshot(),
+      submitAction: vi.fn(),
       busyActionId: "",
     });
 
@@ -847,28 +836,23 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const agentCard = (await screen.findByText("历史工具 Agent")).closest(".wb-agent-card") as HTMLElement | null;
-    expect(agentCard).not.toBeNull();
+    // 打开主 Agent 编辑器
+    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
-    await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
+    // 等待审批覆盖列表加载完成
+    expect(await screen.findByText("已授权工具")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("docker.run")).toBeInTheDocument();
+    });
 
-    expect(await screen.findByRole("checkbox", { name: /legacy group/i })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /legacy\.inspect/i })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("checkbox", { name: /legacy group/i }));
-    await userEvent.click(screen.getByRole("checkbox", { name: /legacy\.inspect/i }));
-    // 编辑已有 Agent 时保存按钮文案是 "保存"
-    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    // 点击撤销
+    await userEvent.click(screen.getByRole("button", { name: "撤销" }));
 
     await waitFor(() => {
-      expect(submitAction).toHaveBeenCalledWith(
-        "worker_profile.review",
-        expect.objectContaining({
-          draft: expect.objectContaining({
-            default_tool_groups: ["project"],
-            selected_tools: ["project.inspect"],
-          }),
-        })
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/approval-overrides/butler-001/docker.run",
+        expect.objectContaining({ method: "DELETE" })
       );
     });
   });
@@ -1192,7 +1176,7 @@ describe("AgentCenter", () => {
     expect(within(projectSharedCard!).getByText("PROJECT.md")).toBeInTheDocument();
   });
 
-  it("编辑器中的 Skills/MCP 能力绑定链接指向正确的管理路由", async () => {
+  it("编辑器展示行为文件卡片（IDENTITY.md / SOUL.md / HEARTBEAT.md）", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
       submitAction: vi.fn(),
@@ -1209,12 +1193,12 @@ describe("AgentCenter", () => {
     const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
     await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
-    // 编辑器中 Skills 和 MCP 区域的「去管理」链接
-    // AgentEditorSection 中 renderCapabilityGroup 使用 /agents/skills 和 /agents/mcp
-    // App.tsx 已配置旧路径重定向到 /skills 和 /mcp
-    const manageLinks = await screen.findAllByRole("link", { name: "去管理" });
-    expect(manageLinks.length).toBe(2);
-    expect(manageLinks[0]).toHaveAttribute("href", "/agents/skills");
-    expect(manageLinks[1]).toHaveAttribute("href", "/agents/mcp");
+    // 编辑器中应展示 3 个行为文件
+    expect(await screen.findByText("IDENTITY.md")).toBeInTheDocument();
+    expect(screen.getByText("SOUL.md")).toBeInTheDocument();
+    expect(screen.getByText("HEARTBEAT.md")).toBeInTheDocument();
+
+    // 行为文件区域标签（页面顶部也有同名标题，所以用 getAllByText）
+    expect(screen.getAllByText("行为文件").length).toBeGreaterThanOrEqual(2);
   });
 });

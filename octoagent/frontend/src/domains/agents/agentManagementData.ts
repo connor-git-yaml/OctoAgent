@@ -25,6 +25,14 @@ export interface BehaviorFileInfo {
   exists_on_disk?: boolean;
 }
 
+/** Feature 061: 审批覆盖条目（从 GET /api/approval-overrides 映射） */
+export interface ApprovalOverrideDisplay {
+  agentRuntimeId: string;
+  toolName: string;
+  decision: string;
+  createdAt: string;
+}
+
 export interface AgentCardViewModel {
   profileId: string;
   name: string;

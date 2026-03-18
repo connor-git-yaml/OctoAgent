@@ -1,20 +1,23 @@
-import { useDeferredValue, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import type { AgentEditorDraft, AgentEditorReview, CapabilityProviderEntry, ToolOption } from "./agentManagementData";
+import type { AgentEditorDraft, AgentEditorReview, ApprovalOverrideDisplay, BehaviorFileInfo } from "./agentManagementData";
 
 interface SelectOption {
   value: string;
   label: string;
 }
 
-interface EditorToolGroupOption {
-  value: string;
-  missing: boolean;
-}
+/** 行为文件描述（固定 3 个 Agent 私有文件） */
+const BEHAVIOR_FILE_META: Record<string, { title: string; description: string }> = {
+  "IDENTITY.md": { title: "身份补充", description: "Agent 的名称和角色定位。" },
+  "SOUL.md": { title: "表达风格", description: "个性、语气和协作方式。" },
+  "HEARTBEAT.md": { title: "运行节奏", description: "内部运行节奏和自检策略。" },
+};
 
-interface EditorToolOption extends ToolOption {
-  missing: boolean;
-}
+const RUNTIME_KIND_OPTIONS: Array<{ value: string; label: string; description: string }> = [
+  { value: "worker", label: "Worker", description: "适合日常任务拆分和持续推进。" },
+  { value: "subagent", label: "Subagent", description: "适合短链路的专项协助。" },
+  { value: "acp_runtime", label: "ACP Runtime", description: "适合需要工具 runtime 的执行场景。" },
+  { value: "graph_agent", label: "Graph Agent", description: "适合有固定步骤的流程处理。" },
+];
 
 interface AgentEditorSectionProps {
   title: string;
@@ -25,82 +28,33 @@ interface AgentEditorSectionProps {
   busy: boolean;
   projectOptions: SelectOption[];
   modelAliasOptions: string[];
-  toolProfileOptions: SelectOption[];
-  toolGroupOptions: string[];
-  toolOptions: ToolOption[];
   policyOptions: SelectOption[];
-  skillEntries: CapabilityProviderEntry[];
-  mcpEntries: CapabilityProviderEntry[];
+  behaviorFiles: BehaviorFileInfo[];
+  approvalOverrides: ApprovalOverrideDisplay[];
+  approvalOverridesLoading: boolean;
   metadataError: string;
   onChangeDraft: <Key extends keyof AgentEditorDraft>(key: Key, value: AgentEditorDraft[Key]) => void;
-  onToggleDefaultToolGroup: (value: string) => void;
-  onToggleSelectedTool: (value: string) => void;
-  onToggleCapability: (selectionItemId: string, selected: boolean) => void;
   onToggleRuntimeKind: (value: string) => void;
   onTogglePolicyRef: (value: string) => void;
+  onOpenBehaviorFile: (path: string, fileId: string) => void;
+  onRevokeOverride: (agentRuntimeId: string, toolName: string) => void;
   onSave: () => void;
   onCancel: () => void;
   formatTokenLabel: (value: string) => string;
 }
 
-const RUNTIME_KIND_OPTIONS: Array<{ value: string; label: string; description: string }> = [
-  { value: "worker", label: "Worker", description: "适合日常任务拆分和持续推进。" },
-  { value: "subagent", label: "Subagent", description: "适合短链路的专项协助。" },
-  { value: "acp_runtime", label: "ACP Runtime", description: "适合需要工具 runtime 的执行场景。" },
-  { value: "graph_agent", label: "Graph Agent", description: "适合有固定步骤的流程处理。" },
-];
-
-function renderCapabilityGroup(
-  title: string,
-  manageTo: string,
-  entries: CapabilityProviderEntry[],
-  selection: Record<string, boolean>,
-  onToggle: (selectionItemId: string, selected: boolean) => void
-) {
-  if (entries.length === 0) {
-    return (
-      <div className="wb-note">
-        <strong>{title}</strong>
-        <span>当前还没有可绑定的项目，先去对应管理页补上，再回来选择。</span>
-      </div>
-    );
+function formatOverrideTime(iso: string): string {
+  try {
+    const date = new Date(iso);
+    return date.toLocaleDateString("zh-CN", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
   }
-
-  return (
-    <div className="wb-note-stack">
-      <div className="wb-panel-head">
-        <div>
-          <strong>{title}</strong>
-          <p className="wb-panel-copy">只保留这个 Agent 真正需要的能力，避免权限越来越乱。</p>
-        </div>
-        <Link className="wb-button wb-button-tertiary" to={manageTo}>
-          去管理
-        </Link>
-      </div>
-      <div className="wb-agent-check-grid">
-        {entries.map((entry) => {
-          const selected = selection[entry.selectionItemId] ?? entry.defaultSelected;
-          return (
-            <label key={entry.selectionItemId} className="wb-agent-option-card">
-              <div className="wb-agent-option-copy">
-                <strong>{entry.label}</strong>
-                <p>{entry.description || entry.providerId}</p>
-                <small>
-                  默认{entry.defaultSelected ? "开启" : "关闭"} · 当前 {entry.availability}
-                </small>
-              </div>
-              <input
-                type="checkbox"
-                checked={selected}
-                disabled={!entry.enabled}
-                onChange={(event) => onToggle(entry.selectionItemId, event.target.checked)}
-              />
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 export default function AgentEditorSection({
@@ -112,72 +66,20 @@ export default function AgentEditorSection({
   busy,
   projectOptions,
   modelAliasOptions,
-  toolProfileOptions,
-  toolGroupOptions,
-  toolOptions,
   policyOptions,
-  skillEntries,
-  mcpEntries,
+  behaviorFiles,
+  approvalOverrides,
+  approvalOverridesLoading,
   metadataError,
   onChangeDraft,
-  onToggleDefaultToolGroup,
-  onToggleSelectedTool,
-  onToggleCapability,
   onToggleRuntimeKind,
   onTogglePolicyRef,
+  onOpenBehaviorFile,
+  onRevokeOverride,
   onSave,
   onCancel,
   formatTokenLabel,
 }: AgentEditorSectionProps) {
-  const [toolSearch, setToolSearch] = useState("");
-  const deferredToolSearch = useDeferredValue(toolSearch);
-  const visibleToolGroups = useMemo(() => {
-    const knownGroups = new Set(toolGroupOptions);
-    const staleGroups = draft.defaultToolGroups.filter((group) => !knownGroups.has(group));
-    return [
-      ...toolGroupOptions.map((group) => ({
-        value: group,
-        missing: false,
-      })),
-      ...staleGroups.map((group) => ({
-        value: group,
-        missing: true,
-      })),
-    ] satisfies EditorToolGroupOption[];
-  }, [draft.defaultToolGroups, toolGroupOptions]);
-  const visibleToolOptions = useMemo(() => {
-    const knownTools = new Set(toolOptions.map((tool) => tool.toolName));
-    const staleTools = draft.selectedTools
-      .filter((toolName) => !knownTools.has(toolName))
-      .map((toolName) => ({
-        toolName,
-        label: formatTokenLabel(toolName),
-        toolGroup: "legacy",
-        availability: "missing",
-        missing: true,
-      }));
-    return [
-      ...staleTools,
-      ...toolOptions.map((tool) => ({
-        ...tool,
-        missing: false,
-      })),
-    ] satisfies EditorToolOption[];
-  }, [draft.selectedTools, formatTokenLabel, toolOptions]);
-
-  const filteredTools = useMemo(() => {
-    const keyword = deferredToolSearch.trim().toLowerCase();
-    if (!keyword) {
-      return visibleToolOptions;
-    }
-    return visibleToolOptions.filter((tool) =>
-      [tool.toolName, tool.label, tool.toolGroup, tool.availability]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword)
-    );
-  }, [deferredToolSearch, visibleToolOptions]);
-
   return (
     <section className="wb-panel wb-agent-editor-shell">
       <div className="wb-panel-head">
@@ -296,119 +198,91 @@ export default function AgentEditorSection({
           <small>决定这个 Agent 执行工具时需不需要你先确认。大多数情况选标准模式就好。</small>
         </label>
 
-        <label className="wb-field">
-          <span>角色描述</span>
-          <textarea
-            value={draft.roleCard}
-            onChange={(event) => onChangeDraft("roleCard", event.target.value)}
-            placeholder="简单说明这个 Agent 的职责和擅长领域，帮助它更好地理解自己的定位。"
-            rows={3}
-          />
-          <small>留空也可以，Agent 会用默认通用身份工作。</small>
-        </label>
+        <div className="wb-field">
+          <span>行为文件</span>
+          <div className="wb-agent-check-grid">
+            {(["IDENTITY.md", "SOUL.md", "HEARTBEAT.md"] as const).map((fileId) => {
+              const meta = BEHAVIOR_FILE_META[fileId];
+              const fileInfo = behaviorFiles.find((f) => f.file_id === fileId);
+              return (
+                <button
+                  key={fileId}
+                  type="button"
+                  className="wb-agent-option-card"
+                  style={{ cursor: "pointer", textAlign: "left", background: "none", border: "1px solid var(--wb-border, #ddd)" }}
+                  onClick={() => {
+                    if (fileInfo?.path) {
+                      onOpenBehaviorFile(fileInfo.path, fileId);
+                    }
+                  }}
+                  disabled={!fileInfo?.path}
+                >
+                  <div className="wb-agent-option-copy">
+                    <strong>{fileId}</strong>
+                    <p>{meta?.description ?? "Agent 私有行为配置。"}</p>
+                    <small>
+                      {meta?.title ?? fileId}
+                      {" · "}
+                      {fileInfo?.exists_on_disk ? "已创建" : "待创建"}
+                    </small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <small>点击文件名可以查看和编辑。这些文件定义了 Agent 的身份、风格和运行节奏。</small>
+        </div>
       </div>
 
+      {/* ── 已授权工具（审批覆盖） ── */}
       <div className="wb-note-stack">
         <div className="wb-panel-head">
           <div>
-            <strong>默认工具组</strong>
-            <p className="wb-panel-copy">常用的一组能力放在这里，进入任务时会优先带上。</p>
+            <strong>已授权工具</strong>
+            <p className="wb-panel-copy">
+              Agent 运行过程中你选择"始终允许"的工具会出现在这里。如果想收回授权，点击撤销即可。
+            </p>
           </div>
-          <span className="wb-chip">{draft.defaultToolGroups.length} 已选择</span>
+          <span className="wb-chip">{approvalOverrides.length} 条授权</span>
         </div>
-        <div className="wb-agent-check-grid">
-          {visibleToolGroups.map((toolGroup) => (
-            <label key={toolGroup.value} className="wb-agent-option-card">
-              <div className="wb-agent-option-copy">
-                <strong>{formatTokenLabel(toolGroup.value)}</strong>
-                <p>
-                  {toolGroup.missing
-                    ? "这个工具组已经不在当前 catalog 里了，取消后不会自动恢复。"
-                    : "适合作为默认随身工具组。"}
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                checked={draft.defaultToolGroups.includes(toolGroup.value)}
-                onChange={() => onToggleDefaultToolGroup(toolGroup.value)}
-              />
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="wb-note-stack">
-        <div className="wb-panel-head">
-          <div>
-            <strong>固定工具</strong>
-            <p className="wb-panel-copy">只有你确定长期需要固定带上的工具，才建议放到这里。</p>
+        {approvalOverridesLoading ? (
+          <div className="wb-note">
+            <span>加载中…</span>
           </div>
-          <span className="wb-chip">{draft.selectedTools.length} 已固定</span>
-        </div>
-        <label className="wb-field">
-          <span>搜索工具</span>
-          <input
-            type="text"
-            value={toolSearch}
-            onChange={(event) => setToolSearch(event.target.value)}
-            placeholder="按工具名、标签或工具组搜索"
-          />
-        </label>
-        <div className="wb-agent-tool-browser">
-          {filteredTools.map((tool) => (
-            <label key={tool.toolName} className="wb-agent-tool-row">
-              <div>
-                <strong>{tool.label}</strong>
-                <p>
-                  {tool.missing
-                    ? "这个工具已经不在当前 catalog 里了，取消后不会自动恢复。"
-                    : `${formatTokenLabel(tool.toolGroup)} · ${tool.availability}`}
-                </p>
-                <small>{tool.toolName}</small>
+        ) : approvalOverrides.length === 0 ? (
+          <div className="wb-note">
+            <span>还没有额外授权记录。Agent 工作时如果遇到需要确认的工具，你可以选择"始终允许"来跳过后续确认。</span>
+          </div>
+        ) : (
+          <div className="wb-agent-tool-browser">
+            {approvalOverrides.map((override) => (
+              <div
+                key={`${override.agentRuntimeId}:${override.toolName}`}
+                className="wb-agent-tool-row"
+              >
+                <div>
+                  <strong>{formatTokenLabel(override.toolName)}</strong>
+                  <p>
+                    始终允许 · 授权于 {formatOverrideTime(override.createdAt)}
+                  </p>
+                  <small>{override.toolName}</small>
+                </div>
+                <button
+                  type="button"
+                  className="wb-button wb-button-tertiary"
+                  onClick={() => onRevokeOverride(override.agentRuntimeId, override.toolName)}
+                >
+                  撤销
+                </button>
               </div>
-              <input
-                type="checkbox"
-                checked={draft.selectedTools.includes(tool.toolName)}
-                onChange={() => onToggleSelectedTool(tool.toolName)}
-              />
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="wb-section-stack">
-        {renderCapabilityGroup(
-          "Skills 能力绑定",
-          "/agents/skills",
-          skillEntries,
-          draft.capabilitySelection,
-          onToggleCapability
-        )}
-        {renderCapabilityGroup(
-          "MCP 能力绑定",
-          "/agents/mcp",
-          mcpEntries,
-          draft.capabilitySelection,
-          onToggleCapability
+            ))}
+          </div>
         )}
       </div>
 
       <details className="wb-agent-details">
         <summary>高级设置</summary>
         <div className="wb-form-grid wb-agent-editor-grid">
-          <label className="wb-field">
-            <span>工具权限范围</span>
-            <select
-              value={draft.toolProfile}
-              onChange={(event) => onChangeDraft("toolProfile", event.target.value)}
-            >
-              {toolProfileOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
 
           <div className="wb-field">
             <span>运行形态</span>

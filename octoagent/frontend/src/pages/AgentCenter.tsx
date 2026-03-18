@@ -12,14 +12,14 @@ import {
   buildCapabilityProviderEntries,
   buildModelAliasOptions,
   buildProjectOptions,
-  buildToolGroupOptions,
-  buildToolOptions,
   deriveAgentManagementView,
   formatTokenLabel,
   parseAgentReview,
   type AgentCardViewModel,
   type AgentEditorDraft,
   type AgentEditorReview,
+  type ApprovalOverrideDisplay,
+  type BehaviorFileInfo,
 } from "../domains/agents/agentManagementData";
 import type { AgentProfileItem } from "../types";
 import { formatDateTime } from "../workbench/utils";
@@ -29,6 +29,7 @@ type EditorMode = "main" | "agent" | "create";
 interface EditorState {
   mode: EditorMode;
   draft: AgentEditorDraft;
+  behaviorFiles: BehaviorFileInfo[];
 }
 
 type BehaviorSystemSummary = NonNullable<AgentProfileItem["behavior_system"]>;
@@ -284,11 +285,6 @@ export default function AgentCenter() {
       snapshot!.resources.skill_governance.generated_at,
     ]
   );
-  const toolOptions = useMemo(() => buildToolOptions(snapshot!), [snapshot!.resources.capability_pack.generated_at]);
-  const toolGroupOptions = useMemo(
-    () => buildToolGroupOptions(snapshot!),
-    [snapshot!.resources.capability_pack.generated_at]
-  );
   const modelAliasOptions = useMemo(
     () => buildModelAliasOptions(snapshot!),
     [snapshot!.resources.config.generated_at]
@@ -297,14 +293,6 @@ export default function AgentCenter() {
     const all = buildProjectOptions(snapshot!.resources.project_selector);
     return all.filter((option) => option.value === agentView.currentProjectId);
   }, [agentView.currentProjectId, snapshot!.resources.project_selector.generated_at]);
-  const toolProfileOptions = useMemo(
-    () => [
-      { value: "minimal", label: "仅保留基础工具" },
-      { value: "standard", label: "常用工具" },
-      { value: "privileged", label: "扩展工具" },
-    ],
-    []
-  );
   const policyOptions = useMemo(
     () =>
       snapshot!.resources.policy_profiles.profiles.map((profile) => ({
@@ -313,8 +301,6 @@ export default function AgentCenter() {
       })),
     [snapshot!.resources.policy_profiles.generated_at]
   );
-  const skillEntries = capabilityProviderEntries.filter((entry) => entry.kind === "skill");
-  const mcpEntries = capabilityProviderEntries.filter((entry) => entry.kind === "mcp");
   const behaviorProfiles = useMemo(
     () =>
       agentProfilesDocument.profiles.filter(
@@ -337,6 +323,54 @@ export default function AgentCenter() {
   const [fileContentLoading, setFileContentLoading] = useState(false);
   const [editingFile, setEditingFile] = useState(false);
   const [editFileContent, setEditFileContent] = useState("");
+
+  // 审批覆盖（全局，不区分 profile）
+  const [approvalOverrides, setApprovalOverrides] = useState<ApprovalOverrideDisplay[]>([]);
+  const [approvalOverridesLoading, setApprovalOverridesLoading] = useState(false);
+
+  async function fetchApprovalOverrides() {
+    setApprovalOverridesLoading(true);
+    try {
+      const response = await fetch("/api/approval-overrides");
+      if (response.ok) {
+        const data = await response.json();
+        const items: ApprovalOverrideDisplay[] = (data.overrides ?? []).map(
+          (o: Record<string, string>) => ({
+            agentRuntimeId: o.agent_runtime_id ?? "",
+            toolName: o.tool_name ?? "",
+            decision: o.decision ?? "always",
+            createdAt: o.created_at ?? "",
+          })
+        );
+        setApprovalOverrides(items);
+      }
+    } catch {
+      // 静默失败，列表保持空
+    } finally {
+      setApprovalOverridesLoading(false);
+    }
+  }
+
+  async function handleRevokeOverride(agentRuntimeId: string, toolName: string) {
+    try {
+      const response = await fetch(
+        `/api/approval-overrides/${encodeURIComponent(agentRuntimeId)}/${encodeURIComponent(toolName)}`,
+        { method: "DELETE" }
+      );
+      if (response.ok) {
+        setApprovalOverrides((current) =>
+          current.filter(
+            (o) => !(o.agentRuntimeId === agentRuntimeId && o.toolName === toolName)
+          )
+        );
+        setFlashMessage("已撤销授权。下次使用该工具时需要重新确认。");
+      } else {
+        setFlashMessage("撤销失败，请重试。");
+      }
+    } catch {
+      setFlashMessage("撤销失败，请重试。");
+    }
+  }
 
   const metadataError = editorState ? validateMetadataText(editorState.draft.metadataText) : "";
 
@@ -368,6 +402,13 @@ export default function AgentCenter() {
     null;
   const selectedBehaviorSystem = selectedBehaviorProfile?.behavior_system;
   const behaviorScopeGroups = buildBehaviorScopeGroups(selectedBehaviorSystem);
+
+  // 编辑器打开时加载审批覆盖列表
+  useEffect(() => {
+    if (editorState) {
+      void fetchApprovalOverrides();
+    }
+  }, [editorState !== null]);
 
   useEffect(() => {
     const view = (searchParams.get("view") || "").trim().toLowerCase();
@@ -450,6 +491,7 @@ export default function AgentCenter() {
       setEditorState({
         mode: "main",
         draft,
+        behaviorFiles: agentView.mainAgent.behaviorFiles,
       });
       setFlashMessage("");
     });
@@ -462,6 +504,7 @@ export default function AgentCenter() {
     if (!profile) {
       return;
     }
+    const agentCard = agentView.projectAgents.find((a) => a.profileId === profileId);
     startTransition(() => {
       setShowTemplatePicker(false);
       setReview(null);
@@ -474,6 +517,7 @@ export default function AgentCenter() {
           agentView.currentProjectName,
           capabilityProviderEntries
         ),
+        behaviorFiles: agentCard?.behaviorFiles ?? [],
       });
       setFlashMessage("");
     });
@@ -501,6 +545,7 @@ export default function AgentCenter() {
           agentView.currentProjectName,
           capabilityProviderEntries
         ),
+        behaviorFiles: [],
       });
       setFlashMessage("");
     });
@@ -522,6 +567,7 @@ export default function AgentCenter() {
           agentView.currentProjectName,
           capabilityProviderEntries
         ),
+        behaviorFiles: [],
       });
       setFlashMessage("");
     });
@@ -550,7 +596,7 @@ export default function AgentCenter() {
   }
 
   function updateDraftList(
-    key: "defaultToolGroups" | "selectedTools" | "runtimeKinds" | "policyRefs",
+    key: "runtimeKinds" | "policyRefs",
     value: string
   ) {
     setEditorState((current) =>
@@ -560,23 +606,6 @@ export default function AgentCenter() {
             draft: {
               ...current.draft,
               [key]: toggleStringValue(current.draft[key], value),
-            },
-          }
-        : current
-    );
-  }
-
-  function updateCapability(selectionItemId: string, selected: boolean) {
-    setEditorState((current) =>
-      current
-        ? {
-            ...current,
-            draft: {
-              ...current.draft,
-              capabilitySelection: {
-                ...current.draft.capabilitySelection,
-                [selectionItemId]: selected,
-              },
             },
           }
         : current
@@ -795,19 +824,16 @@ export default function AgentCenter() {
                 busy={busySaving}
                 projectOptions={projectOptions}
                 modelAliasOptions={modelAliasOptions}
-                toolProfileOptions={toolProfileOptions}
-                toolGroupOptions={toolGroupOptions}
-                toolOptions={toolOptions}
                 policyOptions={policyOptions}
-                skillEntries={skillEntries}
-                mcpEntries={mcpEntries}
+                behaviorFiles={editorState.behaviorFiles}
+                approvalOverrides={approvalOverrides}
+                approvalOverridesLoading={approvalOverridesLoading}
                 metadataError={metadataError}
                 onChangeDraft={updateDraft}
-                onToggleDefaultToolGroup={(value) => updateDraftList("defaultToolGroups", value)}
-                onToggleSelectedTool={(value) => updateDraftList("selectedTools", value)}
-                onToggleCapability={updateCapability}
                 onToggleRuntimeKind={(value) => updateDraftList("runtimeKinds", value)}
                 onTogglePolicyRef={(value) => updateDraftList("policyRefs", value)}
+                onOpenBehaviorFile={(path, fileId) => void handleOpenBehaviorFile(path, fileId)}
+                onRevokeOverride={(agentRuntimeId, toolName) => void handleRevokeOverride(agentRuntimeId, toolName)}
                 onSave={() => void handleSave()}
                 onCancel={closeComposer}
                 formatTokenLabel={formatTokenLabel}
