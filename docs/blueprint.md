@@ -2938,6 +2938,7 @@ BehaviorWorkspace 设计补充（2026-03-15）：
 - `BehaviorWorkspace` 目录已按 project-centered 方式定义：全局共享与 agent 通用人格保留在 `behavior/` 下，某个 project 自己的行为文件、代码、数据、文档、notes、artifacts 都进入 `projects/<project-slug>/`
 - 任意 Agent 的 effective context 都必须携带 `project_path_manifest`，明确 `project/workspace/data/notes/artifacts/behavior` 根目录与关键行为文件路径
 - subordinate / worker handoff 不得裸转发原始用户问题，必须携带 `project_path_manifest + effective_behavior_source_chain + shared/project instructions summary + agent private identity summary`
+- **行为文件生命周期管理**（Feature 063）：BOOTSTRAP.md 支持"完成即不再注入"（双触发：`<!-- COMPLETED -->` 标记 OR 文件删除）；`BehaviorLoadProfile` 按 Agent 角色差异化加载（FULL/WORKER/MINIMAL）；head/tail 截断策略替代硬截断；session 级缓存减少重复 resolve IO；Behavior Compactor 支持 LLM 智能合并 + `<!-- 🔒 PROTECTED -->` 保护标记
 
 交付：从”能力齐全的 Agent 系统”推进到”普通用户 Ready 的 Personal AI OS”——新用户可一键安装并完成统一向导配置，随后在 Web 管理台完成渠道接入、审批、恢复和 Memory 浏览。
 
@@ -3000,6 +3001,7 @@ BehaviorWorkspace 设计补充（2026-03-15）：
 - [x] Feature 053：Session-Scoped Project Activation（对齐 Agent Zero 的 `each chat/context has its own active project` 语义；**Project ↔ Session 一一对应**——每个 Project 同时只有一个活跃 Session，每个 Session 锁定一个 Project；`session.new` 现在会冻结当前 `project_id/workspace_id` 并形成待消费的新会话 snapshot；chat 首条消息会透传 token + project/workspace 并写入 `workspace:<workspace_id>:chat:<channel>:<thread_id>` durable scope；`session.focus / session.reset` 会恢复目标会话自己的 project/workspace 到 control-plane selector；Web `useChatStream / ChatWorkbench` 也已支持 pending snapshot 的刷新恢复，不再把新会话 project 绑定退回 surface-selected selector）
 - [x] Feature 058：MCP Install Lifecycle & Session Pool（MCP server 完整安装生命周期管理：npm/pip 一键安装向导、安装注册表持久化 `mcp-installs.json`、McpSessionPool 持久连接池（auto-reconnect + health check）、McpInstallerService 异步安装任务与子进程 env 隔离、control plane 新增 `mcp_provider.install / install_status / uninstall` 三个 action、前端 McpInstallWizard 五步安装向导；MCP 工具继续走 ToolBroker / Policy / Audit 主链，McpServerConfig 与 McpRegistryService 保持不变仅扩展）
 - [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为”当前项目主 Agent + 已创建 Agent 列表 + 模板创建流”，并将结构化编辑控件替代技术字段编辑主路径）
+- [ ] Feature 063：Behavior File Lifecycle & Smart Loading（Bootstrap 双触发完成检测、BehaviorLoadProfile 差异化加载（FULL/WORKER/MINIMAL）、head/tail 截断策略、session 级缓存、Behavior Compactor LLM 智能合并）
 
 M4 约束：
 

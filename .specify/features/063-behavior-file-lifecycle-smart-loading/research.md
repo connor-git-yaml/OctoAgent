@@ -131,15 +131,18 @@ resolve_behavior_workspace()  →  resolve_behavior_pack()
 
 ### 3.1 OpenClaw
 
-**核心亮点：Bootstrap 自毁机制**
+**核心亮点：Bootstrap 完成检测机制**
 
 ```
-创建 workspace → 播种 BOOTSTRAP.md
+创建 workspace → 播种 BOOTSTRAP.md → 记录 bootstrapSeededAt
 → Agent 按指令完成 onboarding 对话
-→ Agent 自行删除 BOOTSTRAP.md（模板最后写："Delete this file."）
-→ 系统检测删除 → 标记 onboardingCompletedAt
+→ Agent 或用户删除 BOOTSTRAP.md（模板最后写："Delete this file."）
+→ 下次 resolveOnboardingState() 检测到文件不存在 → 记录 onboardingCompletedAt
 → 此后永不再创建
 ```
+
+**重要细节**：删除动作不是 Agent 调用专门 API 完成的，而是通过普通文件操作删除。
+系统端只做被动检测——文件存在即未完成，文件不在即完成。
 
 状态跟踪：`workspace-state.json` 中的 `bootstrapSeededAt` / `onboardingCompletedAt`。
 Legacy 兼容：如果 IDENTITY.md/USER.md 已被修改但 state 缺失，视为已完成。
@@ -223,7 +226,7 @@ paths:
 
 | 维度 | OctoAgent | OpenClaw | Agent Zero | Claude Code |
 |------|-----------|----------|------------|-------------|
-| **Bootstrap 生命周期** | ❌ 永久存在 | ✅ LLM 自删除 | ❌ 无 bootstrap | ❌ 无 bootstrap |
+| **Bootstrap 生命周期** | ❌ 永久存在 | ✅ 删除即完成 | ❌ 无 bootstrap | ❌ 无 bootstrap |
 | **差异化加载** | ❌ 全量注入 | ✅ 按 session 类型白名单 | ✅ Profile 覆盖继承 | ✅ 子 Agent 独立上下文 |
 | **条件加载** | ❌ 无 | 心跳轻量模式 | Project + Profile 双维 | ✅ glob path-scoped rules |
 | **文件大小控制** | 字符预算（1.6K-3.2K） | 单文件 20K / 总量 150K | 无限制 | 200 行硬限 |
@@ -258,7 +261,7 @@ BOOTSTRAP.md 创建后永久存在，完成 onboarding 后仍每次注入浪费 
 当前 Worker 和 Subagent 收到全部 9 个行为文件。需要定义 `BehaviorLoadProfile`，按 Agent 类型裁剪：
 - Butler（FULL）→ 全部 9 个
 - Worker（WORKER）→ AGENTS + TOOLS + IDENTITY + PROJECT（不含 USER/SOUL/HEARTBEAT/BOOTSTRAP）
-- Subagent（MINIMAL）→ AGENTS + TOOLS + IDENTITY
+- Subagent（MINIMAL）→ AGENTS + TOOLS + IDENTITY + USER（OpenClaw 验证了用户偏好对 Subagent 也有价值）
 
 ### P2：行为文件智能加载策略
 
@@ -266,4 +269,72 @@ BOOTSTRAP.md 创建后永久存在，完成 onboarding 后仍每次注入浪费 
 
 ### P3：Behavior Compactor
 
-行为文件只增不减。需要内置压缩机制：定期检查总大小 → LLM 压缩 → 详情下沉到 KNOWLEDGE.md → 顶层保留骨架。借鉴 OpenClaw 的 `[🔒 不压缩]` 标记。
+行为文件只增不减。需要内置压缩机制：定期检查总大小 → LLM 智能合并（非简单压缩） → 详情下沉到 KNOWLEDGE.md → 顶层保留骨架。借鉴 OpenClaw 的 `[🔒 不压缩]` 标记和 Agent Zero 的 behaviour merge 模式。
+
+---
+
+## 七、深度调研补充：竞品遗漏的关键机制
+
+> 以下内容来自第二轮深度源码调研，补充初版 research 遗漏的重要差异点。
+
+### 7.1 OpenClaw Bootstrap Cache（Session 级缓存）
+
+OpenClaw 有 `bootstrap-cache.ts`：per-session 缓存已解析的行为文件列表，避免每次 LLM 调用都从磁盘重新读取。OctoAgent 当前 `resolve_behavior_workspace()` 每次调用都从文件系统重新解析 9 级 overlay，高频对话中是不必要的 IO。
+
+**建议**：在 `resolve_behavior_pack()` 层增加 session 级缓存，文件修改时（通过 `behavior.write_file`）主动 invalidate。低成本高收益。
+
+### 7.2 OpenClaw 动态预算分配算法
+
+初版调研提到 "70% 头 + 20% 尾"，但遗漏了完整的预算分配机制（`bootstrap.ts:198-257`）：
+- 全局总预算 150K 在所有文件间动态分配
+- 每个文件的实际预算 = min(单文件上限 20K, 剩余总预算)
+- 截断时插入明确标记：`[...truncated, read {fileName} for full content...]`
+- 最小文件预算 64 字符（低于此阈值直接跳过）
+
+OctoAgent 当前每个文件固定字符预算（1.6K-3.2K），截断时无 head/tail 保留策略。
+
+**建议**：实现 head/tail 截断策略（70% 头 + 20% 尾 + 中间标记），让截断后的内容仍保留文件开头的角色定义和末尾的关键规则。
+
+### 7.3 Agent Zero Behaviour Merge（LLM 辅助智能合并）
+
+Agent Zero 的 `behaviour_adjustment` 工具不是简单覆写，而是：
+1. 读取当前规则全文
+2. 读取调整请求
+3. 调用 utility LLM + `behaviour.merge.sys.md` 执行智能合并（保留关键规则、去重、合并相近条目）
+4. 写回文件
+
+OctoAgent 当前 `behavior.write_file` 是直接覆写（虽有 review_required 审批）。
+
+**建议**：这个机制对 Compactor（Phase 3）特别有价值——Compactor 的本质就是"LLM 辅助合并+去重+保留关键规则"，而非单纯压缩。
+
+### 7.4 Agent Zero Extras persistent/temporary 分层
+
+Agent Zero 区分两类运行时注入内容：
+- **extras_persistent**：跨轮保留（如记忆回忆结果、已加载 Skill）
+- **extras_temporary**：单轮即清（如当前时间、文件树快照、Agent 信息）
+
+OctoAgent 有 `RuntimeHintBundle`（weather_query、location_hint 等），但没有 persistent/temporary 的显式区分。
+
+**记录为参考**：未来 RuntimeHintBundle 演进时可以借鉴这个分层模型，但不作为 063 scope。
+
+---
+
+## 八、长期改进方向（063 Out of Scope）
+
+以下方向在 063 中不实现，但记录为后续 Feature 参考：
+
+| 方向 | 参考来源 | OctoAgent 收益 | 建议里程碑 |
+|------|---------|---------------|-----------|
+| Path-scoped 条件激活 | Claude Code `.claude/rules/` | 按操作对象动态裁剪上下文 | M5+ |
+| 行为文件两阶段加载 | SKILL.md 已有的模式 | 减少启动时 token 消耗 | M5+ |
+| SKILL.md 与 Behavior 统一发现 | 架构收敛 | 统一管理入口和加载机制 | M5+ |
+| Compactor 自动定时执行 | OpenClaw cron Skill | 无需手动触发 | M4 后续 |
+
+**明确不采纳的方向**：
+
+| 方向 | 参考来源 | 不采纳理由 |
+|------|---------|-----------|
+| 行为文件内条件段 `<!-- IF ... -->` | Agent Zero 模板引擎 | 与 9 级 overlay 机制冲突，增加用户编辑复杂度，不符合"面向非技术用户"的 UX 规范 |
+| `activation_conditions` 预留字段 | 预留设计 | YAGNI——在条件加载语义未确定前加空字段会给实现者错误暗示 |
+| Bootstrap Hooks / 插件扩展点 | OpenClaw bootstrap-hooks | 当前无插件系统，空扩展点暗示不存在的契约 |
+| 5 指标 Legacy 检测 | OpenClaw 5 指标方案 | 过度工程——检查 `IDENTITY.md ≠ 默认模板` + `有历史 session` 两个指标已足够 |
