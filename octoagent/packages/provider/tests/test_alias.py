@@ -11,15 +11,15 @@ class TestAliasRegistry:
     """AliasRegistry 核心功能测试"""
 
     def test_default_aliases_count(self):
-        """默认注册 6 个 MVP alias"""
+        """默认注册 7 个 MVP alias（含 compaction）"""
         registry = AliasRegistry()
-        assert len(registry.list_all()) == 6
+        assert len(registry.list_all()) == 7
 
     def test_default_alias_names(self):
-        """默认 alias 名称完整"""
+        """默认 alias 名称完整（含 compaction）"""
         registry = AliasRegistry()
         names = {a.name for a in registry.list_all()}
-        expected = {"router", "extractor", "summarizer", "planner", "executor", "fallback"}
+        expected = {"router", "extractor", "summarizer", "compaction", "planner", "executor", "fallback"}
         assert names == expected
 
     def test_resolve_semantic_alias(self):
@@ -63,11 +63,11 @@ class TestAliasRegistry:
         assert registry.get_alias("nonexistent") is None
 
     def test_get_aliases_by_category_cheap(self):
-        """按 category 查询 cheap 组"""
+        """按 category 查询 cheap 组（含 compaction）"""
         registry = AliasRegistry()
         aliases = registry.get_aliases_by_category("cheap")
         names = {a.name for a in aliases}
-        assert names == {"router", "extractor", "summarizer"}
+        assert names == {"router", "extractor", "summarizer", "compaction"}
 
     def test_get_aliases_by_category_main(self):
         """按 category 查询 main 组"""
@@ -83,11 +83,11 @@ class TestAliasRegistry:
         assert aliases == []
 
     def test_get_aliases_by_runtime_group(self):
-        """按运行时 group 查询"""
+        """按运行时 group 查询（含 compaction）"""
         registry = AliasRegistry()
         aliases = registry.get_aliases_by_runtime_group("cheap")
         names = {a.name for a in aliases}
-        assert names == {"router", "extractor", "summarizer"}
+        assert names == {"router", "extractor", "summarizer", "compaction"}
 
     def test_list_all_sorted(self):
         """list_all() 按 name 排序"""

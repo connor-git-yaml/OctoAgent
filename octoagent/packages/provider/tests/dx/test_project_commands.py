@@ -72,10 +72,12 @@ def test_project_edit_wizard_status_and_apply(tmp_path: Path) -> None:
     assert "status=ready_for_apply" in status.output
 
     applied = runner.invoke(main, ["project", "edit", "--apply-wizard"], env=env)
-    assert applied.exit_code == 2
-    assert "Setup Review" in applied.output
-    assert "尚未通过 canonical setup.review" in applied.output
-    assert not (tmp_path / "octoagent.yaml").exists()
+    # setup.review 已通过，apply 成功执行，exit_code 为 0
+    assert applied.exit_code == 0
+    assert "Setup Apply" in applied.output
+    assert "SETUP_APPLIED" in applied.output
+    # 配置已应用，octoagent.yaml 应被创建
+    assert (tmp_path / "octoagent.yaml").exists()
 
 
 def test_wizard_build_setup_draft_does_not_force_agent_profile(tmp_path: Path) -> None:

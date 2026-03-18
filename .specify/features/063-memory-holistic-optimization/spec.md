@@ -91,13 +91,35 @@ MemU Bridge（Feature 028）已被废弃，Memory 后端已简化为内建引擎
 
 ---
 
+### User Story 6 - LanceDB 语义检索集成 (Priority: P1)
+
+用户的 Memory 系统当前所有检索都是 SQLite `LIKE '%query%'`，不具备语义理解能力（如搜索"我饿了"无法关联到饮食相关记忆）。同时系统预期将导入微信聊天记录（2GB 纯文本），数据量将从当前 ~100 条增长到百万级，现有的"拉全量候选 → 内存 embed → 逐条打分"架构完全不可扩展。
+
+用户期望接入 LanceDB 作为持久化向量存储 + 全文检索引擎，Qwen3-Embedding-0.6B 作为默认 embedding 模型，使用 LanceDB 原生混合检索（0.7 向量 + 0.3 BM25）实现生产级语义搜索。当 Qwen3 不可用时自动降级到纯 BM25 搜索（不使用 hash embedding，因为 BM25 独立工作效果更优）。
+
+**Why this priority**: 这是 Memory 系统从"能存"到"能检索"的关键跨越。Story 1-5 解决了数据层面的 scope/partition/配置问题，但检索仍是纯文本匹配。接入语义检索后，Memory 才真正具备"理解用户意图"的能力，也才能支撑百万级微信聊天记录的检索需求。
+
+**Independent Test**: 在 Memory 页面搜索"我饿了"，验证返回饮食相关记忆（而非仅包含"饿"字的记录）。
+
+**Acceptance Scenarios**:
+
+1. **Given** Memory 中有饮食相关记忆（如"午餐吃了沙拉"），**When** 用户搜索"我饿了"，**Then** 系统通过语义检索返回饮食相关记忆（不依赖字面子串匹配）
+2. **Given** LanceDB 已初始化且 Qwen3-Embedding-0.6B 可用，**When** 新的 SoR 记录写入，**Then** 该记录同时写入 SQLite（canonical 数据）和 LanceDB（向量 + FTS 索引）
+3. **Given** Qwen3-Embedding-0.6B 不可用（未安装 sentence-transformers），**When** 用户执行搜索，**Then** 系统自动降级到纯 BM25 全文搜索，仍返回有意义的结果
+4. **Given** 已有历史记忆未索引到 LanceDB，**When** 用户触发 REINDEX 维护命令，**Then** 所有历史记忆被批量嵌入并写入 LanceDB
+5. **Given** 百万级数据量（微信聊天记录导入后），**When** 用户执行搜索，**Then** 响应延迟 < 100ms
+
+---
+
 ### Edge Cases
 
 - **存量数据迁移失败**: 如果 98 条历史 SoR 记录在 scope 迁移过程中部分失败（如数据库写入错误），系统应记录失败记录并允许重试，不丢弃任何已有记忆 [关联 FR-001, FR-002]
 - **分区重分配冲突**: 存量记录重新分区时，如果 LLM 分类结果与用户预期不符（如将健康记录误分到 work），用户应能在 Memory 管理页面手动修改单条记录的分区 [关联 FR-003, FR-004]
 - **无 main 别名时的 fallback 链**: 如果用户既未配置 reasoning_model_alias 也未配置 main 别名（极端情况），系统应明确报告 Memory 加工能力不可用，而非静默失败 [关联 FR-008]
 - **Scope 选择器无数据**: 如果系统中没有任何记忆数据（全新安装），scope 选择器应显示空状态提示而非空下拉菜单 [关联 FR-005]
-- **Embedding 模型不可用**: 如果内建 Qwen3-Embedding-0.6B 本机运行时暂不可用，系统应自动回退到双语 hash embedding，Memory 页面显示降级提示而非 "degraded" 错误 [关联 FR-009]
+- **Embedding 模型不可用**: 如果 Qwen3-Embedding-0.6B 不可用，系统应自动降级到纯 BM25 全文搜索（不使用 hash embedding），Memory 页面不显示错误状态 [关联 FR-013, FR-015]
+- **LanceDB 表为空**: 首次搜索时 LanceDB 尚无数据，系统应触发后台 REINDEX 并返回空结果（非报错） [关联 FR-013, FR-016]
+- **FTS 索引未建立**: 首次启动或维度变化后 FTS 索引可能不存在，系统应自动创建 [关联 FR-014]
 - **敏感分区扩大可见性**: SoR 从 WORKER_PRIVATE 迁移到 PROJECT_SHARED 后，原先仅单个 Agent 可见的敏感记忆（如 health 分区）将对同 Project 下所有 Agent 可见，需确保 Vault 层的授权控制不受影响 [关联 FR-001, Constitution C5]
 
 ## Requirements *(mandatory)*
@@ -131,6 +153,13 @@ MemU Bridge（Feature 028）已被废弃，Memory 后端已简化为内建引擎
 - **FR-011**: 系统 MUST 移除 memory_retrieval_profile 中的 "local_only" / "memu_compat" 分支逻辑，统一为内建引擎单一路径 [Story 5]
 - **FR-012**: 前端 Memory 页面和 Settings 页面 MUST 移除与 Bridge 模式相关的 UI 元素（状态显示、配置提示、缺失配置警告） [Story 5]
 
+**LanceDB 语义检索集成**
+
+- **FR-013**: 系统 MUST 使用 LanceDB 作为 Memory 的持久化向量存储和全文检索引擎，新写入的记忆记录同时写入 SQLite（canonical 数据源）和 LanceDB（向量索引 + FTS 索引） [Story 6]
+- **FR-014**: 系统 MUST 使用 LanceDB 原生混合检索（hybrid search）进行记忆召回，融合策略为 0.7 × 向量相似度 + 0.3 × BM25 文本评分，中文分词使用 jieba [Story 6]
+- **FR-015**: 当 Qwen3-Embedding-0.6B 不可用时，系统 MUST 自动降级到纯 BM25 全文搜索（不使用 hash embedding fallback），不影响系统可用性 [Story 6]
+- **FR-016**: 系统 MUST 支持 REINDEX 维护命令，将 SQLite 中的全量历史记忆批量嵌入并写入 LanceDB，支持幂等执行 [Story 6]
+
 [AUTO-RESOLVED: SoR 加工克制策略 -- 用户明确表示"SoR 的加工需要克制"，但未定义具体的克制规则。基于上下文判断，这里指的是 SoR scope 扩大后不应增加新的自动加工管道（如自动派生、自动合并），本次仅变更写入 scope，不扩展加工行为。]
 
 ### Key Entities
@@ -152,3 +181,7 @@ MemU Bridge（Feature 028）已被废弃，Memory 后端已简化为内建引擎
 - **SC-005**: 在 reasoning_model_alias 和 expand_model_alias 均未配置的情况下，Memory 页面不再显示 "degraded" 或 "memory snapshot unavailable" 状态
 - **SC-006**: Settings 页面 Memory 区域正确展示 4 个别名槽位的当前状态，用户可完成"选择别名 -> 保存 -> 生效"的完整操作流程
 - **SC-007**: 代码库中不再存在 bridge_transport、bridge_url、bridge_command、bridge_api_key_env 等已废弃配置字段的运行时引用（测试 fixture 和迁移脚本中的引用不计）
+- **SC-008**: 新写入的 SoR 记录同时出现在 SQLite 和 LanceDB 表中，LanceDB 中包含向量和 FTS 可索引文本
+- **SC-009**: Memory 页面搜索"我饿了"能返回饮食相关记忆（语义匹配，非子串匹配）
+- **SC-010**: Qwen3 不可用时搜索自动降级到 BM25，返回基于关键词匹配的结果，无报错
+- **SC-011**: REINDEX 命令执行后，历史记忆全部写入 LanceDB（记录数一致）

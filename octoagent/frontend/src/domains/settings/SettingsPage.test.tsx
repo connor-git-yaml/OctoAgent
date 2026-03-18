@@ -435,7 +435,7 @@ describe("SettingsPage", () => {
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
@@ -497,7 +497,7 @@ describe("SettingsPage", () => {
     // 迁移管理 UI 暂未启用，不应渲染切换按钮或迁移状态
     expect(screen.queryByRole("button", { name: "切换到新索引" })).not.toBeInTheDocument();
     // Memory 区块仍然正常渲染基础状态卡片
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
     expect(screen.getByText("ready")).toBeInTheDocument();
   });
 
@@ -589,7 +589,6 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("link", { name: "回聊天验证" })).not.toBeInTheDocument();
   });
 
-<<<<<<< HEAD
   it("Memory 区块展示基础状态卡片而非兼容接入表单", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.config.current_value.memory.backend_mode = "memu";
@@ -610,9 +609,9 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    // 当前 Memory 区块只展示静态卡片，不渲染兼容接入表单
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
-    expect(screen.getByText("本地记忆")).toBeInTheDocument();
+    // Feature 063 重构后 Memory 区块展示内建引擎卡片
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
+    expect(screen.getByText("内建记忆引擎")).toBeInTheDocument();
     expect(screen.getByText("SQLite / Vault")).toBeInTheDocument();
     // 兼容接入表单字段不应在 Memory 区块中渲染
     expect(screen.queryByDisplayValue("uv run python scripts/memu_bridge.py")).not.toBeInTheDocument();
@@ -650,7 +649,7 @@ describe("SettingsPage", () => {
     );
 
     // Memory 区块正常渲染静态状态卡片
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
     expect(screen.getByText("内建 embedding（默认）")).toBeInTheDocument();
     expect(screen.getByText("换模型时会后台重建索引")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument(); // sor_current_count
@@ -676,7 +675,7 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("link", { name: /Agents/ })).not.toBeInTheDocument();
     // 确认核心区块正常渲染
     expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
   });
 
@@ -699,7 +698,7 @@ describe("SettingsPage", () => {
     expect(screen.queryByText(/Behavior Files/)).not.toBeInTheDocument();
     // 确认 Settings 页面只聚焦 Providers / Memory / 渠道 / 保存检查
     expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆状态" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
   });
 

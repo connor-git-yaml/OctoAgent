@@ -208,7 +208,7 @@ class TestTaskServiceHardening:
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             model_alias="main",
-            error=RuntimeError("api_key=secret-123 token=abc"),
+            error=RuntimeError("api_key=secret-123 token=abc-very-long-token"),
         )
 
         events = await store_group.event_store.get_events_for_task(task_id)
@@ -216,8 +216,10 @@ class TestTaskServiceHardening:
         assert len(failed_events) == 1
         payload = failed_events[0].payload
         assert payload["error_type"] == "RuntimeError"
-        assert payload["error_message"] == "LLM 调用失败，请查看服务端日志"
-        assert "secret" not in payload["error_message"].lower()
+        # _sanitize_error_message 应脱敏 API key / token，但保留错误类别
+        assert "secret-123" not in payload["error_message"]
+        assert "abc-very-long-token" not in payload["error_message"]
+        assert "[REDACTED]" in payload["error_message"]
 
         task = await store_group.task_store.get_task(task_id)
         assert task is not None

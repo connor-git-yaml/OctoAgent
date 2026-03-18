@@ -187,6 +187,7 @@ def _bootstrap_instance_root(
         data_dir / "sqlite",
         data_dir / "artifacts",
         data_dir / "ops",
+        data_dir / "lancedb",
     ):
         path.mkdir(parents=True, exist_ok=True)
 

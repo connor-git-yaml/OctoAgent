@@ -117,14 +117,19 @@ class TestLLMEcho:
         store_group = test_app.state.store_group
         artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
 
+        # 现在会先存储 llm-request-context，再存储 llm-response，按时间升序排
         assert len(artifacts) >= 1
-        assert artifacts[0].name == "llm-response"
-        assert artifacts[0].size > 0
-        assert artifacts[0].hash != ""
+        artifact_names = [a.name for a in artifacts]
+        assert "llm-response" in artifact_names, f"期望找到 llm-response，实际: {artifact_names}"
+
+        # 找到 llm-response artifact
+        response_artifact = next(a for a in artifacts if a.name == "llm-response")
+        assert response_artifact.size > 0
+        assert response_artifact.hash != ""
 
         # 验证内容
         content = await store_group.artifact_store.get_artifact_content(
-            artifacts[0].artifact_id
+            response_artifact.artifact_id
         )
         assert content is not None
         assert b"Echo:" in content

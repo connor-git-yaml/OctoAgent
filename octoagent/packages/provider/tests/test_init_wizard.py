@@ -298,6 +298,13 @@ class TestOAuthProfileCanonicalId:
             patch("octoagent.provider.dx.init_wizard._select_auth_mode", return_value="oauth"),
             patch("octoagent.provider.dx.init_wizard.asyncio.run", side_effect=_mock_asyncio_run),
             patch("octoagent.provider.dx.init_wizard._check_docker", return_value=True),
+            # mock RuntimeActivationService 避免查找不存在的 docker-compose.litellm.yml
+            # 由于 init_wizard 内部用 from .runtime_activation import RuntimeActivationService，
+            # 需要在 runtime_activation 模块上 patch
+            patch(
+                "octoagent.provider.dx.runtime_activation.RuntimeActivationService.build_compose_up_command",
+                return_value="docker compose up -d",
+            ),
         ):
             config = run_init_wizard(project_root=tmp_path, store=store, manual_oauth=False)
 

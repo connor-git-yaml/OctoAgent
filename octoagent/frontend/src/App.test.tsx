@@ -2445,8 +2445,9 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "整理最新记忆" })).toBeInTheDocument();
-    expect((await screen.findAllByText("打开 Settings > Memory")).length).toBeGreaterThan(0);
+    // Feature 063 重构后 Memory 页面只展示筛选 + 结果，不再有 "整理最新记忆" 按钮
+    expect(await screen.findByRole("button", { name: "重新查看" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "清空筛选" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
     expect(screen.queryByText("备份与恢复")).not.toBeInTheDocument();
     expect(screen.queryByText("允许读取受限记忆")).not.toBeInTheDocument();
@@ -3098,11 +3099,8 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "Memory 在工作，只是当前筛选太窄" });
-    expect(screen.getAllByRole("link", { name: "打开 Settings > Memory" })[0]!).toHaveAttribute(
-      "href",
-      "/settings#settings-group-memory"
-    );
+    // Feature 063 重构后 heroTitle 改为 "当前筛选没有命中记忆"
+    await screen.findByRole("heading", { name: "当前筛选没有命中记忆" });
     expect(screen.queryByText("Active Scope")).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("记忆类型"), "sor");
     await userEvent.selectOptions(screen.getByLabelText("主题分区"), "contact");
@@ -3123,11 +3121,13 @@ describe("App workbench routing", () => {
     expect(String(actionCall?.[1]?.body)).toContain('"include_history":true');
     expect(String(actionCall?.[1]?.body)).toContain('"limit":50');
 
-    const inspectorHeading = await screen.findByRole("heading", { name: "Alice" });
-    const inspectorSection = inspectorHeading.closest("section");
-    expect(inspectorSection).not.toBeNull();
-    expect(within(inspectorSection!).getByText("Alice 偏好异步沟通")).toBeInTheDocument();
-    expect(await screen.findByText("当前有需要注意的情况")).toBeInTheDocument();
+    // Feature 063 重构后记录卡片用 <strong> 而非 heading 渲染标题
+    const aliceTitle = await screen.findByText("Alice");
+    const recordSection = aliceTitle.closest("section");
+    expect(recordSection).not.toBeNull();
+    expect(within(recordSection!).getByText("Alice 偏好异步沟通")).toBeInTheDocument();
+    // Feature 063 重构后 warning banner 使用 "注意" + 原始 warning 文本
+    expect(await screen.findByText("注意")).toBeInTheDocument();
   });
 
 });

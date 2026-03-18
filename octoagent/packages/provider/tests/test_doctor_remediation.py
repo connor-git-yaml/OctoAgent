@@ -30,7 +30,8 @@ def test_planner_builds_blocking_guidance() -> None:
 
     guidance = DoctorRemediationPlanner().build(report)
     assert guidance.overall_status == "blocked"
-    assert guidance.blocking_actions[0].command == "octo config init"
+    # env_file 对应的 action command 是 "octo init"，与 config-init 类型不同
+    assert guidance.blocking_actions[0].command == "octo init"
     assert [group.stage for group in guidance.groups] == ["system", "config"]
 
 

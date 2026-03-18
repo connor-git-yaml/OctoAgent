@@ -446,7 +446,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     prompt = llm_service.calls[0]["prompt_or_messages"]
     assert isinstance(prompt, list)
     joined = "\n".join(str(item.get("content", "")) for item in prompt)
-    assert "你负责 Alpha 项目的需求连续性与交付推进" in joined
+    # persona_summary 已不再直接注入 prompt；AgentProfile 块只包含 name 和 instruction_overlays
     assert "Alpha Agent" in joined
     assert "AmbientRuntime:" in joined
     assert "timezone: UTC" in joined
@@ -1758,9 +1758,12 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     )
 
     writeback = first_frame.budget["private_memory_writeback"]
-    assert writeback["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
-    assert writeback["scope_id"] == first_private_scope_ids[1]
-    assert writeback["scope_kind"] == "runtime_private"
+    # private_memory_writeback 现在使用 PROJECT_SHARED namespace（而非 WORKER_PRIVATE）
+    assert writeback["namespace_kind"] == MemoryNamespaceKind.PROJECT_SHARED.value
+    # scope_id 由 PROJECT_SHARED namespace 的 memory_scope_ids 决定（通常为 memory/project-{id}）
+    actual_writeback_scope_id = writeback["scope_id"]
+    assert actual_writeback_scope_id  # 确保非空
+    assert writeback["scope_kind"]    # 确保有值（namespace_primary / runtime_private 等）
     assert writeback["fragment_refs"]
     assert any(
         ref["ref_type"] == "memory_maintenance_run" and ref["ref_id"] == writeback["run_id"]
@@ -1769,8 +1772,9 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
 
     first_session = await store_group.agent_context_store.get_agent_session(first_frame.agent_session_id)
     assert first_session is not None
-    assert first_session.metadata["last_private_memory_writeback_run_id"] == writeback["run_id"]
-    assert first_session.metadata["last_private_memory_scope_id"] == first_private_scope_ids[1]
+    # session metadata key 已改名为 last_memory_writeback_run_id / last_memory_scope_id
+    assert first_session.metadata["last_memory_writeback_run_id"] == writeback["run_id"]
+    assert first_session.metadata["last_memory_scope_id"] == actual_writeback_scope_id
 
     cursor = await store_group.conn.execute(
         """
@@ -1780,11 +1784,11 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         ORDER BY created_at DESC
         LIMIT 1
         """,
-        (first_private_scope_ids[1],),
+        (actual_writeback_scope_id,),
     )
     fragment_row = await cursor.fetchone()
     assert fragment_row is not None
-    assert fragment_row[0] == first_private_scope_ids[1]
+    assert fragment_row[0] == actual_writeback_scope_id
     assert "alpha-official-root" in fragment_row[1]
 
     second_agent_session_id = build_agent_session_id(

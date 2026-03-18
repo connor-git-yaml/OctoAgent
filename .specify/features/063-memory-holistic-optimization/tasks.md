@@ -168,6 +168,44 @@
 
 ---
 
+## Phase 8: User Story 6 - LanceDB 语义检索集成 (Priority: P1)
+
+**Goal**: 接入 LanceDB 作为持久化向量存储 + 全文检索引擎，Qwen3-Embedding-0.6B 作为默认 embedding，实现 0.7 向量 + 0.3 BM25 混合检索，Qwen3 不可用时降级到纯 BM25
+
+**Independent Test**: Memory 页面搜索"我饿了"返回饮食相关记忆；停止 sentence-transformers 后搜索仍返回基于 BM25 的结果
+
+### 依赖安装
+
+- [ ] T047 [US6] 添加 `lancedb>=0.21,<1.0` 到 `provider/pyproject.toml` 的 dependencies，运行 `uv lock` 更新锁文件 -- `octoagent/packages/provider/pyproject.toml`
+- [ ] T048 [US6] 更新 `install_bootstrap.py`，在数据目录创建 `data/lancedb/` 子目录 -- `octoagent/packages/provider/src/octoagent/provider/dx/install_bootstrap.py`
+
+### LanceDB 接入（BuiltinMemUBridge 改造）
+
+- [ ] T049 [US6] 改造 `BuiltinMemUBridge.__init__`：新增 `lancedb_dir: Path` 参数，使用 `lancedb.connect_async()` 打开异步连接，新增 `_embedding_available: bool` 状态标记 -- `octoagent/packages/provider/src/octoagent/provider/dx/builtin_memu_bridge.py`
+- [ ] T050 [US6] 实现 `_ensure_table()` 方法：创建/打开 `memory_vectors_{dim}` 表 + 创建 FTS 索引（`create_fts_index("content_text", tokenizer_name="jieba")`）+ 创建 scalar 索引（scope_id, layer, status） -- `builtin_memu_bridge.py`
+- [ ] T051 [US6] 实现 `_try_embed_query()` / `_try_embed_batch()`：Qwen3 可用时返回向量，不可用时返回 None/零向量，失败后标记 `_embedding_available = False` 避免重复尝试 -- `builtin_memu_bridge.py`
+- [ ] T052 [US6] 重写 `search()` 方法：Qwen3 可用时使用 `query_type="hybrid"` + `LinearCombinationReranker(weight=0.7)`；不可用时使用 `query_type="fts"` 纯 BM25；focus_terms/subject_hint 通过查询扩展注入 FTS 查询 -- `builtin_memu_bridge.py`
+- [ ] T053 [US6] 重写 `sync_batch()` / `sync_sor()` / `sync_fragment()` / `sync_vault()`：embed + LanceDB upsert（`merge_insert` on record_id），content_text 自动被 FTS 索引 -- `builtin_memu_bridge.py`
+- [ ] T054 [US6] 实现 REINDEX（`run_maintenance`）：从 SQLite 读取全量记录 → 分批 embed（每批 64 条）→ 写入 LanceDB（overwrite 模式）→ 重建 FTS 索引 -- `builtin_memu_bridge.py`
+- [ ] T055 [US6] 清理旧代码：删除 `_hash_embed()`、`_stable_index()`、`_cosine()` 旧打分辅助函数，删除 additive bonus 打分逻辑（`min(overlap*0.08, 0.4)` 等） -- `builtin_memu_bridge.py`
+
+### 接入点改造
+
+- [ ] T056 [US6] 改造 `memory_backend_resolver.py`：`resolve_backend()` 创建 `BuiltinMemUBridge`（传入 lancedb_dir、store、project_binding），不再返回 `SqliteMemoryBackend` -- `octoagent/packages/provider/src/octoagent/provider/dx/memory_backend_resolver.py`
+- [ ] T057 [US6] 改造 `memory_runtime_service.py`：确保 `project_root` / `lancedb_dir` 参数正确传递给 `MemoryBackendResolver` -- `octoagent/packages/provider/src/octoagent/provider/dx/memory_runtime_service.py`
+- [ ] T058 [US6] 改造 `service.py`：`_should_use_backend_recall_contract()` 支持 backend_id="memu" -- `octoagent/packages/memory/src/octoagent/memory/service.py`
+
+### 测试
+
+- [ ] T059 [P] [US6] 为 hybrid search + BM25 降级编写单元测试（mock LanceDB），覆盖：hybrid search 正常路径、Qwen3 不可用降级到 FTS、空表触发 reindex、focus_terms 查询扩展 -- `octoagent/packages/provider/tests/dx/test_builtin_memu_bridge.py`（新建）
+- [ ] T060 [P] [US6] 为 sync_batch LanceDB upsert 编写单元测试（mock LanceDB），覆盖：正常 upsert、tombstone 删除、Qwen3 不可用时零向量写入 -- `octoagent/packages/provider/tests/dx/test_builtin_memu_bridge.py`
+- [ ] T061 [P] [US6] 运行全量测试套件，修复回归 -- `uv run pytest` + `npx tsc --noEmit` + `npx vitest`
+- [ ] T062 [US6] 集成验证：启动系统 → Chat 产生 SoR → 验证 LanceDB 写入 → Memory 页面语义搜索 → REINDEX → BM25 降级
+
+**Checkpoint**: Memory 检索从 SQLite LIKE 升级为 LanceDB hybrid search (0.7 vector + 0.3 BM25)，支持百万级数据和语义理解
+
+---
+
 ## FR 覆盖映射表
 
 | FR | 描述 | 覆盖任务 |
@@ -184,8 +222,12 @@
 | FR-010 | 移除 MemoryConfig backend_mode 及 Bridge 配置 | T023 |
 | FR-011 | 移除 retrieval_profile local_only/memu_compat 分支 | T024, T025 |
 | FR-012 | 前端移除 Bridge UI 元素 | T032, T033, T034, T035 |
+| FR-013 | LanceDB 作为持久化向量存储 + FTS 引擎 | T047, T049, T050, T053, T056 |
+| FR-014 | 混合检索 0.7 向量 + 0.3 BM25 (jieba 中文分词) | T052, T059 |
+| FR-015 | Qwen3 不可用时降级到纯 BM25 | T051, T052, T059 |
+| FR-016 | REINDEX 维护命令 | T054, T060 |
 
-**FR 覆盖率**: 12/12 = 100%
+**FR 覆盖率**: 16/16 = 100%
 
 ---
 
@@ -200,6 +242,7 @@
 - **Phase 5 (US3)**: 后端验证(T018)独立，前端实现依赖 MemoryPage 未被 US5 清理改动（建议在 US5 之前完成）
 - **Phase 6 (US5)**: 建议在 US3、US4 完成后启动，避免前端文件冲突
 - **Phase 7 (Polish)**: 依赖所有 Story 完成
+- **Phase 8 (US6)**: 依赖 Phase 6 完成（US5 清理后 bridge 代码已移除，避免冲突）；T049-T055 共享 builtin_memu_bridge.py 应串行；T056-T058 操作不同文件可并行
 
 ### User Story 间依赖
 

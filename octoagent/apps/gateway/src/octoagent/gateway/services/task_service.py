@@ -96,6 +96,20 @@ from .runtime_control import runtime_context_from_metadata
 
 log = structlog.get_logger()
 
+# 匹配常见 API 密钥/Token 格式（sk-xxx, Bearer xxx, key=xxx 等）
+_SECRET_PATTERN = re.compile(
+    r"(sk-[A-Za-z0-9_-]{8,})"          # OpenAI-style keys
+    r"|(Bearer\s+\S{8,})"              # Bearer tokens
+    r"|(api[_-]?key\s*[:=]\s*\S{4,})"  # api_key=xxx / api-key: xxx
+    r"|(token\s*[:=]\s*\S{8,})",       # token=xxx
+    re.IGNORECASE,
+)
+
+
+def _sanitize_error_message(raw: str) -> str:
+    """脱敏错误信息中的凭证，保留错误类型和网络/服务相关描述。"""
+    return _SECRET_PATTERN.sub("[REDACTED]", raw)[:500]
+
 
 class TaskService:
     """任务业务服务"""
@@ -2335,8 +2349,9 @@ class TaskService:
             task_id=task_id,
             error_type=type(error).__name__,
         )
-        raw_error_message = str(error).strip()
-        error_message = raw_error_message[:400] if raw_error_message else "LLM 调用失败，请查看服务端日志"
+        # 保留错误类型和消息（供内部 freshness/orchestrator 判断），
+        # 但脱敏可能泄露的凭证（api_key、token 等）。
+        error_message = _sanitize_error_message(str(error))
         try:
             failed_event = await self._append_event_only_with_retry(
                 task_id=task_id,

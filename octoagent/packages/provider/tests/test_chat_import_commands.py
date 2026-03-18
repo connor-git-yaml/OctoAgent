@@ -129,10 +129,11 @@ def test_import_workbench_cli_flow(tmp_path: Path) -> None:
 
     assert detect.exit_code == 0
     assert "Import Source Detected" in detect.output
+    # Rich Panel 每行带有 │ 装饰符，用 "in" 而非 startswith 来匹配
     source_line = next(
-        line for line in detect.output.splitlines() if line.strip().startswith("source_id:")
+        line for line in detect.output.splitlines() if "source_id:" in line
     )
-    source_id = source_line.split(":", 1)[1].strip()
+    source_id = source_line.split("source_id:", 1)[1].strip().rstrip("│").strip()
     assert source_id
 
     mapping_save = runner.invoke(

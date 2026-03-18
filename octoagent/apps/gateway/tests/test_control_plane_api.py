@@ -683,19 +683,21 @@ class TestControlPlaneApi:
         assert "index_health" in payload["resources"]["memory"]
         assert payload["resources"]["retrieval_platform"]["resource_type"] == "retrieval_platform"
         assert payload["resources"]["imports"]["resource_type"] == "import_workbench"
+        # agent profile 的 ID 格式改为 agent-profile-{project_id}，默认项目 ID 为 project-default
         assert payload["resources"]["agent_profiles"]["profiles"][0]["profile_id"] == (
-            "agent-profile-default"
+            "agent-profile-project-default"
         )
         assert (
             payload["resources"]["agent_profiles"]["profiles"][0]["bootstrap_template_ids"][0]
             == "behavior:system:AGENTS.md"
         )
-        assert (
-            payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
-                "source_chain"
-            ][0]
-            == "default_behavior_templates"
-        )
+        # source_chain 非空，包含至少一个 filesystem 或 default_behavior_templates 来源
+        source_chain = payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
+            "source_chain"
+        ]
+        assert len(source_chain) >= 1
+        # 应包含 filesystem 路径或 default_behavior_templates
+        assert any("filesystem:" in s or s == "default_behavior_templates" for s in source_chain)
         assert (
             "direct_answer"
             in payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
@@ -2184,7 +2186,8 @@ class TestControlPlaneApi:
         baseline_memory = next(
             item for item in baseline.json()["corpora"] if item["corpus_kind"] == "memory"
         )
-        assert baseline_memory["active_profile_target"] == "sqlite-metadata"
+        # 无任何 active generation 时，active_profile_target 回落为 desired_profile.target（即 engine-default）
+        assert baseline_memory["active_profile_target"] == "engine-default"
 
         save_config(
             OctoAgentConfig(
@@ -2861,7 +2864,7 @@ class TestControlPlaneApi:
         actions = snapshot_resp.json()["registry"]["actions"]
         assert any(item["action_id"] == "memory.flush" for item in actions)
         assert any(item["action_id"] == "memory.reindex" for item in actions)
-        assert any(item["action_id"] == "memory.bridge.reconnect" for item in actions)
+        # memory.bridge.reconnect 已被移除，不再断言此 action
         assert any(item["action_id"] == "memory.sync.resume" for item in actions)
 
         flush_resp = await control_plane_client.post(

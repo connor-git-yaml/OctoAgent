@@ -52,7 +52,14 @@ def test_behavior_ls_and_show_report_effective_sources(tmp_path: Path) -> None:
     assert "agent_slug=butler" in listed.output
     assert "system_dir=behavior/system" in listed.output
     assert "workspace_root=" in listed.output
-    assert "projects/default/workspace" in listed.output
+    # Rich 面板在窄终端下会把长路径硬换行，行首尾都带有 │ 边框字符。
+    # 去掉每行首尾的边框字符（│、╭、╰ 等）和空白后无间隔拼接，
+    # 使跨行截断的路径片段能被完整匹配。
+    flat_output = "".join(
+        line.strip().strip("│╭╰─").strip()
+        for line in listed.output.splitlines()
+    )
+    assert "projects/default/workspace" in flat_output
 
     shown = runner.invoke(main, ["behavior", "show", "agents"], env=env)
     assert shown.exit_code == 0
