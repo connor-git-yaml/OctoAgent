@@ -608,6 +608,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         memory_console_service=MemoryConsoleService(
             project_root,
             store_group=store_group,
+            llm_service=fallback_manager,
         ),
         capability_pack_service=app.state.capability_pack_service,
         delegation_plane_service=app.state.delegation_plane_service,

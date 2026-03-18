@@ -225,6 +225,22 @@ export default function MemoryPage() {
     });
   }
 
+  const [consolidateMessage, setConsolidateMessage] = useState("");
+  const [consolidateIsError, setConsolidateIsError] = useState(false);
+
+  async function consolidateMemory() {
+    setConsolidateMessage("");
+    setConsolidateIsError(false);
+    const result = await submitAction("memory.consolidate", {
+      project_id: memoryResource.active_project_id,
+      workspace_id: memoryResource.active_workspace_id,
+    });
+    const hasErrors = (result?.data?.errors?.length ?? 0) > 0;
+    const msg = result?.data?.message || result?.message || "整理完成";
+    setConsolidateMessage(msg);
+    setConsolidateIsError(hasErrors);
+  }
+
   function handleSelectRecord(record: (typeof displayRecords)[number]) {
     setSelectedRecordId(record.record.record_id);
     setShowDetailModal(true);
@@ -299,8 +315,11 @@ export default function MemoryPage() {
         records={displayRecords}
         hasStoredRecords={narrative.hasStoredRecords}
         busyActionId={busyActionId}
+        consolidateMessage={consolidateMessage}
+        consolidateIsError={consolidateIsError}
         onResetFilters={resetFilters}
         onSelectRecord={handleSelectRecord}
+        onConsolidate={consolidateMemory}
       />
 
       <MemoryDetailModal

@@ -3260,6 +3260,8 @@ class ControlPlaneService:
                 success_code="MEMORY_SYNC_RESUME_COMPLETED",
                 success_message="已执行 Memory sync.resume。",
             )
+        if action_id == "memory.consolidate":
+            return await self._handle_memory_consolidate(request)
         if action_id == "vault.access.request":
             return await self._handle_vault_access_request(request)
         if action_id == "vault.access.resolve":
@@ -4363,6 +4365,34 @@ class ControlPlaneService:
             resource_refs=[
                 self._resource_ref("memory_console", "memory:overview"),
                 self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            ],
+            target_refs=self._memory_target_refs(request),
+        )
+
+    async def _handle_memory_consolidate(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """使用 LLM 将待整理 fragment 整合为 SoR 现行事实。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        try:
+            result = await self._memory_console_service.run_consolidate(
+                project_id=project_id or "",
+                workspace_id=workspace_id,
+            )
+        except MemoryConsoleError as exc:
+            return self._failed_result(
+                request=request,
+                code=exc.code,
+                message=exc.message,
+            )
+        return self._completed_result(
+            request=request,
+            code="MEMORY_CONSOLIDATE_COMPLETED",
+            message=result.get("message", "记忆整理完成"),
+            data=result,
+            resource_refs=[
+                self._resource_ref("memory_console", "memory:overview"),
             ],
             target_refs=self._memory_target_refs(request),
         )

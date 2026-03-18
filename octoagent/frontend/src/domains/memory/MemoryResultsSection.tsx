@@ -12,8 +12,11 @@ interface MemoryResultsSectionProps {
   records: MemoryDisplayRecord[];
   hasStoredRecords: boolean;
   busyActionId: string | null;
+  consolidateMessage: string;
+  consolidateIsError: boolean;
   onResetFilters: () => Promise<void>;
   onSelectRecord: (record: MemoryDisplayRecord) => void;
+  onConsolidate: () => Promise<void>;
 }
 
 export default function MemoryResultsSection({
@@ -21,9 +24,14 @@ export default function MemoryResultsSection({
   records,
   hasStoredRecords,
   busyActionId,
+  consolidateMessage,
+  consolidateIsError,
   onResetFilters,
   onSelectRecord,
+  onConsolidate,
 }: MemoryResultsSectionProps) {
+  const isConsolidating = busyActionId === "memory.consolidate";
+
   return (
     <section className="wb-panel">
       <div className="wb-panel-head">
@@ -31,11 +39,27 @@ export default function MemoryResultsSection({
           <p className="wb-card-label">记忆列表</p>
           <h3>{records.length} 条记忆</h3>
         </div>
-        <div className="wb-chip-row">
-          <span className="wb-chip">需授权 {memory.summary.vault_ref_count}</span>
-          <span className="wb-chip">待整理 {memory.summary.pending_replay_count}</span>
+        <div className="wb-inline-actions">
+          <button
+            type="button"
+            className="wb-button wb-button-primary"
+            onClick={() => void onConsolidate()}
+            disabled={isConsolidating || records.length === 0}
+          >
+            {isConsolidating ? "整理中…" : "整理记忆"}
+          </button>
+          <div className="wb-chip-row">
+            <span className="wb-chip">需授权 {memory.summary.vault_ref_count}</span>
+            <span className="wb-chip">待整理 {memory.summary.pending_replay_count}</span>
+          </div>
         </div>
       </div>
+
+      {consolidateMessage ? (
+        <div className={`wb-inline-banner ${consolidateIsError ? "is-warning" : "is-success"}`}>
+          <span>{consolidateMessage}</span>
+        </div>
+      ) : null}
 
       {records.length === 0 ? (
         <div className="wb-empty-state">

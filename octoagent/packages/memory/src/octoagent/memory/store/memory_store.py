@@ -192,6 +192,13 @@ class SqliteMemoryStore:
         rows = await cursor.fetchall()
         return [self._row_to_fragment(row) for row in rows]
 
+    async def update_fragment_metadata(self, fragment_id: str, metadata: dict) -> None:
+        """更新 fragment 的 metadata JSON 列。"""
+        await self._conn.execute(
+            "UPDATE memory_fragments SET metadata = ? WHERE fragment_id = ?",
+            (json.dumps(metadata, ensure_ascii=False), fragment_id),
+        )
+
     async def insert_sor(self, record: SorRecord) -> None:
         try:
             await self._conn.execute(
