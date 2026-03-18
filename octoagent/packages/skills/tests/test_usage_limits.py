@@ -20,7 +20,6 @@ from octoagent.skills.models import (
     LoopGuardPolicy,
     UsageLimits,
     UsageTracker,
-    _MAX_STEPS_HARD_CEILING,
 )
 
 
@@ -32,13 +31,13 @@ from octoagent.skills.models import (
 class TestUsageLimits:
     def test_defaults(self) -> None:
         limits = UsageLimits()
-        assert limits.max_steps == 30
+        assert limits.max_steps is None  # 不限步数
         assert limits.max_request_tokens is None
         assert limits.max_response_tokens is None
-        assert limits.max_tool_calls is None
+        assert limits.max_tool_calls is None  # 不限工具调用
         assert limits.max_budget_usd is None
-        assert limits.max_duration_seconds is None
-        assert limits.repeat_signature_threshold == 3
+        assert limits.max_duration_seconds == 7200.0  # 统一 2 小时
+        assert limits.repeat_signature_threshold == 10
 
     def test_custom_values(self) -> None:
         limits = UsageLimits(
@@ -52,13 +51,15 @@ class TestUsageLimits:
         assert limits.max_budget_usd == 1.5
         assert limits.max_duration_seconds == 120.0
 
-    def test_max_steps_upper_bound(self) -> None:
-        limits = UsageLimits(max_steps=_MAX_STEPS_HARD_CEILING)
-        assert limits.max_steps == _MAX_STEPS_HARD_CEILING
+    def test_max_steps_none_means_unlimited(self) -> None:
+        """max_steps=None 表示不限步数。"""
+        limits = UsageLimits()
+        assert limits.max_steps is None
 
-    def test_max_steps_exceeds_ceiling_rejected(self) -> None:
-        with pytest.raises(Exception):
-            UsageLimits(max_steps=_MAX_STEPS_HARD_CEILING + 1)
+    def test_max_steps_large_value_accepted(self) -> None:
+        """max_steps 不再有硬上限（旧的 _MAX_STEPS_HARD_CEILING 仅用于降级 clamp）。"""
+        limits = UsageLimits(max_steps=10000)
+        assert limits.max_steps == 10000
 
 
 # ═══════════════════════════════════════
@@ -74,16 +75,16 @@ class TestLoopGuardPolicyConversion:
         assert limits.repeat_signature_threshold == 5
         assert limits.max_budget_usd is None
 
-    def test_clamp_to_ceiling(self) -> None:
+    def test_large_steps_preserved(self) -> None:
         policy = LoopGuardPolicy(max_steps=200)
         limits = policy.to_usage_limits()
-        assert limits.max_steps == 200  # 200 < 500，不触发 clamp
+        assert limits.max_steps == 200
 
     def test_default_conversion(self) -> None:
         policy = LoopGuardPolicy()
         limits = policy.to_usage_limits()
         assert limits.max_steps == 30
-        assert limits.repeat_signature_threshold == 3
+        assert limits.repeat_signature_threshold == 10
 
 
 # ═══════════════════════════════════════
@@ -107,6 +108,12 @@ class TestUsageTrackerCheckLimits:
         limits = UsageLimits(max_steps=30)
         assert tracker.check_limits(limits) is None
 
+    def test_max_steps_none_never_exceeded(self) -> None:
+        """max_steps=None（不限）时，步数再多也不触发。"""
+        tracker = UsageTracker(steps=999999, start_time=time.monotonic())
+        limits = UsageLimits(max_steps=None, max_duration_seconds=99999.0)
+        assert tracker.check_limits(limits) is None
+
     def test_request_token_limit_exceeded(self) -> None:
         tracker = UsageTracker(request_tokens=10000, start_time=time.monotonic())
         limits = UsageLimits(max_request_tokens=10000)
@@ -121,6 +128,12 @@ class TestUsageTrackerCheckLimits:
         tracker = UsageTracker(tool_calls=20, start_time=time.monotonic())
         limits = UsageLimits(max_tool_calls=20)
         assert tracker.check_limits(limits) == ErrorCategory.TOOL_CALL_LIMIT_EXCEEDED
+
+    def test_tool_calls_none_never_exceeded(self) -> None:
+        """max_tool_calls=None（不限）时，调用再多也不触发。"""
+        tracker = UsageTracker(tool_calls=999999, start_time=time.monotonic())
+        limits = UsageLimits(max_tool_calls=None, max_duration_seconds=99999.0)
+        assert tracker.check_limits(limits) is None
 
     def test_budget_exceeded(self) -> None:
         tracker = UsageTracker(cost_usd=0.50, start_time=time.monotonic())
@@ -148,8 +161,14 @@ class TestUsageTrackerCheckLimits:
             cost_usd=999999.0,
             start_time=time.monotonic(),
         )
-        limits = UsageLimits(max_steps=100)  # 其余都是 None
+        # max_steps=None, max_tool_calls=None 等都不限，只设大 duration 避免超时
+        limits = UsageLimits(max_duration_seconds=99999.0)
         assert tracker.check_limits(limits) is None
+
+    def test_default_timeout_is_7200(self) -> None:
+        """默认 max_duration_seconds=7200s。"""
+        limits = UsageLimits()
+        assert limits.max_duration_seconds == 7200.0
 
 
 # ═══════════════════════════════════════
@@ -183,7 +202,7 @@ class TestCheckLimitsPriority:
 class TestCostFuse:
     def test_cost_fuse_triggers_at_budget(self) -> None:
         """T3.2: Mock 每步 $0.01，budget=$0.03，第 4 步前应触发。"""
-        limits = UsageLimits(max_steps=100, max_budget_usd=0.03)
+        limits = UsageLimits(max_budget_usd=0.03)
         tracker = UsageTracker(start_time=time.monotonic())
 
         # 模拟 3 步，每步 $0.01

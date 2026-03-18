@@ -19,10 +19,10 @@ const LIMIT_FIELDS: LimitFieldDef[] = [
   {
     key: "max_steps",
     label: "最大步数",
-    description: "单次 Skill 最多执行的 LLM 调用轮次",
+    description: "单次 Skill 最多执行的 LLM 调用轮次（留空表示不限）",
     unit: "步",
     type: "int",
-    placeholder: "30",
+    placeholder: "不限",
   },
   {
     key: "max_budget_usd",
@@ -30,7 +30,7 @@ const LIMIT_FIELDS: LimitFieldDef[] = [
     description: "单次 Skill 最大 LLM 调用成本",
     unit: "USD",
     type: "float",
-    placeholder: "0.30",
+    placeholder: "不限",
   },
   {
     key: "max_duration_seconds",
@@ -38,15 +38,7 @@ const LIMIT_FIELDS: LimitFieldDef[] = [
     description: "单次 Skill 最大运行时长",
     unit: "秒",
     type: "float",
-    placeholder: "180",
-  },
-  {
-    key: "max_tool_calls",
-    label: "工具调用上限",
-    description: "单次 Skill 最多工具调用次数",
-    unit: "次",
-    type: "int",
-    placeholder: "20",
+    placeholder: "7200",
   },
   {
     key: "max_request_tokens",
@@ -65,29 +57,6 @@ const LIMIT_FIELDS: LimitFieldDef[] = [
     placeholder: "不限",
   },
 ];
-
-// ─── 预设类型定义 ───
-
-interface PresetInfo {
-  label: string;
-  description: string;
-}
-
-const PRESET_MAP: Record<string, PresetInfo> = {
-  butler: { label: "Butler", description: "主 Agent 预设（50 步 / $0.50 / 5 分钟）" },
-  worker: { label: "Worker 通用", description: "通用 Worker 预设（30 步 / $0.30 / 3 分钟）" },
-  worker_coding: { label: "Coding Worker", description: "编码 Worker 预设（100 步 / $1.00 / 10 分钟）" },
-  worker_research: { label: "Research Worker", description: "研究 Worker 预设（60 步 / $0.50 / 5 分钟）" },
-  subagent: { label: "Subagent", description: "临时子代理预设（15 步 / $0.10 / 1 分钟）" },
-};
-
-const PRESET_VALUES: Record<string, Record<string, number>> = {
-  butler: { max_steps: 50, max_budget_usd: 0.5, max_duration_seconds: 300, max_tool_calls: 30 },
-  worker: { max_steps: 30, max_budget_usd: 0.3, max_duration_seconds: 180, max_tool_calls: 20 },
-  worker_coding: { max_steps: 100, max_budget_usd: 1.0, max_duration_seconds: 600, max_tool_calls: 80 },
-  worker_research: { max_steps: 60, max_budget_usd: 0.5, max_duration_seconds: 300, max_tool_calls: 40 },
-  subagent: { max_steps: 15, max_budget_usd: 0.1, max_duration_seconds: 60, max_tool_calls: 10 },
-};
 
 // ─── 类型定义 ───
 
@@ -229,18 +198,6 @@ export default function SettingsResourceLimitsSection({
     setSaveMessage("");
   }, []);
 
-  const handleApplyPreset = useCallback((presetKey: string) => {
-    const values = PRESET_VALUES[presetKey];
-    if (!values) return;
-    const next: DraftLimits = {};
-    for (const field of LIMIT_FIELDS) {
-      const presetVal = values[field.key];
-      next[field.key] = presetVal !== undefined ? String(presetVal) : "";
-    }
-    setDraft(next);
-    setSaveMessage("");
-  }, []);
-
   const handleClear = useCallback(() => {
     const empty: DraftLimits = {};
     for (const field of LIMIT_FIELDS) {
@@ -299,29 +256,14 @@ export default function SettingsResourceLimitsSection({
             ))}
           </select>
           <span className="wb-field-hint">
-            选择要配置资源限制的 Agent 或 Worker。留空的字段将使用预设默认值。
+            选择要配置资源限制的 Agent 或 Worker。留空的字段将使用全局默认值。
           </span>
         </div>
       </div>
 
-      {/* 预设快捷按钮 */}
+      {/* 操作按钮 */}
       <div style={{ marginBottom: "1rem" }}>
-        <p className="wb-card-label" style={{ marginBottom: "0.5rem" }}>
-          快速预设
-        </p>
-        <div className="wb-inline-actions wb-inline-actions-wrap">
-          {Object.entries(PRESET_MAP).map(([key, info]) => (
-            <button
-              key={key}
-              type="button"
-              className="wb-button wb-button-tertiary"
-              onClick={() => handleApplyPreset(key)}
-              disabled={busy}
-              title={info.description}
-            >
-              {info.label}
-            </button>
-          ))}
+        <div className="wb-inline-actions">
           <button
             type="button"
             className="wb-button wb-button-tertiary"

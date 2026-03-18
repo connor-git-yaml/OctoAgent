@@ -76,7 +76,7 @@ class WorkerRuntimeConfig:
     # 参考 Claude Code 可连续执行数小时的设计。
     max_steps: int = 50
     first_output_timeout_seconds: float = 120.0
-    between_output_timeout_seconds: float = 60.0
+    between_output_timeout_seconds: float = 120.0
     max_execution_timeout_seconds: float = 7200.0  # 2 小时
     docker_mode: str = "preferred"  # disabled/preferred/required
     default_tool_profile: str = "standard"
@@ -120,7 +120,7 @@ class WorkerRuntimeConfig:
                 "OCTOAGENT_WORKER_TIMEOUT_FIRST_OUTPUT_S", 120.0
             ),
             between_output_timeout_seconds=_float_env(
-                "OCTOAGENT_WORKER_TIMEOUT_BETWEEN_OUTPUT_S", 60.0
+                "OCTOAGENT_WORKER_TIMEOUT_BETWEEN_OUTPUT_S", 120.0
             ),
             max_execution_timeout_seconds=_float_env("OCTOAGENT_WORKER_TIMEOUT_MAX_EXEC_S", 7200.0),
             docker_mode=docker_mode,

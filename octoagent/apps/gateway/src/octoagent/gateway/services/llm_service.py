@@ -28,7 +28,7 @@ from octoagent.skills import (
     SkillRunStatus,
     extract_mounted_tool_names,
 )
-from octoagent.skills.limits import get_preset_limits, merge_usage_limits
+from octoagent.skills.limits import get_global_defaults, merge_usage_limits
 from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
 from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
@@ -331,8 +331,7 @@ class LLMService:
             tool_profile=profile,
         )
         # --- Feature 062: 资源限制合并 (T2.10) ---
-        agent_type = "butler" if single_loop_executor else worker_type
-        base_limits = get_preset_limits(agent_type)
+        base_limits = get_global_defaults()
         profile_rl = metadata.get("resource_limits", {})
         # SKILL.md resource_limits 暂时为空（runtime 未注入时 fallback）
         skill_rl: dict[str, Any] = {}
@@ -437,18 +436,15 @@ class LLMService:
                     and manifest.retry_policy.fallback_model_alias
                     and category in ("step_limit_exceeded", "timeout_exceeded")
                 ):
-                    degraded_steps = min(
-                        int(usage_limits.max_steps * 1.5), _MAX_STEPS_HARD_CEILING
+                    # max_steps=None → 降级时也保持 None（不限）
+                    degraded_steps = (
+                        min(int(usage_limits.max_steps * 1.5), _MAX_STEPS_HARD_CEILING)
+                        if usage_limits.max_steps is not None
+                        else None
                     )
-                    degraded_limits = UsageLimits(
-                        max_steps=degraded_steps,
-                        max_request_tokens=usage_limits.max_request_tokens,
-                        max_response_tokens=usage_limits.max_response_tokens,
-                        max_tool_calls=usage_limits.max_tool_calls,
-                        # max_budget_usd 不放宽
-                        max_budget_usd=usage_limits.max_budget_usd,
-                        max_duration_seconds=usage_limits.max_duration_seconds,
-                        repeat_signature_threshold=usage_limits.repeat_signature_threshold,
+                    # 仅覆盖 max_steps，其余字段（含 max_budget_usd）保持不变
+                    degraded_limits = usage_limits.model_copy(
+                        update={"max_steps": degraded_steps}
                     )
                     degraded_ctx = SkillExecutionContext(
                         task_id=task_id,

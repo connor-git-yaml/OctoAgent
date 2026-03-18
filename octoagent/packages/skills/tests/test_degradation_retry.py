@@ -3,7 +3,7 @@
 覆盖：
 - 降级成功：FAILED → 切 fallback 模型 → SUCCEEDED
 - 防递归：is_degraded_retry=True 时不重试
-- max_steps clamp：min(int(max_steps * 1.5), _MAX_STEPS_HARD_CEILING)
+- max_steps clamp：min(int(max_steps * 1.5), _MAX_STEPS_HARD_CEILING) 或 None → None
 - budget 不放宽：降级时 max_budget_usd 保持不变
 """
 
@@ -320,29 +320,23 @@ class TestDegradationMaxStepsClamp:
         assert min(int(100 * 1.5), _MAX_STEPS_HARD_CEILING) == 150
         assert min(int(400 * 1.5), _MAX_STEPS_HARD_CEILING) == 500  # clamp at 500
 
+    @pytest.mark.asyncio
+    async def test_max_steps_none_stays_none(self) -> None:
+        """max_steps=None 时，降级后仍为 None（不限步数）。"""
+        # 验证降级逻辑
+        original = UsageLimits()  # max_steps=None
+        degraded_steps = (
+            min(int(original.max_steps * 1.5), _MAX_STEPS_HARD_CEILING)
+            if original.max_steps is not None
+            else None
+        )
+        assert degraded_steps is None
+
 
 class TestDegradationBudgetNotRelaxed:
     @pytest.mark.asyncio
     async def test_budget_preserved_in_degraded_context(self) -> None:
         """降级重试时 max_budget_usd 不放宽。"""
-        from octoagent.gateway.services.llm_service import LLMService
-
-        captured_contexts: list[Any] = []
-
-        async def mock_run(*, manifest: Any, execution_context: Any, skill_input: Any, prompt: str) -> SkillRunResult:
-            captured_contexts.append(execution_context)
-            if len(captured_contexts) == 1:
-                return _make_failed_result("step_limit_exceeded")
-            return _make_succeeded_result()
-
-        mock_runner = MagicMock()
-        mock_runner.run = mock_run
-
-        # 注入 fallback_model_alias 需要通过 manifest 的 retry_policy
-        # 但 LLMService 内部构建 manifest，无法直接控制 retry_policy
-        # 由于默认 RetryPolicy.fallback_model_alias=""，降级不会触发
-        # 转为验证 UsageLimits 构造逻辑
-
         # 直接验证降级 UsageLimits 构造
         original = UsageLimits(max_steps=30, max_budget_usd=0.50)
         degraded_steps = min(int(original.max_steps * 1.5), _MAX_STEPS_HARD_CEILING)
@@ -359,7 +353,7 @@ class TestDegradationBudgetNotRelaxed:
         assert degraded.max_steps == 45  # 放宽
         assert degraded.max_budget_usd == 0.50  # 不放宽
         assert degraded.max_request_tokens is None
-        assert degraded.max_duration_seconds is None
+        assert degraded.max_duration_seconds == 7200.0  # 全局默认
 
 
 class TestDegradedRetryFailure:

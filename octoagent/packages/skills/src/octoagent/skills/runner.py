@@ -28,6 +28,7 @@ from .hooks import NoopSkillRunnerHook, SkillRunnerHook
 from .manifest import SkillManifest
 from .models import (
     ErrorCategory,
+    LoopGuardPolicy,
     SkillExecutionContext,
     SkillOutputEnvelope,
     SkillRunResult,
@@ -41,6 +42,10 @@ from .models import (
 from .protocols import StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
+
+# 模块级默认值单例，避免每次 run() 重复构造 Pydantic 实例
+_DEFAULT_USAGE_LIMITS = UsageLimits()
+_DEFAULT_LOOP_GUARD = LoopGuardPolicy()
 
 
 class SkillRunner:
@@ -72,8 +77,13 @@ class SkillRunner:
 
         # --- Feature 062: 多维度资源限制 ---
         limits = execution_context.usage_limits
-        # 向后兼容：如果调用方未设置 usage_limits 但 manifest 有自定义 loop_guard
-        if limits == UsageLimits() and manifest.loop_guard.max_steps != 30:
+        # 向后兼容：调用方未自定义 usage_limits 时，从 manifest.loop_guard 转换。
+        # 比较整个 LoopGuardPolicy 对象而非仅检查 max_steps，
+        # 避免 UsageLimits 默认值变更后导致条件语义漂移。
+        if (
+            limits == _DEFAULT_USAGE_LIMITS
+            and manifest.loop_guard != _DEFAULT_LOOP_GUARD
+        ):
             limits = manifest.loop_guard.to_usage_limits()
         tracker = UsageTracker(start_time=start_time)
 

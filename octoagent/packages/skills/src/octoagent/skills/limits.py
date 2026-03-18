@@ -1,11 +1,10 @@
-"""资源限制合并与默认值预设。
+"""资源限制合并与默认值。
 
 Feature 062: 支持多层优先级覆盖的 UsageLimits 合并逻辑。
-合并优先级: SKILL.md > WorkerProfile > AgentProfile > 默认值预设（按 Agent 类型）> 环境变量 > 全局默认
+合并优先级: SKILL.md > WorkerProfile > AgentProfile > 全局默认（环境变量 > 代码硬编码）
 
-环境变量优先级说明:
-  代码硬编码默认值 < 环境变量 < 预设（按 Agent 类型）< Profile 配置 < SKILL.md
-  环境变量仅影响"无预设、无 Profile 覆盖"时的全局兜底默认值。
+注意: Agent-type 预设矩阵已移除（不再区分 butler/worker/worker_coding 等类型）。
+所有 Agent 共享同一个全局默认配置，通过 Profile 或 SKILL.md 自定义覆盖。
 """
 
 from __future__ import annotations
@@ -66,76 +65,6 @@ def get_global_defaults() -> UsageLimits:
             base[key] = value
     return UsageLimits(**base)
 
-# ═══════════════════════════════════════
-# 默认值预设矩阵（按 Agent 类型）
-# ═══════════════════════════════════════
-
-_PRESETS: dict[str, dict[str, Any]] = {
-    "butler": {
-        "max_steps": 50,
-        "max_budget_usd": 0.50,
-        "max_duration_seconds": 300,
-        "max_tool_calls": 30,
-    },
-    "worker": {
-        "max_steps": 30,
-        "max_budget_usd": 0.30,
-        "max_duration_seconds": 180,
-        "max_tool_calls": 20,
-    },
-    "worker_coding": {
-        "max_steps": 100,
-        "max_budget_usd": 1.00,
-        "max_duration_seconds": 600,
-        "max_tool_calls": 80,
-    },
-    "worker_research": {
-        "max_steps": 60,
-        "max_budget_usd": 0.50,
-        "max_duration_seconds": 300,
-        "max_tool_calls": 40,
-    },
-    "subagent": {
-        "max_steps": 15,
-        "max_budget_usd": 0.10,
-        "max_duration_seconds": 60,
-        "max_tool_calls": 10,
-    },
-}
-
-# Agent 类型别名映射（统一到预设键名）
-_AGENT_TYPE_ALIASES: dict[str, str] = {
-    "butler": "butler",
-    "main": "butler",
-    "ops": "worker",
-    "general": "worker",
-    "dev": "worker_coding",
-    "coding": "worker_coding",
-    "research": "worker_research",
-    "subagent": "subagent",
-}
-
-
-def get_preset_limits(agent_type: str) -> UsageLimits:
-    """根据 Agent 类型返回预设的 UsageLimits。
-
-    对于已知 Agent 类型：返回预设值（环境变量不影响预设）。
-    对于未知 Agent 类型：返回全局默认值（可被环境变量覆盖）。
-
-    Args:
-        agent_type: Agent 类型标识符（如 "butler"、"worker"、"dev"、"research"）。
-                    支持别名映射（如 "coding" -> "worker_coding"）。
-
-    Returns:
-        对应预设的 UsageLimits 实例。未知类型返回 get_global_defaults()。
-    """
-    normalized = agent_type.strip().lower()
-    preset_key = _AGENT_TYPE_ALIASES.get(normalized, normalized)
-    preset_data = _PRESETS.get(preset_key)
-    if preset_data is None:
-        return get_global_defaults()
-    return UsageLimits(**preset_data)
-
 
 def merge_usage_limits(base: UsageLimits, *overrides: dict[str, Any]) -> UsageLimits:
     """逐字段合并 UsageLimits。
@@ -144,7 +73,7 @@ def merge_usage_limits(base: UsageLimits, *overrides: dict[str, Any]) -> UsageLi
     None 值表示"不覆盖"，0 值也不覆盖（防止误置零）。
 
     Args:
-        base: 基础 UsageLimits（如从预设获取的）
+        base: 基础 UsageLimits（如从 get_global_defaults() 获取的）
         *overrides: 一个或多个覆盖 dict（如来自 AgentProfile.resource_limits、
                     WorkerProfile.resource_limits、SkillMdEntry.resource_limits）
 
@@ -152,13 +81,12 @@ def merge_usage_limits(base: UsageLimits, *overrides: dict[str, Any]) -> UsageLi
         合并后的 UsageLimits 实例。
 
     Examples:
-        >>> base = get_preset_limits("butler")
+        >>> base = get_global_defaults()
         >>> profile_rl = {"max_steps": 100}
         >>> skill_rl = {"max_budget_usd": 2.0}
         >>> merged = merge_usage_limits(base, profile_rl, skill_rl)
         >>> merged.max_steps  # 100（从 profile_rl 覆盖）
         >>> merged.max_budget_usd  # 2.0（从 skill_rl 覆盖）
-        >>> merged.max_duration_seconds  # 300（从 base 预设保留）
     """
     # 从 base 提取当前值
     current = base.model_dump()

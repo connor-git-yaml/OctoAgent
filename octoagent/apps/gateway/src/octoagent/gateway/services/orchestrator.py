@@ -76,6 +76,7 @@ from octoagent.provider import ModelCallResult, TokenUsage
 from ulid import ULID
 
 from .agent_context import (
+    _SESSION_TRANSCRIPT_LIMIT,
     AgentContextService,
     build_agent_runtime_id,
     build_agent_session_id,
@@ -107,7 +108,6 @@ from .worker_runtime import (
 )
 
 log = structlog.get_logger()
-_SESSION_TRANSCRIPT_LIMIT = 12
 
 
 class _InlineReplyLLMService:

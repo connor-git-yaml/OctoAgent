@@ -2,7 +2,7 @@
 
 覆盖：Settings 修改 resource_limits → 新请求立即生效。
 通过模拟完整 pipeline 验证：
-  profile.resource_limits → merge_usage_limits → SkillExecutionContext.usage_limits → runner 执行
+  global_defaults → merge_usage_limits(base, profile_rl, skill_rl) → UsageLimits
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from octoagent.skills.limits import get_global_defaults, get_preset_limits, merge_usage_limits
+from octoagent.skills.limits import get_global_defaults, merge_usage_limits
 from octoagent.skills.models import (
     ErrorCategory,
     SkillExecutionContext,
@@ -44,18 +44,17 @@ def _make_manifest():
 
 
 def _simulate_settings_pipeline(
-    agent_type: str = "butler",
     profile_resource_limits: dict[str, Any] | None = None,
     skill_resource_limits: dict[str, Any] | None = None,
 ) -> UsageLimits:
     """模拟 llm_service.py 中的完整限制合并链路。
 
     Pipeline:
-        get_preset_limits(agent_type)
+        get_global_defaults()
         → merge_usage_limits(base, profile_rl, skill_rl)
         → UsageLimits
     """
-    base_limits = get_preset_limits(agent_type)
+    base_limits = get_global_defaults()
     return merge_usage_limits(
         base_limits,
         profile_resource_limits or {},
@@ -78,7 +77,6 @@ class TestSettingsImmediateEffect:
 
         # 模拟用户在 Settings 中将 max_steps 设为 5
         limits = _simulate_settings_pipeline(
-            agent_type="butler",
             profile_resource_limits={"max_steps": 5},
         )
         assert limits.max_steps == 5  # Settings 覆盖生效
@@ -124,12 +122,7 @@ class TestSettingsImmediateEffect:
     @pytest.mark.asyncio
     async def test_profile_override_increases_budget(self) -> None:
         """Profile 提高 max_budget_usd → 之前会超限的场景现在可以完成。"""
-        # butler 默认 max_budget_usd=0.50
-        # 假设任务 cost 为 $0.60，默认会超限
-        # Settings 修改 max_budget_usd=1.0 后应该可以完成
-
         limits = _simulate_settings_pipeline(
-            agent_type="butler",
             profile_resource_limits={"max_budget_usd": 1.0},
         )
         assert limits.max_budget_usd == 1.0
@@ -166,27 +159,24 @@ class TestSettingsImmediateEffect:
     async def test_skill_rl_overrides_profile(self) -> None:
         """SKILL.md resource_limits 覆盖 Profile 设置。"""
         limits = _simulate_settings_pipeline(
-            agent_type="worker",
             profile_resource_limits={"max_steps": 50},
             skill_resource_limits={"max_steps": 10},  # SKILL.md 优先
         )
         assert limits.max_steps == 10  # SKILL.md 层优先
 
     @pytest.mark.asyncio
-    async def test_default_preset_without_settings(self) -> None:
-        """无 Settings 覆盖时使用 agent_type 预设默认值。"""
-        limits = _simulate_settings_pipeline(agent_type="butler")
-        assert limits.max_steps == 50
-        assert limits.max_budget_usd == 0.50
-        assert limits.max_duration_seconds == 300
+    async def test_default_without_settings(self) -> None:
+        """无 Settings 覆盖时使用全局默认值。"""
+        limits = _simulate_settings_pipeline()
+        assert limits.max_steps is None  # 不限步数
+        assert limits.max_budget_usd is None
+        assert limits.max_duration_seconds == 7200.0  # 2 小时
 
     @pytest.mark.asyncio
-    async def test_env_var_defaults_for_unknown_type(self) -> None:
-        """环境变量设置 → 未知 agent_type 使用环境变量默认值。"""
+    async def test_env_var_defaults(self) -> None:
+        """环境变量设置 → 使用环境变量默认值。"""
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": "75"}):
-            limits = _simulate_settings_pipeline(
-                agent_type="unknown_type",
-            )
+            limits = _simulate_settings_pipeline()
             assert limits.max_steps == 75
 
     @pytest.mark.asyncio
@@ -194,7 +184,6 @@ class TestSettingsImmediateEffect:
         """Settings (profile) > 环境变量：profile 覆盖 env 设置。"""
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": "200"}):
             limits = _simulate_settings_pipeline(
-                agent_type="unknown_type",  # fallback 到 env=200
                 profile_resource_limits={"max_steps": 80},  # profile 覆盖
             )
             assert limits.max_steps == 80
@@ -207,7 +196,6 @@ class TestSettingsMultiDimensionIntegration:
     async def test_multi_dimension_settings(self) -> None:
         """同时设置 max_steps + max_budget_usd + max_tool_calls → 全部生效。"""
         limits = _simulate_settings_pipeline(
-            agent_type="worker_coding",
             profile_resource_limits={
                 "max_steps": 200,
                 "max_budget_usd": 2.0,
@@ -219,29 +207,29 @@ class TestSettingsMultiDimensionIntegration:
         assert limits.max_tool_calls == 100
 
     @pytest.mark.asyncio
-    async def test_partial_override_preserves_preset(self) -> None:
-        """部分覆盖：仅修改一个维度，其余保留预设默认值。"""
+    async def test_partial_override_preserves_default(self) -> None:
+        """部分覆盖：仅修改一个维度，其余保留全局默认值。"""
         limits = _simulate_settings_pipeline(
-            agent_type="butler",
             profile_resource_limits={"max_duration_seconds": 600.0},
         )
-        assert limits.max_steps == 50  # 预设保留
-        assert limits.max_budget_usd == 0.50  # 预设保留
+        assert limits.max_steps is None  # 全局默认保留（不限）
+        assert limits.max_budget_usd is None  # 全局默认保留
         assert limits.max_duration_seconds == 600.0  # 被覆盖
-        assert limits.max_tool_calls == 30  # 预设保留
+        assert limits.max_tool_calls is None  # 全局默认保留
 
     @pytest.mark.asyncio
     async def test_none_and_zero_do_not_override(self) -> None:
-        """None 和 0 值不覆盖预设。"""
+        """None 和 0 值不覆盖默认。"""
         limits = _simulate_settings_pipeline(
-            agent_type="butler",
             profile_resource_limits={
                 "max_steps": None,
                 "max_budget_usd": 0,
+                "max_duration_seconds": None,
             },
         )
-        assert limits.max_steps == 50  # None 不覆盖
-        assert limits.max_budget_usd == 0.50  # 0 不覆盖
+        assert limits.max_steps is None  # None 不覆盖
+        assert limits.max_budget_usd is None  # 0 不覆盖
+        assert limits.max_duration_seconds == 7200.0  # None 不覆盖
 
 
 class TestSettingsFullPipeline:
@@ -251,7 +239,6 @@ class TestSettingsFullPipeline:
     async def test_runner_uses_settings_budget_limit(self) -> None:
         """Settings 设 budget=0.05 → 超限时返回 BUDGET_EXCEEDED + 友好提示文案。"""
         limits = _simulate_settings_pipeline(
-            agent_type="subagent",
             profile_resource_limits={"max_budget_usd": 0.05},
         )
 
@@ -270,7 +257,7 @@ class TestSettingsFullPipeline:
         context = SkillExecutionContext(
             task_id="task-e2e-budget",
             trace_id="trace-e2e-budget",
-            caller="worker:subagent",
+            caller="worker:general",
             usage_limits=limits,
         )
 
@@ -289,7 +276,6 @@ class TestSettingsFullPipeline:
     async def test_runner_completes_within_limits(self) -> None:
         """在限制范围内正常完成的请求。"""
         limits = _simulate_settings_pipeline(
-            agent_type="butler",
             profile_resource_limits={"max_steps": 10, "max_budget_usd": 0.20},
         )
 

@@ -62,26 +62,30 @@ class LoopGuardPolicy(BaseModel):
     """
 
     max_steps: int = Field(default=30, ge=1, le=200)
-    repeat_signature_threshold: int = Field(default=3, ge=2, le=20)
+    repeat_signature_threshold: int = Field(default=10, ge=2, le=20)
 
     def to_usage_limits(self) -> UsageLimits:
         """转换为 UsageLimits。"""
         return UsageLimits(
-            max_steps=min(self.max_steps, _MAX_STEPS_HARD_CEILING),
+            max_steps=self.max_steps,
             repeat_signature_threshold=self.repeat_signature_threshold,
         )
 
 
 class UsageLimits(BaseModel):
-    """多维度资源限制。任一维度触发即终止执行。"""
+    """多维度资源限制。任一维度触发即终止执行。
 
-    max_steps: int = Field(default=30, ge=1, le=_MAX_STEPS_HARD_CEILING)
+    max_steps / max_tool_calls 默认 None 表示不限制（与 Claude SDK / Agent Zero 对齐）。
+    max_duration_seconds 默认 7200s（2 小时），作为全局安全上限。
+    """
+
+    max_steps: int | None = Field(default=None, ge=1)
     max_request_tokens: int | None = Field(default=None, ge=1)
     max_response_tokens: int | None = Field(default=None, ge=1)
     max_tool_calls: int | None = Field(default=None, ge=1)
     max_budget_usd: float | None = Field(default=None, ge=0.0)
-    max_duration_seconds: float | None = Field(default=None, ge=1.0)
-    repeat_signature_threshold: int = Field(default=3, ge=2, le=20)
+    max_duration_seconds: float = Field(default=7200.0, ge=1.0)
+    repeat_signature_threshold: int = Field(default=10, ge=2, le=20)
 
 
 @dataclass
@@ -97,20 +101,19 @@ class UsageTracker:
 
     def check_limits(self, limits: UsageLimits) -> ErrorCategory | None:
         """检查是否超限。返回 None 表示未超限，否则返回对应的 ErrorCategory。"""
-        if self.steps >= limits.max_steps:
+        if limits.max_steps is not None and self.steps >= limits.max_steps:
             return ErrorCategory.STEP_LIMIT_EXCEEDED
-        if limits.max_request_tokens and self.request_tokens >= limits.max_request_tokens:
+        if limits.max_request_tokens is not None and self.request_tokens >= limits.max_request_tokens:
             return ErrorCategory.TOKEN_LIMIT_EXCEEDED
-        if limits.max_response_tokens and self.response_tokens >= limits.max_response_tokens:
+        if limits.max_response_tokens is not None and self.response_tokens >= limits.max_response_tokens:
             return ErrorCategory.TOKEN_LIMIT_EXCEEDED
-        if limits.max_tool_calls and self.tool_calls >= limits.max_tool_calls:
+        if limits.max_tool_calls is not None and self.tool_calls >= limits.max_tool_calls:
             return ErrorCategory.TOOL_CALL_LIMIT_EXCEEDED
         if limits.max_budget_usd is not None and self.cost_usd >= limits.max_budget_usd - 1e-9:
             return ErrorCategory.BUDGET_EXCEEDED
-        if limits.max_duration_seconds is not None:
-            elapsed = time.monotonic() - self.start_time
-            if elapsed >= limits.max_duration_seconds:
-                return ErrorCategory.TIMEOUT_EXCEEDED
+        elapsed = time.monotonic() - self.start_time
+        if elapsed >= limits.max_duration_seconds:
+            return ErrorCategory.TIMEOUT_EXCEEDED
         return None
 
     def to_dict(self) -> dict[str, Any]:

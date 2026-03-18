@@ -32,7 +32,7 @@ class ContextCompactionConfig:
     """上下文压缩配置。"""
 
     enabled: bool = True
-    max_input_tokens: int = 6000
+    max_input_tokens: int = 75000
     soft_limit_ratio: float = 0.75
     target_ratio: float = 0.55
     recent_turns: int = 2
@@ -55,7 +55,7 @@ class ContextCompactionConfig:
     def from_env(cls) -> ContextCompactionConfig:
         return cls(
             enabled=_env_bool("OCTOAGENT_CONTEXT_COMPACTION_ENABLED", True),
-            max_input_tokens=_env_int("OCTOAGENT_CONTEXT_MAX_INPUT_TOKENS", 6000, minimum=64),
+            max_input_tokens=_env_int("OCTOAGENT_CONTEXT_MAX_INPUT_TOKENS", 75000, minimum=64),
             soft_limit_ratio=_env_float(
                 "OCTOAGENT_CONTEXT_COMPACTION_SOFT_RATIO",
                 0.75,

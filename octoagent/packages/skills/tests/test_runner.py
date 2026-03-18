@@ -275,7 +275,7 @@ async def test_runner_loop_detected(
         complete=False,
         tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "x"}}],
     )
-    client = QueueModelClient([repeated, repeated, repeated, repeated])
+    client = QueueModelClient([repeated] * 12)
     runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
 
     result = await runner.run(

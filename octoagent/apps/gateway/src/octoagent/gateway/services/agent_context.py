@@ -116,7 +116,7 @@ _WEEKDAY_NAMES_EN = {
     6: "Sunday",
 }
 
-_SESSION_TRANSCRIPT_LIMIT = 12
+_SESSION_TRANSCRIPT_LIMIT = 20
 
 
 def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, Any]:

@@ -1396,7 +1396,7 @@ class CapabilityPackService:
         async def terminal_exec(
             command: str,
             cwd: str = ".",
-            timeout_seconds: float = 30.0,
+            timeout_seconds: float = 300.0,
             max_output_chars: int = 4000,
         ) -> str:
             """在当前 workspace 内执行受治理终端命令。"""
