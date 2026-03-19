@@ -60,7 +60,6 @@ export interface BuiltinAgentTemplateViewModel {
   templateId: string;
   name: string;
   summary: string;
-  baseArchetype: string;
   modelAlias: string;
   defaultToolGroups: string[];
   selectedTools: string[];
@@ -82,7 +81,6 @@ export interface AgentEditorDraft {
   profileId: string;
   projectId: string;
   name: string;
-  baseArchetype: string;
   modelAlias: string;
   toolProfile: string;
   /** Feature 061: 权限 Preset（minimal/normal/full），取代 toolProfile */
@@ -93,10 +91,6 @@ export interface AgentEditorDraft {
   selectedTools: string[];
   capabilitySelection: Record<string, boolean>;
   runtimeKinds: string[];
-  policyRefs: string[];
-  instructionOverlaysText: string;
-  tagsText: string;
-  metadataText: string;
   originKind: "custom" | "cloned" | "extracted";
 }
 
@@ -114,13 +108,6 @@ export interface ToolOption {
   toolGroup: string;
   availability: string;
 }
-
-const ARCHETYPE_LABELS: Record<string, string> = {
-  general: "通用协作",
-  ops: "运行保障",
-  research: "资料调研",
-  dev: "开发实现",
-};
 
 const DEFAULT_TOOL_PROFILE = "standard";
 /** Feature 061: 默认权限 Preset */
@@ -172,10 +159,6 @@ export function formatAgentStatus(status: string): string {
   }
 }
 
-export function formatAgentArchetype(archetype: string): string {
-  return ARCHETYPE_LABELS[archetype] ?? formatTokenLabel(archetype);
-}
-
 /** Feature 061: 权限 Preset 用户友好标签 */
 const PRESET_LABELS: Record<string, string> = {
   minimal: "保守模式",
@@ -189,27 +172,6 @@ export function formatPermissionPreset(preset: string): string {
 
 export function formatProjectName(projects: ProjectOption[], projectId: string): string {
   return projects.find((project) => project.project_id === projectId)?.name ?? projectId;
-}
-
-function joinLines(values: string[]): string {
-  return values.join("\n");
-}
-
-function parseLineList(value: string): string[] {
-  return uniqueStrings(value.split(/\n+/g));
-}
-
-function parseMetadataText(value: string): Record<string, unknown> {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    return toRecord(parsed);
-  } catch {
-    return {};
-  }
 }
 
 function readCapabilitySelectionMetadata(
@@ -318,7 +280,7 @@ export function mergeCapabilitySelectionMetadata(
 function formatSourceLabel(profile: WorkerProfileItem): string {
   switch (profile.origin_kind) {
     case "builtin":
-      return `${formatAgentArchetype(profile.static_config.base_archetype)} 模板`;
+      return "内置模板";
     case "cloned":
       return "从模板创建";
     case "extracted":
@@ -398,7 +360,7 @@ export function deriveAgentManagementView(
     currentProjectProfiles.find((profile) => profile.profile_id === defaultProfileId) ?? null;
   const fallbackTemplate =
     builtinProfileById[defaultProfileId] ??
-    builtinProfiles.find((profile) => profile.static_config.base_archetype === "general") ??
+    builtinProfiles[0] ??
     builtinProfiles[0] ??
     null;
 
@@ -424,7 +386,7 @@ export function deriveAgentManagementView(
           attentionWorkCount: 0,
           updatedAt: fallbackTemplate?.dynamic_context.updated_at ?? null,
           sourceLabel: fallbackTemplate
-            ? `当前还在使用 ${formatAgentArchetype(fallbackTemplate.static_config.base_archetype)} 模板`
+            ? `当前还在使用内置模板`
             : "当前还没有主 Agent",
           isMainAgent: true,
           removable: false,
@@ -438,9 +400,8 @@ export function deriveAgentManagementView(
 
   const builtinTemplates = builtinProfiles.map((profile) => ({
     templateId: profile.profile_id,
-    name: `${formatAgentArchetype(profile.static_config.base_archetype)} 模板`,
+    name: profile.name || "内置模板",
     summary: profile.summary || "从这个起点开始，会自动带上对应的常用工具和能力。",
-    baseArchetype: profile.static_config.base_archetype,
     modelAlias: profile.static_config.model_alias || DEFAULT_MODEL_ALIAS,
     defaultToolGroups: profile.static_config.default_tool_groups ?? [],
     selectedTools: profile.static_config.selected_tools ?? [],
@@ -474,7 +435,6 @@ function buildDraftFromProfileLike(
     profileId: profile?.profile_id ?? "",
     projectId: profile?.project_id || currentProjectId,
     name: profile?.name || `${currentProjectName} Agent`,
-    baseArchetype: profile?.static_config.base_archetype || "general",
     modelAlias: profile?.static_config.model_alias || DEFAULT_MODEL_ALIAS,
     toolProfile: profile?.static_config.tool_profile || DEFAULT_TOOL_PROFILE,
     permissionPreset: profile?.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
@@ -484,10 +444,6 @@ function buildDraftFromProfileLike(
     capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
     runtimeKinds:
       profile?.static_config.runtime_kinds?.length ? profile.static_config.runtime_kinds : DEFAULT_RUNTIME_KINDS,
-    policyRefs: profile?.static_config.policy_refs ?? [],
-    instructionOverlaysText: joinLines(profile?.static_config.instruction_overlays ?? []),
-    tagsText: joinLines(profile?.static_config.tags ?? []),
-    metadataText: Object.keys(metadata).length > 0 ? JSON.stringify(metadata, null, 2) : "",
     originKind:
       profile?.origin_kind === "cloned" || profile?.origin_kind === "extracted"
         ? profile.origin_kind
@@ -551,13 +507,11 @@ export function buildAgentPayload(
   draft: AgentEditorDraft,
   capabilityProviderEntries: CapabilityProviderEntry[]
 ): Record<string, unknown> {
-  const metadata = parseMetadataText(draft.metadataText);
   return {
     profile_id: draft.profileId || undefined,
     scope: "project",
     project_id: draft.projectId,
     name: draft.name,
-    base_archetype: draft.baseArchetype,
     model_alias: draft.modelAlias,
     tool_profile: draft.toolProfile,
     permission_preset: draft.permissionPreset,
@@ -565,10 +519,7 @@ export function buildAgentPayload(
     default_tool_groups: uniqueStrings(draft.defaultToolGroups),
     selected_tools: uniqueStrings(draft.selectedTools),
     runtime_kinds: uniqueStrings(draft.runtimeKinds),
-    policy_refs: uniqueStrings(draft.policyRefs),
-    instruction_overlays: parseLineList(draft.instructionOverlaysText),
-    tags: parseLineList(draft.tagsText),
-    metadata: mergeCapabilitySelectionMetadata(metadata, capabilityProviderEntries, draft.capabilitySelection),
+    metadata: mergeCapabilitySelectionMetadata({}, capabilityProviderEntries, draft.capabilitySelection),
     origin_kind: draft.originKind,
   };
 }

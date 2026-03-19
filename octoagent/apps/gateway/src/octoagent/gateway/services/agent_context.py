@@ -133,17 +133,14 @@ def _default_worker_memory_recall_preferences(
 ) -> dict[str, Any]:
     if worker_profile is None:
         return {}
-    archetype = str(worker_profile.base_archetype or "").strip().lower()
-    # 对齐 Agent Zero / OpenClaw：worker 默认只拿 recall runtime hints，具体检索交回主循环。
-    preferences: dict[str, Any] = {
+    # 所有自定义 Agent 统一视为 general，直接返回固定默认值。
+    return {
         "prefetch_mode": "hint_first",
-        "planner_enabled": archetype in {"research", "dev", "general"},
+        "planner_enabled": True,
+        "scope_limit": 4,
+        "per_scope_limit": 4,
+        "max_hits": 8,
     }
-    if archetype in {"research", "dev", "general"}:
-        preferences.update({"scope_limit": 4, "per_scope_limit": 4, "max_hits": 8})
-    else:
-        preferences.update({"scope_limit": 3, "per_scope_limit": 3, "max_hits": 6})
-    return preferences
 
 
 def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
@@ -3063,11 +3060,10 @@ class AgentContextService:
             instruction_overlays=[
                 "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
                 "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
-                *list(worker_profile.instruction_overlays),
             ],
             model_alias=worker_profile.model_alias or "main",
             tool_profile=worker_profile.tool_profile or "standard",
-            policy_refs=list(worker_profile.policy_refs),
+            policy_refs=[],
             context_budget_policy=context_budget_policy,
             metadata={
                 **(dict(existing_profile.metadata) if existing_profile is not None else {}),
@@ -3075,7 +3071,6 @@ class AgentContextService:
                 "source_worker_profile_revision": (
                     worker_profile.active_revision or worker_profile.draft_revision or 0
                 ),
-                "base_archetype": worker_profile.base_archetype,
                 "source_kind": "worker_profile_mirror",
                 "memory_recall_default_mode": str(
                     merged_memory_recall.get("prefetch_mode", "")

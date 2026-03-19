@@ -688,7 +688,6 @@ export type WorkerProfileStatus = "draft" | "active" | "archived";
 export type PermissionPreset = "minimal" | "normal" | "full";
 
 export interface WorkerProfileStaticConfig {
-  base_archetype: string;
   summary: string;
   model_alias: string;
   tool_profile: string;
@@ -699,9 +698,6 @@ export interface WorkerProfileStaticConfig {
   default_tool_groups: string[];
   selected_tools: string[];
   runtime_kinds: string[];
-  policy_refs: string[];
-  instruction_overlays: string[];
-  tags: string[];
   capabilities: string[];
   metadata: Record<string, unknown>;
   resource_limits?: Record<string, unknown>;

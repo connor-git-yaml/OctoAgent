@@ -40,7 +40,6 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         project_id="project-alpha",
         name="Alpha Agent",
         persona_summary="负责 Alpha 项目的连续协作。",
-        instruction_overlays=["保持 project 上下文连续性。"],
     )
     owner_profile = OwnerProfile(
         owner_profile_id="owner-profile-default",
@@ -253,14 +252,11 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
         project_id="project-alpha",
         name="NAS Root Agent",
         summary="负责 NAS 巡检与文件整理。",
-        base_archetype="ops",
         model_alias="main",
         tool_profile="standard",
         default_tool_groups=["project", "filesystem"],
         selected_tools=["filesystem.read"],
         runtime_kinds=["worker", "acp_runtime"],
-        policy_refs=["default"],
-        tags=["nas", "storage"],
         status=WorkerProfileStatus.ACTIVE,
         origin_kind=WorkerProfileOriginKind.CUSTOM,
         draft_revision=1,

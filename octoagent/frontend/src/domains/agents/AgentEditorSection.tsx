@@ -28,14 +28,11 @@ interface AgentEditorSectionProps {
   busy: boolean;
   projectOptions: SelectOption[];
   modelAliasOptions: string[];
-  policyOptions: SelectOption[];
   behaviorFiles: BehaviorFileInfo[];
   approvalOverrides: ApprovalOverrideDisplay[];
   approvalOverridesLoading: boolean;
-  metadataError: string;
   onChangeDraft: <Key extends keyof AgentEditorDraft>(key: Key, value: AgentEditorDraft[Key]) => void;
   onToggleRuntimeKind: (value: string) => void;
-  onTogglePolicyRef: (value: string) => void;
   onOpenBehaviorFile: (path: string, fileId: string) => void;
   onRevokeOverride: (agentRuntimeId: string, toolName: string) => void;
   onSave: () => void;
@@ -66,14 +63,11 @@ export default function AgentEditorSection({
   busy,
   projectOptions,
   modelAliasOptions,
-  policyOptions,
   behaviorFiles,
   approvalOverrides,
   approvalOverridesLoading,
-  metadataError,
   onChangeDraft,
   onToggleRuntimeKind,
-  onTogglePolicyRef,
   onOpenBehaviorFile,
   onRevokeOverride,
   onSave,
@@ -92,7 +86,7 @@ export default function AgentEditorSection({
           <button
             type="button"
             className="wb-button wb-button-primary"
-            disabled={busy || Boolean(metadataError)}
+            disabled={busy}
             onClick={onSave}
           >
             {saveLabel}
@@ -173,14 +167,6 @@ export default function AgentEditorSection({
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="wb-field">
-          <span>当前起点</span>
-          <div className="wb-note">
-            <strong>{formatTokenLabel(draft.baseArchetype)}</strong>
-            <span>这个 Agent 现在主要沿用这类工作的默认起点。</span>
-          </div>
         </div>
       </div>
 
@@ -303,51 +289,6 @@ export default function AgentEditorSection({
             </div>
           </div>
 
-          <div className="wb-field wb-field-span-2">
-            <span>策略参考</span>
-            <div className="wb-agent-check-grid">
-              {policyOptions.map((option) => (
-                <label key={option.value} className="wb-agent-option-card">
-                  <div className="wb-agent-option-copy">
-                    <strong>{option.label}</strong>
-                    <p>只在你需要明确限制策略时再勾选。</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={draft.policyRefs.includes(option.value)}
-                    onChange={() => onTogglePolicyRef(option.value)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <label className="wb-field wb-field-span-2">
-            <span>额外提醒</span>
-            <textarea
-              className="wb-textarea-prose"
-              value={draft.instructionOverlaysText}
-              onChange={(event) => onChangeDraft("instructionOverlaysText", event.target.value)}
-            />
-            <small>只有确实需要长期保留的工作习惯，再放到这里。</small>
-          </label>
-
-          <label className="wb-field">
-            <span>内部标签</span>
-            <textarea
-              value={draft.tagsText}
-              onChange={(event) => onChangeDraft("tagsText", event.target.value)}
-            />
-          </label>
-
-          <label className="wb-field">
-            <span>附加配置（JSON）</span>
-            <textarea
-              value={draft.metadataText}
-              onChange={(event) => onChangeDraft("metadataText", event.target.value)}
-            />
-            <small>{metadataError || "留空即可；只有明确需要额外配置时再填写。"}</small>
-          </label>
         </div>
       </details>
     </section>

@@ -725,7 +725,6 @@ class TestControlPlaneApi:
         worker_profile = payload["resources"]["worker_profiles"]["profiles"][0]
         assert worker_profile["profile_id"] == "singleton:general"
         assert worker_profile["mode"] == "singleton"
-        assert worker_profile["static_config"]["base_archetype"] == "general"
         assert "active_work_count" in worker_profile["dynamic_context"]
         assert payload["resources"]["owner_profile"]["profile"]["owner_profile_id"] == (
             "owner-profile-default"
@@ -4132,12 +4131,9 @@ class TestControlPlaneApi:
             "project_id": project.project_id,
             "name": "NAS Root Agent",
             "summary": "负责 NAS 巡检与文件归档。",
-            "base_archetype": "ops",
             "tool_profile": "standard",
             "default_tool_groups": ["project", "artifact"],
             "runtime_kinds": ["worker", "acp_runtime"],
-            "policy_refs": ["default"],
-            "tags": ["nas", "storage"],
         }
 
         review_resp = await control_plane_client.post(
@@ -4267,14 +4263,11 @@ class TestControlPlaneApi:
             project_id=project.project_id,
             name="Runtime Alpha",
             summary="用于 runtime lineage 测试。",
-            base_archetype="research",
             model_alias="main",
             tool_profile="minimal",
             default_tool_groups=["project", "network"],
             selected_tools=["web.search"],
             runtime_kinds=["worker", "subagent"],
-            policy_refs=["default"],
-            tags=["runtime", "search"],
             status=WorkerProfileStatus.ACTIVE,
             origin_kind=WorkerProfileOriginKind.CUSTOM,
             draft_revision=1,
@@ -4407,14 +4400,11 @@ class TestControlPlaneApi:
             project_id=project.project_id,
             name="Project Root Agent",
             summary="跨 workspace 聚合 runtime 状态。",
-            base_archetype="ops",
             model_alias="main",
             tool_profile="standard",
             default_tool_groups=["runtime", "project"],
             selected_tools=["runtime.inspect"],
             runtime_kinds=["worker", "acp_runtime"],
-            policy_refs=["default"],
-            tags=["runtime", "ops"],
             status=WorkerProfileStatus.ACTIVE,
             origin_kind=WorkerProfileOriginKind.CUSTOM,
             draft_revision=1,

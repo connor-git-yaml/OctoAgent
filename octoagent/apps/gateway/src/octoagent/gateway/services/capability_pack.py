@@ -579,8 +579,8 @@ class CapabilityPackService:
                 normalized_profile_id
             )
             if stored_profile is not None and stored_profile.status != WorkerProfileStatus.ARCHIVED:
-                worker_type = self._coerce_worker_type_name(stored_profile.base_archetype)
-                builtin_profile = self.get_worker_profile(worker_type)
+                worker_type = WorkerType.GENERAL
+                builtin_profile = self.get_worker_profile(WorkerType.GENERAL)
                 return _ResolvedWorkerBinding(
                     profile_id=stored_profile.profile_id,
                     profile_revision=(
@@ -634,7 +634,7 @@ class CapabilityPackService:
         stored_profile = await self._stores.agent_context_store.get_worker_profile(normalized)
         if stored_profile is None or stored_profile.status == WorkerProfileStatus.ARCHIVED:
             return None
-        return self._coerce_worker_type_name(stored_profile.base_archetype)
+        return WorkerType.GENERAL
 
     async def select_tools(
         self,

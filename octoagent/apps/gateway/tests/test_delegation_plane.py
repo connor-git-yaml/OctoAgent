@@ -227,14 +227,11 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
         project_id="project-default",
         name="Weather Root Agent",
         summary="专门处理需要联网查询的实时信息。",
-        base_archetype="research",
         model_alias="main",
         tool_profile="standard",
         default_tool_groups=["network", "browser", "project"],
         selected_tools=["web.search"],
         runtime_kinds=["worker", "subagent"],
-        policy_refs=["default"],
-        tags=["realtime", "web"],
         status=WorkerProfileStatus.ACTIVE,
         origin_kind=WorkerProfileOriginKind.CUSTOM,
         draft_revision=1,
@@ -262,7 +259,7 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
 
     assert plan.work.agent_profile_id == profile.profile_id
     assert plan.work.requested_worker_profile_id == profile.profile_id
-    assert plan.work.selected_worker_type.value == "research"
+    assert plan.work.selected_worker_type.value == "general"
     assert plan.tool_selection.resolution_mode == "profile_first_core"
     assert plan.tool_selection.effective_tool_universe is not None
     assert plan.tool_selection.effective_tool_universe.profile_id == profile.profile_id

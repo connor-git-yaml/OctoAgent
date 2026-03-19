@@ -133,7 +133,7 @@ function buildTargetOptions(
         type: "worker_profile",
         id: profile.profile_id,
         label: profile.name || profile.profile_id,
-        sublabel: `Worker · ${profile.static_config.base_archetype}`,
+        sublabel: `Worker · ${profile.origin_kind}`,
       });
     }
   }

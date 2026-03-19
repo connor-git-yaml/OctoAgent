@@ -1954,7 +1954,6 @@ describe("ControlPlane", () => {
                 editable: true,
                 summary: "已从运行态同步出的 Worker 模板。",
                 static_config: {
-                  base_archetype: "ops",
                   summary: "已从运行态同步出的 Worker 模板。",
                   model_alias: "main",
                   tool_profile: "minimal",
@@ -1963,9 +1962,6 @@ describe("ControlPlane", () => {
                   default_tool_groups: ["runtime", "project"],
                   selected_tools: ["runtime.inspect"],
                   runtime_kinds: ["worker", "acp_runtime"],
-                  policy_refs: [],
-                  instruction_overlays: [],
-                  tags: ["ops"],
                   capabilities: ["ops", "runtime"],
                 },
                 dynamic_context: {

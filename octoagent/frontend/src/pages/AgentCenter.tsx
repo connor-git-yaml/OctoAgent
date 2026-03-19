@@ -150,22 +150,6 @@ function buildBehaviorScopeGroups(summary: BehaviorSystemSummary | undefined): B
 }
 
 
-function validateMetadataText(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return "附加配置需要是 JSON 对象。";
-    }
-    return "";
-  } catch {
-    return "附加配置不是合法的 JSON。";
-  }
-}
-
 function toggleStringValue(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
@@ -293,14 +277,6 @@ export default function AgentCenter() {
     const all = buildProjectOptions(snapshot!.resources.project_selector);
     return all.filter((option) => option.value === agentView.currentProjectId);
   }, [agentView.currentProjectId, snapshot!.resources.project_selector.generated_at]);
-  const policyOptions = useMemo(
-    () =>
-      snapshot!.resources.policy_profiles.profiles.map((profile) => ({
-        value: profile.profile_id,
-        label: profile.label,
-      })),
-    [snapshot!.resources.policy_profiles.generated_at]
-  );
   const behaviorProfiles = useMemo(
     () =>
       agentProfilesDocument.profiles.filter(
@@ -371,8 +347,6 @@ export default function AgentCenter() {
       setFlashMessage("撤销失败，请重试。");
     }
   }
-
-  const metadataError = editorState ? validateMetadataText(editorState.draft.metadataText) : "";
 
   useEffect(() => {
     setEditorState(null);
@@ -596,7 +570,7 @@ export default function AgentCenter() {
   }
 
   function updateDraftList(
-    key: "runtimeKinds" | "policyRefs",
+    key: "runtimeKinds",
     value: string
   ) {
     setEditorState((current) =>
@@ -614,10 +588,6 @@ export default function AgentCenter() {
 
   async function handleSave() {
     if (!editorState) {
-      return;
-    }
-    if (metadataError) {
-      setFlashMessage(metadataError);
       return;
     }
 
@@ -824,14 +794,11 @@ export default function AgentCenter() {
                 busy={busySaving}
                 projectOptions={projectOptions}
                 modelAliasOptions={modelAliasOptions}
-                policyOptions={policyOptions}
                 behaviorFiles={editorState.behaviorFiles}
                 approvalOverrides={approvalOverrides}
                 approvalOverridesLoading={approvalOverridesLoading}
-                metadataError={metadataError}
                 onChangeDraft={updateDraft}
                 onToggleRuntimeKind={(value) => updateDraftList("runtimeKinds", value)}
-                onTogglePolicyRef={(value) => updateDraftList("policyRefs", value)}
                 onOpenBehaviorFile={(path, fileId) => void handleOpenBehaviorFile(path, fileId)}
                 onRevokeOverride={(agentRuntimeId, toolName) => void handleRevokeOverride(agentRuntimeId, toolName)}
                 onSave={() => void handleSave()}

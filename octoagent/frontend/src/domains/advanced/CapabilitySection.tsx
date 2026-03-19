@@ -11,7 +11,7 @@ interface CapabilitySectionProps {
   formatScope: (value: string) => string;
   formatProfileMode: (value: string) => string;
   formatDateTime: (value?: string | null) => string;
-  formatWorkerTemplateName: (name: string, archetype: string) => string;
+  formatWorkerTemplateName: (name: string) => string;
   statusTone: (status: string) => string;
 }
 
@@ -81,8 +81,7 @@ export default function CapabilitySection({
                       <p className="wb-card-label">模板视图</p>
                       <h3>
                         {formatWorkerTemplateName(
-                          profile.name,
-                          profile.static_config.base_archetype
+                          profile.name
                         )}
                       </h3>
                       <p className="wb-inline-note">
@@ -107,8 +106,6 @@ export default function CapabilitySection({
                         <span>{profile.profile_id}</span>
                       </div>
                       <div className="wb-key-value-list">
-                        <span>Archetype</span>
-                        <strong>{staticConfig.base_archetype || "-"}</strong>
                         <span>Model</span>
                         <strong>{staticConfig.model_alias || "-"}</strong>
                         <span>Permission Preset</span>

@@ -246,16 +246,12 @@ class AgentProfilesDocument(ControlPlaneDocument):
 
 
 class WorkerProfileStaticConfig(BaseModel):
-    base_archetype: str = Field(default="")
     summary: str = Field(default="")
     model_alias: str = Field(default="main")
     tool_profile: str = Field(default="minimal")
     default_tool_groups: list[str] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     runtime_kinds: list[str] = Field(default_factory=list)
-    policy_refs: list[str] = Field(default_factory=list)
-    instruction_overlays: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")

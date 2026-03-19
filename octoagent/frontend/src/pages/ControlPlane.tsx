@@ -1492,8 +1492,7 @@ export default function ControlPlane({
               <strong>
                 {primaryRootAgentProfile
                   ? formatWorkerTemplateName(
-                      primaryRootAgentProfile.name,
-                      primaryRootAgentProfile.static_config.base_archetype
+                      primaryRootAgentProfile.name
                     )
                   : "未接入"}
               </strong>
@@ -1581,8 +1580,7 @@ export default function ControlPlane({
             rootAgentLabel={
               primaryRootAgentProfile
                 ? formatWorkerTemplateName(
-                    primaryRootAgentProfile.name,
-                    primaryRootAgentProfile.static_config.base_archetype
+                    primaryRootAgentProfile.name
                   )
                 : "未接入"
             }

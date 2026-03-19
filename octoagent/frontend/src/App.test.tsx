@@ -286,7 +286,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             editable: true,
             summary: "负责默认聊天入口。",
             static_config: {
-              base_archetype: "general",
               summary: "负责默认聊天入口。",
               model_alias: "main",
               tool_profile: "standard",
@@ -295,9 +294,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
               default_tool_groups: ["project", "session"],
               selected_tools: ["project.inspect"],
               runtime_kinds: ["worker"],
-              policy_refs: ["default"],
-              instruction_overlays: [],
-              tags: [],
               capabilities: ["planner"],
               metadata: {},
             },
@@ -337,7 +333,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             editable: false,
             summary: "适合资料整理、检索和信息提炼。",
             static_config: {
-              base_archetype: "research",
               summary: "适合资料整理、检索和信息提炼。",
               model_alias: "main",
               tool_profile: "standard",
@@ -346,9 +341,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
               default_tool_groups: ["web", "project"],
               selected_tools: ["web.search"],
               runtime_kinds: ["worker"],
-              policy_refs: ["default"],
-              instruction_overlays: [],
-              tags: [],
               capabilities: ["research"],
               metadata: {},
             },
@@ -1455,7 +1447,6 @@ describe("App workbench routing", () => {
           editable: true,
           summary: "负责默认聊天入口。",
           static_config: {
-            base_archetype: "general",
             summary: "负责默认聊天入口。",
             model_alias: "main",
             tool_profile: "standard",
@@ -1464,9 +1455,6 @@ describe("App workbench routing", () => {
             default_tool_groups: ["project"],
             selected_tools: ["project.inspect"],
             runtime_kinds: ["worker"],
-            policy_refs: ["default"],
-            instruction_overlays: [],
-            tags: [],
             capabilities: ["planner"],
             metadata: {},
           },
@@ -1506,7 +1494,6 @@ describe("App workbench routing", () => {
           editable: false,
           summary: "适合主入口。",
           static_config: {
-            base_archetype: "general",
             summary: "适合主入口。",
             model_alias: "main",
             tool_profile: "standard",
@@ -1515,9 +1502,6 @@ describe("App workbench routing", () => {
             default_tool_groups: ["project"],
             selected_tools: ["project.inspect"],
             runtime_kinds: ["worker"],
-            policy_refs: ["default"],
-            instruction_overlays: [],
-            tags: [],
             capabilities: ["planner"],
             metadata: {},
           },
@@ -1818,7 +1802,6 @@ describe("App workbench routing", () => {
           editable: true,
           summary: "负责默认聊天入口。",
           static_config: {
-            base_archetype: "general",
             summary: "负责默认聊天入口。",
             model_alias: "main",
             tool_profile: "standard",
@@ -1827,9 +1810,6 @@ describe("App workbench routing", () => {
             default_tool_groups: ["project"],
             selected_tools: ["project.inspect"],
             runtime_kinds: ["worker"],
-            policy_refs: ["default"],
-            instruction_overlays: [],
-            tags: [],
             capabilities: ["planner"],
             metadata: {},
           },
@@ -1869,7 +1849,6 @@ describe("App workbench routing", () => {
           editable: false,
           summary: "适合主入口。",
           static_config: {
-            base_archetype: "general",
             summary: "适合主入口。",
             model_alias: "main",
             tool_profile: "standard",
@@ -1878,9 +1857,6 @@ describe("App workbench routing", () => {
             default_tool_groups: ["project"],
             selected_tools: ["project.inspect"],
             runtime_kinds: ["worker"],
-            policy_refs: ["default"],
-            instruction_overlays: [],
-            tags: [],
             capabilities: ["planner"],
             metadata: {},
           },
@@ -2001,7 +1977,6 @@ describe("App workbench routing", () => {
 
     expect(actionBody).toContain('"default_tool_groups":["project"]');
     expect(actionBody).toContain('"selected_tools":["project.inspect"]');
-    expect(actionBody).toContain('"base_archetype":"general"');
   });
 
   it("从带 hash 的 Settings 链接进入时会滚动到 Memory 分区", async () => {

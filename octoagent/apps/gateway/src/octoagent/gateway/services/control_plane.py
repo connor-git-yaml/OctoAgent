@@ -1125,21 +1125,17 @@ class ControlPlaneService:
                     editable=profile.origin_kind != WorkerProfileOriginKind.BUILTIN,
                     summary=profile.summary
                     or self._worker_profile_summary(
-                        profile.tags,
-                        profile.default_tool_groups,
+                        list(profile.default_tool_groups),
+                        list(profile.default_tool_groups),
                     ),
                     static_config=WorkerProfileStaticConfig(
-                        base_archetype=profile.base_archetype,
                         summary=profile.summary,
                         model_alias=profile.model_alias,
                         tool_profile=profile.tool_profile,
                         default_tool_groups=list(profile.default_tool_groups),
                         selected_tools=list(profile.selected_tools),
                         runtime_kinds=list(profile.runtime_kinds),
-                        policy_refs=list(profile.policy_refs),
-                        instruction_overlays=list(profile.instruction_overlays),
-                        tags=list(profile.tags),
-                        capabilities=list(profile.tags),
+                        capabilities=[],
                         metadata=dict(profile.metadata),
                         resource_limits=dict(profile.resource_limits),
                     ),
@@ -1181,7 +1177,7 @@ class ControlPlaneService:
                 name=self._worker_profile_label(worker_type),
                 model_alias=profile.default_model_alias,
                 tool_profile=profile.default_tool_profile,
-                metadata={"worker_base_archetype": worker_type},
+                metadata={},
             )
             # 确保 agent-private 行为文件存在（lazy materialization）
             _builtin_slug = resolve_behavior_agent_slug(builtin_agent_profile)
@@ -1216,16 +1212,12 @@ class ControlPlaneService:
                     editable=False,
                     summary=summary,
                     static_config=WorkerProfileStaticConfig(
-                        base_archetype=worker_type,
                         summary=summary,
                         model_alias=profile.default_model_alias,
                         tool_profile=profile.default_tool_profile,
                         default_tool_groups=list(profile.default_tool_groups),
                         selected_tools=[],
                         runtime_kinds=[item.value for item in profile.runtime_kinds],
-                        policy_refs=[],
-                        instruction_overlays=[],
-                        tags=list(profile.capabilities),
                         capabilities=list(profile.capabilities),
                         metadata={},
                     ),
@@ -1380,7 +1372,6 @@ class ControlPlaneService:
                         snapshot_payload={
                             "profile_id": profile_id,
                             "name": self._worker_profile_label(worker_type),
-                            "base_archetype": worker_type,
                             "summary": summary,
                             "model_alias": builtin.default_model_alias,
                             "tool_profile": builtin.default_tool_profile,
@@ -5152,13 +5143,9 @@ class ControlPlaneService:
         # 参数解析
         worker_name = str(request.params.get("worker_name", "")).strip()
         project_name = str(request.params.get("project_name", "")).strip()
-        archetype = str(request.params.get("archetype", "general")).strip()
         model_alias = str(request.params.get("model_alias", "main")).strip()
         tool_profile = str(request.params.get("tool_profile", "minimal")).strip()
         project_goal = str(request.params.get("project_goal", "")).strip()
-        instruction_overlays = request.params.get("instruction_overlays", [])
-        if not isinstance(instruction_overlays, list):
-            instruction_overlays = []
         # Feature 061 T-030: permission_preset + role_card 参数
         permission_preset = str(request.params.get("permission_preset", "normal")).strip().lower()
         role_card = str(request.params.get("role_card", "")).strip()
@@ -5171,15 +5158,6 @@ class ControlPlaneService:
             )
         if not project_name:
             project_name = worker_name
-
-        # 验证 archetype
-        valid_archetypes = {"general", "ops", "research", "dev"}
-        if archetype not in valid_archetypes:
-            return self._rejected_result(
-                request=request,
-                code="WORKER_CREATE_INVALID_ARCHETYPE",
-                message=f"archetype 必须是 {', '.join(sorted(valid_archetypes))} 之一。",
-            )
 
         # 验证 tool_profile
         valid_profiles = {"minimal", "standard", "privileged"}
@@ -5219,8 +5197,6 @@ class ControlPlaneService:
             project_id="",  # 后面回填
             name=worker_name,
             summary=project_goal or f"{worker_name} Worker",
-            base_archetype=archetype,
-            instruction_overlays=[str(o) for o in instruction_overlays],
             model_alias=model_alias,
             tool_profile=tool_profile,
             status=WorkerProfileStatus.ACTIVE,
@@ -5238,7 +5214,6 @@ class ControlPlaneService:
             project_id="",
             name=worker_name,
             persona_summary=project_goal,
-            instruction_overlays=[str(o) for o in instruction_overlays],
             model_alias=model_alias,
             tool_profile=tool_profile,
         )
@@ -5315,7 +5290,7 @@ class ControlPlaneService:
             status=AgentRuntimeStatus.ACTIVE,
             permission_preset=permission_preset,
             role_card=role_card,
-            metadata={"worker_base_archetype": archetype},
+            metadata={},
             created_at=now,
             updated_at=now,
         )
@@ -6171,12 +6146,6 @@ class ControlPlaneService:
                 else "agent-profile-system-default"
             )
         existing = await self._stores.agent_context_store.get_agent_profile(profile_id)
-        instruction_overlays = raw.get("instruction_overlays", [])
-        if not isinstance(instruction_overlays, list):
-            instruction_overlays = []
-        policy_refs = raw.get("policy_refs", [])
-        if not isinstance(policy_refs, list):
-            policy_refs = []
         profile = AgentProfileItem.model_validate(
             {
                 "profile_id": profile_id,
@@ -6200,10 +6169,8 @@ class ControlPlaneService:
                 project_id=profile.project_id,
                 name=profile.name,
                 persona_summary=profile.persona_summary,
-                instruction_overlays=[str(item) for item in instruction_overlays],
                 model_alias=profile.model_alias,
                 tool_profile=profile.tool_profile,
-                policy_refs=[str(item) for item in policy_refs],
                 memory_access_policy=(
                     dict(raw.get("memory_access_policy", {}))
                     if isinstance(raw.get("memory_access_policy"), dict)
@@ -6926,7 +6893,7 @@ class ControlPlaneService:
                     profile.profile_id,
                     requested_revision,
                 ),
-                "requested_worker_type": profile.base_archetype,
+                "requested_worker_type": "general",
                 "tool_profile": profile.tool_profile,
                 "target_kind": self._param_str(request.params, "target_kind", default="worker")
                 or "worker",
@@ -6980,7 +6947,6 @@ class ControlPlaneService:
             or f"{self._worker_profile_label(work.selected_worker_type.value)} 提炼草稿",
             "summary": self._param_str(request.params, "summary")
             or (work.title or "从运行中的 Work 提炼而来。"),
-            "base_archetype": work.selected_worker_type.value,
             "tool_profile": str(work.metadata.get("requested_tool_profile", "minimal")),
             "selected_tools": list(work.selected_tools),
             "runtime_kinds": [work.target_kind.value]
@@ -8444,7 +8410,6 @@ class ControlPlaneService:
                 "worker_profile_id": profile.profile_id,
                 "worker_profile_revision": revision,
                 "worker_profile_status": profile.status.value,
-                "worker_base_archetype": profile.base_archetype,
             }
         )
         return AgentProfile(
@@ -8453,10 +8418,8 @@ class ControlPlaneService:
             project_id=profile.project_id,
             name=profile.name,
             persona_summary=profile.summary,
-            instruction_overlays=list(profile.instruction_overlays),
             model_alias=profile.model_alias,
             tool_profile=profile.tool_profile,
-            policy_refs=list(profile.policy_refs),
             metadata=metadata,
             version=max(existing.version if existing is not None else 1, revision or 1),
             created_at=existing.created_at if existing is not None else profile.created_at,
@@ -8769,15 +8732,11 @@ class ControlPlaneService:
                 list(builtin.capabilities),
                 list(builtin.default_tool_groups),
             ),
-            base_archetype=worker_type,
-            instruction_overlays=[],
             model_alias=builtin.default_model_alias,
             tool_profile=builtin.default_tool_profile,
             default_tool_groups=list(builtin.default_tool_groups),
             selected_tools=[],
             runtime_kinds=[item.value for item in builtin.runtime_kinds],
-            policy_refs=[],
-            tags=list(builtin.capabilities),
             metadata={},
             status=WorkerProfileStatus.ACTIVE,
             origin_kind=WorkerProfileOriginKind.BUILTIN,
@@ -8860,13 +8819,7 @@ class ControlPlaneService:
             or str(existing_data.get("summary", ""))
             or str(source_data.get("summary", ""))
         )
-        base_archetype = (
-            self._param_str(raw, "base_archetype")
-            or str(existing_data.get("base_archetype", ""))
-            or str(source_data.get("base_archetype", ""))
-            or "general"
-        )
-        builtin = builtin_defaults.get(base_archetype)
+        builtin = builtin_defaults.get("general")
         default_tool_groups = self._normalize_string_list(raw.get("default_tool_groups"))
         if not default_tool_groups:
             default_tool_groups = (
@@ -8896,19 +8849,6 @@ class ControlPlaneService:
             or str(source_data.get("tool_profile", ""))
             or (builtin.default_tool_profile if builtin is not None else "minimal")
         )
-        policy_refs = self._normalize_string_list(raw.get("policy_refs"))
-        if not policy_refs:
-            policy_refs = self._normalize_string_list(existing_data.get("policy_refs")) or self._normalize_string_list(source_data.get("policy_refs"))
-        instruction_overlays = self._normalize_text_list(raw.get("instruction_overlays"))
-        if not instruction_overlays:
-            instruction_overlays = self._normalize_text_list(existing_data.get("instruction_overlays")) or self._normalize_text_list(source_data.get("instruction_overlays"))
-        tags = self._normalize_string_list(raw.get("tags"))
-        if not tags:
-            tags = (
-                self._normalize_string_list(existing_data.get("tags"))
-                or self._normalize_string_list(source_data.get("tags"))
-                or (list(builtin.capabilities) if builtin is not None else [])
-            )
         metadata = self._normalize_dict(raw.get("metadata"))
         if not metadata:
             metadata = self._normalize_dict(existing_data.get("metadata")) or self._normalize_dict(source_data.get("metadata"))
@@ -8921,7 +8861,7 @@ class ControlPlaneService:
             profile_id = str(existing_data.get("profile_id", "")) or str(source_data.get("profile_id", ""))
         if not profile_id or profile_id.startswith("singleton:"):
             profile_id = await self._generate_worker_profile_id(
-                name=name or base_archetype,
+                name=name or "",
                 project_id=project_id,
                 scope=scope,
                 existing_profile_id=existing.profile_id if existing is not None else "",
@@ -8933,16 +8873,12 @@ class ControlPlaneService:
             "project_id": project_id if scope == "project" else "",
             "name": name,
             "summary": summary
-            or self._worker_profile_summary(tags, default_tool_groups),
-            "base_archetype": base_archetype,
-            "instruction_overlays": instruction_overlays,
+            or self._worker_profile_summary(default_tool_groups, default_tool_groups),
             "model_alias": model_alias or "main",
             "tool_profile": tool_profile or "minimal",
             "default_tool_groups": default_tool_groups,
             "selected_tools": selected_tools,
             "runtime_kinds": runtime_kinds,
-            "policy_refs": policy_refs,
-            "tags": tags,
             "metadata": metadata,
             "resource_limits": resource_limits,
             "origin_kind": (
@@ -9009,25 +8945,17 @@ class ControlPlaneService:
                 warnings.append(
                     "当前 profile 的 tool_profile 高于当前 project policy，运行时可能被降级或要求审批。"
                 )
-            if policy_profile_id not in policy_refs:
-                warnings.append(
-                    f"当前 project 正在使用 {policy_profile_id} policy，建议把它写进 policy_refs。"
-                )
         if existing is not None and existing.status == WorkerProfileStatus.ARCHIVED:
             save_errors.append("归档后的 Root Agent 不能直接更新，请先 clone 一个新 profile。")
 
         snapshot_fields = (
             "name",
             "summary",
-            "base_archetype",
             "model_alias",
             "tool_profile",
             "default_tool_groups",
             "selected_tools",
             "runtime_kinds",
-            "policy_refs",
-            "instruction_overlays",
-            "tags",
         )
         diff_items: list[dict[str, Any]] = []
         before_payload = existing_data or source_data
@@ -9088,15 +9016,11 @@ class ControlPlaneService:
             "project_id": profile.project_id,
             "name": profile.name,
             "summary": profile.summary,
-            "base_archetype": profile.base_archetype,
-            "instruction_overlays": list(profile.instruction_overlays),
             "model_alias": profile.model_alias,
             "tool_profile": profile.tool_profile,
             "default_tool_groups": list(profile.default_tool_groups),
             "selected_tools": list(profile.selected_tools),
             "runtime_kinds": list(profile.runtime_kinds),
-            "policy_refs": list(profile.policy_refs),
-            "tags": list(profile.tags),
             "metadata": dict(profile.metadata),
             "resource_limits": dict(profile.resource_limits),
             "origin_kind": profile.origin_kind.value,
@@ -9146,10 +9070,6 @@ class ControlPlaneService:
                 project_id=str(normalized_profile.get("project_id", "")),
                 name=str(normalized_profile.get("name", "")),
                 summary=str(normalized_profile.get("summary", "")),
-                base_archetype=str(normalized_profile.get("base_archetype", "general")),
-                instruction_overlays=self._normalize_text_list(
-                    normalized_profile.get("instruction_overlays")
-                ),
                 model_alias=str(normalized_profile.get("model_alias", "main")),
                 tool_profile=str(normalized_profile.get("tool_profile", "minimal")),
                 default_tool_groups=self._normalize_string_list(
@@ -9161,8 +9081,6 @@ class ControlPlaneService:
                 runtime_kinds=self._normalize_string_list(
                     normalized_profile.get("runtime_kinds")
                 ),
-                policy_refs=self._normalize_string_list(normalized_profile.get("policy_refs")),
-                tags=self._normalize_string_list(normalized_profile.get("tags")),
                 metadata=self._normalize_dict(normalized_profile.get("metadata")),
                 resource_limits=self._normalize_dict(normalized_profile.get("resource_limits")),
                 status=status,
