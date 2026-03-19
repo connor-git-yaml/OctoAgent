@@ -2856,6 +2856,28 @@ class AgentContextService:
             workspace=workspace,
         )
 
+    def get_consolidation_service(self):
+        """获取 ConsolidationService 实例（Feature 065）。
+
+        延迟创建，首次调用时实例化。若 LLM 服务不可用则返回 None。
+        """
+        if not hasattr(self, "_consolidation_service"):
+            try:
+                from octoagent.memory import SqliteMemoryStore
+                from octoagent.provider.dx.consolidation_service import ConsolidationService
+
+                memory_store = SqliteMemoryStore(self._stores.conn)
+                # LLM 服务通过 store_group 获取（若可用）
+                llm_service = getattr(self._stores, "llm_service", None)
+                self._consolidation_service = ConsolidationService(
+                    memory_store=memory_store,
+                    llm_service=llm_service,
+                    project_root=self._project_root,
+                )
+            except Exception:
+                self._consolidation_service = None
+        return self._consolidation_service
+
     async def get_memory_retrieval_profile(
         self,
         *,

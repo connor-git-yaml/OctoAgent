@@ -4088,7 +4088,13 @@ class TestControlPlaneApi:
 
         automation_resp = await control_plane_client.get("/api/control/resources/automation")
         assert automation_resp.status_code == 200
-        assert automation_resp.json()["jobs"] == []
+        # 系统内置作业（如 system:memory-consolidate）可能存在，
+        # 此处仅验证用户创建的 broken-job 未被保存
+        user_jobs = [
+            j for j in automation_resp.json()["jobs"]
+            if not j["job"]["job_id"].startswith("system:")
+        ]
+        assert user_jobs == []
 
     async def test_automation_create_rejects_invalid_schedule_kind(
         self,

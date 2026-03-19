@@ -103,7 +103,14 @@ class MemoryConsoleError(RuntimeError):
 class MemoryConsoleService:
     """基于 Project/Workspace 绑定产出 Memory Console 文档与动作结果。"""
 
-    def __init__(self, project_root: Path, *, store_group, llm_service=None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        store_group,
+        llm_service=None,
+        consolidation_service=None,
+    ) -> None:
         self._project_root = resolve_project_root(project_root).resolve()
         self._stores = store_group
         self._memory_store = SqliteMemoryStore(store_group.conn)
@@ -113,6 +120,16 @@ class MemoryConsoleService:
             store_group=store_group,
         )
         self._llm_service = llm_service
+        # Feature 065: ConsolidationService 注入（可选，为 None 时退化为旧路径报错）
+        if consolidation_service is not None:
+            self._consolidation_service = consolidation_service
+        else:
+            from .consolidation_service import ConsolidationService
+            self._consolidation_service = ConsolidationService(
+                memory_store=self._memory_store,
+                llm_service=llm_service,
+                project_root=self._project_root,
+            )
 
     async def ensure_ready(self) -> None:
         await init_memory_db(self._stores.conn)
@@ -219,44 +236,8 @@ class MemoryConsoleService:
         )
 
     # ------------------------------------------------------------------
-    # CONSOLIDATE: 使用 LLM 将待整理 fragment 整合为 SoR 现行事实
+    # CONSOLIDATE: 委托 ConsolidationService（Feature 065）
     # ------------------------------------------------------------------
-
-    _CONSOLIDATE_SYSTEM_PROMPT = """\
-你是一个记忆整理助手。你的任务是从一组对话摘要片段中提取出持久有价值的结构化事实。
-
-## 规则
-
-1. **提取事实，不是操作记录**
-   - 保留：用户偏好、项目决策、人物关系、重要结论、知识点
-   - 过滤：纯操作性内容（"修了一个 bug"、"运行了测试"）、临时状态（"正在等待回复"）
-
-2. **subject_key 命名规范**
-   - 用 `/` 分层，如 `用户偏好/编程语言`、`项目/OctoAgent/架构决策`
-   - 简短明确，同一主题的事实用相同 key
-
-3. **去重合并**
-   - 多个片段包含相同或相近信息时，合并为一条更完整的表述
-
-4. **confidence 评估**
-   - 1.0：直接明确陈述的事实
-   - 0.7-0.9：多次提及、可靠推断
-   - 0.5-0.6：仅出现一次或推断较弱
-
-5. **输出格式**
-   必须输出一个 JSON 数组，不要输出其他内容：
-   ```json
-   [
-     {
-       "subject_key": "主题/子主题",
-       "content": "完整的陈述句",
-       "confidence": 0.8,
-       "source_fragment_ids": ["frag-id-1", "frag-id-2"]
-     }
-   ]
-   ```
-   如果没有可提取的有价值事实，输出空数组 `[]`。
-"""
 
     async def run_consolidate(
         self,
@@ -265,6 +246,8 @@ class MemoryConsoleService:
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """使用 LLM 将待整理 fragment 整合为 SoR 现行事实。
+
+        委托 ConsolidationService.consolidate_all_pending 执行实际逻辑。
 
         Returns:
             包含 consolidated_count, skipped_count, errors 等统计信息的字典。
@@ -291,184 +274,22 @@ class MemoryConsoleService:
         config = load_config(self._project_root)
         model_alias = (config.memory.reasoning_model_alias if config else "") or "main"
 
-        # 3. 逐 scope 处理
-        total_consolidated = 0
-        total_skipped = 0
-        all_errors: list[str] = []
-
-        for scope_id in context.selected_scope_ids:
-            result = await self._consolidate_scope(
-                memory=memory,
-                scope_id=scope_id,
-                model_alias=model_alias,
-            )
-            total_consolidated += result["consolidated"]
-            total_skipped += result["skipped"]
-            all_errors.extend(result["errors"])
+        # 3. 委托 ConsolidationService 逐 scope 处理
+        result = await self._consolidation_service.consolidate_all_pending(
+            memory=memory,
+            scope_ids=context.selected_scope_ids,
+            model_alias=model_alias,
+        )
 
         return {
-            "consolidated_count": total_consolidated,
-            "skipped_count": total_skipped,
-            "errors": all_errors,
+            "consolidated_count": result.total_consolidated,
+            "skipped_count": result.total_skipped,
+            "errors": result.all_errors,
             "model_alias": model_alias,
-            "message": f"已整理 {total_consolidated} 条事实" if total_consolidated else "没有可提取的新事实",
+            "message": f"已整理 {result.total_consolidated} 条事实"
+            if result.total_consolidated
+            else "没有可提取的新事实",
         }
-
-    async def _consolidate_scope(
-        self,
-        *,
-        memory: MemoryService,
-        scope_id: str,
-        model_alias: str,
-    ) -> dict[str, Any]:
-        """对单个 scope 下的 fragment 执行整合。"""
-        consolidated = 0
-        skipped = 0
-        errors: list[str] = []
-
-        # 读取所有 fragment
-        fragments = await self._memory_store.list_fragments(scope_id, query=None, limit=200)
-        if not fragments:
-            return {"consolidated": 0, "skipped": 0, "errors": []}
-
-        # 排除已整理过的 fragment（metadata 中有 consolidated_at 标记）
-        pending = [f for f in fragments if not f.metadata.get("consolidated_at")]
-        if not pending:
-            return {"consolidated": 0, "skipped": 0, "errors": []}
-
-        # 读取已有 SoR，供 LLM 参考去重 + 后续 UPDATE 时直接取 version
-        existing_sor = await self._memory_store.search_sor(scope_id, query=None, include_history=False, limit=500)
-        existing_sor_map: dict[str, Any] = {s.subject_key: s for s in existing_sor}
-        existing_keys = set(existing_sor_map.keys())
-
-        # 构建 LLM 请求
-        fragment_texts = []
-        for f in pending:
-            fragment_texts.append(f"[{f.fragment_id}] ({f.partition.value}) {f.content}")
-        user_content = "以下是待整理的记忆片段：\n\n" + "\n\n".join(fragment_texts)
-        if existing_keys:
-            user_content += "\n\n已有的事实主题（请避免重复）：\n" + "\n".join(f"- {k}" for k in sorted(existing_keys))
-
-        messages = [
-            {"role": "system", "content": self._CONSOLIDATE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
-
-        # 调用 LLM
-        try:
-            result = await self._llm_service.call_with_fallback(
-                messages=messages,
-                model_alias=model_alias,
-                temperature=0.3,
-                max_tokens=4096,
-            )
-            response_text = result.content.strip()
-        except Exception as exc:
-            _log.warning("consolidate_llm_call_failed", scope_id=scope_id, error=str(exc))
-            return {"consolidated": 0, "skipped": len(pending), "errors": [f"LLM 调用失败: {exc}"]}
-
-        # 解析 LLM 输出
-        facts = self._parse_consolidation_response(response_text)
-        if facts is None:
-            _log.warning("consolidate_parse_failed", scope_id=scope_id, response=response_text[:200])
-            return {"consolidated": 0, "skipped": len(pending), "errors": ["LLM 输出格式错误，无法解析"]}
-
-        # 为每个事实创建 SoR
-        fragment_map = {f.fragment_id: f for f in pending}
-        consolidated_fragment_ids: set[str] = set()
-
-        for fact in facts:
-            subject_key = fact.get("subject_key", "").strip()
-            content = fact.get("content", "").strip()
-            confidence = float(fact.get("confidence", 0.7))
-            source_ids = fact.get("source_fragment_ids", [])
-
-            if not subject_key or not content:
-                skipped += 1
-                continue
-
-            # 构建 evidence_refs 从 source fragment
-            evidence_refs = []
-            for fid in source_ids:
-                if fid in fragment_map:
-                    evidence_refs.append(EvidenceRef(ref_id=fid, ref_type="fragment"))
-                    consolidated_fragment_ids.add(fid)
-            if not evidence_refs:
-                # 如果 LLM 没给有效的 source_id，用第一个 pending fragment
-                evidence_refs = [EvidenceRef(ref_id=pending[0].fragment_id, ref_type="fragment")]
-                consolidated_fragment_ids.add(pending[0].fragment_id)
-
-            # 推断 partition：从 source fragment 中取众数
-            partitions = [fragment_map[fid].partition for fid in source_ids if fid in fragment_map]
-            partition = max(set(partitions), key=partitions.count) if partitions else MemoryPartition.WORK
-
-            # 判断 ADD 还是 UPDATE（直接用已查到的 SoR，避免重复 DB 查询）
-            existing_sor_for_key = existing_sor_map.get(subject_key)
-            if existing_sor_for_key:
-                action = WriteAction.UPDATE
-                expected_version = existing_sor_for_key.version
-            else:
-                action = WriteAction.ADD
-                expected_version = None
-
-            try:
-                proposal = await memory.propose_write(
-                    scope_id=scope_id,
-                    partition=partition,
-                    action=action,
-                    subject_key=subject_key,
-                    content=content,
-                    rationale="memory consolidation",
-                    confidence=confidence,
-                    evidence_refs=evidence_refs,
-                    expected_version=expected_version,
-                    metadata={"source": "consolidate"},
-                )
-                validation = await memory.validate_proposal(proposal.proposal_id)
-                if validation.accepted:
-                    await memory.commit_memory(proposal.proposal_id)
-                    consolidated += 1
-                    existing_keys.add(subject_key)
-                else:
-                    skipped += 1
-                    _log.info(
-                        "consolidate_proposal_rejected",
-                        subject_key=subject_key,
-                        errors=validation.errors,
-                    )
-            except Exception as exc:
-                skipped += 1
-                errors.append(f"写入 '{subject_key}' 失败: {exc}")
-                _log.warning("consolidate_commit_failed", subject_key=subject_key, error=str(exc))
-
-        # 标记已整理的 fragment
-        now_str = datetime.now(UTC).isoformat()
-        for fid in consolidated_fragment_ids:
-            frag = fragment_map.get(fid)
-            if frag:
-                updated_meta = {**frag.metadata, "consolidated_at": now_str}
-                await self._memory_store.update_fragment_metadata(fid, updated_meta)
-        await self._stores.conn.commit()
-
-        return {"consolidated": consolidated, "skipped": skipped, "errors": errors}
-
-    @staticmethod
-    def _parse_consolidation_response(text: str) -> list[dict[str, Any]] | None:
-        """从 LLM 响应中解析 JSON 数组。"""
-        cleaned = text.strip()
-        # 处理 markdown code block 包裹
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            # 跳过首行 ``` / ```json
-            start = 1
-            # 去掉尾行 ```（如存在）
-            end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
-            cleaned = "\n".join(lines[start:end])
-        try:
-            parsed = json.loads(cleaned)
-            return parsed if isinstance(parsed, list) else None
-        except (json.JSONDecodeError, ValueError):
-            return None
 
     async def get_overview(
         self,

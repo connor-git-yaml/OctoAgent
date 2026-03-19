@@ -1891,6 +1891,18 @@ class TaskService:
                     },
                 )
             )
+
+            # --- Feature 065: Flush 后自动 Consolidate (fire-and-forget) ---
+            if run.run_id:
+                asyncio.create_task(
+                    self._auto_consolidate_after_flush(
+                        run_id=run.run_id,
+                        scope_id=flush_scope_id,
+                        project=project,
+                        workspace=workspace,
+                    )
+                )
+
             return run.run_id
         except Exception as exc:
             log.warning(
@@ -1900,6 +1912,49 @@ class TaskService:
                 error=str(exc),
             )
             return ""
+
+    async def _auto_consolidate_after_flush(
+        self,
+        *,
+        run_id: str,
+        scope_id: str,
+        project: Any,
+        workspace: Any,
+    ) -> None:
+        """Flush 后 fire-and-forget 轻量 Consolidate（Feature 065）。
+
+        仅处理本次 Flush 产出的 Fragment。
+        内部捕获所有异常，不让异常逸出影响事件循环。
+        """
+        try:
+            memory_service = await self._agent_context.get_memory_service(
+                project=project,
+                workspace=workspace,
+            )
+            consolidation_service = self._agent_context.get_consolidation_service()
+            if consolidation_service is None:
+                return
+
+            result = await consolidation_service.consolidate_by_run_id(
+                memory=memory_service,
+                scope_id=scope_id,
+                run_id=run_id,
+            )
+            log.info(
+                "auto_consolidate_after_flush",
+                run_id=run_id,
+                scope_id=scope_id,
+                consolidated=result.consolidated,
+                skipped=result.skipped,
+            )
+        except Exception as exc:
+            log.warning(
+                "auto_consolidate_after_flush_failed",
+                run_id=run_id,
+                scope_id=scope_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
 
     async def _resolve_compaction_flush_scope(
         self,

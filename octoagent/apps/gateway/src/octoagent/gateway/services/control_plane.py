@@ -258,6 +258,49 @@ class ControlPlaneService:
     def bind_automation_scheduler(self, scheduler: Any) -> None:
         self._automation_scheduler = scheduler
 
+    async def ensure_system_automation_jobs(self) -> None:
+        """确保系统内置的自动化作业已注册（Feature 065）。
+
+        由 app startup 流程在 scheduler.startup() 之前调用。
+        分离到独立方法避免在 bind_automation_scheduler 中产生副作用。
+        """
+        self._ensure_system_consolidate_job()
+
+    def _ensure_system_consolidate_job(self) -> None:
+        """确保 system:memory-consolidate 定时作业存在（Feature 065）。
+
+        在系统首次启动时自动创建，后续启动跳过（已持久化）。
+        用户可通过管理台调整间隔或禁用。
+        """
+        job_id = "system:memory-consolidate"
+        existing = self._automation_store.get_job(job_id)
+        if existing is not None:
+            return
+
+        try:
+            job = AutomationJob(
+                job_id=job_id,
+                name="Memory Consolidate (定期整理)",
+                action_id="memory.consolidate",
+                params={},
+                schedule_kind=AutomationScheduleKind.CRON,
+                schedule_expr="0 */4 * * *",
+                timezone="UTC",
+                enabled=True,
+            )
+            self._automation_store.save_job(job)
+            log.info(
+                "system_job_registered",
+                job_id=job_id,
+                schedule_expr="0 */4 * * *",
+            )
+        except Exception as exc:
+            log.warning(
+                "system_job_registration_failed",
+                job_id=job_id,
+                error=str(exc),
+            )
+
     def bind_mcp_installer(self, installer: Any) -> None:
         """绑定 McpInstallerService（Feature 058: MCP 安装生命周期）。"""
         self._mcp_installer = installer

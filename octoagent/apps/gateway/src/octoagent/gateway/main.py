@@ -619,6 +619,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         automation_store=app.state.control_plane_service.automation_store,
     )
     app.state.control_plane_service.bind_automation_scheduler(app.state.automation_scheduler)
+    # Feature 065: 注册系统内置自动化作业（在 scheduler.startup 之前）
+    await app.state.control_plane_service.ensure_system_automation_jobs()
     # Feature 058: 绑定 McpInstallerService 到 ControlPlaneService 并启动
     app.state.control_plane_service.bind_mcp_installer(app.state.mcp_installer)
     await app.state.mcp_installer.startup()

@@ -40,6 +40,7 @@ from octoagent.core.models import (
     WorkStatus,
 )
 from octoagent.memory import (
+    EvidenceRef,
     MemoryAccessPolicy,
     MemoryLayer,
     MemoryPartition,
@@ -47,6 +48,8 @@ from octoagent.memory import (
     MemoryRecallPostFilterMode,
     MemoryRecallRerankMode,
     MemoryRecallResult,
+    SqliteMemoryStore,
+    WriteAction,
 )
 from octoagent.provider.dx.automation_store import AutomationStore
 from octoagent.provider.dx.memory_console_service import MemoryConsoleService
@@ -72,6 +75,8 @@ from pydantic import BaseModel, Field
 from ulid import ULID
 
 import structlog
+
+_log = structlog.get_logger()
 
 from octoagent.core.behavior_workspace import (
     BEHAVIOR_FILE_BUDGETS,
@@ -2992,6 +2997,229 @@ class CapabilityPackService:
             )
             return json.dumps(recall.model_dump(mode="json"), ensure_ascii=False)
 
+        # ---- memory.write 工具 (Feature 065) ----
+
+        _VALID_PARTITIONS = {"core", "profile", "work", "health", "finance", "chat"}
+
+        @tool_contract(
+            name="memory.write",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="memory",
+            tags=["memory", "write", "persist"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://memory.write",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def memory_write(
+            subject_key: str,
+            content: str,
+            partition: str = "work",
+            evidence_refs: list[dict[str, str]] | None = None,
+            scope_id: str = "",
+            project_id: str = "",
+            workspace_id: str = "",
+        ) -> str:
+            """将重要信息持久化为长期记忆（SoR 记录）。
+
+            当用户透露偏好、事实、决策或其他值得长期记住的信息时，
+            调用此工具保存。系统会自动判断是新增还是更新已有记忆。
+
+            Args:
+                subject_key: 记忆主题标识，用 `/` 分层（如"用户偏好/编程语言"）
+                content: 记忆内容，完整的陈述句
+                partition: 业务分区 (core/profile/work/health/finance/chat)，默认 work
+                evidence_refs: 证据引用列表 [{"ref_id": "...", "ref_type": "message"}]
+                scope_id: 可选，指定 scope
+                project_id: 可选，指定 project
+                workspace_id: 可选，指定 workspace
+            """
+            # 1. 参数校验
+            subject_key = subject_key.strip()
+            if not subject_key:
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "subject_key 不能为空"},
+                    ensure_ascii=False,
+                )
+            content = content.strip()
+            if not content:
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "content 不能为空"},
+                    ensure_ascii=False,
+                )
+            partition = partition.strip().lower()
+            if partition not in _VALID_PARTITIONS:
+                return json.dumps(
+                    {
+                        "error": "INVALID_PARTITION",
+                        "message": f"无效的 partition 值 '{partition}'，有效值为: {', '.join(sorted(_VALID_PARTITIONS))}",
+                    },
+                    ensure_ascii=False,
+                )
+
+            # 2. 解析 project/workspace/scope context
+            try:
+                project, workspace, task = await _resolve_runtime_project_context(
+                    project_id=project_id,
+                    workspace_id=workspace_id,
+                )
+                scope_ids = await _resolve_memory_scope_ids(
+                    task=task,
+                    project=project,
+                    workspace=workspace,
+                    explicit_scope_id=scope_id,
+                )
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "SCOPE_UNRESOLVED", "message": f"无法解析 memory scope: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            if not scope_ids:
+                return json.dumps(
+                    {"error": "SCOPE_UNRESOLVED", "message": "无法解析 memory scope，请确认 project 和 workspace 配置"},
+                    ensure_ascii=False,
+                )
+
+            resolved_scope_id = scope_ids[0]
+
+            # 3. 获取 MemoryService
+            try:
+                memory_service = await self._memory_runtime_service.memory_service_for_scope(
+                    project=project,
+                    workspace=workspace,
+                )
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "INTERNAL_ERROR", "message": f"获取 memory 服务失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            # 4. 查询是否已存在 SoR → 决定 ADD 或 UPDATE
+            memory_store = SqliteMemoryStore(store_group.conn)
+            try:
+                existing = await memory_store.get_current_sor(resolved_scope_id, subject_key)
+            except Exception:
+                existing = None
+
+            if existing is not None:
+                action = WriteAction.UPDATE
+                expected_version = existing.version
+                action_label = "update"
+            else:
+                action = WriteAction.ADD
+                expected_version = None
+                action_label = "add"
+
+            # 5. 构建 evidence_refs
+            refs: list[EvidenceRef] = []
+            if evidence_refs:
+                for ref_dict in evidence_refs:
+                    refs.append(
+                        EvidenceRef(
+                            ref_id=str(ref_dict.get("ref_id", "")).strip(),
+                            ref_type=str(ref_dict.get("ref_type", "message")).strip(),
+                            snippet=str(ref_dict.get("snippet", "")).strip() or None,
+                        )
+                    )
+            # 自动追加当前 task_id 作为证据
+            try:
+                _, ctx, current_task = await _current_parent()
+                if current_task is not None:
+                    refs.append(
+                        EvidenceRef(
+                            ref_id=current_task.task_id,
+                            ref_type="task",
+                        )
+                    )
+            except Exception:
+                pass
+            # 确保至少有一个 evidence_ref
+            if not refs:
+                refs.append(EvidenceRef(ref_id="memory.write", ref_type="tool"))
+
+            # 6. 治理流程: propose_write -> validate_proposal -> commit_memory
+            mem_partition = MemoryPartition(partition)
+            try:
+                proposal = await memory_service.propose_write(
+                    scope_id=resolved_scope_id,
+                    partition=mem_partition,
+                    action=action,
+                    subject_key=subject_key,
+                    content=content,
+                    rationale="memory.write tool",
+                    confidence=1.0,
+                    evidence_refs=refs,
+                    expected_version=expected_version,
+                    metadata={"source": "memory.write"},
+                )
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "PROPOSE_FAILED", "message": f"记忆写入提案失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            try:
+                validation = await memory_service.validate_proposal(proposal.proposal_id)
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "VALIDATE_FAILED", "message": f"记忆写入验证失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            if not validation.accepted:
+                _log.info(
+                    "memory_rejected",
+                    subject_key=subject_key,
+                    errors=validation.errors,
+                    scope_id=resolved_scope_id,
+                    action=action_label,
+                )
+                return json.dumps(
+                    {
+                        "status": "rejected",
+                        "action": action_label,
+                        "subject_key": subject_key,
+                        "errors": validation.errors,
+                        "scope_id": resolved_scope_id,
+                    },
+                    ensure_ascii=False,
+                )
+
+            try:
+                commit_result = await memory_service.commit_memory(proposal.proposal_id)
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "COMMIT_FAILED", "message": f"记忆写入失败: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            _log.info(
+                "memory_committed",
+                action=action_label,
+                subject_key=subject_key,
+                memory_id=commit_result.memory_id,
+                version=commit_result.version,
+                scope_id=resolved_scope_id,
+                partition=partition,
+            )
+
+            return json.dumps(
+                {
+                    "status": "committed",
+                    "action": action_label,
+                    "subject_key": subject_key,
+                    "memory_id": commit_result.memory_id,
+                    "version": commit_result.version,
+                    "scope_id": resolved_scope_id,
+                    "partition": partition,
+                },
+                ensure_ascii=False,
+            )
+
         # ---- behavior 工具 ----
 
         # 预构建 review_mode 查找表（file_id -> BehaviorReviewMode）
@@ -4149,6 +4377,7 @@ class CapabilityPackService:
             "memory.search": ["agent_runtime", "web"],
             "memory.citations": ["agent_runtime", "web"],
             "memory.recall": ["agent_runtime", "web"],
+            "memory.write": ["agent_runtime", "web"],
         }
         if tool_name.startswith("mcp."):
             return ["agent_runtime", "web"]
