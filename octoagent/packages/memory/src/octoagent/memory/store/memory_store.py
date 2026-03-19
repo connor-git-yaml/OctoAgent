@@ -15,6 +15,9 @@ from ..enums import (
     VaultAccessRequestStatus,
 )
 from ..models import (
+    BrowseGroup,
+    BrowseItem,
+    BrowseResult,
     DerivedMemoryQuery,
     DerivedMemoryRecord,
     FragmentRecord,
@@ -349,6 +352,133 @@ class SqliteMemoryStore:
             return None
         return self._row_to_vault(row)
 
+    async def browse_sor(
+        self,
+        scope_id: str,
+        *,
+        prefix: str = "",
+        partition: str = "",
+        status: str = "current",
+        group_by: str = "partition",
+        offset: int = 0,
+        limit: int = 20,
+    ) -> BrowseResult:
+        """按结构化维度浏览 SoR 目录，返回分组统计和条目摘要。"""
+        # 限制 limit 上限
+        limit = min(limit, 100)
+
+        # 构建基础 WHERE 条件
+        where_clauses = ["scope_id = ?"]
+        params: list[object] = [scope_id]
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if partition:
+            where_clauses.append("partition = ?")
+            params.append(partition)
+        if prefix:
+            where_clauses.append("subject_key LIKE ?")
+            params.append(f"{prefix}%")
+        where_sql = " AND ".join(where_clauses)
+
+        # 获取总数
+        count_sql = f"SELECT COUNT(*) FROM memory_sor WHERE {where_sql}"
+        cursor = await self._conn.execute(count_sql, tuple(params))
+        row = await cursor.fetchone()
+        total_count = row[0] if row else 0
+
+        if total_count == 0:
+            return BrowseResult(
+                groups=[],
+                total_count=0,
+                has_more=False,
+                offset=offset,
+                limit=limit,
+            )
+
+        # 确定分组键的 SQL 表达式
+        if group_by == "prefix":
+            # 按 subject_key 的第一个 "/" 前缀分组
+            group_expr = (
+                "CASE WHEN INSTR(subject_key, '/') > 0 "
+                "THEN SUBSTR(subject_key, 1, INSTR(subject_key, '/') - 1) "
+                "ELSE subject_key END"
+            )
+        elif group_by == "scope":
+            group_expr = "scope_id"
+        else:
+            # 默认按 partition 分组
+            group_expr = "partition"
+
+        # 查询分组统计
+        group_sql = (
+            f"SELECT {group_expr} AS group_key, COUNT(*) AS cnt, "
+            f"MAX(updated_at) AS latest_updated "
+            f"FROM memory_sor WHERE {where_sql} "
+            f"GROUP BY group_key ORDER BY latest_updated DESC"
+        )
+        cursor = await self._conn.execute(group_sql, tuple(params))
+        group_rows = await cursor.fetchall()
+
+        # 查询明细条目（带分页）
+        items_sql = (
+            f"SELECT memory_id, scope_id, partition, subject_key, content, "
+            f"version, status, updated_at, {group_expr} AS group_key "
+            f"FROM memory_sor WHERE {where_sql} "
+            f"ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        )
+        cursor = await self._conn.execute(
+            items_sql, (*params, limit, offset)
+        )
+        item_rows = await cursor.fetchall()
+
+        # 按分组组装结果
+        group_items: dict[str, list[BrowseItem]] = {}
+        for item_row in item_rows:
+            gk = item_row["group_key"]
+            if gk not in group_items:
+                group_items[gk] = []
+            content = item_row["content"] or ""
+            summary = content[:100]
+            updated_at_str = item_row["updated_at"]
+            updated_at = (
+                datetime.fromisoformat(updated_at_str) if updated_at_str else None
+            )
+            group_items[gk].append(
+                BrowseItem(
+                    subject_key=item_row["subject_key"],
+                    partition=item_row["partition"],
+                    summary=summary,
+                    status=item_row["status"],
+                    version=item_row["version"],
+                    updated_at=updated_at,
+                )
+            )
+
+        groups: list[BrowseGroup] = []
+        for grow in group_rows:
+            gk = grow["group_key"]
+            latest_str = grow["latest_updated"]
+            latest_updated_at = (
+                datetime.fromisoformat(latest_str) if latest_str else None
+            )
+            groups.append(
+                BrowseGroup(
+                    key=gk,
+                    count=grow["cnt"],
+                    items=group_items.get(gk, []),
+                    latest_updated_at=latest_updated_at,
+                )
+            )
+
+        return BrowseResult(
+            groups=groups,
+            total_count=total_count,
+            has_more=(offset + limit) < total_count,
+            offset=offset,
+            limit=limit,
+        )
+
     async def search_sor(
         self,
         scope_id: str,
@@ -356,14 +486,41 @@ class SqliteMemoryStore:
         query: str | None = None,
         include_history: bool = False,
         limit: int = 10,
+        partition: str = "",
+        status: str = "",
+        derived_type: str = "",
+        updated_after: str = "",
+        updated_before: str = "",
     ) -> list[SorRecord]:
         sql = "SELECT * FROM memory_sor WHERE scope_id = ?"
         params: list[object] = [scope_id]
         if not include_history:
-            sql += " AND status = 'current'"
+            # 如果指定了 status 则按指定值过滤，否则默认只看 current
+            if status:
+                sql += " AND status = ?"
+                params.append(status)
+            else:
+                sql += " AND status = 'current'"
+        elif status:
+            # include_history=True 时也可以按 status 筛选
+            sql += " AND status = ?"
+            params.append(status)
+        if partition:
+            sql += " AND partition = ?"
+            params.append(partition)
         if query:
             sql += " AND (subject_key LIKE ? OR content LIKE ?)"
             params.extend([f"%{query}%", f"%{query}%"])
+        if updated_after:
+            sql += " AND updated_at >= ?"
+            params.append(updated_after)
+        if updated_before:
+            sql += " AND updated_at <= ?"
+            params.append(updated_before)
+        # derived_type 存储在 metadata JSON 中，通过 JSON 提取过滤
+        if derived_type:
+            sql += " AND json_extract(metadata, '$.derived_type') = ?"
+            params.append(derived_type)
         sql += " ORDER BY updated_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._conn.execute(sql, tuple(params))

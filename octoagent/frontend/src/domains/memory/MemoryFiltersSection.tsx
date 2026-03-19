@@ -18,12 +18,20 @@ function formatScopeLabel(scopeId: string): string {
   return parts[parts.length - 1] || scopeId;
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  "": "当前有效",
+  current: "当前有效",
+  archived: "已归档",
+  all: "全部状态",
+};
+
 interface MemoryFiltersSectionProps {
   scopeDraft: string;
   scopeOptions: string[];
   queryDraft: string;
   layerDraft: string;
   partitionDraft: string;
+  statusDraft?: string;
   includeHistoryDraft: boolean;
   includeVaultRefsDraft: boolean;
   limitDraft: string;
@@ -36,6 +44,7 @@ interface MemoryFiltersSectionProps {
   onQueryChange: (value: string) => void;
   onLayerChange: (value: string) => void;
   onPartitionChange: (value: string) => void;
+  onStatusChange?: (value: string) => void;
   onIncludeHistoryChange: (value: boolean) => void;
   onIncludeVaultRefsChange: (value: boolean) => void;
   onLimitChange: (value: string) => void;
@@ -52,6 +61,7 @@ export default function MemoryFiltersSection({
   queryDraft,
   layerDraft,
   partitionDraft,
+  statusDraft,
   includeHistoryDraft,
   includeVaultRefsDraft,
   limitDraft,
@@ -64,6 +74,7 @@ export default function MemoryFiltersSection({
   onQueryChange,
   onLayerChange,
   onPartitionChange,
+  onStatusChange,
   onIncludeHistoryChange,
   onIncludeVaultRefsChange,
   onLimitChange,
@@ -145,6 +156,20 @@ export default function MemoryFiltersSection({
             ))}
           </select>
         </label>
+
+        {/* T038: status 筛选选项 */}
+        {onStatusChange ? (
+          <label className="wb-field">
+            <span>记忆状态</span>
+            <select value={statusDraft || ""} onChange={(event) => onStatusChange(event.target.value)}>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value || "default-status"} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <label className="wb-field">
           <span>最多显示</span>

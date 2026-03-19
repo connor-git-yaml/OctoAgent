@@ -240,6 +240,16 @@ class MemoryService:
                 sor_id = await self._commit_update(proposal, current, now)
             elif proposal.action is WriteAction.DELETE:
                 sor_id = await self._commit_delete(proposal, current, now)
+            elif proposal.action is WriteAction.MERGE:
+                # T054: MERGE——创建新综合 SoR + 批量 supersede 源 SoR
+                sor_id = await self._commit_add(proposal, now)
+                merge_source_ids = proposal.metadata.get("merge_source_ids", [])
+                for src_id in merge_source_ids:
+                    await self._store.update_sor_status(
+                        src_id,
+                        status=SorStatus.SUPERSEDED.value,
+                        updated_at=now.isoformat(),
+                    )
 
             if validation.persist_vault and proposal.action in {
                 WriteAction.ADD,

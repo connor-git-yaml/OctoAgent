@@ -162,6 +162,10 @@ class MemoryConsoleService:
         include_history: bool = False,
         include_vault_refs: bool = False,
         limit: int = 50,
+        derived_type: str = "",
+        status: str = "",
+        updated_after: str = "",
+        updated_before: str = "",
     ) -> MemoryConsoleDocument:
         return await self.get_overview(
             active_project_id=project_id or "",
@@ -175,6 +179,10 @@ class MemoryConsoleService:
             include_history=include_history,
             include_vault_refs=include_vault_refs,
             limit=limit,
+            derived_type=derived_type,
+            status=status,
+            updated_after=updated_after,
+            updated_before=updated_before,
         )
 
     async def get_memory_subject_history(
@@ -193,6 +201,79 @@ class MemoryConsoleService:
             workspace_id=workspace_id or "",
             scope_id=scope_id or "",
         )
+
+    async def browse_memory(
+        self,
+        *,
+        project_id: str = "",
+        workspace_id: str | None = None,
+        scope_id: str = "",
+        prefix: str = "",
+        partition: str = "",
+        group_by: str = "partition",
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """浏览 SoR 记忆目录——返回分组统计和条目摘要。"""
+        from octoagent.memory import BrowseResult
+
+        context = await self._resolve_context(
+            active_project_id=project_id or "",
+            active_workspace_id=workspace_id or "",
+            project_id=project_id or "",
+            workspace_id=workspace_id or "",
+            scope_id=scope_id or "",
+        )
+        if context.blocking_issues:
+            return BrowseResult().model_dump(mode="json")
+
+        # 限制 limit
+        limit = max(1, min(limit, 100))
+
+        # 合并所有 scope 的 browse 结果
+        from octoagent.memory import BrowseGroup
+
+        merged_groups: dict[str, BrowseGroup] = {}
+        total = 0
+        has_more = False
+
+        for sid in context.selected_scope_ids:
+            result = await self._memory_store.browse_sor(
+                sid,
+                prefix=prefix,
+                partition=partition,
+                status="current",
+                group_by=group_by,
+                offset=offset,
+                limit=limit,
+            )
+            total += result.total_count
+            if result.has_more:
+                has_more = True
+            for g in result.groups:
+                if g.key in merged_groups:
+                    existing = merged_groups[g.key]
+                    merged_groups[g.key] = BrowseGroup(
+                        key=g.key,
+                        count=existing.count + g.count,
+                        items=existing.items + g.items,
+                        latest_updated_at=(
+                            max(existing.latest_updated_at, g.latest_updated_at)
+                            if existing.latest_updated_at and g.latest_updated_at
+                            else existing.latest_updated_at or g.latest_updated_at
+                        ),
+                    )
+                else:
+                    merged_groups[g.key] = g
+
+        final = BrowseResult(
+            groups=list(merged_groups.values()),
+            total_count=total,
+            has_more=has_more,
+            offset=offset,
+            limit=limit,
+        )
+        return final.model_dump(mode="json")
 
     async def run_maintenance(
         self,
@@ -305,6 +386,10 @@ class MemoryConsoleService:
         include_history: bool = False,
         include_vault_refs: bool = False,
         limit: int = 50,
+        derived_type: str = "",
+        status: str = "",
+        updated_after: str = "",
+        updated_before: str = "",
     ) -> MemoryConsoleDocument:
         context = await self._resolve_context(
             active_project_id=active_project_id,
@@ -352,6 +437,11 @@ class MemoryConsoleService:
                     query=query or None,
                     include_history=include_history,
                     limit=limit,
+                    partition=partition,
+                    status=status,
+                    derived_type=derived_type,
+                    updated_after=updated_after,
+                    updated_before=updated_before,
                 )
                 for sor in sor_records:
                     if partition and sor.partition.value != partition:

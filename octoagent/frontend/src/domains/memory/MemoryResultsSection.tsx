@@ -93,13 +93,19 @@ export default function MemoryResultsSection({
                 key={record.record_id}
                 className="wb-memory-card"
                 onClick={() => onSelectRecord(displayRecord)}
-                style={{ cursor: "pointer" }}
+                style={{
+                  cursor: "pointer",
+                  ...(record.status === "archived" ? { opacity: 0.65 } : {}),
+                }}
               >
                 <div className="wb-memory-head">
                   <div>
                     <div className="wb-chip-row">
                       <span className="wb-chip">{formatLayerLabel(record.layer)}</span>
                       <span className="wb-chip">{formatPartitionLabel(record.partition)}</span>
+                      {record.status === "archived" ? (
+                        <span className="wb-chip is-muted">已归档</span>
+                      ) : null}
                       {record.requires_vault_authorization ? (
                         <span className="wb-chip is-warning">需授权</span>
                       ) : null}

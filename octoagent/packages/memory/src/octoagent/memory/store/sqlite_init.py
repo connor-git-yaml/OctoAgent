@@ -227,6 +227,12 @@ _INDEXES = [
         "ON memory_sor(scope_id, status, updated_at DESC);"
     ),
     (
+        "CREATE INDEX IF NOT EXISTS idx_memory_sor_scope_partition_status "
+        "ON memory_sor(scope_id, partition, status);"
+    ),
+    # idx_memory_sor_scope_subject 已覆盖 (scope_id, subject_key, version DESC)，
+    # 无需单独的 (scope_id, subject_key) 索引
+    (
         "CREATE INDEX IF NOT EXISTS idx_memory_proposals_scope_created "
         "ON memory_write_proposals(scope_id, created_at DESC);"
     ),

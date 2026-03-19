@@ -20,6 +20,7 @@ class MemoryPartition(StrEnum):
     HEALTH = "health"
     FINANCE = "finance"
     CHAT = "chat"
+    SOLUTION = "solution"  # 历史解决方案（problem + solution 结构）
 
 
 class SorStatus(StrEnum):
@@ -28,6 +29,7 @@ class SorStatus(StrEnum):
     CURRENT = "current"
     SUPERSEDED = "superseded"
     DELETED = "deleted"
+    ARCHIVED = "archived"  # 用户主动归档（可恢复，从 recall/search 默认结果排除）
 
 
 class WriteAction(StrEnum):
@@ -37,6 +39,7 @@ class WriteAction(StrEnum):
     UPDATE = "update"
     DELETE = "delete"
     NONE = "none"
+    MERGE = "merge"  # 多条合并为一条综合记忆
 
 
 class ProposalStatus(StrEnum):

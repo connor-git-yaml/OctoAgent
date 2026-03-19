@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from ..models import (
+    BrowseResult,
     DerivedMemoryQuery,
     DerivedMemoryRecord,
     FragmentRecord,
@@ -70,6 +71,18 @@ class MemoryStore(Protocol):
 
     async def get_vault(self, vault_id: str) -> VaultRecord | None: ...
 
+    async def browse_sor(
+        self,
+        scope_id: str,
+        *,
+        prefix: str = "",
+        partition: str = "",
+        status: str = "current",
+        group_by: str = "partition",
+        offset: int = 0,
+        limit: int = 20,
+    ) -> BrowseResult: ...
+
     async def search_sor(
         self,
         scope_id: str,
@@ -77,6 +90,11 @@ class MemoryStore(Protocol):
         query: str | None = None,
         include_history: bool = False,
         limit: int = 10,
+        partition: str = "",
+        status: str = "",
+        derived_type: str = "",
+        updated_after: str = "",
+        updated_before: str = "",
     ) -> list[SorRecord]: ...
 
     async def search_vault(

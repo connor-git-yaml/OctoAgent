@@ -21,6 +21,7 @@ const PARTITION_LABELS: Record<string, string> = {
   finance: "财务（敏感）",
   chat: "对话内容",
   contact: "联系人",
+  solution: "历史方案",
 };
 
 const RETRIEVAL_LABELS: Record<string, string> = {

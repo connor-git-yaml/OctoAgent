@@ -43,6 +43,9 @@ from .imports import (
     verify_chat_import_tables,
 )
 from .models import (
+    BrowseGroup,
+    BrowseItem,
+    BrowseResult,
     CommitResult,
     CompactionFlushResult,
     DerivedMemoryQuery,
@@ -92,6 +95,9 @@ from .store import (
 )
 
 __all__ = [
+    "BrowseGroup",
+    "BrowseItem",
+    "BrowseResult",
     "MemoryBackend",
     "SENSITIVE_PARTITIONS",
     "MemoryLayer",

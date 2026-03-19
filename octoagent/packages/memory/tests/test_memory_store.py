@@ -1,12 +1,14 @@
 """MemoryStore 测试。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 from octoagent.memory import (
+    BrowseResult,
     EvidenceRef,
     MemoryPartition,
     SorRecord,
+    SorStatus,
     VaultAccessGrantRecord,
     VaultAccessGrantStatus,
     VaultAccessRequestRecord,
@@ -230,3 +232,214 @@ async def _seed_fragment(memory_store, now):
     )
     await memory_store.append_fragment(fragment)
     return fragment
+
+
+async def _seed_sor_batch(memory_store, scope_id: str = "memory/global") -> list[SorRecord]:
+    """创建一批测试用 SoR 记录，覆盖多个 partition 和 subject_key。"""
+    now = datetime.now(UTC)
+    records: list[SorRecord] = []
+    configs = [
+        ("01JSOR_BROWSE_000000000001", MemoryPartition.CORE, "用户偏好/编程语言", "偏好 Python", 1),
+        ("01JSOR_BROWSE_000000000002", MemoryPartition.CORE, "用户偏好/编辑器", "使用 VS Code", 1),
+        ("01JSOR_BROWSE_000000000003", MemoryPartition.WORK, "项目决策/选型", "选用 FastAPI", 1),
+        ("01JSOR_BROWSE_000000000004", MemoryPartition.WORK, "项目决策/部署", "Docker 部署", 1),
+        ("01JSOR_BROWSE_000000000005", MemoryPartition.WORK, "技术选型/数据库", "SQLite WAL", 1),
+        ("01JSOR_BROWSE_000000000006", MemoryPartition.HEALTH, "健康/运动", "每周跑步三次", 1),
+        ("01JSOR_BROWSE_000000000007", MemoryPartition.CORE, "家庭/妈妈", "妈妈喜欢园艺", 1),
+    ]
+    for i, (mid, part, sk, content, ver) in enumerate(configs):
+        ts = now + timedelta(seconds=i)
+        rec = SorRecord(
+            memory_id=mid,
+            scope_id=scope_id,
+            partition=part,
+            subject_key=sk,
+            content=content,
+            version=ver,
+            evidence_refs=[EvidenceRef(ref_id="artifact-1", ref_type="artifact")],
+            created_at=ts,
+            updated_at=ts,
+        )
+        await memory_store.insert_sor(rec)
+        records.append(rec)
+    return records
+
+
+class TestBrowseSor:
+    """T014: browse_sor 测试。"""
+
+    async def test_browse_empty_scope(self, memory_store):
+        """空 scope 返回空列表不报错。"""
+        result = await memory_store.browse_sor("nonexistent/scope")
+        assert isinstance(result, BrowseResult)
+        assert result.groups == []
+        assert result.total_count == 0
+        assert result.has_more is False
+
+    async def test_browse_by_partition(self, memory_store):
+        """按 partition 分组。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor("memory/global", group_by="partition")
+        assert result.total_count == 7
+        # 应有 core、work、health 三个分组
+        keys = {g.key for g in result.groups}
+        assert "core" in keys
+        assert "work" in keys
+        assert "health" in keys
+        # core 有 3 条
+        core_group = next(g for g in result.groups if g.key == "core")
+        assert core_group.count == 3
+
+    async def test_browse_by_prefix_filter(self, memory_store):
+        """按 subject_key 前缀筛选。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor(
+            "memory/global", prefix="用户偏好/", group_by="partition"
+        )
+        assert result.total_count == 2
+        # 所有条目的 subject_key 都以 "用户偏好/" 开头
+        for g in result.groups:
+            for item in g.items:
+                assert item.subject_key.startswith("用户偏好/")
+
+    async def test_browse_by_partition_filter(self, memory_store):
+        """按 partition 筛选。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor(
+            "memory/global", partition="work", group_by="prefix"
+        )
+        assert result.total_count == 3
+
+    async def test_browse_pagination(self, memory_store):
+        """分页：has_more 和 total_count。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor("memory/global", limit=3, offset=0)
+        assert result.total_count == 7
+        assert result.has_more is True
+        assert result.limit == 3
+
+        result2 = await memory_store.browse_sor("memory/global", limit=3, offset=3)
+        assert result2.total_count == 7
+        assert result2.has_more is True
+
+        result3 = await memory_store.browse_sor("memory/global", limit=3, offset=6)
+        assert result3.total_count == 7
+        assert result3.has_more is False
+
+    async def test_browse_group_has_latest_updated_at(self, memory_store):
+        """每个分组都有 latest_updated_at。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor("memory/global", group_by="partition")
+        for g in result.groups:
+            assert g.latest_updated_at is not None
+
+    async def test_browse_items_have_summary(self, memory_store):
+        """每个 item 都有 summary（content 前 100 字符）。"""
+        await _seed_sor_batch(memory_store)
+        result = await memory_store.browse_sor("memory/global", limit=100)
+        for g in result.groups:
+            for item in g.items:
+                assert item.summary != ""
+                assert len(item.summary) <= 100
+
+
+class TestSearchSorExtended:
+    """T015: search_sor 扩展参数测试。"""
+
+    async def test_search_backward_compatible(self, memory_store):
+        """不传新参数时行为不变。"""
+        await _seed_sor_batch(memory_store)
+        results = await memory_store.search_sor("memory/global", query="Python")
+        assert len(results) >= 1
+        assert all(r.status == SorStatus.CURRENT for r in results)
+
+    async def test_search_by_partition(self, memory_store):
+        """按 partition 筛选。"""
+        await _seed_sor_batch(memory_store)
+        results = await memory_store.search_sor("memory/global", partition="health")
+        assert len(results) == 1
+        assert results[0].partition == MemoryPartition.HEALTH
+
+    async def test_search_by_status(self, memory_store):
+        """按 status 筛选。"""
+        await _seed_sor_batch(memory_store)
+        # 归档一条记忆
+        await memory_store.update_sor_status(
+            "01JSOR_BROWSE_000000000001",
+            status="archived",
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+        # 默认不含 archived
+        results = await memory_store.search_sor("memory/global")
+        ids = [r.memory_id for r in results]
+        assert "01JSOR_BROWSE_000000000001" not in ids
+
+        # 显式查 archived
+        results = await memory_store.search_sor(
+            "memory/global", status="archived", include_history=True
+        )
+        assert any(r.memory_id == "01JSOR_BROWSE_000000000001" for r in results)
+
+    async def test_search_by_time_range(self, memory_store):
+        """按更新时间范围筛选。"""
+        await _seed_sor_batch(memory_store)
+        now = datetime.now(UTC)
+        future = (now + timedelta(hours=1)).isoformat()
+        past = (now - timedelta(hours=1)).isoformat()
+
+        # 全部在范围内
+        results = await memory_store.search_sor(
+            "memory/global", updated_after=past, updated_before=future
+        )
+        assert len(results) == 7
+
+        # 未来之后无结果
+        results = await memory_store.search_sor(
+            "memory/global", updated_after=future
+        )
+        assert len(results) == 0
+
+
+class TestUpdateSorStatus:
+    """T016: update_sor_status 测试。"""
+
+    async def test_current_to_archived(self, memory_store):
+        """current -> archived 转换。"""
+        await _seed_sor_batch(memory_store)
+        now_str = datetime.now(UTC).isoformat()
+        await memory_store.update_sor_status(
+            "01JSOR_BROWSE_000000000001", status="archived", updated_at=now_str
+        )
+        rec = await memory_store.get_sor("01JSOR_BROWSE_000000000001")
+        assert rec is not None
+        assert rec.status == SorStatus.ARCHIVED
+
+    async def test_archived_to_current(self, memory_store):
+        """archived -> current 恢复。"""
+        await _seed_sor_batch(memory_store)
+        now_str = datetime.now(UTC).isoformat()
+        # 先归档
+        await memory_store.update_sor_status(
+            "01JSOR_BROWSE_000000000001", status="archived", updated_at=now_str
+        )
+        # 再恢复
+        await memory_store.update_sor_status(
+            "01JSOR_BROWSE_000000000001", status="current", updated_at=now_str
+        )
+        rec = await memory_store.get_sor("01JSOR_BROWSE_000000000001")
+        assert rec is not None
+        assert rec.status == SorStatus.CURRENT
+
+    async def test_status_change_preserves_version(self, memory_store):
+        """状态变更不改变 version。"""
+        await _seed_sor_batch(memory_store)
+        rec_before = await memory_store.get_sor("01JSOR_BROWSE_000000000001")
+        assert rec_before is not None
+
+        now_str = datetime.now(UTC).isoformat()
+        await memory_store.update_sor_status(
+            "01JSOR_BROWSE_000000000001", status="archived", updated_at=now_str
+        )
+        rec_after = await memory_store.get_sor("01JSOR_BROWSE_000000000001")
+        assert rec_after is not None
+        assert rec_after.version == rec_before.version

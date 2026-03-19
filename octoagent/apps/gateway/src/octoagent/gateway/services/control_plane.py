@@ -3370,6 +3370,14 @@ class ControlPlaneService:
             return await self._handle_memory_consolidate(request)
         if action_id == "memory.profile_generate":
             return await self._handle_memory_profile_generate(request)
+        if action_id == "memory.sor.edit":
+            return await self._handle_memory_sor_edit(request)
+        if action_id == "memory.sor.archive":
+            return await self._handle_memory_sor_archive(request)
+        if action_id == "memory.sor.restore":
+            return await self._handle_memory_sor_restore(request)
+        if action_id == "memory.browse":
+            return await self._handle_memory_browse(request)
         if action_id == "vault.access.request":
             return await self._handle_vault_access_request(request)
         if action_id == "vault.access.resolve":
@@ -4350,6 +4358,10 @@ class ControlPlaneService:
             include_history=self._param_bool(request.params, "include_history"),
             include_vault_refs=self._param_bool(request.params, "include_vault_refs"),
             limit=self._param_int(request.params, "limit", default=50),
+            derived_type=self._param_str(request.params, "derived_type") or "",
+            status=self._param_str(request.params, "status") or "",
+            updated_after=self._param_str(request.params, "updated_after") or "",
+            updated_before=self._param_str(request.params, "updated_before") or "",
         )
         return self._completed_result(
             request=request,
@@ -4591,6 +4603,287 @@ class ControlPlaneService:
                 self._resource_ref("memory_console", "memory:overview"),
             ],
             target_refs=self._memory_target_refs(request),
+        )
+
+    @staticmethod
+    def _check_sensitive_partition(partition_str: str) -> bool:
+        """检查 partition 是否属于敏感分区（HEALTH/FINANCE）。"""
+        from octoagent.memory import SENSITIVE_PARTITIONS, MemoryPartition
+        try:
+            partition_enum = MemoryPartition(partition_str)
+        except ValueError:
+            return False
+        return partition_enum in SENSITIVE_PARTITIONS
+
+    def _get_memory_store(self):
+        """获取 Memory Store 实例（避免多处直接穿透 _memory_console_service）。"""
+        return self._memory_console_service._memory_store
+
+    async def _handle_memory_sor_edit(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """T023: 用户编辑 SoR 记忆——乐观锁 + Proposal 流程 + 审计事件。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        scope_id = self._param_str(request.params, "scope_id")
+        subject_key = self._param_str(request.params, "subject_key")
+        content = self._param_str(request.params, "content")
+        new_subject_key = self._param_str(request.params, "new_subject_key")
+        expected_version = self._param_int(request.params, "expected_version", default=0)
+        edit_summary = self._param_str(request.params, "edit_summary")
+
+        if not scope_id or not subject_key or not content or expected_version < 1:
+            return self._rejected_result(
+                request=request,
+                code="INVALID_PARAMS",
+                message="scope_id、subject_key、content、expected_version 均为必填项。",
+            )
+
+        store = self._get_memory_store()
+        current = await store.get_current_sor(scope_id, subject_key)
+        if current is None:
+            return self._rejected_result(
+                request=request,
+                code="SOR_NOT_FOUND",
+                message=f"未找到 scope={scope_id} subject_key={subject_key} 的 current SoR 记录。",
+            )
+        if current.version != expected_version:
+            return self._rejected_result(
+                request=request,
+                code="VERSION_CONFLICT",
+                message=f"版本冲突：期望版本 {expected_version}，当前版本 {current.version}。请刷新后重试。",
+            )
+        if self._check_sensitive_partition(current.partition):
+            return self._rejected_result(
+                request=request,
+                code="VAULT_AUTHORIZATION_REQUIRED",
+                message="此记忆属于敏感分区，编辑需要额外的 Vault 授权确认。",
+            )
+
+        # 走 propose-validate-commit 流程
+        from datetime import UTC, datetime
+
+        from octoagent.memory import EvidenceRef, MemoryService, WriteAction, WriteProposal
+        from ulid import ULID
+
+        target_subject_key = new_subject_key if new_subject_key else subject_key
+        memory_service = await self._memory_console_service._memory_service_for_context(
+            await self._memory_console_service._resolve_context(
+                active_project_id=project_id or "",
+                active_workspace_id=workspace_id or "",
+                project_id=project_id or "",
+                workspace_id=workspace_id or "",
+                scope_id=scope_id,
+            )
+        )
+        now = datetime.now(UTC)
+        proposal = WriteProposal(
+            proposal_id=f"01JPROP_{ULID()}",
+            scope_id=scope_id,
+            partition=current.partition,
+            action=WriteAction.UPDATE,
+            subject_key=target_subject_key,
+            content=content,
+            rationale=edit_summary or "用户手动编辑",
+            confidence=1.0,
+            evidence_refs=current.evidence_refs or [EvidenceRef(ref_id="user_edit", ref_type="user")],
+            expected_version=current.version,
+            metadata={"source": "user_edit", "edit_summary": edit_summary},
+            created_at=now,
+        )
+
+        await memory_service.propose_write(proposal)
+        validation = await memory_service.validate_proposal(proposal.proposal_id)
+        if validation.errors:
+            return self._rejected_result(
+                request=request,
+                code="VALIDATION_FAILED",
+                message=f"编辑验证失败: {'; '.join(validation.errors)}",
+            )
+
+        result = await memory_service.commit_memory(proposal.proposal_id)
+
+        # T026: 审计事件
+        _log.info(
+            "memory.sor.edit.completed",
+            scope_id=scope_id,
+            subject_key=subject_key,
+            new_subject_key=target_subject_key,
+            old_version=current.version,
+            new_version=result.version if result else expected_version + 1,
+            edit_summary=edit_summary,
+            actor="user:web",
+        )
+
+        return self._completed_result(
+            request=request,
+            code="MEMORY_SOR_EDIT_COMPLETED",
+            message="记忆已更新",
+            data={
+                "memory_id": result.memory_id if result else "",
+                "subject_key": target_subject_key,
+                "version": result.version if result else expected_version + 1,
+            },
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+        )
+
+    async def _handle_memory_sor_archive(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """T034: 归档 SoR 记忆。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        scope_id = self._param_str(request.params, "scope_id")
+        memory_id = self._param_str(request.params, "memory_id")
+        expected_version = self._param_int(request.params, "expected_version", default=0)
+
+        if not scope_id or not memory_id or expected_version < 1:
+            return self._rejected_result(
+                request=request,
+                code="INVALID_PARAMS",
+                message="scope_id、memory_id、expected_version 均为必填项。",
+            )
+
+        store = self._get_memory_store()
+        current = await store.get_sor(memory_id)
+        if current is None or current.scope_id != scope_id:
+            return self._rejected_result(
+                request=request, code="SOR_NOT_FOUND",
+                message=f"未找到 memory_id={memory_id} 的 SoR 记录。",
+            )
+        if current.status != "current":
+            return self._rejected_result(
+                request=request, code="INVALID_STATUS",
+                message=f"记忆状态为 {current.status}，只有 current 状态的记忆可以归档。",
+            )
+        if current.version != expected_version:
+            return self._rejected_result(
+                request=request, code="VERSION_CONFLICT",
+                message=f"版本冲突：期望版本 {expected_version}，当前版本 {current.version}。请刷新后重试。",
+            )
+        if self._check_sensitive_partition(current.partition):
+            return self._rejected_result(
+                request=request, code="VAULT_AUTHORIZATION_REQUIRED",
+                message="此记忆属于敏感分区，归档需要额外的 Vault 授权确认。",
+            )
+
+        from datetime import UTC, datetime
+
+        now_str = datetime.now(UTC).isoformat()
+        await store.update_sor_status(memory_id, status="archived", updated_at=now_str)
+
+        # 审计事件
+        _log.info(
+            "memory.sor.archive.completed",
+            scope_id=scope_id,
+            memory_id=memory_id,
+            subject_key=current.subject_key,
+            actor="user:web",
+        )
+
+        return self._completed_result(
+            request=request,
+            code="MEMORY_SOR_ARCHIVE_COMPLETED",
+            message="记忆已归档",
+            data={
+                "memory_id": memory_id,
+                "subject_key": current.subject_key,
+                "new_status": "archived",
+            },
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+        )
+
+    async def _handle_memory_sor_restore(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """T035: 恢复已归档的 SoR 记忆。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        scope_id = self._param_str(request.params, "scope_id")
+        memory_id = self._param_str(request.params, "memory_id")
+
+        if not scope_id or not memory_id:
+            return self._rejected_result(
+                request=request,
+                code="INVALID_PARAMS",
+                message="scope_id 和 memory_id 均为必填项。",
+            )
+
+        store = self._get_memory_store()
+        record = await store.get_sor(memory_id)
+        if record is None or record.scope_id != scope_id:
+            return self._rejected_result(
+                request=request, code="SOR_NOT_FOUND",
+                message=f"未找到 memory_id={memory_id} 的 SoR 记录。",
+            )
+        if record.status != "archived":
+            return self._rejected_result(
+                request=request,
+                code="INVALID_STATUS",
+                message=f"记忆状态为 {record.status}，只有 archived 状态的记忆可以恢复。",
+            )
+
+        # 检查同 subject_key 下是否已有 current 记录
+        existing_current = await store.get_current_sor(scope_id, record.subject_key)
+        if existing_current is not None:
+            return self._rejected_result(
+                request=request,
+                code="SUBJECT_KEY_CONFLICT",
+                message=(
+                    f"同 subject_key ({record.subject_key}) 下已存在 current 记录 "
+                    f"(memory_id={existing_current.memory_id})，无法恢复。"
+                    f"请先归档或编辑现有记录。"
+                ),
+            )
+
+        from datetime import UTC, datetime
+
+        now_str = datetime.now(UTC).isoformat()
+        await store.update_sor_status(memory_id, status="current", updated_at=now_str)
+
+        # 审计事件
+        _log.info(
+            "memory.sor.restore.completed",
+            scope_id=scope_id,
+            memory_id=memory_id,
+            subject_key=record.subject_key,
+            actor="user:web",
+        )
+
+        return self._completed_result(
+            request=request,
+            code="MEMORY_SOR_RESTORE_COMPLETED",
+            message="记忆已恢复",
+            data={
+                "memory_id": memory_id,
+                "subject_key": record.subject_key,
+                "new_status": "current",
+            },
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
+        )
+
+    async def _handle_memory_browse(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """T062: 前端 Memory UI 的 browse 查询。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        result = await self._memory_console_service.browse_memory(
+            project_id=project_id or "",
+            workspace_id=workspace_id,
+            scope_id=self._param_str(request.params, "scope_id") or "",
+            prefix=self._param_str(request.params, "prefix"),
+            partition=self._param_str(request.params, "partition"),
+            group_by=self._param_str(request.params, "group_by") or "partition",
+            offset=self._param_int(request.params, "offset", default=0),
+            limit=self._param_int(request.params, "limit", default=20),
+        )
+        return self._completed_result(
+            request=request,
+            code="MEMORY_BROWSE_COMPLETED",
+            message="已获取记忆目录。",
+            data=result,
+            resource_refs=[self._resource_ref("memory_console", "memory:overview")],
         )
 
     async def _handle_retrieval_index_start(
@@ -10357,6 +10650,36 @@ class ControlPlaneService:
                     risk_hint="medium",
                 ),
                 definition("memory.query", "刷新 Memory 总览", category="memory"),
+                definition(
+                    "memory.sor.edit",
+                    "编辑记忆内容",
+                    category="memory",
+                    risk_hint="medium",
+                    params_schema={
+                        "type": "object",
+                        "required": ["scope_id", "subject_key", "content", "expected_version"],
+                    },
+                ),
+                definition(
+                    "memory.sor.archive",
+                    "归档记忆",
+                    category="memory",
+                    risk_hint="medium",
+                    params_schema={
+                        "type": "object",
+                        "required": ["scope_id", "memory_id", "expected_version"],
+                    },
+                ),
+                definition(
+                    "memory.sor.restore",
+                    "恢复已归档记忆",
+                    category="memory",
+                    params_schema={
+                        "type": "object",
+                        "required": ["scope_id", "memory_id"],
+                    },
+                ),
+                definition("memory.browse", "浏览记忆目录", category="memory"),
                 definition(
                     "memory.subject.inspect",
                     "查看 Subject 历史",

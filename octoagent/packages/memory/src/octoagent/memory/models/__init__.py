@@ -1,5 +1,6 @@
 """Memory 领域模型统一导出。"""
 
+from .browse import BrowseGroup, BrowseItem, BrowseResult
 from .common import (
     CommitResult,
     CompactionFlushResult,
@@ -47,6 +48,9 @@ from .vault_access import (
 )
 
 __all__ = [
+    "BrowseGroup",
+    "BrowseItem",
+    "BrowseResult",
     "CommitResult",
     "CompactionFlushResult",
     "DerivedMemoryQuery",

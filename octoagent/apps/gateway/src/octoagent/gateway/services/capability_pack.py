@@ -2827,6 +2827,47 @@ class CapabilityPackService:
             return json.dumps(document.model_dump(mode="json"), ensure_ascii=False)
 
         @tool_contract(
+            name="memory.browse",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="memory",
+            tags=["memory", "browse", "directory"],
+            worker_types=["ops", "research", "dev", "general"],
+            manifest_ref="builtin://memory.browse",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def memory_browse(
+            prefix: str = "",
+            partition: str = "",
+            scope_id: str = "",
+            group_by: str = "partition",
+            offset: int = 0,
+            limit: int = 20,
+            project_id: str = "",
+            workspace_id: str = "",
+        ) -> str:
+            """按 subject_key 前缀、partition、scope 等维度浏览记忆目录，获取分组统计和概览。"""
+
+            project, workspace, _task = await _resolve_runtime_project_context(
+                project_id=project_id,
+                workspace_id=workspace_id,
+            )
+            result = await self._memory_console_service.browse_memory(
+                project_id=project.project_id if project is not None else "",
+                workspace_id=workspace.workspace_id if workspace is not None else None,
+                scope_id=scope_id or "",
+                prefix=prefix,
+                partition=partition,
+                group_by=group_by,
+                offset=offset,
+                limit=max(1, min(limit, 100)),
+            )
+            return json.dumps(result, ensure_ascii=False)
+
+        @tool_contract(
             name="memory.search",
             side_effect_level=SideEffectLevel.NONE,
             tool_profile=ToolProfile.MINIMAL,
@@ -2847,8 +2888,20 @@ class CapabilityPackService:
             project_id: str = "",
             workspace_id: str = "",
             limit: int = 10,
+            derived_type: str = "",
+            status: str = "",
+            updated_after: str = "",
+            updated_before: str = "",
         ) -> str:
-            """按 query / scope / partition / layer 搜索 Memory。"""
+            """按 query / scope / partition / layer / derived_type / status / 时间范围搜索 Memory。
+
+            新增可选参数：
+            - derived_type: 按派生类型筛选（profile/tom/entity/relation）
+            - status: 按 SoR 状态筛选（current/archived/superseded）
+            - updated_after: 更新时间下界（ISO 8601）
+            - updated_before: 更新时间上界（ISO 8601）
+            所有新参数均为可选，默认空字符串，向后兼容。
+            """
 
             project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
@@ -2861,9 +2914,13 @@ class CapabilityPackService:
                 partition=MemoryPartition(partition) if partition else None,
                 layer=MemoryLayer(layer) if layer else None,
                 query=query,
-                include_history=False,
+                include_history=bool(status and status != "current"),
                 include_vault_refs=True,
                 limit=max(1, min(limit, 50)),
+                derived_type=derived_type,
+                status=status,
+                updated_after=updated_after,
+                updated_before=updated_before,
             )
             return json.dumps(document.model_dump(mode="json"), ensure_ascii=False)
 
@@ -3523,6 +3580,7 @@ class CapabilityPackService:
             tts_speak,
             canvas_write,
             memory_read,
+            memory_browse,
             memory_search,
             memory_citations,
             memory_recall,
