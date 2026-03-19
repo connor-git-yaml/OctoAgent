@@ -475,26 +475,18 @@ class SubagentExecutor:
 
 
 # ============================================================
-# spawn_subagent() — Feature 064 P3 配置对象新签名 + 旧签名兼容
-# ============================================================
-
-
-async def spawn_subagent_v2(
+async def spawn_subagent(
     *,
     store_group: StoreGroup,
     parent_worker_runtime_id: str,
     params: SubagentSpawnParams,
     ctx: SubagentSpawnContext,
 ) -> tuple[AgentRuntime, AgentSession] | tuple[AgentRuntime, AgentSession, SubagentExecutor]:
-    """为指定 Worker 创建一个临时 Subagent Runtime + Session（新签名）。
-
-    Feature 064 P3: 将 15 个 keyword-only 参数拆分为 SubagentSpawnParams（业务参数）
-    + SubagentSpawnContext（调用者上下文）。
+    """为指定 Worker 创建一个临时 Subagent Runtime + Session。
 
     当 ctx 中提供 model_client/tool_broker/event_store/parent_manifest 时，
     同时创建 Child Task + A2AConversation + SubagentExecutor（独立执行循环）。
     """
-    # 查找 parent Worker 的 Runtime
     parent_runtime = await store_group.agent_context_store.get_agent_runtime(
         parent_worker_runtime_id
     )
@@ -505,14 +497,13 @@ async def spawn_subagent_v2(
     runtime_id = f"subagent-{str(ULID())}"
     effective_name = params.name or f"Subagent of {parent_runtime.name or parent_worker_runtime_id}"
 
-    # 创建轻量 AgentRuntime
     runtime = AgentRuntime(
         agent_runtime_id=runtime_id,
         project_id=parent_runtime.project_id,
         workspace_id=parent_runtime.workspace_id,
         agent_profile_id=parent_runtime.agent_profile_id,
         worker_profile_id=parent_runtime.worker_profile_id,
-        role=AgentRuntimeRole.WORKER,  # 复用 worker role，通过 metadata 标记为 subagent
+        role=AgentRuntimeRole.WORKER,
         name=effective_name,
         persona_summary=params.persona_summary,
         status=AgentRuntimeStatus.ACTIVE,
@@ -527,7 +518,6 @@ async def spawn_subagent_v2(
     )
     await store_group.agent_context_store.save_agent_runtime(runtime)
 
-    # 创建 SUBAGENT_INTERNAL session
     session_id = f"session-subagent-{str(ULID())}"
     session = AgentSession(
         agent_session_id=session_id,
@@ -555,7 +545,6 @@ async def spawn_subagent_v2(
         ),
     )
 
-    # Feature 064 P1-A: 如果提供了执行依赖，创建 SubagentExecutor
     if (
         ctx.model_client
         and ctx.tool_broker
@@ -582,58 +571,6 @@ async def spawn_subagent_v2(
         return runtime, session, executor
 
     return runtime, session
-
-
-async def spawn_subagent(
-    *,
-    store_group: StoreGroup,
-    parent_worker_runtime_id: str,
-    name: str = "",
-    persona_summary: str = "",
-    # Feature 064 P1-A 新增参数
-    parent_task_id: str = "",
-    task_description: str = "",
-    permission_preset: str = "normal",
-    usage_limits: dict[str, Any] | None = None,
-    model_client: StructuredModelClientProtocol | None = None,
-    tool_broker: ToolBrokerProtocol | None = None,
-    event_store: EventStoreProtocol | None = None,
-    parent_manifest: SkillManifest | None = None,
-    approval_bridge: ApprovalBridgeProtocol | None = None,
-    result_callback: SubagentResultCallback | None = None,
-) -> tuple[AgentRuntime, AgentSession] | tuple[AgentRuntime, AgentSession, SubagentExecutor]:
-    """为指定 Worker 创建一个临时 Subagent Runtime + Session。
-
-    .. deprecated::
-        使用 :func:`spawn_subagent_v2` + SubagentSpawnParams/SubagentSpawnContext 替代。
-
-    Feature 064 P1 扩展：当提供 model_client/tool_broker/event_store/parent_manifest 时，
-    同时创建 Child Task + A2AConversation + SubagentExecutor（独立执行循环）。
-
-    向后兼容：不提供新参数时行为与 Feature 059 完全一致。
-    """
-    params = SubagentSpawnParams(
-        task_description=task_description,
-        permission_preset=permission_preset,
-        usage_limits=usage_limits,
-        name=name,
-        persona_summary=persona_summary,
-    )
-    ctx = SubagentSpawnContext(
-        parent_task_id=parent_task_id,
-        model_client=model_client,
-        tool_broker=tool_broker,
-        event_store=event_store,
-        parent_manifest=parent_manifest,
-        approval_bridge=approval_bridge,
-        result_callback=result_callback,
-    )
-    return await spawn_subagent_v2(
-        store_group=store_group,
-        parent_worker_runtime_id=parent_worker_runtime_id,
-        params=params,
-        ctx=ctx,
-    )
 
 
 async def _create_subagent_executor(

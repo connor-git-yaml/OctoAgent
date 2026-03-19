@@ -52,7 +52,6 @@ from octoagent.gateway.services.subagent_lifecycle import (
     kill_subagent,
     list_active_subagents,
     spawn_subagent,
-    spawn_subagent_v2,
 )
 
 
@@ -383,7 +382,8 @@ class TestSpawnSubagentBackcompat:
         result = await spawn_subagent(
             store_group=store_group,
             parent_worker_runtime_id=parent_runtime.agent_runtime_id,
-            name="compat-subagent",
+            params=SubagentSpawnParams(name="compat-subagent"),
+            ctx=SubagentSpawnContext(),
         )
         assert len(result) == 2
         runtime, session = result
@@ -399,6 +399,8 @@ class TestSpawnSubagentBackcompat:
         result = await spawn_subagent(
             store_group=store_group,
             parent_worker_runtime_id=parent_runtime.agent_runtime_id,
+            params=SubagentSpawnParams(),
+            ctx=SubagentSpawnContext(),
         )
         runtime, session = result
         ok = await kill_subagent(
@@ -453,12 +455,14 @@ class TestSpawnSubagentWithExecutor:
         result = await spawn_subagent(
             store_group=store_group,
             parent_worker_runtime_id=parent_runtime.agent_runtime_id,
-            parent_task_id=parent_task.task_id,
-            task_description="Test task for subagent",
-            model_client=mock_model_client,
-            tool_broker=mock_tool_broker,
-            event_store=mock_event_store,
-            parent_manifest=manifest,
+            params=SubagentSpawnParams(task_description="Test task for subagent"),
+            ctx=SubagentSpawnContext(
+                parent_task_id=parent_task.task_id,
+                model_client=mock_model_client,
+                tool_broker=mock_tool_broker,
+                event_store=mock_event_store,
+                parent_manifest=manifest,
+            ),
         )
 
         assert len(result) == 3
@@ -502,15 +506,17 @@ class TestSpawnSubagentWithExecutor:
         result = await spawn_subagent(
             store_group=store_group,
             parent_worker_runtime_id=parent_runtime.agent_runtime_id,
-            parent_task_id=parent_task.task_id,
-            task_description="Inherit test",
-            model_client=mock_model_client,
-            tool_broker=MagicMock(),
-            event_store=AsyncMock(
-                get_next_task_seq=AsyncMock(return_value=2),
-                append_event=AsyncMock(),
+            params=SubagentSpawnParams(task_description="Inherit test"),
+            ctx=SubagentSpawnContext(
+                parent_task_id=parent_task.task_id,
+                model_client=mock_model_client,
+                tool_broker=MagicMock(),
+                event_store=AsyncMock(
+                    get_next_task_seq=AsyncMock(return_value=2),
+                    append_event=AsyncMock(),
+                ),
+                parent_manifest=manifest,
             ),
-            parent_manifest=manifest,
         )
 
         _, _, executor = result

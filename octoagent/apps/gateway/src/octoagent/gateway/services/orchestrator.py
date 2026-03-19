@@ -1166,6 +1166,37 @@ class OrchestratorService:
             if is_trivial
             else "butler_direct_execution:standard"
         )
+
+        # Phase 2 (Feature 064): 解析工具集，注入 tool_selection 到 metadata
+        # 使 LLMService.call() → _try_call_with_tools() → SkillRunner 多轮循环自动生效
+        worker_type = WorkerType.GENERAL
+        selection = await self._resolve_single_loop_tool_selection(
+            request, worker_type=worker_type,
+        )
+        selected_tools = list(selection.selected_tools) if selection is not None else []
+        if selection is not None:
+            route_reason = self._join_route_reason(
+                route_reason,
+                f"tool_resolution={selection.resolution_mode}",
+            )
+            task_service = TaskService(self._stores, self._sse_hub)
+            await task_service.append_structured_event(
+                task_id=request.task_id,
+                event_type=EventType.TOOL_INDEX_SELECTED,
+                actor=ActorType.KERNEL,
+                payload=ToolIndexSelectedPayload(
+                    selection_id=selection.selection_id,
+                    backend=selection.backend,
+                    is_fallback=selection.is_fallback,
+                    query=selection.query.query,
+                    selected_tools=selection.selected_tools,
+                    hit_count=len(selection.hits),
+                    warnings=selection.warnings,
+                ).model_dump(mode="json"),
+                trace_id=request.trace_id,
+                idempotency_key=f"butler-direct-tool-index:{selection.selection_id}",
+            )
+
         await self._write_orch_decision_event(
             request=request,
             route_reason=route_reason,
@@ -1177,7 +1208,17 @@ class OrchestratorService:
             "final_speaker": "butler",
             "butler_execution_mode": "direct",
             "butler_is_trivial": is_trivial,
+            "selected_tools": selected_tools,
+            "tool_selection": (
+                selection.model_dump(mode="json") if selection is not None else {}
+            ),
         }
+        if selection is not None and selection.effective_tool_universe is not None:
+            if selection.effective_tool_universe.profile_id:
+                butler_metadata.setdefault(
+                    "agent_profile_id",
+                    selection.effective_tool_universe.profile_id,
+                )
 
         task_service = TaskService(self._stores, self._sse_hub)
         await task_service.ensure_task_running(
@@ -1185,9 +1226,9 @@ class OrchestratorService:
             trace_id=request.trace_id,
         )
 
-        # 复用现有 process_task_with_llm 链路
-        # Butler 直接执行时使用真实 LLM（self._llm_service），
-        # 而非 _InlineReplyLLMService
+        # Butler 直接执行：LLMService.call() 内部自动判断
+        # 有 tool_selection → _try_call_with_tools() → SkillRunner 多轮循环
+        # 无 tool_selection → FallbackManager 单次调用
         await task_service.process_task_with_llm(
             task_id=request.task_id,
             user_text=request.user_text,
