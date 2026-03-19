@@ -1902,7 +1902,9 @@ export default function ChatWorkbench() {
     setExecutionSession(null);
     setPendingApprovals([]);
     setChatActionNotice(null);
-    await sendMessage(text);
+    await sendMessage(text, {
+      agentProfileId: currentSession?.agent_profile_id || undefined,
+    });
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
