@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
 import AgentTemplatePicker from "../domains/agents/AgentTemplatePicker";
@@ -154,21 +154,11 @@ function toggleStringValue(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
-function describeTools(values: string[]): string {
-  if (values.length === 0) {
-    return "还没有固定工具";
-  }
-  if (values.length <= 3) {
-    return values.map((value) => formatTokenLabel(value)).join("、");
-  }
-  return `${values.slice(0, 3).map((value) => formatTokenLabel(value)).join("、")} 等 ${values.length} 项`;
-}
 
 function renderAgentCard(
   agent: AgentCardViewModel,
   options: {
     onEdit: () => void;
-    onStartSession?: () => void;
     onDelete?: () => void;
     onOpenBehaviorFile?: (filePath: string, fileId: string) => void;
     primaryActionLabel: string;
@@ -179,30 +169,41 @@ function renderAgentCard(
 
   return (
     <article key={agent.profileId || agent.name} className={`wb-agent-card ${agent.isMainAgent ? "is-main" : ""}`}>
+      {/* 标题行：名称 + badge + 操作按钮 */}
       <div className="wb-agent-card-topline">
-        <span className={`wb-status-pill ${agent.status === "needs_setup" ? "is-warning" : "is-ready"}`}>
-          {agent.isMainAgent ? "主 Agent" : agent.profileStatus}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <strong style={{ fontSize: "1rem", color: "var(--cp-ink)" }}>{agent.name}</strong>
+          <span className={`wb-status-pill ${agent.status === "needs_setup" ? "is-warning" : "is-ready"}`}>
+            {agent.isMainAgent ? "主 Agent" : agent.profileStatus}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <button type="button" className="wb-button wb-button-secondary" style={{ padding: "4px 12px", fontSize: "0.82rem" }} onClick={options.onEdit}>
+            {options.primaryActionLabel}
+          </button>
+          {typeof options.onDelete === "function" ? (
+            <button
+              type="button"
+              className="wb-button wb-button-tertiary"
+              style={{ padding: "4px 12px", fontSize: "0.82rem" }}
+              disabled={options.busyActionId === "worker_profile.archive"}
+              onClick={options.onDelete}
+            >
+              删除
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="wb-agent-card-body">
-        <strong>{agent.name}</strong>
-        <p>{agent.summary}</p>
-      </div>
+
+      {/* 元信息：模型 + 权限 + 进行中 */}
       <div className="wb-agent-card-meta">
         <span>模型 {agent.modelAlias}</span>
-        <span>默认工具组 {agent.defaultToolGroups.length}</span>
-        <span>固定工具 {agent.selectedTools.length}</span>
-        <span>进行中 {agent.activeWorkCount}</span>
+        {agent.activeWorkCount > 0 && <span>进行中 {agent.activeWorkCount}</span>}
       </div>
-      <div className="wb-chip-row">
-        {agent.defaultToolGroups.slice(0, 3).map((group) => (
-          <span key={`${agent.profileId}:${group}`} className="wb-chip">
-            {formatTokenLabel(group)}
-          </span>
-        ))}
-      </div>
+
+      {/* 行为文件快捷按钮 */}
       {agent.behaviorFiles.length > 0 && options.onOpenBehaviorFile ? (
-        <div className="wb-chip-row" style={{ marginTop: "0.25rem" }}>
+        <div className="wb-chip-row">
           {agent.behaviorFiles.map((file) => (
             <button
               key={file.file_id}
@@ -216,33 +217,9 @@ function renderAgentCard(
           ))}
         </div>
       ) : null}
-      <div className="wb-agent-card-actions">
-        <button type="button" className="wb-button wb-button-primary" onClick={options.onEdit}>
-          {options.primaryActionLabel}
-        </button>
-        {typeof options.onStartSession === "function" ? (
-          <button
-            type="button"
-            className="wb-button wb-button-secondary"
-            disabled={options.busyActionId === "session.new"}
-            onClick={options.onStartSession}
-          >
-            直接开启会话
-          </button>
-        ) : null}
-        {typeof options.onDelete === "function" ? (
-          <button
-            type="button"
-            className="wb-button wb-button-tertiary"
-            disabled={options.busyActionId === "worker_profile.archive"}
-            onClick={options.onDelete}
-          >
-            删除
-          </button>
-        ) : null}
-      </div>
+
       <small className="wb-inline-note">
-        {agent.updatedAt ? `最近更新于 ${formatDateTime(agent.updatedAt)}` : "还没有更新记录"} · 固定工具：{describeTools(agent.selectedTools)}
+        {agent.updatedAt ? `最近更新于 ${formatDateTime(agent.updatedAt)}` : "还没有更新记录"}
       </small>
     </article>
   );
@@ -250,7 +227,6 @@ function renderAgentCard(
 
 export default function AgentCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const behaviorCenterRef = useRef<HTMLElement | null>(null);
   const mainAgentRef = useRef<HTMLElement | null>(null);
@@ -650,17 +626,6 @@ export default function AgentCenter() {
   const busySaving =
     busyActionId === "worker_profile.review" || busyActionId === "worker_profile.apply";
 
-  async function handleStartAgentSession(profileId: string, agentName: string) {
-    const result = await submitAction("session.new", {
-      agent_profile_id: profileId,
-    });
-    if (!result) {
-      return;
-    }
-    setFlashMessage(`下一条消息会直接开启「${agentName}」会话。`);
-    navigate("/");
-  }
-
   return (
     <div className="wb-page wb-agent-management-page">
       {flashMessage ? (
@@ -729,8 +694,6 @@ export default function AgentCenter() {
           </div>
           {renderAgentCard(agentView.mainAgent, {
             onEdit: openMainEditor,
-            onStartSession: () =>
-              void handleStartAgentSession(agentView.mainAgent.profileId, agentView.mainAgent.name),
             onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
             primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑" : "建立主 Agent",
             busyActionId,
@@ -741,7 +704,6 @@ export default function AgentCenter() {
               {agentView.projectAgents.map((agent) =>
                 renderAgentCard(agent, {
                   onEdit: () => openAgentEditor(agent.profileId),
-                  onStartSession: () => void handleStartAgentSession(agent.profileId, agent.name),
                   onDelete: () => void handleDeleteAgent(agent),
                   onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
                   primaryActionLabel: "编辑",
