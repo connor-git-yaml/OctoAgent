@@ -1132,17 +1132,16 @@ export default function ChatWorkbench() {
   // routeSession（URL 指定）或 webSessions[0]（默认首个）——用于 agent 名和标题
   const currentSession = routeSession || webSessions[0] || null;
 
-  const restoreTaskIds = useMemo(() => {
-    // URL 指定了特定 session，直接使用其 task_id
-    if (routeSessionId && routeSession?.task_id) {
-      return [routeSession.task_id];
-    }
-    // URL 指定了 session 但该 session 没有 task_id（如 Worker/A2A session）——
-    // 不应 fallback 到其他 session 的消息，返回空数组显示空聊天
-    if (routeSessionId && routeSession) {
-      return [];
-    }
-    // 默认行为（无 URL 参数）：使用 focused session 和 stored task id
+  // 当 URL 指定了 session（Worker 会话路由）时，restoreTaskIds 必须完全隔离于
+  // 全局 focused_session_id 和 sessions 轮询变化，避免 deps 变化导致 fallthrough
+  // 到主 Agent 的 taskIds（根因：sessionDocument?.sessions 每次轮询是新引用，
+  // 而 routeSession 可能在轮询间隙瞬间为 null）。
+  const routeRestoreTaskIds = useMemo(
+    () => (routeSession?.task_id ? [routeSession.task_id] : []),
+    [routeSession?.task_id],
+  );
+  const defaultRestoreTaskIds = useMemo(() => {
+    if (routeSessionId) return []; // route 模式下不使用，跳过计算
     const taskIds = sessionDocument ? resolveRestorableTaskIds(sessionDocument) : [];
     if (storedRestoreTaskId && !taskIds.includes(storedRestoreTaskId)) {
       taskIds.unshift(storedRestoreTaskId);
@@ -1150,13 +1149,13 @@ export default function ChatWorkbench() {
     return taskIds;
   }, [
     routeSessionId,
-    routeSession?.task_id,
     sessionDocument?.focused_session_id,
     sessionDocument?.focused_thread_id,
     sessionDocument?.new_conversation_token,
     sessionDocument?.sessions,
     storedRestoreTaskId,
   ]);
+  const restoreTaskIds = routeSessionId ? routeRestoreTaskIds : defaultRestoreTaskIds;
   const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>("continue");
 
   // 当 URL 指向已有 session 或已有 restore task 时，不传 newConversationToken——
