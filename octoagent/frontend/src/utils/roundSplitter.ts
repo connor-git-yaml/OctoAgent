@@ -237,6 +237,9 @@ function buildFlowNodes(
     // 隐藏不在可见列表中的事件
     if (!VISIBLE_TYPES.has(event.type)) continue;
 
+    // A2A 心跳消息：内部簿记事件，不展示给用户
+    if (event.type === "A2A_MESSAGE_RECEIVED" && isA2AHeartbeat(event)) continue;
+
     // 配对型事件（STARTED → 查找后续 COMPLETED/FAILED）
     const completionTypes = PAIR_MAP[event.type];
     if (completionTypes) {
@@ -405,13 +408,23 @@ function makeSingleNode(
       };
 
     case "A2A_MESSAGE_SENT":
+      return {
+        ...base,
+        id: event.event_id,
+        kind: "a2a",
+        label: "A2A 发送",
+        status: "neutral",
+        events: [event],
+        ts: event.ts,
+      };
+
     case "A2A_MESSAGE_RECEIVED":
       return {
         ...base,
         id: event.event_id,
         kind: "a2a",
-        label: event.type === "A2A_MESSAGE_SENT" ? "A2A 发送" : "A2A 接收",
-        status: "neutral",
+        label: a2aReceivedLabel(event),
+        status: a2aReceivedStatus(event),
         events: [event],
         ts: event.ts,
       };
@@ -543,4 +556,40 @@ function fmtDuration(start: TaskEvent, end: TaskEvent): string {
   const diff = new Date(end.ts).getTime() - new Date(start.ts).getTime();
   if (diff > 0) return diff >= 1000 ? `${(diff / 1000).toFixed(1)}s` : `${diff}ms`;
   return "";
+}
+
+// ─── A2A 消息类型识别 ───────────────────────────────────────
+
+/** 从 payload.message_type 获取 A2A 消息类型 */
+function a2aMessageType(event: TaskEvent): string {
+  return String(event.payload?.message_type || "").toUpperCase();
+}
+
+/** 是否为心跳类型（内部簿记，不展示给用户） */
+function isA2AHeartbeat(event: TaskEvent): boolean {
+  return a2aMessageType(event) === "HEARTBEAT";
+}
+
+/** A2A 接收节点的用户可读标签 */
+function a2aReceivedLabel(event: TaskEvent): string {
+  const type = a2aMessageType(event);
+  switch (type) {
+    case "RESULT": return "A2A 完成";
+    case "ERROR": return "A2A 失败";
+    case "TASK": return "A2A 接收";
+    case "UPDATE": return "A2A 更新";
+    case "CANCEL": return "A2A 取消";
+    // HEARTBEAT 已被过滤，不会走到这里
+    default: return "A2A 接收";
+  }
+}
+
+/** A2A 接收节点的状态颜色 */
+function a2aReceivedStatus(event: TaskEvent): FlowNodeStatus {
+  const type = a2aMessageType(event);
+  switch (type) {
+    case "RESULT": return "success";
+    case "ERROR": return "error";
+    default: return "neutral";
+  }
 }
