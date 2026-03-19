@@ -295,23 +295,36 @@ class LiteLLMSkillClient:
         text_parts: list[str] = []
         tool_calls_raw: dict[str, dict[str, Any]] = {}
         response_payload: dict[str, Any] = {}
-        async with self._http_client.stream(
-            "POST",
-            self._build_responses_url(self._proxy_url),
-            json=body,
-            headers={
-                "Authorization": f"Bearer {self._master_key}",
-                "Content-Type": "application/json",
-            },
-        ) as resp:
+        try:
+            stream_ctx = self._http_client.stream(
+                "POST",
+                self._build_responses_url(self._proxy_url),
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {self._master_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise _classify_proxy_error(exc) from exc
+
+        async with stream_ctx as resp:
             if resp.status_code >= 400:
                 body_text = await resp.aread()
+                error_body = body_text.decode(errors="replace")[:500]
                 log.error(
                     "litellm_responses_proxy_error",
                     status=resp.status_code,
-                    body=body_text.decode(errors="replace")[:500],
+                    body=error_body,
                 )
-            resp.raise_for_status()
+                raise _classify_proxy_error(
+                    httpx.HTTPStatusError(
+                        f"Responses API returned {resp.status_code}: {error_body}",
+                        request=resp.request,
+                        response=resp,
+                    ),
+                    status_code=resp.status_code,
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

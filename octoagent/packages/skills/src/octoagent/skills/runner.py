@@ -38,6 +38,7 @@ from .models import (
     UsageTracker,
     resolve_effective_tool_allowlist,
 )
+from .litellm_client import LLMCallError
 from .protocols import ApprovalBridgeProtocol, StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
@@ -153,8 +154,6 @@ class SkillRunner:
                 )
 
                 # Feature 064 Phase 3: 异常分类差异化处理
-                from .litellm_client import LLMCallError
-
                 if isinstance(exc, LLMCallError):
                     if exc.error_type == "rate_limit":
                         # 速率限制：等待后重试，不消耗 retry 计数
