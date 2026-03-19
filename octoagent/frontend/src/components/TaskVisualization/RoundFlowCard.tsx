@@ -95,7 +95,7 @@ interface Props {
 
 const COLLAPSE_THRESHOLD = 30;
 /** 泳道高度常量（min-height 52px + gap 约 8px） */
-const LANE_HEIGHT = 60;
+// const LANE_HEIGHT = 60; // 跨泳道斜线暂停，待后续启用
 
 export default function RoundFlowCard({ round, onNodeClick }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -335,70 +335,7 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
               })}
             </div>
 
-            {/* 跨泳道 SVG 斜线 overlay (T024) */}
-            {layout.crossLaneLinks.length > 0 && (
-              <svg
-                className="tv-cross-lane-svg"
-                width={layout.totalWidthPx}
-                height={lanes.length * LANE_HEIGHT}
-                style={{ marginLeft: `calc(110px + var(--cp-space-3))` }}
-              >
-                {layout.crossLaneLinks.map((link, i) => {
-                  const fromNl = layout.nodeLayouts.get(link.fromNodeId);
-                  const toNl = layout.nodeLayouts.get(link.toNodeId);
-                  if (!fromNl || !toNl) return null;
-
-                  // 泳道被折叠时跳过
-                  if (shouldCollapse) {
-                    const isFromCollapsed = link.fromLaneIndex >= 2 && link.fromLaneIndex < lanes.length - 1;
-                    const isToCollapsed = link.toLaneIndex >= 2 && link.toLaneIndex < lanes.length - 1;
-                    if (isFromCollapsed || isToCollapsed) return null;
-                  }
-
-                  // 节点中心坐标
-                  const cx1 = fromNl.leftPx + fromNl.widthPx / 2;
-                  const cy1 = link.fromLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
-                  const cx2 = toNl.leftPx + toNl.widthPx / 2;
-                  const cy2 = link.toLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
-
-                  // 线段方向
-                  const dx = cx2 - cx1;
-                  const dy = cy2 - cy1;
-                  const len = Math.sqrt(dx * dx + dy * dy);
-                  if (len < 1) return null;
-
-                  // 从中心沿方向找到 box 边界交点（不穿透节点）
-                  const NODE_R = 18; // 圆形节点半径 + 2px 留白
-                  const hw1 = (fromNl.widthPx > MIN_NODE_WIDTH ? fromNl.widthPx / 2 : NODE_R);
-                  const hh1 = NODE_R;
-                  const hw2 = (toNl.widthPx > MIN_NODE_WIDTH ? toNl.widthPx / 2 : NODE_R);
-                  const hh2 = NODE_R;
-
-                  const t1 = boxEdgeT(dx / len, dy / len, hw1, hh1);
-                  const t2 = boxEdgeT(-dx / len, -dy / len, hw2, hh2);
-
-                  const x1 = cx1 + (dx / len) * t1;
-                  const y1 = cy1 + (dy / len) * t1;
-                  const x2 = cx2 - (dx / len) * t2;
-                  const y2 = cy2 - (dy / len) * t2;
-
-                  return (
-                    <line
-                      key={i}
-                      x1={x1}
-                      y1={y1}
-                      x2={x2}
-                      y2={y2}
-                      className={
-                        link.type === "dispatch"
-                          ? "tv-cross-line--dispatch"
-                          : "tv-cross-line--return"
-                      }
-                    />
-                  );
-                })}
-              </svg>
-            )}
+            {/* 跨泳道斜线暂时禁用，待后续优化锚点计算后重新启用 */}
           </div>
         </div>
       )}
@@ -424,9 +361,9 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
   );
 }
 
-/** 从 box 中心沿单位方向 (ndx,ndy) 到 box 边框的距离 */
-function boxEdgeT(ndx: number, ndy: number, hw: number, hh: number): number {
-  const tx = ndx !== 0 ? hw / Math.abs(ndx) : Infinity;
-  const ty = ndy !== 0 ? hh / Math.abs(ndy) : Infinity;
-  return Math.min(tx, ty);
-}
+// boxEdgeT 暂停使用，待跨泳道斜线重新启用
+// function boxEdgeT(ndx: number, ndy: number, hw: number, hh: number): number {
+//   const tx = ndx !== 0 ? hw / Math.abs(ndx) : Infinity;
+//   const ty = ndy !== 0 ? hh / Math.abs(ndy) : Infinity;
+//   return Math.min(tx, ty);
+// }
