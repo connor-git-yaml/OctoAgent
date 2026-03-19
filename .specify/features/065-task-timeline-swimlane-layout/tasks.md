@@ -221,7 +221,7 @@
 
 ### 数据层
 
-- [ ] T018 [US5] 实现 `generateTimeTicks()` 函数
+- [x] T018 [US5] 实现 `generateTimeTicks()` 函数
   - **File**: `octoagent/frontend/src/utils/roundSplitter.ts`
   - **Depends on**: T005
   - **Input**: `tMin: number`, `tMax: number`, `scale: number`, `padding: number`
@@ -242,7 +242,7 @@
   - **Covers**: FR-008
   - **Verify**: 不同时间跨度选择合适的间隔；标签格式正确
 
-- [ ] T019 [US5] 在 `computeTimelineLayout()` 中集成 `generateTimeTicks` 调用
+- [x] T019 [US5] 在 `computeTimelineLayout()` 中集成 `generateTimeTicks` 调用
   - **File**: `octoagent/frontend/src/utils/roundSplitter.ts`
   - **Depends on**: T008, T018
   - **Logic**: 在 `computeTimelineLayout` 正常路径（非降级）末尾调用 `generateTimeTicks(tMin, tMax, scale, PADDING)` 并赋值到 `TimelineLayout.timeTicks`
@@ -251,7 +251,7 @@
 
 ### 组件层
 
-- [ ] T020 [US5] 实现时间刻度尺渲染
+- [x] T020 [US5] 实现时间刻度尺渲染
   - **File**: `octoagent/frontend/src/components/TaskVisualization/RoundFlowCard.tsx`
   - **Depends on**: T012, T019
   - **Logic**:
@@ -264,7 +264,7 @@
 
 ### 样式层
 
-- [ ] T021 [P] [US5] 新增时间刻度尺样式
+- [x] T021 [P] [US5] 新增时间刻度尺样式
   - **File**: `octoagent/frontend/src/components/TaskVisualization/task-visualization.css`
   - **Depends on**: T020
   - **Output**:
@@ -285,7 +285,7 @@
 
 ### 数据层
 
-- [ ] T022 [US3] 实现 `buildCrossLaneLinks()` 函数
+- [x] T022 [US3] 实现 `buildCrossLaneLinks()` 函数
   - **File**: `octoagent/frontend/src/utils/roundSplitter.ts`
   - **Depends on**: T004, T008
   - **Input**: `lanes: AgentLane[]`, `nodeLayouts: Map<string, NodeLayout>`
@@ -302,7 +302,7 @@
   - **Covers**: FR-010
   - **Verify**: 多泳道任务生成 dispatch + return 对；单泳道返回空数组
 
-- [ ] T023 [US3] 在 `computeTimelineLayout()` 中集成 `buildCrossLaneLinks` 调用
+- [x] T023 [US3] 在 `computeTimelineLayout()` 中集成 `buildCrossLaneLinks` 调用
   - **File**: `octoagent/frontend/src/utils/roundSplitter.ts`
   - **Depends on**: T008, T022
   - **Logic**: 在正常路径（非降级）末尾调用 `buildCrossLaneLinks(lanes, nodeLayouts)` 并赋值到 `TimelineLayout.crossLaneLinks`
@@ -311,7 +311,7 @@
 
 ### 组件层
 
-- [ ] T024 [US3] 实现 SVG overlay 渲染跨泳道连接线
+- [x] T024 [US3] 实现 SVG overlay 渲染跨泳道连接线
   - **File**: `octoagent/frontend/src/components/TaskVisualization/RoundFlowCard.tsx`
   - **Depends on**: T012, T023
   - **Logic**:
@@ -331,7 +331,7 @@
 
 ### 样式层
 
-- [ ] T025 [P] [US3] 新增 SVG 跨泳道斜线样式
+- [x] T025 [P] [US3] 新增 SVG 跨泳道斜线样式
   - **File**: `octoagent/frontend/src/components/TaskVisualization/task-visualization.css`
   - **Depends on**: T024
   - **Output**:

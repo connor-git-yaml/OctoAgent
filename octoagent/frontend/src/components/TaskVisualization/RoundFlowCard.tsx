@@ -94,6 +94,8 @@ interface Props {
 }
 
 const COLLAPSE_THRESHOLD = 30;
+/** 泳道高度常量（min-height 52px + gap 约 8px） */
+const LANE_HEIGHT = 60;
 
 export default function RoundFlowCard({ round, onNodeClick }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -210,6 +212,24 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
         /* ─── 时间轴路径：节点按时间定位，Worker 展宽为胶囊条 ─── */
         <div className="tv-timeline-container">
           <div className="tv-lanes-scroll">
+            {/* 时间刻度尺 (T020) */}
+            {layout.timeTicks.length > 0 && (
+              <div
+                className="tv-time-axis"
+                style={{ width: layout.totalWidthPx }}
+              >
+                {layout.timeTicks.map((tick, i) => (
+                  <span
+                    key={i}
+                    className="tv-time-tick"
+                    style={{ left: tick.leftPx }}
+                  >
+                    {tick.label}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* 泳道列表 */}
             <div className="tv-lanes">
               {lanes.map((lane, laneIdx) => {
@@ -332,6 +352,59 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                 );
               })}
             </div>
+
+            {/* 跨泳道 SVG 斜线 overlay (T024) */}
+            {layout.crossLaneLinks.length > 0 && (
+              <svg
+                className="tv-cross-lane-svg"
+                width={layout.totalWidthPx}
+                height={lanes.length * LANE_HEIGHT}
+                style={{ marginLeft: `calc(110px + var(--cp-space-3))` }}
+              >
+                {layout.crossLaneLinks.map((link, i) => {
+                  const fromNl = layout.nodeLayouts.get(link.fromNodeId);
+                  const toNl = layout.nodeLayouts.get(link.toNodeId);
+                  if (!fromNl || !toNl) return null;
+
+                  // 泳道被折叠时跳过
+                  if (shouldCollapse) {
+                    const isFromCollapsed = link.fromLaneIndex >= 2 && link.fromLaneIndex < lanes.length - 1;
+                    const isToCollapsed = link.toLaneIndex >= 2 && link.toLaneIndex < lanes.length - 1;
+                    if (isFromCollapsed || isToCollapsed) return null;
+                  }
+
+                  let x1: number, x2: number;
+                  if (link.type === "dispatch") {
+                    // dispatch: 从 Orchestrator worker 节点中心底部 -> Worker 泳道首节点中心顶部
+                    x1 = fromNl.leftPx + fromNl.widthPx / 2;
+                    x2 = toNl.leftPx + toNl.widthPx / 2;
+                  } else {
+                    // return: 从 Worker 末节点中心底部 -> Orchestrator 节点中心顶部
+                    x1 = fromNl.leftPx + fromNl.widthPx / 2;
+                    x2 = toNl.leftPx + toNl.widthPx / 2;
+                  }
+
+                  // Y 坐标：泳道索引 * LANE_HEIGHT + 泳道中心
+                  const y1 = link.fromLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+                  const y2 = link.toLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+
+                  return (
+                    <line
+                      key={i}
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      className={
+                        link.type === "dispatch"
+                          ? "tv-cross-line--dispatch"
+                          : "tv-cross-line--return"
+                      }
+                    />
+                  );
+                })}
+              </svg>
+            )}
           </div>
         </div>
       )}

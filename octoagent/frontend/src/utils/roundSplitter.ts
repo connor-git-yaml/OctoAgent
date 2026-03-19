@@ -902,8 +902,8 @@ export function computeTimelineLayout(
   return {
     totalWidthPx,
     nodeLayouts,
-    crossLaneLinks: [], // P2 阶段实现
-    timeTicks: [],       // P2 阶段实现
+    crossLaneLinks: buildCrossLaneLinks(lanes, nodeLayouts),
+    timeTicks: generateTimeTicks(tMin, effectiveTMax, scale, PADDING),
     degraded: false,
   };
 }
@@ -939,4 +939,160 @@ function interpolateMissingTimestamps(
       metas[start + k].tsMs = anchorBefore + step * (k + 1);
     }
   }
+}
+
+// ─── 时间刻度尺生成 (T018) ────────────────────────────────────
+
+/**
+ * 根据时间跨度自动选择刻度间隔，生成时间刻度标记。
+ * 标签格式为相对于 tMin 的偏移量（如 +0s, +5s, +1m30s）。
+ */
+function generateTimeTicks(
+  tMin: number,
+  tMax: number,
+  scale: number,
+  padding: number,
+): TimeTick[] {
+  const spanMs = tMax - tMin;
+  if (spanMs <= 0) return [];
+
+  // 根据时间跨度选择刻度间隔
+  let intervalMs: number;
+  if (spanMs <= 5000) {
+    intervalMs = 1000;       // <= 5s: 每 1s
+  } else if (spanMs <= 30000) {
+    intervalMs = 5000;       // <= 30s: 每 5s
+  } else if (spanMs <= 180000) {
+    intervalMs = 30000;      // <= 3min: 每 30s
+  } else {
+    intervalMs = 60000;      // > 3min: 每 1min
+  }
+
+  // 从 tMin 向上取整到最近的 intervalMs 整数倍
+  const firstTick = Math.ceil(tMin / intervalMs) * intervalMs;
+
+  const ticks: TimeTick[] = [];
+  for (let t = firstTick; t <= tMax; t += intervalMs) {
+    const offsetMs = t - tMin;
+    const label = formatTickLabel(offsetMs);
+    const leftPx = padding + (t - tMin) * scale;
+    ticks.push({ label, leftPx });
+  }
+
+  return ticks;
+}
+
+/**
+ * 格式化刻度标签：相对于起始时间的偏移量。
+ * < 60s: "+Ns"（如 +0s, +5s, +30s）
+ * >= 60s: "+NmMs"（如 +1m, +1m30s, +2m）
+ */
+function formatTickLabel(offsetMs: number): string {
+  const totalSeconds = Math.round(offsetMs / 1000);
+  if (totalSeconds < 60) {
+    return `+${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `+${minutes}m${seconds}s` : `+${minutes}m`;
+}
+
+// ─── 跨泳道连接线构建 (T022) ──────────────────────────────────
+
+/**
+ * 遍历 Orchestrator 泳道的 worker 节点，
+ * 找到对应 Worker 泳道的首尾节点，生成 dispatch/return 连接线描述。
+ * 单泳道场景或无匹配时返回空数组。
+ */
+function buildCrossLaneLinks(
+  lanes: AgentLane[],
+  nodeLayouts: Map<string, NodeLayout>,
+): CrossLaneLink[] {
+  if (lanes.length < 2) return [];
+
+  // 找到 Orchestrator 泳道
+  const orchIdx = lanes.findIndex((l) => l.agent === "Orchestrator");
+  if (orchIdx < 0) return [];
+
+  const orchLane = lanes[orchIdx];
+  const links: CrossLaneLink[] = [];
+
+  for (const node of orchLane.nodes) {
+    if (node.kind !== "worker") continue;
+
+    // 从 worker 节点的 label 或 events payload 提取 agent 名称，
+    // 然后匹配对应的 Worker 泳道
+    const workerAgentName = resolveWorkerLaneName(node, lanes);
+    if (!workerAgentName) continue;
+
+    const workerLaneIdx = lanes.findIndex(
+      (l, idx) => idx !== orchIdx && l.agent === workerAgentName,
+    );
+    if (workerLaneIdx < 0) continue;
+
+    const workerLane = lanes[workerLaneIdx];
+    if (workerLane.nodes.length === 0) continue;
+
+    const firstWorkerNode = workerLane.nodes[0];
+    const lastWorkerNode = workerLane.nodes[workerLane.nodes.length - 1];
+
+    // 确保节点在 nodeLayouts 中存在
+    if (!nodeLayouts.has(node.id) || !nodeLayouts.has(firstWorkerNode.id)) continue;
+
+    // dispatch 连接：Orchestrator worker 节点 -> Worker 泳道首节点
+    links.push({
+      fromLaneIndex: orchIdx,
+      fromNodeId: node.id,
+      toLaneIndex: workerLaneIdx,
+      toNodeId: firstWorkerNode.id,
+      type: "dispatch",
+    });
+
+    // return 连接：Worker 泳道末节点 -> Orchestrator worker 节点
+    if (nodeLayouts.has(lastWorkerNode.id)) {
+      links.push({
+        fromLaneIndex: workerLaneIdx,
+        fromNodeId: lastWorkerNode.id,
+        toLaneIndex: orchIdx,
+        toNodeId: node.id,
+        type: "return",
+      });
+    }
+  }
+
+  return links;
+}
+
+/**
+ * 从 worker 节点匹配对应的 Worker 泳道名称。
+ * 优先从 events payload 中提取 agent_name，
+ * 回退到通过 Worker ID 短标识匹配。
+ */
+function resolveWorkerLaneName(
+  workerNode: FlowNode,
+  lanes: AgentLane[],
+): string {
+  // 方式 1：从 payload 的 agent_name 匹配
+  for (const ev of workerNode.events) {
+    const agentName = ev.payload?.agent_name;
+    if (typeof agentName === "string" && agentName) {
+      // 直接找完全匹配的泳道
+      if (lanes.some((l) => l.agent === agentName)) return agentName;
+    }
+  }
+
+  // 方式 2：从 Worker ID 构造短名称匹配
+  for (const ev of workerNode.events) {
+    const wid = ev.payload?.worker_id;
+    if (typeof wid === "string" && wid) {
+      const shortName = `Worker ${wid.length > 4 ? wid.slice(0, 4) : wid}`;
+      if (lanes.some((l) => l.agent === shortName)) return shortName;
+    }
+  }
+
+  // 方式 3：如果只有两个泳道（Orchestrator + 一个 Worker），直接匹配
+  const nonOrchLanes = lanes.filter((l) => l.agent !== "Orchestrator");
+  if (nonOrchLanes.length === 1) return nonOrchLanes[0].agent;
+
+  return "";
 }

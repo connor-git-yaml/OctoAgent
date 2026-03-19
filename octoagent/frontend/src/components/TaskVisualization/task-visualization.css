@@ -807,6 +807,49 @@
   max-width: none;
 }
 
+/* T021: 时间刻度尺 */
+.tv-time-axis {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid var(--cp-border);
+  margin-left: calc(110px + var(--cp-space-3)); /* 对齐泳道标签后的内容区 */
+  margin-bottom: var(--cp-space-1);
+}
+
+.tv-time-tick {
+  position: absolute;
+  top: 0;
+  font-size: 10px;
+  color: var(--cp-muted);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* T025: SVG 跨泳道斜线 */
+.tv-cross-lane-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.tv-cross-line--dispatch {
+  stroke: var(--cp-primary);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+  opacity: 0.7;
+}
+
+.tv-cross-line--return {
+  stroke: var(--cp-success);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+  opacity: 0.7;
+}
+
 /* 轮次统计 */
 .tv-round-stats {
   font-size: 11px;
