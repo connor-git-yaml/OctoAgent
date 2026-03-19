@@ -178,6 +178,12 @@ export function useChatStream(
     if (prev === restoreTaskIdSignature) {
       return;
     }
+    // 如果当前已有活跃的 taskId（刚发过消息），且新 signature 包含该 taskId，
+    // 说明这只是轮询更新 session 列表导致 routeSession.task_id 从空变为已有值，
+    // 不是真正的 session 切换，不应该重置状态。
+    if (taskId && restoreTaskIdSignature.includes(taskId)) {
+      return;
+    }
     // restoreTaskIdSignature 变化说明用户切换了 Session
     // 关闭旧 SSE 连接
     if (eventSourceRef.current) {
@@ -193,7 +199,7 @@ export function useChatStream(
     setLiveApproval(null);
     setSuppressedRestoreSignature(null);
     attemptedRestoreSignatureRef.current = null;
-  }, [restoreTaskIdSignature]);
+  }, [restoreTaskIdSignature, taskId]);
 
   const spawnAgentPlaceholder = useCallback(() => {
     const placeholderId = `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
