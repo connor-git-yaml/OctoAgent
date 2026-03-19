@@ -953,11 +953,10 @@ function buildCrossLaneLinks(
   const orchLane = lanes[orchIdx];
   const links: CrossLaneLink[] = [];
 
-  for (const node of orchLane.nodes) {
+  for (let ni = 0; ni < orchLane.nodes.length; ni++) {
+    const node = orchLane.nodes[ni];
     if (node.kind !== "worker") continue;
 
-    // 从 worker 节点的 label 或 events payload 提取 agent 名称，
-    // 然后匹配对应的 Worker 泳道
     const workerAgentName = resolveWorkerLaneName(node, lanes);
     if (!workerAgentName) continue;
 
@@ -972,31 +971,58 @@ function buildCrossLaneLinks(
     const firstWorkerNode = workerLane.nodes[0];
     const lastWorkerNode = workerLane.nodes[workerLane.nodes.length - 1];
 
-    // 确保节点在 nodeLayouts 中存在
-    if (!nodeLayouts.has(node.id) || !nodeLayouts.has(firstWorkerNode.id)) continue;
+    // 找 Worker 节点前面最近的 A2A 发送节点作为 dispatch 起点
+    const a2aSendNode = findPrecedingA2ASend(orchLane.nodes, ni);
+    // 找 Worker 节点后面最近的 A2A 完成/接收节点作为 return 终点
+    const a2aRecvNode = findFollowingA2AReceive(orchLane.nodes, ni);
 
-    // dispatch 连接：Orchestrator worker 节点 -> Worker 泳道首节点
+    const dispatchFrom = a2aSendNode || node;
+    const returnTo = a2aRecvNode || node;
+
+    if (!nodeLayouts.has(dispatchFrom.id) || !nodeLayouts.has(firstWorkerNode.id)) continue;
+
+    // dispatch: A2A 发送 → Worker 泳道首节点
     links.push({
       fromLaneIndex: orchIdx,
-      fromNodeId: node.id,
+      fromNodeId: dispatchFrom.id,
       toLaneIndex: workerLaneIdx,
       toNodeId: firstWorkerNode.id,
       type: "dispatch",
     });
 
-    // return 连接：Worker 泳道末节点 -> Orchestrator worker 节点
-    if (nodeLayouts.has(lastWorkerNode.id)) {
+    // return: Worker 泳道末节点 → A2A 完成
+    if (nodeLayouts.has(lastWorkerNode.id) && nodeLayouts.has(returnTo.id)) {
       links.push({
         fromLaneIndex: workerLaneIdx,
         fromNodeId: lastWorkerNode.id,
         toLaneIndex: orchIdx,
-        toNodeId: node.id,
+        toNodeId: returnTo.id,
         type: "return",
       });
     }
   }
 
   return links;
+}
+
+/** 在 worker 节点之前找最近的 A2A 发送节点 */
+function findPrecedingA2ASend(nodes: FlowNode[], workerIdx: number): FlowNode | null {
+  for (let i = workerIdx - 1; i >= 0; i--) {
+    if (nodes[i].kind === "a2a" && nodes[i].label.includes("发送")) return nodes[i];
+    // 不跨越其他 worker 节点
+    if (nodes[i].kind === "worker") break;
+  }
+  return null;
+}
+
+/** 在 worker 节点之后找最近的 A2A 完成/接收节点 */
+function findFollowingA2AReceive(nodes: FlowNode[], workerIdx: number): FlowNode | null {
+  for (let i = workerIdx + 1; i < nodes.length; i++) {
+    if (nodes[i].kind === "a2a" && (nodes[i].label.includes("完成") || nodes[i].label.includes("接收"))) return nodes[i];
+    // 不跨越其他 worker 节点
+    if (nodes[i].kind === "worker") break;
+  }
+  return null;
 }
 
 /**
