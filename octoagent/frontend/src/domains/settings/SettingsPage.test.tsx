@@ -560,8 +560,7 @@ describe("SettingsPage", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存后回聊天验证" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
   });
 
   it("未连接真实模型时仍把连接真实模型作为首屏主动作", () => {
@@ -586,9 +585,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("先连上至少一个模型 Provider")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "连接真实模型" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("可以先保存")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "回聊天验证" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "检查配置" }).length).toBeGreaterThan(0);
   });
 
   it("Memory 区块展示基础状态卡片而非兼容接入表单", () => {

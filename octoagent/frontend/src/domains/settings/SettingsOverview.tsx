@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import type {
   ProjectSelectorDocument,
   SetupReviewSummary,
@@ -26,23 +25,11 @@ export default function SettingsOverview({
   onScrollToSection,
 }: SettingsOverviewProps) {
   const reviewBlockingCount = review.blocking_reasons.length;
-  const primaryTitle = usingEchoMode
+  const subtitle = usingEchoMode
     ? "先连上至少一个模型 Provider"
     : review.ready
       ? ""
       : `还差 ${Math.max(reviewBlockingCount, 1)} 项才能稳定开始`;
-  const primaryActionLabel = usingEchoMode
-    ? "连接真实模型"
-    : review.ready
-      ? "保存后回聊天验证"
-      : "先检查阻塞项";
-  const statusChipLabel = usingEchoMode
-    ? review.ready
-      ? "可以先保存"
-      : `还差 ${reviewBlockingCount} 项`
-    : review.ready
-      ? "可以回聊天验证"
-      : `还差 ${reviewBlockingCount} 项`;
 
   return (
     <>
@@ -52,21 +39,16 @@ export default function SettingsOverview({
       >
         <div className="wb-hero-copy">
           <h1 style={{ fontSize: "1.75rem" }}>Settings</h1>
-          {primaryTitle ? <p style={{ margin: 0, color: "var(--cp-muted)" }}>{primaryTitle}</p> : null}
-          <div className="wb-chip-row">
-            <span className={`wb-chip ${review.ready ? "is-success" : "is-warning"}`} role="status">
-              {statusChipLabel}
-            </span>
-          </div>
+          {subtitle ? <p style={{ margin: 0, color: "var(--cp-muted)" }}>{subtitle}</p> : null}
         </div>
         <div className="wb-settings-hero-actions">
           <button
             type="button"
             className="wb-button wb-button-primary"
-            onClick={usingEchoMode ? onQuickConnect : review.ready ? onApply : onQuickConnect}
+            onClick={usingEchoMode ? onQuickConnect : onApply}
             disabled={connectBusy}
           >
-            {primaryActionLabel}
+            {usingEchoMode ? "连接真实模型" : "保存配置"}
           </button>
           <button
             type="button"
@@ -76,29 +58,6 @@ export default function SettingsOverview({
           >
             检查配置
           </button>
-          {usingEchoMode ? (
-            <button
-              type="button"
-              className="wb-button wb-button-secondary"
-              onClick={onApply}
-              disabled={connectBusy}
-            >
-              保存配置
-            </button>
-          ) : review.ready ? (
-            <Link className="wb-button wb-button-secondary" to="/">
-              回聊天验证
-            </Link>
-          ) : (
-            <button
-              type="button"
-              className="wb-button wb-button-secondary"
-              onClick={onApply}
-              disabled={connectBusy}
-            >
-              保存配置
-            </button>
-          )}
         </div>
       </section>
 
@@ -112,14 +71,14 @@ export default function SettingsOverview({
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("aliases")}>
           模型别名
         </button>
+        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
+          Memory
+        </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("channels")}>
           渠道
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("resource-limits")}>
           资源限制
-        </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
-          Memory
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("review")}>
           保存检查

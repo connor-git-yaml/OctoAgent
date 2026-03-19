@@ -457,19 +457,6 @@ export default function SettingsPage() {
         }}
       />
 
-      <SettingsResourceLimitsSection
-        agentProfiles={snapshot!.resources.agent_profiles ?? null}
-        workerProfiles={snapshot!.resources.worker_profiles ?? null}
-        onSubmit={async (targetType, profileId, limits) => {
-          await submitAction("agent_profile.update_resource_limits", {
-            target_type: targetType,
-            profile_id: profileId,
-            resource_limits: limits,
-          });
-        }}
-        busy={busyActionId === "agent_profile.update_resource_limits"}
-      />
-
       <section id="settings-group-memory" className="wb-panel">
         <div className="wb-panel-head">
           <div>
@@ -581,6 +568,19 @@ export default function SettingsPage() {
           </section>
         );
       })}
+
+      <SettingsResourceLimitsSection
+        agentProfiles={snapshot!.resources.agent_profiles ?? null}
+        workerProfiles={snapshot!.resources.worker_profiles ?? null}
+        onSubmit={async (targetType, profileId, limits) => {
+          await submitAction("agent_profile.update_resource_limits", {
+            target_type: targetType,
+            profile_id: profileId,
+            resource_limits: limits,
+          });
+        }}
+        busy={busyActionId === "agent_profile.update_resource_limits"}
+      />
 
       <section id="settings-group-review" className="wb-panel">
         <div className="wb-panel-head">
