@@ -344,15 +344,16 @@ function buildFlowNodes(
 
     // 包装层过滤：task_service 外层 MODEL_CALL（actor=system）和
     // chat.*.inline Skill 都是不调模型的包装层，隐藏并消耗配对
+    // 注意：必须按 actor 匹配 COMPLETED，避免抢走内层 worker 的配对
     if (isWrapperModelCall(event, events, i)) {
       consumed.add(event.event_id);
-      const comp = findCompletion(events, i + 1, PAIR_MAP[event.type] || [], consumed);
+      const comp = findCompletionByActor(events, i + 1, PAIR_MAP[event.type] || [], consumed, event.actor);
       if (comp) consumed.add(comp.event_id);
       continue;
     }
     if (isInlineSkill(event)) {
       consumed.add(event.event_id);
-      const comp = findCompletion(events, i + 1, PAIR_MAP[event.type] || [], consumed);
+      const comp = findCompletionByActor(events, i + 1, PAIR_MAP[event.type] || [], consumed, event.actor);
       if (comp) consumed.add(comp.event_id);
       continue;
     }
@@ -426,6 +427,22 @@ function findCompletion(
     const c = events[j];
     if (consumed.has(c.event_id)) continue;
     if (completionTypes.includes(c.type)) return c;
+  }
+  return undefined;
+}
+
+/** 按 actor 匹配的 findCompletion，避免包装层抢走内层事件的配对 */
+function findCompletionByActor(
+  events: TaskEvent[],
+  startIdx: number,
+  completionTypes: string[],
+  consumed: Set<string>,
+  actor: string,
+): TaskEvent | undefined {
+  for (let j = startIdx; j < events.length; j++) {
+    const c = events[j];
+    if (consumed.has(c.event_id)) continue;
+    if (completionTypes.includes(c.type) && c.actor === actor) return c;
   }
   return undefined;
 }
