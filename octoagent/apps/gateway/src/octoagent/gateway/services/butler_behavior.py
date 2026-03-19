@@ -1192,6 +1192,62 @@ def build_runtime_hint_bundle(
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 (Feature 064): 简单对话识别
+# 仅作为性能优化（跳过 memory recall 等准备步骤），不影响 Butler Execution Loop 的核心执行逻辑。
+# 误判（false negative）不影响正确性——未被识别的请求正常进入完整流程。
+# ---------------------------------------------------------------------------
+
+# 纯问候语——匹配最常见的问候短语，避免误匹配"你好，帮我查一下..."等复合句
+_TRIVIAL_GREETING_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^(你好|hello|hi|hey|嗨|哈喽|早|早上好|晚上好|下午好)\s*[!！。.？?]*$", re.I),
+]
+
+# 身份询问——"你是谁/你是什么模型"等直接身份问题
+_TRIVIAL_IDENTITY_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^(你是谁|你是什么|你叫什么|what are you|who are you|你是什么模型)\s*[?？。.]*$", re.I),
+]
+
+# 致谢/确认——简短的正向反馈，不含后续请求
+_TRIVIAL_ACK_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^(谢谢|thanks|thank you|好的|ok|好|明白了|知道了|收到|了解)\s*[!！。.]*$", re.I),
+]
+
+# 简单元问题——关于 Agent 自身能力的简短提问
+_TRIVIAL_META_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^(你能做什么|你有什么功能|help|帮助)\s*[?？。.]*$", re.I),
+]
+
+
+def _is_trivial_direct_answer(user_text: str) -> bool:
+    """判断用户消息是否为简单直答类型。
+
+    保守匹配，仅覆盖最明确的几类：
+    1. 纯问候（你好/hello/hi + 无实质问题）
+    2. 身份询问（你是谁/什么模型）
+    3. 致谢/确认（谢谢/好的/明白了）
+    4. 简单元问题（你能做什么）
+
+    该函数仅作为性能优化（跳过 memory recall 等准备步骤），
+    不影响 Butler Execution Loop 的核心执行逻辑。
+    误判不影响正确性——未被识别的请求正常进入完整流程。
+    """
+    normalized = user_text.strip()
+    if not normalized or len(normalized) > 30:
+        return False
+
+    for patterns in (
+        _TRIVIAL_GREETING_PATTERNS,
+        _TRIVIAL_IDENTITY_PATTERNS,
+        _TRIVIAL_ACK_PATTERNS,
+        _TRIVIAL_META_PATTERNS,
+    ):
+        for pattern in patterns:
+            if pattern.match(normalized):
+                return True
+    return False
+
+
 def decide_butler_decision(
     user_text: str,
     *,

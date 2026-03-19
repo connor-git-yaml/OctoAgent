@@ -6,6 +6,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
@@ -137,210 +139,6 @@ class _FailingFreshnessLLMService(_FreshnessLLMService):
             metadata=metadata,
             worker_capability=worker_capability,
             tool_profile=tool_profile,
-        )
-
-
-class _ButlerDecisionLLMService:
-    supports_butler_decision_phase = True
-
-    def __init__(self) -> None:
-        self.decision_calls: list[dict[str, object]] = []
-
-    async def call(
-        self,
-        prompt_or_messages,
-        model_alias: str | None = None,
-        *,
-        task_id: str | None = None,
-        trace_id: str | None = None,
-        metadata: dict | None = None,
-        worker_capability: str | None = None,
-        tool_profile: str | None = None,
-    ) -> ModelCallResult:
-        del task_id, trace_id, worker_capability, tool_profile
-        resolved_metadata = dict(metadata or {})
-        if resolved_metadata.get("decision_phase") == "butler_decision":
-            self.decision_calls.append(
-                {
-                    "metadata": resolved_metadata,
-                    "prompt_or_messages": prompt_or_messages,
-                }
-            )
-            content = json.dumps(
-                {
-                    "mode": "ask_once",
-                    "category": "work_priority_context",
-                    "rationale": "用户要排序，但缺少真实待办清单。",
-                    "missing_inputs": ["today_tasks"],
-                    "assumptions": [],
-                    "tool_intent": "",
-                    "target_worker_type": "",
-                    "user_visible_boundary_note": "",
-                    "reply_prompt": (
-                        "我可以帮你把今天下午的工作拆成 3 个优先级，"
-                        "但我现在还没拿到你的真实待办列表。"
-                    ),
-                },
-                ensure_ascii=False,
-            )
-        else:
-            content = "普通模型答复。"
-        return ModelCallResult(
-            content=content,
-            model_alias=model_alias or "main",
-            model_name="butler-decision-test",
-            provider="tests",
-            duration_ms=5,
-            token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
-            cost_usd=0.0,
-            cost_unavailable=False,
-            is_fallback=False,
-            fallback_reason="",
-        )
-
-
-class _RoutingButlerDecisionLLMService:
-    supports_butler_decision_phase = True
-
-    def __init__(
-        self,
-        *,
-        mode: str,
-        target_worker_type: str,
-        category: str,
-        worker_content: str,
-    ) -> None:
-        self._mode = mode
-        self._target_worker_type = target_worker_type
-        self._category = category
-        self._worker_content = worker_content
-        self.decision_calls: list[dict[str, object]] = []
-
-    async def call(
-        self,
-        prompt_or_messages,
-        model_alias: str | None = None,
-        *,
-        task_id: str | None = None,
-        trace_id: str | None = None,
-        metadata: dict | None = None,
-        worker_capability: str | None = None,
-        tool_profile: str | None = None,
-    ) -> ModelCallResult:
-        del prompt_or_messages, task_id, trace_id, tool_profile
-        resolved_metadata = dict(metadata or {})
-        if resolved_metadata.get("decision_phase") == "butler_decision":
-            self.decision_calls.append({"metadata": resolved_metadata})
-            content = json.dumps(
-                {
-                    "mode": self._mode,
-                    "category": self._category,
-                    "rationale": f"这类请求更适合交给 {self._target_worker_type} worker 处理。",
-                    "missing_inputs": [],
-                    "assumptions": [],
-                    "tool_intent": "web.search"
-                    if self._target_worker_type == "research"
-                    else "ops.execute",
-                    "target_worker_type": self._target_worker_type,
-                    "user_visible_boundary_note": "",
-                    "reply_prompt": "",
-                },
-                ensure_ascii=False,
-            )
-        elif (
-            str(resolved_metadata.get("selected_worker_type", "")).strip()
-            == self._target_worker_type
-            or str(worker_capability or "").strip() == self._target_worker_type
-        ):
-            content = self._worker_content
-        else:
-            content = "General worker 默认答复。"
-        return ModelCallResult(
-            content=content,
-            model_alias=model_alias or "main",
-            model_name="butler-routing-test",
-            provider="tests",
-            duration_ms=5,
-            token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
-            cost_usd=0.0,
-            cost_unavailable=False,
-            is_fallback=False,
-            fallback_reason="",
-        )
-
-
-class _ConversationAwareButlerDecisionLLMService:
-    supports_butler_decision_phase = True
-
-    def __init__(self) -> None:
-        self.decision_prompts: list[str] = []
-
-    async def call(
-        self,
-        prompt_or_messages,
-        model_alias: str | None = None,
-        *,
-        task_id: str | None = None,
-        trace_id: str | None = None,
-        metadata: dict | None = None,
-        worker_capability: str | None = None,
-        tool_profile: str | None = None,
-    ) -> ModelCallResult:
-        del task_id, trace_id, worker_capability, tool_profile
-        resolved_metadata = dict(metadata or {})
-        if isinstance(prompt_or_messages, str):
-            joined = prompt_or_messages
-        else:
-            joined = "\n\n".join(str(item.get("content", "")) for item in prompt_or_messages)
-        if resolved_metadata.get("decision_phase") == "butler_decision":
-            self.decision_prompts.append(joined)
-            if (
-                "RecentConversation:" in joined
-                and "我现在还没拿到你的真实待办列表" in joined
-                and "修 bug、开会、写文档" in joined
-            ):
-                content = json.dumps(
-                    {
-                        "mode": "direct_answer",
-                        "category": "work_priority_followup_resolved",
-                        "rationale": "最近对话已经说明这是上一轮待办补充，可以直接继续回答。",
-                        "missing_inputs": [],
-                        "assumptions": [],
-                        "tool_intent": "",
-                        "target_worker_type": "",
-                        "user_visible_boundary_note": "",
-                        "reply_prompt": "",
-                    },
-                    ensure_ascii=False,
-                )
-            else:
-                content = json.dumps(
-                    {
-                        "mode": "ask_once",
-                        "category": "work_priority_context",
-                        "rationale": "还缺真实待办清单。",
-                        "missing_inputs": ["today_tasks"],
-                        "assumptions": [],
-                        "tool_intent": "",
-                        "target_worker_type": "",
-                        "user_visible_boundary_note": "",
-                        "reply_prompt": "我现在还没拿到你的真实待办列表。",
-                    },
-                    ensure_ascii=False,
-                )
-        else:
-            content = "已基于你刚补充的 3 项任务继续给出优先级排序。"
-        return ModelCallResult(
-            content=content,
-            model_alias=model_alias or "main",
-            model_name="butler-conversation-test",
-            provider="tests",
-            duration_ms=5,
-            token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
-            cost_usd=0.0,
-            cost_unavailable=False,
-            is_fallback=False,
-            fallback_reason="",
         )
 
 
@@ -528,16 +326,11 @@ class TestOrchestrator:
         events = await store_group.event_store.get_events_for_task(task_id)
         event_types = [event.type for event in events]
         assert "ORCH_DECISION" in event_types
-        assert "A2A_MESSAGE_SENT" in event_types
-        assert "A2A_MESSAGE_RECEIVED" in event_types
-        assert "WORKER_DISPATCHED" in event_types
-        assert "WORKER_RETURNED" in event_types
-        conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
-        assert len(conversations) == 1
-        messages = await store_group.a2a_store.list_messages(
-            a2a_conversation_id=conversations[0].a2a_conversation_id
-        )
-        assert [item.message_type for item in messages] == ["TASK", "HEARTBEAT", "RESULT"]
+        # Feature 064 Phase 1: Butler Direct Execution 路径不经过 Worker 派发，
+        # 因此不产生 A2A/Worker 事件，但保留 MODEL_CALL 和 ARTIFACT 事件。
+        assert "MODEL_CALL_STARTED" in event_types
+        assert "MODEL_CALL_COMPLETED" in event_types
+        assert "ARTIFACT_CREATED" in event_types
 
         await store_group.conn.close()
 
@@ -643,11 +436,15 @@ class TestOrchestrator:
         task_id, created = await task_service.create_task(msg)
         assert created is True
 
+        # Feature 064 Phase 1: 使用 parent_task_id 标记为子任务，
+        # 绕过 Butler Direct Execution 路径，确保请求走 Worker Dispatch
+        # 路径以触发 hop guard 检查。
         result = await orchestrator.dispatch(
             task_id=task_id,
             user_text=msg.text,
             hop_count=3,
             max_hops=3,
+            metadata={"parent_task_id": "parent-hop-guard"},
         )
         assert result.status == WorkerExecutionStatus.FAILED
         assert result.retryable is False
@@ -977,223 +774,10 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert result.worker_id == "worker.llm.default"
-            assert result.summary != "butler_clarification:work_priority_context"
-        finally:
-            await store_group.conn.close()
-
-    async def test_model_butler_decision_preflight_can_drive_inline_clarification(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        llm_service = _ButlerDecisionLLMService()
-        store_group, task_service, orchestrator = await _build_context(
-            tmp_path,
-            llm_service=llm_service,
-        )
-
-        try:
-            msg = NormalizedMessage(
-                text="帮我把今天下午的工作拆成 3 个优先级，并给我一个先做什么后做什么的顺序。",
-                idempotency_key="f049-orch-model-decision-work-priority",
-            )
-            task_id, created = await task_service.create_task(msg)
-            assert created is True
-
-            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            # Feature 064 Phase 1: Butler Direct Execution 路径处理，
+            # worker_id 为 butler.main
             assert result.worker_id == "butler.main"
-            assert result.summary == "butler_clarification:work_priority_context"
-            assert len(llm_service.decision_calls) == 1
-
-            decision_call = llm_service.decision_calls[0]
-            assert decision_call["metadata"]["decision_phase"] == "butler_decision"
-            joined_prompt = "\n\n".join(
-                str(item.get("content", "")) for item in decision_call["prompt_or_messages"]
-            )
-            assert "ToolUniverseHints:" in joined_prompt
-            assert "tool_universe_note: delegation_plane_unavailable_for_preflight" in joined_prompt
-
-            events = await store_group.event_store.get_events_for_task(task_id)
-            assert [event.type for event in events].count("MODEL_CALL_STARTED") == 2
-            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 2
-
-            artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
-            artifact_names = [artifact.name for artifact in artifacts]
-            assert "butler-decision-request" in artifact_names
-            assert "butler-decision-response" in artifact_names
-
-            decision_response = next(
-                artifact for artifact in artifacts if artifact.name == "butler-decision-response"
-            )
-            decision_response_content = (
-                await store_group.artifact_store.get_artifact_content(
-                    decision_response.artifact_id
-                )
-            ).decode("utf-8")
-            assert '"mode": "ask_once"' in decision_response_content
-            assert '"category": "work_priority_context"' in decision_response_content
-
-            final_completion = next(
-                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
-            )
-            final_content = (
-                await store_group.artifact_store.get_artifact_content(
-                    final_completion.payload["artifact_ref"]
-                )
-            ).decode("utf-8")
-            assert "我现在还没拿到你的真实待办列表" in final_content
-        finally:
-            await store_group.conn.close()
-
-    async def test_model_butler_decision_delegate_ops_routes_without_delegation_plane(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        llm_service = _RoutingButlerDecisionLLMService(
-            mode="delegate_ops",
-            target_worker_type="ops",
-            category="ops_triage",
-            worker_content="Ops worker 执行结果：已完成本机排查并整理处理建议。",
-        )
-        store_group, task_service, orchestrator = await _build_context(
-            tmp_path,
-            llm_service=llm_service,
-        )
-
-        try:
-            msg = NormalizedMessage(
-                text="帮我排查一下本机磁盘占用并给出处理建议。",
-                idempotency_key="f049-orch-model-decision-delegate-ops",
-            )
-            task_id, created = await task_service.create_task(msg)
-            assert created is True
-
-            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert result.worker_id == "worker.llm.ops"
-            assert len(llm_service.decision_calls) == 1
-
-            events = await store_group.event_store.get_events_for_task(task_id)
-            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 2
-            completion = next(
-                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
-            )
-            content = (
-                await store_group.artifact_store.get_artifact_content(
-                    completion.payload["artifact_ref"]
-                )
-            ).decode("utf-8")
-            assert "Ops worker 执行结果" in content
-
-            artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
-            artifact_names = [artifact.name for artifact in artifacts]
-            assert "butler-decision-request" in artifact_names
-            assert "butler-decision-response" in artifact_names
-        finally:
-            await store_group.conn.close()
-
-    async def test_model_butler_decision_delegate_research_routes_through_delegation_plane(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        llm_service = _RoutingButlerDecisionLLMService(
-            mode="delegate_research",
-            target_worker_type="research",
-            category="latest_info_lookup",
-            worker_content="Research worker 实时检索结果：已完成最新资料汇总。",
-        )
-        store_group, task_service, orchestrator = await _build_freshness_context(
-            tmp_path,
-            llm_service=llm_service,
-        )
-
-        try:
-            msg = NormalizedMessage(
-                text="帮我联网查一下 OpenAI 最新文档变化。",
-                idempotency_key="f049-orch-model-decision-delegate-research",
-            )
-            task_id, created = await task_service.create_task(msg)
-            assert created is True
-
-            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert result.worker_id == "worker.llm.research"
-            assert len(llm_service.decision_calls) == 1
-
-            works = await store_group.work_store.list_works(task_id=task_id)
-            assert len(works) == 1
-            work = works[0]
-            assert work.selected_worker_type.value == "research"
-            assert work.target_kind.value == "subagent"
-            request_metadata = work.metadata["request_context"]["metadata"]
-            assert request_metadata["butler_decision_mode"] == "delegate_research"
-            assert request_metadata["requested_worker_type"] == "research"
-            assert request_metadata["butler_decision_source"] == "model"
-            assert request_metadata["butler_delegate_original_user_text"] == msg.text
-            assert request_metadata["butler_delegate_objective"] != msg.text
-            assert "ButlerDelegation for research" in request_metadata["butler_delegate_objective"]
-            assert request_metadata["delegate_continuity_topic"] == "latest_info_lookup"
-
-            events = await store_group.event_store.get_events_for_task(task_id)
-            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 2
-            completion = next(
-                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
-            )
-            content = (
-                await store_group.artifact_store.get_artifact_content(
-                    completion.payload["artifact_ref"]
-                )
-            ).decode("utf-8")
-            assert "Research worker 实时检索结果" in content
-
-            artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
-            artifact_names = [artifact.name for artifact in artifacts]
-            assert "butler-decision-request" in artifact_names
-            assert "butler-decision-response" in artifact_names
-
-            conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
-            assert len(conversations) == 1
-            messages = await store_group.a2a_store.list_messages(
-                a2a_conversation_id=conversations[0].a2a_conversation_id
-            )
-            assert messages[0].message_type == "TASK"
-            assert messages[0].payload["user_text"] != msg.text
-            assert "ButlerDelegation for research" in messages[0].payload["user_text"]
-        finally:
-            await store_group.conn.close()
-
-    async def test_model_butler_decision_prompt_includes_resolved_tool_universe(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        llm_service = _ButlerDecisionLLMService()
-        store_group, task_service, orchestrator = await _build_freshness_context(
-            tmp_path,
-            llm_service=llm_service,
-        )
-
-        try:
-            msg = NormalizedMessage(
-                text="今天天气怎么样？",
-                idempotency_key="f051-orch-tool-universe",
-            )
-            task_id, created = await task_service.create_task(msg)
-            assert created is True
-
-            result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert len(llm_service.decision_calls) == 1
-
-            decision_call = llm_service.decision_calls[0]
-            joined_prompt = "\n\n".join(
-                str(item.get("content", "")) for item in decision_call["prompt_or_messages"]
-            )
-            assert "ToolUniverseHints:" in joined_prompt
-            assert "tool_resolution_mode: profile_first_core" in joined_prompt
-            assert "selected_tools:" in joined_prompt
-            assert "web.search(mounted)" in joined_prompt
-            assert "tool_universe_note: resolved_before_butler_decision" in joined_prompt
+            assert result.summary != "butler_clarification:work_priority_context"
         finally:
             await store_group.conn.close()
 
@@ -1213,7 +797,8 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert result.worker_id == "worker.llm.default"
+            # Feature 064 Phase 1: Butler Direct Execution 路径处理天气查询
+            assert result.worker_id == "butler.main"
             assert result.summary != "butler_clarification:weather_location"
 
             events = await store_group.event_store.get_events_for_task(task_id)
@@ -1241,12 +826,14 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            assert result.worker_id == "worker.llm.default"
+            # Feature 064 Phase 1: Butler Direct Execution 路径处理
+            assert result.worker_id == "butler.main"
 
             assert len(llm_service.calls) == 1
             metadata = llm_service.calls[0]["metadata"]
             assert isinstance(metadata, dict)
-            assert metadata["single_loop_executor"] is True
+            # Butler Direct Execution 设置 butler_execution_mode=direct
+            assert metadata.get("butler_execution_mode") == "direct"
             assert "decision_phase" not in metadata
 
             artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
@@ -1328,60 +915,6 @@ class TestOrchestrator:
             assert metadata["single_loop_executor_mode"] == "butler_research"
             assert metadata["requested_worker_type_source"] == "requested_worker_profile_id"
             assert "decision_phase" not in metadata
-        finally:
-            await store_group.conn.close()
-
-    async def test_model_butler_decision_uses_recent_conversation_context_for_followup(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        llm_service = _ConversationAwareButlerDecisionLLMService()
-        store_group, task_service, orchestrator = await _build_context(
-            tmp_path,
-            llm_service=llm_service,
-        )
-
-        try:
-            initial_text = "帮我把今天下午的工作拆成 3 个优先级，并给我一个先做什么后做什么的顺序。"
-            msg = NormalizedMessage(
-                text=initial_text,
-                idempotency_key="f049-orch-conversation-aware-followup",
-            )
-            task_id, created = await task_service.create_task(msg)
-            assert created is True
-
-            first_result = await orchestrator.dispatch(task_id=task_id, user_text=initial_text)
-            assert first_result.status == WorkerExecutionStatus.SUCCEEDED
-            assert first_result.worker_id == "butler.main"
-            assert first_result.summary == "butler_clarification:work_priority_context"
-
-            followup_text = "修 bug、开会、写文档"
-            append_event = await task_service.append_user_message(task_id, followup_text)
-            assert append_event.type == "USER_MESSAGE"
-
-            second_result = await orchestrator.dispatch(task_id=task_id, user_text=followup_text)
-            assert second_result.status == WorkerExecutionStatus.SUCCEEDED
-            assert second_result.worker_id == "worker.llm.default"
-
-            assert len(llm_service.decision_prompts) == 2
-            second_prompt = llm_service.decision_prompts[-1]
-            assert "RecentConversation:" in second_prompt
-            assert "session_rolling_summary:" in second_prompt
-            assert "帮我把今天下午的工作拆成 3 个优先级" in second_prompt
-            assert "我现在还没拿到你的真实待办列表" in second_prompt
-            assert "修 bug、开会、写文档" in second_prompt
-
-            events = await store_group.event_store.get_events_for_task(task_id)
-            assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 4
-            latest_completion = next(
-                event for event in reversed(events) if event.type == "MODEL_CALL_COMPLETED"
-            )
-            latest_content = (
-                await store_group.artifact_store.get_artifact_content(
-                    latest_completion.payload["artifact_ref"]
-                )
-            ).decode("utf-8")
-            assert "已基于你刚补充的 3 项任务继续给出优先级排序" in latest_content
         finally:
             await store_group.conn.close()
 

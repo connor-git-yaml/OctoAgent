@@ -33,7 +33,6 @@ from octoagent.core.models import (
     AgentSessionKind,
     ButlerDecision,
     ButlerDecisionMode,
-    ButlerLoopPlan,
     DelegationResult,
     DelegationTargetKind,
     DispatchEnvelope,
@@ -44,7 +43,7 @@ from octoagent.core.models import (
     OrchestratorRequest,
     OwnerProfile,
     RecallPlan,
-    RecallPlanMode,
+
     RiskLevel,
     SessionContextState,
     TaskHeartbeatPayload,
@@ -84,13 +83,12 @@ from .agent_context import (
     build_scope_aware_session_id,
 )
 from .butler_behavior import (
-    build_butler_decision_messages,
+    _is_trivial_direct_answer,
     build_runtime_hint_bundle,
-    build_tool_universe_hints,
+
     build_weather_followup_query,
     contains_explicit_location,
     decide_butler_decision,
-    parse_butler_loop_plan_response,
     render_behavior_system_block,
     render_runtime_hint_block,
 )
@@ -765,6 +763,15 @@ class OrchestratorService:
                 decision=butler_decision,
             )
 
+        # Phase 1 (Feature 064): Butler Direct Execution
+        # butler_decision is None 且无委派请求时，走 Butler Execution Loop
+        # 而非 Delegation Plane -> Worker Dispatch
+        if self._should_butler_direct_execute(request):
+            return await self._dispatch_butler_direct_execution(
+                request=request,
+                gate_decision=gate_decision,
+            )
+
         freshness_request = await self._resolve_butler_owned_freshness_request(request)
         if freshness_request is not None:
             return await self._dispatch_butler_owned_freshness(
@@ -1066,26 +1073,12 @@ class OrchestratorService:
             request.user_text,
             runtime_hints=hints,
         )
-        model_plan, model_resolution_status = await self._resolve_model_butler_decision(
-            request=request,
-            runtime_hints=hints,
-        )
-        resolved = (
-            model_plan.decision
-            if model_plan is not None
-            else self._annotate_compatibility_fallback_decision(
-                decision,
-                model_resolution_status=model_resolution_status,
-            )
-        )
-        request_metadata_updates = (
-            self._build_precomputed_recall_plan_metadata(model_plan.recall_plan)
-            if model_plan is not None and resolved.mode is ButlerDecisionMode.DIRECT_ANSWER
-            else {}
-        )
-        if resolved.mode is ButlerDecisionMode.DIRECT_ANSWER:
-            return None, request_metadata_updates
-        return resolved, request_metadata_updates
+
+        # Phase 1 (Feature 064): 跳过 model decision preflight
+        # 天气/位置等规则决策保留，其余直接返回 None -> 进入 Butler Direct Execution
+        if decision.mode is ButlerDecisionMode.DIRECT_ANSWER:
+            return None, {}
+        return decision, {}
 
     async def _dispatch_inline_butler_decision(
         self,
@@ -1148,6 +1141,75 @@ class OrchestratorService:
             dispatch_prefix="butler-clarification",
         )
 
+    async def _dispatch_butler_direct_execution(
+        self,
+        *,
+        request: OrchestratorRequest,
+        gate_decision: OrchestratorPolicyDecision,
+    ) -> WorkerResult:
+        """Butler 直接执行路径：使用主 LLM 直接处理用户请求。
+
+        Phase 1 (Feature 064): 跳过 Butler Decision Preflight，复用
+        ``TaskService.process_task_with_llm()`` 的 Event Sourcing 链路，
+        与 Worker 执行路径保持一致的事件粒度。
+
+        Args:
+            request: 经过 Policy Gate 和 prepare 阶段的编排请求。
+            gate_decision: Policy Gate 评估结果。
+
+        Returns:
+            WorkerResult: Butler 直接执行的结果，状态映射与 Worker 路径一致。
+        """
+        is_trivial = _is_trivial_direct_answer(request.user_text)
+        route_reason = (
+            "butler_direct_execution:trivial"
+            if is_trivial
+            else "butler_direct_execution:standard"
+        )
+        await self._write_orch_decision_event(
+            request=request,
+            route_reason=route_reason,
+            gate_decision=gate_decision,
+        )
+
+        butler_metadata = {
+            **dict(request.metadata),
+            "final_speaker": "butler",
+            "butler_execution_mode": "direct",
+            "butler_is_trivial": is_trivial,
+        }
+
+        task_service = TaskService(self._stores, self._sse_hub)
+        await task_service.ensure_task_running(
+            request.task_id,
+            trace_id=request.trace_id,
+        )
+
+        # 复用现有 process_task_with_llm 链路
+        # Butler 直接执行时使用真实 LLM（self._llm_service），
+        # 而非 _InlineReplyLLMService
+        await task_service.process_task_with_llm(
+            task_id=request.task_id,
+            user_text=request.user_text,
+            llm_service=self._llm_service,
+            model_alias=request.model_alias or "main",
+            execution_context=None,
+            dispatch_metadata=butler_metadata,
+            worker_capability="llm_generation",
+            tool_profile="standard",
+            runtime_context=request.runtime_context,
+        )
+
+        task_after = await self._stores.task_store.get_task(request.task_id)
+        return self._butler_worker_result(
+            request=request,
+            task_status=(
+                task_after.status if task_after is not None else TaskStatus.FAILED
+            ),
+            success_summary=f"butler_direct:{('trivial' if is_trivial else 'standard')}",
+            dispatch_prefix="butler-direct",
+        )
+
     def _is_butler_decision_eligible(self, request: OrchestratorRequest) -> bool:
         if request.worker_capability not in {"", "llm_generation"}:
             return False
@@ -1158,6 +1220,17 @@ class OrchestratorService:
             return False
         requested_worker_type = self._canonical_requested_worker_type(metadata)
         return not requested_worker_type or requested_worker_type == "general"
+
+    def _should_butler_direct_execute(self, request: OrchestratorRequest) -> bool:
+        """判断请求是否应走 Butler Direct Execution 路径。
+
+        Phase 1 (Feature 064): Butler 直接执行条件：
+        1. LLMService 支持 tool calling（supports_single_loop_executor）
+        2. 请求满足 Butler 决策资格（非子任务、非 spawned 等）
+        """
+        if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
+            return False
+        return self._is_butler_decision_eligible(request)
 
     def _is_freshness_butler_decision(self, decision: ButlerDecision) -> bool:
         if self._delegation_plane is None:
@@ -1270,195 +1343,6 @@ class OrchestratorService:
                 if latest_candidate is None or sort_key > latest_candidate[0]:
                     latest_candidate = (sort_key, candidate)
         return None if latest_candidate is None else latest_candidate[1]
-
-    async def _resolve_model_butler_decision(
-        self,
-        *,
-        request: OrchestratorRequest,
-        runtime_hints,
-    ) -> tuple[ButlerLoopPlan | None, str]:
-        if not bool(getattr(self._llm_service, "supports_butler_decision_phase", False)):
-            return None, "unsupported"
-        task = await self._stores.task_store.get_task(request.task_id)
-        if task is None:
-            return None, "task_missing"
-
-        agent_context_service = AgentContextService(
-            self._stores,
-            project_root=self._project_root,
-        )
-        project, workspace = await agent_context_service._resolve_project_scope(
-            task=task,
-            surface=task.requester.channel or "chat",
-        )
-        agent_profile, _ = await agent_context_service._resolve_agent_profile(
-            project=project,
-            requested_profile_id=str(request.metadata.get("agent_profile_id", "")).strip(),
-        )
-        owner_profile = await agent_context_service._ensure_owner_profile()
-        tool_universe = await self._resolve_butler_tool_universe_hints(
-            request=request,
-            agent_profile_id=agent_profile.profile_id,
-            project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
-        )
-        hydrated_hints = await self._build_request_runtime_hints(
-            request,
-            owner_profile=owner_profile,
-        )
-        hydrated_hints = hydrated_hints.model_copy(
-            update={
-                "tool_universe": tool_universe,
-                "metadata": {
-                    **dict(hydrated_hints.metadata),
-                    "tool_universe_resolution_mode": tool_universe.resolution_mode,
-                    "tool_universe_scope": tool_universe.scope,
-                },
-            }
-        )
-        behavior_block = render_behavior_system_block(
-            agent_profile=agent_profile,
-            project_name=project.name if project is not None else "",
-            project_slug=project.slug if project is not None else "",
-            project_root=self._project_root,
-            workspace_id=workspace.workspace_id if workspace is not None else "",
-            workspace_slug=workspace.slug if workspace is not None else "",
-            workspace_root_path=workspace.root_path if workspace is not None else "",
-        )
-        hint_block = render_runtime_hint_block(
-            user_text=request.user_text,
-            runtime_hints=hydrated_hints,
-        )
-        conversation_context_block = await self._build_butler_recent_conversation_block(
-            task_id=request.task_id,
-        )
-        messages = build_butler_decision_messages(
-            user_text=request.user_text,
-            behavior_system_block=behavior_block,
-            runtime_hint_block=hint_block,
-            conversation_context_block=conversation_context_block,
-            project_name=project.name if project is not None else "",
-            project_slug=project.slug if project is not None else "",
-        )
-        task_service = TaskService(self._stores, self._sse_hub)
-        llm_result, request_artifact, response_artifact = await task_service.record_auxiliary_model_call(
-            task_id=request.task_id,
-            trace_id=request.trace_id,
-            llm_service=self._llm_service,
-            prompt_or_messages=messages,
-            request_summary=f"ButlerDecision preflight: {request.user_text[:80]}",
-            model_alias=request.model_alias or "main",
-            dispatch_metadata={
-                **dict(request.metadata),
-                "decision_phase": "butler_decision",
-                "decision_task_id": request.task_id,
-            },
-            worker_capability="butler_decision",
-            tool_profile="minimal",
-            request_artifact_name="butler-decision-request",
-            request_artifact_description="ButlerDecision 预路由判定请求",
-            request_artifact_source="butler-decision-request",
-            response_artifact_name="butler-decision-response",
-            response_artifact_description="ButlerDecision 预路由判定响应",
-            response_artifact_source="butler-decision-response",
-        )
-        parsed = parse_butler_loop_plan_response(llm_result.content)
-        if parsed is None:
-            return None, "parse_failed"
-        return ButlerLoopPlan(
-            decision=parsed.decision.model_copy(
-                update={
-                    "metadata": {
-                        **dict(parsed.decision.metadata),
-                        "decision_source": "model",
-                        "decision_request_artifact_ref": request_artifact.artifact_id,
-                        "decision_response_artifact_ref": response_artifact.artifact_id,
-                        "decision_tool_universe_resolution_mode": tool_universe.resolution_mode,
-                        "decision_tool_universe_scope": tool_universe.scope,
-                    }
-                }
-            ),
-            recall_plan=parsed.recall_plan.model_copy(
-                update={
-                    "metadata": {
-                        **dict(parsed.recall_plan.metadata),
-                        "plan_source": "butler_loop_plan",
-                        "request_artifact_ref": request_artifact.artifact_id,
-                        "response_artifact_ref": response_artifact.artifact_id,
-                    }
-                }
-            ),
-            metadata={
-                **dict(parsed.metadata),
-                "loop_plan_source": str(
-                    parsed.metadata.get("loop_plan_source", "model")
-                ).strip()
-                or "model",
-            },
-        ), "resolved"
-
-    @staticmethod
-    def _build_precomputed_recall_plan_metadata(recall_plan: RecallPlan) -> dict[str, Any]:
-        if recall_plan.mode is not RecallPlanMode.RECALL or not recall_plan.query.strip():
-            return {}
-        metadata = dict(recall_plan.metadata)
-        return {
-            "precomputed_recall_plan": recall_plan.model_dump(mode="json"),
-            "precomputed_recall_plan_source": str(
-                metadata.get("plan_source", "butler_loop_plan")
-            ).strip()
-            or "butler_loop_plan",
-            "precomputed_recall_plan_request_artifact_ref": str(
-                metadata.get("request_artifact_ref", "")
-            ).strip(),
-            "precomputed_recall_plan_response_artifact_ref": str(
-                metadata.get("response_artifact_ref", "")
-            ).strip(),
-        }
-
-    async def _resolve_butler_tool_universe_hints(
-        self,
-        *,
-        request: OrchestratorRequest,
-        agent_profile_id: str,
-        project_id: str = "",
-        workspace_id: str = "",
-    ):
-        tool_profile = str(request.tool_profile).strip() or "standard"
-        if self._delegation_plane is None:
-            return build_tool_universe_hints(
-                None,
-                scope="butler_main",
-                note="delegation_plane_unavailable_for_preflight",
-                tool_profile_fallback=tool_profile,
-            )
-        try:
-            selection = await self._delegation_plane.capability_pack.resolve_profile_first_tools(
-                ToolIndexQuery(
-                    query=request.user_text.strip() or "general request",
-                    limit=12,
-                    tool_groups=[],
-                    worker_type=WorkerType.GENERAL,
-                    tool_profile=tool_profile,
-                    project_id=project_id,
-                    workspace_id=workspace_id,
-                ),
-                worker_type=WorkerType.GENERAL,
-                requested_profile_id=agent_profile_id,
-            )
-        except Exception as exc:
-            return build_tool_universe_hints(
-                None,
-                scope="butler_main",
-                note=f"tool_universe_resolution_failed:{type(exc).__name__}",
-                tool_profile_fallback=tool_profile,
-            )
-        return build_tool_universe_hints(
-            selection,
-            scope="butler_main",
-            note="resolved_before_butler_decision",
-            tool_profile_fallback=tool_profile,
-        )
 
     @staticmethod
     def _build_butler_decision_trace_metadata(decision: ButlerDecision) -> dict[str, str]:

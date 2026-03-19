@@ -540,3 +540,102 @@ def test_behavior_pack_cache_invalidate_all(tmp_path: Path) -> None:
     count = invalidate_behavior_pack_cache()
     assert count >= 1
     assert behavior_pack_cache_size() == 0
+
+
+# ---------------------------------------------------------------------------
+# Feature 064 Phase 1: _is_trivial_direct_answer 单元测试
+# ---------------------------------------------------------------------------
+
+from octoagent.gateway.services.butler_behavior import _is_trivial_direct_answer
+
+
+class TestIsTrivialDirectAnswer:
+    """_is_trivial_direct_answer() 的正向/反向用例测试。"""
+
+    # ---- 正向用例：应返回 True ----
+
+    def test_greeting_nihao(self) -> None:
+        assert _is_trivial_direct_answer("你好") is True
+
+    def test_greeting_hello(self) -> None:
+        assert _is_trivial_direct_answer("hello") is True
+
+    def test_greeting_hello_upper(self) -> None:
+        assert _is_trivial_direct_answer("Hello") is True
+
+    def test_greeting_hi(self) -> None:
+        assert _is_trivial_direct_answer("Hi!") is True
+
+    def test_greeting_hey(self) -> None:
+        assert _is_trivial_direct_answer("hey") is True
+
+    def test_greeting_morning(self) -> None:
+        assert _is_trivial_direct_answer("早上好") is True
+
+    def test_identity_who_are_you(self) -> None:
+        assert _is_trivial_direct_answer("你是谁") is True
+
+    def test_identity_what_model(self) -> None:
+        assert _is_trivial_direct_answer("你是什么模型？") is True
+
+    def test_identity_what_are_you(self) -> None:
+        assert _is_trivial_direct_answer("what are you") is True
+
+    def test_ack_thanks(self) -> None:
+        assert _is_trivial_direct_answer("谢谢") is True
+
+    def test_ack_ok(self) -> None:
+        assert _is_trivial_direct_answer("好的") is True
+
+    def test_ack_ok_english(self) -> None:
+        assert _is_trivial_direct_answer("ok") is True
+
+    def test_ack_understood(self) -> None:
+        assert _is_trivial_direct_answer("明白了") is True
+
+    def test_ack_received(self) -> None:
+        assert _is_trivial_direct_answer("收到") is True
+
+    def test_meta_what_can_you_do(self) -> None:
+        assert _is_trivial_direct_answer("你能做什么") is True
+
+    def test_meta_help(self) -> None:
+        assert _is_trivial_direct_answer("帮助") is True
+
+    def test_meta_help_english(self) -> None:
+        assert _is_trivial_direct_answer("help") is True
+
+    def test_greeting_with_trailing_spaces(self) -> None:
+        assert _is_trivial_direct_answer("  你好  ") is True
+
+    def test_greeting_with_punctuation(self) -> None:
+        assert _is_trivial_direct_answer("你好！") is True
+
+    # ---- 反向用例：应返回 False ----
+
+    def test_code_request(self) -> None:
+        assert _is_trivial_direct_answer("帮我写一段代码") is False
+
+    def test_weather_query(self) -> None:
+        assert _is_trivial_direct_answer("今天天气怎么样") is False
+
+    def test_greeting_with_followup(self) -> None:
+        assert _is_trivial_direct_answer("你好，帮我查一下...") is False
+
+    def test_empty_string(self) -> None:
+        assert _is_trivial_direct_answer("") is False
+
+    def test_whitespace_only(self) -> None:
+        assert _is_trivial_direct_answer("   ") is False
+
+    def test_long_text_over_30_chars(self) -> None:
+        assert _is_trivial_direct_answer("你好啊我想问你一个关于编程的问题可以吗？") is False
+
+    def test_complex_greeting_with_question(self) -> None:
+        assert _is_trivial_direct_answer("你好啊我想问你一个关于编程的问题") is False
+
+    def test_general_question(self) -> None:
+        assert _is_trivial_direct_answer("Python 怎么安装？") is False
+
+    def test_tool_request(self) -> None:
+        assert _is_trivial_direct_answer("搜索一下最新新闻") is False
