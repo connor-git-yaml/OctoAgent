@@ -50,7 +50,7 @@ export default function MemoryResultsSection({
           </button>
           <div className="wb-chip-row">
             <span className="wb-chip">需授权 {memory.summary.vault_ref_count}</span>
-            <span className="wb-chip">待整理 {memory.summary.pending_replay_count}</span>
+            <span className="wb-chip">待整理 {memory.summary.pending_consolidation_count}</span>
           </div>
         </div>
       </div>

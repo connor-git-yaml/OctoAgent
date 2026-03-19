@@ -55,6 +55,7 @@ export default function MemoryPage() {
     sor_current_count: 0,
     sor_history_count: 0,
     fragment_count: 0,
+    pending_consolidation_count: 0,
     pending_replay_count: 0,
     vault_ref_count: 0,
     proposal_count: 0,

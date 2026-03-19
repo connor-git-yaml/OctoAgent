@@ -1383,6 +1383,7 @@ export interface MemoryRecordProjection {
 export interface MemoryConsoleSummary {
   scope_count: number;
   fragment_count: number;
+  pending_consolidation_count: number;
   sor_current_count: number;
   sor_history_count: number;
   vault_ref_count: number;

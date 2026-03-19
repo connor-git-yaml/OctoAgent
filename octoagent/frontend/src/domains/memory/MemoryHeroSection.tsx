@@ -46,7 +46,7 @@ export default function MemoryHeroSection({
         </article>
         <article className="wb-hero-metric">
           <p className="wb-card-label">待处理</p>
-          <strong>{memory.summary.pending_replay_count + memory.summary.vault_ref_count}</strong>
+          <strong>{memory.summary.pending_consolidation_count + memory.summary.vault_ref_count}</strong>
         </article>
       </div>
     </section>

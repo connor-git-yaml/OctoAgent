@@ -98,6 +98,7 @@ function buildMemorySnapshot(): any {
         summary: {
           sor_current_count: 2,
           fragment_count: 1,
+          pending_consolidation_count: 1,
           vault_ref_count: 0,
           pending_replay_count: 1,
           scope_count: 1,

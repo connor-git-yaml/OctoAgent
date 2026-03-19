@@ -356,7 +356,7 @@ class MemoryConsoleService:
 
         # 调用 LLM
         try:
-            result = await self._llm_service.call(
+            result = await self._llm_service.call_with_fallback(
                 messages=messages,
                 model_alias=model_alias,
                 temperature=0.3,
@@ -523,6 +523,8 @@ class MemoryConsoleService:
                         )
                     )
                     summary.fragment_count += 1
+                    if not fragment.metadata.get("consolidated_at"):
+                        summary.pending_consolidation_count += 1
             if layer in {"", "sor"}:
                 sor_records = await self._memory_store.search_sor(
                     scope,

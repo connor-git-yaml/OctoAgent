@@ -851,6 +851,7 @@ class MemoryRecordProjection(BaseModel):
 class MemoryConsoleSummary(BaseModel):
     scope_count: int = 0
     fragment_count: int = 0
+    pending_consolidation_count: int = 0
     sor_current_count: int = 0
     sor_history_count: int = 0
     vault_ref_count: int = 0

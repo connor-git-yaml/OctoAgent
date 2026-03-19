@@ -192,6 +192,7 @@ function buildSettingsSnapshot(): any {
         summary: {
           sor_current_count: 1,
           fragment_count: 2,
+          pending_consolidation_count: 2,
           pending_replay_count: 0,
           vault_ref_count: 0,
         },
