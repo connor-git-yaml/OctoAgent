@@ -1,12 +1,13 @@
 /**
  * RoundFlowCard -- 单个轮次的流程图卡片
  *
- * 水平连线的节点流：每个节点代表一次 LLM 调用 / 工具调用 / 产物等，
- * 按调用顺序排列，点击弹出详情弹框。
+ * 按 Agent 分行展示节点流：每行代表一个 Agent 的执行片段，
+ * 行首显示 Agent 名称，行内节点按调用顺序排列，点击弹出详情弹框。
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { Round, FlowNode } from "../../utils/roundSplitter";
+import { groupByAgent } from "../../utils/roundSplitter";
 import { formatTime } from "../../utils/formatTime";
 
 // ─── 节点图标 ────────────────────────────────────────────────
@@ -72,21 +73,15 @@ interface Props {
 }
 
 const COLLAPSE_THRESHOLD = 30;
-const VISIBLE_HEAD = 10;
-const VISIBLE_TAIL = 5;
 
 export default function RoundFlowCard({ round, onNodeClick }: Props) {
   const [expanded, setExpanded] = useState(false);
 
+  const lanes = useMemo(() => groupByAgent(round.nodes), [round.nodes]);
+
+  // 折叠逻辑：基于总节点数
   const shouldCollapse =
     round.nodes.length > COLLAPSE_THRESHOLD && !expanded;
-  const visibleNodes = shouldCollapse
-    ? [
-        ...round.nodes.slice(0, VISIBLE_HEAD),
-        ...round.nodes.slice(-VISIBLE_TAIL),
-      ]
-    : round.nodes;
-  const hiddenCount = round.nodes.length - VISIBLE_HEAD - VISIBLE_TAIL;
 
   return (
     <div className="tv-round-card">
@@ -104,55 +99,74 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
         </span>
       </div>
 
-      {/* 流程图 */}
-      <div className="tv-round-flow-scroll">
-        <div className="tv-round-flow">
-          {visibleNodes.map((node, i) => {
-            const isCollapsePoint = shouldCollapse && i === VISIBLE_HEAD;
+      {/* 按 Agent 分行的流程图 */}
+      <div className="tv-lanes">
+        {lanes.map((lane, laneIdx) => {
+          // 折叠模式下只保留前后几个 lane
+          if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
+            if (laneIdx === 2) {
+              return (
+                <div key="collapse" className="tv-lane">
+                  <div className="tv-lane-label" />
+                  <div className="tv-lane-flow-scroll">
+                    <div className="tv-lane-flow">
+                      <button
+                        className="tv-flow-collapse-btn"
+                        onClick={() => setExpanded(true)}
+                      >
+                        +{lanes.length - 3} 个 Agent 泳道
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          }
 
-            return (
-              <div key={node.id} style={{ display: "contents" }}>
-                {/* 连线（不是第一个节点、且不是折叠点） */}
-                {i > 0 && !isCollapsePoint && (
-                  <div className="tv-flow-connector" />
-                )}
-
-                {/* 折叠点 */}
-                {isCollapsePoint && (
-                  <>
-                    <div className="tv-flow-connector" />
-                    <button
-                      className="tv-flow-collapse-btn"
-                      onClick={() => setExpanded(true)}
-                    >
-                      +{hiddenCount}
-                    </button>
-                    <div className="tv-flow-connector" />
-                  </>
-                )}
-
-                {/* 节点 */}
-                <button
-                  className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
-                  onClick={() => onNodeClick(node)}
-                  title={node.label}
-                >
-                  <span className="tv-flow-node-circle">
-                    {iconFor(node)}
-                  </span>
-                  <span className="tv-flow-node-text">
-                    {shortLabel(node)}
-                  </span>
-                </button>
+          return (
+            <div key={`${lane.agent}-${laneIdx}`} className="tv-lane">
+              {/* Agent 名称标签 */}
+              <div className="tv-lane-label" title={lane.agent}>
+                <span className="tv-lane-label-text">{lane.agent}</span>
               </div>
-            );
-          })}
-        </div>
+
+              {/* 该 Agent 的节点流 */}
+              <div className="tv-lane-flow-scroll">
+                <div className="tv-lane-flow">
+                  {lane.nodes.map((node, i) => (
+                    <div key={node.id} style={{ display: "contents" }}>
+                      {/* 连线 */}
+                      {i > 0 && <div className="tv-flow-connector" />}
+
+                      {/* 节点 */}
+                      <button
+                        className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
+                        onClick={() => onNodeClick(node)}
+                        title={node.label}
+                      >
+                        <span className="tv-flow-node-circle">
+                          {iconFor(node)}
+                        </span>
+                        <span className="tv-flow-node-text">
+                          {shortLabel(node)}
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 底部统计 */}
       <div className="tv-round-stats">
         <span>{round.nodes.length} 个步骤</span>
+        <span className="tv-round-stats-agents">
+          {new Set(round.nodes.map((n) => n.agent)).size} 个 Agent
+        </span>
         {shouldCollapse && (
           <button
             className="tv-phase-expand-btn"

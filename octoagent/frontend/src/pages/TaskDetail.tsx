@@ -3,8 +3,8 @@
  *
  * 功能：
  * 1. 调用 GET /api/tasks/{id} 获取任务信息 + 事件 + artifacts
- * 2. 展示任务基本信息
- * 3. 可视化模式：PipelineBar（总览）+ 按轮次拆分的流程图 + 点击弹框
+ * 2. 展示任务基本信息（紧凑头部）
+ * 3. 可视化模式：按轮次拆分的 Agent 泳道流程图 + 点击弹框
  * 4. Raw Data 模式：事件时间线（类型、时间、payload 摘要）
  * 5. 进行中任务通过 useSSE 实时追加新事件
  */
@@ -20,7 +20,6 @@ import FrontDoorGate from "../components/FrontDoorGate";
 import { useSSE } from "../hooks/useSSE";
 import {
   SegmentedToggle,
-  PipelineBar,
   RoundFlowCard,
   NodeDetailModal,
 } from "../components/TaskVisualization";
@@ -30,6 +29,19 @@ import { splitIntoRounds } from "../utils/roundSplitter";
 import type { FlowNode } from "../utils/roundSplitter";
 import { formatTime } from "../utils/formatTime";
 import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
+
+/** 状态 badge 的用户友好文案 */
+const STATUS_LABEL: Record<string, string> = {
+  CREATED: "已创建",
+  RUNNING: "运行中",
+  WAITING_INPUT: "等待输入",
+  WAITING_APPROVAL: "等待审批",
+  PAUSED: "已暂停",
+  SUCCEEDED: "已完成",
+  FAILED: "失败",
+  CANCELLED: "已取消",
+  REJECTED: "已拒绝",
+};
 
 /** 生成 payload 摘要 */
 function payloadSummary(payload: Record<string, unknown>): string {
@@ -81,7 +93,7 @@ export default function TaskDetail() {
     void loadTask();
   }, [loadTask]);
 
-  // SSE 事件回调（不改动）
+  // SSE 事件回调
   const handleSSEEvent = useCallback((eventData: SSEEventData) => {
     // 追加新事件到列表（去重）
     setEvents((prev) => {
@@ -133,40 +145,61 @@ export default function TaskDetail() {
 
   if (error || !task) {
     return (
-      <div>
+      <div className="tv-page">
         <Link to="/" className="back-link">&larr; Back to tasks</Link>
         <div className="error">Error: {error || "Task not found"}</div>
       </div>
     );
   }
 
+  // 计算耗时
+  const duration = (() => {
+    const start = new Date(task.created_at).getTime();
+    const end = new Date(task.updated_at).getTime();
+    const diff = end - start;
+    if (diff < 1000) return "";
+    if (diff < 60_000) return `${(diff / 1000).toFixed(0)}s`;
+    return `${(diff / 60_000).toFixed(1)}min`;
+  })();
+
   return (
-    <div>
+    <div className="tv-page">
       <Link to="/" className="back-link">&larr; Back to tasks</Link>
 
-      {/* 任务头部 */}
-      <div className="task-header">
-        <h1>{task.title}</h1>
-        <span className={`status-badge ${task.status}`}>{task.status}</span>
-        {!isTerminal && (
-          <span
-            className={`sse-indicator ${sseStatus === "connected" ? "connected" : "disconnected"}`}
-            title={`SSE: ${sseStatus}`}
-          />
-        )}
-      </div>
-
-      {/* 任务信息 */}
-      <div className="card">
-        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: "var(--space-xs)" }}>
-          <span style={{ color: "var(--color-text-secondary)" }}>Task ID:</span>
-          <span style={{ fontFamily: "monospace", fontSize: "12px" }}>{task.task_id}</span>
-          <span style={{ color: "var(--color-text-secondary)" }}>Channel:</span>
-          <span>{task.requester.channel}</span>
-          <span style={{ color: "var(--color-text-secondary)" }}>Created:</span>
-          <span>{new Date(task.created_at).toLocaleString("zh-CN")}</span>
-          <span style={{ color: "var(--color-text-secondary)" }}>Updated:</span>
-          <span>{new Date(task.updated_at).toLocaleString("zh-CN")}</span>
+      {/* 紧凑头部：标题 + 状态 + 元信息一体化 */}
+      <div className="tv-detail-header">
+        <div className="tv-detail-header-top">
+          <h1 className="tv-detail-title">{task.title}</h1>
+          <span className={`tv-detail-badge tv-detail-badge--${task.status.toLowerCase()}`}>
+            {STATUS_LABEL[task.status] || task.status}
+          </span>
+          {!isTerminal && (
+            <span
+              className={`sse-indicator ${sseStatus === "connected" ? "connected" : "disconnected"}`}
+              title={`SSE: ${sseStatus}`}
+            />
+          )}
+        </div>
+        <div className="tv-detail-meta">
+          <span className="tv-detail-meta-item">
+            {task.requester.channel}
+          </span>
+          <span className="tv-detail-meta-sep" />
+          <span className="tv-detail-meta-item">
+            {new Date(task.created_at).toLocaleString("zh-CN")}
+          </span>
+          {duration && (
+            <>
+              <span className="tv-detail-meta-sep" />
+              <span className="tv-detail-meta-item">
+                耗时 {duration}
+              </span>
+            </>
+          )}
+          <span className="tv-detail-meta-sep" />
+          <span className="tv-detail-meta-item tv-detail-meta-id" title={task.task_id}>
+            {task.task_id.slice(0, 12)}…
+          </span>
         </div>
       </div>
 
@@ -176,7 +209,6 @@ export default function TaskDetail() {
       {/* 可视化模式 */}
       {viewMode === "visual" && classified && (
         <>
-          <PipelineBar phases={classified.phases} />
           {rounds.map((round) => (
             <RoundFlowCard
               key={round.id}

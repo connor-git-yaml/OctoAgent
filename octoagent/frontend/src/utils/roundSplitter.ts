@@ -36,6 +36,8 @@ export interface FlowNode {
   events: TaskEvent[];
   artifact?: Artifact;
   ts: string;
+  /** 所属 Agent 名称，用于按 Agent 分行展示 */
+  agent: string;
 }
 
 export interface Round {
@@ -45,6 +47,35 @@ export interface Round {
   nodes: FlowNode[];
   startTime: string;
   endTime?: string;
+}
+
+/** 按 Agent 分组后的节点泳道 */
+export interface AgentLane {
+  agent: string;
+  nodes: FlowNode[];
+}
+
+/** 将节点按连续相同 agent 分组为泳道 */
+export function groupByAgent(nodes: FlowNode[]): AgentLane[] {
+  const lanes: AgentLane[] = [];
+  let currentAgent = "";
+  let currentNodes: FlowNode[] = [];
+
+  for (const node of nodes) {
+    if (node.agent !== currentAgent) {
+      if (currentNodes.length > 0) {
+        lanes.push({ agent: currentAgent, nodes: currentNodes });
+      }
+      currentAgent = node.agent;
+      currentNodes = [node];
+    } else {
+      currentNodes.push(node);
+    }
+  }
+  if (currentNodes.length > 0) {
+    lanes.push({ agent: currentAgent, nodes: currentNodes });
+  }
+  return lanes;
 }
 
 // ─── 配对规则：STARTED -> COMPLETED/FAILED ──────────────────
@@ -136,6 +167,7 @@ function buildRound(
       : "任务创建";
 
   const nodes = buildFlowNodes(events, artifactMap);
+  assignAgents(nodes);
 
   return {
     id: trigger.event_id,
@@ -145,6 +177,44 @@ function buildRound(
     startTime: trigger.ts,
     endTime: events[events.length - 1]?.ts,
   };
+}
+
+// ─── Agent 分配 ─────────────────────────────────────────────
+
+/** 按 actor 字段为每个节点分配所属 Agent 名称 */
+function assignAgents(nodes: FlowNode[]): void {
+  let lastWorkerName = "Worker";
+
+  for (const node of nodes) {
+    const actor = node.events[0]?.actor ?? "system";
+
+    if (actor === "user" || actor === "kernel") {
+      node.agent = "Orchestrator";
+      // 从 WORKER_DISPATCHED payload 提取 worker_id，给后续 worker 事件命名
+      if (node.kind === "worker") {
+        const wid = extractWorkerId(node);
+        if (wid) lastWorkerName = `Worker ${shortId(wid)}`;
+      }
+    } else if (actor === "worker" || actor === "tool") {
+      node.agent = lastWorkerName;
+    } else {
+      // system 等：跟随上一个已知 agent
+      node.agent = lastWorkerName === "Worker" ? "Orchestrator" : lastWorkerName;
+    }
+  }
+}
+
+function extractWorkerId(node: FlowNode): string {
+  for (const ev of node.events) {
+    const wid = ev.payload?.worker_id;
+    if (typeof wid === "string" && wid) return wid;
+  }
+  return "";
+}
+
+function shortId(id: string): string {
+  // 取前 4 位做短标识
+  return id.length > 4 ? id.slice(0, 4) : id;
 }
 
 // ─── 构建流程图节点 ──────────────────────────────────────────
@@ -205,6 +275,7 @@ function buildFlowNodes(
         status: "neutral",
         events: [event],
         ts: event.ts,
+        agent: "",
       });
       continue;
     }
@@ -243,6 +314,7 @@ function makePairedNode(start: TaskEvent, end: TaskEvent): FlowNode {
     status: isFailed ? "error" : "success",
     events: [start, end],
     ts: start.ts,
+    agent: "",
   };
 }
 
@@ -255,6 +327,7 @@ function makeRunningNode(start: TaskEvent): FlowNode {
     status: "running",
     events: [start],
     ts: start.ts,
+    agent: "",
   };
 }
 
@@ -268,6 +341,7 @@ function makeOrphanNode(event: TaskEvent): FlowNode {
     status: isFailed ? "error" : "success",
     events: [event],
     ts: event.ts,
+    agent: "",
   };
 }
 
@@ -286,6 +360,7 @@ function makeCompletionNode(event: TaskEvent, toStatus: string): FlowNode {
     status,
     events: [event],
     ts: event.ts,
+    agent: "",
   };
 }
 
@@ -293,9 +368,11 @@ function makeSingleNode(
   event: TaskEvent,
   artifactMap: Map<string, Artifact>,
 ): FlowNode {
+  const base = { agent: "" } as const;
   switch (event.type) {
     case "USER_MESSAGE":
       return {
+        ...base,
         id: event.event_id,
         kind: "message",
         label: str(event.payload?.content ?? event.payload?.text, 30) || "消息",
@@ -308,6 +385,7 @@ function makeSingleNode(
       const artifactId = String(event.payload?.artifact_id || "");
       const artifact = artifactMap.get(artifactId);
       return {
+        ...base,
         id: event.event_id,
         kind: "artifact",
         label:
@@ -322,6 +400,7 @@ function makeSingleNode(
 
     case "ORCH_DECISION":
       return {
+        ...base,
         id: event.event_id,
         kind: "decision",
         label: str(event.payload?.decision, 20) || "调度决策",
@@ -333,6 +412,7 @@ function makeSingleNode(
     case "A2A_MESSAGE_SENT":
     case "A2A_MESSAGE_RECEIVED":
       return {
+        ...base,
         id: event.event_id,
         kind: "a2a",
         label: event.type === "A2A_MESSAGE_SENT" ? "A2A 发送" : "A2A 接收",
@@ -343,6 +423,7 @@ function makeSingleNode(
 
     case "APPROVAL_REQUESTED":
       return {
+        ...base,
         id: event.event_id,
         kind: "approval",
         label: "等待审批",
@@ -352,6 +433,7 @@ function makeSingleNode(
       };
     case "APPROVAL_APPROVED":
       return {
+        ...base,
         id: event.event_id,
         kind: "approval",
         label: "已审批",
@@ -362,6 +444,7 @@ function makeSingleNode(
     case "APPROVAL_REJECTED":
     case "APPROVAL_EXPIRED":
       return {
+        ...base,
         id: event.event_id,
         kind: "approval",
         label: event.type === "APPROVAL_REJECTED" ? "审批拒绝" : "审批过期",
@@ -372,6 +455,7 @@ function makeSingleNode(
 
     case "ERROR":
       return {
+        ...base,
         id: event.event_id,
         kind: "error",
         label: str(event.payload?.message ?? event.payload?.error, 20) || "错误",
@@ -382,6 +466,7 @@ function makeSingleNode(
 
     default:
       return {
+        ...base,
         id: event.event_id,
         kind: "other",
         label: event.type,
