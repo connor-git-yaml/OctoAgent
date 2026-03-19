@@ -113,10 +113,6 @@ export interface TimelineLayout {
 
 // ─── 布局计算常量 ──────────────────────────────────────────────
 
-/** 每秒对应的像素数 */
-const PX_PER_SECOND = 12;
-/** 时间轴总宽度上限（像素） */
-const MAX_TOTAL_PX = 8000;
 /** 节点最小宽度（像素） */
 export const MIN_NODE_WIDTH = 48;
 /** 相邻节点最小间距（像素） */
@@ -796,205 +792,145 @@ function buildDegradedLayout(): TimelineLayout {
 }
 
 /**
- * 时间轴布局主入口：计算每个节点的水平位置和宽度。
- * 有效时间戳 < 2 或时间范围 = 0 时降级为等宽布局。
+ * 顺序对齐布局主入口：按节点顺序排列，Worker 泳道与 Orchestrator 的
+ * Worker 胶囊条左右对齐。不按时间比例，只保证顺序正确。
+ *
+ * 降级条件：总节点 < 2 时走原有 flex 路径。
  */
 export function computeTimelineLayout(
   lanes: AgentLane[],
-  startTime: string,
-  endTime?: string,
+  _startTime: string,
+  _endTime?: string,
 ): TimelineLayout {
-  // ── 1. 收集所有节点的时间戳 ──
-  interface NodeMeta {
-    node: FlowNode;
-    laneIndex: number;
-    tsMs: number; // 0 表示无效
-  }
+  const allNodes = lanes.flatMap((l) => l.nodes);
+  if (allNodes.length < 2) return buildDegradedLayout();
 
-  const allMetas: NodeMeta[] = [];
-  for (let li = 0; li < lanes.length; li++) {
-    for (const node of lanes[li].nodes) {
-      const tsMs = node.ts ? new Date(node.ts).getTime() : 0;
-      allMetas.push({
-        node,
-        laneIndex: li,
-        tsMs: Number.isFinite(tsMs) && tsMs > 0 ? tsMs : 0,
-      });
-    }
-  }
-
-  // 将 startTime / endTime 解析为毫秒（作为辅助锚点）
-  const startMs = startTime ? new Date(startTime).getTime() : 0;
-
-  // ── 2. 统计有效时间戳，判断降级 ──
-  const validTs = allMetas.filter((m) => m.tsMs > 0).map((m) => m.tsMs);
-  // 如果 startTime 有效，也纳入有效时间戳集合
-  if (Number.isFinite(startMs) && startMs > 0) validTs.push(startMs);
-
-  if (validTs.length < 2) return buildDegradedLayout();
-
-  const tMin = Math.min(...validTs);
-  const tMax = Math.max(...validTs);
-  if (tMax === tMin) return buildDegradedLayout();
-
-  // 用 endTime 扩展 tMax（如果 endTime 比最后事件更晚）
-  let effectiveTMax = tMax;
-  if (endTime) {
-    const endMs = new Date(endTime).getTime();
-    if (Number.isFinite(endMs) && endMs > effectiveTMax) {
-      effectiveTMax = endMs;
-    }
-  }
-
-  // ── 3. 计算缩放因子 ──
-  const spanMs = effectiveTMax - tMin;
-  const rawScale = PX_PER_SECOND / 1000; // px/ms
-  const rawWidth = PADDING * 2 + spanMs * rawScale;
-  const scale = rawWidth > MAX_TOTAL_PX
-    ? (MAX_TOTAL_PX - PADDING * 2) / spanMs
-    : rawScale;
-
-  // ── 4. 为缺失时间戳的节点插值 ──
-  // 按泳道分组处理
-  const laneMetasMap = new Map<number, NodeMeta[]>();
-  for (const m of allMetas) {
-    const list = laneMetasMap.get(m.laneIndex);
-    if (list) list.push(m);
-    else laneMetasMap.set(m.laneIndex, [m]);
-  }
-
-  for (const [, laneMetas] of laneMetasMap) {
-    interpolateMissingTimestamps(laneMetas, tMin, effectiveTMax);
-  }
-
-  // ── 5. 计算每个节点的 leftPx 和 widthPx ──
+  const STEP = MIN_NODE_WIDTH + MIN_GAP; // 每个普通节点的步进宽度
   const nodeLayouts = new Map<string, NodeLayout>();
-  for (const m of allMetas) {
-    const leftPx = PADDING + (m.tsMs - tMin) * scale;
-    let widthPx = MIN_NODE_WIDTH;
-    // Worker 节点展宽
-    if (m.node.kind === "worker" && m.node.durationMs > 0) {
-      widthPx = Math.max(m.node.durationMs / 1000 * PX_PER_SECOND * (scale / rawScale), MIN_NODE_WIDTH);
+
+  // ── 1. 找出 Orchestrator 泳道中的 worker 节点，记录它对应哪个 Worker 泳道 ──
+  const orchLaneIdx = lanes.findIndex((l) => l.agent === "Orchestrator");
+  // workerNodeId -> workerLaneIndex
+  const workerSpanMap = new Map<string, number>();
+  if (orchLaneIdx >= 0) {
+    for (const node of lanes[orchLaneIdx].nodes) {
+      if (node.kind !== "worker") continue;
+      const targetLaneIdx = resolveWorkerLaneIndex(node, lanes);
+      if (targetLaneIdx >= 0) workerSpanMap.set(node.id, targetLaneIdx);
     }
-    nodeLayouts.set(m.node.id, { leftPx, widthPx, laneIndex: m.laneIndex });
   }
 
-  // ── 6. 防重叠修正 ──
-  for (const [, laneMetas] of laneMetasMap) {
-    for (let i = 1; i < laneMetas.length; i++) {
-      const prev = nodeLayouts.get(laneMetas[i - 1].node.id)!;
-      const curr = nodeLayouts.get(laneMetas[i].node.id)!;
-      const minLeft = prev.leftPx + prev.widthPx + MIN_GAP;
-      if (curr.leftPx < minLeft) {
-        curr.leftPx = minLeft;
+  // ── 2. 计算每个 Worker 泳道所需的宽度（用于 Worker 胶囊展宽） ──
+  const workerLaneWidthMap = new Map<number, number>();
+  for (const [, wLaneIdx] of workerSpanMap) {
+    const wLane = lanes[wLaneIdx];
+    if (!wLane) continue;
+    // Worker 泳道节点需要的总宽度
+    const w = Math.max(wLane.nodes.length * STEP - MIN_GAP, MIN_NODE_WIDTH);
+    workerLaneWidthMap.set(wLaneIdx, w);
+  }
+
+  // ── 3. 布局 Orchestrator 泳道（主轴） ──
+  let cursor = PADDING;
+  if (orchLaneIdx >= 0) {
+    for (const node of lanes[orchLaneIdx].nodes) {
+      const wLaneIdx = workerSpanMap.get(node.id);
+      if (wLaneIdx !== undefined) {
+        // Worker 胶囊节点：展宽到容纳 Worker 泳道所有节点
+        const spanWidth = workerLaneWidthMap.get(wLaneIdx) || MIN_NODE_WIDTH;
+        nodeLayouts.set(node.id, { leftPx: cursor, widthPx: spanWidth, laneIndex: orchLaneIdx });
+        cursor += spanWidth + MIN_GAP;
+      } else {
+        // 普通节点
+        nodeLayouts.set(node.id, { leftPx: cursor, widthPx: MIN_NODE_WIDTH, laneIndex: orchLaneIdx });
+        cursor += STEP;
       }
     }
   }
 
-  // ── 7. 计算总宽度 ──
+  // ── 4. 布局 Worker 泳道：对齐到 Orchestrator 的 Worker 胶囊条 ──
+  for (const [workerNodeId, wLaneIdx] of workerSpanMap) {
+    const wLane = lanes[wLaneIdx];
+    const orchSpan = nodeLayouts.get(workerNodeId);
+    if (!wLane || !orchSpan) continue;
+
+    const spanLeft = orchSpan.leftPx;
+    const spanWidth = orchSpan.widthPx;
+    const nodeCount = wLane.nodes.length;
+
+    if (nodeCount === 1) {
+      // 单节点居中
+      nodeLayouts.set(wLane.nodes[0].id, {
+        leftPx: spanLeft + (spanWidth - MIN_NODE_WIDTH) / 2,
+        widthPx: MIN_NODE_WIDTH,
+        laneIndex: wLaneIdx,
+      });
+    } else {
+      // 多节点：首节点对齐 spanLeft，末节点右边缘对齐 spanLeft + spanWidth
+      const availableWidth = spanWidth - MIN_NODE_WIDTH;
+      const step = availableWidth / (nodeCount - 1);
+      for (let i = 0; i < nodeCount; i++) {
+        nodeLayouts.set(wLane.nodes[i].id, {
+          leftPx: spanLeft + i * step,
+          widthPx: MIN_NODE_WIDTH,
+          laneIndex: wLaneIdx,
+        });
+      }
+    }
+  }
+
+  // ── 5. 布局无 Orchestrator 关联的独立泳道 ──
+  for (let li = 0; li < lanes.length; li++) {
+    if (li === orchLaneIdx) continue;
+    // 跳过已被 workerSpanMap 布局的泳道
+    const isHandled = [...workerSpanMap.values()].includes(li);
+    if (isHandled) continue;
+
+    let laneCursor = PADDING;
+    for (const node of lanes[li].nodes) {
+      if (!nodeLayouts.has(node.id)) {
+        nodeLayouts.set(node.id, { leftPx: laneCursor, widthPx: MIN_NODE_WIDTH, laneIndex: li });
+        laneCursor += STEP;
+      }
+    }
+    cursor = Math.max(cursor, laneCursor);
+  }
+
+  // ── 6. 总宽度 ──
   let maxRight = 0;
   for (const [, nl] of nodeLayouts) {
-    const right = nl.leftPx + nl.widthPx;
-    if (right > maxRight) maxRight = right;
+    maxRight = Math.max(maxRight, nl.leftPx + nl.widthPx);
   }
-  const totalWidthPx = Math.min(maxRight + PADDING, MAX_TOTAL_PX);
+  const totalWidthPx = maxRight + PADDING;
 
   return {
     totalWidthPx,
     nodeLayouts,
     crossLaneLinks: buildCrossLaneLinks(lanes, nodeLayouts),
-    timeTicks: generateTimeTicks(tMin, effectiveTMax, scale, PADDING),
+    timeTicks: [], // 顺序布局不需要时间刻度
     degraded: false,
   };
 }
 
-/**
- * 为缺失时间戳的节点在前后有效节点之间进行线性插值。
- * 直接修改 meta.tsMs。
- */
-function interpolateMissingTimestamps(
-  metas: { tsMs: number }[],
-  globalMin: number,
-  globalMax: number,
-): void {
-  // 找到所有无效区间，在有效锚点之间均匀分布
-  let i = 0;
-  while (i < metas.length) {
-    if (metas[i].tsMs > 0) {
-      i++;
-      continue;
-    }
-    // 找到无效区间 [i, j)
-    const start = i;
-    while (i < metas.length && metas[i].tsMs === 0) i++;
-    const end = i; // 第一个有效节点的索引（或 metas.length）
-
-    // 确定插值锚点
-    const anchorBefore = start > 0 ? metas[start - 1].tsMs : globalMin;
-    const anchorAfter = end < metas.length ? metas[end].tsMs : globalMax;
-    const count = end - start;
-    const step = (anchorAfter - anchorBefore) / (count + 1);
-
-    for (let k = 0; k < count; k++) {
-      metas[start + k].tsMs = anchorBefore + step * (k + 1);
-    }
+/** 找到 worker 节点对应的 Worker 泳道索引 */
+function resolveWorkerLaneIndex(workerNode: FlowNode, lanes: AgentLane[]): number {
+  // 1. 从 payload 提取 agent_name，精确匹配
+  const agentName = extractAgentName(workerNode);
+  if (agentName) {
+    const idx = lanes.findIndex((l) => l.agent === agentName);
+    if (idx >= 0) return idx;
   }
-}
-
-// ─── 时间刻度尺生成 (T018) ────────────────────────────────────
-
-/**
- * 根据时间跨度自动选择刻度间隔，生成时间刻度标记。
- * 标签格式为相对于 tMin 的偏移量（如 +0s, +5s, +1m30s）。
- */
-function generateTimeTicks(
-  tMin: number,
-  tMax: number,
-  scale: number,
-  padding: number,
-): TimeTick[] {
-  const spanMs = tMax - tMin;
-  if (spanMs <= 0) return [];
-
-  // 根据时间跨度选择刻度间隔
-  let intervalMs: number;
-  if (spanMs <= 5000) {
-    intervalMs = 1000;       // <= 5s: 每 1s
-  } else if (spanMs <= 30000) {
-    intervalMs = 5000;       // <= 30s: 每 5s
-  } else if (spanMs <= 180000) {
-    intervalMs = 30000;      // <= 3min: 每 30s
-  } else {
-    intervalMs = 60000;      // > 3min: 每 1min
+  // 2. worker_id 短名匹配
+  const wid = extractWorkerId(workerNode);
+  if (wid) {
+    const shortName = `Worker ${shortId(wid)}`;
+    const idx = lanes.findIndex((l) => l.agent === shortName);
+    if (idx >= 0) return idx;
   }
-
-  // 从 tMin 向上取整到最近的 intervalMs 整数倍
-  const firstTick = Math.ceil(tMin / intervalMs) * intervalMs;
-
-  const ticks: TimeTick[] = [];
-  for (let t = firstTick; t <= tMax; t += intervalMs) {
-    const offsetMs = t - tMin;
-    const label = formatTickLabel(offsetMs);
-    const leftPx = padding + (t - tMin) * scale;
-    ticks.push({ label, leftPx });
-  }
-
-  return ticks;
-}
-
-/**
- * 格式化刻度标签：相对于起始时间的偏移量。
- * < 60s: "+Ns"（如 +0s, +5s, +30s）
- * >= 60s: "+NmMs"（如 +1m, +1m30s, +2m）
- */
-function formatTickLabel(offsetMs: number): string {
-  const totalSeconds = Math.round(offsetMs / 1000);
-  if (totalSeconds < 60) {
-    return `+${totalSeconds}s`;
-  }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds > 0 ? `+${minutes}m${seconds}s` : `+${minutes}m`;
+  // 3. 只有一个非 Orchestrator 泳道
+  const nonOrch = lanes.map((l, i) => ({ l, i })).filter(({ l }) => l.agent !== "Orchestrator");
+  if (nonOrch.length === 1) return nonOrch[0].i;
+  return -1;
 }
 
 // ─── 跨泳道连接线构建 (T022) ──────────────────────────────────

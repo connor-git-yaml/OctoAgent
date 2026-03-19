@@ -212,24 +212,6 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
         /* ─── 时间轴路径：节点按时间定位，Worker 展宽为胶囊条 ─── */
         <div className="tv-timeline-container">
           <div className="tv-lanes-scroll">
-            {/* 时间刻度尺 (T020) */}
-            {layout.timeTicks.length > 0 && (
-              <div
-                className="tv-time-axis"
-                style={{ width: layout.totalWidthPx }}
-              >
-                {layout.timeTicks.map((tick, i) => (
-                  <span
-                    key={i}
-                    className="tv-time-tick"
-                    style={{ left: tick.leftPx }}
-                  >
-                    {tick.label}
-                  </span>
-                ))}
-              </div>
-            )}
-
             {/* 泳道列表 */}
             <div className="tv-lanes">
               {lanes.map((lane, laneIdx) => {
