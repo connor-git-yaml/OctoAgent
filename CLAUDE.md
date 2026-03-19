@@ -12,16 +12,15 @@
 - **阶段**: v0.1（MVP 实现）
 - **蓝图文档**: `docs/blueprint.md`（工程蓝图，所有设计决策的权威来源）
 
-## 核心架构（三层 Agent + Skill Pipeline）
+## 核心架构（全层 Free Loop + Skill Pipeline）
 
 ```
 Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 ```
 
-- **主 Agent（Butler）**：主执行者 + 监督者，永远 Free Loop（直接处理请求、Worker 创建与派发、全局监督）。绑定 Project，是 Project Owner 之一
-- **Workers**：持久化自治智能体，永远 Free Loop（自主决策，按需调用 Skill Pipeline 或创建 Subagent）。每个 Worker 绑定一个 Project，是 Project Owner 之一
-- **Subagent**：Worker 按需创建的临时智能体，Free Loop 运行。共享 Worker 的 Project，干完回收
-- **Skill Pipeline / Graph**：Agent 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
+- **Orchestrator**：路由与监督层，永远 Free Loop（目标理解、Worker 派发、全局监督）
+- **Workers**：自治智能体层，永远 Free Loop（自主决策，按需调用 Skill Pipeline）
+- **Skill Pipeline / Graph**：Subagent 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
 - **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
 
@@ -106,6 +105,7 @@ octoagent/
 - 测试：每个模块需有 unit test，关键路径需有 integration test
 - 开发和重构时，不要把“最小改动”当作默认目标；应先从长期演进视角判断更合理的整体架构、模块边界与数据流，再在可控范围内向正确方向收敛
 - 避免为了短期交付继续堆叠临时 patch、兼容层或例外分支；如果现有结构已经明显不合理，优先选择能降低后续复杂度的长期方案
+- 去掉功能时直接删除所有相关代码（函数、类型、CSS、JSX），不要注释掉或保留"待后续启用"的死代码；需要时从 git 历史恢复
 
 ### Web UI / UX 规范
 
@@ -132,7 +132,7 @@ octoagent/
 |------|------|------|
 | 结构化存储 | SQLite WAL | Task/Event/Artifact 元信息，单用户足够 |
 | 语义检索 | 向量数据库（LanceDB） | 嵌入式零运维 + 版本化存储 + 混合检索 + Python 3.12 兼容 + async 原生 |
-| 编排模型 | 三层 Agent + Skill Pipeline | 主 Agent/Workers/Subagent 都以 Free Loop 运行；Skill Pipeline（pydantic-graph）作为 Agent 的确定性编排工具按需调用；主 Agent 和 Worker 持久化且拥有 Project，Subagent 临时且共享 Project |
+| 编排模型 | 全层 Free Loop + Skill Pipeline | Orchestrator/Workers 永远 Free Loop 保持灵活性；Skill Pipeline（pydantic-graph）作为 Worker 的确定性编排工具按需调用 |
 | 模型网关 | LiteLLM Proxy | 统一 alias 路由，业务代码不写死厂商型号 |
 | 执行隔离 | Docker 默认 | Agent Zero 验证过的方案，安全边界清晰 |
 | 事件溯源 | 最小 Event Sourcing | append-only events + tasks projection，先保证崩溃不丢 |
@@ -144,14 +144,10 @@ octoagent/
 | Web UI | React + Vite | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway |
 | 可观测 | Logfire + structlog + Event Store | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
 
-## Skill 系统（SKILL.md 驱动）
+## 项目级 Skills（Codex + Claude 通用）
 
-Feature 057 重写后的 Skill 系统采用 SKILL.md 文件系统驱动模式：
-- 内置 Skill 位于 `skills/` 目录（8 个，含 coding-agent、github、summarize 等）
-- 用户自定义 Skill 位于 `~/.octoagent/skills/`
-- 项目级 Skill 位于 `{project_root}/skills/`
-- 三级优先级：项目 > 用户 > 内置（同名按优先级覆盖）
-- LLM 通过 `skills` tool 自动发现和加载 Skill，加载后注入 system prompt
-- 管理 API：`GET/POST/DELETE /api/skills`
-- 前端管理界面：`/agents/skills`
+- `milestone-blueprint-split-sync`  
+  - 路径：`skills/milestone-blueprint-split-sync/SKILL.md`  
+  - 用途：把“blueprint 需求提取 -> 里程碑 Feature 并行拆解 -> 调研复核 -> 回写 blueprint -> 一致性校验”固化为可复用流程。  
+  - 触发示例：`使用 [$milestone-blueprint-split-sync](skills/milestone-blueprint-split-sync/SKILL.md) 从 M2/M3 开始拆解并回写 blueprint。`
 
