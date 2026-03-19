@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Callable
@@ -413,6 +414,7 @@ class OrchestratorService:
         cancellation_registry: WorkerCancellationRegistry | None = None,
         execution_console=None,
         project_root: Path | None = None,
+        notification_service: Any | None = None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -479,6 +481,147 @@ class OrchestratorService:
         }
         if workers:
             self._workers.update(workers)
+
+        # Feature 064 P1-B: Subagent 结果注入队列
+        # key = parent_task_id, value = asyncio.Queue 存放结果摘要
+        self._subagent_result_queues: dict[str, asyncio.Queue] = {}
+
+        # Feature 064 P2-B: 通知服务（可选注入，不注入时不影响现有行为）
+        self._notification_service = notification_service
+
+    # ----- Feature 064 P2-B: 通知服务 -----
+
+    async def _notify_state_change(
+        self,
+        *,
+        task_id: str,
+        from_status: str,
+        to_status: str,
+        reason: str = "",
+    ) -> None:
+        """Task 状态变更时调用 NotificationService（FR-064-32）。
+
+        降级安全：通知失败仅记录日志，不影响 Task 执行（Constitution #6）。
+        """
+        if self._notification_service is None:
+            return
+        try:
+            # 获取 Task 信息用于通知 payload
+            task = await self._stores.task_store.get_task(task_id)
+            task_title = ""
+            if task is not None:
+                task_title = task.title or task_id
+
+            payload = {
+                "task_id": task_id,
+                "task_title": task_title,
+                "from_status": from_status,
+                "to_status": to_status,
+                "reason": reason,
+            }
+
+            await self._notification_service.notify_task_state_change(
+                task_id=task_id,
+                event_type=f"STATE_TRANSITION:{to_status}",
+                payload=payload,
+            )
+        except Exception:
+            log.warning(
+                "notification_state_change_failed",
+                task_id=task_id,
+                to_status=to_status,
+                exc_info=True,
+            )
+
+    # ----- Feature 064 P1-B: SubagentResultQueue -----
+
+    async def enqueue_subagent_result(
+        self,
+        *,
+        parent_task_id: str,
+        child_task_id: str,
+        subagent_name: str,
+        status: str,
+        summary: str,
+        artifact_count: int,
+    ) -> None:
+        """Subagent 完成后将结果放入队列，父 Worker 在下一步 generate() 前消费。
+
+        同时写入 A2A_MESSAGE_RECEIVED 事件到父 Task（事件冒泡 FR-064-22）。
+        """
+        if not parent_task_id:
+            return
+
+        # 写入 A2A_MESSAGE_RECEIVED 事件到父 Task
+        try:
+            now = datetime.now(UTC)
+            task_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
+            event = Event(
+                event_id=f"evt-{ULID()}",
+                task_id=parent_task_id,
+                task_seq=task_seq,
+                ts=now,
+                type=EventType.A2A_MESSAGE_RECEIVED,
+                actor=ActorType.SYSTEM,
+                payload={
+                    "source": "subagent",
+                    "child_task_id": child_task_id,
+                    "subagent_name": subagent_name,
+                    "status": status,
+                    "summary": summary[:500] if summary else "",
+                    "artifact_count": artifact_count,
+                },
+                trace_id="",
+            )
+            await self._stores.event_store.append_event(event)
+            await self._stores.conn.commit()
+
+            # SSE 双路广播到父 Task 订阅者
+            if self._sse_hub:
+                await self._sse_hub.broadcast(parent_task_id, event)
+        except Exception:
+            log.warning(
+                "subagent_result_event_failed",
+                parent_task_id=parent_task_id,
+                child_task_id=child_task_id,
+                exc_info=True,
+            )
+
+        # 将结果放入 Queue 供父 Worker SkillRunner 消费
+        if parent_task_id not in self._subagent_result_queues:
+            self._subagent_result_queues[parent_task_id] = asyncio.Queue()
+
+        result_message = (
+            f"[Subagent Result] Subagent '{subagent_name}' "
+            f"(task: {child_task_id}) completed:\n"
+            f"Status: {status}\n"
+            f"Summary: {summary}\n"
+            f"Artifacts: {artifact_count} items"
+        )
+        self._subagent_result_queues[parent_task_id].put_nowait(result_message)
+
+    def drain_subagent_results(self, parent_task_id: str) -> list[str]:
+        """消费父 Task 的所有待处理 Subagent 结果。
+
+        由 SkillRunner（或 LiteLLMSkillClient）在 generate() 前调用。
+        返回按到达顺序排列的结果消息列表。
+        """
+        queue = self._subagent_result_queues.get(parent_task_id)
+        if queue is None or queue.empty():
+            return []
+
+        results: list[str] = []
+        while not queue.empty():
+            try:
+                results.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        # 清理空 Queue，防止无界增长
+        if queue.empty():
+            self._subagent_result_queues.pop(parent_task_id, None)
+
+        return results
 
     async def dispatch_prepared(self, envelope: DispatchEnvelope) -> WorkerResult:
         """执行已完成 preflight 的 dispatch envelope。"""
@@ -2811,6 +2954,23 @@ class OrchestratorService:
         if result.status == WorkerExecutionStatus.FAILED:
             await self._ensure_task_failed(task_id, trace_id, result.summary)
 
+        # Feature 064 P2-B: Worker 完成后的终态通知
+        # 注意：_ensure_task_failed 内部已有通知调用，这里处理 SUCCEEDED/CANCELLED 情况
+        if result.status == WorkerExecutionStatus.SUCCEEDED:
+            await self._notify_state_change(
+                task_id=task_id,
+                from_status=TaskStatus.RUNNING.value,
+                to_status=TaskStatus.SUCCEEDED.value,
+                reason=result.summary,
+            )
+        elif result.status == WorkerExecutionStatus.CANCELLED:
+            await self._notify_state_change(
+                task_id=task_id,
+                from_status=TaskStatus.RUNNING.value,
+                to_status=TaskStatus.CANCELLED.value,
+                reason=result.summary,
+            )
+
         return result
 
     async def _prepare_a2a_dispatch(
@@ -3825,6 +3985,13 @@ class OrchestratorService:
                     trace_id=trace_id,
                     reason=reason,
                 )
+                # Feature 064 P2-B: 终态通知
+                await self._notify_state_change(
+                    task_id=task_id,
+                    from_status=TaskStatus.RUNNING.value,
+                    to_status=TaskStatus.FAILED.value,
+                    reason=reason,
+                )
         except Exception as exc:  # pragma: no cover - 防御性兜底
             log.warning(
                 "orchestrator_force_fail_error",
@@ -3872,14 +4039,29 @@ class OrchestratorService:
                     trace_id=trace_id,
                     reason=reason,
                 )
+                # Feature 064 P2-B: 终态通知
+                await self._notify_state_change(
+                    task_id=task_id,
+                    from_status=TaskStatus.WAITING_APPROVAL.value,
+                    to_status=TaskStatus.REJECTED.value,
+                    reason=reason,
+                )
                 return
 
             if task.status not in TERMINAL_STATES:
+                prev_status = task.status.value
                 await service._write_state_transition(
                     task_id=task_id,
                     from_status=task.status,
                     to_status=TaskStatus.REJECTED,
                     trace_id=trace_id,
+                    reason=reason,
+                )
+                # Feature 064 P2-B: 终态通知
+                await self._notify_state_change(
+                    task_id=task_id,
+                    from_status=prev_status,
+                    to_status=TaskStatus.REJECTED.value,
                     reason=reason,
                 )
         except Exception as exc:  # pragma: no cover - 防御性兜底
@@ -3930,6 +4112,14 @@ class OrchestratorService:
                     trace_id=trace_id,
                     reason=reason,
                 )
+                # Feature 064 P2-B: WAITING_APPROVAL 状态通知
+                if target == TaskStatus.WAITING_APPROVAL:
+                    await self._notify_state_change(
+                        task_id=task_id,
+                        from_status=TaskStatus.RUNNING.value,
+                        to_status=TaskStatus.WAITING_APPROVAL.value,
+                        reason=reason,
+                    )
         except Exception as exc:  # pragma: no cover - 防御性兜底
             log.warning(
                 "orchestrator_force_waiting_error",

@@ -240,6 +240,25 @@ class TestBrokerRegistration:
         result = await broker.unregister("nonexistent")
         assert result is False
 
+    async def test_get_tool_meta_found(self, mock_event_store) -> None:
+        """Feature 064: get_tool_meta 返回已注册工具的 ToolMeta"""
+        from octoagent.tooling.broker import ToolBroker
+
+        broker = ToolBroker(event_store=mock_event_store)
+        await broker.register(reflect_tool_schema(echo_tool), echo_tool)
+        meta = await broker.get_tool_meta("echo_tool")
+        assert meta is not None
+        assert meta.name == "echo_tool"
+        assert meta.side_effect_level == SideEffectLevel.NONE
+
+    async def test_get_tool_meta_not_found(self, mock_event_store) -> None:
+        """Feature 064: get_tool_meta 未注册工具返回 None"""
+        from octoagent.tooling.broker import ToolBroker
+
+        broker = ToolBroker(event_store=mock_event_store)
+        meta = await broker.get_tool_meta("nonexistent")
+        assert meta is None
+
 
 # ============================================================
 # 额外的工具定义（US3 执行测试用）

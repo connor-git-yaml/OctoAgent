@@ -9,7 +9,7 @@ import pytest
 from octoagent.core.models.event import Event
 from octoagent.skills.manifest import SkillManifest
 from octoagent.skills.models import SkillExecutionContext, SkillOutputEnvelope
-from octoagent.tooling.models import ToolResult
+from octoagent.tooling.models import ToolMeta, ToolResult, SideEffectLevel, ToolProfile
 from pydantic import BaseModel
 
 
@@ -48,9 +48,18 @@ class MockToolBroker:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.contexts: list[Any] = []
         self._results: dict[str, ToolResult] = {}
+        self._tool_metas: dict[str, ToolMeta] = {}
 
     def set_result(self, tool_name: str, result: ToolResult) -> None:
         self._results[tool_name] = result
+
+    def set_tool_meta(self, tool_name: str, meta: ToolMeta) -> None:
+        """设置工具元数据（用于并行分桶测试）。"""
+        self._tool_metas[tool_name] = meta
+
+    async def get_tool_meta(self, tool_name: str) -> ToolMeta | None:
+        """按名称查询工具元数据。"""
+        return self._tool_metas.get(tool_name)
 
     async def execute(self, tool_name: str, args: dict[str, Any], context: Any) -> ToolResult:
         self.calls.append((tool_name, args))

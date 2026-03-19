@@ -166,25 +166,23 @@ class TestSSETokenData:
         ]
         mock_resp = _build_sse_mock_response(chunks)
 
-        mock_client = MagicMock()
-        mock_client.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http = MagicMock()
+        mock_http.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            envelope = await client.generate(
-                manifest=_make_manifest(),
-                execution_context=_make_context(),
-                prompt="hello",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        envelope = await client.generate(
+            manifest=_make_manifest(),
+            execution_context=_make_context(),
+            prompt="hello",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert envelope.content == "Hello world"
         assert envelope.complete is True
@@ -203,30 +201,29 @@ class TestSSETokenData:
         ]
         mock_resp = _build_sse_mock_response(chunks)
 
-        mock_client = MagicMock()
+        mock_http = MagicMock()
 
-        def capture_stream(method: str, url: str, json: dict, **kw: Any) -> _AsyncContextManager:
-            captured_body.update(json)
+        def capture_stream(method: str, url: str, *, json: dict = None, **kw: Any) -> _AsyncContextManager:
+            if json is not None:
+                captured_body.update(json)
             return _AsyncContextManager(mock_resp)
 
-        mock_client.stream = capture_stream
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http.stream = capture_stream
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            await client.generate(
-                manifest=_make_manifest(),
-                execution_context=_make_context(),
-                prompt="test",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        await client.generate(
+            manifest=_make_manifest(),
+            execution_context=_make_context(),
+            prompt="test",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert captured_body.get("stream") is True
         assert captured_body.get("stream_options") == {"include_usage": True}
@@ -239,25 +236,23 @@ class TestSSETokenData:
         ]
         mock_resp = _build_sse_mock_response(chunks)
 
-        mock_client = MagicMock()
-        mock_client.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http = MagicMock()
+        mock_http.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            envelope = await client.generate(
-                manifest=_make_manifest(),
-                execution_context=_make_context(),
-                prompt="test",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        envelope = await client.generate(
+            manifest=_make_manifest(),
+            execution_context=_make_context(),
+            prompt="test",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert envelope.token_usage == {}
         assert envelope.cost_usd == 0.0
@@ -293,26 +288,24 @@ class TestResponsesAPITokenData:
         ]
         mock_resp = _build_responses_mock_response(events)
 
-        mock_client = MagicMock()
-        mock_client.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http = MagicMock()
+        mock_http.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
             responses_model_aliases={"responses-model"},
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            envelope = await client.generate(
-                manifest=_make_manifest(model_alias="responses-model"),
-                execution_context=_make_context(),
-                prompt="hello",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        envelope = await client.generate(
+            manifest=_make_manifest(model_alias="responses-model"),
+            execution_context=_make_context(),
+            prompt="hello",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert envelope.content == "Bonjour"
         assert envelope.complete is True
@@ -341,26 +334,24 @@ class TestResponsesAPITokenData:
         ]
         mock_resp = _build_responses_mock_response(events)
 
-        mock_client = MagicMock()
-        mock_client.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http = MagicMock()
+        mock_http.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
             responses_model_aliases={"responses-model"},
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            envelope = await client.generate(
-                manifest=_make_manifest(model_alias="responses-model"),
-                execution_context=_make_context(),
-                prompt="test",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        envelope = await client.generate(
+            manifest=_make_manifest(model_alias="responses-model"),
+            execution_context=_make_context(),
+            prompt="test",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert envelope.cost_usd == 0.003
 
@@ -384,26 +375,24 @@ class TestResponsesAPITokenData:
         ]
         mock_resp = _build_responses_mock_response(events)
 
-        mock_client = MagicMock()
-        mock_client.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_http = MagicMock()
+        mock_http.stream = lambda *args, **kwargs: _AsyncContextManager(mock_resp)
 
         client = LiteLLMSkillClient(
             proxy_url="http://localhost:4000",
             master_key="test-key",
             responses_model_aliases={"responses-model"},
         )
+        client._http_client = mock_http
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            envelope = await client.generate(
-                manifest=_make_manifest(model_alias="responses-model"),
-                execution_context=_make_context(),
-                prompt="test",
-                feedback=[],
-                attempt=1,
-                step=1,
-            )
+        envelope = await client.generate(
+            manifest=_make_manifest(model_alias="responses-model"),
+            execution_context=_make_context(),
+            prompt="test",
+            feedback=[],
+            attempt=1,
+            step=1,
+        )
 
         assert envelope.cost_usd == 0.0
         assert envelope.token_usage["prompt_tokens"] == 10

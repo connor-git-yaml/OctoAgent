@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 import structlog
 
+from .compactor import CompactionResult, ContextCompactor
 from .manifest import SkillManifest
 from .models import (
     SkillExecutionContext,
@@ -43,6 +44,9 @@ class LiteLLMSkillClient:
     每个 (task_id, trace_id) 维护独立的对话历史，跨 generate() 调用保持上下文。
     """
 
+    # Feature 064 P3 优化 5: 对话历史条目数上限，防止内存泄漏
+    _MAX_HISTORY_ENTRIES = 100
+
     def __init__(
         self,
         proxy_url: str,
@@ -61,6 +65,22 @@ class LiteLLMSkillClient:
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
         # 对话历史：key = "{task_id}:{trace_id}"
         self._histories: dict[str, list[dict[str, Any]]] = {}
+        # Feature 064 P3 优化 4: per-instance 长生命周期 httpx.AsyncClient
+        self._http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout_s, connect=10.0),
+        )
+
+    async def close(self) -> None:
+        """关闭 per-instance httpx.AsyncClient。"""
+        await self._http_client.aclose()
+
+    def clear_history(self, key: str) -> None:
+        """清理指定 key 的对话历史。
+
+        Feature 064 P3 优化 5: Task 终态后由 SkillRunner 调用，释放已完成 task 的对话。
+        """
+        self._histories.pop(key, None)
+
     def _key(self, ctx: SkillExecutionContext) -> str:
         return f"{ctx.task_id}:{ctx.trace_id}"
 
@@ -238,18 +258,15 @@ class LiteLLMSkillClient:
         text_parts: list[str] = []
         tool_calls_raw: dict[str, dict[str, Any]] = {}
         response_payload: dict[str, Any] = {}
-        async with (
-            httpx.AsyncClient(timeout=self._timeout_s) as client,
-            client.stream(
-                "POST",
-                self._build_responses_url(self._proxy_url),
-                json=body,
-                headers={
-                    "Authorization": f"Bearer {self._master_key}",
-                    "Content-Type": "application/json",
-                },
-            ) as resp,
-        ):
+        async with self._http_client.stream(
+            "POST",
+            self._build_responses_url(self._proxy_url),
+            json=body,
+            headers={
+                "Authorization": f"Bearer {self._master_key}",
+                "Content-Type": "application/json",
+            },
+        ) as resp:
             if resp.status_code >= 400:
                 body_text = await resp.aread()
                 log.error(
@@ -400,18 +417,15 @@ class LiteLLMSkillClient:
             "stream_options": {"include_usage": True},
         }
 
-        async with (
-            httpx.AsyncClient(timeout=self._timeout_s) as client,
-            client.stream(
-                "POST",
-                f"{self._proxy_url}/v1/chat/completions",
-                json=body_with_stream,
-                headers={
-                    "Authorization": f"Bearer {self._master_key}",
-                    "Content-Type": "application/json",
-                },
-            ) as resp,
-        ):
+        async with self._http_client.stream(
+            "POST",
+            f"{self._proxy_url}/v1/chat/completions",
+            json=body_with_stream,
+            headers={
+                "Authorization": f"Bearer {self._master_key}",
+                "Content-Type": "application/json",
+            },
+        ) as resp:
             if resp.status_code >= 400:
                 body_text = await resp.aread()
                 log.error(
@@ -512,30 +526,104 @@ class LiteLLMSkillClient:
             )
             self._histories[key] = history
 
+            # Feature 064 P3 优化 5: maxsize 兜底，清理最老条目防止内存泄漏
+            if len(self._histories) > self._MAX_HISTORY_ENTRIES:
+                oldest_key = next(iter(self._histories))
+                self._histories.pop(oldest_key, None)
+
         history = self._histories[key]
 
         if step > 1 and feedback:
-            # 注意：Responses API 在 Codex 代理链路上复用 function_call_output 时，
-            # call_id 可能与上一轮 function_call 脱节，导致 400 invalid_request。
-            # 为保证多轮工具调用稳定，统一把工具结果折叠成自然语言回填。
-            results = []
-            for fb in feedback:
-                if fb.is_error:
-                    results.append(f"- {fb.tool_name}: ERROR: {fb.error}")
-                else:
-                    results.append(f"- {fb.tool_name}: {fb.output}")
-            history.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Tool execution results:\n"
-                        + "\n".join(results)
-                        + "\n\nBased on these results, either call the next necessary tool "
-                        "immediately or provide the final answer now. "
-                        "Do not reply with plans like '我先查一下' or '我再看看'."
-                    ),
-                }
+            has_standard_ids = any(fb.tool_call_id for fb in feedback)
+
+            if has_standard_ids and not use_responses_api:
+                # Chat Completions 标准回填：tool role message
+                for fb in feedback:
+                    if fb.tool_call_id:
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": fb.tool_call_id,
+                            "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                        })
+                    else:
+                        # 混合场景下无 ID 的 feedback 用自然语言
+                        history.append({
+                            "role": "tool",
+                            "tool_call_id": f"fallback_{fb.tool_name}",
+                            "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                        })
+            elif has_standard_ids and use_responses_api:
+                # Responses API 标准回填：function_call_output
+                for fb in feedback:
+                    call_id = fb.tool_call_id
+                    if call_id:
+                        history.append({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                        })
+                    else:
+                        history.append({
+                            "type": "function_call_output",
+                            "call_id": f"fallback_{fb.tool_name}",
+                            "output": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                        })
+            else:
+                # 向后兼容：自然语言回填（无 tool_call_id 时）
+                results = []
+                for fb in feedback:
+                    if fb.is_error:
+                        results.append(f"- {fb.tool_name}: ERROR: {fb.error}")
+                    else:
+                        results.append(f"- {fb.tool_name}: {fb.output}")
+                history.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Tool execution results:\n"
+                            + "\n".join(results)
+                            + "\n\nBased on these results, either call the next necessary tool "
+                            "immediately or provide the final answer now. "
+                            "Do not reply with plans like '我先查一下' or '我再看看'."
+                        ),
+                    }
+                )
+
+        # ---- Feature 064 P2-A: 上下文压缩 ----
+        # 在构建 LLM 请求前检测并压缩对话历史。
+        # 压缩 token 消耗不计入 UsageTracker（基础设施开销）。
+        # compaction_threshold_ratio 设为 1.0 时永不触发（回滚方案）。
+        compaction_result: CompactionResult | None = None
+        threshold_ratio = manifest.compaction_threshold_ratio
+        if threshold_ratio < 1.0:
+            # 从 resource_limits 获取 max_tokens 作为上下文窗口上限
+            max_context_tokens = int(
+                manifest.resource_limits.get("max_context_tokens", 0)
+                or manifest.resource_limits.get("max_tokens", 0)
+                or 128000  # 默认 128k
             )
+            compactor = ContextCompactor(
+                proxy_url=self._proxy_url,
+                master_key=self._master_key,
+                recent_turns=manifest.compaction_recent_turns,
+                http_client=self._http_client,
+            )
+            compaction_result = await compactor.compact(
+                history=history,
+                max_tokens=max_context_tokens,
+                threshold_ratio=threshold_ratio,
+                compaction_model_alias=manifest.compaction_model_alias,
+            )
+            if compaction_result.strategy_used != "none":
+                log.info(
+                    "context_compaction_applied",
+                    key=key,
+                    step=step,
+                    strategy=compaction_result.strategy_used,
+                    before_tokens=compaction_result.before_tokens,
+                    after_tokens=compaction_result.after_tokens,
+                    messages_compressed=compaction_result.messages_compressed,
+                )
 
         tools = await self._get_tool_schemas(
             manifest,
@@ -565,15 +653,53 @@ class LiteLLMSkillClient:
                 body["tool_choice"] = "auto"
             content, tool_calls, metadata = await self._call_proxy(body)
 
-        # 追加 assistant 消息到历史，后续轮次通过自然语言摘要回填工具结果。
+        # 追加 assistant 消息到历史
         if tool_calls:
-            tc_summary = ", ".join(f"{tc['tool_name']}({tc['arguments']})" for tc in tool_calls)
-            history.append({"role": "assistant", "content": f"[Calling tools: {tc_summary}]"})
+            # 检测是否有标准 tool_call ID（用于决定回填格式）
+            has_ids = any(tc.get("id") for tc in tool_calls)
+
+            if has_ids and not use_responses_api:
+                # Chat Completions: 追加标准 assistant tool_calls message
+                history.append({
+                    "role": "assistant",
+                    "content": content or None,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": _to_fn_name(tc["tool_name"]),
+                                "arguments": json.dumps(tc["arguments"]),
+                            },
+                        }
+                        for tc in tool_calls
+                    ],
+                })
+            elif has_ids and use_responses_api:
+                # Responses API: 追加 function_call items
+                for tc in tool_calls:
+                    history.append({
+                        "type": "function_call",
+                        "call_id": tc["id"],
+                        "name": _to_fn_name(tc["tool_name"]),
+                        "arguments": json.dumps(tc["arguments"]),
+                    })
+            else:
+                # 向后兼容：自然语言摘要
+                tc_summary = ", ".join(
+                    f"{tc['tool_name']}({tc['arguments']})" for tc in tool_calls
+                )
+                history.append({"role": "assistant", "content": f"[Calling tools: {tc_summary}]"})
+
             return SkillOutputEnvelope(
                 content=content,
                 complete=False,
                 tool_calls=[
-                    ToolCallSpec(tool_name=tc["tool_name"], arguments=tc["arguments"])
+                    ToolCallSpec(
+                        tool_name=tc["tool_name"],
+                        arguments=tc["arguments"],
+                        tool_call_id=tc.get("id", ""),
+                    )
                     for tc in tool_calls
                 ],
                 metadata=metadata,

@@ -898,6 +898,13 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if task_columns and "trace_id" not in task_columns:
         await conn.execute("ALTER TABLE tasks ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
 
+    # Feature 064: Subagent Child Task 的 parent_task_id 字段
+    if task_columns and "parent_task_id" not in task_columns:
+        await conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT DEFAULT NULL")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id ON tasks(parent_task_id)"
+        )
+
     project_columns = await _table_columns(conn, "projects")
     if project_columns and "default_agent_profile_id" not in project_columns:
         await conn.execute(

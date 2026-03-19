@@ -6,13 +6,12 @@ import asyncio
 import hashlib
 import json
 import time
-from datetime import UTC, datetime
 from typing import Any
 
 import structlog
+from octoagent.core.event_helpers import emit_task_event
 from octoagent.core.models.enums import ActorType, EventType
-from octoagent.core.models.event import Event
-from octoagent.tooling.models import ExecutionContext, PermissionPreset
+from octoagent.tooling.models import ExecutionContext, PermissionPreset, SideEffectLevel
 from octoagent.tooling.protocols import EventStoreProtocol, ToolBrokerProtocol
 from pydantic import BaseModel, ValidationError
 from ulid import ULID
@@ -77,6 +76,9 @@ class SkillRunner:
     ) -> SkillRunResult:
         """执行 Skill。"""
         start_time = time.monotonic()
+
+        # Feature 064 P3 优化 5: 构建 history key 用于 finally 清理
+        history_key = f"{execution_context.task_id}:{execution_context.trace_id}"
 
         # --- Feature 062: 多维度资源限制 ---
         limits = execution_context.usage_limits
@@ -161,6 +163,7 @@ class SkillRunner:
                         error=SkillRepeatError(f"模型调用连续失败: {exc}"),
                     )
                     await self._call_hook("skill_end", manifest, execution_context, result)
+                    self._try_clear_history(history_key)
                     return result
                 await self._backoff(manifest)
                 continue
@@ -190,6 +193,7 @@ class SkillRunner:
                         error=SkillValidationError("输出模型校验连续失败"),
                     )
                     await self._call_hook("skill_end", manifest, execution_context, result)
+                    self._try_clear_history(history_key)
                     return result
                 await self._backoff(manifest)
                 continue
@@ -215,6 +219,7 @@ class SkillRunner:
                         error=SkillLoopDetectedError("检测到重复 tool_calls 签名循环"),
                     )
                     await self._call_hook("skill_end", manifest, execution_context, result)
+                    self._try_clear_history(history_key)
                     return result
             else:
                 last_signature = None
@@ -292,6 +297,7 @@ class SkillRunner:
                 )
                 await self._emit_usage_report(manifest, execution_context, tracker)
                 await self._call_hook("skill_end", manifest, execution_context, result)
+                self._try_clear_history(history_key)
                 return result
 
             if output.complete or output.skip_remaining_tools:
@@ -309,6 +315,7 @@ class SkillRunner:
                 await self._emit_usage_report(manifest, execution_context, tracker)
                 await self._emit_skill_completed(manifest, execution_context, result)
                 await self._call_hook("skill_end", manifest, execution_context, result)
+                self._try_clear_history(history_key)
                 return result
 
             if not output.tool_calls:
@@ -333,6 +340,7 @@ class SkillRunner:
                         error=SkillRepeatError("输出无进展，超过重试上限"),
                     )
                     await self._call_hook("skill_end", manifest, execution_context, result)
+                    self._try_clear_history(history_key)
                     return result
                 await self._backoff(manifest)
 
@@ -355,6 +363,7 @@ class SkillRunner:
             manifest, execution_context, tracker, category, limits
         )
         await self._call_hook("skill_end", manifest, execution_context, result)
+        self._try_clear_history(history_key)
         return result
 
     async def _execute_tool_calls(
@@ -365,55 +374,160 @@ class SkillRunner:
         tool_calls: list[ToolCallSpec],
         skip_remaining_tools: bool,
     ) -> list[ToolFeedbackMessage]:
-        results: list[ToolFeedbackMessage] = []
+        # 1. 白名单校验
         allowed_tool_names = resolve_effective_tool_allowlist(
             permission_mode=manifest.permission_mode,
             tools_allowed=list(manifest.tools_allowed),
             metadata=execution_context.metadata,
         )
-
         for call in tool_calls:
             if allowed_tool_names and call.tool_name not in allowed_tool_names:
                 raise SkillToolExecutionError(
                     f"工具 '{call.tool_name}' 不在当前 skill 可用工具集合中"
                 )
 
-            await self._call_hook("before_tool_execute", call.tool_name, call.arguments)
+        # 2. 分桶：按 SideEffectLevel 将 tool_calls 分为三组
+        bucket_none: list[ToolCallSpec] = []       # 并行
+        bucket_reversible: list[ToolCallSpec] = []  # 串行
+        bucket_irreversible: list[ToolCallSpec] = []  # 审批串行
 
-            # Feature 061: 将 permission_preset 从 SkillExecutionContext 传递到 ExecutionContext
-            try:
-                _preset = PermissionPreset(execution_context.permission_preset)
-            except ValueError:
-                _preset = PermissionPreset.NORMAL
-            tool_context = ExecutionContext(
-                task_id=execution_context.task_id,
-                trace_id=execution_context.trace_id,
-                caller=execution_context.caller,
-                agent_runtime_id=execution_context.agent_runtime_id,
-                agent_session_id=execution_context.agent_session_id,
-                work_id=execution_context.work_id,
-                profile=manifest.tool_profile,
-                permission_preset=_preset,
-            )
-            tool_result = await self._tool_broker.execute(
-                call.tool_name, call.arguments, tool_context
+        for call in tool_calls:
+            meta = await self._tool_broker.get_tool_meta(call.tool_name)
+            level = meta.side_effect_level if meta else SideEffectLevel.IRREVERSIBLE
+            if level == SideEffectLevel.NONE:
+                bucket_none.append(call)
+            elif level == SideEffectLevel.REVERSIBLE:
+                bucket_reversible.append(call)
+            else:
+                bucket_irreversible.append(call)
+
+        # 用于按原始顺序重排结果
+        results_map: dict[str, ToolFeedbackMessage] = {}
+        # 每个 call 的唯一键（用于多次调用同一工具的场景）
+        call_keys = [
+            f"{c.tool_name}:{c.tool_call_id}:{i}"
+            for i, c in enumerate(tool_calls)
+        ]
+
+        batch_id: str | None = None
+        batch_start_time = time.monotonic()
+
+        # 3. 发射 TOOL_BATCH_STARTED（仅 batch_size > 1）
+        if len(tool_calls) > 1:
+            batch_id = str(ULID())
+            await self._emit_tool_batch_started(
+                execution_context=execution_context,
+                batch_id=batch_id,
+                tool_calls=tool_calls,
+                manifest=manifest,
+                bucket_none_count=len(bucket_none),
+                bucket_reversible_count=len(bucket_reversible),
+                bucket_irreversible_count=len(bucket_irreversible),
             )
 
-            # Feature 061 T-014: "ask:" 前缀信号桥接
-            tool_result = await self._handle_ask_bridge(
-                tool_result, call, tool_context
-            )
+        # 预建 call -> 原始索引映射，避免 O(n²) 的 .index() 查找
+        call_index_map: dict[int, int] = {id(c): i for i, c in enumerate(tool_calls)}
 
-            feedback = self._build_tool_feedback(
-                call.tool_name, tool_result, manifest.context_budget
-            )
-            results.append(feedback)
-            await self._call_hook("after_tool_execute", feedback)
+        # 4a. 并行执行 NONE 桶（asyncio.gather + return_exceptions=True）
+        if bucket_none:
+            none_indices = [call_index_map[id(c)] for c in bucket_none]
+            coros = [
+                self._execute_single_tool(manifest, execution_context, call)
+                for call in bucket_none
+            ]
+            parallel_results = await asyncio.gather(*coros, return_exceptions=True)
+            for call, idx, result in zip(bucket_none, none_indices, parallel_results):
+                if isinstance(result, Exception):
+                    fb = ToolFeedbackMessage(
+                        tool_name=call.tool_name,
+                        tool_call_id=call.tool_call_id,
+                        is_error=True,
+                        output="",
+                        error=str(result),
+                        duration_ms=0,
+                    )
+                else:
+                    fb = result
+                results_map[call_keys[idx]] = fb
 
+        # 4b. 串行执行 REVERSIBLE 桶
+        for call in bucket_reversible:
+            idx = call_index_map[id(call)]
+            fb = await self._execute_single_tool(manifest, execution_context, call)
+            results_map[call_keys[idx]] = fb
             if skip_remaining_tools:
                 break
 
-        return results
+        # 4c. 逐个审批执行 IRREVERSIBLE 桶
+        for call in bucket_irreversible:
+            idx = call_index_map[id(call)]
+            fb = await self._execute_single_tool(manifest, execution_context, call)
+            results_map[call_keys[idx]] = fb
+            if skip_remaining_tools:
+                break
+
+        # 5. 发射 TOOL_BATCH_COMPLETED
+        if batch_id:
+            all_results = [results_map.get(k) for k in call_keys if k in results_map]
+            success_count = sum(1 for r in all_results if r and not r.is_error)
+            error_count = sum(1 for r in all_results if r and r.is_error)
+            duration_ms = int((time.monotonic() - batch_start_time) * 1000)
+            await self._emit_tool_batch_completed(
+                execution_context=execution_context,
+                batch_id=batch_id,
+                manifest=manifest,
+                duration_ms=duration_ms,
+                success_count=success_count,
+                error_count=error_count,
+                total_count=len(tool_calls),
+            )
+
+        # 6. 按原始 tool_calls 顺序返回结果
+        ordered_results: list[ToolFeedbackMessage] = []
+        for key in call_keys:
+            if key in results_map:
+                ordered_results.append(results_map[key])
+        return ordered_results
+
+    async def _execute_single_tool(
+        self,
+        manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
+        call: ToolCallSpec,
+    ) -> ToolFeedbackMessage:
+        """执行单个工具调用的完整流程：hook → execute → ask bridge → feedback → hook。"""
+        await self._call_hook("before_tool_execute", call.tool_name, call.arguments)
+
+        # Feature 061: 将 permission_preset 从 SkillExecutionContext 传递到 ExecutionContext
+        try:
+            _preset = PermissionPreset(execution_context.permission_preset)
+        except ValueError:
+            _preset = PermissionPreset.NORMAL
+        tool_context = ExecutionContext(
+            task_id=execution_context.task_id,
+            trace_id=execution_context.trace_id,
+            caller=execution_context.caller,
+            agent_runtime_id=execution_context.agent_runtime_id,
+            agent_session_id=execution_context.agent_session_id,
+            work_id=execution_context.work_id,
+            profile=manifest.tool_profile,
+            permission_preset=_preset,
+        )
+        tool_result = await self._tool_broker.execute(
+            call.tool_name, call.arguments, tool_context
+        )
+
+        # Feature 061 T-014: "ask:" 前缀信号桥接
+        tool_result = await self._handle_ask_bridge(
+            tool_result, call, tool_context
+        )
+
+        feedback = self._build_tool_feedback(
+            call.tool_name, tool_result, manifest.context_budget,
+            tool_call_id=call.tool_call_id,
+        )
+        await self._call_hook("after_tool_execute", feedback)
+        return feedback
 
     async def _handle_ask_bridge(
         self,
@@ -477,6 +591,8 @@ class SkillRunner:
         tool_name: str,
         tool_result: Any,
         budget: Any,
+        *,
+        tool_call_id: str = "",
     ) -> ToolFeedbackMessage:
         output = tool_result.output or ""
         if len(output) > budget.max_chars:
@@ -498,6 +614,7 @@ class SkillRunner:
             duration_ms=int(tool_result.duration * 1000),
             artifact_ref=tool_result.artifact_ref,
             parts=parts,
+            tool_call_id=tool_call_id,
         )
 
     @staticmethod
@@ -518,6 +635,15 @@ class SkillRunner:
             return manifest.input_model.model_validate(skill_input)
         except ValidationError as exc:
             raise SkillInputError(f"输入校验失败: {exc.errors()}") from exc
+
+    def _try_clear_history(self, history_key: str) -> None:
+        """Feature 064 P3 优化 5: Task 终态时清理 model_client 对话历史。"""
+        clear_fn = getattr(self._model_client, "clear_history", None)
+        if callable(clear_fn):
+            try:
+                clear_fn(history_key)
+            except Exception:
+                pass
 
     async def _backoff(self, manifest: SkillManifest) -> None:
         if manifest.retry_policy.backoff_ms > 0:
@@ -563,24 +689,21 @@ class SkillRunner:
         event_type: EventType,
         payload: dict[str, Any],
     ) -> None:
+        """发射事件到 Task 事件流。
+
+        Feature 064 P3: 委托给 core 层 emit_task_event()，消除重复逻辑。
+        """
         if self._event_store is None:
             return
 
-        event = Event(
-            event_id=str(ULID()),
+        await emit_task_event(
+            self._event_store,
             task_id=execution_context.task_id,
-            task_seq=await self._event_store.get_next_task_seq(execution_context.task_id),
-            ts=datetime.now(UTC),
-            type=event_type,
-            actor=ActorType.WORKER,
+            event_type=event_type,
             payload=payload,
+            actor=ActorType.WORKER,
             trace_id=execution_context.trace_id,
         )
-        append_committed = getattr(self._event_store, "append_event_committed", None)
-        if callable(append_committed):
-            await append_committed(event, update_task_pointer=True)
-            return
-        await self._event_store.append_event(event)
 
     async def _emit_skill_started(
         self,
@@ -738,6 +861,60 @@ class SkillRunner:
             except Exception as exc:
                 logger.warning("stop_hook_failed", error=str(exc))
         return False
+
+    async def _emit_tool_batch_started(
+        self,
+        *,
+        execution_context: SkillExecutionContext,
+        batch_id: str,
+        tool_calls: list[ToolCallSpec],
+        manifest: SkillManifest,
+        bucket_none_count: int,
+        bucket_reversible_count: int,
+        bucket_irreversible_count: int,
+    ) -> None:
+        """发射 TOOL_BATCH_STARTED 事件。"""
+        await self._emit_event(
+            execution_context=execution_context,
+            event_type=EventType.TOOL_BATCH_STARTED,
+            payload={
+                "batch_id": batch_id,
+                "tool_names": [call.tool_name for call in tool_calls],
+                "execution_mode": "parallel",
+                "batch_size": len(tool_calls),
+                "agent_runtime_id": execution_context.agent_runtime_id,
+                "skill_id": manifest.skill_id,
+                "bucket_none_count": bucket_none_count,
+                "bucket_reversible_count": bucket_reversible_count,
+                "bucket_irreversible_count": bucket_irreversible_count,
+            },
+        )
+
+    async def _emit_tool_batch_completed(
+        self,
+        *,
+        execution_context: SkillExecutionContext,
+        batch_id: str,
+        manifest: SkillManifest,
+        duration_ms: int,
+        success_count: int,
+        error_count: int,
+        total_count: int,
+    ) -> None:
+        """发射 TOOL_BATCH_COMPLETED 事件。"""
+        await self._emit_event(
+            execution_context=execution_context,
+            event_type=EventType.TOOL_BATCH_COMPLETED,
+            payload={
+                "batch_id": batch_id,
+                "duration_ms": duration_ms,
+                "success_count": success_count,
+                "error_count": error_count,
+                "total_count": total_count,
+                "agent_runtime_id": execution_context.agent_runtime_id,
+                "skill_id": manifest.skill_id,
+            },
+        )
 
     async def _emit_model_failed(
         self,

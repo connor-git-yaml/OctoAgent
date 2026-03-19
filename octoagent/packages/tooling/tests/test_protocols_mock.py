@@ -63,6 +63,10 @@ class MockToolBroker:
         await self.register(tool_meta, handler)
         return RegisterToolResult(ok=True, tool_name=tool_meta.name, message="registered")
 
+    async def get_tool_meta(self, tool_name: str) -> ToolMeta | None:
+        entry = self._registry.get(tool_name)
+        return entry[0] if entry else None
+
     async def execute(
         self,
         tool_name: str,

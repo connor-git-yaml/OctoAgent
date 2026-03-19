@@ -37,6 +37,10 @@ class TaskStore(Protocol):
         """更新任务状态（仅通过事件触发）"""
         ...
 
+    async def list_child_tasks(self, parent_task_id: str) -> list[Task]:
+        """查询指定父任务的所有子任务（Feature 064）"""
+        ...
+
 
 class EventStore(Protocol):
     """Event 存储接口 -- 对齐 Blueprint §9.2

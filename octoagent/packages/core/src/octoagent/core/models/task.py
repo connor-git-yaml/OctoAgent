@@ -43,3 +43,8 @@ class Task(BaseModel):
     risk_level: RiskLevel = Field(default=RiskLevel.LOW, description="风险等级")
     pointers: TaskPointers = Field(default_factory=TaskPointers, description="指针信息")
     trace_id: str = Field(default="", description="追踪 ID（链路追踪用，F012 前为空字符串）")
+    # Feature 064: Subagent Child Task 通过此字段关联父 Task
+    parent_task_id: str | None = Field(
+        default=None,
+        description="父任务 ID（Subagent Child Task 用）。顶层 Task 为 None。",
+    )

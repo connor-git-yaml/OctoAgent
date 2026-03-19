@@ -152,6 +152,11 @@ class SkillExecutionContext(BaseModel):
     conversation_messages: list[dict[str, str]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     usage_limits: UsageLimits = Field(default_factory=UsageLimits)
+    # Feature 064: Subagent 关联父 Task
+    parent_task_id: str | None = Field(
+        default=None,
+        description="父任务 ID。Subagent 的 Child Task 通过此字段关联父 Task。",
+    )
 
 
 class ToolCallSpec(BaseModel):
@@ -159,6 +164,15 @@ class ToolCallSpec(BaseModel):
 
     tool_name: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    tool_call_id: str = Field(
+        default="",
+        description=(
+            "LLM 返回的 function call ID。"
+            "Chat Completions 路径从 tool_calls[].id 填充；"
+            "Responses API 路径从 function_call.call_id 填充。"
+            "为空时回退到自然语言回填模式（FR-064-12 向后兼容）。"
+        ),
+    )
 
 
 class SkillOutputEnvelope(BaseModel):
@@ -185,6 +199,10 @@ class ToolFeedbackMessage(BaseModel):
     duration_ms: int = Field(default=0, ge=0)
     artifact_ref: str | None = Field(default=None)
     parts: list[dict[str, Any]] = Field(default_factory=list)
+    tool_call_id: str = Field(
+        default="",
+        description="对应 ToolCallSpec.tool_call_id，用于回填标准 tool role message",
+    )
 
 
 class SkillRunResult(BaseModel):
@@ -219,6 +237,44 @@ class SkillManifestModel(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     resource_limits: dict[str, Any] = Field(default_factory=dict)
     # 从 SKILL.md frontmatter 的 resource_limits 字段读取
+
+    # Feature 064 P1-A: Subagent 心跳和并发控制
+    heartbeat_interval_steps: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Subagent 心跳上报间隔（每 N 个 step 上报一次）",
+    )
+    max_concurrent_subagents: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="单个 Worker 最大并发 Subagent 数",
+    )
+
+    # Feature 064 P2-A: 上下文压缩配置
+    compaction_model_alias: str | None = Field(
+        default=None,
+        description=(
+            "上下文压缩摘要生成使用的模型别名。"
+            "默认 None 时使用 'compaction' alias（需在 LiteLLM Proxy 预配置）。"
+        ),
+    )
+    compaction_threshold_ratio: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "上下文压缩触发阈值比例（token 数 / max_tokens）。"
+            "设为 1.0 则永不触发（回滚方案）。"
+        ),
+    )
+    compaction_recent_turns: int = Field(
+        default=8,
+        ge=1,
+        le=50,
+        description="上下文压缩 Level 2 保留最近 N 轮对话。",
+    )
 
 
 def extract_mounted_tool_names(metadata: dict[str, Any] | None) -> list[str]:

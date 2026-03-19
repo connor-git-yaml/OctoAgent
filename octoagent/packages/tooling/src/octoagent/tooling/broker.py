@@ -174,6 +174,20 @@ class ToolBroker:
             results.append(meta)
         return results
 
+    async def get_tool_meta(self, tool_name: str) -> ToolMeta | None:
+        """按名称查询工具元数据（含 SideEffectLevel）。
+
+        O(1) 复杂度，从内部 _registry 字典查找。
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            ToolMeta 或 None（工具未注册时）
+        """
+        entry = self._registry.get(tool_name)
+        return entry[0] if entry else None
+
     async def unregister(self, tool_name: str) -> bool:
         """注销工具（FR-009）
 

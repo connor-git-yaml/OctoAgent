@@ -25,8 +25,8 @@ class SqliteTaskStore:
             """
             INSERT INTO tasks (task_id, created_at, updated_at, status, title,
                                thread_id, scope_id, requester, risk_level, pointers,
-                               trace_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               trace_id, parent_task_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task.task_id,
@@ -40,6 +40,7 @@ class SqliteTaskStore:
                 task.risk_level.value,
                 task.pointers.model_dump_json(),
                 task.trace_id,
+                task.parent_task_id,
             ),
         )
 
@@ -93,6 +94,15 @@ class SqliteTaskStore:
         rows = await cursor.fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    async def list_child_tasks(self, parent_task_id: str) -> list[Task]:
+        """查询指定父任务的所有子任务（Feature 064），按 created_at 正序"""
+        cursor = await self._conn.execute(
+            "SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC",
+            (parent_task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_task(row) for row in rows]
+
     async def update_task_status(
         self,
         task_id: str,
@@ -115,10 +125,10 @@ class SqliteTaskStore:
     def _row_to_task(row: aiosqlite.Row) -> Task:
         """将数据库行转换为 Task 模型
 
-        列顺序（对应 _TASKS_DDL）:
+        列顺序（对应 _TASKS_DDL + migrations）:
         0=task_id, 1=created_at, 2=updated_at, 3=status, 4=title,
         5=thread_id, 6=scope_id, 7=requester, 8=risk_level,
-        9=pointers, 10=trace_id
+        9=pointers, 10=trace_id, 11=parent_task_id
         """
         requester_data = json.loads(row[7])  # requester 列
         pointers_data = json.loads(row[9])   # pointers 列
@@ -134,4 +144,5 @@ class SqliteTaskStore:
             risk_level=row[8],
             pointers=TaskPointers(**pointers_data),
             trace_id=row[10] if len(row) > 10 else "",  # Feature 011: 追踪 ID
+            parent_task_id=row[11] if len(row) > 11 else None,  # Feature 064: 父任务 ID
         )

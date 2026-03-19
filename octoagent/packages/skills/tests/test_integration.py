@@ -29,6 +29,9 @@ class MockToolBroker:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
+    async def get_tool_meta(self, tool_name: str):
+        return None
+
     async def execute(self, tool_name: str, args: dict[str, Any], context: Any):
         self.calls.append((tool_name, args))
         from octoagent.tooling.models import ToolResult

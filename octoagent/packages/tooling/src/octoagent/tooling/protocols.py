@@ -218,6 +218,20 @@ class ToolBrokerProtocol(Protocol):
         """
         ...
 
+    async def get_tool_meta(self, tool_name: str) -> ToolMeta | None:
+        """按名称查询工具元数据（含 SideEffectLevel）。
+
+        O(1) 复杂度，从内部 _registry 字典查找。
+        返回 None 表示工具未注册。
+
+        Args:
+            tool_name: 工具名称
+
+        Returns:
+            ToolMeta 或 None
+        """
+        ...
+
     async def execute(
         self,
         tool_name: str,

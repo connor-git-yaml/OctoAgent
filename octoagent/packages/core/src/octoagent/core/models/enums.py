@@ -175,6 +175,13 @@ class EventType(StrEnum):
     SKILL_USAGE_REPORT = "SKILL_USAGE_REPORT"      # Skill 执行资源消耗报告
     RESOURCE_LIMIT_HIT = "RESOURCE_LIMIT_HIT"      # 资源限制触发告警
 
+    # Feature 064: 并行工具调用批次事件
+    TOOL_BATCH_STARTED = "TOOL_BATCH_STARTED"      # 并行工具批次开始
+    TOOL_BATCH_COMPLETED = "TOOL_BATCH_COMPLETED"    # 并行工具批次完成
+
+    # Feature 064: 上下文压缩失败事件（P2-A 预留）
+    CONTEXT_COMPACTION_FAILED = "CONTEXT_COMPACTION_FAILED"
+
     # Feature 061: 权限 Preset + Deferred Tools 事件
     PRESET_CHECK = "PRESET_CHECK"                            # Preset 权限检查
     APPROVAL_OVERRIDE_HIT = "APPROVAL_OVERRIDE_HIT"          # always 覆盖命中
