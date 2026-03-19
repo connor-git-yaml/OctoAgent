@@ -118,7 +118,7 @@ export const MIN_NODE_WIDTH = 48;
 /** 相邻节点最小间距（像素） */
 const MIN_GAP = 8;
 /** 时间轴左右 padding（像素） */
-const PADDING = 24;
+const PADDING = 0;
 
 /** 将节点按唯一 agent 合并为泳道（同一 Agent 只有一行） */
 export function groupByAgent(nodes: FlowNode[]): AgentLane[] {
@@ -251,10 +251,37 @@ function buildRound(
   };
 }
 
+// ─── Dispatch 模式检测 ──────────────────────────────────────
+
+type DispatchMode = "direct" | "worker";
+
+/**
+ * 扫描事件流，检测本轮的 dispatch 模式：
+ * - "direct": Butler 直接执行（无 WORKER_DISPATCHED 事件）
+ * - "worker": 传统 Worker 路由（存在 WORKER_DISPATCHED 事件）
+ */
+function detectDispatchMode(nodes: FlowNode[]): DispatchMode {
+  for (const node of nodes) {
+    if (node.kind === "worker") return "worker";
+  }
+  return "direct";
+}
+
 // ─── Agent 分配 ─────────────────────────────────────────────
 
 /** 按 actor 字段为每个节点分配所属 Agent 名称 */
 function assignAgents(nodes: FlowNode[]): void {
+  const mode = detectDispatchMode(nodes);
+
+  if (mode === "direct") {
+    // Butler 直接执行：所有事件归入 Orchestrator 单泳道
+    for (const node of nodes) {
+      node.agent = "Orchestrator";
+    }
+    return;
+  }
+
+  // Worker 模式：保留现有逻辑，从 WORKER_DISPATCHED 提取 Worker 名称
   let lastWorkerName = "Worker";
 
   for (const node of nodes) {
@@ -295,7 +322,7 @@ function extractAgentName(node: FlowNode): string {
 
 function extractWorkerType(node: FlowNode): string {
   for (const ev of node.events) {
-    const wt = ev.payload?.selected_worker_type || ev.payload?.worker_type;
+    const wt = ev.payload?.selected_worker_type || ev.payload?.worker_type || ev.payload?.worker_capability;
     if (typeof wt === "string" && wt) return wt;
   }
   return "";
@@ -551,16 +578,21 @@ function makeSingleNode(
       };
     }
 
-    case "ORCH_DECISION":
+    case "ORCH_DECISION": {
+      const routeReason = String(event.payload?.route_reason || "");
+      const isButlerDirect = routeReason.startsWith("butler_direct_execution:");
       return {
         ...base,
         id: event.event_id,
         kind: "decision",
-        label: str(event.payload?.decision, 20) || "调度决策",
+        label: isButlerDirect
+          ? "Butler 直接处理"
+          : str(event.payload?.decision, 20) || "调度决策",
         status: "neutral",
         events: [event],
         ts: event.ts,
       };
+    }
 
     case "A2A_MESSAGE_SENT":
       return {
@@ -847,16 +879,69 @@ export function computeTimelineLayout(
     workerLaneWidthMap.set(wLaneIdx, w);
   }
 
-  // ── 3. 布局 Orchestrator 泳道（主轴） ──
+  // ── 3. 将 Orchestrator 中相邻的 worker 节点分组为并发组 ──
+  // 相邻 worker 节点（中间只隔 decision/a2a）视为并发 dispatch
+  const concurrentGroups: string[][] = []; // 每组包含 workerNodeId[]
+  if (orchLaneIdx >= 0) {
+    let currentGroup: string[] = [];
+    for (const node of lanes[orchLaneIdx].nodes) {
+      if (workerSpanMap.has(node.id)) {
+        currentGroup.push(node.id);
+      } else if (node.kind === "decision" || node.kind === "a2a") {
+        // decision/a2a 不打断并发组
+      } else {
+        if (currentGroup.length > 0) {
+          concurrentGroups.push(currentGroup);
+          currentGroup = [];
+        }
+      }
+    }
+    if (currentGroup.length > 0) concurrentGroups.push(currentGroup);
+  }
+
+  // 并发组内所有胶囊共享最大宽度
+  const sharedWidthMap = new Map<string, number>(); // workerNodeId -> sharedWidth
+  const sharedGroupMap = new Map<string, string[]>(); // workerNodeId -> 同组所有 workerNodeId
+  for (const group of concurrentGroups) {
+    if (group.length <= 1) continue; // 单个不需要共享
+    let maxW = MIN_NODE_WIDTH;
+    for (const nid of group) {
+      const wLaneIdx = workerSpanMap.get(nid)!;
+      maxW = Math.max(maxW, workerLaneWidthMap.get(wLaneIdx) || MIN_NODE_WIDTH);
+    }
+    for (const nid of group) {
+      sharedWidthMap.set(nid, maxW);
+      sharedGroupMap.set(nid, group);
+    }
+  }
+
+  // ── 4. 布局 Orchestrator 泳道（主轴） ──
   let cursor = PADDING;
+  const concurrentPlaced = new Set<string>(); // 已布局的并发组首节点
   if (orchLaneIdx >= 0) {
     for (const node of lanes[orchLaneIdx].nodes) {
       const wLaneIdx = workerSpanMap.get(node.id);
       if (wLaneIdx !== undefined) {
-        // Worker 胶囊节点：展宽到容纳 Worker 泳道所有节点
-        const spanWidth = workerLaneWidthMap.get(wLaneIdx) || MIN_NODE_WIDTH;
-        nodeLayouts.set(node.id, { leftPx: cursor, widthPx: spanWidth, laneIndex: orchLaneIdx });
-        cursor += spanWidth + MIN_GAP;
+        const group = sharedGroupMap.get(node.id);
+        if (group && group.length > 1) {
+          // 并发组：所有胶囊共享同一水平范围
+          const groupKey = group[0];
+          if (!concurrentPlaced.has(groupKey)) {
+            concurrentPlaced.add(groupKey);
+            const sharedWidth = sharedWidthMap.get(node.id) || MIN_NODE_WIDTH;
+            const groupLeft = cursor;
+            for (const gid of group) {
+              nodeLayouts.set(gid, { leftPx: groupLeft, widthPx: sharedWidth, laneIndex: orchLaneIdx });
+            }
+            cursor += sharedWidth + MIN_GAP;
+          }
+          // 组内后续节点已在首次遇到时布局过，跳过
+        } else {
+          // 单独 Worker 胶囊
+          const spanWidth = workerLaneWidthMap.get(wLaneIdx) || MIN_NODE_WIDTH;
+          nodeLayouts.set(node.id, { leftPx: cursor, widthPx: spanWidth, laneIndex: orchLaneIdx });
+          cursor += spanWidth + MIN_GAP;
+        }
       } else {
         // 普通节点
         nodeLayouts.set(node.id, { leftPx: cursor, widthPx: MIN_NODE_WIDTH, laneIndex: orchLaneIdx });
@@ -865,7 +950,7 @@ export function computeTimelineLayout(
     }
   }
 
-  // ── 4. 布局 Worker 泳道：对齐到 Orchestrator 的 Worker 胶囊条 ──
+  // ── 5. 布局 Worker 泳道：对齐到 Orchestrator 的 Worker 胶囊条 ──
   for (const [workerNodeId, wLaneIdx] of workerSpanMap) {
     const wLane = lanes[wLaneIdx];
     const orchSpan = nodeLayouts.get(workerNodeId);
@@ -896,7 +981,7 @@ export function computeTimelineLayout(
     }
   }
 
-  // ── 5. 布局无 Orchestrator 关联的独立泳道 ──
+  // ── 6. 布局无 Orchestrator 关联的独立泳道 ──
   for (let li = 0; li < lanes.length; li++) {
     if (li === orchLaneIdx) continue;
     // 跳过已被 workerSpanMap 布局的泳道
@@ -913,7 +998,7 @@ export function computeTimelineLayout(
     cursor = Math.max(cursor, laneCursor);
   }
 
-  // ── 6. 总宽度 ──
+  // ── 7. 总宽度 ──
   let maxRight = 0;
   for (const [, nl] of nodeLayouts) {
     maxRight = Math.max(maxRight, nl.leftPx + nl.widthPx);

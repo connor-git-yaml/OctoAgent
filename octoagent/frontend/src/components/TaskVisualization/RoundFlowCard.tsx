@@ -341,9 +341,12 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
       {/* 底部统计 */}
       <div className="tv-round-stats">
         <span>{round.nodes.length} 个步骤</span>
-        <span className="tv-round-stats-agents">
-          {new Set(round.nodes.map((n) => n.agent)).size} 个 Agent
-        </span>
+        {(() => {
+          const agentCount = new Set(round.nodes.map((n) => n.agent)).size;
+          return agentCount > 1 ? (
+            <span className="tv-round-stats-agents">{agentCount} 个 Agent</span>
+          ) : null;
+        })()}
         {shouldCollapse && (
           <button className="tv-phase-expand-btn" onClick={() => setExpanded(true)}>
             展开全部

@@ -269,12 +269,17 @@ function KindContent({
         </Section>
       );
 
-    case "decision":
+    case "decision": {
+      const routeReason = String(event.payload?.route_reason || "");
+      const isButlerDirect = routeReason.startsWith("butler_direct_execution:");
       return (
-        <Section title="调度决策">
+        <Section title={isButlerDirect ? "Butler 直接处理" : "调度决策"}>
           <div className="tv-modal-meta">
             {!!event.payload?.decision && (
               <Row label="决策">{s(event.payload.decision)}</Row>
+            )}
+            {!!routeReason && (
+              <Row label="路由原因">{s(routeReason)}</Row>
             )}
             {!!event.payload?.reason && (
               <Row label="原因">{s(event.payload.reason)}</Row>
@@ -282,6 +287,7 @@ function KindContent({
           </div>
         </Section>
       );
+    }
 
     case "error":
       return (
@@ -353,7 +359,7 @@ function kindTitle(kind: string): string {
     memory: "记忆检索",
     artifact: "产物",
     completion: "任务完成",
-    decision: "调度决策",
+    decision: "调度/路由",
     a2a: "A2A 消息",
     approval: "审批",
     error: "错误",
