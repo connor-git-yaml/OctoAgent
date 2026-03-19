@@ -482,6 +482,7 @@ class AgentContextService:
         self._memory_runtime = MemoryRuntimeService(
             self._project_root,
             store_group=store_group,
+            reranker_service=self.get_reranker_service(),
         )
 
     async def build_task_context(
@@ -2860,6 +2861,7 @@ class AgentContextService:
         """获取 ConsolidationService 实例（Feature 065）。
 
         延迟创建，首次调用时实例化。若 LLM 服务不可用则返回 None。
+        Phase 2: 自动注入 DerivedExtractionService。
         """
         if not hasattr(self, "_consolidation_service"):
             try:
@@ -2869,14 +2871,117 @@ class AgentContextService:
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 # LLM 服务通过 store_group 获取（若可用）
                 llm_service = getattr(self._stores, "llm_service", None)
+
+                # Phase 2: 创建 DerivedExtractionService 并注入
+                derived_service = self.get_derived_extraction_service()
+                # Phase 3: 创建 ToMExtractionService 并注入
+                tom_service = self.get_tom_extraction_service()
+
                 self._consolidation_service = ConsolidationService(
+                    memory_store=memory_store,
+                    llm_service=llm_service,
+                    project_root=self._project_root,
+                    derived_extraction_service=derived_service,
+                    tom_extraction_service=tom_service,
+                )
+            except Exception:
+                self._consolidation_service = None
+        return self._consolidation_service
+
+    def get_derived_extraction_service(self):
+        """获取 DerivedExtractionService 实例（Feature 065 Phase 2, US-4）。
+
+        延迟创建，首次调用时实例化。
+        """
+        if not hasattr(self, "_derived_extraction_service"):
+            try:
+                from octoagent.memory import SqliteMemoryStore
+                from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+
+                memory_store = SqliteMemoryStore(self._stores.conn)
+                llm_service = getattr(self._stores, "llm_service", None)
+                self._derived_extraction_service = DerivedExtractionService(
                     memory_store=memory_store,
                     llm_service=llm_service,
                     project_root=self._project_root,
                 )
             except Exception:
-                self._consolidation_service = None
-        return self._consolidation_service
+                self._derived_extraction_service = None
+        return self._derived_extraction_service
+
+    def get_tom_extraction_service(self):
+        """获取 ToMExtractionService 实例（Feature 065 Phase 3, US-7）。
+
+        延迟创建，首次调用时实例化。
+        """
+        if not hasattr(self, "_tom_extraction_service"):
+            try:
+                from octoagent.memory import SqliteMemoryStore
+                from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+
+                memory_store = SqliteMemoryStore(self._stores.conn)
+                llm_service = getattr(self._stores, "llm_service", None)
+                self._tom_extraction_service = ToMExtractionService(
+                    memory_store=memory_store,
+                    llm_service=llm_service,
+                    project_root=self._project_root,
+                )
+            except Exception:
+                self._tom_extraction_service = None
+        return self._tom_extraction_service
+
+    def get_profile_generator_service(self):
+        """获取 ProfileGeneratorService 实例（Feature 065 Phase 3, US-9）。
+
+        延迟创建，首次调用时实例化。
+        """
+        if not hasattr(self, "_profile_generator_service"):
+            try:
+                from octoagent.memory import SqliteMemoryStore
+                from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+
+                memory_store = SqliteMemoryStore(self._stores.conn)
+                llm_service = getattr(self._stores, "llm_service", None)
+                self._profile_generator_service = ProfileGeneratorService(
+                    memory_store=memory_store,
+                    llm_service=llm_service,
+                    project_root=self._project_root,
+                )
+            except Exception:
+                self._profile_generator_service = None
+        return self._profile_generator_service
+
+    def get_flush_prompt_injector(self):
+        """获取 FlushPromptInjector 实例（Feature 065 Phase 2, US-5）。
+
+        延迟创建，首次调用时实例化。
+        """
+        if not hasattr(self, "_flush_prompt_injector"):
+            try:
+                from octoagent.provider.dx.flush_prompt_injector import FlushPromptInjector
+
+                llm_service = getattr(self._stores, "llm_service", None)
+                self._flush_prompt_injector = FlushPromptInjector(
+                    llm_service=llm_service,
+                    project_root=self._project_root,
+                )
+            except Exception:
+                self._flush_prompt_injector = None
+        return self._flush_prompt_injector
+
+    def get_reranker_service(self):
+        """获取 ModelRerankerService 实例（Feature 065 Phase 2, US-6）。
+
+        延迟创建，首次调用时实例化。后台 warmup 模型。
+        """
+        if not hasattr(self, "_reranker_service"):
+            try:
+                from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+
+                self._reranker_service = ModelRerankerService(auto_load=True)
+            except Exception:
+                self._reranker_service = None
+        return self._reranker_service
 
     async def get_memory_retrieval_profile(
         self,

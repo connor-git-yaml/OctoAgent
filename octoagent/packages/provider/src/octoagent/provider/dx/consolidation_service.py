@@ -6,12 +6,10 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 import structlog
 from octoagent.memory import (
@@ -23,25 +21,10 @@ from octoagent.memory import (
     WriteAction,
 )
 
-
-@runtime_checkable
-class LlmServiceProtocol(Protocol):
-    """LLM 服务的最小接口契约。"""
-
-    async def call_with_fallback(
-        self,
-        messages: list[dict[str, str]],
-        model_alias: str = "main",
-        **kwargs: Any,
-    ) -> Any: ...
-
+from .llm_common import LlmServiceProtocol, parse_llm_json_array, resolve_default_model_alias
 
 # 单次 consolidate 操作的 Fragment 批量上限
-# MVP 阶段设为 200，足以覆盖单用户日常积压量
-# 若 Scheduler 发现仍有未处理的 Fragment，会在下次周期继续
 _MAX_FRAGMENTS_PER_BATCH: int = 200
-
-from .config_wizard import load_config
 
 _log = structlog.get_logger()
 
@@ -52,6 +35,27 @@ _log = structlog.get_logger()
 
 
 @dataclass(slots=True)
+class CommittedSorInfo:
+    """Consolidate 产出的 SoR 摘要信息，供 derived 提取用。"""
+
+    memory_id: str
+    subject_key: str
+    content: str
+    partition: MemoryPartition
+    source_fragment_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DerivedExtractionResult:
+    """Derived 提取结果。"""
+
+    scope_id: str
+    extracted: int = 0
+    skipped: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ConsolidationScopeResult:
     """单个 scope 的 consolidate 结果。"""
 
@@ -59,6 +63,8 @@ class ConsolidationScopeResult:
     consolidated: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+    derived_extracted: int = 0  # Phase 2: Derived 记录提取数
+    tom_extracted: int = 0  # Phase 3: ToM 推理产出数
 
 
 @dataclass(slots=True)
@@ -126,10 +132,14 @@ class ConsolidationService:
         memory_store: SqliteMemoryStore,
         llm_service: LlmServiceProtocol | None,
         project_root: Path,
+        derived_extraction_service: Any | None = None,  # Phase 2: DerivedExtractionService
+        tom_extraction_service: Any | None = None,  # Phase 3: ToMExtractionService
     ) -> None:
         self._memory_store = memory_store
         self._llm_service = llm_service
         self._project_root = project_root
+        self._derived_service = derived_extraction_service
+        self._tom_service = tom_extraction_service
 
     # ------------------------------------------------------------------
     # 公共方法
@@ -219,7 +229,7 @@ class ConsolidationService:
             )
 
         # 7. 解析 LLM 输出
-        facts = _parse_consolidation_response(response_text)
+        facts = parse_llm_json_array(response_text)
         if facts is None:
             _log.warning(
                 "consolidation_parse_failed",
@@ -238,6 +248,7 @@ class ConsolidationService:
         errors: list[str] = []
         fragment_map = {f.fragment_id: f for f in pending}
         consolidated_fragment_ids: set[str] = set()
+        committed_sors: list[CommittedSorInfo] = []  # Phase 2: 收集已 commit 的 SoR 信息
 
         for fact in facts:
             subject_key = fact.get("subject_key", "").strip()
@@ -291,6 +302,14 @@ class ConsolidationService:
                     await memory.commit_memory(proposal.proposal_id)
                     consolidated += 1
                     existing_keys.add(subject_key)
+                    # Phase 2: 收集 committed SoR 信息供 derived 提取
+                    committed_sors.append(CommittedSorInfo(
+                        memory_id=proposal.target_memory_id if hasattr(proposal, 'target_memory_id') else proposal.proposal_id,
+                        subject_key=subject_key,
+                        content=content,
+                        partition=partition,
+                        source_fragment_ids=[e.ref_id for e in evidence_refs if e.ref_type == "fragment"],
+                    ))
                     _log.info(
                         "consolidation_fact_committed",
                         scope_id=scope_id,
@@ -312,6 +331,59 @@ class ConsolidationService:
                     "consolidation_commit_failed",
                     scope_id=scope_id,
                     subject_key=subject_key,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
+        # 8.5 Phase 2: Derived Memory 自动提取 (best-effort)
+        derived_extracted = 0
+        if self._derived_service and committed_sors:
+            try:
+                # 推断 partition 用于 derived 提取
+                _partition = committed_sors[0].partition if committed_sors else MemoryPartition.WORK
+                derived_result = await self._derived_service.extract_from_sors(
+                    scope_id=scope_id,
+                    partition=_partition,
+                    committed_sors=committed_sors,
+                    model_alias=resolved_alias,
+                )
+                derived_extracted = derived_result.extracted
+                _log.info(
+                    "consolidation_derived_extraction",
+                    scope_id=scope_id,
+                    extracted=derived_result.extracted,
+                    errors=derived_result.errors[:3],
+                )
+            except Exception as exc:
+                _log.warning(
+                    "consolidation_derived_extraction_failed",
+                    scope_id=scope_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
+        # 8.6 Phase 3: Theory of Mind 推理 (best-effort)
+        tom_extracted = 0
+        if self._tom_service and committed_sors:
+            try:
+                _partition_tom = committed_sors[0].partition if committed_sors else MemoryPartition.WORK
+                tom_result = await self._tom_service.extract_tom(
+                    scope_id=scope_id,
+                    partition=_partition_tom,
+                    committed_sors=committed_sors,
+                    model_alias=resolved_alias,
+                )
+                tom_extracted = tom_result.extracted
+                _log.info(
+                    "consolidation_tom_extraction",
+                    scope_id=scope_id,
+                    extracted=tom_result.extracted,
+                    errors=tom_result.errors[:3],
+                )
+            except Exception as exc:
+                _log.warning(
+                    "consolidation_tom_extraction_failed",
+                    scope_id=scope_id,
                     error_type=type(exc).__name__,
                     error=str(exc),
                 )
@@ -343,6 +415,8 @@ class ConsolidationService:
             consolidated=consolidated,
             skipped=skipped,
             errors=errors,
+            derived_extracted=derived_extracted,
+            tom_extracted=tom_extracted,
         )
 
     async def consolidate_by_run_id(
@@ -424,32 +498,4 @@ class ConsolidationService:
     # ------------------------------------------------------------------
 
     def _resolve_default_model_alias(self) -> str:
-        """从项目配置中读取默认的 reasoning 模型别名。"""
-        try:
-            config = load_config(self._project_root)
-            return (config.memory.reasoning_model_alias if config else "") or "main"
-        except Exception:
-            return "main"
-
-
-# ---------------------------------------------------------------------------
-# 辅助函数
-# ---------------------------------------------------------------------------
-
-
-def _parse_consolidation_response(text: str) -> list[dict[str, Any]] | None:
-    """从 LLM 响应中解析 JSON 数组。"""
-    cleaned = text.strip()
-    # 处理 markdown code block 包裹
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        # 跳过首行 ``` / ```json
-        start = 1
-        # 去掉尾行 ```（如存在）
-        end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
-        cleaned = "\n".join(lines[start:end])
-    try:
-        parsed = json.loads(cleaned)
-        return parsed if isinstance(parsed, list) else None
-    except (json.JSONDecodeError, ValueError):
-        return None
+        return resolve_default_model_alias(self._project_root)

@@ -265,6 +265,7 @@ class ControlPlaneService:
         分离到独立方法避免在 bind_automation_scheduler 中产生副作用。
         """
         self._ensure_system_consolidate_job()
+        self._ensure_system_profile_generate_job()
 
     def _ensure_system_consolidate_job(self) -> None:
         """确保 system:memory-consolidate 定时作业存在（Feature 065）。
@@ -293,6 +294,40 @@ class ControlPlaneService:
                 "system_job_registered",
                 job_id=job_id,
                 schedule_expr="0 */4 * * *",
+            )
+        except Exception as exc:
+            log.warning(
+                "system_job_registration_failed",
+                job_id=job_id,
+                error=str(exc),
+            )
+
+    def _ensure_system_profile_generate_job(self) -> None:
+        """确保 system:memory-profile-generate 定时作业存在（Feature 065 Phase 3, US-9）。
+
+        每天凌晨 2 点 UTC 自动聚合生成用户画像。
+        """
+        job_id = "system:memory-profile-generate"
+        existing = self._automation_store.get_job(job_id)
+        if existing is not None:
+            return
+
+        try:
+            job = AutomationJob(
+                job_id=job_id,
+                name="Memory Profile Generate (用户画像)",
+                action_id="memory.profile_generate",
+                params={},
+                schedule_kind=AutomationScheduleKind.CRON,
+                schedule_expr="0 2 * * *",
+                timezone="UTC",
+                enabled=True,
+            )
+            self._automation_store.save_job(job)
+            log.info(
+                "system_job_registered",
+                job_id=job_id,
+                schedule_expr="0 2 * * *",
             )
         except Exception as exc:
             log.warning(
@@ -3296,6 +3331,8 @@ class ControlPlaneService:
             )
         if action_id == "memory.consolidate":
             return await self._handle_memory_consolidate(request)
+        if action_id == "memory.profile_generate":
+            return await self._handle_memory_profile_generate(request)
         if action_id == "vault.access.request":
             return await self._handle_vault_access_request(request)
         if action_id == "vault.access.resolve":
@@ -4425,6 +4462,94 @@ class ControlPlaneService:
             code="MEMORY_CONSOLIDATE_COMPLETED",
             message=result.get("message", "记忆整理完成"),
             data=result,
+            resource_refs=[
+                self._resource_ref("memory_console", "memory:overview"),
+            ],
+            target_refs=self._memory_target_refs(request),
+        )
+
+    async def _handle_memory_profile_generate(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """定期聚合生成用户画像（Feature 065 Phase 3, US-9）。"""
+        project_id, workspace_id = await self._resolve_memory_action_context(request)
+
+        # 复用 MemoryConsoleService 内部的 context/memory 解析模式
+        try:
+            context = await self._memory_console_service._resolve_context(
+                active_project_id=project_id or "",
+                active_workspace_id=workspace_id or "",
+                project_id=project_id or "",
+                workspace_id=workspace_id or "",
+            )
+            if not context.selected_scope_ids:
+                return self._completed_result(
+                    request=request,
+                    code="PROFILE_GENERATE_NO_SCOPE",
+                    message="没有可用的 scope",
+                    data={"dimensions_generated": 0, "dimensions_updated": 0},
+                    resource_refs=[],
+                    target_refs=self._memory_target_refs(request),
+                )
+            memory = await self._memory_console_service._memory_service_for_context(context)
+        except Exception as exc:
+            return self._failed_result(
+                request=request,
+                code="MEMORY_SERVICE_UNAVAILABLE",
+                message=f"Memory 服务不可用: {exc}",
+            )
+
+        # 延迟创建 ProfileGeneratorService
+        try:
+            from octoagent.memory import SqliteMemoryStore
+            from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+
+            memory_store = SqliteMemoryStore(self._stores.conn)
+            llm_service = getattr(self._stores, "llm_service", None) or self._memory_console_service._llm_service
+            profile_service = ProfileGeneratorService(
+                memory_store=memory_store,
+                llm_service=llm_service,
+                project_root=self._project_root,
+            )
+        except Exception as exc:
+            return self._failed_result(
+                request=request,
+                code="PROFILE_SERVICE_UNAVAILABLE",
+                message=f"画像服务初始化失败: {exc}",
+            )
+
+        total_generated = 0
+        total_updated = 0
+        all_errors: list[str] = []
+
+        for scope_id in context.selected_scope_ids:
+            try:
+                result = await profile_service.generate_profile(
+                    memory=memory,
+                    scope_id=scope_id,
+                )
+                total_generated += result.dimensions_generated
+                total_updated += result.dimensions_updated
+                all_errors.extend(result.errors)
+            except Exception as exc:
+                all_errors.append(f"scope {scope_id} 画像生成失败: {exc}")
+                log.warning(
+                    "profile_generate_scope_failed",
+                    scope_id=scope_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
+        return self._completed_result(
+            request=request,
+            code="PROFILE_GENERATE_COMPLETED",
+            message=f"画像生成完成：{total_generated} 新增, {total_updated} 更新",
+            data={
+                "dimensions_generated": total_generated,
+                "dimensions_updated": total_updated,
+                "errors": all_errors[:10],
+            },
             resource_refs=[
                 self._resource_ref("memory_console", "memory:overview"),
             ],

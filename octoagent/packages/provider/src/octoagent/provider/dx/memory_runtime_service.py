@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from octoagent.core.models import MemoryRetrievalProfile, Project, Workspace
 from octoagent.memory import MemoryBackendStatus, MemoryService, SqliteMemoryStore
@@ -22,10 +23,12 @@ class MemoryRuntimeService:
         *,
         store_group,
         memory_store: SqliteMemoryStore | None = None,
+        reranker_service: Any | None = None,
     ) -> None:
         self._project_root = resolve_project_root(project_root).resolve()
         self._stores = store_group
         self._memory_store = memory_store or SqliteMemoryStore(store_group.conn)
+        self._reranker_service = reranker_service
         self._backend_resolver = MemoryBackendResolver(
             self._project_root,
             store_group=store_group,
@@ -42,7 +45,11 @@ class MemoryRuntimeService:
         workspace: Workspace | None = None,
     ) -> MemoryService:
         if project is None:
-            return MemoryService(self._stores.conn, store=self._memory_store)
+            return MemoryService(
+                self._stores.conn,
+                store=self._memory_store,
+                reranker_service=self._reranker_service,
+            )
         backend = await self._backend_resolver.resolve_backend(
             project=project,
             workspace=workspace,
@@ -51,6 +58,7 @@ class MemoryRuntimeService:
             self._stores.conn,
             store=self._memory_store,
             backend=backend,
+            reranker_service=self._reranker_service,
         )
 
     async def retrieval_profile_for_scope(

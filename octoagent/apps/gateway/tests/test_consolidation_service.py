@@ -34,8 +34,8 @@ from octoagent.provider.dx.consolidation_service import (
     ConsolidationBatchResult,
     ConsolidationScopeResult,
     ConsolidationService,
-    _parse_consolidation_response,
 )
+from octoagent.provider.dx.llm_common import parse_llm_json_array
 
 
 # ---------------------------------------------------------------------------
@@ -117,30 +117,30 @@ def _build_service(
 
 
 # ---------------------------------------------------------------------------
-# _parse_consolidation_response 测试
+# parse_llm_json_array 测试
 # ---------------------------------------------------------------------------
 
 
 class TestParseConsolidationResponse:
     def test_valid_json_array(self):
-        result = _parse_consolidation_response('[{"subject_key": "a", "content": "b"}]')
+        result = parse_llm_json_array('[{"subject_key": "a", "content": "b"}]')
         assert result == [{"subject_key": "a", "content": "b"}]
 
     def test_markdown_code_block(self):
         text = '```json\n[{"subject_key": "a", "content": "b"}]\n```'
-        result = _parse_consolidation_response(text)
+        result = parse_llm_json_array(text)
         assert result == [{"subject_key": "a", "content": "b"}]
 
     def test_empty_array(self):
-        result = _parse_consolidation_response("[]")
+        result = parse_llm_json_array("[]")
         assert result == []
 
     def test_invalid_json(self):
-        result = _parse_consolidation_response("not json at all")
+        result = parse_llm_json_array("not json at all")
         assert result is None
 
     def test_json_object_not_array(self):
-        result = _parse_consolidation_response('{"key": "value"}')
+        result = parse_llm_json_array('{"key": "value"}')
         assert result is None
 
 

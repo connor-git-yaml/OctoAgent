@@ -1,5 +1,6 @@
 """Memory 领域服务。"""
 
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,11 +71,13 @@ class MemoryService:
         conn: aiosqlite.Connection,
         store: SqliteMemoryStore | None = None,
         backend: MemoryBackend | None = None,
+        reranker_service: Any | None = None,  # Phase 2: ModelRerankerService
     ) -> None:
         self._conn = conn
         self._store = store or SqliteMemoryStore(conn)
         self._fallback_backend = SqliteMemoryBackend(self._store)
         self._backend = backend or self._fallback_backend
+        self._reranker_service = reranker_service
         self._backend_degraded = False
         self._backend_last_success_at: datetime | None = None
         self._backend_last_failure_at: datetime | None = None
@@ -554,7 +557,7 @@ class MemoryService:
                         )
 
             collected.sort(key=self._recall_sort_key)
-            selected_candidates, hook_trace = self._apply_recall_hooks(
+            selected_candidates, hook_trace = await self._apply_recall_hooks(
                 collected=collected,
                 query=normalized_query,
                 max_hits=max_hits,
@@ -1552,7 +1555,7 @@ class MemoryService:
             subject_hint=subject_hint,
         )
 
-    def _apply_recall_hooks(
+    async def _apply_recall_hooks(
         self,
         *,
         collected: list[tuple[int, int, int, MemorySearchHit]],
@@ -1601,6 +1604,63 @@ class MemoryService:
         if hook_options.rerank_mode is MemoryRecallRerankMode.HEURISTIC and candidates:
             candidates = self._rerank_recall_candidates(candidates)
 
+        # Phase 2: MODEL rerank (US-6)
+        elif hook_options.rerank_mode is MemoryRecallRerankMode.MODEL and candidates:
+            if len(candidates) >= 2 and self._reranker_service is not None:
+                # 构建候选文本
+                candidate_texts = [
+                    c[-1].summary or c[-1].subject_key or ""
+                    for c in candidates
+                ]
+                rerank_result = await self._reranker_service.rerank(
+                    query=query,
+                    candidates=candidate_texts,
+                )
+                if rerank_result.degraded:
+                    # 降级到 HEURISTIC
+                    candidates = self._rerank_recall_candidates(candidates)
+                    degraded_reasons.append(
+                        f"reranker_degraded:{rerank_result.degraded_reason}"
+                    )
+                else:
+                    # 按 reranker 分数重排
+                    scored = list(zip(rerank_result.scores, candidates))
+                    scored.sort(key=lambda x: -x[0])
+                    candidates = [
+                        self._annotate_recall_candidate(
+                            c,
+                            recall_rerank_score=round(s, 4),
+                            recall_rerank_mode="model",
+                            recall_rerank_model=rerank_result.model_id,
+                        )
+                        for s, c in scored
+                    ]
+            else:
+                # candidates < 2 或 reranker 不可用，降级到 HEURISTIC
+                if candidates:
+                    candidates = self._rerank_recall_candidates(candidates)
+
+        # --- Phase 3: Temporal Decay (US-8, FR-020) ---
+        if hook_options.temporal_decay_enabled and candidates:
+            candidates = self._apply_temporal_decay(
+                candidates,
+                half_life_days=hook_options.temporal_decay_half_life_days,
+            )
+            trace.temporal_decay_applied = True
+            trace.temporal_decay_half_life_days = hook_options.temporal_decay_half_life_days
+
+        # --- Phase 3: MMR 去重 (US-8, FR-021) ---
+        if hook_options.mmr_enabled and len(candidates) > 1:
+            before_count = len(candidates)
+            candidates = self._apply_mmr_dedup(
+                candidates,
+                max_hits=max_hits,
+                mmr_lambda=hook_options.mmr_lambda,
+            )
+            trace.mmr_applied = True
+            trace.mmr_lambda = hook_options.mmr_lambda
+            trace.mmr_removed_count = before_count - len(candidates)
+
         bounded_max_hits = max(1, max_hits)
         trace.delivered_count = min(len(candidates), bounded_max_hits)
         return candidates[:bounded_max_hits], trace
@@ -1619,6 +1679,143 @@ class MemoryService:
             ordinal,
             hit.model_copy(update={"metadata": metadata}),
         )
+
+    # ------------------------------------------------------------------
+    # Phase 3: Temporal Decay + MMR 去重 (US-8)
+    # ------------------------------------------------------------------
+
+    def _apply_temporal_decay(
+        self,
+        candidates: list[tuple[int, int, int, MemorySearchHit]],
+        *,
+        half_life_days: float = 30.0,
+    ) -> list[tuple[int, int, int, MemorySearchHit]]:
+        """对候选结果应用指数时间衰减。
+
+        decay_factor = exp(-ln(2) / half_life_days * age_days)
+
+        将 decay_factor 乘以已有的 rerank_score（或 1.0），
+        按调整后的分数重排。
+        """
+        if not candidates:
+            return []
+
+        decay_constant = math.log(2) / max(half_life_days, 1.0)
+        now = datetime.now(UTC)
+
+        scored: list[tuple[float, tuple[int, int, int, MemorySearchHit]]] = []
+        for candidate in candidates:
+            hit = candidate[-1]
+            age_seconds = (now - hit.created_at).total_seconds()
+            age_days = max(0.0, age_seconds / 86400.0)
+
+            # 指数衰减因子：新记忆 ~= 1.0，半衰期时 = 0.5
+            decay_factor = math.exp(-decay_constant * age_days)
+
+            # 读取已有 rerank_score（来自 HEURISTIC 或 MODEL 阶段）
+            existing_score = float(hit.metadata.get("recall_rerank_score", 1.0) or 1.0)
+            adjusted_score = existing_score * decay_factor
+
+            scored.append((
+                adjusted_score,
+                self._annotate_recall_candidate(
+                    candidate,
+                    recall_temporal_decay_factor=round(decay_factor, 4),
+                    recall_decay_adjusted_score=round(adjusted_score, 4),
+                ),
+            ))
+
+        scored.sort(key=lambda x: -x[0])
+        return [item[1] for item in scored]
+
+    def _apply_mmr_dedup(
+        self,
+        candidates: list[tuple[int, int, int, MemorySearchHit]],
+        *,
+        max_hits: int,
+        mmr_lambda: float = 0.7,
+    ) -> list[tuple[int, int, int, MemorySearchHit]]:
+        """Maximal Marginal Relevance 去重。
+
+        迭代选择 argmax(lambda * relevance - (1-lambda) * max_similarity_to_selected)
+        使用 Jaccard token similarity 作为相似度度量。
+        """
+        if len(candidates) <= 1:
+            return candidates
+
+        n = min(max_hits, len(candidates))
+
+        # 提取文本用于相似度计算
+        texts = [
+            (c[-1].summary or c[-1].subject_key or "").lower()
+            for c in candidates
+        ]
+
+        # 预计算 token 集合
+        token_sets = [set(text.split()) for text in texts]
+
+        # 归一化 relevance score
+        relevance_scores: list[float] = []
+        for c in candidates:
+            score = float(
+                c[-1].metadata.get("recall_decay_adjusted_score")
+                or c[-1].metadata.get("recall_rerank_score")
+                or 1.0
+            )
+            relevance_scores.append(score)
+
+        max_rel = max(relevance_scores) if relevance_scores else 1.0
+        if max_rel > 0:
+            norm_relevance = [s / max_rel for s in relevance_scores]
+        else:
+            norm_relevance = [1.0] * len(relevance_scores)
+
+        # MMR 迭代选择
+        selected_indices: list[int] = []
+        remaining = set(range(len(candidates)))
+
+        for _ in range(n):
+            if not remaining:
+                break
+
+            best_idx = -1
+            best_mmr = float("-inf")
+
+            for idx in remaining:
+                rel = norm_relevance[idx]
+
+                # 计算与已选集合的最大 Jaccard 相似度
+                max_sim = 0.0
+                for sel_idx in selected_indices:
+                    sim = self._jaccard_similarity(token_sets[idx], token_sets[sel_idx])
+                    if sim > max_sim:
+                        max_sim = sim
+
+                mmr_score = mmr_lambda * rel - (1 - mmr_lambda) * max_sim
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
+                    best_idx = idx
+
+            if best_idx >= 0:
+                selected_indices.append(best_idx)
+                remaining.discard(best_idx)
+
+        return [
+            self._annotate_recall_candidate(
+                candidates[idx],
+                recall_mmr_rank=rank,
+            )
+            for rank, idx in enumerate(selected_indices)
+        ]
+
+    @staticmethod
+    def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
+        """Jaccard token 集合相似度。"""
+        if not set_a and not set_b:
+            return 0.0
+        intersection = len(set_a & set_b)
+        union = len(set_a | set_b)
+        return intersection / union if union > 0 else 0.0
 
     def _rerank_recall_candidates(
         self,

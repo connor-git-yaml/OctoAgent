@@ -32,6 +32,7 @@ class MemoryRecallRerankMode(StrEnum):
 
     NONE = "none"
     HEURISTIC = "heuristic"
+    MODEL = "model"  # Phase 2: 本地 cross-encoder 模型精排
 
 
 class WriteProposalDraft(BaseModel):
@@ -97,6 +98,12 @@ class MemoryRecallHookOptions(BaseModel):
     subject_hint: str = Field(default="")
     min_keyword_overlap: int = Field(default=1, ge=1, le=8)
 
+    # Phase 3: Temporal Decay + MMR 配置
+    temporal_decay_enabled: bool = Field(default=False)
+    temporal_decay_half_life_days: float = Field(default=30.0, gt=0.0)
+    mmr_enabled: bool = Field(default=False)
+    mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0)
+
 
 class MemorySearchOptions(BaseModel):
     """传给高级 memory backend 的显式检索提示。"""
@@ -124,6 +131,13 @@ class MemoryRecallHookTrace(BaseModel):
     filtered_count: int = Field(default=0, ge=0)
     delivered_count: int = Field(default=0, ge=0)
     fallback_applied: bool = Field(default=False)
+
+    # Phase 3: Temporal Decay + MMR 执行轨迹
+    temporal_decay_applied: bool = Field(default=False)
+    temporal_decay_half_life_days: float = Field(default=0.0)
+    mmr_applied: bool = Field(default=False)
+    mmr_lambda: float = Field(default=0.0)
+    mmr_removed_count: int = Field(default=0)
 
 
 class MemoryRecallResult(BaseModel):

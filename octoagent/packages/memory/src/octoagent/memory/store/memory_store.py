@@ -1,9 +1,12 @@
 """SQLite MemoryStore 实现。"""
 
 import json
+import logging
 from datetime import UTC, datetime
 
 import aiosqlite
+
+_log = logging.getLogger(__name__)
 
 from ..enums import (
     MemoryPartition,
@@ -568,6 +571,30 @@ class SqliteMemoryStore:
                 record.created_at.isoformat(),
             ),
         )
+
+    async def upsert_derived_records(
+        self,
+        scope_id: str,
+        records: list[DerivedMemoryRecord],
+    ) -> int:
+        """批量写入 derived 记录到 SQLite，返回成功写入数。
+
+        逐条 INSERT OR REPLACE，单条失败不影响其他记录。
+        """
+        written = 0
+        for record in records:
+            try:
+                await self.insert_derived_record(record)
+                written += 1
+            except Exception:
+                _log.warning(
+                    "upsert_derived_record_failed",
+                    extra={"derived_id": record.derived_id, "scope_id": scope_id},
+                    exc_info=True,
+                )
+        if written > 0:
+            await self._conn.commit()
+        return written
 
     async def get_derived_record(self, derived_id: str) -> DerivedMemoryRecord | None:
         cursor = await self._conn.execute(
