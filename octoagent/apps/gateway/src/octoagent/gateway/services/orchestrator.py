@@ -1259,6 +1259,14 @@ class OrchestratorService:
             return False
         if str(metadata.get("spawned_by", "")).strip():
             return False
+        # 如果用户明确指定了 Worker profile（非空的 requested_worker_profile_id），
+        # 即使 worker_type 是 general，也应该路由到该 Worker 而非被 Butler 拦截。
+        requested_profile_id = (
+            str(metadata.get("requested_worker_profile_id", "")).strip()
+            or str(metadata.get("agent_profile_id", "")).strip()
+        )
+        if requested_profile_id:
+            return False
         requested_worker_type = self._canonical_requested_worker_type(metadata)
         return not requested_worker_type or requested_worker_type == "general"
 
