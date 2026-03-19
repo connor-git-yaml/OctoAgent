@@ -2,7 +2,7 @@
  * RoundFlowCard -- 单个轮次的流程图卡片
  *
  * 按 Agent 分行展示节点流：每行代表一个 Agent 的执行片段，
- * 行首显示 Agent 名称，行内节点按调用顺序排列，点击弹出详情弹框。
+ * 行首显示 Agent 名称 + 耗时 + 状态，行内节点带耗时角标和 Artifact 角标。
  */
 
 import { useState, useMemo } from "react";
@@ -38,16 +38,14 @@ function iconFor(node: FlowNode): string {
 function shortLabel(node: FlowNode): string {
   const { kind, label } = node;
 
-  // 工具调用：取最后一段（如 filesystem.read_text → read_text）
   if (kind === "tool") {
     const parts = label.split(".");
-    const name = parts[parts.length - 1].split(" ")[0]; // 去掉耗时
+    const name = parts[parts.length - 1].split(" ")[0];
     return truncate(name, 10);
   }
 
-  // LLM 调用：取简短模型名
   if (kind === "llm") {
-    const name = label.split(" ")[0]; // 去掉耗时
+    const name = label.split(" ")[0];
     return truncate(name, 10);
   }
 
@@ -56,6 +54,25 @@ function shortLabel(node: FlowNode): string {
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+/** 格式化毫秒为简短文本 */
+function fmtDur(ms: number): string {
+  if (ms <= 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60_000).toFixed(1)}m`;
+}
+
+// ─── 泳道状态图标 ───────────────────────────────────────────
+
+function laneStatusIcon(status: string): string {
+  switch (status) {
+    case "success": return "✓";
+    case "error": return "✗";
+    case "running": return "…";
+    default: return "";
+  }
 }
 
 // ─── 组件 ────────────────────────────────────────────────────
@@ -79,7 +96,6 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
 
   const lanes = useMemo(() => groupByAgent(round.nodes), [round.nodes]);
 
-  // 折叠逻辑：基于总节点数
   const shouldCollapse =
     round.nodes.length > COLLAPSE_THRESHOLD && !expanded;
 
@@ -102,7 +118,6 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
       {/* 按 Agent 分行的流程图 */}
       <div className="tv-lanes">
         {lanes.map((lane, laneIdx) => {
-          // 折叠模式下只保留前后几个 lane
           if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
             if (laneIdx === 2) {
               return (
@@ -124,30 +139,49 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
             return null;
           }
 
+          const durText = fmtDur(lane.totalDurationMs);
+          const statusIco = laneStatusIcon(lane.laneStatus);
+
           return (
             <div key={`${lane.agent}-${laneIdx}`} className="tv-lane">
-              {/* Agent 名称标签 */}
+              {/* Agent 标签 + 耗时 + 状态 */}
               <div className="tv-lane-label" title={lane.agent}>
                 <span className="tv-lane-label-text">{lane.agent}</span>
+                <span className="tv-lane-label-meta">
+                  {statusIco && (
+                    <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
+                      {statusIco}
+                    </span>
+                  )}
+                  {durText && <span className="tv-lane-dur">{durText}</span>}
+                </span>
               </div>
 
-              {/* 该 Agent 的节点流 */}
+              {/* 节点流 */}
               <div className="tv-lane-flow-scroll">
                 <div className="tv-lane-flow">
                   {lane.nodes.map((node, i) => (
                     <div key={node.id} style={{ display: "contents" }}>
-                      {/* 连线 */}
                       {i > 0 && <div className="tv-flow-connector" />}
 
-                      {/* 节点 */}
                       <button
                         className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
                         onClick={() => onNodeClick(node)}
                         title={node.label}
                       >
+                        {/* 耗时角标（右上角） */}
+                        {node.durationMs > 0 && (
+                          <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                        )}
                         <span className="tv-flow-node-circle">
                           {iconFor(node)}
                         </span>
+                        {/* Artifact 角标（右下角） */}
+                        {node.artifacts.length > 0 && (
+                          <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                            📦
+                          </span>
+                        )}
                         <span className="tv-flow-node-text">
                           {shortLabel(node)}
                         </span>
@@ -168,18 +202,12 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
           {new Set(round.nodes.map((n) => n.agent)).size} 个 Agent
         </span>
         {shouldCollapse && (
-          <button
-            className="tv-phase-expand-btn"
-            onClick={() => setExpanded(true)}
-          >
+          <button className="tv-phase-expand-btn" onClick={() => setExpanded(true)}>
             展开全部
           </button>
         )}
         {expanded && round.nodes.length > COLLAPSE_THRESHOLD && (
-          <button
-            className="tv-phase-expand-btn"
-            onClick={() => setExpanded(false)}
-          >
+          <button className="tv-phase-expand-btn" onClick={() => setExpanded(false)}>
             收起
           </button>
         )}

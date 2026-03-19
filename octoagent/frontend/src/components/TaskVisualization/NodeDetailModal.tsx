@@ -63,9 +63,32 @@ export default function NodeDetailModal({ node, onClose }: Props) {
           {/* 类型特定内容 */}
           <KindContent node={node} event={event} endEvent={endEvent} />
 
-          {/* 产物图片预览 */}
+          {/* 产物图片预览（兼容旧 artifact 字段） */}
           {node.artifact?.parts && (
             <ArtifactPreview parts={node.artifact.parts} />
+          )}
+
+          {/* 折叠附带的 Artifacts */}
+          {node.artifacts.length > 0 && (
+            <Section title={`产物 (${node.artifacts.length})`}>
+              {node.artifacts.map((art) => (
+                <div key={art.artifact_id} style={{ marginBottom: "8px" }}>
+                  <div className="tv-modal-meta">
+                    <Row label="名称">{art.name}</Row>
+                    <Row label="大小">{formatSize(art.size)}</Row>
+                  </div>
+                  {art.parts?.some((p) => p.mime?.startsWith("image/") && p.content) && (
+                    <ArtifactPreview parts={art.parts} />
+                  )}
+                  {art.parts?.filter((p) => p.content && !p.mime?.startsWith("image/")).map((p, pi) => (
+                    <details key={pi} className="tv-modal-payload-details">
+                      <summary>{p.mime || "内容"}</summary>
+                      <pre className="tv-modal-payload">{p.content}</pre>
+                    </details>
+                  ))}
+                </div>
+              ))}
+            </Section>
           )}
 
           {/* 原始 Payload */}

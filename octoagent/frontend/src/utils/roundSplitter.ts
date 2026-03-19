@@ -35,9 +35,13 @@ export interface FlowNode {
   status: FlowNodeStatus;
   events: TaskEvent[];
   artifact?: Artifact;
+  /** 附带的 Artifact 列表（从 ARTIFACT_CREATED 折叠而来） */
+  artifacts: Artifact[];
   ts: string;
   /** 所属 Agent 名称，用于按 Agent 分行展示 */
   agent: string;
+  /** 耗时（毫秒），0 表示无数据 */
+  durationMs: number;
 }
 
 export interface Round {
@@ -53,6 +57,10 @@ export interface Round {
 export interface AgentLane {
   agent: string;
   nodes: FlowNode[];
+  /** 泳道总耗时（毫秒） */
+  totalDurationMs: number;
+  /** 泳道最终状态 */
+  laneStatus: FlowNodeStatus;
 }
 
 /** 将节点按唯一 agent 合并为泳道（同一 Agent 只有一行） */
@@ -70,7 +78,19 @@ export function groupByAgent(nodes: FlowNode[]): AgentLane[] {
     }
   }
 
-  return order.map((agent) => ({ agent, nodes: map.get(agent)! }));
+  return order.map((agent) => {
+    const nodes = map.get(agent)!;
+    const totalDurationMs = nodes.reduce((sum, n) => sum + n.durationMs, 0);
+    // 有任何 error 就是 error，有 running 就是 running，否则取最后节点状态
+    const hasError = nodes.some((n) => n.status === "error");
+    const hasRunning = nodes.some((n) => n.status === "running");
+    const laneStatus: FlowNodeStatus = hasError
+      ? "error"
+      : hasRunning
+        ? "running"
+        : nodes[nodes.length - 1]?.status || "neutral";
+    return { agent, nodes, totalDurationMs, laneStatus };
+  });
 }
 
 // ─── 配对规则：STARTED -> COMPLETED/FAILED ──────────────────
@@ -185,18 +205,47 @@ function assignAgents(nodes: FlowNode[]): void {
 
     if (actor === "user" || actor === "kernel") {
       node.agent = "Orchestrator";
-      // 从 WORKER_DISPATCHED payload 提取 worker_id，给后续 worker 事件命名
+      // 从 ORCH_DECISION 或 WORKER_DISPATCHED payload 提取真实 Agent 名称
+      if (node.kind === "decision") {
+        const wType = extractWorkerType(node);
+        if (wType) lastWorkerName = capitalize(wType);
+      }
       if (node.kind === "worker") {
-        const wid = extractWorkerId(node);
-        if (wid) lastWorkerName = `Worker ${shortId(wid)}`;
+        const cap = extractWorkerCapability(node);
+        const wType = extractWorkerType(node);
+        if (cap) lastWorkerName = capitalize(cap.replace(/_/g, " "));
+        else if (wType) lastWorkerName = capitalize(wType);
+        else {
+          const wid = extractWorkerId(node);
+          if (wid) lastWorkerName = `Worker ${shortId(wid)}`;
+        }
       }
     } else if (actor === "worker" || actor === "tool") {
       node.agent = lastWorkerName;
     } else {
-      // system 等：跟随上一个已知 agent
       node.agent = lastWorkerName === "Worker" ? "Orchestrator" : lastWorkerName;
     }
   }
+}
+
+function extractWorkerType(node: FlowNode): string {
+  for (const ev of node.events) {
+    const wt = ev.payload?.selected_worker_type || ev.payload?.worker_type;
+    if (typeof wt === "string" && wt) return wt;
+  }
+  return "";
+}
+
+function extractWorkerCapability(node: FlowNode): string {
+  for (const ev of node.events) {
+    const cap = ev.payload?.worker_capability;
+    if (typeof cap === "string" && cap) return cap;
+  }
+  return "";
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function extractWorkerId(node: FlowNode): string {
@@ -289,7 +338,20 @@ function buildFlowNodes(
         events: [event],
         ts: event.ts,
         agent: "",
+        artifacts: [],
+        durationMs: 0,
       });
+      continue;
+    }
+
+    // ARTIFACT_CREATED：折叠到前一个节点上，而非独立展示
+    if (event.type === "ARTIFACT_CREATED") {
+      consumed.add(event.event_id);
+      const artifactId = String(event.payload?.artifact_id || "");
+      const artifact = artifactMap.get(artifactId);
+      if (artifact && nodes.length > 0) {
+        nodes[nodes.length - 1].artifacts.push(artifact);
+      }
       continue;
     }
 
@@ -328,6 +390,8 @@ function makePairedNode(start: TaskEvent, end: TaskEvent): FlowNode {
     events: [start, end],
     ts: start.ts,
     agent: "",
+    artifacts: [],
+    durationMs: extractDurationMs(start, end),
   };
 }
 
@@ -341,6 +405,8 @@ function makeRunningNode(start: TaskEvent): FlowNode {
     events: [start],
     ts: start.ts,
     agent: "",
+    artifacts: [],
+    durationMs: 0,
   };
 }
 
@@ -355,6 +421,8 @@ function makeOrphanNode(event: TaskEvent): FlowNode {
     events: [event],
     ts: event.ts,
     agent: "",
+    artifacts: [],
+    durationMs: 0,
   };
 }
 
@@ -374,6 +442,8 @@ function makeCompletionNode(event: TaskEvent, toStatus: string): FlowNode {
     events: [event],
     ts: event.ts,
     agent: "",
+    artifacts: [],
+    durationMs: 0,
   };
 }
 
@@ -381,7 +451,7 @@ function makeSingleNode(
   event: TaskEvent,
   artifactMap: Map<string, Artifact>,
 ): FlowNode {
-  const base = { agent: "" } as const;
+  const base = { agent: "", artifacts: [] as Artifact[], durationMs: 0 };
   switch (event.type) {
     case "USER_MESSAGE":
       return {
@@ -501,6 +571,14 @@ function makeSingleNode(
 }
 
 // ─── 辅助函数 ────────────────────────────────────────────────
+
+/** 从配对事件中提取耗时 */
+function extractDurationMs(start: TaskEvent, end: TaskEvent): number {
+  const ms = Number(end.payload?.duration_ms);
+  if (ms > 0) return ms;
+  const diff = new Date(end.ts).getTime() - new Date(start.ts).getTime();
+  return diff > 0 ? diff : 0;
+}
 
 /** 从事件中提取最优模型名称：model_name > model_alias，跳过空字符串 */
 function bestModelName(...events: TaskEvent[]): string {
