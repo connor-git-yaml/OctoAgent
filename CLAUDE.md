@@ -24,6 +24,14 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
 - **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
 
+## 当前主线实现状态（截至 2026-03）
+
+- **Behavior / Context**：主线已完成四层 `BehaviorWorkspaceScope`（`system_shared / agent_private / project_shared / project_agent`）、`project_path_manifest` 与 `storage_boundary_hints`；行为文件、事实记忆、敏感信息、项目工作材料已明确分层，`MEMORY.md` 不再作为事实仓库。
+- **Memory**：主线已完成 Feature 066，支持 `memory.browse`、增强筛选的 `memory.search`、`SOLUTION` 记忆、`ARCHIVED` 状态、SoR `propose -> validate -> commit` 编辑，以及敏感分区额外授权。
+- **Graph / Pipeline**：主线已完成 Feature 069，支持 `PIPELINE.md`、三级 `PipelineRegistry`、`GraphPipelineTool`、`ButlerDecisionMode.DELEGATE_GRAPH` 和对应 REST API。
+- **Worker 路由**：最近主线已修复前端轮询重复建 session，以及非 `singleton:*` 自定义 Worker profile 被 Butler single-loop 拦截的问题；自定义 Worker 应走 Delegation Plane，保留自己的 persona/context。
+- **运行验证**：用户体验与真实运行验证默认针对 `~/.octoagent` 托管实例，而不是源码目录直接启动。
+
 ## 技术栈
 
 - **语言**: Python 3.12+
@@ -106,8 +114,6 @@ octoagent/
 - 开发和重构时，不要把“最小改动”当作默认目标；应先从长期演进视角判断更合理的整体架构、模块边界与数据流，再在可控范围内向正确方向收敛
 - 避免为了短期交付继续堆叠临时 patch、兼容层或例外分支；如果现有结构已经明显不合理，优先选择能降低后续复杂度的长期方案
 - 去掉功能时直接删除所有相关代码（函数、类型、CSS、JSX），不要注释掉或保留"待后续启用"的死代码；需要时从 git 历史恢复
-- **零技术债原则**：不留 `_v2` 后缀、兼容包装层、临时 shim、`@deprecated` 标注等过渡态代码；重构时一步到位合并新旧实现，删除老签名及其调用方
-- **架构随代码同步演进**：每次改动必须检查是否引入或加剧了坏味道（如：枚举/类型已失去实际区分意义但仍被广泛引用、过滤条件形同虚设、同一概念在多处用不同方式表达）。发现坏味道时不要绕过——在同一个 PR 中一并清理，哪怕涉及面更广。保证架构可持续比快速交付更重要
 
 ### Web UI / UX 规范
 

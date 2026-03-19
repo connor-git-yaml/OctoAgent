@@ -30,6 +30,14 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
 - **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
 
+## 当前主线实现状态（截至 2026-03）
+
+- **Behavior / Context**：主线已完成四层 `BehaviorWorkspaceScope`（`system_shared / agent_private / project_shared / project_agent`）、`project_path_manifest` 与 `storage_boundary_hints`；行为文件、事实记忆、敏感信息、项目工作材料已明确分层，`MEMORY.md` 不再作为事实仓库。
+- **Memory**：主线已完成 Feature 066，支持 `memory.browse`、增强筛选的 `memory.search`、`SOLUTION` 记忆、`ARCHIVED` 状态、SoR `propose -> validate -> commit` 编辑，以及敏感分区额外授权。
+- **Graph / Pipeline**：主线已完成 Feature 069，支持 `PIPELINE.md`、三级 `PipelineRegistry`、`GraphPipelineTool`、`ButlerDecisionMode.DELEGATE_GRAPH` 和对应 REST API。
+- **Worker 路由**：最近主线已修复前端轮询重复建 session，以及非 `singleton:*` 自定义 Worker profile 被 Butler single-loop 拦截的问题；自定义 Worker 应走 Delegation Plane，保留自己的 persona/context。
+- **运行验证**：用户体验与真实运行验证默认针对 `~/.octoagent` 托管实例，而不是源码目录直接启动。
+
 ## 技术栈
 
 - **语言**: Python 3.12+
