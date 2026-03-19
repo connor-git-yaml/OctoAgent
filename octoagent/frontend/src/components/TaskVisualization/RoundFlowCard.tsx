@@ -3,11 +3,15 @@
  *
  * 按 Agent 分行展示节点流：每行代表一个 Agent 的执行片段，
  * 行首显示 Agent 名称 + 耗时 + 状态，行内节点带耗时角标和 Artifact 角标。
+ *
+ * 支持两种布局模式：
+ * - 时间轴布局（degraded=false）：节点按时间戳水平定位，Worker 展宽为胶囊条
+ * - 降级布局（degraded=true）：保留原有 flex 等宽布局
  */
 
 import { useState, useMemo } from "react";
 import type { Round, FlowNode } from "../../utils/roundSplitter";
-import { groupByAgent } from "../../utils/roundSplitter";
+import { groupByAgent, computeTimelineLayout, MIN_NODE_WIDTH } from "../../utils/roundSplitter";
 import { formatTime } from "../../utils/formatTime";
 
 // ─── 节点图标 ────────────────────────────────────────────────
@@ -96,6 +100,12 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
 
   const lanes = useMemo(() => groupByAgent(round.nodes), [round.nodes]);
 
+  // 时间轴布局计算
+  const layout = useMemo(
+    () => computeTimelineLayout(lanes, round.startTime, round.endTime),
+    [lanes, round.startTime, round.endTime],
+  );
+
   const shouldCollapse =
     round.nodes.length > COLLAPSE_THRESHOLD && !expanded;
 
@@ -115,85 +125,216 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
         </span>
       </div>
 
-      {/* 按 Agent 分行的流程图 */}
-      <div className="tv-lanes">
-        {lanes.map((lane, laneIdx) => {
-          if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
-            if (laneIdx === 2) {
-              return (
-                <div key="collapse" className="tv-lane">
-                  <div className="tv-lane-label" />
-                  <div className="tv-lane-flow-scroll">
-                    <div className="tv-lane-flow">
-                      <button
-                        className="tv-flow-collapse-btn"
-                        onClick={() => setExpanded(true)}
-                      >
-                        +{lanes.length - 3} 个 Agent 泳道
-                      </button>
+      {/* 根据 degraded 标志选择渲染路径 */}
+      {layout.degraded ? (
+        /* ─── 降级路径：保留原有 flex 等宽布局，不做任何改动 ─── */
+        <div className="tv-lanes">
+          {lanes.map((lane, laneIdx) => {
+            if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
+              if (laneIdx === 2) {
+                return (
+                  <div key="collapse" className="tv-lane">
+                    <div className="tv-lane-label" />
+                    <div className="tv-lane-flow-scroll">
+                      <div className="tv-lane-flow">
+                        <button
+                          className="tv-flow-collapse-btn"
+                          onClick={() => setExpanded(true)}
+                        >
+                          +{lanes.length - 3} 个 Agent 泳道
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
+                );
+              }
+              return null;
             }
-            return null;
-          }
 
-          const durText = fmtDur(lane.totalDurationMs);
-          const statusIco = laneStatusIcon(lane.laneStatus);
+            const durText = fmtDur(lane.totalDurationMs);
+            const statusIco = laneStatusIcon(lane.laneStatus);
 
-          return (
-            <div key={`${lane.agent}-${laneIdx}`} className="tv-lane">
-              {/* Agent 标签 + 耗时 + 状态 */}
-              <div className="tv-lane-label" title={lane.agent}>
-                <span className="tv-lane-label-text">{lane.agent}</span>
-                <span className="tv-lane-label-meta">
-                  {statusIco && (
-                    <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
-                      {statusIco}
-                    </span>
-                  )}
-                  {durText && <span className="tv-lane-dur">{durText}</span>}
-                </span>
+            return (
+              <div key={`${lane.agent}-${laneIdx}`} className="tv-lane">
+                {/* Agent 标签 + 耗时 + 状态 */}
+                <div className="tv-lane-label" title={lane.agent}>
+                  <span className="tv-lane-label-text">{lane.agent}</span>
+                  <span className="tv-lane-label-meta">
+                    {statusIco && (
+                      <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
+                        {statusIco}
+                      </span>
+                    )}
+                    {durText && <span className="tv-lane-dur">{durText}</span>}
+                  </span>
+                </div>
+
+                {/* 节点流 */}
+                <div className="tv-lane-flow-scroll">
+                  <div className="tv-lane-flow">
+                    {lane.nodes.map((node, i) => (
+                      <div key={node.id} style={{ display: "contents" }}>
+                        {i > 0 && <div className="tv-flow-connector" />}
+
+                        <button
+                          className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
+                          onClick={() => onNodeClick(node)}
+                          title={node.label}
+                        >
+                          {/* 耗时角标（右上角） */}
+                          {node.durationMs > 0 && (
+                            <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                          )}
+                          <span className="tv-flow-node-circle">
+                            {iconFor(node)}
+                          </span>
+                          {/* Artifact 角标（右下角） */}
+                          {node.artifacts.length > 0 && (
+                            <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                              📦
+                            </span>
+                          )}
+                          <span className="tv-flow-node-text">
+                            {shortLabel(node)}
+                          </span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ─── 时间轴路径：节点按时间定位，Worker 展宽为胶囊条 ─── */
+        <div className="tv-timeline-container">
+          <div className="tv-lanes-scroll">
+            {/* 泳道列表 */}
+            <div className="tv-lanes">
+              {lanes.map((lane, laneIdx) => {
+                if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
+                  if (laneIdx === 2) {
+                    return (
+                      <div key="collapse" className="tv-lane">
+                        <div className="tv-lane-label" />
+                        <div className="tv-lane-track" style={{ width: layout.totalWidthPx }}>
+                          <button
+                            className="tv-flow-collapse-btn"
+                            onClick={() => setExpanded(true)}
+                            style={{ position: "absolute", left: 0, top: 6 }}
+                          >
+                            +{lanes.length - 3} 个 Agent 泳道
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }
 
-              {/* 节点流 */}
-              <div className="tv-lane-flow-scroll">
-                <div className="tv-lane-flow">
-                  {lane.nodes.map((node, i) => (
-                    <div key={node.id} style={{ display: "contents" }}>
-                      {i > 0 && <div className="tv-flow-connector" />}
+                const durText = fmtDur(lane.totalDurationMs);
+                const statusIco = laneStatusIcon(lane.laneStatus);
 
-                      <button
-                        className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
-                        onClick={() => onNodeClick(node)}
-                        title={node.label}
-                      >
-                        {/* 耗时角标（右上角） */}
-                        {node.durationMs > 0 && (
-                          <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
-                        )}
-                        <span className="tv-flow-node-circle">
-                          {iconFor(node)}
-                        </span>
-                        {/* Artifact 角标（右下角） */}
-                        {node.artifacts.length > 0 && (
-                          <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
-                            📦
+                return (
+                  <div key={`${lane.agent}-${laneIdx}`} className="tv-lane">
+                    {/* Agent 标签 + 耗时 + 状态 */}
+                    <div className="tv-lane-label" title={lane.agent}>
+                      <span className="tv-lane-label-text">{lane.agent}</span>
+                      <span className="tv-lane-label-meta">
+                        {statusIco && (
+                          <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
+                            {statusIco}
                           </span>
                         )}
-                        <span className="tv-flow-node-text">
-                          {shortLabel(node)}
-                        </span>
-                      </button>
+                        {durText && <span className="tv-lane-dur">{durText}</span>}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+
+                    {/* 时间轴轨道：节点 absolute 定位 */}
+                    <div
+                      className="tv-lane-track"
+                      style={{ width: layout.totalWidthPx }}
+                    >
+                      {lane.nodes.map((node) => {
+                        const nl = layout.nodeLayouts.get(node.id);
+                        if (!nl) return null;
+
+                        const isSpan = nl.widthPx > MIN_NODE_WIDTH;
+
+                        return isSpan ? (
+                          /* Worker 展宽节点：胶囊条 */
+                          <button
+                            key={node.id}
+                            className={`tv-flow-node tv-flow-node--span ${STATUS_CLASS[node.status] || ""}`}
+                            onClick={() => onNodeClick(node)}
+                            title={node.label}
+                            style={{
+                              position: "absolute",
+                              left: nl.leftPx,
+                              width: nl.widthPx,
+                              top: 4,
+                            }}
+                          >
+                            {/* 耗时角标 */}
+                            {node.durationMs > 0 && (
+                              <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                            )}
+                            <div className="tv-flow-node-bar">
+                              <span className="tv-flow-node-bar-icon">
+                                {iconFor(node)}
+                              </span>
+                              <span className="tv-flow-node-bar-text">
+                                {shortLabel(node)}
+                              </span>
+                            </div>
+                            {/* Artifact 角标 */}
+                            {node.artifacts.length > 0 && (
+                              <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                                📦
+                              </span>
+                            )}
+                          </button>
+                        ) : (
+                          /* 普通节点：保持圆形 */
+                          <button
+                            key={node.id}
+                            className={`tv-flow-node ${STATUS_CLASS[node.status] || ""}`}
+                            onClick={() => onNodeClick(node)}
+                            title={node.label}
+                            style={{
+                              position: "absolute",
+                              left: nl.leftPx,
+                              top: 4,
+                            }}
+                          >
+                            {/* 耗时角标 */}
+                            {node.durationMs > 0 && (
+                              <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                            )}
+                            <span className="tv-flow-node-circle">
+                              {iconFor(node)}
+                            </span>
+                            {/* Artifact 角标 */}
+                            {node.artifacts.length > 0 && (
+                              <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                                📦
+                              </span>
+                            )}
+                            <span className="tv-flow-node-text">
+                              {shortLabel(node)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* 底部统计 */}
       <div className="tv-round-stats">

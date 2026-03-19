@@ -63,6 +63,67 @@ export interface AgentLane {
   laneStatus: FlowNodeStatus;
 }
 
+// ─── 时间轴布局类型 (Feature 065) ────────────────────────────
+
+/** 单个节点在时间轴上的布局信息 */
+export interface NodeLayout {
+  /** 节点水平起始位置（像素） */
+  leftPx: number;
+  /** 节点宽度（普通节点 = 48，展宽 Worker 节点 > 48） */
+  widthPx: number;
+  /** 所在泳道索引（0-based，对应 AgentLane[] 下标） */
+  laneIndex: number;
+}
+
+/** 跨泳道连接线描述 */
+export interface CrossLaneLink {
+  /** 起始泳道索引 */
+  fromLaneIndex: number;
+  /** 起始节点 ID */
+  fromNodeId: string;
+  /** 目标泳道索引 */
+  toLaneIndex: number;
+  /** 目标节点 ID */
+  toNodeId: string;
+  /** 连接类型：dispatch（Orchestrator -> Worker）或 return（Worker -> Orchestrator） */
+  type: "dispatch" | "return";
+}
+
+/** 时间刻度标记 */
+export interface TimeTick {
+  /** 刻度标签文本，如 "+0s", "+5s", "+1m30s" */
+  label: string;
+  /** 刻度水平位置（像素） */
+  leftPx: number;
+}
+
+/** 时间轴布局计算的完整输出 */
+export interface TimelineLayout {
+  /** 时间轴总宽度（像素），所有泳道轨道的 width 都设为此值 */
+  totalWidthPx: number;
+  /** 节点布局映射：nodeId -> NodeLayout */
+  nodeLayouts: Map<string, NodeLayout>;
+  /** 跨泳道连接线描述列表 */
+  crossLaneLinks: CrossLaneLink[];
+  /** 时间刻度标记列表 */
+  timeTicks: TimeTick[];
+  /** 是否降级为等宽布局（有效时间戳 < 2 或时间范围 = 0） */
+  degraded: boolean;
+}
+
+// ─── 布局计算常量 ──────────────────────────────────────────────
+
+/** 每秒对应的像素数 */
+const PX_PER_SECOND = 12;
+/** 时间轴总宽度上限（像素） */
+const MAX_TOTAL_PX = 8000;
+/** 节点最小宽度（像素） */
+export const MIN_NODE_WIDTH = 48;
+/** 相邻节点最小间距（像素） */
+const MIN_GAP = 8;
+/** 时间轴左右 padding（像素） */
+const PADDING = 24;
+
 /** 将节点按唯一 agent 合并为泳道（同一 Agent 只有一行） */
 export function groupByAgent(nodes: FlowNode[]): AgentLane[] {
   const map = new Map<string, FlowNode[]>();
@@ -715,5 +776,167 @@ function a2aReceivedStatus(event: TaskEvent): FlowNodeStatus {
     case "RESULT": return "success";
     case "ERROR": return "error";
     default: return "neutral";
+  }
+}
+
+// ─── 时间轴布局计算 (Feature 065) ─────────────────────────────
+
+/**
+ * 降级布局：返回 degraded=true 的空布局，
+ * 组件层据此走原有 flex 等宽渲染路径。
+ */
+function buildDegradedLayout(): TimelineLayout {
+  return {
+    totalWidthPx: 0,
+    nodeLayouts: new Map(),
+    crossLaneLinks: [],
+    timeTicks: [],
+    degraded: true,
+  };
+}
+
+/**
+ * 时间轴布局主入口：计算每个节点的水平位置和宽度。
+ * 有效时间戳 < 2 或时间范围 = 0 时降级为等宽布局。
+ */
+export function computeTimelineLayout(
+  lanes: AgentLane[],
+  startTime: string,
+  endTime?: string,
+): TimelineLayout {
+  // ── 1. 收集所有节点的时间戳 ──
+  interface NodeMeta {
+    node: FlowNode;
+    laneIndex: number;
+    tsMs: number; // 0 表示无效
+  }
+
+  const allMetas: NodeMeta[] = [];
+  for (let li = 0; li < lanes.length; li++) {
+    for (const node of lanes[li].nodes) {
+      const tsMs = node.ts ? new Date(node.ts).getTime() : 0;
+      allMetas.push({
+        node,
+        laneIndex: li,
+        tsMs: Number.isFinite(tsMs) && tsMs > 0 ? tsMs : 0,
+      });
+    }
+  }
+
+  // 将 startTime / endTime 解析为毫秒（作为辅助锚点）
+  const startMs = startTime ? new Date(startTime).getTime() : 0;
+
+  // ── 2. 统计有效时间戳，判断降级 ──
+  const validTs = allMetas.filter((m) => m.tsMs > 0).map((m) => m.tsMs);
+  // 如果 startTime 有效，也纳入有效时间戳集合
+  if (Number.isFinite(startMs) && startMs > 0) validTs.push(startMs);
+
+  if (validTs.length < 2) return buildDegradedLayout();
+
+  const tMin = Math.min(...validTs);
+  const tMax = Math.max(...validTs);
+  if (tMax === tMin) return buildDegradedLayout();
+
+  // 用 endTime 扩展 tMax（如果 endTime 比最后事件更晚）
+  let effectiveTMax = tMax;
+  if (endTime) {
+    const endMs = new Date(endTime).getTime();
+    if (Number.isFinite(endMs) && endMs > effectiveTMax) {
+      effectiveTMax = endMs;
+    }
+  }
+
+  // ── 3. 计算缩放因子 ──
+  const spanMs = effectiveTMax - tMin;
+  const rawScale = PX_PER_SECOND / 1000; // px/ms
+  const rawWidth = PADDING * 2 + spanMs * rawScale;
+  const scale = rawWidth > MAX_TOTAL_PX
+    ? (MAX_TOTAL_PX - PADDING * 2) / spanMs
+    : rawScale;
+
+  // ── 4. 为缺失时间戳的节点插值 ──
+  // 按泳道分组处理
+  const laneMetasMap = new Map<number, NodeMeta[]>();
+  for (const m of allMetas) {
+    const list = laneMetasMap.get(m.laneIndex);
+    if (list) list.push(m);
+    else laneMetasMap.set(m.laneIndex, [m]);
+  }
+
+  for (const [, laneMetas] of laneMetasMap) {
+    interpolateMissingTimestamps(laneMetas, tMin, effectiveTMax);
+  }
+
+  // ── 5. 计算每个节点的 leftPx 和 widthPx ──
+  const nodeLayouts = new Map<string, NodeLayout>();
+  for (const m of allMetas) {
+    const leftPx = PADDING + (m.tsMs - tMin) * scale;
+    let widthPx = MIN_NODE_WIDTH;
+    // Worker 节点展宽
+    if (m.node.kind === "worker" && m.node.durationMs > 0) {
+      widthPx = Math.max(m.node.durationMs / 1000 * PX_PER_SECOND * (scale / rawScale), MIN_NODE_WIDTH);
+    }
+    nodeLayouts.set(m.node.id, { leftPx, widthPx, laneIndex: m.laneIndex });
+  }
+
+  // ── 6. 防重叠修正 ──
+  for (const [, laneMetas] of laneMetasMap) {
+    for (let i = 1; i < laneMetas.length; i++) {
+      const prev = nodeLayouts.get(laneMetas[i - 1].node.id)!;
+      const curr = nodeLayouts.get(laneMetas[i].node.id)!;
+      const minLeft = prev.leftPx + prev.widthPx + MIN_GAP;
+      if (curr.leftPx < minLeft) {
+        curr.leftPx = minLeft;
+      }
+    }
+  }
+
+  // ── 7. 计算总宽度 ──
+  let maxRight = 0;
+  for (const [, nl] of nodeLayouts) {
+    const right = nl.leftPx + nl.widthPx;
+    if (right > maxRight) maxRight = right;
+  }
+  const totalWidthPx = Math.min(maxRight + PADDING, MAX_TOTAL_PX);
+
+  return {
+    totalWidthPx,
+    nodeLayouts,
+    crossLaneLinks: [], // P2 阶段实现
+    timeTicks: [],       // P2 阶段实现
+    degraded: false,
+  };
+}
+
+/**
+ * 为缺失时间戳的节点在前后有效节点之间进行线性插值。
+ * 直接修改 meta.tsMs。
+ */
+function interpolateMissingTimestamps(
+  metas: { tsMs: number }[],
+  globalMin: number,
+  globalMax: number,
+): void {
+  // 找到所有无效区间，在有效锚点之间均匀分布
+  let i = 0;
+  while (i < metas.length) {
+    if (metas[i].tsMs > 0) {
+      i++;
+      continue;
+    }
+    // 找到无效区间 [i, j)
+    const start = i;
+    while (i < metas.length && metas[i].tsMs === 0) i++;
+    const end = i; // 第一个有效节点的索引（或 metas.length）
+
+    // 确定插值锚点
+    const anchorBefore = start > 0 ? metas[start - 1].tsMs : globalMin;
+    const anchorAfter = end < metas.length ? metas[end].tsMs : globalMax;
+    const count = end - start;
+    const step = (anchorAfter - anchorBefore) / (count + 1);
+
+    for (let k = 0; k < count; k++) {
+      metas[start + k].tsMs = anchorBefore + step * (k + 1);
+    }
   }
 }

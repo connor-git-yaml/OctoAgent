@@ -736,6 +736,77 @@
   background: var(--cp-card-strong);
 }
 
+/* ─── 时间轴布局 (Feature 065) ─────────────────────────────── */
+
+/* T015: 统一滚动容器 */
+.tv-timeline-container {
+  position: relative;
+}
+
+.tv-lanes-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--cp-space-1);
+}
+
+/* T016: 泳道轨道（absolute 定位节点） */
+.tv-lane-track {
+  position: relative;
+  min-height: 52px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 时间轴模式下节点用 absolute 定位（由内联 style 控制） */
+
+/* T017: Worker 展宽胶囊条 */
+.tv-flow-node--span {
+  flex-direction: row;
+  gap: 0;
+  align-items: stretch;
+}
+
+.tv-flow-node-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  border-radius: 16px; /* 胶囊形状 */
+  padding: 0 12px;
+  background: var(--cp-success-soft);
+  width: 100%;
+}
+
+.tv-flow-node--error .tv-flow-node-bar {
+  background: var(--cp-danger-soft);
+}
+
+.tv-flow-node--running .tv-flow-node-bar {
+  background: rgba(183, 106, 43, 0.15);
+  animation: tv-pulse 1.5s ease-in-out infinite;
+}
+
+.tv-flow-node--neutral .tv-flow-node-bar {
+  background: var(--cp-soft);
+}
+
+.tv-flow-node-bar-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tv-flow-node-bar-text {
+  font-size: 10px;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-flow-node--span .tv-flow-node-text {
+  max-width: none;
+}
+
 /* 轮次统计 */
 .tv-round-stats {
   font-size: 11px;
