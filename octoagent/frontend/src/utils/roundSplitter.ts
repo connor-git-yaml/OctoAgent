@@ -240,6 +240,21 @@ function buildFlowNodes(
     // A2A 心跳消息：内部簿记事件，不展示给用户
     if (event.type === "A2A_MESSAGE_RECEIVED" && isA2AHeartbeat(event)) continue;
 
+    // 包装层过滤：task_service 外层 MODEL_CALL（actor=system）和
+    // chat.*.inline Skill 都是不调模型的包装层，隐藏并消耗配对
+    if (isWrapperModelCall(event, events, i)) {
+      consumed.add(event.event_id);
+      const comp = findCompletion(events, i + 1, PAIR_MAP[event.type] || [], consumed);
+      if (comp) consumed.add(comp.event_id);
+      continue;
+    }
+    if (isInlineSkill(event)) {
+      consumed.add(event.event_id);
+      const comp = findCompletion(events, i + 1, PAIR_MAP[event.type] || [], consumed);
+      if (comp) consumed.add(comp.event_id);
+      continue;
+    }
+
     // 配对型事件（STARTED → 查找后续 COMPLETED/FAILED）
     const completionTypes = PAIR_MAP[event.type];
     if (completionTypes) {
@@ -578,6 +593,26 @@ function fmtDuration(start: TaskEvent, end: TaskEvent): string {
 /** 从 payload.message_type 获取 A2A 消息类型 */
 function a2aMessageType(event: TaskEvent): string {
   return String(event.payload?.message_type || "").toUpperCase();
+}
+
+/** task_service 外层包装 MODEL_CALL：actor=system 且后面紧跟 SKILL_STARTED */
+function isWrapperModelCall(event: TaskEvent, events: TaskEvent[], idx: number): boolean {
+  if (event.type !== "MODEL_CALL_STARTED") return false;
+  if (event.actor !== "system") return false;
+  // 往后找，如果在下一个 MODEL_CALL_COMPLETED 之前先遇到 SKILL_STARTED，就是包装层
+  for (let j = idx + 1; j < events.length; j++) {
+    const t = events[j].type;
+    if (t === "SKILL_STARTED") return true;
+    if (t === "MODEL_CALL_COMPLETED" || t === "MODEL_CALL_FAILED") return false;
+  }
+  return false;
+}
+
+/** chat.*.inline Skill：LLM 对话循环的包装层，本身不调模型 */
+function isInlineSkill(event: TaskEvent): boolean {
+  if (event.type !== "SKILL_STARTED") return false;
+  const skillId = String(event.payload?.skill_id || "");
+  return /^chat\..+\.inline$/.test(skillId);
 }
 
 /** 是否为心跳类型（内部簿记，不展示给用户） */
