@@ -355,20 +355,32 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                     if (isFromCollapsed || isToCollapsed) return null;
                   }
 
-                  let x1: number, x2: number;
-                  if (link.type === "dispatch") {
-                    // dispatch: 从 Orchestrator worker 节点中心底部 -> Worker 泳道首节点中心顶部
-                    x1 = fromNl.leftPx + fromNl.widthPx / 2;
-                    x2 = toNl.leftPx + toNl.widthPx / 2;
-                  } else {
-                    // return: 从 Worker 末节点中心底部 -> Orchestrator 节点中心顶部
-                    x1 = fromNl.leftPx + fromNl.widthPx / 2;
-                    x2 = toNl.leftPx + toNl.widthPx / 2;
-                  }
+                  // 节点中心坐标
+                  const cx1 = fromNl.leftPx + fromNl.widthPx / 2;
+                  const cy1 = link.fromLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+                  const cx2 = toNl.leftPx + toNl.widthPx / 2;
+                  const cy2 = link.toLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
 
-                  // Y 坐标：泳道索引 * LANE_HEIGHT + 泳道中心
-                  const y1 = link.fromLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
-                  const y2 = link.toLaneIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+                  // 线段方向
+                  const dx = cx2 - cx1;
+                  const dy = cy2 - cy1;
+                  const len = Math.sqrt(dx * dx + dy * dy);
+                  if (len < 1) return null;
+
+                  // 从中心沿方向找到 box 边界交点（不穿透节点）
+                  const NODE_R = 18; // 圆形节点半径 + 2px 留白
+                  const hw1 = (fromNl.widthPx > MIN_NODE_WIDTH ? fromNl.widthPx / 2 : NODE_R);
+                  const hh1 = NODE_R;
+                  const hw2 = (toNl.widthPx > MIN_NODE_WIDTH ? toNl.widthPx / 2 : NODE_R);
+                  const hh2 = NODE_R;
+
+                  const t1 = boxEdgeT(dx / len, dy / len, hw1, hh1);
+                  const t2 = boxEdgeT(-dx / len, -dy / len, hw2, hh2);
+
+                  const x1 = cx1 + (dx / len) * t1;
+                  const y1 = cy1 + (dy / len) * t1;
+                  const x2 = cx2 - (dx / len) * t2;
+                  const y2 = cy2 - (dy / len) * t2;
 
                   return (
                     <line
@@ -410,4 +422,11 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
       </div>
     </div>
   );
+}
+
+/** 从 box 中心沿单位方向 (ndx,ndy) 到 box 边框的距离 */
+function boxEdgeT(ndx: number, ndy: number, hw: number, hh: number): number {
+  const tx = ndx !== 0 ? hw / Math.abs(ndx) : Infinity;
+  const ty = ndy !== 0 ? hh / Math.abs(ndy) : Infinity;
+  return Math.min(tx, ty);
 }
