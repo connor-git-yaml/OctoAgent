@@ -529,15 +529,17 @@ class ContextCompactor:
             if content.startswith("[Earlier conversation summary]"):
                 to_remove.append(i)
 
-        # 如果没有摘要块可丢弃，尝试丢弃最老的非保护消息
+        # 如果没有摘要块可丢弃，按轮次边界丢弃最老的整轮
+        # 保证 assistant + tool 配对完整性，避免孤立 tool role message
         if not to_remove:
-            for i in range(len(history)):
-                if i in protected:
-                    continue
-                to_remove.append(i)
-                # 每次只丢弃少量以避免过度丢失
-                if len(to_remove) >= 3:
-                    break
+            turns = _identify_turn_boundaries(history)
+            for turn_start, turn_end in turns:
+                turn_indices = [
+                    i for i in range(turn_start, turn_end) if i not in protected
+                ]
+                if turn_indices:
+                    to_remove.extend(turn_indices)
+                    break  # 一次只丢弃一整轮
 
         # 反向删除以保持索引正确
         for i in sorted(to_remove, reverse=True):
