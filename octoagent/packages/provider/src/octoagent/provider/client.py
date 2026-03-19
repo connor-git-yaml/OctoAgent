@@ -79,6 +79,7 @@ class LiteLLMClient:
         *,
         stream_model_aliases: set[str] | None = None,
         responses_model_aliases: set[str] | None = None,
+        responses_direct_params: dict[str, dict[str, Any]] | None = None,
         responses_reasoning_aliases: dict[str, ReasoningConfig] | None = None,
         reasoning_supported_aliases: set[str] | None = None,
         auth_refresh_callback: Callable[[], Awaitable[Any | None]] | None = None,
@@ -103,6 +104,7 @@ class LiteLLMClient:
         self._timeout_s = timeout_s
         self._stream_model_aliases = set(stream_model_aliases or ())
         self._responses_model_aliases = set(responses_model_aliases or ())
+        self._responses_direct_params = dict(responses_direct_params or {})
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
         self._reasoning_supported_aliases = (
             None
@@ -439,15 +441,26 @@ class LiteLLMClient:
         resolved_api_key = api_key or self._proxy_api_key or "no-key"
 
         if model_alias in self._responses_model_aliases:
+            # Responses API 调用直连 Codex Backend，绕过 Proxy，
+            # 避免 Proxy 内部 fallback 到不支持 Responses API 的 Provider
+            direct = self._responses_direct_params.get(model_alias)
+            if direct:
+                direct_base = direct.get("api_base", resolved_api_base)
+                direct_key = direct.get("api_key", resolved_api_key)
+                direct_headers = {**(extra_headers or {}), **direct.get("headers", {})}
+            else:
+                direct_base = resolved_api_base
+                direct_key = resolved_api_key
+                direct_headers = extra_headers
             return await self._complete_via_responses_api(
                 messages=messages,
                 model_alias=model_alias,
-                api_base=resolved_api_base,
-                api_key=resolved_api_key,
+                api_base=direct_base,
+                api_key=direct_key,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 reasoning=reasoning,
-                extra_headers=extra_headers,
+                extra_headers=direct_headers,
                 **kwargs,
             )
 

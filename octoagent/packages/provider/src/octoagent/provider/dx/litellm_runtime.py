@@ -104,6 +104,64 @@ def alias_uses_codex_backend(project_root: Path, alias_name: str) -> bool:
     return alias_name in resolve_codex_backend_aliases(project_root)
 
 
+def resolve_responses_api_direct_params(
+    project_root: Path,
+) -> dict[str, dict[str, Any]]:
+    """解析 Responses API 别名的直连参数，绕过 LiteLLM Proxy。
+
+    仅 Codex Backend（openai-codex OAuth）需要 Responses API。
+    Responses API 调用应直接发到 Codex Backend，不经 Proxy，
+    避免 Proxy 内部 fallback 到不支持 Responses API 的 Provider。
+
+    Returns:
+        {alias: {"api_base": str, "api_key": str, "headers": dict}}
+    """
+    result: dict[str, dict[str, Any]] = {}
+    litellm_config = _load_litellm_config(project_root)
+    if litellm_config is None:
+        return result
+
+    model_list = litellm_config.get("model_list", [])
+    if not isinstance(model_list, list):
+        return result
+
+    for model_entry in model_list:
+        if not isinstance(model_entry, dict):
+            continue
+        model_name = model_entry.get("model_name")
+        params = model_entry.get("litellm_params")
+        if not isinstance(model_name, str) or not model_name:
+            continue
+        if not isinstance(params, dict):
+            continue
+        api_base = params.get("api_base", "")
+        if not isinstance(api_base, str):
+            continue
+        if api_base.rstrip("/") != _CODEX_BACKEND_API_BASE:
+            continue
+        # 这是一个 Codex Backend 别名，提取直连参数
+        api_key_ref = params.get("api_key", "")
+        # 解析 os.environ/ 引用
+        actual_key = _resolve_env_ref(str(api_key_ref))
+        headers = params.get("headers", {})
+        result[model_name] = {
+            "api_base": api_base.rstrip("/"),
+            "api_key": actual_key,
+            "headers": dict(headers) if isinstance(headers, dict) else {},
+        }
+
+    return result
+
+
+def _resolve_env_ref(value: str) -> str:
+    """解析 litellm 配置中的 os.environ/ 引用。"""
+    import os
+    if value.startswith("os.environ/"):
+        env_name = value[len("os.environ/"):]
+        return os.environ.get(env_name, "")
+    return value
+
+
 def resolve_codex_reasoning_aliases(project_root: Path) -> dict[str, ReasoningConfig]:
     """解析 Codex backend alias 的默认 reasoning 配置。"""
     try:
