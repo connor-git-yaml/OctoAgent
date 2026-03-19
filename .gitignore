@@ -4,6 +4,7 @@ _research/
 
 # ===== Claude Code（个人配置不提交）=====
 .claude/settings.local.json
+.claude/worktrees/
 .claude/CLAUDE.local.md
 CLAUDE.local.md
 
