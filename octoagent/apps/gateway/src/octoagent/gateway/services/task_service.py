@@ -1871,61 +1871,7 @@ class TaskService:
                 workspace=workspace,
             )
 
-            # --- Phase 2: Flush Prompt 优化 (US-5) ---
-            # 在原有 Flush 之前注入静默 agentic turn，让 LLM 主动选择性保存信息
-            try:
-                injector = self._agent_context.get_flush_prompt_injector()
-                if injector is not None and summary_text:
-                    # 构建简化的 memory_write_fn 包装
-                    async def _memory_write_for_flush(
-                        subject_key: str,
-                        content: str,
-                        partition: str = "work",
-                        evidence_refs: list | None = None,
-                    ) -> str:
-                        from octoagent.memory import WriteAction
-                        # Flush Prompt 不允许写入敏感分区（HEALTH/FINANCE）
-                        _FLUSH_SAFE_PARTITIONS = {"work", "core", "profile", "chat"}
-                        safe_partition = partition if partition in _FLUSH_SAFE_PARTITIONS else "work"
-                        part = MemoryPartition(safe_partition)
-                        proposal = await memory_service.propose_write(
-                            scope_id=flush_scope_id,
-                            partition=part,
-                            action=WriteAction.ADD,
-                            subject_key=subject_key,
-                            content=content,
-                            rationale="flush_prompt",
-                            confidence=0.8,
-                            evidence_refs=[
-                                EvidenceRef(ref_id=summary_artifact_id, ref_type="artifact"),
-                            ],
-                            metadata={"source": "flush_prompt"},
-                        )
-                        validation = await memory_service.validate_proposal(proposal.proposal_id)
-                        if validation.accepted:
-                            await memory_service.commit_memory(proposal.proposal_id)
-                            return f"committed:{subject_key}"
-                        return f"rejected:{subject_key}"
-
-                    flush_prompt_result = await injector.run_flush_turn(
-                        conversation_messages=[{"role": "assistant", "content": summary_text}],
-                        scope_id=flush_scope_id,
-                        memory_write_fn=_memory_write_for_flush,
-                    )
-                    log.info(
-                        "flush_prompt_completed",
-                        scope_id=flush_scope_id,
-                        writes=flush_prompt_result.writes_committed,
-                        skipped=flush_prompt_result.skipped,
-                        fallback=flush_prompt_result.fallback_to_summary,
-                    )
-            except Exception as exc:
-                log.warning(
-                    "flush_prompt_failed",
-                    scope_id=flush_scope_id,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                )
+            # Feature 067: FlushPromptInjector 调用已废弃 -- 记忆提取统一由 SessionMemoryExtractor 处理
 
             # --- 继续原有 Flush 流程（不变）---
             run = await memory_service.run_memory_maintenance(
@@ -1959,16 +1905,7 @@ class TaskService:
                 )
             )
 
-            # --- Feature 065: Flush 后自动 Consolidate (fire-and-forget) ---
-            if run.run_id:
-                asyncio.create_task(
-                    self._auto_consolidate_after_flush(
-                        run_id=run.run_id,
-                        scope_id=flush_scope_id,
-                        project=project,
-                        workspace=workspace,
-                    )
-                )
+            # Feature 067: _auto_consolidate_after_flush 已废弃 -- 记忆提取统一由 SessionMemoryExtractor 处理
 
             return run.run_id
         except Exception as exc:
@@ -1980,48 +1917,7 @@ class TaskService:
             )
             return ""
 
-    async def _auto_consolidate_after_flush(
-        self,
-        *,
-        run_id: str,
-        scope_id: str,
-        project: Any,
-        workspace: Any,
-    ) -> None:
-        """Flush 后 fire-and-forget 轻量 Consolidate（Feature 065）。
-
-        仅处理本次 Flush 产出的 Fragment。
-        内部捕获所有异常，不让异常逸出影响事件循环。
-        """
-        try:
-            memory_service = await self._agent_context.get_memory_service(
-                project=project,
-                workspace=workspace,
-            )
-            consolidation_service = self._agent_context.get_consolidation_service()
-            if consolidation_service is None:
-                return
-
-            result = await consolidation_service.consolidate_by_run_id(
-                memory=memory_service,
-                scope_id=scope_id,
-                run_id=run_id,
-            )
-            log.info(
-                "auto_consolidate_after_flush",
-                run_id=run_id,
-                scope_id=scope_id,
-                consolidated=result.consolidated,
-                skipped=result.skipped,
-            )
-        except Exception as exc:
-            log.warning(
-                "auto_consolidate_after_flush_failed",
-                run_id=run_id,
-                scope_id=scope_id,
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
+    # Feature 067: _auto_consolidate_after_flush 已删除 -- 记忆提取统一由 SessionMemoryExtractor 处理
 
     async def _resolve_compaction_flush_scope(
         self,

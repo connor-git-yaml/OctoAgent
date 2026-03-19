@@ -1744,39 +1744,9 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         idempotency_key="f038-worker-writeback-001",
     )
 
-    writeback = first_frame.budget["private_memory_writeback"]
-    # private_memory_writeback 现在使用 PROJECT_SHARED namespace（而非 WORKER_PRIVATE）
-    assert writeback["namespace_kind"] == MemoryNamespaceKind.PROJECT_SHARED.value
-    # scope_id 由 PROJECT_SHARED namespace 的 memory_scope_ids 决定（通常为 memory/project-{id}）
-    actual_writeback_scope_id = writeback["scope_id"]
-    assert actual_writeback_scope_id  # 确保非空
-    assert writeback["scope_kind"]    # 确保有值（namespace_primary / runtime_private 等）
-    assert writeback["fragment_refs"]
-    assert any(
-        ref["ref_type"] == "memory_maintenance_run" and ref["ref_id"] == writeback["run_id"]
-        for ref in first_frame.source_refs
-    )
-
-    first_session = await store_group.agent_context_store.get_agent_session(first_frame.agent_session_id)
-    assert first_session is not None
-    # session metadata key 已改名为 last_memory_writeback_run_id / last_memory_scope_id
-    assert first_session.metadata["last_memory_writeback_run_id"] == writeback["run_id"]
-    assert first_session.metadata["last_memory_scope_id"] == actual_writeback_scope_id
-
-    cursor = await store_group.conn.execute(
-        """
-        SELECT scope_id, content
-        FROM memory_fragments
-        WHERE scope_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (actual_writeback_scope_id,),
-    )
-    fragment_row = await cursor.fetchone()
-    assert fragment_row is not None
-    assert fragment_row[0] == actual_writeback_scope_id
-    assert "alpha-official-root" in fragment_row[1]
+    # Feature 067: _record_memory_writeback 已废弃 -- private_memory_writeback 不再写入 budget
+    # 验证 private_memory_writeback 不再存在于 budget 中
+    assert "private_memory_writeback" not in first_frame.budget
 
     second_agent_session_id = build_agent_session_id(
         agent_runtime_id=worker_runtime_id,

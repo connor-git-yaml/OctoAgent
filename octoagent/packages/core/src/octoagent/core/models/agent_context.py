@@ -255,6 +255,14 @@ class AgentSession(BaseModel):
     recent_transcript: list[dict[str, str]] = Field(default_factory=list)
     rolling_summary: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Feature 067: 记忆提取游标
+    memory_cursor_seq: int = Field(
+        default=0,
+        ge=0,
+        description="记忆提取游标，标记已处理到的 turn_seq 位置。"
+        "cursor=0 表示尚未进行过任何提取。"
+        "cursor=N 表示 turn_seq <= N 的 turns 已被处理。",
+    )
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
     closed_at: datetime | None = None

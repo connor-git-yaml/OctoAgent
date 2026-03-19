@@ -1250,33 +1250,7 @@ class AgentContextService:
                 await _update_agent_session()
         if frame is not None:
             current_frame = frame
-            try:
-                current_frame = await self._record_memory_writeback(
-                    task=task,
-                    frame=current_frame,
-                    agent_session=agent_session,
-                    project=project,
-                    workspace=workspace,
-                    request_artifact_id=request_artifact_id,
-                    response_artifact_id=response_artifact_id,
-                    latest_user_text=latest_user_text,
-                    model_response=model_response,
-                    continuity_summary=merged_summary,
-                )
-            except Exception as exc:
-                log.warning(
-                    "agent_context_memory_writeback_degraded",
-                    task_id=task_id,
-                    context_frame_id=context_frame_id,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                )
-            if agent_session is not None and current_frame.agent_session_id:
-                latest_agent_session = await self._stores.agent_context_store.get_agent_session(
-                    current_frame.agent_session_id
-                )
-                if latest_agent_session is not None:
-                    agent_session = latest_agent_session
+            # Feature 067: _record_memory_writeback 已废弃，记忆提取统一由 SessionMemoryExtractor 处理
             try:
                 await self._record_private_tool_evidence_writeback(
                     task=task,
@@ -1296,6 +1270,18 @@ class AgentContextService:
                     error=str(exc),
                 )
         await self._stores.conn.commit()
+
+        # Feature 067: fire-and-forget 触发 Session 驱动记忆提取
+        if agent_session is not None:
+            extractor = self.get_session_memory_extractor()
+            if extractor is not None:
+                asyncio.create_task(
+                    extractor.extract_and_commit(
+                        agent_session=agent_session,
+                        project=project,
+                        workspace=workspace,
+                    )
+                )
 
     async def record_delayed_recall_state(
         self,
@@ -1926,153 +1912,7 @@ class AgentContextService:
         )
         await self._stores.conn.commit()
 
-    async def _record_memory_writeback(
-        self,
-        *,
-        task: Task,
-        frame: ContextFrame,
-        agent_session: AgentSession | None,
-        project: Project | None,
-        workspace: Workspace | None,
-        request_artifact_id: str,
-        response_artifact_id: str,
-        latest_user_text: str,
-        model_response: str,
-        continuity_summary: str,
-    ) -> ContextFrame:
-        if not frame.agent_runtime_id:
-            return frame
-        agent_runtime = await self._stores.agent_context_store.get_agent_runtime(
-            frame.agent_runtime_id
-        )
-        if agent_runtime is None or agent_runtime.role is not AgentRuntimeRole.WORKER:
-            return frame
-
-        writeback_state = dict(frame.budget.get("private_memory_writeback", {}))
-        if response_artifact_id and (
-            str(writeback_state.get("response_artifact_ref", "")) == response_artifact_id
-        ):
-            return frame
-
-        namespace = await self._resolve_memory_namespace_by_kind(
-            frame=frame,
-            kind=MemoryNamespaceKind.PROJECT_SHARED,
-        )
-        if namespace is None:
-            return frame
-
-        scope_id, scope_kind = self._select_writeback_scope(namespace)
-        if not scope_id:
-            return frame
-
-        # 推断记忆分区：基于用户输入、模型回复和续写摘要的内容主题
-        writeback_text = " ".join(
-            part for part in [latest_user_text, model_response, continuity_summary] if part
-        )
-        inferred_partition = infer_memory_partition(writeback_text)
-
-        await init_memory_db(self._stores.conn)
-        memory_service = await self.get_memory_service(project=project, workspace=workspace)
-        evidence_refs = await self._collect_private_writeback_evidence_refs(
-            task_id=task.task_id,
-            agent_session_id=frame.agent_session_id,
-            request_artifact_id=request_artifact_id,
-            response_artifact_id=response_artifact_id,
-        )
-        run = await memory_service.run_memory_maintenance(
-            MemoryMaintenanceCommand(
-                command_id=str(ULID()),
-                kind=MemoryMaintenanceCommandKind.FLUSH,
-                scope_id=scope_id,
-                partition=inferred_partition,
-                reason="memory writeback",
-                requested_by=f"agent_context:{agent_runtime.agent_runtime_id}",
-                idempotency_key=(
-                    f"{frame.context_frame_id}:private_writeback:{response_artifact_id or task.task_id}"
-                ),
-                summary=self._build_private_memory_writeback_summary(
-                    latest_user_text=latest_user_text,
-                    model_response=model_response,
-                    continuity_summary=continuity_summary,
-                ),
-                evidence_refs=evidence_refs,
-                metadata={
-                    "source": "agent_context.memory_writeback",
-                    "task_id": task.task_id,
-                    "context_frame_id": frame.context_frame_id,
-                    "agent_runtime_id": agent_runtime.agent_runtime_id,
-                    "agent_session_id": frame.agent_session_id,
-                    "memory_namespace_id": namespace.namespace_id,
-                    "namespace_kind": namespace.kind.value,
-                    "scope_kind": scope_kind,
-                    "inferred_partition": inferred_partition.value,
-                    "request_artifact_ref": request_artifact_id,
-                    "response_artifact_ref": response_artifact_id,
-                },
-            )
-        )
-
-        updated_budget = dict(frame.budget)
-        updated_budget["private_memory_writeback"] = {
-            "status": run.status.value,
-            "run_id": run.run_id,
-            "scope_id": scope_id,
-            "scope_kind": scope_kind,
-            "namespace_id": namespace.namespace_id,
-            "namespace_kind": namespace.kind.value,
-            "fragment_refs": list(run.fragment_refs),
-            "proposal_refs": list(run.proposal_refs),
-            "backend_used": run.backend_used,
-            "backend_state": run.backend_state.value,
-            "request_artifact_ref": request_artifact_id,
-            "response_artifact_ref": response_artifact_id,
-            "updated_at": datetime.now(tz=UTC).isoformat(),
-        }
-        updated_source_refs = self._append_source_refs(
-            frame.source_refs,
-            [
-                {
-                    "ref_type": "memory_maintenance_run",
-                    "ref_id": run.run_id,
-                    "label": "memory_writeback",
-                    "metadata": {
-                        "scope_id": scope_id,
-                        "scope_kind": scope_kind,
-                        "namespace_id": namespace.namespace_id,
-                    },
-                },
-                *[
-                    {
-                        "ref_type": "memory_fragment",
-                        "ref_id": ref_id,
-                        "label": "memory_writeback",
-                    }
-                    for ref_id in run.fragment_refs
-                ],
-            ],
-        )
-        updated_frame = frame.model_copy(
-            update={
-                "budget": updated_budget,
-                "source_refs": updated_source_refs,
-            }
-        )
-        await self._stores.agent_context_store.save_context_frame(updated_frame)
-        if agent_session is not None:
-            await self._stores.agent_context_store.save_agent_session(
-                agent_session.model_copy(
-                    update={
-                        "metadata": {
-                            **agent_session.metadata,
-                            "last_memory_writeback_run_id": run.run_id,
-                            "last_memory_scope_id": scope_id,
-                            "last_memory_scope_kind": scope_kind,
-                        },
-                        "updated_at": datetime.now(tz=UTC),
-                    }
-                )
-            )
-        return updated_frame
+    # Feature 067: _record_memory_writeback 已删除 -- 记忆提取统一由 SessionMemoryExtractor 处理
 
     async def _record_private_tool_evidence_writeback(
         self,
@@ -2953,23 +2793,27 @@ class AgentContextService:
                 self._profile_generator_service = None
         return self._profile_generator_service
 
-    def get_flush_prompt_injector(self):
-        """获取 FlushPromptInjector 实例（Feature 065 Phase 2, US-5）。
+    # Feature 067: get_flush_prompt_injector 已删除 -- FlushPromptInjector 整体废弃
 
-        延迟创建，首次调用时实例化。
+    def get_session_memory_extractor(self):
+        """获取 SessionMemoryExtractor 实例（Feature 067）。
+
+        延迟创建，首次调用时实例化。若依赖不可用则返回 None。
         """
-        if not hasattr(self, "_flush_prompt_injector"):
+        if not hasattr(self, "_session_memory_extractor"):
             try:
-                from octoagent.provider.dx.flush_prompt_injector import FlushPromptInjector
+                from .session_memory_extractor import SessionMemoryExtractor
 
                 llm_service = getattr(self._stores, "llm_service", None)
-                self._flush_prompt_injector = FlushPromptInjector(
+                self._session_memory_extractor = SessionMemoryExtractor(
+                    agent_context_store=self._stores.agent_context_store,
+                    memory_service_factory=self.get_memory_service,
                     llm_service=llm_service,
                     project_root=self._project_root,
                 )
             except Exception:
-                self._flush_prompt_injector = None
-        return self._flush_prompt_injector
+                self._session_memory_extractor = None
+        return self._session_memory_extractor
 
     def get_reranker_service(self):
         """获取 ModelRerankerService 实例（Feature 065 Phase 2, US-6）。

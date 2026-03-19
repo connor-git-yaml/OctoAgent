@@ -556,9 +556,9 @@ class SqliteAgentContextStore:
                 parent_agent_session_id, work_id, a2a_conversation_id,
                 last_context_frame_id, last_recall_frame_id, recent_transcript,
                 rolling_summary, metadata, created_at, updated_at, closed_at,
-                parent_worker_runtime_id
+                parent_worker_runtime_id, memory_cursor_seq
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
@@ -578,7 +578,8 @@ class SqliteAgentContextStore:
                 metadata = excluded.metadata,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at,
-                parent_worker_runtime_id = excluded.parent_worker_runtime_id
+                parent_worker_runtime_id = excluded.parent_worker_runtime_id,
+                memory_cursor_seq = excluded.memory_cursor_seq
             """,
             (
                 session.agent_session_id,
@@ -602,6 +603,7 @@ class SqliteAgentContextStore:
                 session.updated_at.isoformat(),
                 session.closed_at.isoformat() if session.closed_at else None,
                 session.parent_worker_runtime_id,
+                session.memory_cursor_seq,
             ),
         )
         return session
@@ -807,6 +809,41 @@ class SqliteAgentContextStore:
             (agent_session_id, limit),
         )
         return [self._row_to_agent_session_turn(row) for row in reversed(rows)]
+
+    async def list_turns_after_seq(
+        self,
+        agent_session_id: str,
+        after_seq: int,
+        limit: int = 200,
+    ) -> list[AgentSessionTurn]:
+        """查询 turn_seq > after_seq 的 turns，按 turn_seq ASC 排序。
+
+        Feature 067: Session 驱动统一记忆管线 -- 增量读取 cursor 之后的新增 turns。
+        """
+        rows = await self._fetchall(
+            """
+            SELECT * FROM agent_session_turns
+            WHERE agent_session_id = ? AND turn_seq > ?
+            ORDER BY turn_seq ASC
+            LIMIT ?
+            """,
+            (agent_session_id, after_seq, limit),
+        )
+        return [self._row_to_agent_session_turn(row) for row in rows]
+
+    async def update_memory_cursor(
+        self,
+        agent_session_id: str,
+        new_cursor_seq: int,
+    ) -> None:
+        """更新 AgentSession 的 memory_cursor_seq。
+
+        Feature 067: Session 驱动统一记忆管线 -- SoR 写入成功后推进游标。
+        """
+        await self._conn.execute(
+            "UPDATE agent_sessions SET memory_cursor_seq = ? WHERE agent_session_id = ?",
+            (new_cursor_seq, agent_session_id),
+        )
 
     async def delete_agent_session_turns(self, *, agent_session_id: str) -> None:
         await self._conn.execute(
@@ -1363,6 +1400,11 @@ class SqliteAgentContextStore:
                 row["parent_worker_runtime_id"]
                 if "parent_worker_runtime_id" in row.keys()
                 else ""
+            ),
+            memory_cursor_seq=(
+                int(row["memory_cursor_seq"] or 0)
+                if "memory_cursor_seq" in row.keys()
+                else 0
             ),
         )
 

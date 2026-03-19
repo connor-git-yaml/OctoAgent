@@ -16,8 +16,7 @@ __all__ = [
     "CommittedSorInfo",
     "DerivedExtractionResult",
     "DerivedExtractionService",
-    "FlushPromptInjector",
-    "FlushPromptResult",
+    # Feature 067: FlushPromptInjector / FlushPromptResult 已废弃删除
     "ModelRerankerService",
     "RerankResult",
     # Feature 065 Phase 3
@@ -48,9 +47,7 @@ def __getattr__(name: str):
     if name == "DerivedExtractionService":
         from .derived_extraction_service import DerivedExtractionService
         return DerivedExtractionService
-    if name in ("FlushPromptInjector", "FlushPromptResult"):
-        from .flush_prompt_injector import FlushPromptInjector, FlushPromptResult
-        return locals()[name]
+    # Feature 067: FlushPromptInjector / FlushPromptResult 已废弃删除
     if name in ("ModelRerankerService", "RerankResult"):
         from .model_reranker_service import ModelRerankerService, RerankResult
         return locals()[name]

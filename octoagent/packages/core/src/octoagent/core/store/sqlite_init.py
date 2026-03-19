@@ -462,6 +462,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     updated_at               TEXT NOT NULL,
     closed_at                TEXT,
     parent_worker_runtime_id TEXT NOT NULL DEFAULT '',
+    memory_cursor_seq        INTEGER NOT NULL DEFAULT 0,
 
     FOREIGN KEY (agent_runtime_id) REFERENCES agent_runtimes(agent_runtime_id)
 );
@@ -970,6 +971,12 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE agent_sessions "
             "ADD COLUMN parent_worker_runtime_id TEXT NOT NULL DEFAULT ''"
+        )
+    # Feature 067: 记忆提取游标
+    if agent_session_columns and "memory_cursor_seq" not in agent_session_columns:
+        await conn.execute(
+            "ALTER TABLE agent_sessions "
+            "ADD COLUMN memory_cursor_seq INTEGER NOT NULL DEFAULT 0"
         )
 
     agent_session_turn_columns = await _table_columns(conn, "agent_session_turns")
