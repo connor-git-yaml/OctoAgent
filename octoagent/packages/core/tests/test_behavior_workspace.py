@@ -9,10 +9,12 @@ import pytest
 
 from octoagent.core.behavior_workspace import (
     ALL_BEHAVIOR_FILE_IDS,
+    BEHAVIOR_FILE_BUDGETS,
     BOOTSTRAP_COMPLETED_MARKER,
     BehaviorLoadProfile,
     OnboardingState,
     _PROFILE_ALLOWLIST,
+    _default_content_for_file,
     _onboarding_state_path,
     ensure_filesystem_skeleton,
     load_onboarding_state,
@@ -403,3 +405,183 @@ class TestMeasureBehaviorTotalSize:
     def test_empty_project_has_zero_total(self, tmp_path: Path) -> None:
         sizes = measure_behavior_total_size(tmp_path)
         assert sizes["__total__"] == 0
+
+
+# ============================================================================
+# Feature 065: 默认模板内容改进 -- 预算合规与内容域覆盖测试
+# ============================================================================
+
+
+class TestDefaultTemplateBudgetCompliance:
+    """T014: 全量字符预算合规参数化测试。"""
+
+    @pytest.mark.parametrize(
+        "file_id,is_worker",
+        [
+            ("AGENTS.md", False),
+            ("AGENTS.md", True),
+            ("USER.md", False),
+            ("PROJECT.md", False),
+            ("KNOWLEDGE.md", False),
+            ("TOOLS.md", False),
+            ("BOOTSTRAP.md", False),
+            ("SOUL.md", False),
+            ("IDENTITY.md", False),
+            ("IDENTITY.md", True),
+            ("HEARTBEAT.md", False),
+        ],
+    )
+    def test_default_template_within_budget(self, file_id: str, is_worker: bool) -> None:
+        """每个默认模板的字符数 <= 预算上限且 >= 30% 下限。"""
+        content = _default_content_for_file(
+            file_id=file_id,
+            is_worker_profile=is_worker,
+            agent_name="TestAgent",
+            project_label="test-project",
+        )
+        budget = BEHAVIOR_FILE_BUDGETS[file_id]
+        char_count = len(content)
+        variant = "Worker" if is_worker else "Butler"
+        assert char_count <= budget, (
+            f"{file_id}({variant}) 超预算: {char_count} > {budget}"
+        )
+        assert char_count >= int(budget * 0.3), (
+            f"{file_id}({variant}) 内容过少: {char_count} < 30% of {budget}"
+        )
+
+
+class TestDefaultTemplateContentDomains:
+    """T015: 内容域覆盖关键词测试。"""
+
+    def test_agents_butler_content_domains(self) -> None:
+        """Butler 版 AGENTS.md 包含角色定位、委派框架、安全红线、内存协议。"""
+        content = _default_content_for_file(
+            file_id="AGENTS.md",
+            is_worker_profile=False,
+            agent_name="Butler",
+            project_label="default",
+        )
+        assert "委派" in content or "delegate" in content.lower()
+        assert "Worker" in content
+        assert "安全" in content or "红线" in content
+        assert "Memory" in content or "记忆" in content or "内存" in content
+        assert "A2A" in content
+
+    def test_agents_worker_content_domains(self) -> None:
+        """Worker 版 AGENTS.md 包含 Worker 角色、Butler 协作、Subagent、objective。"""
+        content = _default_content_for_file(
+            file_id="AGENTS.md",
+            is_worker_profile=True,
+            agent_name="Worker",
+            project_label="default",
+        )
+        assert "Worker" in content
+        assert "Butler" in content
+        assert "Subagent" in content or "子代理" in content
+        assert "objective" in content or "目标" in content
+
+    def test_tools_content_domains(self) -> None:
+        """TOOLS.md 包含优先级、secrets 安全、delegate 规范、读写指引。"""
+        content = _default_content_for_file(
+            file_id="TOOLS.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "优先级" in content or "优先" in content
+        assert "secret" in content.lower() or "SecretService" in content
+        assert "delegate" in content.lower() or "委派" in content
+        assert "filesystem" in content or "读" in content
+
+    def test_bootstrap_content_domains(self) -> None:
+        """BOOTSTRAP.md 包含完成引导关键词、COMPLETED 标记、称呼引导步骤。"""
+        content = _default_content_for_file(
+            file_id="BOOTSTRAP.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "完成引导" in content
+        assert "<!-- COMPLETED -->" in content
+        assert "称呼" in content or "名称" in content
+
+    def test_soul_content_domains(self) -> None:
+        """SOUL.md 包含价值观/原则和认知边界。"""
+        content = _default_content_for_file(
+            file_id="SOUL.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "价值观" in content or "原则" in content
+        assert "边界" in content or "不确定" in content
+
+    def test_identity_butler_content_domains(self) -> None:
+        """Butler 版 IDENTITY.md 包含 agent_name 插值、Butler 角色、proposal 权限。"""
+        content = _default_content_for_file(
+            file_id="IDENTITY.md",
+            is_worker_profile=False,
+            agent_name="TestButler",
+            project_label="default",
+        )
+        assert "TestButler" in content
+        assert "默认会话" in content or "Butler" in content
+        assert "proposal" in content
+
+    def test_identity_worker_content_domains(self) -> None:
+        """Worker 版 IDENTITY.md 包含 agent_name 插值、specialist/worker、proposal 权限。"""
+        content = _default_content_for_file(
+            file_id="IDENTITY.md",
+            is_worker_profile=True,
+            agent_name="TestWorker",
+            project_label="default",
+        )
+        assert "TestWorker" in content
+        assert "specialist" in content or "worker" in content.lower()
+        assert "proposal" in content
+
+    def test_user_content_domains(self) -> None:
+        """USER.md 包含 Memory/记忆存储边界提示和偏好/习惯框架。"""
+        content = _default_content_for_file(
+            file_id="USER.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "Memory" in content or "记忆" in content
+        assert "偏好" in content or "习惯" in content
+
+    def test_project_content_domains(self) -> None:
+        """PROJECT.md 包含 project_label 插值、术语/目录/验收框架。"""
+        content = _default_content_for_file(
+            file_id="PROJECT.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="my-awesome-project",
+        )
+        assert "my-awesome-project" in content
+        assert "术语" in content or "目录" in content or "验收" in content
+
+    def test_knowledge_content_domains(self) -> None:
+        """KNOWLEDGE.md 包含引用/入口原则、canonical 引用、更新触发。"""
+        content = _default_content_for_file(
+            file_id="KNOWLEDGE.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "引用" in content or "入口" in content
+        assert "canonical" in content
+        assert "更新" in content
+
+    def test_heartbeat_content_domains(self) -> None:
+        """HEARTBEAT.md 包含自检/检查、进度/报告、收口标准。"""
+        content = _default_content_for_file(
+            file_id="HEARTBEAT.md",
+            is_worker_profile=False,
+            agent_name="Agent",
+            project_label="default",
+        )
+        assert "自检" in content or "检查" in content
+        assert "进度" in content or "报告" in content
+        assert "收口" in content

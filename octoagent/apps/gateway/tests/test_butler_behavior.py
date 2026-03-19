@@ -418,7 +418,7 @@ def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_wor
 
     files = {item.file_id: item for item in pack.files}
     assert "web / filesystem / terminal" in files["AGENTS.md"].content
-    assert "sticky worker lane" in files["AGENTS.md"].content
+    assert "委派决策框架" in files["AGENTS.md"].content
     assert "specialist worker lane" in files["AGENTS.md"].content
     assert "不要把用户原话原封不动转发过去" in files["TOOLS.md"].content
 
