@@ -208,14 +208,13 @@ function assignAgents(nodes: FlowNode[]): void {
       // 从 ORCH_DECISION 或 WORKER_DISPATCHED payload 提取真实 Agent 名称
       if (node.kind === "decision") {
         const wType = extractWorkerType(node);
-        if (wType) lastWorkerName = capitalize(wType);
+        if (wType) lastWorkerName = wType.charAt(0).toUpperCase() + wType.slice(1);
       }
       if (node.kind === "worker") {
-        const cap = extractWorkerCapability(node);
-        const wType = extractWorkerType(node);
-        if (cap) lastWorkerName = capitalize(cap.replace(/_/g, " "));
-        else if (wType) lastWorkerName = capitalize(wType);
-        else {
+        const name = extractAgentName(node);
+        if (name) {
+          lastWorkerName = name;
+        } else {
           const wid = extractWorkerId(node);
           if (wid) lastWorkerName = `Worker ${shortId(wid)}`;
         }
@@ -228,24 +227,21 @@ function assignAgents(nodes: FlowNode[]): void {
   }
 }
 
+/** 从 WORKER_DISPATCHED payload 提取 Agent 显示名称 */
+function extractAgentName(node: FlowNode): string {
+  for (const ev of node.events) {
+    const name = ev.payload?.agent_name;
+    if (typeof name === "string" && name) return name;
+  }
+  return "";
+}
+
 function extractWorkerType(node: FlowNode): string {
   for (const ev of node.events) {
     const wt = ev.payload?.selected_worker_type || ev.payload?.worker_type;
     if (typeof wt === "string" && wt) return wt;
   }
   return "";
-}
-
-function extractWorkerCapability(node: FlowNode): string {
-  for (const ev of node.events) {
-    const cap = ev.payload?.worker_capability;
-    if (typeof cap === "string" && cap) return cap;
-  }
-  return "";
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function extractWorkerId(node: FlowNode): string {

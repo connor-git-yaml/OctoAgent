@@ -206,6 +206,7 @@ class WorkerDispatchedPayload(BaseModel):
     worker_id: str = Field(description="worker 标识")
     worker_capability: str = Field(description="worker 能力")
     contract_version: str = Field(description="派发协议版本")
+    agent_name: str = Field(default="", description="Agent 显示名称（前端泳道标题用）")
 
 
 class WorkerReturnedPayload(BaseModel):

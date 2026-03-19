@@ -2733,7 +2733,20 @@ class OrchestratorService:
                 worker_id=worker.worker_id,
                 dispatch_id=envelope.dispatch_id,
             )
-        await self._write_worker_dispatched_event(envelope, worker.worker_id)
+        # 获取 target agent 显示名称（用于前端泳道标题）
+        _agent_name = ""
+        if a2a_conversation and a2a_conversation.target_agent_runtime_id:
+            try:
+                _rt = await self._stores.agent_context_store.get_agent_runtime(
+                    a2a_conversation.target_agent_runtime_id
+                )
+                if _rt is not None:
+                    _agent_name = _rt.name
+            except Exception:
+                pass
+        await self._write_worker_dispatched_event(
+            envelope, worker.worker_id, agent_name=_agent_name
+        )
 
         try:
             result = await worker.handle(envelope)
@@ -3725,12 +3738,14 @@ class OrchestratorService:
         self,
         envelope: DispatchEnvelope,
         worker_id: str,
+        agent_name: str = "",
     ) -> None:
         payload = WorkerDispatchedPayload(
             dispatch_id=envelope.dispatch_id,
             worker_id=worker_id,
             worker_capability=envelope.worker_capability,
             contract_version=envelope.contract_version,
+            agent_name=agent_name,
         )
         await self._append_control_event(
             task_id=envelope.task_id,
