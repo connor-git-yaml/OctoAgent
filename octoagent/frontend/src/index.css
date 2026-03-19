@@ -1115,9 +1115,10 @@
 .wb-shell {
   display: grid;
   grid-template-columns: 296px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
   gap: var(--cp-space-5);
   padding: var(--cp-space-5);
+  overflow: hidden;
 }
 
 .wb-main,
@@ -1139,20 +1140,20 @@
   flex-direction: column;
   gap: var(--cp-space-3);
   padding: var(--cp-space-4);
-  min-height: calc(100vh - (var(--cp-space-5) * 2));
+  min-height: 0;
+  overflow-y: auto;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(250, 249, 246, 0.7)),
     rgba(255, 255, 255, 0.72);
 }
 
 .wb-sidebar {
-  position: sticky;
-  top: var(--cp-space-4);
-  align-self: start;
   display: flex;
   flex-direction: column;
   gap: var(--cp-space-2);
   padding: 14px;
+  min-height: 0;
+  overflow-y: auto;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 245, 239, 0.92)),
     radial-gradient(circle at top right, rgba(183, 106, 43, 0.12), transparent 40%),
