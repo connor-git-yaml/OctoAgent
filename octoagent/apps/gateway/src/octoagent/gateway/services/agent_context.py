@@ -498,6 +498,7 @@ class AgentContextService:
         loaded_skills_content: str = "",
         progress_notes: list[dict[str, Any]] | None = None,
         deferred_tools_text: str = "",
+        pipeline_catalog_content: str = "",
     ) -> CompiledTaskContext:
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
@@ -563,6 +564,7 @@ class AgentContextService:
             progress_notes=progress_notes,
             deferred_tools_text=deferred_tools_text,
             role_card=agent_runtime.role_card if agent_runtime is not None else "",
+            pipeline_catalog_content=pipeline_catalog_content,
         )
         degraded_reasons.extend(prompt_budget_reasons)
         degraded_reason = "; ".join(dict.fromkeys(item for item in degraded_reasons if item))
@@ -3902,6 +3904,7 @@ class AgentContextService:
         progress_notes: list[dict] | None = None,
         deferred_tools_text: str = "",
         role_card: str = "",
+        pipeline_catalog_content: str = "",
     ) -> tuple[list[dict[str, str]], list[str]]:
         ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
             owner_profile=owner_profile,
@@ -4197,6 +4200,15 @@ class AgentContextService:
                 }
             )
 
+        # Feature 065: Pipeline 目录系统块（Worker/Subagent 感知 Pipeline 存在）
+        if pipeline_catalog_content:
+            blocks.append(
+                {
+                    "role": "system",
+                    "content": pipeline_catalog_content,
+                }
+            )
+
         # Feature 060: ProgressNotes 系统块（Worker 进度笔记）
         if progress_notes:
             notes_text = "## Progress Notes\n\n"
@@ -4336,6 +4348,7 @@ class AgentContextService:
         progress_notes: list[dict] | None = None,
         deferred_tools_text: str = "",
         role_card: str = "",
+        pipeline_catalog_content: str = "",
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
         summary_limits = [0]
         if recent_summary:
@@ -4457,6 +4470,7 @@ class AgentContextService:
                             progress_notes=progress_notes,
                             deferred_tools_text=deferred_tools_text,
                             role_card=role_card,
+                            pipeline_catalog_content=pipeline_catalog_content,
                         )
                         system_tokens = estimate_messages_tokens(blocks)
                         delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])

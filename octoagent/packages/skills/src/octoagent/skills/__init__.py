@@ -33,6 +33,16 @@ from .pipeline import (
     PipelineNodeOutcome,
     SkillPipelineEngine,
 )
+from .pipeline_handlers import BUILTIN_HANDLERS as PIPELINE_BUILTIN_HANDLERS
+from .pipeline_models import (
+    PipelineListItem,
+    PipelineManifest,
+    PipelineParseError,
+    PipelineSource,
+)
+from .pipeline_registry import PipelineRegistry
+from .pipeline_tool import GraphPipelineTool
+from .registry_base import AssetSource, BaseFilesystemRegistry
 from .protocols import (
     ApprovalBridgeProtocol,
     SkillRegistryProtocol,
@@ -85,4 +95,15 @@ __all__ = [
     "SkillMdEntry",
     "SkillListItem",
     "SkillDiscovery",
+    # Feature 065: Pipeline 文件系统驱动模型
+    "PipelineSource",
+    "PipelineManifest",
+    "PipelineListItem",
+    "PipelineParseError",
+    "PipelineRegistry",
+    "GraphPipelineTool",
+    "PIPELINE_BUILTIN_HANDLERS",
+    # Feature 067: 三级目录扫描泛型基类
+    "AssetSource",
+    "BaseFilesystemRegistry",
 ]

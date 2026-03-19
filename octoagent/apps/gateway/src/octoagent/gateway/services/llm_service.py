@@ -197,6 +197,7 @@ class LLMService:
         skill_runner: SkillRunner | None = None,
         skill_discovery: SkillDiscovery | None = None,
         tool_promotion_service: ToolPromotionService | None = None,
+        pipeline_registry: Any | None = None,
     ) -> None:
         """初始化 LLM 服务
 
@@ -207,6 +208,7 @@ class LLMService:
             skill_runner: SkillRunner 实例
             skill_discovery: Feature 057 SkillDiscovery 实例，用于注入已加载 Skill 到 system prompt
             tool_promotion_service: Feature 061 工具提升服务，追踪 Deferred → Active 状态
+            pipeline_registry: Feature 065 PipelineRegistry 实例，用于注入 Pipeline 列表到 system prompt
         """
         if fallback_manager is not None:
             # Feature 002 模式
@@ -229,6 +231,8 @@ class LLMService:
         self._skill_discovery = skill_discovery
         # Feature 061 T-022: 工具提升服务
         self._tool_promotion = tool_promotion_service
+        # Feature 065: Pipeline 注册表
+        self._pipeline_registry = pipeline_registry
 
     def register(self, alias: str, provider: LLMProvider) -> None:
         """注册 LLM provider -- M0 兼容"""
@@ -811,6 +815,58 @@ class LLMService:
             "Use `skills action=load name=<name>` to load a skill's full instructions "
             "into this session."
         )
+        return "\n".join(lines)
+
+    def _build_pipeline_catalog_context(self) -> str:
+        """Feature 065 T-032: 构建 Pipeline 目录摘要，注入 Worker/Subagent system prompt。
+
+        从 PipelineRegistry 获取 Pipeline 列表，格式化为 system prompt 段落。
+        Pipeline 列表为空时返回空字符串（FR-065-07 AC-04）。
+        包含 Pipeline vs Subagent 语义区分指引（FR-065-07 AC-02）。
+
+        Returns:
+            可直接拼入 system prompt 的文本，或空字符串。
+        """
+        if self._pipeline_registry is None:
+            return ""
+
+        try:
+            items = self._pipeline_registry.list_items()
+        except Exception:
+            return ""
+
+        if not items:
+            return ""
+
+        lines: list[str] = ["## Available Pipelines\n"]
+        lines.append(
+            "Deterministic workflow pipelines you can start, monitor and manage "
+            "via `graph_pipeline` tool.\n"
+        )
+
+        for item in items:
+            pid = getattr(item, "pipeline_id", "")
+            desc = getattr(item, "description", "")
+            hint = getattr(item, "trigger_hint", "")
+            entry = f"- **{pid}**: {desc}"
+            if hint:
+                entry += f" (trigger: {hint})"
+            lines.append(entry)
+
+        # 语义区分指引（FR-065-07 AC-02）
+        lines.append("")
+        lines.append("### Pipelines vs Subagents\n")
+        lines.append("Use **Pipeline** (graph_pipeline tool) when:")
+        lines.append("- The task follows a known, repeatable sequence of steps")
+        lines.append("- Steps need checkpoint/recovery guarantees (e.g., deploy, data migration)")
+        lines.append("- Steps include approval gates or human review points")
+        lines.append("- Deterministic execution is preferred over LLM reasoning\n")
+        lines.append("Use **Subagent** (subagents tool) when:")
+        lines.append("- The task requires exploration, reasoning, or multi-turn interaction")
+        lines.append("- The approach is not predetermined and needs LLM judgment")
+        lines.append("- The task involves creative work (writing, analysis, research)")
+        lines.append("- Flexibility is more important than determinism")
+
         return "\n".join(lines)
 
     @staticmethod

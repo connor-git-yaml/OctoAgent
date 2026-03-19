@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Protocol
+
+import structlog
 
 from octoagent.core.models import (
     EventType,
@@ -20,6 +23,8 @@ from octoagent.core.models import (
 from octoagent.core.store import StoreGroup
 from pydantic import BaseModel, Field
 from ulid import ULID
+
+logger = structlog.get_logger(__name__)
 
 EventRecorder = Callable[[str, EventType, dict[str, Any]], Awaitable[None]]
 
@@ -198,8 +203,26 @@ class SkillPipelineEngine:
             node_id = current.current_node_id or definition.entry_node_id
             node = definition.get_node(node_id)
             handler = self._handlers.get(node.handler_id)
+
+            # T-065-011: handler 缺失改为 FAILED 终态，不 raise
             if handler is None:
-                raise PipelineExecutionError(f"pipeline handler 未注册: {node.handler_id}")
+                logger.warning(
+                    "pipeline_handler_missing",
+                    handler_id=node.handler_id,
+                    node_id=node.node_id,
+                    run_id=current.run_id,
+                )
+                return await self._fail_run(
+                    current,
+                    node=node,
+                    failure_category="handler_missing",
+                    error_message=f"pipeline handler 未注册: {node.handler_id}",
+                    recovery_hint=(
+                        f"节点 '{node.node_id}' 的 handler '{node.handler_id}' 未注册。"
+                        f"请确认 handler 已正确注册到 Engine 后，通过 "
+                        f"graph_pipeline(action='retry', run_id='{current.run_id}') 重试。"
+                    ),
+                )
 
             current = current.model_copy(
                 update={
@@ -212,11 +235,58 @@ class SkillPipelineEngine:
             await self._stores.conn.commit()
             await self._emit_run_event(current, summary=f"pipeline node running: {node.node_id}")
 
-            outcome = await handler(
-                run=current,
-                node=node,
-                state=dict(current.state_snapshot),
-            )
+            # T-065-012: 节点级超时支持
+            try:
+                if node.timeout_seconds:
+                    outcome = await asyncio.wait_for(
+                        handler(
+                            run=current,
+                            node=node,
+                            state=dict(current.state_snapshot),
+                        ),
+                        timeout=node.timeout_seconds,
+                    )
+                else:
+                    outcome = await handler(
+                        run=current,
+                        node=node,
+                        state=dict(current.state_snapshot),
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "pipeline_node_timeout",
+                    node_id=node.node_id,
+                    run_id=current.run_id,
+                    timeout_seconds=node.timeout_seconds,
+                )
+                return await self._fail_run(
+                    current,
+                    node=node,
+                    failure_category="timeout",
+                    error_message=f"节点 {node.node_id} 执行超时 ({node.timeout_seconds}s)",
+                    recovery_hint=(
+                        f"节点 '{node.node_id}' 执行超时（限制 {node.timeout_seconds} 秒）。"
+                        f"可通过 graph_pipeline(action='retry', run_id='{current.run_id}') 重试。"
+                    ),
+                )
+            except Exception as exc:
+                logger.error(
+                    "pipeline_node_exception",
+                    node_id=node.node_id,
+                    run_id=current.run_id,
+                    error=str(exc),
+                )
+                return await self._fail_run(
+                    current,
+                    node=node,
+                    failure_category="unknown",
+                    error_message=str(exc),
+                    recovery_hint=(
+                        f"节点 '{node.node_id}' 执行异常: {exc}。"
+                        f"可通过 graph_pipeline(action='retry', run_id='{current.run_id}') 重试。"
+                    ),
+                )
+
             next_state = {**current.state_snapshot, **outcome.state_patch}
             next_metadata = {**current.metadata, **outcome.metadata_patch}
             checkpoint_status = outcome.status
@@ -258,10 +328,30 @@ class SkillPipelineEngine:
                 await self._emit_run_event(current, summary=outcome.summary)
                 return current
 
+            # T-065-013: FAILED / CANCELLED 路径统一 metadata
             if outcome.status in {
                 PipelineRunStatus.FAILED,
                 PipelineRunStatus.CANCELLED,
             }:
+                if outcome.status == PipelineRunStatus.FAILED:
+                    # 从 outcome 获取 failure_category，或推断
+                    failure_category = outcome.metadata_patch.get(
+                        "failure_category",
+                        _infer_failure_category(node),
+                    )
+                    failure_metadata = {
+                        "failure_category": failure_category,
+                        "failed_node_id": node.node_id,
+                        "recovery_hint": outcome.metadata_patch.get(
+                            "recovery_hint",
+                            f"节点 '{node.node_id}' 执行失败。"
+                            f"可通过 graph_pipeline(action='retry', run_id='{current.run_id}') "
+                            f"重试当前节点。",
+                        ),
+                        "error_message": outcome.summary,
+                    }
+                    next_metadata = {**next_metadata, **failure_metadata}
+
                 current = current.model_copy(
                     update={
                         "status": outcome.status,
@@ -300,6 +390,49 @@ class SkillPipelineEngine:
             await self._emit_run_event(current, summary=outcome.summary)
             if is_terminal:
                 return current
+
+    async def _fail_run(
+        self,
+        current: SkillPipelineRun,
+        *,
+        node: SkillPipelineNode,
+        failure_category: str,
+        error_message: str,
+        recovery_hint: str,
+    ) -> SkillPipelineRun:
+        """将 run 设为 FAILED 终态并写入统一的失败 metadata。"""
+        failure_metadata = {
+            "failure_category": failure_category,
+            "failed_node_id": node.node_id,
+            "recovery_hint": recovery_hint,
+            "error_message": error_message,
+        }
+        failed = current.model_copy(
+            update={
+                "status": PipelineRunStatus.FAILED,
+                "current_node_id": node.node_id,
+                "state_snapshot": current.state_snapshot,
+                "metadata": {**current.metadata, **failure_metadata},
+                "completed_at": _utc_now(),
+                "updated_at": _utc_now(),
+            }
+        )
+        await self._stores.work_store.save_pipeline_run(failed)
+        await self._stores.conn.commit()
+        await self._emit_run_event(failed, summary=error_message)
+        return failed
+
+    def get_run_sync(self, run_id: str) -> SkillPipelineRun | None:
+        """同步方式检查内存中是否有 run（用于 Tool 层无 async 上下文时的快速查询）。
+        注意：此方法仅供 GraphPipelineTool 使用，不保证数据库一致性。
+        """
+        # Engine 不维护内存缓存，始终返回 None。
+        # Tool 层应使用 async 版本 _load_run。
+        return None
+
+    async def get_pipeline_run(self, run_id: str) -> SkillPipelineRun | None:
+        """获取 pipeline run，不存在时返回 None（不抛异常）。"""
+        return await self._stores.work_store.get_pipeline_run(run_id)
 
     async def _load_run(self, run_id: str) -> SkillPipelineRun:
         run = await self._stores.work_store.get_pipeline_run(run_id)
@@ -344,3 +477,17 @@ class SkillPipelineEngine:
                 replay_summary=checkpoint.replay_summary,
             ).model_dump(mode="json"),
         )
+
+
+def _infer_failure_category(node: SkillPipelineNode) -> str:
+    """根据节点类型推断 failure_category。"""
+    from octoagent.core.models.pipeline import PipelineNodeType
+
+    _NODE_TYPE_TO_CATEGORY: dict[PipelineNodeType, str] = {
+        PipelineNodeType.TOOL: "tool",
+        PipelineNodeType.SKILL: "tool",
+        PipelineNodeType.GATE: "gate",
+        PipelineNodeType.TRANSFORM: "unknown",
+        PipelineNodeType.DELEGATION: "unknown",
+    }
+    return _NODE_TYPE_TO_CATEGORY.get(node.node_type, "unknown")

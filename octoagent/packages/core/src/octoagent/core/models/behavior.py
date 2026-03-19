@@ -61,6 +61,7 @@ class ButlerDecisionMode(StrEnum):
     DELEGATE_DEV = "delegate_dev"
     DELEGATE_OPS = "delegate_ops"
     BEST_EFFORT_ANSWER = "best_effort_answer"
+    DELEGATE_GRAPH = "delegate_graph"  # Feature 065: 委派到 Graph Pipeline
 
 
 class RecallPlanMode(StrEnum):
@@ -262,6 +263,9 @@ class ButlerDecision(BaseModel):
     prefer_sticky_worker: bool = False
     user_visible_boundary_note: str = Field(default="")
     reply_prompt: str = Field(default="")
+    # Feature 065: DELEGATE_GRAPH 模式下的 Pipeline 标识和参数
+    pipeline_id: str = Field(default="")
+    pipeline_params: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

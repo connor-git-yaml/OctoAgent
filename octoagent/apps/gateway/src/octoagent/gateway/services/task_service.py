@@ -1202,6 +1202,14 @@ class TaskService:
                 dispatch_metadata
             )
 
+        # Feature 065: 获取 Pipeline 目录文本
+        pipeline_catalog_content = ""
+        if hasattr(llm_service, "_build_pipeline_catalog_context"):
+            try:
+                pipeline_catalog_content = llm_service._build_pipeline_catalog_context()
+            except Exception:
+                pass  # Pipeline 注入失败不影响正常流程
+
         recall_plan = await self._build_memory_recall_plan(
             task_id=task_id,
             trace_id=trace_id,
@@ -1245,6 +1253,7 @@ class TaskService:
                 budget_allocation=budget,
                 loaded_skills_content=loaded_skills_content,
                 progress_notes=progress_notes,
+                pipeline_catalog_content=pipeline_catalog_content,
             )
         except Exception as exc:
             log.warning(

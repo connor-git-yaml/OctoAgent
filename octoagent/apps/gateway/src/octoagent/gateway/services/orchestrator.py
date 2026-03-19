@@ -748,6 +748,18 @@ class OrchestratorService:
                 decision=butler_decision,
             )
 
+        # Feature 065: DELEGATE_GRAPH 路由分支
+        if butler_decision is not None and butler_decision.mode is ButlerDecisionMode.DELEGATE_GRAPH:
+            graph_result = await self._dispatch_butler_delegate_graph(
+                request=request,
+                gate_decision=gate_decision,
+                decision=butler_decision,
+            )
+            if graph_result is not None:
+                return graph_result
+            # fallback 已在 _dispatch_butler_delegate_graph 中将 decision 改写为
+            # DELEGATE_DEV/OPS/RESEARCH，继续走下面的正常委派流程
+
         delegated_request = await self._build_butler_delegation_request(
             request=request,
             decision=butler_decision,
@@ -1069,9 +1081,22 @@ class OrchestratorService:
         if not self._is_butler_decision_eligible(request):
             return None, {}
         hints = await self._build_request_runtime_hints(request)
+
+        # Feature 067: 将 Pipeline 列表传入规则决策层，支持 trigger_hint 匹配
+        pipeline_items = None
+        graph_tool = self._resolve_graph_pipeline_tool()
+        if graph_tool is not None:
+            try:
+                registry = getattr(graph_tool, "_registry", None)
+                if registry is not None:
+                    pipeline_items = registry.list_items()
+            except Exception:
+                pass
+
         decision = decide_butler_decision(
             request.user_text,
             runtime_hints=hints,
+            pipeline_items=pipeline_items,
         )
 
         # Phase 1 (Feature 064): 跳过 model decision preflight
@@ -1544,6 +1569,139 @@ class OrchestratorService:
             return WorkerType(raw)
         except ValueError:
             return None
+
+    # ------------------------------------------------------------------
+    # Feature 065: DELEGATE_GRAPH 路由分支
+    # ------------------------------------------------------------------
+    async def _dispatch_butler_delegate_graph(
+        self,
+        *,
+        request: OrchestratorRequest,
+        gate_decision: "OrchestratorPolicyDecision",
+        decision: ButlerDecision,
+    ) -> WorkerResult | None:
+        """Feature 065 T-030/T-031: Butler DELEGATE_GRAPH 路由 + fallback。
+
+        尝试通过 GraphPipelineTool 启动指定 Pipeline。
+        成功时返回 WorkerResult（Pipeline 已后台启动）。
+        失败时将 decision 改写为 fallback Worker 类型后返回 None，
+        让调用方继续走正常委派流程。
+        """
+        pipeline_id = str(decision.pipeline_id).strip()
+        if not pipeline_id:
+            # pipeline_id 为空，无法启动 Pipeline，直接 fallback
+            log.warning(
+                "butler_delegate_graph_missing_pipeline_id",
+                rationale=decision.rationale,
+            )
+            decision = self._fallback_delegate_graph_decision(decision)
+            return None
+
+        # 尝试获取 GraphPipelineTool 实例
+        graph_tool = self._resolve_graph_pipeline_tool()
+        if graph_tool is None:
+            log.warning(
+                "butler_delegate_graph_tool_unavailable",
+                pipeline_id=pipeline_id,
+            )
+            decision = self._fallback_delegate_graph_decision(decision)
+            return None
+
+        # 调用 GraphPipelineTool.execute(action="start")
+        try:
+            result_text = await graph_tool.execute(
+                action="start",
+                pipeline_id=pipeline_id,
+                params=dict(decision.pipeline_params) if decision.pipeline_params else {},
+                task_id=request.task_id,
+            )
+        except Exception as exc:
+            log.warning(
+                "butler_delegate_graph_start_failed",
+                pipeline_id=pipeline_id,
+                error=str(exc),
+            )
+            decision = self._fallback_delegate_graph_decision(decision)
+            return None
+
+        # 检查返回文本是否包含错误标记
+        if result_text.startswith("Error:"):
+            log.warning(
+                "butler_delegate_graph_start_error",
+                pipeline_id=pipeline_id,
+                error=result_text,
+            )
+            decision = self._fallback_delegate_graph_decision(decision)
+            return None
+
+        # Pipeline 已成功后台启动
+        log.info(
+            "butler_delegate_graph_started",
+            pipeline_id=pipeline_id,
+            task_id=request.task_id,
+            result=result_text[:200],
+        )
+
+        # 写入 ORCH_DECISION 事件
+        await self._write_orch_decision_event(
+            request=request,
+            route_reason=f"butler_delegate_graph:{pipeline_id}",
+            gate_decision=gate_decision,
+        )
+
+        return WorkerResult(
+            dispatch_id=f"butler-graph:{pipeline_id}",
+            task_id=request.task_id,
+            worker_id="butler.graph_pipeline",
+            status=WorkerExecutionStatus.SUCCEEDED,
+            retryable=False,
+            summary=f"pipeline_started:{pipeline_id}",
+            extra_metadata={"pipeline_start_result": result_text[:500]},
+        )
+
+    def _resolve_graph_pipeline_tool(self) -> Any | None:
+        """尝试获取 GraphPipelineTool 实例。
+
+        GraphPipelineTool 可能通过 _graph_pipeline_tool 属性注入，
+        如果不存在则返回 None（Pipeline 功能静默降级）。
+        """
+        return getattr(self, "_graph_pipeline_tool", None)
+
+    @staticmethod
+    def _fallback_delegate_graph_decision(
+        decision: ButlerDecision,
+    ) -> ButlerDecision:
+        """Feature 065 T-031: DELEGATE_GRAPH fallback 到就近 Worker 类型。
+
+        按 Pipeline tags 就近匹配：
+        - deploy/ci-cd/ops -> DELEGATE_OPS
+        - dev/code/build -> DELEGATE_DEV
+        - 其他 -> DELEGATE_RESEARCH
+
+        返回新的 ButlerDecision（不修改原对象）。
+        """
+        tags_str = " ".join(decision.metadata.get("pipeline_tags", []))
+        fallback_rationale = (
+            f"DELEGATE_GRAPH fallback: pipeline_id='{decision.pipeline_id}' "
+            f"不可用或启动失败，回退到 Worker 委派。"
+        )
+        if any(kw in tags_str for kw in ("deploy", "ci-cd", "ops", "infra")):
+            fallback_mode = ButlerDecisionMode.DELEGATE_OPS
+            fallback_worker_type = "ops"
+        elif any(kw in tags_str for kw in ("dev", "code", "build", "test")):
+            fallback_mode = ButlerDecisionMode.DELEGATE_DEV
+            fallback_worker_type = "dev"
+        else:
+            fallback_mode = ButlerDecisionMode.DELEGATE_RESEARCH
+            fallback_worker_type = "research"
+
+        updates: dict[str, Any] = {
+            "mode": fallback_mode,
+            "rationale": f"{fallback_rationale} 原始理由: {decision.rationale}",
+        }
+        if not decision.target_worker_type:
+            updates["target_worker_type"] = fallback_worker_type
+        return decision.model_copy(update=updates)
 
     async def _compose_butler_delegate_objective(
         self,

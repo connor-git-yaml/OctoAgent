@@ -157,7 +157,7 @@ class SkillRunner:
                 if isinstance(exc, LLMCallError):
                     if exc.error_type == "rate_limit":
                         # 速率限制：等待后重试，不消耗 retry 计数
-                        log.warning("rate_limit_backoff", step=steps, wait_seconds=3)
+                        logger.warning("rate_limit_backoff", step=steps, wait_seconds=3)
                         await asyncio.sleep(3)
                         continue
                     if exc.error_type == "context_overflow":

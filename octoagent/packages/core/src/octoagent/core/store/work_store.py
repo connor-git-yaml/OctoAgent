@@ -197,6 +197,10 @@ class SqliteWorkStore:
         *,
         task_id: str | None = None,
         work_id: str | None = None,
+        pipeline_id: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 0,
     ) -> list[SkillPipelineRun]:
         clauses: list[str] = []
         args: list[object] = []
@@ -206,13 +210,54 @@ class SqliteWorkStore:
         if work_id:
             clauses.append("work_id = ?")
             args.append(work_id)
+        if pipeline_id:
+            clauses.append("pipeline_id = ?")
+            args.append(pipeline_id)
+        if status:
+            clauses.append("status = ?")
+            args.append(status)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        limit_clause = ""
+        if page_size > 0:
+            offset = (max(page, 1) - 1) * page_size
+            limit_clause = f" LIMIT {page_size} OFFSET {offset}"
         cursor = await self._conn.execute(
-            f"SELECT * FROM skill_pipeline_runs {where} ORDER BY created_at DESC",
+            f"SELECT * FROM skill_pipeline_runs {where} ORDER BY created_at DESC{limit_clause}",
             tuple(args),
         )
         rows = await cursor.fetchall()
         return [self._row_to_pipeline_run(row) for row in rows]
+
+    async def count_pipeline_runs(
+        self,
+        *,
+        task_id: str | None = None,
+        work_id: str | None = None,
+        pipeline_id: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        """统计符合条件的 pipeline run 总数（分页用）。"""
+        clauses: list[str] = []
+        args: list[object] = []
+        if task_id:
+            clauses.append("task_id = ?")
+            args.append(task_id)
+        if work_id:
+            clauses.append("work_id = ?")
+            args.append(work_id)
+        if pipeline_id:
+            clauses.append("pipeline_id = ?")
+            args.append(pipeline_id)
+        if status:
+            clauses.append("status = ?")
+            args.append(status)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cursor = await self._conn.execute(
+            f"SELECT COUNT(*) FROM skill_pipeline_runs {where}",
+            tuple(args),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
     async def save_pipeline_checkpoint(self, checkpoint: PipelineCheckpoint) -> PipelineCheckpoint:
         await self._conn.execute(

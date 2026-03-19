@@ -56,6 +56,7 @@ from .routes import (
     message,
     operator_inbox,
     ops,
+    pipelines,
     skills,
     stream,
     tasks,
@@ -470,6 +471,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
     app.state.skill_discovery = app.state.capability_pack_service.skill_discovery
+
+    # Feature 065: 创建 PipelineRegistry 并挂载到 app.state 供 REST API 依赖注入
+    try:
+        from octoagent.skills.pipeline_registry import PipelineRegistry
+
+        _builtin_pipelines = Path(__file__).resolve().parents[5] / "pipelines"
+        _user_pipelines = Path.home() / ".octoagent" / "pipelines"
+        pipeline_registry = PipelineRegistry(
+            builtin_dir=_builtin_pipelines if _builtin_pipelines.is_dir() else None,
+            user_dir=_user_pipelines,
+            project_dir=project_root / "pipelines" if project_root else None,
+        )
+        pipeline_registry.scan()
+        app.state.pipeline_registry = pipeline_registry
+    except Exception as exc:
+        log.warning("pipeline_registry_init_skipped", error=str(exc))
+        app.state.pipeline_registry = None
+
     # Feature 058: 创建 McpSessionPool 并注入 McpRegistryService
     from .services.mcp_session_pool import McpSessionPool
 
@@ -534,6 +553,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.execution_console = app.state.task_runner.execution_console
     telegram_service.bind_task_runner(app.state.task_runner)
     await app.state.task_runner.startup()
+
+    # Feature 067: 创建 GraphPipelineTool 并挂载到 app.state + OrchestratorService
+    try:
+        from octoagent.skills.pipeline_tool import GraphPipelineTool
+
+        pipeline_registry = getattr(app.state, "pipeline_registry", None)
+        if pipeline_registry is not None:
+            graph_pipeline_tool = GraphPipelineTool(
+                registry=pipeline_registry,
+                store_group=store_group,
+            )
+            app.state.graph_pipeline_tool = graph_pipeline_tool
+            # 注入到 TaskRunner 内部的 OrchestratorService
+            orchestrator = getattr(app.state.task_runner, "_orchestrator", None)
+            if orchestrator is not None:
+                orchestrator._graph_pipeline_tool = graph_pipeline_tool
+            log.info("graph_pipeline_tool_initialized")
+        else:
+            app.state.graph_pipeline_tool = None
+    except Exception as exc:
+        log.warning("graph_pipeline_tool_init_skipped", error=str(exc))
+        app.state.graph_pipeline_tool = None
+
     await telegram_service.startup()
 
     # Feature 011: 注册 WatchdogScanner APScheduler job
@@ -734,6 +776,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, tags=["chat"], dependencies=protected)
     app.include_router(control_plane.router, tags=["control-plane"], dependencies=protected)
     app.include_router(skills.router, dependencies=protected)
+    pipelines.include_pipeline_routers(app, tags=["pipelines"], dependencies=protected)
 
     # 挂载前端静态文件（frontend/dist/ -> /）
     # 在所有 API 路由之后挂载，确保 API 优先匹配

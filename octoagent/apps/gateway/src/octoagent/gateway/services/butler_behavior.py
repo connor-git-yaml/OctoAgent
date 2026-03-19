@@ -866,6 +866,50 @@ def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundl
     )
 
 
+def _build_butler_pipeline_context(
+    pipeline_items: list[Any] | None,
+) -> str:
+    """Feature 065 T-029: 构建 Butler system prompt 中的 Pipeline 上下文段落。
+
+    当 PipelineRegistry 中有可用 Pipeline 时，注入列表 + trigger_hint + input_schema 摘要。
+    列表为空时返回空字符串（FR-065-07 AC-04：不注入空段落）。
+
+    Args:
+        pipeline_items: PipelineListItem 列表（可选）。
+
+    Returns:
+        可直接拼入 system message 的文本，或空字符串。
+    """
+    if not pipeline_items:
+        return ""
+
+    lines: list[str] = [
+        "Available Pipelines for delegation:",
+    ]
+    for item in pipeline_items:
+        pid = getattr(item, "pipeline_id", "")
+        desc = getattr(item, "description", "")
+        hint = getattr(item, "trigger_hint", "")
+        input_schema = getattr(item, "input_schema", {})
+
+        entry = f"- {pid}: {desc}"
+        if hint:
+            entry += f" (trigger: {hint})"
+        lines.append(entry)
+
+        # 注入 input_schema 摘要（每个字段一行，缩进）
+        if input_schema:
+            fields_parts: list[str] = []
+            for fname, fdef in input_schema.items():
+                ftype = getattr(fdef, "type", "string") if hasattr(fdef, "type") else "string"
+                freq = getattr(fdef, "required", False) if hasattr(fdef, "required") else False
+                suffix = ", required" if freq else ""
+                fields_parts.append(f"{fname} ({ftype}{suffix})")
+            lines.append(f"  input: {', '.join(fields_parts)}")
+
+    return "\n".join(lines)
+
+
 def build_butler_decision_messages(
     *,
     user_text: str,
@@ -875,11 +919,14 @@ def build_butler_decision_messages(
     project_name: str = "",
     project_slug: str = "",
 ) -> list[dict[str, str]]:
-    schema = {
-        "mode": (
-            "direct_answer | ask_once | delegate_research | delegate_dev | "
-            "delegate_ops | best_effort_answer"
-        ),
+    # Feature 067: Pipeline 匹配已迁移到 decide_butler_decision() 规则决策层，
+    # 此函数不再接收 pipeline_items 参数。
+    mode_values = (
+        "direct_answer | ask_once | delegate_research | delegate_dev | "
+        "delegate_ops | best_effort_answer"
+    )
+    schema: dict[str, Any] = {
+        "mode": mode_values,
         "category": "string",
         "rationale": "string",
         "missing_inputs": ["string"],
@@ -893,7 +940,8 @@ def build_butler_decision_messages(
         "user_visible_boundary_note": "string",
         "reply_prompt": "string",
     }
-    return [
+
+    messages: list[dict[str, str]] = [
         {
             "role": "system",
             "content": (
@@ -935,31 +983,30 @@ def build_butler_decision_messages(
             "role": "system",
             "content": runtime_hint_block,
         },
-        *(
-            [
-                {
-                    "role": "system",
-                    "content": conversation_context_block,
-                }
-            ]
-            if conversation_context_block.strip()
-            else []
-        ),
-        {
-            "role": "user",
-            "content": (
-                f"当前用户消息：{user_text.strip() or 'N/A'}\n\n"
-                "请优先输出一个 ButlerLoopPlan JSON："
-                "{\"decision\": <ButlerDecision>, \"recall_plan\": <RecallPlan>}。"
-                "如果你只能输出旧版 ButlerDecision JSON，也允许。"
-                "RecallPlan schema: "
-                "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
-                "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
-                "\"allow_vault\":false,\"limit\":4}\n"
-                f"ButlerDecision 字段模板：{json.dumps(schema, ensure_ascii=False)}"
-            ),
-        },
     ]
+
+    if conversation_context_block.strip():
+        messages.append({
+            "role": "system",
+            "content": conversation_context_block,
+        })
+
+    messages.append({
+        "role": "user",
+        "content": (
+            f"当前用户消息：{user_text.strip() or 'N/A'}\n\n"
+            "请优先输出一个 ButlerLoopPlan JSON："
+            "{\"decision\": <ButlerDecision>, \"recall_plan\": <RecallPlan>}。"
+            "如果你只能输出旧版 ButlerDecision JSON，也允许。"
+            "RecallPlan schema: "
+            "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
+            "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
+            "\"allow_vault\":false,\"limit\":4}\n"
+            f"ButlerDecision 字段模板：{json.dumps(schema, ensure_ascii=False)}"
+        ),
+    })
+
+    return messages
 
 
 def _parse_recall_plan_payload(payload: dict[str, Any]) -> RecallPlan | None:
@@ -980,6 +1027,10 @@ def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | 
         normalized["target_worker_type"] = "dev"
     if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_ops":
         normalized["target_worker_type"] = "ops"
+    # Feature 065: delegate_graph 模式确保 pipeline_id 字段透传
+    if normalized.get("mode") == "delegate_graph":
+        # pipeline_id 和 pipeline_params 直接透传给 ButlerDecision
+        pass
     try:
         decision = ButlerDecision.model_validate(normalized)
     except Exception:
@@ -1248,16 +1299,73 @@ def _is_trivial_direct_answer(user_text: str) -> bool:
     return False
 
 
+def _match_pipeline_trigger(
+    user_text: str,
+    pipeline_items: list[Any] | None,
+) -> ButlerDecision | None:
+    """Feature 067: 当用户请求匹配 Pipeline trigger_hint 时返回 DELEGATE_GRAPH。
+
+    简单的关键词包含匹配：将 trigger_hint 中的关键词与用户输入对比。
+    匹配条件：用户输入包含 trigger_hint 中的所有非停用词（> 1 字符），
+    或 pipeline_id 整体出现在用户输入中。
+
+    Args:
+        user_text: 用户输入（已 strip）
+        pipeline_items: PipelineListItem 列表
+
+    Returns:
+        匹配成功返回 ButlerDecision(DELEGATE_GRAPH)，否则 None
+    """
+    if not pipeline_items:
+        return None
+
+    lower_text = user_text.lower()
+
+    for item in pipeline_items:
+        pid = getattr(item, "pipeline_id", "")
+        hint = getattr(item, "trigger_hint", "")
+        tags = getattr(item, "tags", []) or []
+
+        # 1. pipeline_id 整体出现在用户输入中
+        if pid and pid.lower() in lower_text:
+            return ButlerDecision(
+                mode=ButlerDecisionMode.DELEGATE_GRAPH,
+                pipeline_id=pid,
+                rationale=f"用户输入中包含 pipeline_id '{pid}'，匹配确定性 Pipeline。",
+                metadata={"pipeline_tags": list(tags), "match_type": "pipeline_id"},
+            )
+
+        # 2. trigger_hint 关键词匹配
+        if hint:
+            hint_words = [w for w in hint.lower().split() if len(w) > 1]
+            if hint_words and all(w in lower_text for w in hint_words):
+                return ButlerDecision(
+                    mode=ButlerDecisionMode.DELEGATE_GRAPH,
+                    pipeline_id=pid,
+                    rationale=f"用户请求匹配 Pipeline '{pid}' 的 trigger_hint。",
+                    metadata={"pipeline_tags": list(tags), "match_type": "trigger_hint"},
+                )
+
+    return None
+
+
 def decide_butler_decision(
     user_text: str,
     *,
     runtime_hints: RuntimeHintBundle | None = None,
+    pipeline_items: list[Any] | None = None,
 ) -> ButlerDecision:
     normalized = user_text.strip()
     if not normalized:
         return ButlerDecision()
 
     hints = runtime_hints or build_runtime_hint_bundle(user_text=normalized)
+
+    # Feature 067: Pipeline trigger_hint 规则匹配（优先级低于天气等已有规则）
+    # 在天气规则之前检查，因为 Pipeline 匹配是显式精确的
+    pipeline_match = _match_pipeline_trigger(normalized, pipeline_items)
+    if pipeline_match is not None:
+        return pipeline_match
 
     if (
         hints.recent_clarification_category == "weather_location"
