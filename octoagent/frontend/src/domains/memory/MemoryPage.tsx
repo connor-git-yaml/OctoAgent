@@ -235,8 +235,9 @@ export default function MemoryPage() {
       project_id: memoryResource.active_project_id,
       workspace_id: memoryResource.active_workspace_id,
     });
-    const hasErrors = (result?.data?.errors?.length ?? 0) > 0;
-    const msg = result?.data?.message || result?.message || "整理完成";
+    const data = result?.data as { errors?: unknown[]; message?: string } | undefined;
+    const hasErrors = (data?.errors?.length ?? 0) > 0;
+    const msg = data?.message || result?.message || "整理完成";
     setConsolidateMessage(msg);
     setConsolidateIsError(hasErrors);
   }
