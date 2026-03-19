@@ -230,9 +230,9 @@ export function buildFieldGuide(
 ): FieldGuide | null {
   if (hint.widget === "env-ref") {
     return {
-      title: "怎么填",
+      title: "填写说明",
       description:
-        "这里只填写环境变量名，不要把真实 token 或 API Key 直接贴进来。真实值应放在 ~/.octoagent/.env 或 ~/.octoagent/.env.litellm 里。",
+        "填写环境变量名（非实际值）。实际密钥存储于 ~/.octoagent/.env 或 ~/.octoagent/.env.litellm。",
     };
   }
   if (hint.field_path === "providers" || hint.field_path === "model_aliases") {
@@ -241,7 +241,7 @@ export function buildFieldGuide(
   if (hint.field_path === "front_door.trusted_proxy_cidrs") {
     return {
       title: "填写格式",
-      description: "每行一个 CIDR。只在 trusted_proxy 模式下需要，本机默认值通常就是下面这两个。",
+      description: "每行一个 CIDR，仅 trusted_proxy 模式需要。",
       exampleLabel: "本机默认值",
       example: DEFAULT_TRUSTED_PROXY_CIDRS,
       actions: [{ label: "恢复本机默认值", value: DEFAULT_TRUSTED_PROXY_CIDRS }],
@@ -250,7 +250,7 @@ export function buildFieldGuide(
   if (hint.widget === "string-list" && hint.field_path.startsWith("channels.telegram.")) {
     return {
       title: "填写格式",
-      description: "每行一项。可以填 Telegram 用户 ID、群组 ID 或用户名，按字段含义分别填写。",
+      description: "每行一项，支持用户 ID、群组 ID 或用户名。",
     };
   }
   return null;

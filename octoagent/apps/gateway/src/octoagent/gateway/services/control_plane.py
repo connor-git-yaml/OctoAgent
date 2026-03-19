@@ -8197,7 +8197,7 @@ class ControlPlaneService:
                 label="对外访问模式",
                 description="控制谁可以访问 owner-facing API。",
                 widget="select",
-                help_text="小白默认建议 loopback；公网场景建议 bearer 或 trusted_proxy。",
+                help_text="本机使用 loopback；公网部署使用 bearer 或 trusted_proxy。",
                 order=55,
             ),
             "front_door.bearer_token_env": ConfigFieldHint(
@@ -8237,7 +8237,7 @@ class ControlPlaneService:
                 section="channels",
                 label="启用 Telegram",
                 widget="toggle",
-                help_text="建议先完成 Provider / Secret 配置，再启用 Telegram。",
+                help_text="启用前需完成 Provider 和 Secret 配置。",
                 order=60,
             ),
             "channels.telegram.mode": ConfigFieldHint(
@@ -8259,7 +8259,7 @@ class ControlPlaneService:
                 field_path="channels.telegram.webhook_url",
                 section="channels",
                 label="Webhook URL",
-                help_text="仅 webhook 模式需要；没有公网 HTTPS 时优先用 polling。",
+                help_text="仅 webhook 模式需要。无公网 HTTPS 时使用 polling。",
                 order=90,
             ),
             "channels.telegram.webhook_secret_env": ConfigFieldHint(
@@ -8275,7 +8275,7 @@ class ControlPlaneService:
                 section="channels",
                 label="私聊访问策略",
                 widget="select",
-                help_text="默认推荐 pairing；open 会允许陌生人直接触发主 Agent。",
+                help_text="pairing 需配对后使用；open 允许任意用户触发。",
                 order=97,
             ),
             "channels.telegram.allow_users": ConfigFieldHint(
@@ -8290,7 +8290,7 @@ class ControlPlaneService:
                 section="channels",
                 label="群聊访问策略",
                 widget="select",
-                help_text="默认推荐 allowlist，避免 Agent 在任意群聊被触发。",
+                help_text="allowlist 限定可触发的群组；open 允许所有群组。",
                 order=105,
             ),
             "channels.telegram.allowed_groups": ConfigFieldHint(

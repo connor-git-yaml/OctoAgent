@@ -41,7 +41,7 @@ export default function SettingsOverview({
           <h1 style={{ fontSize: "1.75rem" }}>Settings</h1>
           {subtitle ? <p style={{ margin: 0, color: "var(--cp-muted)" }}>{subtitle}</p> : null}
         </div>
-        <div className="wb-settings-hero-actions">
+        <div className="wb-settings-hero-actions" style={{ display: "flex", gap: 10, width: "auto" }}>
           <button
             type="button"
             className="wb-button wb-button-primary"

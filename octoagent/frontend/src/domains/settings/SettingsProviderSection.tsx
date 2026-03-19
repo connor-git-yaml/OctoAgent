@@ -105,7 +105,7 @@ export default function SettingsProviderSection({
               {providerDrafts.length === 0 ? (
                 <div className="wb-empty-state">
                   <strong>还没有 Provider</strong>
-                  <span>先添加一个 Provider，再为模型别名选择 provider + model。</span>
+                  <span>添加 Provider 后即可配置模型别名。</span>
                 </div>
               ) : null}
 
@@ -126,10 +126,9 @@ export default function SettingsProviderSection({
                   >
                     <div className="wb-provider-card-head">
                       <div>
-                        <p className="wb-card-label">{index === 0 ? "默认 Provider" : "Provider"}</p>
-                        <strong>{providerName}</strong>
+                        <strong style={{ fontSize: "0.95rem" }}>{providerName}</strong>
                         <div className="wb-provider-meta">
-                          <span>ID {provider.id}</span>
+                          <span>{provider.id}</span>
                           <span>{provider.auth_type === "oauth" ? "OAuth" : "API Key"}</span>
                         </div>
                       </div>
@@ -194,7 +193,7 @@ export default function SettingsProviderSection({
                             onUpdateProviderAt(index, { api_key_env: event.target.value })
                           }
                         />
-                        <small>这里只填写环境变量名。</small>
+                        <small>填写变量名，非实际密钥。</small>
                       </label>
                       <label className="wb-field wb-field-span-2">
                         <span>启用状态</span>
@@ -217,8 +216,8 @@ export default function SettingsProviderSection({
                         <strong>OpenAI Auth</strong>
                         <span>
                           {providerRuntimeDetails.openai_oauth_profile
-                            ? `当前凭证 ${providerRuntimeDetails.openai_oauth_profile}`
-                            : "当前还没有本地授权凭证。"}
+                            ? `凭证 ${providerRuntimeDetails.openai_oauth_profile}`
+                            : "未授权"}
                         </span>
                         <div className="wb-inline-actions wb-inline-actions-wrap">
                           <button
@@ -241,8 +240,8 @@ export default function SettingsProviderSection({
                           value={secretValues[provider.api_key_env] ?? ""}
                           placeholder={
                             savedEnvNames.has(provider.api_key_env)
-                              ? "本地已存在值；重新输入才会覆盖"
-                              : "粘贴真实 API Key"
+                              ? "已配置，重新输入将覆盖"
+                              : "输入 API Key"
                           }
                           onChange={(event) =>
                             onSecretValueChange(provider.api_key_env, event.target.value)
@@ -283,13 +282,13 @@ export default function SettingsProviderSection({
           {providerSelectOptions.length === 0 ? (
             <div className="wb-empty-state">
               <strong>先添加 Provider</strong>
-              <span>模型别名需要绑定到现有 Provider；可以先添加 OpenRouter 或 OpenAI。</span>
+              <span>别名需绑定到已有 Provider。</span>
             </div>
           ) : null}
           {aliasDrafts.length === 0 ? (
             <div className="wb-empty-state">
               <strong>还没有模型别名</strong>
-              <span>建议至少保留 `main`，需要低成本路由时再添加 `cheap`。</span>
+              <span>至少需要一个 main 别名。</span>
             </div>
           ) : null}
           {aliasDrafts.map((item, index) => (
