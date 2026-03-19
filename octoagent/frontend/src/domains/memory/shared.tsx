@@ -148,7 +148,10 @@ function isTechnicalSummary(summary: string): boolean {
   return (
     (normalized.includes("tool_name:") && normalized.includes("output_summary:")) ||
     normalized.includes("response_artifact_ref:") ||
-    normalized.includes("task_id:")
+    normalized.includes("task_id:") ||
+    normalized.startsWith("add:worker_tool:") ||
+    normalized.startsWith("update:worker_tool:") ||
+    normalized.includes("worker tool evidence writeback")
   );
 }
 
