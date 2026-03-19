@@ -13,15 +13,6 @@ def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-class WorkerType(StrEnum):
-    """内建 worker 类型。"""
-
-    GENERAL = "general"
-    OPS = "ops"
-    RESEARCH = "research"
-    DEV = "dev"
-
-
 class RuntimeKind(StrEnum):
     """委派目标 runtime 分类。"""
 
@@ -49,7 +40,6 @@ class BundledToolDefinition(BaseModel):
     tool_group: str = Field(default="")
     tool_profile: str = Field(default="standard")
     tags: list[str] = Field(default_factory=list)
-    worker_types: list[WorkerType] = Field(default_factory=list)
     manifest_ref: str = Field(default="")
     availability: BuiltinToolAvailabilityStatus = BuiltinToolAvailabilityStatus.AVAILABLE
     availability_reason: str = Field(default="")
@@ -67,7 +57,6 @@ class BundledSkillDefinition(BaseModel):
     description: str = Field(default="")
     model_alias: str = Field(default="main")
     permission_mode: str = Field(default="restrict")
-    worker_types: list[WorkerType] = Field(default_factory=list)
     tools_allowed: list[str] = Field(default_factory=list)
     pipeline_templates: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -79,14 +68,13 @@ class WorkerBootstrapFile(BaseModel):
     file_id: str = Field(min_length=1)
     path_hint: str = Field(default="")
     content: str = Field(default="")
-    applies_to_worker_types: list[WorkerType] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkerCapabilityProfile(BaseModel):
     """Worker 能力档案。"""
 
-    worker_type: WorkerType
+    worker_type: str = "general"
     capabilities: list[str] = Field(default_factory=list)
     default_model_alias: str = Field(default="main")
     default_tool_profile: str = Field(default="standard")
@@ -116,7 +104,7 @@ class ToolIndexQuery(BaseModel):
     query: str = Field(min_length=1)
     limit: int = Field(default=5, ge=1, le=50)
     tool_groups: list[str] = Field(default_factory=list)
-    worker_type: WorkerType | None = None
+    worker_type: str | None = None
     tool_profile: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
     project_id: str = Field(default="")

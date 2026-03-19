@@ -83,6 +83,9 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
                 model=normalized_model,
                 thinking_level=alias_val.thinking_level,
             )
+        # 自定义 base_url（如硅基流动 https://api.siliconflow.cn/v1）
+        if provider_entry.base_url:
+            litellm_params["api_base"] = provider_entry.base_url
         # OAuth Provider：注入 api_base 和 headers（如 openai-codex → chatgpt.com/backend-api）
         if provider_entry.auth_type == "oauth":
             from ..auth.oauth_flows import extract_account_id_from_jwt

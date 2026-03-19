@@ -58,8 +58,6 @@ class ButlerDecisionMode(StrEnum):
     DIRECT_ANSWER = "direct_answer"
     ASK_ONCE = "ask_once"
     DELEGATE_RESEARCH = "delegate_research"
-    DELEGATE_DEV = "delegate_dev"
-    DELEGATE_OPS = "delegate_ops"
     BEST_EFFORT_ANSWER = "best_effort_answer"
     DELEGATE_GRAPH = "delegate_graph"  # Feature 065: 委派到 Graph Pipeline
 

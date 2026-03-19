@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from octoagent.core.models import ToolIndexQuery, WorkerType
+from octoagent.core.models import ToolIndexQuery
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile, ToolTier
 from octoagent.tooling.tool_index import ToolIndex
 
@@ -53,7 +53,7 @@ async def test_tool_index_selects_tools_with_worker_filter() -> None:
         ToolIndexQuery(
             query="请诊断 runtime health",
             limit=3,
-            worker_type=WorkerType.OPS,
+            worker_type="ops",
             tool_groups=["runtime"],
             tags=["diagnostics"],
         ),
@@ -84,7 +84,7 @@ async def test_tool_index_empty_hits_falls_back_to_static_toolset() -> None:
         ToolIndexQuery(
             query="完全不相关的查询",
             limit=2,
-            worker_type=WorkerType.OPS,
+            worker_type="ops",
             tool_groups=["runtime"],
         ),
         static_fallback=["project.inspect", "runtime.inspect"],
@@ -115,7 +115,7 @@ async def test_tool_index_standard_profile_can_match_minimal_tools() -> None:
         ToolIndexQuery(
             query="请先做 runtime 诊断",
             limit=3,
-            worker_type=WorkerType.OPS,
+            worker_type="ops",
             tool_groups=["runtime"],
             tool_profile=ToolProfile.STANDARD.value,
         ),

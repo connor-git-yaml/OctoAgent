@@ -14,7 +14,6 @@ from octoagent.core.models import (
     EffectiveToolUniverse,
     ToolAvailabilityExplanation,
     ToolIndexQuery,
-    WorkerType,
 )
 from octoagent.gateway.services.butler_behavior import (
     behavior_pack_cache_size,
@@ -426,7 +425,7 @@ def test_default_butler_behavior_templates_emphasize_direct_tools_and_sticky_wor
 def test_render_runtime_hint_block_exposes_tool_universe_hints() -> None:
     selection = DynamicToolSelection(
         selection_id="selection-1",
-        query=ToolIndexQuery(query="今天天气怎么样", worker_type=WorkerType.GENERAL),
+        query=ToolIndexQuery(query="今天天气怎么样", worker_type="general"),
         selected_tools=["runtime.now", "web.search"],
         resolution_mode="profile_first_core",
         effective_tool_universe=EffectiveToolUniverse(

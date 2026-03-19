@@ -68,7 +68,7 @@ class SqliteWorkStore:
                 work.target_kind.value,
                 work.owner_id,
                 work.requested_capability,
-                work.selected_worker_type.value,
+                work.selected_worker_type,
                 work.route_reason,
                 work.project_id,
                 work.workspace_id,

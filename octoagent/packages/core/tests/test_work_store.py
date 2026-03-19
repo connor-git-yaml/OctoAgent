@@ -13,7 +13,6 @@ from octoagent.core.models import (
     SkillPipelineRun,
     Task,
     Work,
-    WorkerType,
     WorkKind,
     WorkStatus,
 )
@@ -61,7 +60,7 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         requested_worker_profile_id="worker-profile-alpha",
         requested_worker_profile_version=2,
         effective_worker_snapshot_id="worker-snapshot:worker-profile-alpha:2",
-        selected_worker_type=WorkerType.RESEARCH,
+        selected_worker_type="research",
         selected_tools=["web.search"],
         context_frame_id="context-frame-child",
     )

@@ -101,7 +101,7 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     )
 
     assert plan.dispatch_envelope is not None
-    assert plan.work.selected_worker_type.value == "dev"
+    assert plan.work.selected_worker_type == "dev"
     assert plan.work.target_kind.value == "graph_agent"
     assert plan.dispatch_envelope.worker_capability == "dev"
     assert plan.tool_selection.selected_tools
@@ -137,7 +137,7 @@ async def test_prepare_dispatch_routes_weather_queries_to_research_with_web_tool
     )
 
     assert plan.dispatch_envelope is not None
-    assert plan.work.selected_worker_type.value == "research"
+    assert plan.work.selected_worker_type == "research"
     assert plan.work.target_kind.value == "subagent"
     assert plan.dispatch_envelope.worker_capability == "research"
     assert "web.search" in plan.tool_selection.selected_tools
@@ -259,7 +259,7 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
 
     assert plan.work.agent_profile_id == profile.profile_id
     assert plan.work.requested_worker_profile_id == profile.profile_id
-    assert plan.work.selected_worker_type.value == "general"
+    assert plan.work.selected_worker_type == "general"
     assert plan.tool_selection.resolution_mode == "profile_first_core"
     assert plan.tool_selection.effective_tool_universe is not None
     assert plan.tool_selection.effective_tool_universe.profile_id == profile.profile_id
@@ -338,7 +338,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
 
     assert plan.work.agent_profile_id == agent_profile.profile_id
     assert plan.work.requested_worker_profile_id == agent_profile.profile_id
-    assert plan.work.selected_worker_type.value == "ops"
+    assert plan.work.selected_worker_type == "ops"
     assert plan.tool_selection.effective_tool_universe is not None
     assert (
         plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
@@ -686,7 +686,7 @@ async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path
 
     assert plan.dispatch_envelope is not None
     assert plan.work.parent_work_id == "work-parent-1"
-    assert plan.work.selected_worker_type.value == "research"
+    assert plan.work.selected_worker_type == "research"
     assert plan.work.target_kind.value == "subagent"
     assert plan.dispatch_envelope.metadata["parent_work_id"] == "work-parent-1"
     assert plan.dispatch_envelope.metadata["parent_task_id"] == "task-parent-1"

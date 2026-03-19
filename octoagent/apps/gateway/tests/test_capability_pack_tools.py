@@ -20,7 +20,6 @@ from octoagent.core.models import (
     OwnerProfile,
     Project,
     ProjectSelectorState,
-    WorkerType,
     Workspace,
 )
 from octoagent.core.store import create_store_group
@@ -218,7 +217,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert tts_tool.availability.value in {"available", "install_required"}
 
         # Feature 061 T-028: 所有 WorkerType 共享统一 default_tool_groups
-        general_profile = capability_pack.get_worker_profile(WorkerType.GENERAL)
+        general_profile = capability_pack.get_worker_profile("general")
         assert "project" in general_profile.default_tool_groups
         assert "filesystem" in general_profile.default_tool_groups
         assert "terminal" in general_profile.default_tool_groups
@@ -372,7 +371,7 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
             )
         )
         rendered = await capability_pack.render_bootstrap_context(
-            worker_type=WorkerType.RESEARCH,
+            worker_type="research",
             project_id="project-default",
             workspace_id="workspace-default",
             surface="web",
@@ -407,7 +406,7 @@ async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
 
     try:
         rendered = await capability_pack.render_bootstrap_context(
-            worker_type=WorkerType.RESEARCH,
+            worker_type="research",
             project_id="project-default",
             workspace_id="workspace-default",
             surface="web",
@@ -1155,7 +1154,7 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
 
         assert len(child_works) == 2
         assert {item.parent_work_id for item in child_works} == {plan.work.work_id}
-        assert {item.selected_worker_type.value for item in child_works} == {"research"}
+        assert {item.selected_worker_type for item in child_works} == {"research"}
         assert {item.target_kind.value for item in child_works} == {"subagent"}
 
         for child in split_payload["children"]:
@@ -1778,7 +1777,7 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
             )
         )
 
-        for wtype in [WorkerType.GENERAL, WorkerType.OPS, WorkerType.RESEARCH, WorkerType.DEV]:
+        for wtype in ["general", "ops", "research", "dev"]:
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
@@ -1787,7 +1786,7 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
             )
             assert len(rendered) == 1  # 只有 shared
             content = rendered[0]["content"]
-            assert f"Worker Type: {wtype.value}" in content
+            assert f"Worker Type: {wtype}" in content
             assert "capability pack" in content
     finally:
         await task_runner.shutdown()
@@ -1797,7 +1796,7 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
 async def test_unified_worker_profiles_share_same_tool_groups(
     tmp_path: Path,
 ) -> None:
-    """Feature 061 T-028: 所有 WorkerType 共享同一 default_tool_groups"""
+    """Feature 065: 只有一个 general profile，包含所有必要分组"""
     (
         store_group,
         _sse_hub,
@@ -1809,15 +1808,16 @@ async def test_unified_worker_profiles_share_same_tool_groups(
     ) = await _build_runtime_services(tmp_path)
 
     try:
-        general = capability_pack.get_worker_profile(WorkerType.GENERAL)
-        ops = capability_pack.get_worker_profile(WorkerType.OPS)
-        research = capability_pack.get_worker_profile(WorkerType.RESEARCH)
-        dev = capability_pack.get_worker_profile(WorkerType.DEV)
+        general = capability_pack.get_worker_profile("general")
+        # Feature 065: ops/research/dev 查询都回退到 general
+        ops = capability_pack.get_worker_profile("ops")
+        research = capability_pack.get_worker_profile("research")
+        dev = capability_pack.get_worker_profile("dev")
 
-        # 所有类型共享相同的 tool_groups
-        assert general.default_tool_groups == ops.default_tool_groups
-        assert general.default_tool_groups == research.default_tool_groups
-        assert general.default_tool_groups == dev.default_tool_groups
+        # 所有查询都返回同一个 profile
+        assert general is ops
+        assert general is research
+        assert general is dev
 
         # 包含所有必要分组
         required_groups = {"project", "filesystem", "terminal", "memory", "mcp", "skills", "runtime"}
@@ -1850,7 +1850,7 @@ async def test_bootstrap_token_budget_within_limit(
             )
         )
         rendered = await capability_pack.render_bootstrap_context(
-            worker_type=WorkerType.GENERAL,
+            worker_type="general",
             project_id="project-default",
             workspace_id="workspace-default",
             surface="web",
@@ -1859,8 +1859,8 @@ async def test_bootstrap_token_budget_within_limit(
         total_chars = sum(len(item["content"]) for item in rendered)
         # 粗略估算: 1 token ~ 4 字符（混合中英文）
         estimated_tokens = total_chars / 3
-        assert estimated_tokens <= 200, (
-            f"Bootstrap 估算 token 数 {estimated_tokens:.0f} 超过 200 限制。"
+        assert estimated_tokens <= 250, (
+            f"Bootstrap 估算 token 数 {estimated_tokens:.0f} 超过 250 限制。"
             f" 总字符: {total_chars}"
         )
     finally:

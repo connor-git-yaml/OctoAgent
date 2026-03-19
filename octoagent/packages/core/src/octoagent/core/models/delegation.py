@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .capability import RuntimeKind, WorkerType
+from .capability import RuntimeKind
 
 
 def _utc_now() -> datetime:
@@ -64,7 +64,7 @@ class Work(BaseModel):
     target_kind: DelegationTargetKind = DelegationTargetKind.WORKER
     owner_id: str = Field(default="")
     requested_capability: str = Field(default="")
-    selected_worker_type: WorkerType = WorkerType.GENERAL
+    selected_worker_type: str = "general"
     route_reason: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
@@ -97,7 +97,7 @@ class DelegationEnvelope(BaseModel):
     requested_capability: str = Field(default="")
     payload: dict[str, Any] = Field(default_factory=dict)
     route_reason: str = Field(default="")
-    selected_worker_type: WorkerType = WorkerType.GENERAL
+    selected_worker_type: str = "general"
     bootstrap_context: list[dict[str, Any]] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     project_id: str = Field(default="")
@@ -116,6 +116,6 @@ class DelegationResult(BaseModel):
     retryable: bool = False
     runtime_id: str = Field(default="")
     target_kind: DelegationTargetKind
-    worker_type: WorkerType = WorkerType.GENERAL
+    worker_type: str = "general"
     route_reason: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)

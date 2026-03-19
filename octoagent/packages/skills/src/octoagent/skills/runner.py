@@ -34,6 +34,7 @@ from .models import (
     SkillRunStatus,
     ToolCallSpec,
     ToolFeedbackMessage,
+    ToolTargetTracker,
     UsageLimits,
     UsageTracker,
     resolve_effective_tool_allowlist,
@@ -99,6 +100,9 @@ class SkillRunner:
         feedback: list[ToolFeedbackMessage] = []
         last_signature: str | None = None
         repeat_count = 0
+        target_tracker = ToolTargetTracker(
+            target_repeat_threshold=limits.repeat_signature_threshold,
+        )
 
         try:
             self._coerce_input(manifest, skill_input)
@@ -241,6 +245,28 @@ class SkillRunner:
                         steps=steps,
                         category=ErrorCategory.LOOP_DETECTED,
                         error=SkillLoopDetectedError("检测到重复 tool_calls 签名循环"),
+                    )
+                    await self._call_hook("skill_end", manifest, execution_context, result)
+                    self._try_clear_history(history_key)
+                    return result
+
+                # 语义级循环检测：同一工具反复操作同一目标
+                loop_reason = target_tracker.record(output.tool_calls)
+                if loop_reason:
+                    logger.warning(
+                        "semantic_loop_detected",
+                        reason=loop_reason,
+                        step=steps,
+                        target_summary=target_tracker.summary(),
+                    )
+                    result = await self._fail_result(
+                        manifest=manifest,
+                        execution_context=execution_context,
+                        start_time=start_time,
+                        attempts=attempts,
+                        steps=steps,
+                        category=ErrorCategory.LOOP_DETECTED,
+                        error=SkillLoopDetectedError(loop_reason),
                     )
                     await self._call_hook("skill_end", manifest, execution_context, result)
                     self._try_clear_history(history_key)

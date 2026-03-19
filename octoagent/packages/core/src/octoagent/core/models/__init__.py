@@ -104,7 +104,6 @@ from .capability import (
     ToolIndexQuery,
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
-    WorkerType,
 )
 from .checkpoint import (
     PIPELINE_NODES,
@@ -450,7 +449,6 @@ __all__ = [
     "RecoveryDrillRecord",
     "RecoverySummary",
     # Capability Pack / ToolIndex
-    "WorkerType",
     "RuntimeKind",
     "BundledToolDefinition",
     "BuiltinToolAvailabilityStatus",

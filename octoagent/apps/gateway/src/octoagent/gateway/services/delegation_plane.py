@@ -20,7 +20,6 @@ from octoagent.core.models import (
     RuntimeControlContext,
     ToolIndexQuery,
     Work,
-    WorkerType,
     WorkKind,
     WorkLifecyclePayload,
     WorkStatus,
@@ -133,7 +132,7 @@ class DelegationPlaneService:
         )
         initial_route_reason = (
             self._build_route_reason(
-                requested_worker_type or WorkerType.GENERAL,
+                requested_worker_type or "general",
                 request.worker_capability,
                 requested_target_kind,
                 explicit_worker_type=requested_worker_type is not None,
@@ -171,7 +170,7 @@ class DelegationPlaneService:
             target_kind=initial_target_kind,
             owner_id="orchestrator",
             requested_capability=request.worker_capability,
-            selected_worker_type=requested_worker_type or WorkerType.GENERAL,
+            selected_worker_type=requested_worker_type or "general",
             route_reason=initial_route_reason,
             project_id=project.project_id if project is not None else "",
             workspace_id=workspace.workspace_id if workspace is not None else "",
@@ -182,9 +181,7 @@ class DelegationPlaneService:
             context_frame_id=context_frame_id,
             metadata={
                 "requested_target_kind": requested_target_kind,
-                "requested_worker_type": (
-                    requested_worker_type.value if requested_worker_type is not None else ""
-                ),
+                "requested_worker_type": requested_worker_type or "",
                 "requested_worker_profile_id": requested_worker_profile_id,
                 "requested_worker_profile_version": requested_worker_profile_version,
                 "effective_worker_snapshot_id": effective_worker_snapshot_id,
@@ -262,12 +259,10 @@ class DelegationPlaneService:
                         )
                     )
                 ),
-                "selected_worker_type": WorkerType(
-                    str(
-                        pipeline_run.state_snapshot.get(
-                            "selected_worker_type",
-                            WorkerType.GENERAL.value,
-                        )
+                "selected_worker_type": str(
+                    pipeline_run.state_snapshot.get(
+                        "selected_worker_type",
+                        "general",
                     )
                 ),
                 "route_reason": str(pipeline_run.state_snapshot.get("route_reason", "")),
@@ -359,7 +354,7 @@ class DelegationPlaneService:
                 **dict(request.metadata),
                 "work_id": updated_work.work_id,
                 "pipeline_run_id": pipeline_run.run_id,
-                "selected_worker_type": updated_work.selected_worker_type.value,
+                "selected_worker_type": updated_work.selected_worker_type,
                 "selected_tools": list(selection.selected_tools),
                 "recommended_tools": list(
                     selection.recommended_tools or selection.selected_tools
@@ -598,12 +593,10 @@ class DelegationPlaneService:
             update={
                 "status": self._work_status_from_pipeline(run.status),
                 "route_reason": str(run.state_snapshot.get("route_reason", work.route_reason)),
-                "selected_worker_type": WorkerType(
-                    str(
-                        run.state_snapshot.get(
-                            "selected_worker_type",
-                            work.selected_worker_type.value,
-                        )
+                "selected_worker_type": str(
+                    run.state_snapshot.get(
+                        "selected_worker_type",
+                        work.selected_worker_type,
                     )
                 ),
                 "target_kind": DelegationTargetKind(
@@ -695,7 +688,7 @@ class DelegationPlaneService:
             **dict(state.get("metadata", {})),
             "work_id": work.work_id,
             "pipeline_run_id": run.run_id,
-            "selected_worker_type": work.selected_worker_type.value,
+            "selected_worker_type": work.selected_worker_type,
             "selected_tools": list(work.selected_tools),
             "recommended_tools": list(
                 state.get("recommended_tools", work.selected_tools)
@@ -917,9 +910,9 @@ class DelegationPlaneService:
         return PipelineNodeOutcome(
             summary=route_reason,
             state_patch={
-                "selected_worker_type": worker_type.value,
-                "worker_capability": worker_type.value
-                if worker_type != WorkerType.GENERAL
+                "selected_worker_type": worker_type,
+                "worker_capability": worker_type
+                if worker_type != "general"
                 else "llm_generation",
                 "target_kind": target_kind.value,
                 "route_reason": route_reason,
@@ -927,7 +920,7 @@ class DelegationPlaneService:
         )
 
     async def _handle_bootstrap_prepare(self, *, run, node, state):
-        worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
+        worker_type = str(state.get("selected_worker_type", "general"))
         runtime_context = state.get("runtime_context", {})
         bootstrap = await self._capability_pack.render_bootstrap_context(
             worker_type=worker_type,
@@ -936,12 +929,12 @@ class DelegationPlaneService:
             surface=str(runtime_context.get("surface", state.get("surface", "chat"))),
         )
         return PipelineNodeOutcome(
-            summary=f"bootstrap prepared for {worker_type.value}",
+            summary=f"bootstrap prepared for {worker_type}",
             state_patch={"bootstrap_context": bootstrap},
         )
 
     async def _handle_tool_index_select(self, *, run, node, state):
-        worker_type = WorkerType(str(state.get("selected_worker_type", WorkerType.GENERAL.value)))
+        worker_type = str(state.get("selected_worker_type", "general"))
         metadata = state.get("metadata", {})
         requested_worker_profile_id = str(
             metadata.get("requested_worker_profile_id", "")
@@ -1000,55 +993,56 @@ class DelegationPlaneService:
             summary="delegation preflight completed",
         )
 
-    def _select_worker_type(self, requested_capability: str, user_text: str) -> WorkerType:
+    def _select_worker_type(self, requested_capability: str, user_text: str) -> str:
+        """根据文本分类 worker 类型标签（Feature 065: 仅用于标记，不影响工具集）。"""
         text = f"{requested_capability} {user_text}".lower()
         if any(token in text for token in ("ops", "runtime", "恢复", "诊断", "部署", "备份")):
-            return WorkerType.OPS
+            return "ops"
         if any(token in text for token in ("research", "调研", "分析", "总结", "资料")):
-            return WorkerType.RESEARCH
+            return "research"
         if any(token in text for token in ("dev", "代码", "修复", "实现", "测试", "patch")):
-            return WorkerType.DEV
+            return "dev"
         if CapabilityPackService._requires_standard_web_access(
             user_text,
-            WorkerType.RESEARCH,
+            "research",
         ):
-            return WorkerType.RESEARCH
-        return WorkerType.GENERAL
+            return "research"
+        return "general"
 
     def _select_target_kind(
         self,
         requested_target: str,
-        worker_type: WorkerType,
+        worker_type: str,
     ) -> DelegationTargetKind:
         if requested_target in {item.value for item in DelegationTargetKind}:
             return DelegationTargetKind(requested_target)
-        if worker_type == WorkerType.DEV:
+        if worker_type == "dev":
             return DelegationTargetKind.GRAPH_AGENT
-        if worker_type == WorkerType.OPS:
+        if worker_type == "ops":
             return DelegationTargetKind.ACP_RUNTIME
-        if worker_type == WorkerType.RESEARCH:
+        if worker_type == "research":
             return DelegationTargetKind.SUBAGENT
         return DelegationTargetKind.FALLBACK
 
     @staticmethod
-    def _coerce_worker_type(raw: str) -> WorkerType | None:
+    def _coerce_worker_type(raw: str) -> str | None:
         if not raw:
             return None
-        try:
-            return WorkerType(raw)
-        except ValueError:
-            return None
+        normalized = raw.strip().lower()
+        if normalized in {"general", "ops", "research", "dev"}:
+            return normalized
+        return None
 
     def _build_route_reason(
         self,
-        worker_type: WorkerType,
+        worker_type: str,
         requested_capability: str,
         requested_target: str,
         *,
         explicit_worker_type: bool = False,
         requested_worker_profile_id: str = "",
     ) -> str:
-        parts = [f"worker_type={worker_type.value}"]
+        parts = [f"worker_type={worker_type}"]
         if explicit_worker_type:
             parts.append("worker_type_source=explicit")
         if requested_worker_profile_id:
@@ -1057,7 +1051,7 @@ class DelegationPlaneService:
             parts.append(f"requested_capability={requested_capability}")
         if requested_target:
             parts.append(f"target={requested_target}")
-        if worker_type == WorkerType.GENERAL:
+        if worker_type == "general":
             parts.append("fallback=single_worker")
         return " | ".join(parts)
 
@@ -1262,7 +1256,7 @@ class DelegationPlaneService:
                 status=work.status.value,
                 target_kind=work.target_kind.value,
                 requested_capability=work.requested_capability,
-                selected_worker_type=work.selected_worker_type.value,
+                selected_worker_type=work.selected_worker_type,
                 route_reason=work.route_reason,
                 selected_tools=work.selected_tools,
                 pipeline_run_id=work.pipeline_run_id,

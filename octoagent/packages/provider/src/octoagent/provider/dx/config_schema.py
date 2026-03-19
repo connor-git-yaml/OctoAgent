@@ -111,6 +111,10 @@ class ProviderEntry(BaseModel):
         description="凭证所在环境变量名（如 'OPENROUTER_API_KEY'）。仅存变量名称，不存实际值。",
         pattern=_ENV_NAME_PATTERN,
     )
+    base_url: str = Field(
+        default="",
+        description="自定义 API Base URL（如 'https://api.siliconflow.cn/v1'）。留空使用 Provider 默认。",
+    )
     enabled: bool = Field(
         default=True,
         description="是否参与配置生成（False 时不生成 litellm-config 条目）",

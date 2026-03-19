@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from octoagent.core.models import OwnerProfile, WorkerType
+from octoagent.core.models import OwnerProfile
 from octoagent.core.models.agent_context import AgentRuntime, AgentRuntimeRole
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.capability_pack import CapabilityPackService
@@ -113,8 +113,8 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             )
         )
 
-        # 渲染各种 worker type 的 bootstrap
-        for wtype in WorkerType:
+        # Feature 065: WorkerType 枚举已删除，测试各字符串标签
+        for wtype in ["general", "ops", "research", "dev"]:
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
@@ -125,7 +125,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             # 只有 bootstrap:shared
             file_ids = [item["file_id"] for item in rendered]
             assert file_ids == ["bootstrap:shared"], (
-                f"WorkerType {wtype.value} 的 bootstrap 应只有 shared，"
+                f"worker_type {wtype} 的 bootstrap 应只有 shared，"
                 f"但得到 {file_ids}"
             )
 
@@ -133,7 +133,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             content = rendered[0]["content"]
             assert "Project: Default Project" in content
             assert "Workspace: primary" in content
-            assert f"Worker Type: {wtype.value}" in content
+            assert f"Worker Type: {wtype}" in content
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -237,19 +237,20 @@ async def test_no_worker_type_specific_templates_in_pack(tmp_path: Path) -> None
 
 
 async def test_all_worker_types_share_unified_tool_groups(tmp_path: Path) -> None:
-    """SC-007: 所有 WorkerType 共享相同的 default_tool_groups"""
+    """SC-007: Feature 065 -- 所有 worker type 查询都返回同一 profile"""
     store_group, capability_pack, task_runner = await _setup_services(tmp_path)
 
     try:
-        profiles = {wt: capability_pack.get_worker_profile(wt) for wt in WorkerType}
-
-        # 所有 profile 的 default_tool_groups 应完全相同
-        groups_sets = [set(p.default_tool_groups) for p in profiles.values()]
-        first = groups_sets[0]
-        for i, gs in enumerate(groups_sets[1:], 1):
-            assert gs == first, (
-                f"WorkerType {list(profiles.keys())[i].value} 的 tool_groups 不一致"
+        # Feature 065: 所有查询都回退到 general profile
+        general = capability_pack.get_worker_profile("general")
+        for wt in ["ops", "research", "dev"]:
+            assert capability_pack.get_worker_profile(wt) is general, (
+                f"worker_type {wt} 应返回同一 general profile"
             )
+
+        # 包含所有必要分组
+        required_groups = {"project", "filesystem", "terminal", "memory", "mcp", "skills", "runtime"}
+        assert required_groups.issubset(set(general.default_tool_groups))
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

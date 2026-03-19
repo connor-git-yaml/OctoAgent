@@ -56,7 +56,6 @@ from octoagent.core.models import (
     WorkerResult,
     WorkerReturnedPayload,
     WorkerSession,
-    WorkerType,
     WorkStatus,
 )
 from octoagent.core.models.message import NormalizedMessage
@@ -200,7 +199,7 @@ class ButlerFreshnessFollowup:
 class _RecentWorkerLaneCandidate:
     """Butler 最近可复用的 specialist worker lane。"""
 
-    worker_type: WorkerType
+    worker_type: str
     requested_worker_profile_id: str
     topic: str
     summary: str
@@ -895,7 +894,7 @@ class OrchestratorService:
             update={
                 "metadata": {
                     **metadata,
-                    "requested_worker_type": resolved_worker_type.value,
+                    "requested_worker_type": resolved_worker_type,
                     "requested_worker_profile_id": requested_profile_id,
                     "requested_worker_type_source": "requested_worker_profile_id",
                 }
@@ -943,7 +942,7 @@ class OrchestratorService:
         selected_tools = list(selection.selected_tools) if selection is not None else []
         route_reason = self._join_route_reason(
             request.route_reason,
-            f"single_loop_executor=butler_{worker_type.value}",
+            f"single_loop_executor=butler_{worker_type}",
         )
         if selection is not None:
             route_reason = self._join_route_reason(
@@ -958,8 +957,8 @@ class OrchestratorService:
         updated_metadata = {
             **metadata,
             "single_loop_executor": True,
-            "single_loop_executor_mode": f"butler_{worker_type.value}",
-            "selected_worker_type": worker_type.value,
+            "single_loop_executor_mode": f"butler_{worker_type}",
+            "selected_worker_type": worker_type,
             "selected_tools": selected_tools,
             "recommended_tools": recommended_tools,
             "selected_tools_json": json.dumps(recommended_tools, ensure_ascii=False),
@@ -1005,14 +1004,14 @@ class OrchestratorService:
         return requested_worker_type in {"", "general", "research", "dev", "ops"}
 
     @staticmethod
-    def _resolve_single_loop_worker_type(request: OrchestratorRequest) -> WorkerType:
+    def _resolve_single_loop_worker_type(request: OrchestratorRequest) -> str:
         requested_worker_type = OrchestratorService._canonical_requested_worker_type(
             request.metadata
         )
-        try:
-            return WorkerType(requested_worker_type or WorkerType.GENERAL.value)
-        except ValueError:
-            return WorkerType.GENERAL
+        wt = requested_worker_type or "general"
+        if wt in {"general", "ops", "research", "dev"}:
+            return wt
+        return "general"
 
     @staticmethod
     def _canonical_requested_worker_type(metadata: dict[str, Any]) -> str:
@@ -1024,7 +1023,7 @@ class OrchestratorService:
             if not profile_id.startswith("singleton:"):
                 continue
             lane = profile_id.split(":", 1)[1].strip()
-            if lane in {member.value for member in WorkerType}:
+            if lane in {"general", "ops", "research", "dev"}:
                 return lane
         return ""
 
@@ -1032,7 +1031,7 @@ class OrchestratorService:
         self,
         request: OrchestratorRequest,
         *,
-        worker_type: WorkerType,
+        worker_type: str = "general",
     ):
         if self._delegation_plane is None:
             return None
@@ -1051,7 +1050,7 @@ class OrchestratorService:
             str(request.metadata.get("requested_worker_profile_id", "")).strip()
             or str(request.metadata.get("agent_profile_id", "")).strip()
         )
-        if worker_type is WorkerType.GENERAL and not requested_profile_id:
+        if worker_type == "general" and not requested_profile_id:
             agent_profile, _ = await agent_context_service._resolve_agent_profile(
                 project=project,
                 requested_profile_id="",
@@ -1203,7 +1202,7 @@ class OrchestratorService:
 
         # Phase 2 (Feature 064): 解析工具集，注入 tool_selection 到 metadata
         # 使 LLMService.call() → _try_call_with_tools() → SkillRunner 多轮循环自动生效
-        worker_type = WorkerType.GENERAL
+        worker_type = "general"
         selection = await self._resolve_single_loop_tool_selection(
             request, worker_type=worker_type,
         )
@@ -1366,7 +1365,7 @@ class OrchestratorService:
             recent_location_hint=latest_location_hint,
             default_location_hint=default_location,
             recent_worker_lane_worker_type=(
-                recent_worker_lane.worker_type.value if recent_worker_lane is not None else ""
+                recent_worker_lane.worker_type if recent_worker_lane is not None else ""
             ),
             recent_worker_lane_profile_id=(
                 recent_worker_lane.requested_worker_profile_id
@@ -1401,7 +1400,7 @@ class OrchestratorService:
         for ref_task_id in recent_task_ids[-6:]:
             works = await self._stores.work_store.list_works(task_id=ref_task_id)
             for work in works:
-                if work.selected_worker_type is WorkerType.GENERAL:
+                if work.selected_worker_type == "general":
                     continue
                 requested_profile_id = str(work.requested_worker_profile_id or "").strip()
                 topic = (
@@ -1474,8 +1473,6 @@ class OrchestratorService:
     ) -> OrchestratorRequest | None:
         if decision is None or decision.mode not in {
             ButlerDecisionMode.DELEGATE_RESEARCH,
-            ButlerDecisionMode.DELEGATE_DEV,
-            ButlerDecisionMode.DELEGATE_OPS,
         }:
             return None
 
@@ -1486,24 +1483,24 @@ class OrchestratorService:
         target_kind = self._butler_target_kind_for_worker_type(worker_type)
         requested_tool_profile = (
             "standard"
-            if worker_type is WorkerType.RESEARCH or decision.tool_intent == "web.search"
+            if worker_type == "research" or decision.tool_intent == "web.search"
             else (str(request.tool_profile).strip() or "standard")
         )
         continuity_topic = str(decision.continuity_topic).strip()
-        if not continuity_topic and recent_lane is not None and recent_lane.worker_type is worker_type:
+        if not continuity_topic and recent_lane is not None and recent_lane.worker_type == worker_type:
             continuity_topic = recent_lane.topic
         if not continuity_topic:
-            continuity_topic = decision.category or decision.tool_intent or worker_type.value
+            continuity_topic = decision.category or decision.tool_intent or worker_type
         requested_worker_profile_id = str(decision.target_worker_profile_id).strip()
         if (
             not requested_worker_profile_id
             and decision.prefer_sticky_worker
             and recent_lane is not None
-            and recent_lane.worker_type is worker_type
+            and recent_lane.worker_type == worker_type
         ):
             requested_worker_profile_id = (
                 recent_lane.requested_worker_profile_id
-                or f"singleton:{worker_type.value}"
+                or f"singleton:{worker_type}"
             )
         delegate_objective = (
             str(decision.delegate_objective).strip()
@@ -1518,7 +1515,7 @@ class OrchestratorService:
         )
         delegation_metadata = {
             **dict(request.metadata),
-            "requested_worker_type": worker_type.value,
+            "requested_worker_type": worker_type,
             "requested_worker_profile_id": requested_worker_profile_id,
             "target_kind": target_kind,
             "butler_decision_mode": decision.mode.value,
@@ -1541,7 +1538,7 @@ class OrchestratorService:
             request.route_reason,
             f"butler_decision={decision.mode.value}",
             f"butler_category={decision.category or 'general'}",
-            f"butler_target={worker_type.value}",
+            f"butler_target={worker_type}",
         )
         if requested_worker_profile_id:
             route_reason = self._join_route_reason(
@@ -1555,7 +1552,7 @@ class OrchestratorService:
             )
         return request.model_copy(
             update={
-                "worker_capability": worker_type.value,
+                "worker_capability": worker_type,
                 "tool_profile": requested_tool_profile,
                 "user_text": delegate_objective,
                 "route_reason": route_reason,
@@ -1564,21 +1561,16 @@ class OrchestratorService:
         )
 
     @staticmethod
-    def _resolve_butler_target_worker_type(decision: ButlerDecision) -> WorkerType | None:
+    def _resolve_butler_target_worker_type(decision: ButlerDecision) -> str | None:
         raw = str(decision.target_worker_type).strip().lower()
         if not raw:
             if decision.mode is ButlerDecisionMode.DELEGATE_RESEARCH:
-                raw = WorkerType.RESEARCH.value
-            elif decision.mode is ButlerDecisionMode.DELEGATE_DEV:
-                raw = WorkerType.DEV.value
-            elif decision.mode is ButlerDecisionMode.DELEGATE_OPS:
-                raw = WorkerType.OPS.value
+                raw = "research"
         if not raw:
             return None
-        try:
-            return WorkerType(raw)
-        except ValueError:
-            return None
+        if raw in {"general", "ops", "research", "dev"}:
+            return raw
+        return None
 
     # ------------------------------------------------------------------
     # Feature 065: DELEGATE_GRAPH 路由分支
@@ -1718,7 +1710,7 @@ class OrchestratorService:
         *,
         request: OrchestratorRequest,
         decision: ButlerDecision,
-        worker_type: WorkerType,
+        worker_type: str,
         continuity_topic: str,
         requested_worker_profile_id: str,
         recent_lane: _RecentWorkerLaneCandidate | None,
@@ -1726,7 +1718,7 @@ class OrchestratorService:
         recent_conversation = await self._build_butler_recent_conversation_block(
             task_id=request.task_id
         )
-        worker_label = worker_type.value
+        worker_label = worker_type
         continuity_lines: list[str] = []
         if continuity_topic:
             continuity_lines.append(f"- continuity_topic: {continuity_topic}")
@@ -1734,7 +1726,7 @@ class OrchestratorService:
             continuity_lines.append(
                 f"- preferred_worker_profile_id: {requested_worker_profile_id}"
             )
-        if recent_lane is not None and recent_lane.worker_type is worker_type:
+        if recent_lane is not None and recent_lane.worker_type == worker_type:
             continuity_lines.append(
                 f"- recent_lane_summary: {recent_lane.summary or recent_lane.source_work_id}"
             )
@@ -1773,7 +1765,7 @@ class OrchestratorService:
             f"{recent_conversation}"
         )
 
-    def _butler_target_kind_for_worker_type(self, worker_type: WorkerType) -> str:
+    def _butler_target_kind_for_worker_type(self, worker_type: str) -> str:
         if self._delegation_plane is None:
             return DelegationTargetKind.WORKER.value
         return CapabilityPackService._target_kind_for_worker_type(worker_type)
@@ -2030,7 +2022,7 @@ class OrchestratorService:
             return False
         return CapabilityPackService._requires_standard_web_access(
             request.user_text,
-            worker_type=WorkerType.RESEARCH,
+            worker_type="research",
         )
 
     async def _resolve_butler_owned_freshness_request(
@@ -2078,7 +2070,7 @@ class OrchestratorService:
             return None
         if CapabilityPackService._requires_standard_web_access(
             request.user_text,
-            worker_type=WorkerType.RESEARCH,
+            worker_type="research",
         ):
             return None
         if not contains_explicit_location(request.user_text):

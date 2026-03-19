@@ -132,7 +132,7 @@ def _matched_filters(meta: ToolMeta, request: ToolIndexQuery) -> list[str] | Non
     if request.tool_groups:
         matched.append("tool_group")
     if request.worker_type is not None:
-        if meta.worker_types and request.worker_type.value not in meta.worker_types:
+        if meta.worker_types and request.worker_type not in meta.worker_types:
             return None
         matched.append("worker_type")
     if request.tool_profile:

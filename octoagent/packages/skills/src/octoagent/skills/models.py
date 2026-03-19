@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import time
 import warnings
-from dataclasses import dataclass
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -126,6 +128,117 @@ class UsageTracker:
             "cost_usd": self.cost_usd,
             "duration_seconds": round(time.monotonic() - self.start_time, 2),
         }
+
+
+# ---------------------------------------------------------------------------
+# 语义级循环检测器
+# ---------------------------------------------------------------------------
+
+# 从工具参数中提取操作目标（文件路径、关键词等）的正则
+_PATH_LIKE_RE = re.compile(
+    r"""(?:^|[\s"'=:])"""           # 前缀分隔符
+    r"""(/?(?:[\w.\-]+/)+[\w.\-]+)""",  # 路径片段
+    re.VERBOSE,
+)
+
+
+@dataclass
+class ToolTargetTracker:
+    """语义级循环检测：追踪每个工具对同一「目标」的重复操作次数。
+
+    解决 exact signature match 无法覆盖的场景：
+    Worker 用略微不同的参数反复调用 terminal.exec 读取同一文件。
+    例如 `rg -n 'keyword' file.yaml` 和 `sed -n '1,220p' file.yaml`
+    签名不同，但目标（file.yaml）相同。
+
+    策略：从 tool_calls 的参数中提取「目标关键词」（文件路径、URL、
+    搜索词等），按 (tool_name, target) 维度统计。单个目标在
+    ``target_repeat_threshold`` 步内被同一工具操作超过阈值即判定循环。
+    """
+
+    target_repeat_threshold: int = 5
+    # (tool_name, target_key) → 出现次数
+    _target_counts: dict[tuple[str, str], int] = field(
+        default_factory=lambda: defaultdict(int),
+    )
+    # 最近 N 步的 tool_name 序列，用于检测 A→B→A→B 交替循环
+    _recent_tools: list[str] = field(default_factory=list)
+    _alternation_window: int = 10
+
+    def record(self, tool_calls: list[Any]) -> str | None:
+        """记录本步 tool_calls，返回循环描述（None 表示正常）。"""
+        for call in tool_calls:
+            tool_name: str = getattr(call, "tool_name", "")
+            args: dict[str, Any] = getattr(call, "arguments", {})
+            targets = self._extract_targets(tool_name, args)
+            for t in targets:
+                key = (tool_name, t)
+                self._target_counts[key] += 1
+                if self._target_counts[key] >= self.target_repeat_threshold:
+                    return (
+                        f"工具 {tool_name} 对目标 '{t}' "
+                        f"重复操作 {self._target_counts[key]} 次"
+                    )
+            # 交替循环检测
+            self._recent_tools.append(tool_name)
+
+        alt = self._check_alternation()
+        if alt:
+            return alt
+        return None
+
+    def _extract_targets(self, tool_name: str, args: dict[str, Any]) -> list[str]:
+        """从工具参数中提取操作目标（去重）。"""
+        seen: set[str] = set()
+        targets: list[str] = []
+        args_str = " ".join(str(v) for v in args.values())
+
+        def _add(t: str) -> None:
+            if t not in seen:
+                seen.add(t)
+                targets.append(t)
+
+        # 1. 常见参数名直接提取（优先，精度高）
+        for key in ("path", "file", "filename", "url", "query", "command"):
+            val = args.get(key)
+            if isinstance(val, str) and val.strip():
+                _add(val.strip()[:120])
+
+        # 2. 文件路径正则（补充提取）
+        for m in _PATH_LIKE_RE.finditer(args_str):
+            _add(m.group(1))
+
+        # 3. 如果未提取到任何目标，用参数值的前 80 字符做粗粒度指纹
+        if not targets and args_str.strip():
+            _add(args_str.strip()[:80])
+
+        return targets
+
+    def _check_alternation(self) -> str | None:
+        """检测 A→B→A→B... 类型的交替循环。
+
+        窗口内仅出现 <=2 个不同工具且交替次数 >= 窗口的 80% 即判定。
+        """
+        window = self._recent_tools[-self._alternation_window:]
+        if len(window) < self._alternation_window:
+            return None
+        unique = set(window)
+        if len(unique) > 2:
+            return None
+        # 统计「方向变化」次数
+        changes = sum(
+            1 for a, b in zip(window, window[1:]) if a != b
+        )
+        # 交替循环的特征：方向变化次数 >= 窗口 - 1 的 70%
+        if changes >= (self._alternation_window - 1) * 0.7:
+            tool_list = ", ".join(sorted(unique))
+            return f"检测到工具交替循环: {tool_list}（最近 {self._alternation_window} 步）"
+        return None
+
+    def summary(self) -> dict[str, int]:
+        """返回当前统计（用于调试日志）。"""
+        top = Counter(self._target_counts).most_common(5)
+        return {f"{tn}:{tgt}": cnt for (tn, tgt), cnt in top}
 
 
 class ContextBudgetPolicy(BaseModel):

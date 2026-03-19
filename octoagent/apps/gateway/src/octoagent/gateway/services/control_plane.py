@@ -1164,7 +1164,7 @@ class ControlPlaneService:
             if work.requested_worker_profile_id:
                 works_by_profile_id[work.requested_worker_profile_id].append(work)
                 continue
-            legacy_works_by_type[work.selected_worker_type.value].append(work)
+            legacy_works_by_type[work.selected_worker_type].append(work)
 
         # 预备 behavior_system 构建所需的项目/工作区上下文
         _bs_project_name = selected_project.name if selected_project is not None else ""
@@ -1273,7 +1273,7 @@ class ControlPlaneService:
             )
 
         for profile in capability_pack.pack.worker_profiles:
-            worker_type = profile.worker_type.value
+            worker_type = profile.worker_type
             matched_works = sorted(
                 [
                     *works_by_profile_id.get(f"singleton:{worker_type}", []),
@@ -1467,7 +1467,7 @@ class ControlPlaneService:
                 (
                     item
                     for item in capability_pack.pack.worker_profiles
-                    if item.worker_type.value == worker_type
+                    if item.worker_type == worker_type
                 ),
                 None,
             )
@@ -2629,7 +2629,7 @@ class ControlPlaneService:
                 title=work.title,
                 status=work.status.value,
                 target_kind=work.target_kind.value,
-                selected_worker_type=work.selected_worker_type.value,
+                selected_worker_type=work.selected_worker_type,
                 route_reason=work.route_reason,
                 owner_id=work.owner_id,
                 selected_tools=work.selected_tools,
@@ -7442,7 +7442,7 @@ class ControlPlaneService:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
         raw = {
             "name": self._param_str(request.params, "name")
-            or f"{self._worker_profile_label(work.selected_worker_type.value)} 提炼草稿",
+            or f"{self._worker_profile_label(work.selected_worker_type)} 提炼草稿",
             "summary": self._param_str(request.params, "summary")
             or (work.title or "从运行中的 Work 提炼而来。"),
             "tool_profile": str(work.metadata.get("requested_tool_profile", "minimal")),
@@ -7450,7 +7450,7 @@ class ControlPlaneService:
             "runtime_kinds": [work.target_kind.value]
             if work.target_kind.value in {"worker", "subagent", "acp_runtime", "graph_agent"}
             else ["worker"],
-            "tags": [work.selected_worker_type.value, "runtime-extract"],
+            "tags": [work.selected_worker_type, "runtime-extract"],
             "metadata": {
                 "source_work_id": work.work_id,
                 "source_task_id": work.task_id,
@@ -9215,7 +9215,7 @@ class ControlPlaneService:
             (
                 item
                 for item in capability_pack.pack.worker_profiles
-                if item.worker_type.value == worker_type
+                if item.worker_type == worker_type
             ),
             None,
         )
@@ -9278,7 +9278,7 @@ class ControlPlaneService:
     ) -> dict[str, Any]:
         capability_pack = await self.get_capability_pack_document()
         builtin_defaults = {
-            item.worker_type.value: item for item in capability_pack.pack.worker_profiles
+            item.worker_type: item for item in capability_pack.pack.worker_profiles
         }
         available_tool_groups = sorted(
             {

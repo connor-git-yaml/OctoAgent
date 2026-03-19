@@ -687,7 +687,7 @@ class TestOrchestrator:
             parent_works = await store_group.work_store.list_works(task_id=task_id)
             assert len(parent_works) == 1
             parent_work = parent_works[0]
-            assert parent_work.selected_worker_type.value == "general"
+            assert parent_work.selected_worker_type == "general"
             assert parent_work.metadata["delegation_strategy"] == "butler_owned_freshness"
             assert parent_work.metadata["research_tool_profile"] == "standard"
 

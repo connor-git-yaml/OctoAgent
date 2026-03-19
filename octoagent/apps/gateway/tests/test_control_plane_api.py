@@ -45,7 +45,6 @@ from octoagent.core.models import (
     WorkerProfileOriginKind,
     WorkerProfileRevision,
     WorkerProfileStatus,
-    WorkerType,
     WorkKind,
     Workspace,
     WorkspaceKind,
@@ -859,7 +858,7 @@ class TestControlPlaneApi:
                 kind=WorkKind.DELEGATION,
                 status=WorkStatus.SUCCEEDED,
                 target_kind=DelegationTargetKind.WORKER,
-                selected_worker_type=WorkerType.GENERAL,
+                selected_worker_type="general",
                 route_reason="delegation_strategy=butler_owned_freshness",
                 owner_id="butler.main",
                 project_id=project.project_id,
@@ -1466,11 +1465,11 @@ class TestControlPlaneApi:
             ToolIndexQuery(
                 query="inspect runtime health and status",
                 limit=5,
-                worker_type=WorkerType.OPS,
+                worker_type="ops",
                 project_id=default_project.project_id,
                 workspace_id=workspace.workspace_id,
             ),
-            worker_type=WorkerType.OPS,
+            worker_type="ops",
         )
 
         assert selection.selected_tools
@@ -2377,7 +2376,7 @@ class TestControlPlaneApi:
 
         assert len(child_works) == 2
         assert {item.parent_work_id for item in child_works} == {plan.work.work_id}
-        assert {item.selected_worker_type.value for item in child_works} == {"research"}
+        assert {item.selected_worker_type for item in child_works} == {"research"}
         assert {item.target_kind.value for item in child_works} == {"subagent"}
 
         for _ in range(30):
@@ -2498,7 +2497,7 @@ class TestControlPlaneApi:
             await asyncio.sleep(0.05)
 
         assert len(child_works) >= 2
-        assert {item.selected_worker_type.value for item in child_works} >= {"research", "dev"}
+        assert {item.selected_worker_type for item in child_works} >= {"research", "dev"}
         assert {str(item.metadata.get("requested_tool_profile", "")) for item in child_works} == {
             "standard",
         }
@@ -4340,7 +4339,7 @@ class TestControlPlaneApi:
                 kind=WorkKind.DELEGATION,
                 status=WorkStatus.RUNNING,
                 target_kind=DelegationTargetKind.SUBAGENT,
-                selected_worker_type=WorkerType.RESEARCH,
+                selected_worker_type="research",
                 project_id=project.project_id,
                 workspace_id=workspace.workspace_id,
                 requested_worker_profile_id=profile.profile_id,
@@ -4453,7 +4452,7 @@ class TestControlPlaneApi:
                 kind=WorkKind.DELEGATION,
                 status=WorkStatus.RUNNING,
                 target_kind=DelegationTargetKind.WORKER,
-                selected_worker_type=WorkerType.OPS,
+                selected_worker_type="ops",
                 project_id=project.project_id,
                 workspace_id=primary_workspace.workspace_id,
                 requested_worker_profile_id=profile.profile_id,
@@ -4498,7 +4497,7 @@ class TestControlPlaneApi:
                 kind=WorkKind.DELEGATION,
                 status=WorkStatus.FAILED,
                 target_kind=DelegationTargetKind.ACP_RUNTIME,
-                selected_worker_type=WorkerType.OPS,
+                selected_worker_type="ops",
                 project_id=project.project_id,
                 workspace_id=secondary_workspace.workspace_id,
                 requested_worker_profile_id=profile.profile_id,

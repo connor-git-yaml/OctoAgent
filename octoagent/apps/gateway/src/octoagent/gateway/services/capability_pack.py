@@ -36,7 +36,6 @@ from octoagent.core.models import (
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
     WorkerProfileStatus,
-    WorkerType,
     WorkStatus,
 )
 from octoagent.memory import (
@@ -123,7 +122,7 @@ class _WorkerPlanProposal(BaseModel):
 class _ResolvedWorkerBinding:
     profile_id: str
     profile_revision: int
-    worker_type: WorkerType
+    worker_type: str
     tool_profile: str
     default_tool_groups: list[str]
     selected_tools: list[str]
@@ -423,11 +422,6 @@ class CapabilityPackService:
                 tool_group=meta.tool_group,
                 tool_profile=meta.tool_profile.value,
                 tags=list(meta.tags),
-                worker_types=[
-                    WorkerType(item)
-                    for item in meta.worker_types
-                    if item in {member.value for member in WorkerType}
-                ],
                 manifest_ref=meta.manifest_ref,
                 availability=self._resolve_tool_availability(meta.name),
                 availability_reason=self._resolve_tool_availability_reason(meta.name),
@@ -504,8 +498,8 @@ class CapabilityPackService:
             profile_id=profile_id,
         )
 
-    def get_worker_profile(self, worker_type: WorkerType) -> WorkerCapabilityProfile:
-        return self._profile_map.get(worker_type, self._profile_map[WorkerType.GENERAL])
+    def get_worker_profile(self, worker_type: str = "general") -> WorkerCapabilityProfile:
+        return self._profile_map.get(worker_type, self._profile_map["general"])
 
     @property
     def tool_index(self) -> ToolIndex:
@@ -562,7 +556,7 @@ class CapabilityPackService:
         self,
         *,
         requested_profile_id: str = "",
-        fallback_worker_type: WorkerType = WorkerType.GENERAL,
+        fallback_worker_type: str = "general",
     ) -> _ResolvedWorkerBinding:
         await self.startup()
         normalized_profile_id = requested_profile_id.strip()
@@ -578,14 +572,14 @@ class CapabilityPackService:
                     default_tool_groups=list(builtin_profile.default_tool_groups),
                     selected_tools=[],
                     source_kind="builtin_singleton",
-                    profile_name=self._worker_profile_label(builtin_worker_type.value),
+                    profile_name=self._worker_profile_label(builtin_worker_type),
                 )
             stored_profile = await self._stores.agent_context_store.get_worker_profile(
                 normalized_profile_id
             )
             if stored_profile is not None and stored_profile.status != WorkerProfileStatus.ARCHIVED:
-                worker_type = WorkerType.GENERAL
-                builtin_profile = self.get_worker_profile(WorkerType.GENERAL)
+                worker_type = "general"
+                builtin_profile = self.get_worker_profile("general")
                 return _ResolvedWorkerBinding(
                     profile_id=stored_profile.profile_id,
                     profile_revision=(
@@ -619,17 +613,17 @@ class CapabilityPackService:
                 )
         builtin_profile = self.get_worker_profile(fallback_worker_type)
         return _ResolvedWorkerBinding(
-            profile_id=f"singleton:{builtin_profile.worker_type.value}",
+            profile_id=f"singleton:{builtin_profile.worker_type}",
             profile_revision=1,
             worker_type=builtin_profile.worker_type,
             tool_profile=builtin_profile.default_tool_profile,
             default_tool_groups=list(builtin_profile.default_tool_groups),
             selected_tools=[],
             source_kind="builtin_fallback",
-            profile_name=self._worker_profile_label(builtin_profile.worker_type.value),
+            profile_name=self._worker_profile_label(builtin_profile.worker_type),
         )
 
-    async def resolve_worker_type_for_profile(self, profile_id: str) -> WorkerType | None:
+    async def resolve_worker_type_for_profile(self, profile_id: str) -> str | None:
         normalized = profile_id.strip()
         if not normalized:
             return None
@@ -639,13 +633,13 @@ class CapabilityPackService:
         stored_profile = await self._stores.agent_context_store.get_worker_profile(normalized)
         if stored_profile is None or stored_profile.status == WorkerProfileStatus.ARCHIVED:
             return None
-        return WorkerType.GENERAL
+        return "general"
 
     async def select_tools(
         self,
         request: ToolIndexQuery,
         *,
-        worker_type: WorkerType,
+        worker_type: str = "general",
     ) -> DynamicToolSelection:
         await self.startup()
         profile = self.get_worker_profile(worker_type)
@@ -675,7 +669,7 @@ class CapabilityPackService:
         self,
         request: ToolIndexQuery,
         *,
-        worker_type: WorkerType,
+        worker_type: str = "general",
         requested_profile_id: str = "",
     ) -> DynamicToolSelection:
         await self.startup()
@@ -865,7 +859,7 @@ class CapabilityPackService:
             effective_tool_universe=EffectiveToolUniverse(
                 profile_id=binding.profile_id,
                 profile_revision=binding.profile_revision,
-                worker_type=binding.worker_type.value,
+                worker_type=binding.worker_type,
                 tool_profile=context_profile.value,
                 resolution_mode="profile_first_core",
                 selected_tools=mounted_names,
@@ -880,7 +874,7 @@ class CapabilityPackService:
     async def render_bootstrap_context(
         self,
         *,
-        worker_type: WorkerType,
+        worker_type: str = "general",
         project_id: str = "",
         workspace_id: str = "",
         surface: str = "",
@@ -913,7 +907,7 @@ class CapabilityPackService:
             "{{surface}}": ambient_runtime["surface"],
             "{{ambient_source}}": ambient_runtime["source"],
             "{{ambient_degraded_reasons}}": ", ".join(ambient_reasons) or "none",
-            "{{worker_type}}": worker_type.value,
+            "{{worker_type}}": worker_type,
             "{{worker_capabilities}}": ", ".join(worker_profile.capabilities) or "none",
             "{{default_tool_profile}}": worker_profile.default_tool_profile,
             "{{default_tool_groups}}": ", ".join(worker_profile.default_tool_groups) or "none",
@@ -922,11 +916,6 @@ class CapabilityPackService:
         }
         rendered: list[dict[str, Any]] = []
         for file in self._bootstrap_templates.values():
-            if (
-                worker_type not in file.applies_to_worker_types
-                and WorkerType.GENERAL not in file.applies_to_worker_types
-            ):
-                continue
             content = file.content
             for source, target in replacements.items():
                 content = content.replace(source, target)
@@ -1862,7 +1851,7 @@ class CapabilityPackService:
                         "title": item.title,
                         "status": item.status.value,
                         "target_kind": item.target_kind.value,
-                        "selected_worker_type": item.selected_worker_type.value,
+                        "selected_worker_type": item.selected_worker_type,
                         "runtime_id": item.runtime_id,
                         "result_summary": str(item.metadata.get("result_summary", "")),
                         "execution_session": None
@@ -3466,6 +3455,209 @@ class CapabilityPackService:
                 result_payload["onboarding_completed"] = True
             return json.dumps(result_payload, ensure_ascii=False)
 
+        # ---- Feature 065: config 管理工具 ----
+        # 让 Worker 能直接读写 octoagent.yaml，不再依赖 terminal.exec 手动编辑
+
+        from octoagent.provider.dx.config_wizard import load_config as _load_config
+        from octoagent.provider.dx.config_wizard import save_config as _save_config
+
+        @tool_contract(
+            name="config.inspect",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.MINIMAL,
+            tool_group="config",
+            tags=["config", "provider", "model", "inspect"],
+            manifest_ref="builtin://config.inspect",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def config_inspect(section: str = "") -> str:
+            """读取 octoagent.yaml 配置。section 可选: providers, model_aliases, memory, channels, runtime, 留空返回全部。"""
+            config = _load_config(self._project_root)
+            if config is None:
+                return json.dumps(
+                    {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在或解析失败"},
+                    ensure_ascii=False,
+                )
+            data = config.model_dump(mode="json")
+            section = section.strip().lower()
+            if section and section in data:
+                return json.dumps({section: data[section]}, ensure_ascii=False, indent=2)
+            if section:
+                return json.dumps(
+                    {"error": "UNKNOWN_SECTION", "message": f"未知 section: {section}", "available": list(data.keys())},
+                    ensure_ascii=False,
+                )
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        @tool_contract(
+            name="config.add_provider",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="config",
+            tags=["config", "provider", "add"],
+            manifest_ref="builtin://config.add_provider",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def config_add_provider(
+            provider_id: str,
+            name: str,
+            auth_type: str = "api_key",
+            api_key_env: str = "",
+            base_url: str = "",
+            enabled: bool = True,
+        ) -> str:
+            """添加或更新一个 LLM Provider 到 octoagent.yaml。修改后需执行 config.sync 生效。"""
+            config = _load_config(self._project_root)
+            if config is None:
+                return json.dumps(
+                    {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
+                    ensure_ascii=False,
+                )
+            provider_id = provider_id.strip().lower()
+            if not provider_id:
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "provider_id 不能为空"},
+                    ensure_ascii=False,
+                )
+            if not api_key_env.strip():
+                api_key_env = f"{provider_id.upper().replace('-', '_')}_API_KEY"
+
+            from octoagent.provider.dx.config_schema import ProviderEntry
+            new_entry = ProviderEntry(
+                id=provider_id,
+                name=name.strip() or provider_id,
+                auth_type=auth_type,
+                api_key_env=api_key_env.strip(),
+                enabled=enabled,
+                **({"base_url": base_url.strip()} if base_url.strip() else {}),
+            )
+            # 更新或追加
+            found = False
+            for i, p in enumerate(config.providers):
+                if p.id == provider_id:
+                    config.providers[i] = new_entry
+                    found = True
+                    break
+            if not found:
+                config.providers.append(new_entry)
+
+            from datetime import date
+            config.updated_at = date.today().isoformat()
+            _save_config(config, self._project_root)
+            action = "updated" if found else "added"
+            return json.dumps(
+                {"success": True, "action": action, "provider_id": provider_id, "hint": "执行 config.sync 使 LiteLLM 配置生效"},
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
+            name="config.set_model_alias",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="config",
+            tags=["config", "model", "alias", "set"],
+            manifest_ref="builtin://config.set_model_alias",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def config_set_model_alias(
+            alias: str,
+            provider: str,
+            model: str,
+            description: str = "",
+            thinking_level: str = "",
+        ) -> str:
+            """设置模型别名（如 main, cheap）到具体 Provider + 模型。修改后需执行 config.sync 生效。"""
+            config = _load_config(self._project_root)
+            if config is None:
+                return json.dumps(
+                    {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
+                    ensure_ascii=False,
+                )
+            alias = alias.strip().lower()
+            if not alias or not provider.strip() or not model.strip():
+                return json.dumps(
+                    {"error": "MISSING_PARAM", "message": "alias, provider, model 都不能为空"},
+                    ensure_ascii=False,
+                )
+            # 校验 provider 存在
+            provider_ids = {p.id for p in config.providers}
+            if provider.strip() not in provider_ids:
+                return json.dumps(
+                    {"error": "UNKNOWN_PROVIDER", "message": f"Provider '{provider}' 不存在", "available": sorted(provider_ids)},
+                    ensure_ascii=False,
+                )
+            from octoagent.provider.dx.config_schema import ModelAlias as _ModelAlias
+            kwargs: dict[str, Any] = {
+                "provider": provider.strip(),
+                "model": model.strip(),
+            }
+            if description.strip():
+                kwargs["description"] = description.strip()
+            if thinking_level.strip():
+                kwargs["thinking_level"] = thinking_level.strip()
+            config.model_aliases[alias] = _ModelAlias(**kwargs)
+
+            from datetime import date
+            config.updated_at = date.today().isoformat()
+            _save_config(config, self._project_root)
+            return json.dumps(
+                {"success": True, "alias": alias, "provider": provider.strip(), "model": model.strip(), "hint": "执行 config.sync 使 LiteLLM 配置生效"},
+                ensure_ascii=False,
+            )
+
+        @tool_contract(
+            name="config.sync",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="config",
+            tags=["config", "sync", "litellm"],
+            manifest_ref="builtin://config.sync",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def config_sync() -> str:
+            """同步 octoagent.yaml 变更到 LiteLLM Proxy 配置并热重载。等同于 `octo config sync`。"""
+            try:
+                config = _load_config(self._project_root)
+                if config is None:
+                    return json.dumps(
+                        {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
+                        ensure_ascii=False,
+                    )
+                from octoagent.provider.dx.litellm_generator import generate_litellm_config as _gen_litellm
+                out_path = _gen_litellm(config, self._project_root)
+                enabled_providers = [p.id for p in config.providers if p.enabled]
+                enabled_aliases = [
+                    k for k, v in config.model_aliases.items()
+                    if any(p.id == v.provider and p.enabled for p in config.providers)
+                ]
+                return json.dumps(
+                    {
+                        "success": True,
+                        "message": "LiteLLM 配置已同步",
+                        "output_path": str(out_path),
+                        "enabled_providers": enabled_providers,
+                        "enabled_aliases": enabled_aliases,
+                    },
+                    ensure_ascii=False,
+                )
+            except Exception as exc:
+                return json.dumps(
+                    {"error": "SYNC_FAILED", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+
         # Feature 057: skills tool -- LLM 主动发现和加载 SKILL.md
         from octoagent.skills.tools import SkillsTool as _SkillsTool
 
@@ -3586,6 +3778,10 @@ class CapabilityPackService:
             memory_recall,
             behavior_read_file,
             behavior_write_file,
+            config_inspect,
+            config_add_provider,
+            config_set_model_alias,
+            config_sync,
             skills,
         ):
             await self._tool_broker.try_register(
@@ -3604,11 +3800,10 @@ class CapabilityPackService:
             tool_search_handler,
         )
 
-    def _build_worker_profiles(self) -> dict[WorkerType, WorkerCapabilityProfile]:
-        # Feature 061 T-028: 统一工具分组 — WorkerType 不再作为工具过滤维度
-        # 所有 Worker 类型共享同一套 default_tool_groups（全量工具分组），
-        # 工具可见性由 Deferred Tools 分层 + PermissionPreset 控制。
-        # WorkerType 保留为分类标签（UI 显示、统计），不影响工具集。
+    def _build_worker_profiles(self) -> dict[str, WorkerCapabilityProfile]:
+        # Feature 065: WorkerType 枚举已删除，所有 Agent 共享同一工具集。
+        # 差异化通过 PermissionPreset + Behavior Files 表达。
+        # 保留 "general" profile 作为唯一内建 profile，兼容历史数据。
         _UNIFIED_TOOL_GROUPS = [
             "project",
             "artifact",
@@ -3626,60 +3821,32 @@ class CapabilityPackService:
             "runtime",
             "automation",
             "media",
+            "config",
+            "behavior",
         ]
         return {
-            WorkerType.GENERAL: WorkerCapabilityProfile(
-                worker_type=WorkerType.GENERAL,
-                capabilities=["llm_generation", "general"],
+            "general": WorkerCapabilityProfile(
+                worker_type="general",
+                capabilities=["llm_generation", "general", "ops", "research", "dev"],
                 default_model_alias="main",
                 default_tool_profile="standard",
                 default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
                 bootstrap_file_ids=["bootstrap:shared"],
-                runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
-            ),
-            WorkerType.OPS: WorkerCapabilityProfile(
-                worker_type=WorkerType.OPS,
-                capabilities=["ops", "runtime", "automation", "recovery"],
-                default_model_alias="main",
-                default_tool_profile="standard",
-                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
-                bootstrap_file_ids=["bootstrap:shared"],
-                runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME],
-            ),
-            WorkerType.RESEARCH: WorkerCapabilityProfile(
-                worker_type=WorkerType.RESEARCH,
-                capabilities=["research", "analysis", "summarize"],
-                default_model_alias="main",
-                default_tool_profile="standard",
-                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
-                bootstrap_file_ids=["bootstrap:shared"],
-                runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.SUBAGENT],
-            ),
-            WorkerType.DEV: WorkerCapabilityProfile(
-                worker_type=WorkerType.DEV,
-                capabilities=["dev", "code", "patch", "test"],
-                default_model_alias="main",
-                default_tool_profile="standard",
-                default_tool_groups=list(_UNIFIED_TOOL_GROUPS),
-                bootstrap_file_ids=["bootstrap:shared"],
-                runtime_kinds=[RuntimeKind.WORKER, RuntimeKind.GRAPH_AGENT],
+                runtime_kinds=[
+                    RuntimeKind.WORKER,
+                    RuntimeKind.SUBAGENT,
+                    RuntimeKind.ACP_RUNTIME,
+                    RuntimeKind.GRAPH_AGENT,
+                ],
             ),
         }
 
     def _build_bootstrap_templates(self) -> dict[str, WorkerBootstrapFile]:
-        # Feature 061 T-028: 移除 4 个 WorkerType 专属模板
-        # 仅保留 bootstrap:shared 共享元信息（~50 tokens）。
-        # 角色化行为引导由 AgentRuntime.role_card 承担（T-029）。
+        # Feature 065: WorkerType 枚举已删除，bootstrap 模板对所有 Agent 共享。
         return {
             "bootstrap:shared": WorkerBootstrapFile(
                 file_id="bootstrap:shared",
                 path_hint="bootstrap/shared.md",
-                applies_to_worker_types=[
-                    WorkerType.GENERAL,
-                    WorkerType.OPS,
-                    WorkerType.RESEARCH,
-                    WorkerType.DEV,
-                ],
                 content=(
                     "你当前运行在 OctoAgent 内建 capability pack。\n"
                     "Project: {{project_name}} ({{project_slug}} / {{project_id}})\n"
@@ -3711,14 +3878,15 @@ class CapabilityPackService:
         return labels.get(worker_type, worker_type)
 
     @staticmethod
-    def _builtin_worker_type_from_profile_id(profile_id: str) -> WorkerType | None:
+    def _builtin_worker_type_from_profile_id(profile_id: str) -> str | None:
         normalized = profile_id.strip().lower()
         if not normalized.startswith("singleton:"):
             return None
-        try:
-            return WorkerType(normalized.split(":", 1)[1])
-        except ValueError:
-            return None
+        suffix = normalized.split(":", 1)[1]
+        # Feature 065: 所有 singleton: profile 都映射到 "general"
+        if suffix in {"general", "ops", "research", "dev"}:
+            return "general"
+        return None
 
     @staticmethod
     def _coerce_tool_profile(value: str) -> ToolProfile:
@@ -3791,39 +3959,40 @@ class CapabilityPackService:
         return [normalized]
 
     @staticmethod
-    def _classify_worker_type(objective: str) -> WorkerType:
+    def _classify_worker_type(objective: str) -> str:
+        """根据目标文本分类 worker 类型标签（仅用于 UI 标记，不影响工具集）。"""
         lowered = objective.lower()
         if any(token in lowered for token in ("代码", "修复", "实现", "测试", "patch", "dev")):
-            return WorkerType.DEV
+            return "dev"
         if any(
             token in lowered
             for token in ("部署", "运行", "恢复", "诊断", "日志", "监控", "重启", "ops")
         ):
-            return WorkerType.OPS
+            return "ops"
         if any(
             token in lowered
             for token in ("调研", "分析", "资料", "阅读", "总结", "research", "investigate")
         ):
-            return WorkerType.RESEARCH
-        return WorkerType.RESEARCH
+            return "research"
+        return "research"
 
     @staticmethod
-    def _coerce_worker_type_name(worker_type: str) -> WorkerType:
-        try:
-            return WorkerType(worker_type.strip().lower())
-        except Exception:
-            return WorkerType.RESEARCH
+    def _coerce_worker_type_name(worker_type: str) -> str:
+        normalized = worker_type.strip().lower()
+        if normalized in {"general", "ops", "research", "dev"}:
+            return normalized
+        return "general"
 
     @staticmethod
-    def _target_kind_for_worker_type(worker_type: WorkerType) -> str:
-        if worker_type == WorkerType.DEV:
+    def _target_kind_for_worker_type(worker_type: str) -> str:
+        if worker_type == "dev":
             return RuntimeKind.GRAPH_AGENT.value
-        if worker_type == WorkerType.OPS:
+        if worker_type == "ops":
             return RuntimeKind.ACP_RUNTIME.value
         return RuntimeKind.SUBAGENT.value
 
     @staticmethod
-    def _requires_standard_web_access(objective: str, worker_type: WorkerType) -> bool:
+    def _requires_standard_web_access(objective: str, worker_type: str = "general") -> bool:
         lowered = objective.lower()
         common_tokens = (
             "天气",
@@ -3848,12 +4017,12 @@ class CapabilityPackService:
         )
         ops_tokens = ("状态页", "status page", "console", "health", "incident", "控制台", "健康")
         if any(token in lowered for token in common_tokens):
-            return worker_type in {WorkerType.RESEARCH, WorkerType.OPS}
-        return worker_type == WorkerType.OPS and any(token in lowered for token in ops_tokens)
+            return worker_type in {"research", "ops", "general"}
+        return worker_type == "ops" and any(token in lowered for token in ops_tokens)
 
     @staticmethod
-    def _requires_weather_toolset(objective: str, worker_type: WorkerType) -> bool:
-        if worker_type != WorkerType.RESEARCH:
+    def _requires_weather_toolset(objective: str, worker_type: str = "general") -> bool:
+        if worker_type not in {"research", "general"}:
             return False
         lowered = objective.lower()
         weather_tokens = (
@@ -3871,7 +4040,7 @@ class CapabilityPackService:
     @classmethod
     def _effective_tool_profile_for_objective(
         cls,
-        worker_type: WorkerType,
+        worker_type: str,
         *,
         objective: str,
     ) -> str:
@@ -3889,23 +4058,23 @@ class CapabilityPackService:
             worker_type,
             objective=objective,
         )
-        reason = f"该子任务更适合由 {worker_type.value} worker 处理。"
-        if worker_type == WorkerType.RESEARCH and tool_profile == ToolProfile.STANDARD.value:
+        reason = f"该子任务更适合由 {worker_type} worker 处理。"
+        if worker_type == "research" and tool_profile == ToolProfile.STANDARD.value:
             reason = (
                 "该子任务涉及最新公开信息或网页资料，"
                 "适合由 research worker 使用受治理 web/browser 工具处理。"
             )
-        elif worker_type == WorkerType.OPS and tool_profile == ToolProfile.STANDARD.value:
+        elif worker_type == "ops" and tool_profile == ToolProfile.STANDARD.value:
             reason = (
                 "该子任务涉及外部状态或网页检查，"
                 "适合由 ops worker 使用受治理 runtime/web 工具处理。"
             )
         return _WorkerPlanAssignment(
             objective=objective,
-            worker_type=worker_type.value,
+            worker_type=worker_type,
             target_kind=self._target_kind_for_worker_type(worker_type),
             tool_profile=tool_profile,
-            title=f"{worker_type.value}-worker-{index}",
+            title=f"{worker_type}-worker-{index}",
             reason=reason,
         )
 
@@ -3960,7 +4129,7 @@ class CapabilityPackService:
             "worker_plan_id": plan_id,
         }
 
-    async def _resolve_fallback_toolset(self, worker_type: WorkerType) -> list[str]:
+    async def _resolve_fallback_toolset(self, worker_type: str = "general") -> list[str]:
         metas = await self._tool_broker.discover()
         profile = self.get_worker_profile(worker_type)
         result: list[str] = []
@@ -3975,7 +4144,7 @@ class CapabilityPackService:
     def _resolve_fallback_toolset_from_pack(
         self,
         pack: BundledCapabilityPack,
-        worker_type: WorkerType,
+        worker_type: str = "general",
     ) -> list[str]:
         profile = self.get_worker_profile(worker_type)
         result = [

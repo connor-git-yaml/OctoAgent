@@ -25,6 +25,7 @@ from .models import (  # noqa: F401 -- SkillRunner 数据模型
     SkillRunStatus,
     ToolCallSpec,
     ToolFeedbackMessage,
+    ToolTargetTracker,
     extract_mounted_tool_names,
     resolve_effective_tool_allowlist,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "SkillRunStatus",
     "ErrorCategory",
     "SkillRunResult",
+    "ToolTargetTracker",
     "extract_mounted_tool_names",
     "resolve_effective_tool_allowlist",
     "StructuredModelClientProtocol",
