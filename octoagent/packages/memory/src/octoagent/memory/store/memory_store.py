@@ -433,6 +433,25 @@ class SqliteMemoryStore:
             for row in rows
         ]
 
+    async def count_sor_by_status(self, scope_id: str, status: str = "current") -> int:
+        """统计指定 scope 和 status 的 SoR 记录数（不受 limit 截断）。"""
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM memory_sor WHERE scope_id = ? AND status = ?",
+            (scope_id, status),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def count_sor_readable(self, scope_id: str) -> int:
+        """统计用户可读的 current SoR 数量（排除 worker_tool: 前缀的系统记录）。"""
+        cursor = await self._conn.execute(
+            "SELECT COUNT(*) FROM memory_sor WHERE scope_id = ? AND status = 'current' "
+            "AND subject_key NOT LIKE 'worker_tool:%'",
+            (scope_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
     async def count_pending_sync_backlog(self) -> int:
         cursor = await self._conn.execute(
             "SELECT COUNT(*) FROM memory_sync_backlog WHERE status = 'pending'"

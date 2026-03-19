@@ -53,12 +53,14 @@ export default function MemoryPage() {
   }
   const defaultSummary = {
     sor_current_count: 0,
+    sor_readable_count: 0,
     sor_history_count: 0,
     fragment_count: 0,
     pending_consolidation_count: 0,
     pending_replay_count: 0,
     vault_ref_count: 0,
     proposal_count: 0,
+    next_consolidation_at: "",
     scope_count: 0,
   };
   const memoryResource = {

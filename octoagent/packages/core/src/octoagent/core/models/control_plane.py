@@ -849,9 +849,11 @@ class MemoryConsoleSummary(BaseModel):
     fragment_count: int = 0
     pending_consolidation_count: int = 0
     sor_current_count: int = 0
+    sor_readable_count: int = 0
     sor_history_count: int = 0
     vault_ref_count: int = 0
     proposal_count: int = 0
+    next_consolidation_at: str = ""
     pending_replay_count: int = 0
 
 

@@ -97,9 +97,11 @@ function buildMemorySnapshot(): any {
         },
         summary: {
           sor_current_count: 2,
+          sor_readable_count: 2,
           fragment_count: 1,
           pending_consolidation_count: 1,
           vault_ref_count: 0,
+          next_consolidation_at: "",
           pending_replay_count: 1,
           scope_count: 1,
         },
@@ -652,7 +654,7 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "2 条现行结论" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "2 条记忆事实" })).toBeInTheDocument();
   });
 
   it("sessions 缺少会话列表时不会因为 focused session 查找而崩溃", async () => {

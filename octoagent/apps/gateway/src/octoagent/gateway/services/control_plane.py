@@ -263,9 +263,17 @@ class ControlPlaneService:
 
         由 app startup 流程在 scheduler.startup() 之前调用。
         分离到独立方法避免在 bind_automation_scheduler 中产生副作用。
+
+        启动时如果发现有未整理的 fragment，立即触发一次 consolidate（不等 4h）。
+        如果上一次 consolidate 进程崩溃（通过检查 consolidated_at 标记的中间状态），
+        同样触发恢复。
         """
         self._ensure_system_consolidate_job()
         self._ensure_system_profile_generate_job()
+
+        # 启动时检查是否有积压的未整理 fragment，有则立即触发
+        import asyncio
+        asyncio.create_task(self._startup_consolidate_if_pending())
 
     def _ensure_system_consolidate_job(self) -> None:
         """确保 system:memory-consolidate 定时作业存在（Feature 065）。
@@ -299,6 +307,35 @@ class ControlPlaneService:
             log.warning(
                 "system_job_registration_failed",
                 job_id=job_id,
+                error=str(exc),
+            )
+
+    async def _startup_consolidate_if_pending(self) -> None:
+        """启动时检查未整理 fragment，有则立即触发 consolidate。
+
+        也用于崩溃恢复：如果上一次 consolidate 进程在 commit 前崩溃，
+        这些 fragment 的 consolidated_at 仍为空，重启后会被重新处理。
+        consolidated_at 标记在 commit 成功后才写入，保证了幂等性。
+        """
+        try:
+            # 延迟 5 秒等待其他服务就绪
+            import asyncio
+            await asyncio.sleep(5)
+
+            result = await self._memory_console_service.run_consolidate()
+            pending = result.get("consolidated_count", 0)
+            if pending > 0:
+                log.info(
+                    "startup_consolidate_completed",
+                    consolidated=pending,
+                    skipped=result.get("skipped_count", 0),
+                )
+            else:
+                log.debug("startup_consolidate_nothing_pending")
+        except Exception as exc:
+            log.warning(
+                "startup_consolidate_failed",
+                error_type=type(exc).__name__,
                 error=str(exc),
             )
 

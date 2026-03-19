@@ -368,6 +368,8 @@ class MemoryConsoleService:
                             retrieval_backend=backend_status.active_backend,
                         )
                     )
+                # 用独立 COUNT 查询获取准确的用户可读 SoR 数量（不受 limit 截断）
+                summary.sor_readable_count += await self._memory_store.count_sor_readable(scope)
             if include_vault_refs and layer in {"", "vault"}:
                 vault_records = await self._memory_store.search_vault(
                     scope,
@@ -412,6 +414,13 @@ class MemoryConsoleService:
         )
         summary.proposal_count = len(proposals)
         summary.pending_replay_count = backend_status.pending_replay_count
+        # 从 AutomationScheduler 获取下次 consolidate 执行时间
+        try:
+            consolidate_job = self._stores.automation_store.get_job("system:memory-consolidate")
+            if consolidate_job and consolidate_job.next_run_at:
+                summary.next_consolidation_at = consolidate_job.next_run_at.isoformat()
+        except Exception:
+            pass  # scheduler 不可用时静默
         records.sort(key=self._projection_sort_key, reverse=True)
         records = records[:limit]
         available_partitions = sorted({item.partition for item in records})

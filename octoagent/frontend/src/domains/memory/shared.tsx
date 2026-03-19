@@ -82,7 +82,6 @@ const PLACEHOLDER_SUMMARY_PATTERNS = [
 
 const INTERNAL_RECORD_SOURCES = new Set([
   "agent_context.worker_tool_writeback",
-  "before_compaction_flush",
   "context_compaction",
 ]);
 
@@ -223,6 +222,11 @@ function buildRecordTitle(record: MemoryRecordProjection): string {
     return `${formatPartitionLabel(record.partition)}受控记忆`;
   }
   if (record.layer === "fragment") {
+    // 从 content (投影为 summary) 中提取首行作为标题
+    const firstLine = record.summary.split("\n").find((l) => l.trim().length > 5);
+    if (firstLine) {
+      return truncateValue(normalizeWhitespace(firstLine), 50);
+    }
     return `${formatPartitionLabel(record.partition)}待整理片段`;
   }
   if (record.layer === "derived") {
@@ -236,6 +240,15 @@ function buildRecordTitle(record: MemoryRecordProjection): string {
 
 function buildRecordSummary(record: MemoryRecordProjection): string {
   const summary = normalizeWhitespace(record.summary);
+
+  // Fragment: 优先展示实际 content，即使匹配了占位符模式
+  if (record.layer === "fragment" && summary && summary.length > 10) {
+    // 过滤纯技术性摘要（工具证据），但保留对话摘要
+    if (!isTechnicalSummary(summary)) {
+      return truncateValue(summary, 160);
+    }
+  }
+
   if (summary && !isPlaceholderSummary(record, summary) && !isTechnicalSummary(summary)) {
     return summary;
   }
@@ -323,6 +336,7 @@ export function formatRecordStatus(record: MemoryRecordProjection): string {
     case "deleted":
       return "已删除";
     default:
+      if (record.layer === "fragment") return "待整理";
       return record.status || formatLayerLabel(record.layer);
   }
 }
@@ -502,10 +516,13 @@ export function buildMemoryNarrative(
   } else if (hasVisibleRecords) {
     heroTone = "success";
     stateLabel = memory.backend_state === "syncing" ? "更新中" : "运行中";
+    const readableCount = memory.summary.sor_readable_count ?? memory.summary.sor_current_count;
     heroTitle =
-      memory.summary.sor_current_count > 0
-        ? `${memory.summary.sor_current_count} 条现行结论`
-        : "Memory 正在整理上下文";
+      readableCount > 0
+        ? `${readableCount} 条记忆事实`
+        : memory.summary.pending_consolidation_count > 0
+          ? `${memory.summary.pending_consolidation_count} 条待整理`
+          : "Memory 正在整理上下文";
     heroSummary = "";
   } else {
     heroTone = "warning";

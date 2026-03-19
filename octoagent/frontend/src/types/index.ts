@@ -1381,9 +1381,11 @@ export interface MemoryConsoleSummary {
   fragment_count: number;
   pending_consolidation_count: number;
   sor_current_count: number;
+  sor_readable_count: number;
   sor_history_count: number;
   vault_ref_count: number;
   proposal_count: number;
+  next_consolidation_at: string;
   pending_replay_count: number;
 }
 

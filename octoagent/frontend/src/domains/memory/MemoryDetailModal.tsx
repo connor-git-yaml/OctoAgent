@@ -60,8 +60,10 @@ export default function MemoryDetailModal({
 
             <div className="wb-note-stack">
               <div className="wb-note">
-                <strong>摘要</strong>
-                <span>{selectedRecord.summary}</span>
+                <strong>内容</strong>
+                <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {rawRecord.summary || selectedRecord.summary}
+                </span>
               </div>
               <div className="wb-note">
                 <strong>状态</strong>
@@ -73,8 +75,10 @@ export default function MemoryDetailModal({
               <div className="wb-note">
                 <strong>时间</strong>
                 <span>
-                  创建于 {formatDateTime(rawRecord.created_at)}，更新于{" "}
-                  {formatDateTime(rawRecord.updated_at ?? rawRecord.created_at)}
+                  创建于 {formatDateTime(rawRecord.created_at)}
+                  {rawRecord.updated_at && rawRecord.updated_at !== rawRecord.created_at
+                    ? `，更新于 ${formatDateTime(rawRecord.updated_at)}`
+                    : ""}
                 </span>
               </div>
               {selectedRecord.derivedTypeLabel || selectedRecord.confidenceLabel ? (
@@ -88,41 +92,10 @@ export default function MemoryDetailModal({
                   </span>
                 </div>
               ) : null}
-              <div className="wb-note">
-                <strong>引用</strong>
-                <span>
-                  证据 {rawRecord.evidence_refs.length} · proposal {rawRecord.proposal_refs.length} ·
-                  derived {rawRecord.derived_refs.length}
-                </span>
-              </div>
-              <div className="wb-note">
-                <strong>访问级别</strong>
-                <span>
-                  {rawRecord.requires_vault_authorization
-                    ? "关联受控内容，读取原文需授权。"
-                    : "可直接阅读。"}
-                </span>
-              </div>
-              {rawRecord.evidence_refs.length > 0 ||
-              rawRecord.proposal_refs.length > 0 ||
-              rawRecord.derived_refs.length > 0 ? (
+              {rawRecord.requires_vault_authorization ? (
                 <div className="wb-note">
-                  <strong>关联标识</strong>
-                  <span>
-                    {[
-                      ...rawRecord.evidence_refs
-                        .map((item) =>
-                          typeof item.id === "string"
-                            ? item.id
-                            : typeof item.ref_id === "string"
-                              ? item.ref_id
-                              : ""
-                        )
-                        .filter(Boolean),
-                      ...rawRecord.proposal_refs,
-                      ...rawRecord.derived_refs,
-                    ].join(" · ") || "无"}
-                  </span>
+                  <strong>访问级别</strong>
+                  <span>关联受控内容，读取原文需授权。</span>
                 </div>
               ) : null}
               {metadataEntries.length > 0 ? (

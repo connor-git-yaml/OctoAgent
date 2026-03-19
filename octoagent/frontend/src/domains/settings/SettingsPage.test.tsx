@@ -191,8 +191,10 @@ function buildSettingsSnapshot(): any {
         warnings: [],
         summary: {
           sor_current_count: 1,
+          sor_readable_count: 1,
           fragment_count: 2,
           pending_consolidation_count: 2,
+          next_consolidation_at: "",
           pending_replay_count: 0,
           vault_ref_count: 0,
         },
