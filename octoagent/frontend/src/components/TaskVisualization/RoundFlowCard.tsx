@@ -94,8 +94,6 @@ interface Props {
 }
 
 const COLLAPSE_THRESHOLD = 30;
-/** 泳道高度常量（min-height 52px + gap 约 8px） */
-// const LANE_HEIGHT = 60; // 跨泳道斜线暂停，待后续启用
 
 export default function RoundFlowCard({ round, onNodeClick }: Props) {
   const [expanded, setExpanded] = useState(false);
@@ -360,10 +358,3 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
     </div>
   );
 }
-
-// boxEdgeT 暂停使用，待跨泳道斜线重新启用
-// function boxEdgeT(ndx: number, ndy: number, hw: number, hh: number): number {
-//   const tx = ndx !== 0 ? hw / Math.abs(ndx) : Infinity;
-//   const ty = ndy !== 0 ? hh / Math.abs(ndy) : Infinity;
-//   return Math.min(tx, ty);
-// }
