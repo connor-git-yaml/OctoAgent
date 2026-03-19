@@ -137,25 +137,13 @@ export function buildConfigPayload(
 export function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
     case "models":
-      return {
-        title: "Providers",
-        description: "配置模型 Provider 和别名路由。",
-      };
+      return { title: "Model Providers 配置", description: "" };
     case "channels":
-      return {
-        title: "渠道接入",
-        description: "管理 Web、Telegram 等入口的连接方式和可见范围。",
-      };
+      return { title: "渠道接入", description: "" };
     case "memory":
-      return {
-        title: "Memory",
-        description: "先决定默认质量层，再在需要时展开兼容接入和高级召回策略。",
-      };
+      return { title: "Memory", description: "" };
     default:
-      return {
-        title: "更多设置",
-        description: "这里是进阶配置，通常在基础功能跑通后再调整。",
-      };
+      return { title: "更多设置", description: "" };
   }
 }
 

@@ -234,8 +234,7 @@ export default function SettingsResourceLimitsSection({
     <section id="settings-group-resource-limits" className="wb-panel">
       <div className="wb-panel-head">
         <div>
-          <p className="wb-card-label">Resource Limits</p>
-          <h3>资源限制配置</h3>
+          <h3 style={{ fontSize: "1.1rem", margin: 0 }}>资源限制</h3>
         </div>
       </div>
 

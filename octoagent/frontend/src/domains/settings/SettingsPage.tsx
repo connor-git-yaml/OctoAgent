@@ -473,8 +473,7 @@ export default function SettingsPage() {
       <section id="settings-group-memory" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">Memory</p>
-            <h3>本地记忆引擎</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>Memory</h3>
           </div>
         </div>
 
@@ -509,12 +508,7 @@ export default function SettingsPage() {
           </article>
         </div>
 
-        <div className="wb-panel-head" style={{ marginTop: "1rem" }}>
-          <div>
-            <p className="wb-card-label">别名配置</p>
-            <h4>Memory 模型别名（留空使用默认）</h4>
-          </div>
-        </div>
+        <h4 style={{ fontSize: "0.85rem", fontWeight: 600, margin: "1rem 0 0.5rem", color: "var(--cp-muted)" }}>记忆模型配置</h4>
         <div className="wb-toolbar-grid">
           {(
             [
@@ -529,7 +523,11 @@ export default function SettingsPage() {
                 getValueAtPath(config.current_value, slot.key) ??
                 ""
             ).trim();
-            const aliasKeys = aliasDrafts.map((item) => item.alias).filter((a) => a.trim());
+            // 提取默认值名称（如 "main（默认）" → "main"），用于去重
+            const fallbackBase = slot.fallback.replace(/[（(].*/u, "").trim();
+            const aliasKeys = aliasDrafts
+              .map((item) => item.alias.trim())
+              .filter((a) => a && a !== fallbackBase);
             return (
               <label key={slot.key} className="wb-field">
                 <span>{slot.label}</span>
@@ -569,8 +567,7 @@ export default function SettingsPage() {
           <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
             <div className="wb-panel-head">
               <div>
-                <p className="wb-card-label">{group.title}</p>
-                <h3>{group.description}</h3>
+                <h3 style={{ fontSize: "1.1rem", margin: 0 }}>{group.title}</h3>
               </div>
             </div>
             <SettingsHintFields
@@ -588,8 +585,7 @@ export default function SettingsPage() {
       <section id="settings-group-review" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">保存检查</p>
-            <h3>风险检查与保存</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>保存检查</h3>
           </div>
         </div>
 

@@ -431,12 +431,13 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("还没有 Provider")).toBeInTheDocument();
     expect(screen.getByText("还没有模型别名")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText("先连上至少一个模型 Provider")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model Providers 配置" })).toBeInTheDocument();
     expect(screen.getAllByText("先添加一个 Provider。").length).toBeGreaterThan(0);
     expect(screen.queryByText("LiteLLM 代理地址")).not.toBeInTheDocument();
     expect(screen.queryByText("LiteLLM Master Key 值")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
@@ -498,7 +499,7 @@ describe("SettingsPage", () => {
     // 迁移管理 UI 暂未启用，不应渲染切换按钮或迁移状态
     expect(screen.queryByRole("button", { name: "切换到新索引" })).not.toBeInTheDocument();
     // Memory 区块仍然正常渲染基础状态卡片
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("ready")).toBeInTheDocument();
   });
 
@@ -558,7 +559,7 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "现在已经可以回聊天验证" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存后回聊天验证" })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "回聊天验证" }).length).toBeGreaterThan(0);
   });
@@ -583,7 +584,7 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "先连上至少一个模型 Provider" })).toBeInTheDocument();
+    expect(screen.getByText("先连上至少一个模型 Provider")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "连接真实模型" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
     expect(screen.getByText("可以先保存")).toBeInTheDocument();
@@ -611,7 +612,7 @@ describe("SettingsPage", () => {
     );
 
     // Feature 063 重构后 Memory 区块展示内建引擎卡片
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("内建记忆引擎")).toBeInTheDocument();
     expect(screen.getByText("SQLite / Vault")).toBeInTheDocument();
     // 兼容接入表单字段不应在 Memory 区块中渲染
@@ -650,7 +651,7 @@ describe("SettingsPage", () => {
     );
 
     // Memory 区块正常渲染静态状态卡片
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("内建 embedding（默认）")).toBeInTheDocument();
     expect(screen.getByText("换模型时会后台重建索引")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument(); // sor_current_count
@@ -675,9 +676,9 @@ describe("SettingsPage", () => {
     expect(screen.queryByText(/Behavior/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Agents/ })).not.toBeInTheDocument();
     // 确认核心区块正常渲染
-    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model Providers 配置" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "保存检查" })).toBeInTheDocument();
   });
 
   it("不再在 Settings 页面展示只读 Behavior Files 视图", () => {
@@ -698,9 +699,9 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("octo behavior ls")).not.toBeInTheDocument();
     expect(screen.queryByText(/Behavior Files/)).not.toBeInTheDocument();
     // 确认 Settings 页面只聚焦 Providers / Memory / 渠道 / 保存检查
-    expect(screen.getByRole("heading", { name: "模型 Provider 管理" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本地记忆引擎" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "风险检查与保存" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model Providers 配置" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "保存检查" })).toBeInTheDocument();
   });
 
   it("不支持 reasoning 的 alias 会在页面和提交草稿里自动清空推理强度", async () => {

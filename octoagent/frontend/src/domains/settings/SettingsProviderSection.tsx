@@ -58,20 +58,10 @@ export default function SettingsProviderSection({
       <section id="settings-group-models" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">Models & Providers</p>
-            <h3>模型 Provider 管理</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>Model Providers 配置</h3>
           </div>
+          <span className="wb-status-pill is-active">共 {providerDrafts.length} 个</span>
         </div>
-
-        <div className="wb-provider-layout">
-          <div className="wb-provider-card">
-            <div className="wb-provider-card-head">
-              <div>
-                <p className="wb-card-label">Providers</p>
-                <strong>多个 Provider 可同时存在</strong>
-              </div>
-              <span className="wb-status-pill is-active">共 {providerDrafts.length} 个</span>
-            </div>
 
             <div className="wb-provider-preset-row">
               <button
@@ -111,7 +101,7 @@ export default function SettingsProviderSection({
               </button>
             </div>
 
-            <div className="wb-provider-list">
+            <div className="wb-provider-list" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
               {providerDrafts.length === 0 ? (
                 <div className="wb-empty-state">
                   <strong>还没有 Provider</strong>
@@ -264,15 +254,12 @@ export default function SettingsProviderSection({
                 );
               })}
             </div>
-          </div>
-        </div>
       </section>
 
       <section id="settings-group-aliases" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <p className="wb-card-label">模型别名</p>
-            <h3>别名只引用 provider + model</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>模型别名</h3>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
             <button
@@ -292,7 +279,7 @@ export default function SettingsProviderSection({
           </div>
         </div>
 
-        <div className="wb-alias-editor">
+        <div className="wb-alias-editor" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
           {providerSelectOptions.length === 0 ? (
             <div className="wb-empty-state">
               <strong>先添加 Provider</strong>
