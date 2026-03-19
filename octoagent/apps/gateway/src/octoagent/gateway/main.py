@@ -501,6 +501,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 tool_broker=tool_broker,
                 responses_model_aliases=_resolve_stream_model_aliases(project_root),
                 responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
+                responses_direct_params=resolve_responses_api_direct_params(project_root),
             ),
             tool_broker=tool_broker,
             event_store=store_group.event_store,

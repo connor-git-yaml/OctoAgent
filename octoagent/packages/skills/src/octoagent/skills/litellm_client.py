@@ -93,6 +93,7 @@ class LiteLLMSkillClient:
         *,
         responses_model_aliases: set[str] | None = None,
         responses_reasoning_aliases: dict[str, Any] | None = None,
+        responses_direct_params: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._proxy_url = proxy_url.rstrip("/")
         self._master_key = master_key
@@ -100,6 +101,7 @@ class LiteLLMSkillClient:
         self._timeout_s = timeout_s
         self._responses_model_aliases = set(responses_model_aliases or ())
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
+        self._responses_direct_params = dict(responses_direct_params or {})
         # 对话历史：key = "{task_id}:{trace_id}"
         self._histories: dict[str, list[dict[str, Any]]] = {}
         # Feature 064 P3 优化 4: per-instance 长生命周期 httpx.AsyncClient
@@ -295,15 +297,31 @@ class LiteLLMSkillClient:
         text_parts: list[str] = []
         tool_calls_raw: dict[str, dict[str, Any]] = {}
         response_payload: dict[str, Any] = {}
+
+        # Responses API 直连 Codex Backend（绕过 Proxy 避免误 fallback）
+        direct = self._responses_direct_params.get(manifest.model_alias)
+        if direct:
+            target_url = self._build_responses_url(direct["api_base"])
+            target_key = direct.get("api_key", self._master_key)
+            target_headers = {
+                "Authorization": f"Bearer {target_key}",
+                "Content-Type": "application/json",
+                **direct.get("headers", {}),
+            }
+        else:
+            target_url = self._build_responses_url(self._proxy_url)
+            target_key = self._master_key
+            target_headers = {
+                "Authorization": f"Bearer {target_key}",
+                "Content-Type": "application/json",
+            }
+
         try:
             stream_ctx = self._http_client.stream(
                 "POST",
-                self._build_responses_url(self._proxy_url),
+                target_url,
                 json=body,
-                headers={
-                    "Authorization": f"Bearer {self._master_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=target_headers,
             )
         except (httpx.TimeoutException, httpx.ConnectError) as exc:
             raise _classify_proxy_error(exc) from exc
