@@ -65,6 +65,8 @@ export interface UseChatStreamReturn {
 
 interface UseChatStreamOptions {
   deferStoredTaskIdRestore?: boolean;
+  /** 跳过发消息后的全局 session.focus 同步（在特定 Worker 会话路由下使用，避免抢走 focus） */
+  skipSessionFocus?: boolean;
 }
 
 export interface ChatSessionScopeSnapshot {
@@ -148,6 +150,7 @@ export function useChatStream(
   sessionScope: ChatSessionScopeSnapshot | null = null,
   options: UseChatStreamOptions = {}
 ): UseChatStreamReturn {
+  const skipSessionFocus = Boolean(options.skipSessionFocus);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -300,9 +303,13 @@ export function useChatStream(
         if (!taskId) {
           setPendingConversationScope(null);
         }
-        void requestSessionFocus(newTaskId).catch(() => {
-          // 这里不阻断聊天主链，focus 同步失败只影响 restore/focus 体验。
-        });
+        // 在特定 session 路由（如 Worker 会话）下跳过 focus 同步，
+        // 避免全局 focused_session_id 被抢走导致消息列表被替换。
+        if (!skipSessionFocus) {
+          void requestSessionFocus(newTaskId).catch(() => {
+            // 这里不阻断聊天主链，focus 同步失败只影响 restore/focus 体验。
+          });
+        }
 
         if (reuseLiveStream) {
           return;
@@ -469,6 +476,7 @@ export function useChatStream(
       pendingConversationScope,
       requestSessionFocus,
       sessionScope,
+      skipSessionFocus,
     ]
   );
 

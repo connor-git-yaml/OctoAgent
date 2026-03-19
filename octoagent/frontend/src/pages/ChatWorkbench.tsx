@@ -1163,7 +1163,7 @@ export default function ChatWorkbench() {
   // 避免 stale token 把消息路由到错误的 project。
   // Token 只在通过 NewSessionModal 创建全新会话时使用。
   const hasExistingSession = Boolean(routeSessionId) || restoreTaskIds.length > 0;
-  const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
+  const { messages, sendMessage, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
     restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
     {
       activeProjectId: currentSession?.project_id || projectSelector?.current_project_id || "",
@@ -1178,11 +1178,18 @@ export default function ChatWorkbench() {
     {
       deferStoredTaskIdRestore:
         restoreTaskIds.length > 0 && restoreChoice !== "continue",
+      skipSessionFocus: Boolean(routeSessionId),
     }
   );
   const [input, setInput] = useState("");
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
   const [showRestoreEscape, setShowRestoreEscape] = useState(false);
+
+  // 消息列表变化时自动滚动到底部
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
   const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
   const [executionSession, setExecutionSession] = useState<ExecutionSessionDocument | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalListItem[]>([]);
@@ -1196,6 +1203,7 @@ export default function ChatWorkbench() {
   const [approvalNow, setApprovalNow] = useState(() => Date.now());
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
@@ -1957,11 +1965,6 @@ export default function ChatWorkbench() {
     await submitCurrentInput();
   }
 
-  async function handleStartFreshConversation() {
-    setRestoreChoice("new");
-    await resetConversation();
-  }
-
   const pendingCommandAction = parseApprovalCommand(input);
   const hasSlashSuggestionOpen = slashCommandMatches.length > 0;
   const submitLabel = pendingCommandAction
@@ -1984,15 +1987,6 @@ export default function ChatWorkbench() {
             <p className="wb-chat-head-summary">{effectiveAgentName}</p>
           </div>
           <div className="wb-chat-head-actions">
-            {taskId || messages.length > 0 ? (
-              <button
-                type="button"
-                className="wb-button wb-button-secondary wb-button-inline"
-                onClick={() => void resetConversation()}
-              >
-                开始新对话
-              </button>
-            ) : null}
             {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}
             {taskId ? (
               <Link className="wb-button wb-button-secondary wb-button-inline" to={`/tasks/${taskId}`}>
@@ -2025,14 +2019,7 @@ export default function ChatWorkbench() {
               <span>稍等，我们在读取历史消息和当前任务状态。</span>
               {showRestoreEscape ? (
                 <div className="wb-action-bar wb-chat-restore-actions">
-                  <span>如果这一步还没结束，你可以先直接开始一段新对话。</span>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-secondary wb-button-inline"
-                    onClick={() => void handleStartFreshConversation()}
-                  >
-                    直接开始新对话
-                  </button>
+                  <span>如果这一步还没结束，你可以从左侧开始一段新对话。</span>
                 </div>
               ) : null}
             </div>
@@ -2089,6 +2076,7 @@ export default function ChatWorkbench() {
                   activityItems={activityItems}
                 />
               ) : null}
+              <div ref={messagesEndRef} />
             </div>
 
             {error ? (
