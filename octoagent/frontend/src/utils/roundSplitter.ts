@@ -487,6 +487,21 @@ function makeSingleNode(
 
 // ─── 辅助函数 ────────────────────────────────────────────────
 
+/** 从事件中提取最优模型名称：model_name > model_alias，跳过空字符串 */
+function bestModelName(...events: TaskEvent[]): string {
+  // 优先从所有事件中找 model_name（实际解析后的模型名）
+  for (const ev of events) {
+    const name = str(ev.payload?.model_name, 16);
+    if (name) return name;
+  }
+  // 回退到 model_alias（LiteLLM 别名）
+  for (const ev of events) {
+    const alias = str(ev.payload?.model_alias, 16);
+    if (alias) return alias;
+  }
+  return "";
+}
+
 function inferKind(eventType: string): FlowNodeKind {
   if (eventType.startsWith("MODEL_CALL")) return "llm";
   if (eventType.startsWith("TOOL_CALL")) return "tool";
@@ -500,7 +515,7 @@ function pairedLabel(kind: FlowNodeKind, start: TaskEvent, end: TaskEvent): stri
   const dur = fmtDuration(start, end);
   switch (kind) {
     case "llm": {
-      const model = str(end.payload?.model_name ?? start.payload?.model_alias, 16);
+      const model = bestModelName(end, start);
       return model ? `${model} ${dur}` : `LLM ${dur}`;
     }
     case "tool": {
@@ -523,7 +538,7 @@ function pairedLabel(kind: FlowNodeKind, start: TaskEvent, end: TaskEvent): stri
 function runningLabel(kind: FlowNodeKind, event: TaskEvent): string {
   switch (kind) {
     case "llm":
-      return str(event.payload?.model_alias, 16) || "LLM 调用中…";
+      return bestModelName(event) || "LLM 调用中…";
     case "tool":
       return str(event.payload?.tool_name, 22) || "工具执行中…";
     case "skill":
@@ -538,7 +553,7 @@ function runningLabel(kind: FlowNodeKind, event: TaskEvent): string {
 }
 
 function singleLabel(kind: FlowNodeKind, event: TaskEvent): string {
-  if (kind === "llm") return str(event.payload?.model_name, 16) || "LLM";
+  if (kind === "llm") return bestModelName(event) || "LLM";
   if (kind === "tool") return str(event.payload?.tool_name, 22) || "工具";
   if (kind === "skill") return str(event.payload?.skill_id, 22) || "Skill";
   return event.type;
