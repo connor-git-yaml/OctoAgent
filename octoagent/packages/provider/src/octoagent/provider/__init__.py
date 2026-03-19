@@ -29,11 +29,15 @@ from .auth import (
     emit_oauth_event,
     mask_secret,
     validate_api_key,
+    validate_claude_setup_token,
     validate_setup_token,
 )
 
 # 核心组件
 from .client import LiteLLMClient
+
+# Feature 064: OAuth Token 刷新协调器
+from .refresh_coordinator import TokenRefreshCoordinator
 
 # 配置
 from .config import ProviderConfig, load_provider_config
@@ -45,6 +49,7 @@ from .echo_adapter import EchoMessageAdapter
 
 # 异常
 from .exceptions import (
+    AuthenticationError,
     CostCalculationError,
     CredentialError,
     CredentialExpiredError,
@@ -71,6 +76,7 @@ __all__ = [
     "ProviderConfig",
     "load_provider_config",
     # 异常
+    "AuthenticationError",
     "ProviderError",
     "ProxyUnreachableError",
     "CostCalculationError",
@@ -98,9 +104,12 @@ __all__ = [
     "HandlerChainResult",
     "mask_secret",
     "validate_api_key",
+    "validate_claude_setup_token",
     "validate_setup_token",
     "emit_credential_event",
     "emit_oauth_event",
+    # Feature 064: Token 刷新协调器
+    "TokenRefreshCoordinator",
     # DX 工具
     "load_project_dotenv",
 ]

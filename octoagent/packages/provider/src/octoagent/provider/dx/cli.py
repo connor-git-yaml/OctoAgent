@@ -14,6 +14,7 @@ import click
 from octoagent.core.models import ControlPlaneActionStatus
 from rich.console import RenderableType
 
+from .auth_commands import auth
 from .backup_commands import backup, export, restore
 from .behavior_commands import behavior_group
 from .chat_import_commands import import_cmd
@@ -84,6 +85,7 @@ def main() -> None:
     """OctoAgent CLI 工具"""
 
 
+main.add_command(auth)
 main.add_command(config)
 main.add_command(behavior_group)
 main.add_command(backup)

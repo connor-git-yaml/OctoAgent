@@ -155,7 +155,7 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
         scopes=["openid", "profile", "email", "offline_access"],
         redirect_uri="http://localhost:1455/auth/callback",
         redirect_port=1455,
-        supports_refresh=False,
+        supports_refresh=True,
         extra_auth_params={
             "codex_cli_simplified_flow": "true",
             "id_token_add_organizations": "true",
@@ -181,6 +181,21 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
         scopes=["read:user"],
         supports_refresh=False,
     ),
+    # Feature 064: Claude 订阅 Provider（通过 setup-token 导入）
+    # 对齐 data-model.md DM-1.2, contracts/claude-provider-api.md
+    "anthropic-claude": OAuthProviderConfig(
+        provider_id="anthropic-claude",
+        display_name="Claude (Subscription)",
+        flow_type="auth_code_pkce",  # 复用 PKCE 流程框架（实际用 paste-token 导入）
+        authorization_endpoint="",  # setup-token 无需授权端点
+        token_endpoint="https://console.anthropic.com/api/oauth/token",
+        client_id="9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        scopes=[],
+        supports_refresh=True,
+        # Claude 订阅走标准 Anthropic API 端点，不需要特殊 api_base_url
+        api_base_url=None,
+        extra_api_headers={},
+    ),
 }
 
 # display_id -> canonical_id 映射表
@@ -188,6 +203,7 @@ BUILTIN_PROVIDERS: dict[str, OAuthProviderConfig] = {
 DISPLAY_TO_CANONICAL: dict[str, str] = {
     "openai": "openai-codex",
     "github": "github-copilot",
+    "anthropic-claude": "anthropic-claude",  # Feature 064: Claude 订阅映射
 }
 
 

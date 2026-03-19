@@ -63,7 +63,7 @@ from .pkce_oauth_adapter import PkceOAuthAdapter
 from .profile import CredentialStoreData, ProviderProfile
 from .setup_token_adapter import SetupTokenAuthAdapter
 from .store import CredentialStore
-from .validators import validate_api_key, validate_setup_token
+from .validators import validate_api_key, validate_claude_setup_token, validate_setup_token
 
 __all__ = [
     # 凭证类型
@@ -88,6 +88,7 @@ __all__ = [
     # 工具
     "mask_secret",
     "validate_api_key",
+    "validate_claude_setup_token",
     "validate_setup_token",
     # 事件
     "emit_credential_event",

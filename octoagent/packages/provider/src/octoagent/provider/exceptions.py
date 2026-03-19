@@ -72,3 +72,24 @@ class CredentialValidationError(CredentialError):
 
 class OAuthFlowError(CredentialError):
     """OAuth 流程错误（授权超时、端点不可达等）"""
+
+
+class AuthenticationError(ProviderError):
+    """认证失败错误（401/403 响应触发）
+
+    此异常表示 Provider API 拒绝了当前凭证。
+    可能原因：access_token 过期、被吊销、权限不足。
+    用于触发 refresh-then-retry 逻辑。
+
+    对齐 data-model.md DM-3, contracts/token-refresh-api.md SS3。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int,
+        provider: str = "",
+    ) -> None:
+        super().__init__(message, recoverable=True)
+        self.status_code = status_code
+        self.provider = provider

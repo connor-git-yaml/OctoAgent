@@ -209,3 +209,59 @@ class TestToDeviceFlowConfig:
         config = BUILTIN_PROVIDERS["openai-codex"]
         with pytest.raises(ValueError, match="device_flow"):
             config.to_device_flow_config()
+
+
+class TestAnthropicClaudeProvider:
+    """[T022] Claude Provider 注册测试"""
+
+    def test_has_anthropic_claude(self) -> None:
+        """BUILTIN_PROVIDERS 包含 anthropic-claude 配置"""
+        assert "anthropic-claude" in BUILTIN_PROVIDERS
+
+    def test_supports_refresh(self) -> None:
+        """anthropic-claude supports_refresh=True"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.supports_refresh is True
+
+    def test_provider_id(self) -> None:
+        """anthropic-claude provider_id 正确"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.provider_id == "anthropic-claude"
+
+    def test_display_name(self) -> None:
+        """anthropic-claude 显示名称"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.display_name == "Claude (Subscription)"
+
+    def test_token_endpoint(self) -> None:
+        """anthropic-claude 使用 Anthropic OAuth token 端点"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert "console.anthropic.com" in config.token_endpoint
+
+    def test_client_id(self) -> None:
+        """anthropic-claude 有 Claude Code CLI 的 Client ID"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.client_id is not None
+        assert config.client_id != ""
+
+    def test_no_api_base_url(self) -> None:
+        """anthropic-claude 走标准 API，不需要 api_base_url"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.api_base_url is None
+
+    def test_no_extra_headers(self) -> None:
+        """anthropic-claude 不需要额外 headers"""
+        config = BUILTIN_PROVIDERS["anthropic-claude"]
+        assert config.extra_api_headers == {}
+
+    def test_display_to_canonical_mapping(self) -> None:
+        """DISPLAY_TO_CANONICAL 包含 anthropic-claude 映射"""
+        assert "anthropic-claude" in DISPLAY_TO_CANONICAL
+        assert DISPLAY_TO_CANONICAL["anthropic-claude"] == "anthropic-claude"
+
+    def test_registry_includes_anthropic_claude(self) -> None:
+        """OAuthProviderRegistry 包含 anthropic-claude"""
+        registry = OAuthProviderRegistry()
+        config = registry.get("anthropic-claude")
+        assert config is not None
+        assert config.supports_refresh is True

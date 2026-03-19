@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import httpx
 import structlog
 
 from .cost import CostTracker
-from .exceptions import ProviderError, ProxyUnreachableError
+from .exceptions import AuthenticationError, ProviderError, ProxyUnreachableError
 from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
 log = structlog.get_logger()
@@ -81,6 +81,7 @@ class LiteLLMClient:
         responses_model_aliases: set[str] | None = None,
         responses_reasoning_aliases: dict[str, ReasoningConfig] | None = None,
         reasoning_supported_aliases: set[str] | None = None,
+        auth_refresh_callback: Callable[[], Awaitable[Any | None]] | None = None,
     ) -> None:
         """初始化 LiteLLM Proxy 客户端
 
@@ -88,6 +89,11 @@ class LiteLLMClient:
             proxy_base_url: Proxy 基础 URL
             proxy_api_key: Proxy 访问密钥（LITELLM_PROXY_KEY）
             timeout_s: 请求超时（秒）
+            auth_refresh_callback: 认证刷新回调函数。当 LLM 调用返回 401/403 时，
+                调用此函数获取刷新后的凭证。返回 None 表示刷新失败。
+                返回值应具有 credential_value, api_base_url, extra_headers 属性
+                （即 HandlerChainResult 或兼容对象）。
+                对齐 contracts/token-refresh-api.md SS3。
 
         注意: proxy_api_key 是 Proxy 管理密钥，不是 LLM provider API key。
               LLM provider API key 仅存在于 Proxy 容器环境变量中。
@@ -103,6 +109,56 @@ class LiteLLMClient:
             if reasoning_supported_aliases is None
             else set(reasoning_supported_aliases)
         )
+        self._auth_refresh_callback = auth_refresh_callback
+
+    @staticmethod
+    def _is_auth_error(e: Exception) -> bool:
+        """判断异常是否为认证类错误（401/403）
+
+        检查方式（检查异常本身及其 __cause__ 链）:
+        1. 异常类型为 AuthenticationError
+        2. LiteLLM SDK 异常名称包含 Authentication/Authorization
+        3. 异常状态码或消息包含 401/403
+
+        对齐 contracts/token-refresh-api.md SS3。
+        """
+
+        def _check_single(exc: BaseException) -> bool:
+            # 直接匹配 AuthenticationError
+            if isinstance(exc, AuthenticationError):
+                return True
+
+            # 检查 LiteLLM SDK 异常类型名
+            error_name = type(exc).__name__
+            if error_name in ("AuthenticationError", "PermissionDeniedError"):
+                return True
+
+            # 检查异常是否有 status_code 属性（LiteLLM 异常通常有）
+            status_code = getattr(exc, "status_code", None)
+            if status_code in (401, 403):
+                return True
+
+            # 检查异常消息中的状态码
+            error_msg = str(exc).lower()
+            if ("401" in error_msg and ("auth" in error_msg or "unauthorized" in error_msg)) or (
+                "403" in error_msg and ("forbidden" in error_msg or "permission" in error_msg)
+            ):
+                return True
+
+            return False
+
+        # 检查异常本身
+        if _check_single(e):
+            return True
+
+        # 检查 __cause__ 链（`raise ... from e` 产生的链）
+        cause = e.__cause__
+        while cause is not None:
+            if _check_single(cause):
+                return True
+            cause = cause.__cause__
+
+        return False
 
     def _resolve_reasoning_for_alias(
         self,
@@ -359,12 +415,12 @@ class LiteLLMClient:
             fallback_reason="",
         )
 
-    async def complete(
+    async def _do_complete(
         self,
         messages: list[dict[str, str]],
-        model_alias: str = "main",
-        temperature: float = 0.7,
-        max_tokens: int | None = None,
+        model_alias: str,
+        temperature: float,
+        max_tokens: int | None,
         *,
         api_base: str | None = None,
         api_key: str | None = None,
@@ -372,25 +428,9 @@ class LiteLLMClient:
         reasoning: ReasoningConfig | None = None,
         **kwargs,
     ) -> ModelCallResult:
-        """发送 chat completion 请求到 LiteLLM Proxy
+        """内部 complete 实现，不含 auth retry 逻辑。
 
-        Args:
-            messages: 消息列表，格式 [{"role": "user", "content": "..."}]
-            model_alias: 运行时 group 名称（由 AliasRegistry.resolve() 提供）
-            temperature: 采样温度
-            max_tokens: 最大生成 token 数，None 使用模型默认
-            api_base: API base URL 覆盖（如 JWT 方案直连 Provider API）
-            api_key: API key 覆盖（如 JWT access_token 作为 Bearer token）
-            extra_headers: 附加 HTTP headers（如 chatgpt-account-id）
-            reasoning: Reasoning 配置（用于 Codex/o-系列模型的思考模式）
-            **kwargs: 其他 LiteLLM 支持的参数
-
-        Returns:
-            ModelCallResult，包含完整的响应、成本、路由信息
-
-        Raises:
-            ProxyUnreachableError: Proxy 连接失败或超时
-            ProviderError: Proxy 返回错误（如模型不可用、配额耗尽）
+        提取为独立方法以便 retry 时复用。
         """
         start_time = time.monotonic()
 
@@ -502,6 +542,122 @@ class LiteLLMClient:
                     message=f"LLM 调用失败: {sanitized_error}",
                     recoverable=True,
                 ) from e
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        model_alias: str = "main",
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        *,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        reasoning: ReasoningConfig | None = None,
+        **kwargs,
+    ) -> ModelCallResult:
+        """发送 chat completion 请求到 LiteLLM Proxy
+
+        包含 refresh-on-auth-error 重试逻辑：当返回 401/403 且有
+        auth_refresh_callback 时，自动刷新凭证并重试一次。
+
+        对齐 contracts/token-refresh-api.md SS3, FR-002。
+
+        Args:
+            messages: 消息列表，格式 [{"role": "user", "content": "..."}]
+            model_alias: 运行时 group 名称（由 AliasRegistry.resolve() 提供）
+            temperature: 采样温度
+            max_tokens: 最大生成 token 数，None 使用模型默认
+            api_base: API base URL 覆盖（如 JWT 方案直连 Provider API）
+            api_key: API key 覆盖（如 JWT access_token 作为 Bearer token）
+            extra_headers: 附加 HTTP headers（如 chatgpt-account-id）
+            reasoning: Reasoning 配置（用于 Codex/o-系列模型的思考模式）
+            **kwargs: 其他 LiteLLM 支持的参数
+
+        Returns:
+            ModelCallResult，包含完整的响应、成本、路由信息
+
+        Raises:
+            ProxyUnreachableError: Proxy 连接失败或超时
+            ProviderError: Proxy 返回错误（如模型不可用、配额耗尽）
+        """
+        try:
+            return await self._do_complete(
+                messages,
+                model_alias,
+                temperature,
+                max_tokens,
+                api_base=api_base,
+                api_key=api_key,
+                extra_headers=extra_headers,
+                reasoning=reasoning,
+                **kwargs,
+            )
+        except Exception as e:
+            # refresh-on-auth-error 重试逻辑
+            if not self._is_auth_error(e) or self._auth_refresh_callback is None:
+                raise
+
+            log.info(
+                "auth_error_triggering_refresh",
+                model_alias=model_alias,
+                error_type=type(e).__name__,
+            )
+
+            try:
+                refreshed = await self._auth_refresh_callback()
+            except Exception:
+                log.warning(
+                    "auth_refresh_callback_failed",
+                    model_alias=model_alias,
+                    exc_info=True,
+                )
+                raise e from None  # 抛出原始认证错误，抑制 callback 异常链
+
+            if refreshed is None:
+                raise ProviderError(
+                    message=(
+                        "认证凭证已失效且刷新失败。请重新授权: "
+                        "octo auth setup"
+                    ),
+                    recoverable=True,
+                ) from e
+
+            # 使用刷新后的凭证重试一次
+            call_kwargs: dict[str, Any] = dict(
+                api_base=getattr(refreshed, "api_base_url", None) or api_base,
+                api_key=getattr(refreshed, "credential_value", None) or api_key,
+                extra_headers=getattr(refreshed, "extra_headers", None) or extra_headers,
+                reasoning=reasoning,
+                **kwargs,
+            )
+
+            log.info(
+                "auth_refresh_retrying",
+                model_alias=model_alias,
+            )
+
+            try:
+                return await self._do_complete(
+                    messages, model_alias, temperature, max_tokens, **call_kwargs,
+                )
+            except Exception as retry_err:
+                # 重试后仍然失败：检测 Anthropic 政策拒绝
+                # 对齐 contracts/claude-provider-api.md SS3, FR-010
+                retry_msg = str(retry_err).lower()
+                if "permission_error" in retry_msg or (
+                    "403" in retry_msg and "permission" in retry_msg
+                ):
+                    raise ProviderError(
+                        message=(
+                            "Claude 订阅凭证被 Anthropic 拒绝。\n"
+                            "此凭证可能仅授权用于 Claude Code 应用，不支持第三方调用。\n"
+                            "建议: 使用 Anthropic API Key 替代订阅凭证。\n"
+                            "配置方法: octo auth setup -> 选择 Anthropic -> 输入 API Key"
+                        ),
+                        recoverable=True,
+                    ) from retry_err
+                raise
 
     async def health_check(self) -> bool:
         """检查 LiteLLM Proxy 可达性

@@ -1,9 +1,14 @@
-"""校验函数单元测试 -- T015
+"""校验函数单元测试 -- T015, T021
 
 覆盖: 各 Provider 格式校验 / Setup Token 前缀校验 / 空值拒绝
+- [T021] Claude setup-token 格式校验
 """
 
-from octoagent.provider.auth.validators import validate_api_key, validate_setup_token
+from octoagent.provider.auth.validators import (
+    validate_api_key,
+    validate_claude_setup_token,
+    validate_setup_token,
+)
 
 
 class TestValidateApiKey:
@@ -63,3 +68,64 @@ class TestValidateSetupToken:
     def test_exact_prefix(self) -> None:
         """恰好是前缀，无后续内容"""
         assert validate_setup_token("sk-ant-oat01-") is True
+
+
+class TestValidateClaudeSetupToken:
+    """[T021] Claude setup-token 格式校验"""
+
+    def test_valid_tokens(self) -> None:
+        """有效的 sk-ant-oat01-* + sk-ant-ort01-* 通过校验"""
+        is_valid, msg = validate_claude_setup_token(
+            "sk-ant-oat01-abcdefghij1234567890",
+            "sk-ant-ort01-abcdefghij1234567890",
+        )
+        assert is_valid is True
+        assert msg == ""
+
+    def test_access_token_wrong_prefix(self) -> None:
+        """access_token 前缀错误被拒绝"""
+        is_valid, msg = validate_claude_setup_token(
+            "sk-ant-api03-wrong-prefix-token",
+            "sk-ant-ort01-valid-refresh-token",
+        )
+        assert is_valid is False
+        assert "sk-ant-oat01-" in msg
+
+    def test_refresh_token_wrong_prefix(self) -> None:
+        """refresh_token 前缀错误被拒绝"""
+        is_valid, msg = validate_claude_setup_token(
+            "sk-ant-oat01-valid-access-token",
+            "sk-ant-api03-wrong-refresh-token",
+        )
+        assert is_valid is False
+        assert "sk-ant-ort01-" in msg
+
+    def test_access_token_too_short(self) -> None:
+        """access_token 长度不足被拒绝"""
+        is_valid, msg = validate_claude_setup_token(
+            "sk-ant-oat01-ab",  # 太短
+            "sk-ant-ort01-abcdefghij1234567890",
+        )
+        assert is_valid is False
+        assert "长度不足" in msg
+
+    def test_refresh_token_too_short(self) -> None:
+        """refresh_token 长度不足被拒绝"""
+        is_valid, msg = validate_claude_setup_token(
+            "sk-ant-oat01-abcdefghij1234567890",
+            "sk-ant-ort01-ab",  # 太短
+        )
+        assert is_valid is False
+        assert "长度不足" in msg
+
+    def test_empty_access_token(self) -> None:
+        """空 access_token 被拒绝"""
+        is_valid, msg = validate_claude_setup_token("", "sk-ant-ort01-valid")
+        assert is_valid is False
+        assert "不能为空" in msg
+
+    def test_empty_refresh_token(self) -> None:
+        """空 refresh_token 被拒绝"""
+        is_valid, msg = validate_claude_setup_token("sk-ant-oat01-valid-long-enough", "")
+        assert is_valid is False
+        assert "不能为空" in msg

@@ -227,3 +227,52 @@ class TestEventStoreFailureGraceful:
             provider_id="test",
             payload={"flow_type": "auth_code_pkce"},
         )
+
+
+class TestOAuthRefreshEventCompleteness:
+    """[T030] OAUTH_REFRESHED / OAUTH_FAILED 事件完整性验证"""
+
+    async def test_refresh_event_contains_new_expires_in(self) -> None:
+        """OAUTH_REFRESHED 事件包含 new_expires_in"""
+        mock_store = _make_event_store()
+        await emit_oauth_event(
+            event_store=mock_store,
+            event_type=EventType.OAUTH_REFRESHED,
+            provider_id="openai-codex",
+            payload={"new_expires_in": 3600},
+        )
+        payload = _get_payload(mock_store)
+        assert payload["provider_id"] == "openai-codex"
+        assert payload["new_expires_in"] == 3600
+
+    async def test_failed_event_for_invalid_grant(self) -> None:
+        """invalid_grant 发射 OAUTH_FAILED"""
+        mock_store = _make_event_store()
+        await emit_oauth_event(
+            event_store=mock_store,
+            event_type=EventType.OAUTH_FAILED,
+            provider_id="openai-codex",
+            payload={
+                "failure_reason": "invalid_grant -- refresh_token 已失效",
+                "failure_stage": "token_refresh",
+            },
+        )
+        payload = _get_payload(mock_store)
+        assert "invalid_grant" in payload["failure_reason"]
+        assert payload["failure_stage"] == "token_refresh"
+
+    async def test_failed_event_for_network_error(self) -> None:
+        """网络错误发射 OAUTH_FAILED"""
+        mock_store = _make_event_store()
+        await emit_oauth_event(
+            event_store=mock_store,
+            event_type=EventType.OAUTH_FAILED,
+            provider_id="anthropic-claude",
+            payload={
+                "failure_reason": "Connection refused",
+                "failure_stage": "token_refresh",
+            },
+        )
+        payload = _get_payload(mock_store)
+        assert "Connection refused" in payload["failure_reason"]
+        assert payload["provider_id"] == "anthropic-claude"

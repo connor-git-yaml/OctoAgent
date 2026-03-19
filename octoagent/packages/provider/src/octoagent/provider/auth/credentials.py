@@ -29,8 +29,13 @@ class ApiKeyCredential(BaseModel):
 class TokenCredential(BaseModel):
     """Token 凭证 -- 带过期时间的临时令牌
 
-    适用 Provider: Anthropic Setup Token（sk-ant-oat01-* 格式）
-    特征: 有过期时间，需要过期检测
+    适用 Provider: 不含 refresh_token 的简单临时令牌。
+    特征: 有过期时间，需要过期检测，但不支持自动刷新。
+
+    注意（Feature 064 更新）：Anthropic setup-token（sk-ant-oat01-* / sk-ant-ort01-*）
+    已迁移至 OAuthCredential 存储，因为 setup-token 包含 refresh_token 且需要
+    自动刷新（8h 有效期）。OAuthCredential 的字段集与 PkceOAuthAdapter 刷新链路
+    完全匹配。本类型不再用于存储 Anthropic setup-token。
     """
 
     type: Literal["token"] = "token"

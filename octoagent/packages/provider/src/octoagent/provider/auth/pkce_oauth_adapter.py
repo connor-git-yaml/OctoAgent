@@ -16,10 +16,16 @@ from .adapter import AuthAdapter
 from .credentials import OAuthCredential
 from .events import EventStoreProtocol, emit_oauth_event
 from .oauth_flows import refresh_access_token
-from .oauth_provider import OAuthProviderConfig, OAuthProviderRegistry
+from .oauth_provider import OAuthProviderConfig
 from .store import CredentialStore
 
 log = structlog.get_logger()
+
+# token 过期预检缓冲时间（秒）
+# 在 access_token 距过期不足此时间时提前触发刷新
+# 5 分钟是业界通用实践（OpenClaw、Claude Code CLI 均采用此值）
+# 对齐 data-model.md DM-4, FR-011
+REFRESH_BUFFER_SECONDS: int = 300
 
 
 class PkceOAuthAdapter(AuthAdapter):
@@ -111,11 +117,12 @@ class PkceOAuthAdapter(AuthAdapter):
         if not self._provider_config.supports_refresh:
             return None
 
-        # 解析 client_id
-        registry = OAuthProviderRegistry()
-        try:
-            client_id = registry.resolve_client_id(self._provider_config)
-        except OAuthFlowError:
+        # 解析 client_id（优先静态配置，其次环境变量）
+        import os
+        client_id = self._provider_config.client_id
+        if not client_id and self._provider_config.client_id_env:
+            client_id = os.environ.get(self._provider_config.client_id_env, "")
+        if not client_id:
             log.warning(
                 "pkce_oauth_refresh_no_client_id",
                 provider=self._credential.provider,
@@ -183,9 +190,20 @@ class PkceOAuthAdapter(AuthAdapter):
         return token_resp.access_token.get_secret_value()
 
     def is_expired(self) -> bool:
-        """基于 expires_at 判断 token 是否过期"""
+        """基于 expires_at 判断 token 是否过期或即将过期
+
+        当距过期时间不足 REFRESH_BUFFER_SECONDS 时，视为"已过期"
+        以触发提前刷新。
+
+        对齐 contracts/token-refresh-api.md SS2, FR-011。
+
+        Returns:
+            True: token 已过期或距过期不足 5 分钟
+            False: token 仍在有效期内且距过期超过 5 分钟
+        """
         now = datetime.now(tz=UTC)
-        return now >= self._credential.expires_at
+        buffer = timedelta(seconds=REFRESH_BUFFER_SECONDS)
+        return now >= (self._credential.expires_at - buffer)
 
     def get_api_base_url(self) -> str | None:
         """返回 LLM API 的 base URL
