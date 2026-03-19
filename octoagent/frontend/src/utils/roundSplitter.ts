@@ -55,27 +55,22 @@ export interface AgentLane {
   nodes: FlowNode[];
 }
 
-/** 将节点按连续相同 agent 分组为泳道 */
+/** 将节点按唯一 agent 合并为泳道（同一 Agent 只有一行） */
 export function groupByAgent(nodes: FlowNode[]): AgentLane[] {
-  const lanes: AgentLane[] = [];
-  let currentAgent = "";
-  let currentNodes: FlowNode[] = [];
+  const map = new Map<string, FlowNode[]>();
+  const order: string[] = [];
 
   for (const node of nodes) {
-    if (node.agent !== currentAgent) {
-      if (currentNodes.length > 0) {
-        lanes.push({ agent: currentAgent, nodes: currentNodes });
-      }
-      currentAgent = node.agent;
-      currentNodes = [node];
+    const existing = map.get(node.agent);
+    if (existing) {
+      existing.push(node);
     } else {
-      currentNodes.push(node);
+      map.set(node.agent, [node]);
+      order.push(node.agent);
     }
   }
-  if (currentNodes.length > 0) {
-    lanes.push({ agent: currentAgent, nodes: currentNodes });
-  }
-  return lanes;
+
+  return order.map((agent) => ({ agent, nodes: map.get(agent)! }));
 }
 
 // ─── 配对规则：STARTED -> COMPLETED/FAILED ──────────────────
