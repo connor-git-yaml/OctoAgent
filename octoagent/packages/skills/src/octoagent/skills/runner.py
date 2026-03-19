@@ -151,6 +151,31 @@ class SkillRunner:
                 await self._emit_model_failed(
                     manifest, execution_context, str(exc), attempts, steps
                 )
+
+                # Feature 064 Phase 3: 异常分类差异化处理
+                from .litellm_client import LLMCallError
+
+                if isinstance(exc, LLMCallError):
+                    if exc.error_type == "rate_limit":
+                        # 速率限制：等待后重试，不消耗 retry 计数
+                        log.warning("rate_limit_backoff", step=steps, wait_seconds=3)
+                        await asyncio.sleep(3)
+                        continue
+                    if exc.error_type == "context_overflow":
+                        # 上下文超长：不可盲目重试，直接标记失败
+                        result = await self._fail_result(
+                            manifest=manifest,
+                            execution_context=execution_context,
+                            start_time=start_time,
+                            attempts=attempts,
+                            steps=steps,
+                            category=ErrorCategory.TOKEN_LIMIT_EXCEEDED,
+                            error=SkillRepeatError(f"上下文超长: {exc}"),
+                        )
+                        await self._call_hook("skill_end", manifest, execution_context, result)
+                        self._try_clear_history(history_key)
+                        return result
+
                 retry_failures += 1
                 if retry_failures > manifest.retry_policy.max_attempts:
                     result = await self._fail_result(

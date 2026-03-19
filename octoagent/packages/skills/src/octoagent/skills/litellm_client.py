@@ -25,6 +25,43 @@ from .models import (
 log = structlog.get_logger(__name__)
 
 
+class LLMCallError(Exception):
+    """LLM 调用异常分类，供 SkillRunner 差异化处理。
+
+    error_type:
+        timeout       — API 超时，可重试（退避后）
+        rate_limit    — 速率限制（429），应等待后重试
+        context_overflow — 上下文超长（4xx），不可盲目重试，需压缩
+        api_error     — 其他 API 错误，可重试
+    """
+
+    def __init__(self, error_type: str, message: str, *, retriable: bool = True, status_code: int = 0):
+        super().__init__(message)
+        self.error_type = error_type
+        self.retriable = retriable
+        self.status_code = status_code
+
+
+def _classify_proxy_error(exc: Exception, status_code: int = 0) -> LLMCallError:
+    """将 httpx / Proxy 异常转换为 LLMCallError。"""
+    msg = str(exc)
+
+    if isinstance(exc, (httpx.TimeoutException, httpx.ReadTimeout, httpx.WriteTimeout, httpx.ConnectTimeout)):
+        return LLMCallError("timeout", msg, retriable=True)
+
+    if status_code == 429:
+        return LLMCallError("rate_limit", msg, retriable=True, status_code=429)
+
+    # LiteLLM Proxy 对上下文超长通常返回 400 + 特定错误信息
+    overflow_keywords = ("context_length", "maximum context", "token limit", "too many tokens", "context window")
+    msg_lower = msg.lower()
+    if status_code in (400, 413) or any(kw in msg_lower for kw in overflow_keywords):
+        if any(kw in msg_lower for kw in overflow_keywords):
+            return LLMCallError("context_overflow", msg, retriable=False, status_code=status_code)
+
+    return LLMCallError("api_error", msg, retriable=True, status_code=status_code)
+
+
 def _to_fn_name(tool_name: str) -> str:
     """工具名 → OpenAI function name（点替换为双下划线）。"""
     return tool_name.replace(".", "__")
@@ -417,23 +454,36 @@ class LiteLLMSkillClient:
             "stream_options": {"include_usage": True},
         }
 
-        async with self._http_client.stream(
-            "POST",
-            f"{self._proxy_url}/v1/chat/completions",
-            json=body_with_stream,
-            headers={
-                "Authorization": f"Bearer {self._master_key}",
-                "Content-Type": "application/json",
-            },
-        ) as resp:
+        try:
+            stream_ctx = self._http_client.stream(
+                "POST",
+                f"{self._proxy_url}/v1/chat/completions",
+                json=body_with_stream,
+                headers={
+                    "Authorization": f"Bearer {self._master_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise _classify_proxy_error(exc) from exc
+
+        async with stream_ctx as resp:
             if resp.status_code >= 400:
                 body_text = await resp.aread()
+                error_body = body_text.decode(errors="replace")[:500]
                 log.error(
                     "litellm_proxy_error",
                     status=resp.status_code,
-                    body=body_text.decode(errors="replace")[:500],
+                    body=error_body,
                 )
-            resp.raise_for_status()
+                raise _classify_proxy_error(
+                    httpx.HTTPStatusError(
+                        f"Proxy returned {resp.status_code}: {error_body}",
+                        request=resp.request,
+                        response=resp,
+                    ),
+                    status_code=resp.status_code,
+                )
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue

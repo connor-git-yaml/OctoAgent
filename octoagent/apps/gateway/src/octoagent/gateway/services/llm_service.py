@@ -467,7 +467,11 @@ class LLMService:
                 if (
                     not is_degraded_retry
                     and manifest.retry_policy.fallback_model_alias
-                    and category in ("step_limit_exceeded", "timeout_exceeded")
+                    and category in (
+                        "step_limit_exceeded",
+                        "timeout_exceeded",
+                        "token_limit_exceeded",
+                    )
                 ):
                     # max_steps=None → 降级时也保持 None（不限）
                     degraded_steps = (
