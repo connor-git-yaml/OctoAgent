@@ -4130,16 +4130,87 @@ class ControlPlaneService:
         apply_result = await self._handle_setup_apply(
             request.model_copy(update={"action_id": "setup.apply"})
         )
+        activation_data = await self._activate_runtime_after_config_change(
+            request=request,
+            failure_code="SETUP_ACTIVATION_FAILED",
+            failure_prefix="配置已保存，但 LiteLLM Proxy 启动失败",
+            raise_on_failure=True,
+        )
+
+        review_result = await self._handle_setup_review(
+            request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})
+        )
+        refreshed_review = review_result.data.get("review", {})
+        data = dict(apply_result.data)
+        if isinstance(refreshed_review, dict) and refreshed_review:
+            data["review"] = refreshed_review
+        data["activation"] = activation_data
+
+        message = str(activation_data["runtime_reload_message"])
+        return self._completed_result(
+            request=request,
+            code="SETUP_QUICK_CONNECTED",
+            message=message,
+            data=data,
+            resource_refs=self._dedupe_resource_refs(
+                list(apply_result.resource_refs)
+                + [
+                    self._resource_ref("config_schema", "config:octoagent"),
+                    self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+                    self._resource_ref("setup_governance", "setup:governance"),
+                ]
+            ),
+            )
+
+    async def _restart_runtime_after_delay(
+        self,
+        *,
+        delay_seconds: float,
+        trigger_source: UpdateTriggerSource,
+    ) -> None:
+        if self._update_service is None:
+            return
+        await asyncio.sleep(delay_seconds)
+        try:
+            await self._update_service.restart(trigger_source=trigger_source)
+        except Exception as exc:  # pragma: no cover - 后台 restart 失败仅记录日志
+            log.warning(
+                "setup_quick_connect_restart_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
+    async def _activate_runtime_after_config_change(
+        self,
+        *,
+        request: ActionRequestEnvelope,
+        failure_code: str,
+        failure_prefix: str,
+        raise_on_failure: bool,
+    ) -> dict[str, Any]:
+        """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
         activation_service = RuntimeActivationService(self._project_root)
         try:
             activation = await activation_service.start_proxy()
         except RuntimeActivationError as exc:
-            raise ControlPlaneActionError(
-                "SETUP_ACTIVATION_FAILED",
-                f"配置已保存，但 LiteLLM Proxy 启动失败：{exc}",
-            ) from exc
+            if raise_on_failure:
+                raise ControlPlaneActionError(
+                    failure_code,
+                    f"{failure_prefix}：{exc}",
+                ) from exc
+            return {
+                "project_root": str(self._project_root),
+                "source_root": "",
+                "compose_file": "",
+                "proxy_url": "",
+                "managed_runtime": activation_service.has_managed_runtime(),
+                "warnings": [str(exc)],
+                "runtime_reload_mode": "activation_failed",
+                "runtime_reload_message": f"{failure_prefix}：{exc}",
+                "activation_succeeded": False,
+            }
 
-        activation_data = {
+        activation_data: dict[str, Any] = {
             "project_root": activation.project_root,
             "source_root": activation.source_root,
             "compose_file": activation.compose_file,
@@ -4148,6 +4219,7 @@ class ControlPlaneService:
             "warnings": list(activation.warnings),
             "runtime_reload_mode": "none",
             "runtime_reload_message": "真实模型连接已准备完成。",
+            "activation_succeeded": True,
         }
 
         if activation.managed_runtime and self._update_service is not None:
@@ -4175,49 +4247,7 @@ class ControlPlaneService:
             activation_data["runtime_reload_message"] = (
                 "LiteLLM Proxy 已启动；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
             )
-
-        review_result = await self._handle_setup_review(
-            request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})
-        )
-        refreshed_review = review_result.data.get("review", {})
-        data = dict(apply_result.data)
-        if isinstance(refreshed_review, dict) and refreshed_review:
-            data["review"] = refreshed_review
-        data["activation"] = activation_data
-
-        message = str(activation_data["runtime_reload_message"])
-        return self._completed_result(
-            request=request,
-            code="SETUP_QUICK_CONNECTED",
-            message=message,
-            data=data,
-            resource_refs=self._dedupe_resource_refs(
-                list(apply_result.resource_refs)
-                + [
-                    self._resource_ref("config_schema", "config:octoagent"),
-                    self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
-                    self._resource_ref("setup_governance", "setup:governance"),
-                ]
-            ),
-        )
-
-    async def _restart_runtime_after_delay(
-        self,
-        *,
-        delay_seconds: float,
-        trigger_source: UpdateTriggerSource,
-    ) -> None:
-        if self._update_service is None:
-            return
-        await asyncio.sleep(delay_seconds)
-        try:
-            await self._update_service.restart(trigger_source=trigger_source)
-        except Exception as exc:  # pragma: no cover - 后台 restart 失败仅记录日志
-            log.warning(
-                "setup_quick_connect_restart_failed",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
+        return activation_data
 
     def _normalize_skill_selection_payload(
         self,
@@ -4599,19 +4629,33 @@ class ControlPlaneService:
         except Exception as exc:
             log.warning("oauth_litellm_config_sync_failed", error=str(exc))
 
+        activation_data = await self._activate_runtime_after_config_change(
+            request=request,
+            failure_code="OPENAI_OAUTH_ACTIVATION_FAILED",
+            failure_prefix="OpenAI Auth 已连接，但真实模型激活失败",
+            raise_on_failure=False,
+        )
+
+        message = "OpenAI Auth 已连接，已写入本地凭证。"
+        runtime_message = str(activation_data.get("runtime_reload_message", "")).strip()
+        if runtime_message:
+            message = runtime_message
+
         return self._completed_result(
             request=request,
             code="OPENAI_OAUTH_CONNECTED",
-            message="OpenAI Auth 已连接，已写入本地凭证。",
+            message=message,
             data={
                 "provider_id": "openai-codex",
                 "profile_name": profile_name,
                 "env_name": env_name,
                 "expires_at": credential.expires_at.isoformat(),
                 "account_id": credential.account_id or "",
+                "activation": activation_data,
             },
             resource_refs=[
                 self._resource_ref("setup_governance", "setup:governance"),
+                self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
             ],
             target_refs=[
                 ControlPlaneTargetRef(

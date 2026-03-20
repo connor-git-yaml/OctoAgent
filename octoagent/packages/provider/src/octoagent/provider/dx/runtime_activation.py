@@ -94,7 +94,7 @@ class RuntimeActivationService:
         return (
             f'OCTOAGENT_INSTANCE_ROOT="{self._root}" '
             f'docker compose --env-file "{env_file}" '
-            f'-f "{compose_file}" up -d'
+            f'-f "{compose_file}" up -d --force-recreate'
         )
 
     async def start_proxy(self, *, timeout_seconds: float = 25.0) -> RuntimeActivationSummary:
@@ -137,6 +137,7 @@ class RuntimeActivationService:
             str(compose_file),
             "up",
             "-d",
+            "--force-recreate",
         ]
         result = subprocess.run(
             command,

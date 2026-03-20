@@ -2025,6 +2025,63 @@ class TestControlPlaneApi:
             fake_run_auth_code_pkce_flow,
         )
 
+        scheduled_restarts: list[dict[str, object]] = []
+
+        class FakeActivationService:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            def has_managed_runtime(self) -> bool:
+                return True
+
+            async def start_proxy(self):
+                return type(
+                    "Activation",
+                    (),
+                    {
+                        "project_root": str(self.project_root),
+                        "source_root": str(self.project_root / "app" / "octoagent"),
+                        "compose_file": str(
+                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
+                        ),
+                        "proxy_url": "http://localhost:4000",
+                        "managed_runtime": True,
+                        "warnings": [],
+                    },
+                )()
+
+        async def fake_restart_runtime_after_delay(
+            *,
+            delay_seconds: float,
+            trigger_source,
+        ) -> None:
+            scheduled_restarts.append(
+                {
+                    "delay_seconds": delay_seconds,
+                    "trigger_source": trigger_source,
+                }
+            )
+
+        original_create_task = asyncio.create_task
+        background_tasks: list[asyncio.Task[None]] = []
+
+        def fake_create_task(coro):
+            task = original_create_task(coro)
+            background_tasks.append(task)
+            return task
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "RuntimeActivationService",
+            FakeActivationService,
+        )
+        monkeypatch.setattr(
+            control_plane_app.state.control_plane_service,
+            "_restart_runtime_after_delay",
+            fake_restart_runtime_after_delay,
+        )
+        monkeypatch.setattr(control_plane_module.asyncio, "create_task", fake_create_task)
+
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -2047,6 +2104,9 @@ class TestControlPlaneApi:
         assert result["code"] == "OPENAI_OAUTH_CONNECTED"
         assert result["data"]["account_id"] == "acct-openai"
         assert result["data"]["env_name"] == "OPENAI_API_KEY"
+        assert result["data"]["activation"]["activation_succeeded"] is True
+        assert result["data"]["activation"]["runtime_reload_mode"] == "managed_restart_scheduled"
+        assert "自动重启" in result["message"]
 
         store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
         profile = store.get_profile("openai-codex-default")
@@ -2064,6 +2124,92 @@ class TestControlPlaneApi:
         )
         assert setup_doc.provider_runtime.details["openai_oauth_connected"] is True
         assert setup_doc.provider_runtime.details["openai_oauth_profile"] == "openai-codex-default"
+
+        assert background_tasks
+        await asyncio.gather(*background_tasks)
+        assert scheduled_restarts == [
+            {
+                "delay_seconds": 2.0,
+                "trigger_source": control_plane_module.UpdateTriggerSource.WEB,
+            }
+        ]
+
+    async def test_provider_oauth_openai_codex_preserves_auth_when_activation_fails(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        monkeypatch,
+    ) -> None:
+        from octoagent.gateway.services import control_plane as control_plane_module
+
+        async def fake_run_auth_code_pkce_flow(**_kwargs):
+            return OAuthCredential(
+                provider="openai-codex",
+                access_token=SecretStr("oauth-access-token"),
+                refresh_token=SecretStr("oauth-refresh-token"),
+                expires_at=datetime(2026, 3, 20, tzinfo=UTC),
+                account_id="acct-openai",
+            )
+
+        class FailingActivationService:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            def has_managed_runtime(self) -> bool:
+                return True
+
+            async def start_proxy(self):
+                raise control_plane_module.RuntimeActivationError("proxy boot failed")
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "detect_environment",
+            lambda: EnvironmentContext(
+                is_remote=False,
+                can_open_browser=True,
+                force_manual=False,
+                detection_details="test",
+            ),
+        )
+        monkeypatch.setattr(
+            control_plane_module,
+            "run_auth_code_pkce_flow",
+            fake_run_auth_code_pkce_flow,
+        )
+        monkeypatch.setattr(
+            control_plane_module,
+            "RuntimeActivationService",
+            FailingActivationService,
+        )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "provider.oauth.openai_codex",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "env_name": "OPENAI_API_KEY",
+                    "profile_name": "openai-codex-default",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "OPENAI_OAUTH_CONNECTED"
+        assert result["data"]["activation"]["activation_succeeded"] is False
+        assert result["data"]["activation"]["runtime_reload_mode"] == "activation_failed"
+        assert "真实模型激活失败" in result["message"]
+
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
+        profile = store.get_profile("openai-codex-default")
+        assert profile is not None
+        assert profile.provider == "openai-codex"
 
     async def test_setup_apply_rejects_blocking_review(
         self,
