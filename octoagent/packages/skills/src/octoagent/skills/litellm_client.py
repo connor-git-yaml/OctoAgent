@@ -279,8 +279,14 @@ class LiteLLMSkillClient:
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        # Responses API 直连 Codex Backend（绕过 Proxy 避免误 fallback）
+        direct = self._responses_direct_params.get(manifest.model_alias)
+
+        # Codex Backend 不认别名，必须用真实模型名（如 gpt-5.4）
+        wire_model = (direct.get("model") if direct else None) or manifest.model_alias
+
         body: dict[str, Any] = {
-            "model": manifest.model_alias,
+            "model": wire_model,
             "instructions": self._build_responses_instructions(manifest, history),
             "input": self._build_responses_input(history),
             "store": False,
@@ -298,8 +304,6 @@ class LiteLLMSkillClient:
         tool_calls_raw: dict[str, dict[str, Any]] = {}
         response_payload: dict[str, Any] = {}
 
-        # Responses API 直连 Codex Backend（绕过 Proxy 避免误 fallback）
-        direct = self._responses_direct_params.get(manifest.model_alias)
         if direct:
             target_url = self._build_responses_url(direct["api_base"])
             target_key = direct.get("api_key", self._master_key)

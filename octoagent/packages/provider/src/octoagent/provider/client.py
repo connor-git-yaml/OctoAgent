@@ -281,6 +281,7 @@ class LiteLLMClient:
         *,
         messages: list[dict[str, str]],
         model_alias: str,
+        model_name: str | None = None,
         api_base: str,
         api_key: str,
         temperature: float,
@@ -289,11 +290,19 @@ class LiteLLMClient:
         extra_headers: dict[str, str] | None,
         **kwargs,
     ) -> ModelCallResult:
-        """通过 Proxy /v1/responses 调用 Codex-compatible alias。"""
+        """通过 Responses API 直连 Codex Backend。
+
+        Args:
+            model_alias: 运行时别名（如 "main"），用于日志和结果标识。
+            model_name: 真实模型名（如 "gpt-5.4"），发送给 Backend。
+                        若为 None/空则回退到 model_alias。
+        """
         start_time = time.monotonic()
         text_parts: list[str] = []
         response_model_name = ""
         usage = TokenUsage()
+        # Codex Backend 需要真实模型名，不认别名
+        wire_model = model_name or model_alias
 
         request_headers = {
             "Authorization": f"Bearer {api_key}",
@@ -307,7 +316,7 @@ class LiteLLMClient:
             reasoning=reasoning,
         )
         body: dict[str, Any] = {
-            "model": model_alias,
+            "model": wire_model,
             "instructions": self._build_responses_instructions(messages),
             "input": self._build_responses_input(messages),
             "store": False,
@@ -448,13 +457,17 @@ class LiteLLMClient:
                 direct_base = direct.get("api_base", resolved_api_base)
                 direct_key = direct.get("api_key", resolved_api_key)
                 direct_headers = {**(extra_headers or {}), **direct.get("headers", {})}
+                # Codex Backend 不认别名，必须用真实模型名（如 gpt-5.4）
+                direct_model = direct.get("model") or model_alias
             else:
                 direct_base = resolved_api_base
                 direct_key = resolved_api_key
                 direct_headers = extra_headers
+                direct_model = model_alias
             return await self._complete_via_responses_api(
                 messages=messages,
                 model_alias=model_alias,
+                model_name=direct_model,
                 api_base=direct_base,
                 api_key=direct_key,
                 temperature=temperature,

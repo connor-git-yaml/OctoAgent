@@ -144,10 +144,13 @@ def resolve_responses_api_direct_params(
         # 解析 os.environ/ 引用
         actual_key = _resolve_env_ref(str(api_key_ref))
         headers = params.get("headers", {})
+        # 真实模型名（如 gpt-5.4），Codex Backend 不认别名
+        real_model = params.get("model", "")
         result[model_name] = {
             "api_base": api_base.rstrip("/"),
             "api_key": actual_key,
             "headers": dict(headers) if isinstance(headers, dict) else {},
+            "model": str(real_model) if real_model else "",
         }
 
     return result
