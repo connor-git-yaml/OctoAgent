@@ -1010,10 +1010,7 @@ class ControlPlaneService:
                 AgentSessionKind.SUBAGENT_INTERNAL,
             }:
                 continue
-            if agent_sess.kind not in {
-                AgentSessionKind.DIRECT_WORKER,
-                AgentSessionKind.BUTLER_MAIN,
-            }:
+            if agent_sess.kind != AgentSessionKind.DIRECT_WORKER:
                 continue
             projected_session_id = build_projected_session_id(
                 thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
@@ -1318,9 +1315,8 @@ class ControlPlaneService:
         self,
         *,
         session_id: str,
-        selected_project,
-        selected_workspace,
     ) -> list[Task]:
+        # 不按项目过滤——用户可能在不同项目的 session 间切换
         tasks = await self._stores.task_store.list_tasks()
         matched: list[Task] = []
         for task in tasks:
@@ -1328,13 +1324,6 @@ class ControlPlaneService:
                 continue
             workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
             if workspace is None:
-                continue
-            if not self._matches_selected_scope(
-                item_project_id=workspace.project_id,
-                item_workspace_id=workspace.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
                 continue
             latest_metadata = await self._extract_latest_user_metadata(task.task_id)
             if (
@@ -6389,11 +6378,8 @@ class ControlPlaneService:
         task_ids: list[str] | None = None
         if session_id and not thread_id and not task_id:
             session = await self._resolve_session_projection_target(request)
-            _, selected_project, selected_workspace, _ = await self._resolve_selection()
             session_tasks = await self._list_tasks_for_projected_session(
                 session_id=session.session_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
             )
             task_ids = [item.task_id for item in session_tasks]
             if not task_ids and session.task_id:
