@@ -46,6 +46,7 @@ export default function SettingsPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [review, setReview] = useState<SetupReviewSummary>(setup.review);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const [pendingRuntimeRefresh, setPendingRuntimeRefresh] = useState(false);
 
   useEffect(() => {
     setFieldState(buildFieldState(config.ui_hints, config.current_value));
@@ -115,6 +116,12 @@ export default function SettingsPage() {
   const gatewayMasterKeyEnv =
     gatewayMasterKeyEnvInput.trim() || DEFAULT_GATEWAY_MASTER_KEY_ENV;
 
+  useEffect(() => {
+    if (activeProviders.length === 0) {
+      setPendingRuntimeRefresh(false);
+    }
+  }, [activeProviders.length]);
+
   function buildManagedProviderDraft(secretStateOverride?: Record<string, string>) {
     const nextSecretValues = {
       ...secretValues,
@@ -167,6 +174,34 @@ export default function SettingsPage() {
     };
   }
 
+  function draftRequiresRuntimeRefresh(draft: {
+    config: Record<string, unknown>;
+    secret_values: Record<string, string>;
+  }) {
+    const currentManagedState = {
+      runtime: {
+        llm_mode: getValueAtPath(config.current_value, "runtime.llm_mode") ?? "",
+        litellm_proxy_url: getValueAtPath(config.current_value, "runtime.litellm_proxy_url") ?? "",
+        master_key_env: getValueAtPath(config.current_value, "runtime.master_key_env") ?? "",
+      },
+      providers: getValueAtPath(config.current_value, "providers") ?? [],
+      model_aliases: getValueAtPath(config.current_value, "model_aliases") ?? {},
+    };
+    const nextManagedState = {
+      runtime: {
+        llm_mode: getValueAtPath(draft.config, "runtime.llm_mode") ?? "",
+        litellm_proxy_url: getValueAtPath(draft.config, "runtime.litellm_proxy_url") ?? "",
+        master_key_env: getValueAtPath(draft.config, "runtime.master_key_env") ?? "",
+      },
+      providers: getValueAtPath(draft.config, "providers") ?? [],
+      model_aliases: getValueAtPath(draft.config, "model_aliases") ?? {},
+    };
+    if (JSON.stringify(currentManagedState) !== JSON.stringify(nextManagedState)) {
+      return true;
+    }
+    return Object.keys(draft.secret_values).length > 0;
+  }
+
   async function handleReview() {
     const draft = buildSetupDraft();
     if (!draft) {
@@ -184,6 +219,7 @@ export default function SettingsPage() {
     if (!draft) {
       return;
     }
+    const requiresRuntimeRefresh = draftRequiresRuntimeRefresh(draft);
     const reviewResult = await submitAction("setup.review", { draft });
     const nextReview = reviewResult?.data.review;
     if (nextReview && typeof nextReview === "object" && !Array.isArray(nextReview)) {
@@ -200,6 +236,7 @@ export default function SettingsPage() {
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
     }
+    setPendingRuntimeRefresh(requiresRuntimeRefresh);
   }
 
   async function handleOpenAIOAuthConnect() {
@@ -222,6 +259,7 @@ export default function SettingsPage() {
       profile_name: "openai-codex-default",
     });
     if (result) {
+      setPendingRuntimeRefresh(false);
       setSecretValues((state) => {
         const next = { ...state };
         delete next[envName];
@@ -261,6 +299,9 @@ export default function SettingsPage() {
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
+    }
+    if (result) {
+      setPendingRuntimeRefresh(false);
     }
   }
 
@@ -625,6 +666,20 @@ export default function SettingsPage() {
               </span>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">
+              {pendingRuntimeRefresh ? (
+                <div className="wb-inline-banner is-warning" role="alert">
+                  <strong>配置已保存，但当前连接尚未刷新</strong>
+                  <span>要让刚保存的 Provider、模型别名和密钥立即生效，请再执行一次连接刷新。</span>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-secondary"
+                    onClick={() => void handleQuickConnect()}
+                    disabled={connectBusy}
+                  >
+                    立即刷新连接
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 className="wb-button wb-button-primary"

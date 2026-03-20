@@ -639,6 +639,86 @@ describe("SettingsPage", () => {
     expect(screen.getAllByRole("button", { name: "检查配置" }).length).toBeGreaterThan(0);
   });
 
+  it("保存包含 Provider 的配置后提示用户刷新连接", async () => {
+    const user = userEvent.setup();
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "openrouter",
+        name: "OpenRouter",
+        auth_type: "api_key",
+        api_key_env: "OPENROUTER_API_KEY",
+        enabled: true,
+      },
+    ] as unknown as never[];
+    snapshot.resources.config.current_value.model_aliases = {
+      main: {
+        provider: "openrouter",
+        model: "openrouter/auto",
+        description: "主模型",
+      },
+    } as never;
+    snapshot.resources.setup_governance.review = {
+      ...snapshot.resources.setup_governance.review,
+      ready: true,
+      blocking_reasons: [],
+      next_actions: [],
+    };
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(async (actionId: string) => {
+        if (actionId === "setup.review") {
+          return {
+            data: {
+              review: {
+                ...snapshot.resources.setup_governance.review,
+                ready: true,
+              },
+            },
+          };
+        }
+        if (actionId === "setup.apply") {
+          return {
+            data: {
+              review: snapshot.resources.setup_governance.review,
+            },
+          };
+        }
+        if (actionId === "setup.quick_connect") {
+          return {
+            data: {
+              review: snapshot.resources.setup_governance.review,
+            },
+          };
+        }
+        return null;
+      }),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    const providerNameInput = screen.getByDisplayValue("OpenRouter");
+    await user.clear(providerNameInput);
+    await user.type(providerNameInput, "OpenRouter Updated");
+
+    await user.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
+
+    expect(
+      await screen.findByText("配置已保存，但当前连接尚未刷新")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "立即刷新连接" }));
+
+    await waitFor(() =>
+      expect(mockWorkbench.submitAction).toHaveBeenCalledWith("setup.quick_connect", expect.any(Object))
+    );
+  });
+
   it("Memory 区块展示基础状态卡片而非兼容接入表单", () => {
     const snapshot = buildSettingsSnapshot();
     snapshot.resources.config.current_value.memory.backend_mode = "memu";

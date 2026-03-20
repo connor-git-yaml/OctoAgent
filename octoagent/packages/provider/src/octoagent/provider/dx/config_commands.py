@@ -44,6 +44,8 @@ from .config_wizard import (
 from .console_output import create_console
 from .litellm_generator import build_litellm_config_dict, generate_litellm_config
 from .project_migration import ProjectWorkspaceMigrationService
+from .runtime_activation import RuntimeActivationService, RuntimeActivationSummary
+from .update_service import UpdateService
 
 console = create_console()
 err_console = create_console(stderr=True)
@@ -158,10 +160,45 @@ def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
             f"  基于 {len(enabled_providers)} 个 enabled Provider"
             + (f"（{', '.join(enabled_providers)}）" if enabled_providers else "")
         )
-        console.print("  说明: 这一步只会重新生成 litellm-config.yaml，不会自动重启 runtime。")
+        console.print(
+            "  说明: 这一步只会重新生成 litellm-config.yaml，不会自动重启 runtime。"
+            " 如需立即生效，请追加 --activate。"
+        )
     except Exception as exc:
         err_console.print(f"[yellow]警告：同步 litellm-config.yaml 失败：{exc}[/yellow]")
         err_console.print("  请稍后手动运行 octo config sync")
+
+
+def _print_runtime_activation(summary: RuntimeActivationSummary) -> None:
+    console.print("[green]已刷新真实模型运行时[/green]")
+    console.print(f"  proxy_url:         {summary.proxy_url}")
+    console.print(f"  source_root:       {summary.source_root}")
+    console.print(
+        "  managed_runtime:   "
+        + ("yes" if summary.managed_runtime else "no")
+    )
+
+
+def _activate_runtime_for_config(project_root: Path, config: OctoAgentConfig) -> None:
+    enabled_providers = [provider.id for provider in config.providers if provider.enabled]
+    if not enabled_providers:
+        console.print("[yellow]当前没有 enabled Provider，已跳过 runtime 激活。[/yellow]")
+        return
+
+    async def _run() -> None:
+        summary = await RuntimeActivationService(project_root).start_proxy()
+        _print_runtime_activation(summary)
+        if summary.managed_runtime:
+            restart = await UpdateService(project_root).restart(trigger_source="cli")
+            console.print("[green]已自动重启托管实例[/green]")
+            console.print(
+                f"  restart_status:    {restart.overall_status or '-'}"
+            )
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        raise click.ClickException(f"激活真实模型运行时失败：{exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +425,7 @@ def provider_group() -> None:
 @click.option("--base-url", default=None, help="自定义 API Base URL（如 https://api.siliconflow.cn/v1）")
 @click.option("--clear-base-url", is_flag=True, default=False, help="清空已有的 API Base URL")
 @click.option("--no-credential", is_flag=True, default=False, help="仅注册 Provider，不写 API Key")
+@click.option("--activate", is_flag=True, default=False, help="保存后立即刷新真实模型运行时")
 @click.pass_context
 def provider_add(
     ctx: click.Context,
@@ -398,6 +436,7 @@ def provider_add(
     base_url: str | None,
     clear_base_url: bool,
     no_credential: bool,
+    activate: bool,
 ) -> None:
     """增量添加 Provider（FR-010）"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
@@ -421,7 +460,11 @@ def provider_add(
 
     # 混合模式：CLI 参数优先，缺失时交互补全（Q6）
     if auth_type is None:
-        default_auth_type = existing_provider.auth_type if existing_provider is not None else "api_key"
+        default_auth_type = (
+            existing_provider.auth_type
+            if existing_provider is not None
+            else "api_key"
+        )
         if sys.stdin.isatty():
             auth_type = click.prompt(
                 "认证类型",
@@ -537,6 +580,8 @@ def provider_add(
 
     # 自动触发 sync（FR-007）
     _auto_sync(updated, project_root)
+    if activate:
+        _activate_runtime_for_config(project_root, updated)
 
 
 @provider_group.command("list")
@@ -576,8 +621,9 @@ def provider_list(ctx: click.Context) -> None:
 @provider_group.command("disable")
 @click.argument("provider_id")
 @click.option("--yes", is_flag=True, default=False, help="跳过确认提示")
+@click.option("--activate", is_flag=True, default=False, help="保存后立即刷新真实模型运行时")
 @click.pass_context
-def provider_disable(ctx: click.Context, provider_id: str, yes: bool) -> None:
+def provider_disable(ctx: click.Context, provider_id: str, yes: bool, activate: bool) -> None:
     """禁用（不删除）指定 Provider"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
@@ -610,6 +656,8 @@ def provider_disable(ctx: click.Context, provider_id: str, yes: bool) -> None:
         save_config(updated, project_root)
         console.print(f"[green]Provider '{provider_id}' 已禁用。[/green]")
         _auto_sync(updated, project_root)
+        if activate:
+            _activate_runtime_for_config(project_root, updated)
     except ProviderNotFoundError as exc:
         err_console.print(f"[red]错误：{exc}[/red]")
         raise SystemExit(1) from exc
