@@ -18,6 +18,7 @@ from octoagent.core.models import (
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
+    AgentSessionStatus,
     AgentSessionTurn,
     AgentSessionTurnKind,
     BootstrapSession,
@@ -790,8 +791,34 @@ class TestControlPlaneApi:
         assert payload["resources"]["skill_governance"]["resource_type"] == "skill_governance"
         assert payload["resources"]["setup_governance"]["resource_type"] == "setup_governance"
         sessions = payload["resources"]["sessions"]["sessions"]
-        assert len(sessions) == 1
-        assert sessions[0]["latest_message_summary"] == "control plane hello"
+        assert len(sessions) >= 2
+        assert any(
+            item["runtime_kind"] == AgentSessionKind.BUTLER_MAIN.value and item["task_id"] == ""
+            for item in sessions
+        )
+        task_session = next(
+            (item for item in sessions if item["latest_message_summary"] == "control plane hello"),
+            None,
+        )
+        assert task_session is not None
+        assert task_session["task_id"]
+        default_session = next(
+            (
+                item
+                for item in sessions
+                if item["project_id"] == "project-default"
+                and item["runtime_kind"] == AgentSessionKind.BUTLER_MAIN.value
+                and item["task_id"] == ""
+            ),
+            None,
+        )
+        assert default_session is not None
+        assert default_session["channel"] == "web"
+        assert default_session["title"] == "Default Project"
+        assert default_session["session_owner_profile_id"] in {
+            "agent-profile-default",
+            "agent-profile-project-default",
+        }
         capability_pack = payload["resources"]["capability_pack"]
         assert capability_pack["resource_type"] == "capability_pack"
         assert capability_pack["pack"]["tools"]
@@ -3136,9 +3163,44 @@ class TestControlPlaneApi:
         assert sessions_resp.status_code == 200
         payload = sessions_resp.json()
         session_items = payload["sessions"]
-        assert len(session_items) == 1
+        assert len(session_items) >= 2
         assert all(item["task_id"] != "ops-control-plane" for item in session_items)
         assert all(item["title"] != "Control Plane Audit" for item in session_items)
+        assert any(
+            item["runtime_kind"] == AgentSessionKind.BUTLER_MAIN.value and item["task_id"] == ""
+            for item in session_items
+        )
+
+    async def test_session_projection_includes_default_butler_session_without_task(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        default_item = next(
+            (
+                item
+                for item in payload["sessions"]
+                if item["runtime_kind"] == AgentSessionKind.BUTLER_MAIN.value
+                and item["task_id"] == ""
+            ),
+            None,
+        )
+        assert default_item is not None
+        assert default_item["title"] == "Default Project"
+        assert default_item["channel"] == "web"
+        assert default_item["thread_id"]
+        assert default_item["session_id"] == build_projected_session_id(
+            thread_id=default_item["thread_id"],
+            surface="web",
+            scope_id=(
+                f"workspace:{default_item['workspace_id']}:chat:web:{default_item['thread_id']}"
+            ),
+            project_id=default_item["project_id"],
+            workspace_id=default_item["workspace_id"],
+        )
 
     async def test_session_projection_scopes_items_to_selected_project(
         self,
@@ -3624,6 +3686,156 @@ class TestControlPlaneApi:
             and entry["runtime_kind"] != AgentSessionKind.WORKER_INTERNAL.value
             for entry in payload["sessions"]
         )
+
+    async def test_session_create_with_project_opens_existing_default_project_session(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+        existing_session = await store_group.agent_context_store.get_active_session_for_project(
+            project.project_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+        )
+        assert existing_session is not None
+        await store_group.agent_context_store.save_agent_session(
+            existing_session.model_copy(
+                update={
+                    "status": AgentSessionStatus.CLOSED,
+                    "closed_at": datetime.now(tz=UTC),
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+
+        profile_id = "worker-profile-project-default-octoagent"
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name="OctoAgent",
+                summary="default project owner session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await store_group.conn.commit()
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.create_with_project",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": profile_id,
+                    "project_name": "Default",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SESSION_OPENED_EXISTING_PROJECT"
+        assert result["data"]["agent_session_id"] != existing_session.agent_session_id
+        assert result["data"]["project_id"] == project.project_id
+        assert result["data"]["workspace_id"] == workspace.workspace_id
+        reopened_session = await store_group.agent_context_store.get_active_session_for_project(
+            project.project_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+        )
+        assert reopened_session is not None
+        assert result["data"]["agent_session_id"] == reopened_session.agent_session_id
+        assert result["data"]["thread_id"] == (
+            reopened_session.thread_id
+            or reopened_session.legacy_session_id
+            or reopened_session.agent_session_id
+        )
+
+    async def test_session_create_with_project_self_heals_stale_default_agent_profile_id(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+
+        existing_session = await store_group.agent_context_store.get_active_session_for_project(
+            project.project_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+        )
+        assert existing_session is not None
+        await store_group.agent_context_store.save_agent_session(
+            existing_session.model_copy(
+                update={
+                    "status": AgentSessionStatus.CLOSED,
+                    "closed_at": datetime.now(tz=UTC),
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        await store_group.project_store.save_project(
+            project.model_copy(
+                update={
+                    "default_agent_profile_id": "worker-profile-stale-default",
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+
+        profile_id = "worker-profile-project-default-octoagent"
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name="OctoAgent",
+                summary="default project owner session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await store_group.conn.commit()
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.create_with_project",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": profile_id,
+                    "project_name": "Default",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SESSION_OPENED_EXISTING_PROJECT"
+        refreshed_project = await store_group.project_store.get_default_project()
+        assert refreshed_project is not None
+        assert refreshed_project.default_agent_profile_id == "agent-profile-project-default"
+        reopened_session = await store_group.agent_context_store.get_active_session_for_project(
+            project.project_id,
+            kind=AgentSessionKind.BUTLER_MAIN,
+        )
+        assert reopened_session is not None
+        assert result["data"]["agent_session_id"] == reopened_session.agent_session_id
 
     async def test_direct_session_first_message_recovers_owner_profile_from_session_anchor(
         self,
@@ -4154,6 +4366,15 @@ class TestControlPlaneApi:
         )
         await store_group.conn.commit()
 
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        projected_session = next(
+            (item for item in payload["sessions"] if item["task_id"] == task_id),
+            None,
+        )
+        assert projected_session is not None
+
         reset_resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -4165,7 +4386,7 @@ class TestControlPlaneApi:
                     "actor_label": "Owner",
                 },
                 "params": {
-                    "session_id": "thread-reset-legacy",
+                    "session_id": projected_session["session_id"],
                 },
             },
         )

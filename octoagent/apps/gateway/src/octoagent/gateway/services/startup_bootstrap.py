@@ -59,7 +59,7 @@ async def ensure_startup_records(
     await _backfill_primary_agent_id(store_group, project)
 
     # 确保 Butler 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
-    await _ensure_butler_runtime_and_session(store_group, project, workspace, agent_profile)
+    await ensure_butler_runtime_and_session(store_group, project, workspace, agent_profile)
 
     await store_group.conn.commit()
 
@@ -107,21 +107,32 @@ async def _ensure_agent_profile(
         include_project_agent=False,
     )
 
+    canonical_profile_id = f"agent-profile-{project.project_id}"
+    project_default_profile_id = str(project.default_agent_profile_id or "").strip()
+
     # 如果 project 上已经指定了 default_agent_profile_id，先查它
-    if project.default_agent_profile_id:
+    if project_default_profile_id:
         existing = await store_group.agent_context_store.get_agent_profile(
-            project.default_agent_profile_id
+            project_default_profile_id
         )
         if existing is not None:
             return existing
 
-    profile_id = f"agent-profile-{project.project_id}"
-    existing = await store_group.agent_context_store.get_agent_profile(profile_id)
+    existing = await store_group.agent_context_store.get_agent_profile(canonical_profile_id)
     if existing is not None:
+        if project_default_profile_id != existing.profile_id:
+            await store_group.project_store.save_project(
+                project.model_copy(
+                    update={
+                        "default_agent_profile_id": existing.profile_id,
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
         return existing
 
     profile = AgentProfile(
-        profile_id=profile_id,
+        profile_id=canonical_profile_id,
         scope=AgentProfileScope.PROJECT,
         project_id=project.project_id,
         name=f"{project.name} Butler",
@@ -139,8 +150,8 @@ async def _ensure_agent_profile(
     )
     await store_group.agent_context_store.save_agent_profile(profile)
 
-    # 回写 project 的 default_agent_profile_id
-    if not project.default_agent_profile_id:
+    # 回写 project 的 default_agent_profile_id（包含脏旧值自愈）
+    if project_default_profile_id != profile.profile_id:
         await store_group.project_store.save_project(
             project.model_copy(
                 update={
@@ -279,7 +290,7 @@ async def _backfill_primary_agent_id(
     )
 
 
-async def _ensure_butler_runtime_and_session(
+async def ensure_butler_runtime_and_session(
     store_group: StoreGroup,
     project: Project,
     workspace: Workspace | None,
@@ -331,7 +342,57 @@ async def _ensure_butler_runtime_and_session(
             status=AgentSessionStatus.ACTIVE,
             project_id=project.project_id,
             workspace_id=workspace_id,
-            surface="chat",
+            surface="web",
+            thread_id=session_id,
+            legacy_session_id=session_id,
         )
         await store_group.agent_context_store.save_agent_session(session)
         log.info("butler_session_created", session_id=session_id, project_id=project.project_id)
+    else:
+        needs_backfill = (
+            existing_session.surface not in {"web", "chat"}
+            or not str(existing_session.thread_id or "").strip()
+            or not str(existing_session.legacy_session_id or "").strip()
+        )
+        if needs_backfill:
+            session_anchor = str(existing_session.thread_id or existing_session.agent_session_id).strip()
+            await store_group.agent_context_store.save_agent_session(
+                existing_session.model_copy(
+                    update={
+                        "surface": "web",
+                        "thread_id": session_anchor,
+                        "legacy_session_id": session_anchor,
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
+
+
+async def ensure_default_project_agent_profile(
+    store_group: StoreGroup,
+    project: Project,
+) -> AgentProfile | None:
+    """解析 default project 的 canonical agent profile，并自愈脏 default_agent_profile_id。"""
+    project_default_profile_id = str(project.default_agent_profile_id or "").strip()
+    canonical_profile_id = f"agent-profile-{project.project_id}"
+    candidate_ids: list[str] = []
+    if project_default_profile_id:
+        candidate_ids.append(project_default_profile_id)
+    if canonical_profile_id not in candidate_ids:
+        candidate_ids.append(canonical_profile_id)
+
+    for candidate_id in candidate_ids:
+        profile = await store_group.agent_context_store.get_agent_profile(candidate_id)
+        if profile is None:
+            continue
+        if project_default_profile_id != profile.profile_id:
+            await store_group.project_store.save_project(
+                project.model_copy(
+                    update={
+                        "default_agent_profile_id": profile.profile_id,
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+            )
+        return profile
+    return None

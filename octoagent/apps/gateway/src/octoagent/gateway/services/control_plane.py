@@ -188,6 +188,10 @@ from .connection_metadata import (
     resolve_turn_executor_kind,
 )
 from .mcp_registry import McpServerConfig
+from .startup_bootstrap import (
+    ensure_butler_runtime_and_session,
+    ensure_default_project_agent_profile,
+)
 from .task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
@@ -1019,7 +1023,10 @@ class ControlPlaneService:
                 AgentSessionKind.SUBAGENT_INTERNAL,
             }:
                 continue
-            if agent_sess.kind is not AgentSessionKind.DIRECT_WORKER:
+            if agent_sess.kind not in {
+                AgentSessionKind.DIRECT_WORKER,
+                AgentSessionKind.BUTLER_MAIN,
+            }:
                 continue
             if not self._matches_selected_scope(
                 item_project_id=agent_sess.project_id,
@@ -5682,6 +5689,62 @@ class ControlPlaneService:
 
         existing_project = await self._stores.project_store.get_project_by_slug(slug)
         if existing_project is not None:
+            workspace = await self._stores.project_store.get_primary_workspace(
+                existing_project.project_id
+            )
+            existing_session = await self._ensure_existing_project_session(
+                project=existing_project,
+                workspace=workspace,
+            )
+            if existing_session is not None:
+                session_anchor = str(
+                    existing_session.thread_id
+                    or existing_session.legacy_session_id
+                    or existing_session.agent_session_id
+                ).strip()
+                projected_session_id = build_projected_session_id(
+                    thread_id=session_anchor,
+                    surface=(
+                        "web"
+                        if existing_session.surface in {"", "chat", "web"}
+                        else existing_session.surface
+                    ),
+                    scope_id=(
+                        f"workspace:{workspace.workspace_id}:chat:web:{session_anchor}"
+                        if workspace is not None and session_anchor
+                        else ""
+                    ),
+                    project_id=existing_project.project_id,
+                    workspace_id=workspace.workspace_id if workspace is not None else "",
+                )
+                existing_runtime = await self._stores.agent_context_store.get_agent_runtime(
+                    existing_session.agent_runtime_id
+                )
+                existing_owner_profile_id = ""
+                if existing_runtime is not None:
+                    existing_owner_profile_id = str(
+                        existing_runtime.worker_profile_id or existing_runtime.agent_profile_id or ""
+                    ).strip()
+                return self._completed_result(
+                    request=request,
+                    code="SESSION_OPENED_EXISTING_PROJECT",
+                    message=f"已打开现有对话「{existing_project.name}」",
+                    data={
+                        "session_id": projected_session_id,
+                        "agent_session_id": existing_session.agent_session_id,
+                        "thread_id": session_anchor,
+                        "project_id": existing_project.project_id,
+                        "workspace_id": workspace.workspace_id if workspace is not None else "",
+                        "agent_profile_id": existing_owner_profile_id or worker_profile_id,
+                    },
+                    resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+                    target_refs=[
+                        ControlPlaneTargetRef(
+                            target_type="session",
+                            target_id=projected_session_id,
+                        ),
+                    ],
+                )
             return self._rejected_result(
                 request=request,
                 code="SESSION_CREATE_DUPLICATE_NAME",
@@ -5823,6 +5886,35 @@ class ControlPlaneService:
                 ControlPlaneTargetRef(target_type="session", target_id=projected_session_id),
             ],
         )
+
+    async def _ensure_existing_project_session(
+        self,
+        *,
+        project: Project,
+        workspace: Workspace | None,
+    ) -> AgentSession | None:
+        existing_session = await self._stores.agent_context_store.get_active_session_for_project(
+            project.project_id
+        )
+        if existing_session is not None:
+            return existing_session
+
+        if project.is_default:
+            agent_profile = await ensure_default_project_agent_profile(self._stores, project)
+            if agent_profile is not None:
+                await ensure_butler_runtime_and_session(
+                    self._stores,
+                    project,
+                    workspace,
+                    agent_profile,
+                )
+                await self._stores.conn.commit()
+                return await self._stores.agent_context_store.get_active_session_for_project(
+                    project.project_id,
+                    kind=AgentSessionKind.BUTLER_MAIN,
+                )
+
+        return None
 
     async def _resolve_direct_session_worker_profile(
         self,
