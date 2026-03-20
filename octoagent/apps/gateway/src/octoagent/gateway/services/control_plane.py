@@ -1623,8 +1623,23 @@ class ControlPlaneService:
                 )
             )
 
+        # 收集所有项目的 default_agent_profile_id，标记每个 profile 是否为其所属项目的默认
+        all_projects = await self._stores.project_store.list_projects()
+        default_profile_id_set: set[str] = set()
+        primary_default_profile_id = ""
+        for project in all_projects:
+            pid = str(project.default_agent_profile_id or "").strip()
+            if pid:
+                default_profile_id_set.add(pid)
+                if project.is_default:
+                    primary_default_profile_id = pid
+        for item in items:
+            if item.profile_id in default_profile_id_set:
+                item.is_default_for_project = True
+        # summary 中的 default_profile_id 优先用默认项目的，退化到 selected_project
         default_profile_id = (
-            selected_project.default_agent_profile_id if selected_project is not None else ""
+            primary_default_profile_id
+            or (selected_project.default_agent_profile_id if selected_project is not None else "")
         )
         default_profile = next(
             (item for item in items if item.profile_id == default_profile_id),

@@ -395,7 +395,11 @@ export function deriveAgentManagementView(
 
   const projectAgents = currentProjectProfiles
     .filter((profile) => profile.profile_id !== mainProfile?.profile_id)
-    .map((profile) => mapProfileToCard(profile, selector.available_projects, false))
+    .map((profile) => mapProfileToCard(
+      profile,
+      selector.available_projects,
+      Boolean(profile.is_default_for_project),
+    ))
     .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
 
   const builtinTemplates = builtinProfiles.map((profile) => ({

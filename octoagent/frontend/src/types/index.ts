@@ -745,6 +745,7 @@ export interface WorkerProfileItem {
   summary: string;
   static_config: WorkerProfileStaticConfig;
   dynamic_context: WorkerProfileDynamicContext;
+  is_default_for_project?: boolean;
   behavior_system?: AgentProfileItem["behavior_system"];
   warnings: string[];
   capabilities: ControlPlaneCapability[];

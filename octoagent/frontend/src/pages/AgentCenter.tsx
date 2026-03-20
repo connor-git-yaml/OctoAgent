@@ -195,8 +195,9 @@ function renderAgentCard(
         </div>
       </div>
 
-      {/* 元信息：模型 + 权限 + 进行中 */}
+      {/* 元信息：项目 + 模型 + 进行中 */}
       <div className="wb-agent-card-meta">
+        {agent.projectName ? <span>{agent.projectName}</span> : null}
         <span>模型 {agent.modelAlias}</span>
         {agent.activeWorkCount > 0 && <span>进行中 {agent.activeWorkCount}</span>}
       </div>
