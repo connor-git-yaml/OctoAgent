@@ -46,6 +46,7 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     Task,
+    TurnExecutorKind,
     WorkerProfile,
     WorkerProfileStatus,
     Workspace,
@@ -81,7 +82,12 @@ from .butler_behavior import (
     resolve_behavior_pack,
 )
 from octoagent.core.behavior_workspace import BehaviorLoadProfile
-from .connection_metadata import summarize_control_metadata_for_prompt
+from .connection_metadata import (
+    resolve_delegation_target_profile_id,
+    resolve_session_owner_profile_id,
+    resolve_turn_executor_kind,
+    summarize_control_metadata_for_prompt,
+)
 from .context_budget import BudgetAllocation
 from .context_compaction import (
     CompiledTaskContext,
@@ -920,14 +926,16 @@ class AgentContextService:
             runtime_context.model_dump(mode="json") if runtime_context is not None else {}
         )
         runtime_extra = runtime_context.metadata if runtime_context is not None else {}
-        requested_worker_profile_id = str(
-            dispatch_metadata.get("requested_worker_profile_id", "")
-        ).strip()
+        requested_worker_profile_id = resolve_delegation_target_profile_id(dispatch_metadata)
+        turn_executor_kind = (
+            runtime_context.turn_executor_kind if runtime_context is not None else None
+        ) or resolve_turn_executor_kind(dispatch_metadata)
         is_worker_request = bool(
             requested_worker_profile_id
             or str(runtime_extra.get("parent_agent_session_id", "")).strip()
             or str(dispatch_metadata.get("parent_agent_session_id", "")).strip()
             or str(dispatch_metadata.get("target_agent_session_id", "")).strip()
+            or turn_executor_kind in {TurnExecutorKind.WORKER, TurnExecutorKind.SUBAGENT}
         )
         request_kind = (
             ContextRequestKind.WORKER
@@ -939,9 +947,18 @@ class AgentContextService:
             )
         )
         requested_agent_profile_id = (
-            runtime_context.agent_profile_id
-            if runtime_context is not None and runtime_context.agent_profile_id
-            else dispatch_metadata.get("agent_profile_id") or None
+            (
+                runtime_context.session_owner_profile_id
+                if runtime_context is not None and runtime_context.session_owner_profile_id
+                else ""
+            )
+            or (
+                runtime_context.agent_profile_id
+                if runtime_context is not None and runtime_context.agent_profile_id
+                else ""
+            )
+            or resolve_session_owner_profile_id(dispatch_metadata)
+            or None
         )
         if is_worker_request and requested_worker_profile_id:
             requested_agent_profile_id = requested_worker_profile_id
@@ -2307,14 +2324,18 @@ class AgentContextService:
 
     @staticmethod
     def _resolve_agent_runtime_role(request: ContextResolveRequest) -> AgentRuntimeRole:
-        requested_worker_profile_id = str(
-            request.delegation_metadata.get("requested_worker_profile_id", "")
-        ).strip()
+        requested_worker_profile_id = resolve_delegation_target_profile_id(
+            request.delegation_metadata
+        )
+        turn_executor_kind = resolve_turn_executor_kind(request.runtime_metadata) or (
+            resolve_turn_executor_kind(request.delegation_metadata)
+        )
         if (
             request.request_kind is ContextRequestKind.WORKER
             or request.request_kind is ContextRequestKind.WORK
             or request.work_id
             or requested_worker_profile_id
+            or turn_executor_kind in {TurnExecutorKind.WORKER, TurnExecutorKind.SUBAGENT}
         ):
             return AgentRuntimeRole.WORKER
         return AgentRuntimeRole.BUTLER
@@ -2382,8 +2403,12 @@ class AgentContextService:
         project_id = project.project_id if project is not None else ""
         workspace_id = workspace.workspace_id if workspace is not None else ""
         worker_profile_id = str(
-            request.delegation_metadata.get("requested_worker_profile_id", "")
+            resolve_delegation_target_profile_id(request.delegation_metadata)
         ).strip()
+        if not worker_profile_id and role is AgentRuntimeRole.WORKER:
+            worker_profile_id = str(
+                agent_profile.metadata.get("source_worker_profile_id", "")
+            ).strip()
         worker_capability = (
             str(request.runtime_metadata.get("worker_capability", "")).strip()
             or str(request.delegation_metadata.get("selected_worker_type", "")).strip()

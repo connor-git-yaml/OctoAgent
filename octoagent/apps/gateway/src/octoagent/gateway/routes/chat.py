@@ -15,12 +15,20 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from octoagent.core.models import EventType, RuntimeControlContext
+from octoagent.core.models import (
+    AgentSessionKind,
+    EventType,
+    RuntimeControlContext,
+    TurnExecutorKind,
+)
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
 from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 
 from ..deps import get_store_group
-from ..services.connection_metadata import control_metadata_from_payload
+from ..services.connection_metadata import (
+    control_metadata_from_payload,
+    resolve_explicit_session_owner_profile_id,
+)
 from ..services.runtime_control import RUNTIME_CONTEXT_JSON_KEY, encode_runtime_context
 
 logger = logging.getLogger(__name__)
@@ -144,7 +152,38 @@ async def _resolve_chat_scope_snapshot(
     )
 
 
-async def _resolve_session_agent_profile_id(store_group, task_id: str) -> str:
+async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
+    task = await store_group.task_store.get_task(task_id)
+    anchored_owner_profile_id = ""
+    if task is not None:
+        workspace = await store_group.project_store.resolve_workspace_for_scope(task.scope_id)
+        session_candidates = await store_group.agent_context_store.list_agent_sessions(
+            legacy_session_id=task.thread_id,
+            project_id=workspace.project_id if workspace is not None else None,
+            workspace_id=workspace.workspace_id if workspace is not None else None,
+            limit=8,
+        )
+        if not session_candidates and workspace is not None:
+            session_candidates = await store_group.agent_context_store.list_agent_sessions(
+                legacy_session_id=task.thread_id,
+                limit=8,
+            )
+        for session in session_candidates:
+            runtime = await store_group.agent_context_store.get_agent_runtime(
+                session.agent_runtime_id
+            )
+            if runtime is None:
+                continue
+            profile_id = str(
+                runtime.worker_profile_id or runtime.agent_profile_id or ""
+            ).strip()
+            if not profile_id:
+                continue
+            if session.kind is AgentSessionKind.DIRECT_WORKER:
+                return profile_id
+            if not anchored_owner_profile_id and session.kind is AgentSessionKind.BUTLER_MAIN:
+                anchored_owner_profile_id = profile_id
+
     events = await store_group.event_store.get_events_for_task(task_id)
     for event in reversed(events):
         if event.type is not EventType.USER_MESSAGE:
@@ -153,10 +192,16 @@ async def _resolve_session_agent_profile_id(store_group, task_id: str) -> str:
         if not isinstance(payload, dict):
             continue
         control = control_metadata_from_payload(payload)
-        value = str(control.get("agent_profile_id", "")).strip()
-        if value:
-            return value
-    return ""
+        explicit_owner = resolve_explicit_session_owner_profile_id(control)
+        if explicit_owner:
+            return explicit_owner
+        legacy_owner = str(control.get("agent_profile_id", "")).strip()
+        if not legacy_owner:
+            continue
+        if await store_group.agent_context_store.get_worker_profile(legacy_owner):
+            continue
+        return legacy_owner
+    return anchored_owner_profile_id
 
 
 async def _resolve_profile_model_alias(store_group, profile_id: str) -> str:
@@ -175,6 +220,18 @@ async def _resolve_profile_model_alias(store_group, profile_id: str) -> str:
     return ""
 
 
+async def _resolve_owner_turn_executor_kind(store_group, profile_id: str) -> TurnExecutorKind:
+    resolved_profile_id = str(profile_id or "").strip()
+    if not resolved_profile_id:
+        return TurnExecutorKind.SELF
+    worker_profile = await store_group.agent_context_store.get_worker_profile(
+        resolved_profile_id
+    )
+    if worker_profile is not None:
+        return TurnExecutorKind.WORKER
+    return TurnExecutorKind.SELF
+
+
 def _build_workspace_scoped_chat_scope_id(
     *,
     workspace_id: str,
@@ -182,6 +239,63 @@ def _build_workspace_scoped_chat_scope_id(
     thread_id: str,
 ) -> str:
     return f"workspace:{workspace_id}:chat:{channel}:{thread_id}"
+
+
+def _parse_projected_session_ref(session_id: str) -> tuple[str, str, str]:
+    thread_id = ""
+    project_id = ""
+    workspace_id = ""
+    for segment in str(session_id or "").split("|"):
+        normalized = segment.strip()
+        if normalized.startswith("thread:") and not thread_id:
+            thread_id = normalized.removeprefix("thread:").strip()
+        elif normalized.startswith("project:") and not project_id:
+            project_id = normalized.removeprefix("project:").strip()
+        elif normalized.startswith("workspace:") and not workspace_id:
+            workspace_id = normalized.removeprefix("workspace:").strip()
+    return thread_id, project_id, workspace_id
+
+
+async def _resolve_session_owner_profile_id_from_session_ref(
+    store_group,
+    *,
+    session_id: str,
+    thread_id: str,
+    project_id: str,
+    workspace_id: str,
+) -> str:
+    resolved_thread_id = str(thread_id or "").strip()
+    resolved_project_id = str(project_id or "").strip()
+    resolved_workspace_id = str(workspace_id or "").strip()
+    if not resolved_thread_id:
+        resolved_thread_id, parsed_project_id, parsed_workspace_id = _parse_projected_session_ref(
+            session_id
+        )
+        resolved_project_id = resolved_project_id or parsed_project_id
+        resolved_workspace_id = resolved_workspace_id or parsed_workspace_id
+    if not resolved_thread_id:
+        return ""
+
+    session_candidates = await store_group.agent_context_store.list_agent_sessions(
+        legacy_session_id=resolved_thread_id,
+        project_id=resolved_project_id or None,
+        workspace_id=resolved_workspace_id or None,
+        limit=8,
+    )
+    if not session_candidates and (resolved_project_id or resolved_workspace_id):
+        session_candidates = await store_group.agent_context_store.list_agent_sessions(
+            legacy_session_id=resolved_thread_id,
+            limit=8,
+        )
+
+    for session in session_candidates:
+        runtime = await store_group.agent_context_store.get_agent_runtime(session.agent_runtime_id)
+        if runtime is None:
+            continue
+        profile_id = str(runtime.agent_profile_id or runtime.worker_profile_id or "").strip()
+        if profile_id:
+            return profile_id
+    return ""
 
 
 @router.post("/api/chat/send", response_model=ChatSendResponse)
@@ -196,6 +310,13 @@ async def send_chat_message(
     前端使用 EventSource 连接 stream_url 获取流式输出。
     """
     chat_control_metadata: dict[str, Any] = {}
+    requested_session_id = str(body.session_id or "").strip()
+    requested_thread_id = str(body.thread_id or "").strip()
+    parsed_thread_id, parsed_project_id, parsed_workspace_id = _parse_projected_session_ref(
+        requested_session_id
+    )
+    if not requested_thread_id:
+        requested_thread_id = parsed_thread_id
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
     new_conversation_token, project_id, workspace_id, requested_agent_profile_id = (
         await _resolve_chat_scope_snapshot(
@@ -204,19 +325,31 @@ async def send_chat_message(
             store_group,
         )
     )
+    project_id = project_id or parsed_project_id
+    workspace_id = workspace_id or parsed_workspace_id
     if body.task_id and not requested_agent_profile_id:
-        requested_agent_profile_id = await _resolve_session_agent_profile_id(
+        requested_agent_profile_id = await _resolve_session_owner_profile_id(
             store_group, body.task_id
+        )
+    elif not body.task_id and not requested_agent_profile_id:
+        requested_agent_profile_id = await _resolve_session_owner_profile_id_from_session_ref(
+            store_group,
+            session_id=requested_session_id,
+            thread_id=requested_thread_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
         )
     requested_model_alias = await _resolve_profile_model_alias(
         store_group,
         requested_agent_profile_id,
     )
+    owner_turn_executor_kind = await _resolve_owner_turn_executor_kind(
+        store_group,
+        requested_agent_profile_id,
+    )
     if requested_agent_profile_id:
+        chat_control_metadata["session_owner_profile_id"] = requested_agent_profile_id
         chat_control_metadata["agent_profile_id"] = requested_agent_profile_id
-        chat_control_metadata["requested_worker_profile_id"] = requested_agent_profile_id
-    requested_session_id = str(body.session_id or "").strip()
-    requested_thread_id = str(body.thread_id or "").strip()
     if requested_session_id:
         chat_control_metadata["session_id"] = requested_session_id
     if requested_thread_id:
@@ -280,6 +413,8 @@ async def send_chat_message(
                     thread_id=effective_thread_id,
                     project_id=project_id,
                     workspace_id=workspace_id,
+                    session_owner_profile_id=requested_agent_profile_id,
+                    turn_executor_kind=owner_turn_executor_kind,
                     agent_profile_id=requested_agent_profile_id,
                     metadata=(
                         {"new_conversation_token": new_conversation_token}
@@ -329,6 +464,8 @@ async def send_chat_message(
                         scope_id=existing_task.scope_id,
                         project_id=project_id,
                         workspace_id=workspace_id,
+                        session_owner_profile_id=requested_agent_profile_id,
+                        turn_executor_kind=owner_turn_executor_kind,
                         agent_profile_id=requested_agent_profile_id,
                     )
                 )

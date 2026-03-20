@@ -32,6 +32,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 | 049 | Implemented | Butler behavior workspace 与 agentic decision runtime 初版：少量显式 md、runtime hints、`ButlerDecision`、初始 Web/CLI 入口；其 scope 仍以 `system/project` 为起点 |
 | 055 | Implemented | 把 behavior workspace 重构为 `shared / agent / project / project-agent` 四层，改成 project-centered 目录；明确 behavior / memory / secrets / workspace 边界；加入 bootstrap 模板、默认会话 Agent 用户画像/名字/性格引导、`project_path_manifest`，并把 Web 行为入口从 Settings 迁到 Agents |
 | 052 | Implemented | tooling/MCP/skills 默认权限面放宽：trusted local `standard` baseline、MCP `auto_readonly`、skill `permission_mode=inherit`、`recommended_tools` 合同升级 |
+| 071 | Implemented | 拆开 `session owner / turn executor / delegation target / inherited context owner` 四层语义，收口 064 与 070 之间的编排冲突；明确主 Agent 可 `self / worker / subagent`，worker 仅可 `self / subagent` |
 
 ## 3. 各 Feature 边界
 
@@ -285,6 +286,24 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 - `Agents` 页已升级成真正的 `Behavior Center`
 - `Settings` 里的无效 behavior 区块已迁走
 - bootstrap 模板、默认会话 Agent 用户画像/名字/性格引导以及落点路由已形成正式 contract
+
+### Feature 071：Session Owner / Execution Target Separation
+
+状态：**Implemented**
+
+已落地：
+
+- `session owner / turn executor / delegation target / inherited context owner` 已拆成独立语义，不再混在 `agent_profile_id / requested_worker_profile_id` 里
+- `Profile + Project` 只决定“先和谁说话”，不再自动把会话 owner 提升成这一轮的执行 target
+- 默认主会话的 Butler direct execution 已重新稳定成立，不会再被 inherited worker profile 脏化绕开
+- direct non-main session 已成为真正的 owner-self 会话，不再先套一层伪 `worker_internal` 包装
+- 主 Agent 动作图已固定为 `self / delegate_to_worker / spawn_subagent`
+- worker 动作图已固定为 `self / spawn_subagent`，并已硬禁止 `worker -> worker`
+- 历史 `BUTLER_MAIN + worker profile` 污染会话已具备兼容标记、reset 提示和恢复策略
+- control plane / Chat / session projection 已能同时解释：
+  - 这条会话默认在和谁说话
+  - 这一轮是谁在执行
+  - 是否真的发生了委派
 
 ### Feature 051：Session-Native Agent Runtime & Recall Loop
 

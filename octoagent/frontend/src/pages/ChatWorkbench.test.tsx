@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatWorkbench from "./ChatWorkbench";
 
@@ -196,7 +196,7 @@ describe("ChatWorkbench", () => {
 
     await waitFor(() => {
       expect(sendMessage).toHaveBeenCalledWith("检查今天的备份情况", {
-        agentProfileId: undefined,
+        agentProfileId: "project-default:nas-guardian",
         sessionId: undefined,
         threadId: undefined,
       });
@@ -293,7 +293,7 @@ describe("ChatWorkbench", () => {
 
     await waitFor(() => {
       expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志", {
-        agentProfileId: undefined,
+        agentProfileId: "project-default:nas-guardian",
         sessionId: undefined,
         threadId: undefined,
       });
@@ -417,7 +417,7 @@ describe("ChatWorkbench", () => {
     // 头部标题显示新会话对应的项目名
     expect(screen.getByRole("heading", { name: "运维项目" })).toBeInTheDocument();
     // 副标题显示默认 Agent 名
-    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
+    expect(screen.getByText("对话：NAS 管家")).toBeInTheDocument();
   });
 
   it("显式开启专长 Agent 会话时，会明确提示下一条消息的直接入口", () => {
@@ -450,7 +450,7 @@ describe("ChatWorkbench", () => {
     );
 
     // 副标题显示 Research Root Agent
-    expect(screen.getByText("Research Root Agent")).toBeInTheDocument();
+    expect(screen.getByText("对话：Research Root Agent")).toBeInTheDocument();
     // placeholder 使用 Research Root Agent 而非默认 NAS 管家
     expect(
       screen.getByPlaceholderText("告诉 Research Root Agent 你现在要做什么")
@@ -463,6 +463,15 @@ describe("ChatWorkbench", () => {
     snapshot.resources.sessions.new_conversation_project_id = "project-fin";
     snapshot.resources.sessions.new_conversation_workspace_id = "workspace-fin";
     snapshot.resources.sessions.new_conversation_agent_profile_id = "worker-profile-finance";
+    snapshot.resources.worker_profiles.profiles.push({
+      profile_id: "worker-profile-finance",
+      name: "研究员小 A",
+      summary: "Finance worker session.",
+      static_config: {
+        tool_profile: "standard",
+      },
+      dynamic_context: {},
+    });
     snapshot.resources.sessions.sessions = [
       {
         session_id:
@@ -502,16 +511,18 @@ describe("ChatWorkbench", () => {
           "/chat/surface:web|scope:workspace:workspace-fin:chat:web:thread-fin|project:project-fin|workspace:workspace-fin|thread:thread-fin",
         ]}
       >
-        <ChatWorkbench />
+        <Routes>
+          <Route path="/chat/:sessionId" element={<ChatWorkbench />} />
+        </Routes>
       </MemoryRouter>
     );
 
     const latestUseChatStreamCall =
       useChatStreamMock.mock.calls[useChatStreamMock.mock.calls.length - 1] ?? [];
     const [, sessionScope] = latestUseChatStreamCall;
-    expect(sessionScope.newConversationToken).toBe("token-fin");
+    expect(sessionScope.newConversationToken).toBe("");
 
-    await userEvent.type(screen.getByPlaceholderText("告诉 NAS 管家 你现在要做什么"), "你好");
+    await userEvent.type(screen.getByPlaceholderText("告诉 研究员小 A 你现在要做什么"), "你好");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
     expect(sendMessage).toHaveBeenCalledWith("你好", {
@@ -580,8 +591,11 @@ describe("ChatWorkbench", () => {
 
     // 头部标题显示会话标题
     expect(screen.getByRole("heading", { name: "运维排障" })).toBeInTheDocument();
-    // 副标题显示 Agent 名
-    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
+    // 副标题区分会话 owner 与本轮执行语义
+    expect(screen.getByText("对话：NAS 管家")).toBeInTheDocument();
+    expect(
+      screen.getByText("正在与 NAS 管家 对话，当前由 NAS 管家 直接处理。")
+    ).toBeInTheDocument();
     // 正常消息渲染
     expect(screen.getByText("正在排查。")).toBeInTheDocument();
   });
@@ -624,8 +638,7 @@ describe("ChatWorkbench", () => {
     vi.useRealTimers();
   });
 
-  it("进入 Chat 时有可恢复会话会直接开始恢复", async () => {
-    // 组件不再展示选择界面，有可恢复会话时直接自动进入 continue 恢复流程
+  it("进入 Chat 时有可恢复会话会先让用户选择是否继续恢复", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -657,8 +670,50 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    // 直接进入恢复流程，不再先展示选择界面
-    expect(screen.getByText("正在恢复最近对话")).toBeInTheDocument();
+    expect(screen.getByText("继续最近会话，还是新开一条？")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续最近会话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
+  });
+
+  it("历史污染会话不会进入默认恢复候选", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-legacy-polluted",
+        thread_id: "thread-legacy-polluted",
+        task_id: "task-legacy-polluted",
+        title: "旧版污染会话",
+        latest_message_summary: "继续沿用旧版 worker profile 继承",
+        compatibility_flags: ["legacy_context_polluted"],
+        compatibility_message: "这条历史会话仍沿用旧版 owner/profile 继承语义。",
+        reset_recommended: true,
+      },
+    ];
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockImplementation((restoreTarget: { taskIds?: string[] } | null) => ({
+      messages: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn().mockResolvedValue(undefined),
+      streaming: false,
+      restoring: Boolean(restoreTarget?.taskIds?.length),
+      error: null,
+      taskId: null,
+    }));
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter>
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("继续最近会话，还是新开一条？")).not.toBeInTheDocument();
+    const latestUseChatStreamCall =
+      useChatStreamMock.mock.calls[useChatStreamMock.mock.calls.length - 1] ?? [];
+    expect(latestUseChatStreamCall[0]).toBeNull();
   });
 
   it("Chat 头部的主要操作按钮使用统一的小规格按钮", async () => {
@@ -706,6 +761,69 @@ describe("ChatWorkbench", () => {
       screen.queryByRole("button", { name: "开始新对话" })
     ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开任务" })).toHaveClass("wb-button-inline");
+  });
+
+  it("历史污染的 routed 会话即使已有消息也会提示先重置 continuity", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id:
+          "surface:web|scope:workspace:workspace-legacy:chat:web:thread-legacy|project:project-default|workspace:workspace-default|thread:thread-legacy",
+        thread_id: "thread-legacy",
+        task_id: "task-legacy",
+        title: "旧版污染 routed 会话",
+        latest_message_summary: "继续旧会话",
+        compatibility_flags: ["legacy_context_polluted"],
+        compatibility_message:
+          "这条历史会话仍沿用旧版 owner/profile 继承语义，建议先重置 continuity，再继续新的对话。",
+        reset_recommended: true,
+      },
+    ];
+    const submitAction = vi.fn().mockResolvedValue({
+      message: "这条历史 continuity 已重置。",
+    });
+    const resetConversation = vi.fn().mockResolvedValue(undefined);
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [{ id: "msg-legacy", role: "agent", content: "这是一条旧会话里的消息。" }],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation,
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-legacy",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-legacy",
+        title: "旧版污染 routed 会话",
+        status: "SUCCEEDED",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/chat/surface:web|scope:workspace:workspace-legacy:chat:web:thread-legacy|project:project-default|workspace:workspace-default|thread:thread-legacy",
+        ]}
+      >
+        <Routes>
+          <Route path="/chat/:sessionId" element={<ChatWorkbench />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("这条历史会话建议先重置再继续")).toBeInTheDocument();
+    expect(screen.getByText("这是一条旧会话里的消息。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重置 continuity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
   });
 
   it("会在消息区内展示当前参与处理的 Agent，并移除旧侧栏模块", async () => {

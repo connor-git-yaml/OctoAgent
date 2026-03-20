@@ -276,6 +276,10 @@ CREATE TABLE IF NOT EXISTS works (
     route_reason            TEXT NOT NULL DEFAULT '',
     project_id              TEXT NOT NULL DEFAULT '',
     workspace_id            TEXT NOT NULL DEFAULT '',
+    session_owner_profile_id TEXT NOT NULL DEFAULT '',
+    inherited_context_owner_profile_id TEXT NOT NULL DEFAULT '',
+    delegation_target_profile_id TEXT NOT NULL DEFAULT '',
+    turn_executor_kind      TEXT NOT NULL DEFAULT 'worker',
     agent_profile_id        TEXT NOT NULL DEFAULT '',
     requested_worker_profile_id TEXT NOT NULL DEFAULT '',
     requested_worker_profile_version INTEGER NOT NULL DEFAULT 0,
@@ -920,6 +924,23 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if work_columns and "agent_profile_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "session_owner_profile_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN session_owner_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "inherited_context_owner_profile_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works "
+            "ADD COLUMN inherited_context_owner_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "delegation_target_profile_id" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN delegation_target_profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    if work_columns and "turn_executor_kind" not in work_columns:
+        await conn.execute(
+            "ALTER TABLE works ADD COLUMN turn_executor_kind TEXT NOT NULL DEFAULT 'worker'"
         )
     if work_columns and "requested_worker_profile_id" not in work_columns:
         await conn.execute(

@@ -22,13 +22,15 @@ class SqliteWorkStore:
             INSERT INTO works (
                 work_id, task_id, parent_work_id, title, kind, status, target_kind,
                 owner_id, requested_capability, selected_worker_type, route_reason,
-                project_id, workspace_id, agent_profile_id, requested_worker_profile_id,
-                requested_worker_profile_version, effective_worker_snapshot_id, context_frame_id,
-                tool_selection_id, selected_tools, pipeline_run_id, delegation_id,
-                runtime_id, retry_count, escalation_count, metadata,
+                project_id, workspace_id, session_owner_profile_id,
+                inherited_context_owner_profile_id, delegation_target_profile_id,
+                turn_executor_kind, agent_profile_id, requested_worker_profile_id,
+                requested_worker_profile_version, effective_worker_snapshot_id,
+                context_frame_id, tool_selection_id, selected_tools, pipeline_run_id,
+                delegation_id, runtime_id, retry_count, escalation_count, metadata,
                 created_at, updated_at, completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(work_id) DO UPDATE SET
                 task_id = excluded.task_id,
                 parent_work_id = excluded.parent_work_id,
@@ -42,6 +44,10 @@ class SqliteWorkStore:
                 route_reason = excluded.route_reason,
                 project_id = excluded.project_id,
                 workspace_id = excluded.workspace_id,
+                session_owner_profile_id = excluded.session_owner_profile_id,
+                inherited_context_owner_profile_id = excluded.inherited_context_owner_profile_id,
+                delegation_target_profile_id = excluded.delegation_target_profile_id,
+                turn_executor_kind = excluded.turn_executor_kind,
                 agent_profile_id = excluded.agent_profile_id,
                 requested_worker_profile_id = excluded.requested_worker_profile_id,
                 requested_worker_profile_version = excluded.requested_worker_profile_version,
@@ -72,6 +78,10 @@ class SqliteWorkStore:
                 work.route_reason,
                 work.project_id,
                 work.workspace_id,
+                work.session_owner_profile_id,
+                work.inherited_context_owner_profile_id,
+                work.delegation_target_profile_id,
+                work.turn_executor_kind.value,
                 work.agent_profile_id,
                 work.requested_worker_profile_id,
                 work.requested_worker_profile_version,
@@ -343,6 +353,10 @@ class SqliteWorkStore:
             route_reason=row["route_reason"],
             project_id=row["project_id"],
             workspace_id=row["workspace_id"],
+            session_owner_profile_id=row["session_owner_profile_id"],
+            inherited_context_owner_profile_id=row["inherited_context_owner_profile_id"],
+            delegation_target_profile_id=row["delegation_target_profile_id"],
+            turn_executor_kind=row["turn_executor_kind"],
             agent_profile_id=row["agent_profile_id"],
             requested_worker_profile_id=row["requested_worker_profile_id"],
             requested_worker_profile_version=row["requested_worker_profile_version"],

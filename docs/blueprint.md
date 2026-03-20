@@ -726,7 +726,9 @@ AgentRuntime:
   agent_kind: butler|worker
   role: supervisor|research|dev|ops|custom
   project_id: "project_id"
-  profile_id: "agent_profile_id or worker_profile_id"
+  workspace_id: "optional workspace_id"
+  agent_profile_id: "optional root/default agent profile id"
+  worker_profile_id: "optional worker owner profile id"
   persona_refs:
     - "artifact://persona.md"
   instruction_refs:
@@ -746,7 +748,12 @@ AgentSession:
   agent_id: "agent://..."
   session_kind: butler_user|worker_a2a|worker_direct
   project_id: "project_id"
+  workspace_id: "optional workspace_id"
   channel_thread_id: "optional stable_thread_key"
+  session_owner_profile_id: "用户当前默认在和谁对话"
+  turn_executor_kind: self|worker|subagent
+  delegation_target_profile_id: "仅在本轮显式委派时存在"
+  inherited_context_owner_profile_id: "可选，连续性/记忆来源 owner"
   parent_session_id: "optional uuid"
   a2a_conversation_id: "optional uuid"
   effective_config_snapshot_ref: "artifact://..."
@@ -2995,6 +3002,7 @@ BehaviorWorkspace 设计补充（2026-03-15）：
 - [x] Feature 041：Butler / Worker Runtime Readiness + Ambient Context（已补齐当前本地时间/日期、Butler-owned freshness delegation 主链、缺城市显式追问、backend unavailable 降级、worker private recall runtime、message-native 返回链与 runtime truth surface）
 - [x] Feature 049：Butler Behavior Workspace & Agentic Decision Runtime（已完成初版 `BehaviorWorkspace + RuntimeHintBundle + session-backed RecentConversation + ButlerDecision preflight` 主链，补齐 Web/CLI 的初始行为文件视图与 CLI `octo behavior ls/show/init/edit/diff/apply`；其 scope 仍以 `system/project` 为起点，后续多 Agent parity、project-centered 目录、bootstrap 模板与 `Agents` 行为中心收口到 055）
 - [x] Feature 055：Agent Behavior Scope Reset & Behavior Center（已完成四层 `BehaviorWorkspaceScope`、project-centered 路径解析、`project_path_manifest` 与 `storage_boundary_hints` 注入、bootstrap 模板与默认会话 Agent 用户画像/个性引导 contract、`octo behavior --agent ...`、`Agents` 页的 Behavior Center 与 `Settings` 行为入口迁移）
+- [x] Feature 071：Session Owner / Execution Target Separation（已完成 `session owner / turn executor / delegation target / inherited context owner` 语义拆分；`Profile + Project` 只决定先和谁说话；默认主会话与 direct worker 会话可并存；`worker -> worker` 已被硬禁止，并补齐历史污染会话 reset/兼容链）
 - [x] Feature 051：Session-Native Agent Runtime & Recall Loop（`behavior budget + ToolUniverseHints` 已落地；`AgentSession` 除正式 `recent_transcript / rolling_summary` 外，已补齐 `AgentSessionTurn` store，`user / assistant / tool_call / tool_result / context_summary` 会落到 `agent_session_turns`，`RecentConversation / session.export / session.reset` 都优先消费该 store；控制面已新增 `session.new / session.reset / session.unfocus`，Session Center 已提供 `全部 / 运行中 / 队列 / 历史` lane 视图；Butler chat 默认切到 `agent-led hint-first` memory runtime，并已把 `ButlerDecision + RecallPlan` 收口为统一 `ButlerLoopPlan`；Worker 默认切到 planner-capable `hint-first` runtime，仅在显式 profile override 下保留 `detailed_prefetch`；`AgentSessionTurn` 现在还会生成正式 replay/sanitize 投影，并进入预算驱动裁剪链；默认 `single_loop_executor` 已从 general Butler 扩到显式 `research/dev/ops` worker lens，主模型调用直接带着 profile-first 工具集进入 `LLM + SkillRunner` 工具循环，不再额外触发 `butler-decision` 或 `memory-recall-planning` 辅助 phase；当高级 Memory backend 可用时，`MemorySearchOptions` 会把 `expanded_queries / focus_terms / rerank_mode / post_filter_mode` 下发到高级 backend search path；compatibility fallback 已收缩为 guardrail，仅保留天气缺地点边界与天气 follow-up 恢复语义）
 - [x] Feature 052：Trusted Tooling Surface & Permission Relaxation（trusted local baseline 已把 `general / research / dev / ops` 默认 tool profile 收口到 `standard`；MCP provider 已支持 `mount_policy=explicit|auto_readonly|auto_all`，其中 `auto_readonly` 默认自动挂载 `minimal` 工具；Skill provider 已支持 `permission_mode=inherit|restrict` 且默认 `inherit`；runtime metadata / control plane 已同步暴露 `recommended_tools + mounted_tools + blocked_tools`，`selected_tools_json` 退化为 recommended mirror；危险动作仍继续走 ToolBroker / Policy / Approval / Audit 主链）
 - [x] Feature 054：Builtin Memory Engine & Shared Retrieval Platform（`local_only` 已升级为内建 Memory Engine，默认优先使用本地 `Qwen3-Embedding-0.6B`，不可用时回退到双语 hash embedding；`memory_reasoning / memory_expand / memory_embedding / memory_rerank` 已接入 Settings / CLI / runtime；`EmbeddingProfile / IndexGeneration / IndexBuildJob / CorpusKind` 已形成共享 retrieval platform contract，Memory 与未来 knowledge base 共用 generation lifecycle；embedding 迁移已支持后台 build、进度展示、cutover / cancel / rollback，且迁移期间旧 generation 持续服务；facts / Vault 候选仍走 proposal / commit / grant / audit 治理链）

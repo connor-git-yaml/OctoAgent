@@ -25,12 +25,14 @@ from octoagent.core.models import (
     BundledCapabilityPack,
     BundledSkillDefinition,
     BundledToolDefinition,
+    DelegationTargetKind,
     DynamicToolSelection,
     EffectiveToolUniverse,
     NormalizedMessage,
     OwnerProfile,
     ProjectBindingType,
     RuntimeKind,
+    TurnExecutorKind,
     ToolAvailabilityExplanation,
     ToolIndexQuery,
     WorkerBootstrapFile,
@@ -123,6 +125,7 @@ class _ResolvedWorkerBinding:
     profile_id: str
     profile_revision: int
     worker_type: str
+    model_alias: str
     tool_profile: str
     default_tool_groups: list[str]
     selected_tools: list[str]
@@ -568,6 +571,7 @@ class CapabilityPackService:
                     profile_id=normalized_profile_id,
                     profile_revision=1,
                     worker_type=builtin_worker_type,
+                    model_alias="main",
                     tool_profile=builtin_profile.default_tool_profile,
                     default_tool_groups=list(builtin_profile.default_tool_groups),
                     selected_tools=[],
@@ -586,6 +590,7 @@ class CapabilityPackService:
                         stored_profile.active_revision or stored_profile.draft_revision or 1
                     ),
                     worker_type=worker_type,
+                    model_alias=stored_profile.model_alias or "main",
                     tool_profile=stored_profile.tool_profile or builtin_profile.default_tool_profile,
                     default_tool_groups=list(
                         stored_profile.default_tool_groups or builtin_profile.default_tool_groups
@@ -603,6 +608,7 @@ class CapabilityPackService:
                     profile_id=agent_profile.profile_id,
                     profile_revision=agent_profile.version,
                     worker_type=fallback_worker_type,
+                    model_alias=agent_profile.model_alias or "main",
                     tool_profile=(
                         agent_profile.tool_profile or builtin_profile.default_tool_profile
                     ),
@@ -616,6 +622,7 @@ class CapabilityPackService:
             profile_id=f"singleton:{builtin_profile.worker_type}",
             profile_revision=1,
             worker_type=builtin_profile.worker_type,
+            model_alias="main",
             tool_profile=builtin_profile.default_tool_profile,
             default_tool_groups=list(builtin_profile.default_tool_groups),
             selected_tools=[],
@@ -4245,6 +4252,7 @@ class CapabilityPackService:
     ) -> dict[str, Any]:
         if self._task_runner is None:
             raise RuntimeError("task runner is not bound for child task launch")
+        self._enforce_child_target_kind_policy(target_kind)
         child_id = str(ULID())
         child_thread_id = f"{parent_task.thread_id}:child:{child_id[:8]}"
         child_message = NormalizedMessage(
@@ -4280,6 +4288,26 @@ class CapabilityPackService:
             "objective": objective,
             "worker_plan_id": plan_id,
         }
+
+    @staticmethod
+    def _enforce_child_target_kind_policy(target_kind: str) -> None:
+        normalized_target_kind = str(target_kind).strip().lower()
+        if normalized_target_kind != DelegationTargetKind.WORKER.value:
+            return
+        try:
+            execution_context = get_current_execution_context()
+        except RuntimeError:
+            return
+        runtime_kind = str(execution_context.runtime_kind or "").strip().lower()
+        runtime_turn_kind = ""
+        if execution_context.runtime_context is not None:
+            runtime_turn_kind = str(
+                execution_context.runtime_context.turn_executor_kind.value
+            ).strip().lower()
+        if runtime_kind == RuntimeKind.WORKER.value or runtime_turn_kind == TurnExecutorKind.WORKER.value:
+            raise RuntimeError(
+                "worker runtime cannot delegate to another worker; use a subagent target instead"
+            )
 
     async def _resolve_fallback_toolset(self, worker_type: str = "general") -> list[str]:
         metas = await self._tool_broker.discover()

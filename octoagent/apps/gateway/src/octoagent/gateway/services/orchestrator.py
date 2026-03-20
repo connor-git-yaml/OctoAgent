@@ -39,6 +39,9 @@ from octoagent.core.models import (
     Event,
     EventCausality,
     EventType,
+    ExecutionBackend,
+    ExecutionSessionState,
+    HumanInputPolicy,
     OrchestratorDecisionPayload,
     OrchestratorRequest,
     OwnerProfile,
@@ -50,6 +53,7 @@ from octoagent.core.models import (
     TaskStatus,
     ToolIndexQuery,
     ToolIndexSelectedPayload,
+    TurnExecutorKind,
     Work,
     WorkerDispatchedPayload,
     WorkerExecutionStatus,
@@ -92,6 +96,12 @@ from .butler_behavior import (
     render_runtime_hint_block,
 )
 from .capability_pack import CapabilityPackService
+from .connection_metadata import (
+    resolve_delegation_target_profile_id,
+    resolve_session_owner_profile_id,
+)
+from .execution_console import ExecutionConsoleService
+from .execution_context import ExecutionRuntimeContext
 from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
     RUNTIME_CONTEXT_KEY,
@@ -205,6 +215,18 @@ class _RecentWorkerLaneCandidate:
     summary: str
     source_task_id: str
     source_work_id: str
+
+
+@dataclass(frozen=True)
+class _OwnerSelfWorkerExecutionChoice:
+    """会话 owner 自执行 worker 路径。"""
+
+    profile_id: str
+    profile_name: str
+    worker_type: str
+    model_alias: str
+    tool_profile: str
+    source_kind: str
 
 
 class OrchestratorApprovalManager(Protocol):
@@ -420,8 +442,13 @@ class OrchestratorService:
         self._policy_gate = policy_gate or OrchestratorPolicyGate(approval_manager=approval_manager)
         self._router = router or SingleWorkerRouter()
         self._delegation_plane = delegation_plane
-        if execution_console is not None and hasattr(execution_console, "bind_a2a_notifier"):
-            execution_console.bind_a2a_notifier(self)
+        self._execution_console = execution_console or ExecutionConsoleService(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            approval_manager=approval_manager,
+        )
+        if hasattr(self._execution_console, "bind_a2a_notifier"):
+            self._execution_console.bind_a2a_notifier(self)
 
         default_workers = [
             LLMWorkerAdapter(
@@ -433,7 +460,7 @@ class OrchestratorService:
                 runtime_config=worker_runtime_config,
                 docker_available_checker=docker_available_checker,
                 cancellation_registry=cancellation_registry,
-                execution_console=execution_console,
+                execution_console=self._execution_console,
                 a2a_observer=self,
             ),
             LLMWorkerAdapter(
@@ -445,7 +472,7 @@ class OrchestratorService:
                 runtime_config=worker_runtime_config,
                 docker_available_checker=docker_available_checker,
                 cancellation_registry=cancellation_registry,
-                execution_console=execution_console,
+                execution_console=self._execution_console,
                 a2a_observer=self,
             ),
             LLMWorkerAdapter(
@@ -457,7 +484,7 @@ class OrchestratorService:
                 runtime_config=worker_runtime_config,
                 docker_available_checker=docker_available_checker,
                 cancellation_registry=cancellation_registry,
-                execution_console=execution_console,
+                execution_console=self._execution_console,
                 a2a_observer=self,
             ),
             LLMWorkerAdapter(
@@ -469,7 +496,7 @@ class OrchestratorService:
                 runtime_config=worker_runtime_config,
                 docker_available_checker=docker_available_checker,
                 cancellation_registry=cancellation_registry,
-                execution_console=execution_console,
+                execution_console=self._execution_console,
                 a2a_observer=self,
             ),
         ]
@@ -707,6 +734,13 @@ class OrchestratorService:
             )
 
         request = await self._normalize_requested_worker_lens(request)
+        owner_self_worker = await self._resolve_owner_self_worker_execution_choice(request)
+        if owner_self_worker is not None:
+            return await self._dispatch_owner_self_worker_execution(
+                request=request,
+                gate_decision=gate_decision,
+                choice=owner_self_worker,
+            )
         request = await self._prepare_single_loop_butler_request(request)
         butler_decision, request_metadata_updates = await self._resolve_butler_decision(request)
         if request_metadata_updates:
@@ -850,6 +884,8 @@ class OrchestratorService:
         request: OrchestratorRequest,
     ) -> OrchestratorRequest:
         metadata = dict(request.metadata)
+        session_owner_profile_id = resolve_session_owner_profile_id(metadata)
+        delegation_target_profile_id = resolve_delegation_target_profile_id(metadata)
         explicit_requested_worker_type = str(
             metadata.get("requested_worker_type", "")
         ).strip()
@@ -857,28 +893,30 @@ class OrchestratorService:
         if explicit_requested_worker_type and canonical_worker_type:
             return request
         if canonical_worker_type:
-            requested_profile_id = (
-                str(metadata.get("requested_worker_profile_id", "")).strip()
-                or str(metadata.get("agent_profile_id", "")).strip()
-            )
+            requested_profile_id = delegation_target_profile_id
             return request.model_copy(
                 update={
                     "metadata": {
                         **metadata,
                         "requested_worker_type": canonical_worker_type,
-                        "requested_worker_profile_id": requested_profile_id,
-                        "requested_worker_type_source": (
-                            "requested_worker_profile_id"
+                        **(
+                            {"requested_worker_profile_id": requested_profile_id}
                             if requested_profile_id
-                            else "canonical_worker_lens"
+                            else {}
+                        ),
+                        "requested_worker_type_source": (
+                            "delegation_target_profile_id"
+                            if requested_profile_id
+                            else (
+                                "session_owner_profile_id"
+                                if session_owner_profile_id.startswith("singleton:")
+                                else "canonical_worker_lens"
+                            )
                         ),
                     }
                 }
             )
-        requested_profile_id = (
-            str(metadata.get("requested_worker_profile_id", "")).strip()
-            or str(metadata.get("agent_profile_id", "")).strip()
-        )
+        requested_profile_id = delegation_target_profile_id
         if not requested_profile_id:
             return request
         if self._delegation_plane is None:
@@ -896,7 +934,7 @@ class OrchestratorService:
                     **metadata,
                     "requested_worker_type": resolved_worker_type,
                     "requested_worker_profile_id": requested_profile_id,
-                    "requested_worker_type_source": "requested_worker_profile_id",
+                    "requested_worker_type_source": "delegation_target_profile_id",
                 }
             }
         )
@@ -994,10 +1032,7 @@ class OrchestratorService:
         # 用户明确指定了非 singleton 的自定义 Worker profile 时，不走 single loop
         # Butler 路径，让请求走 Delegation Plane 由 Worker 自己的 persona 处理。
         # singleton:xxx 格式的内置 profile 仍然允许走 single loop。
-        requested_profile_id = (
-            str(metadata.get("requested_worker_profile_id", "")).strip()
-            or str(metadata.get("agent_profile_id", "")).strip()
-        )
+        requested_profile_id = resolve_delegation_target_profile_id(metadata)
         if requested_profile_id and not requested_profile_id.startswith("singleton:"):
             return False
         requested_worker_type = self._canonical_requested_worker_type(metadata)
@@ -1018,7 +1053,7 @@ class OrchestratorService:
         requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
         if requested_worker_type:
             return requested_worker_type
-        for key in ("requested_worker_profile_id", "agent_profile_id"):
+        for key in ("delegation_target_profile_id", "requested_worker_profile_id"):
             profile_id = str(metadata.get(key, "")).strip().lower()
             if not profile_id.startswith("singleton:"):
                 continue
@@ -1032,6 +1067,8 @@ class OrchestratorService:
         request: OrchestratorRequest,
         *,
         worker_type: str = "general",
+        requested_profile_id: str = "",
+        tool_profile_override: str = "",
     ):
         if self._delegation_plane is None:
             return None
@@ -1046,16 +1083,15 @@ class OrchestratorService:
             task=task,
             surface=task.requester.channel or "chat",
         )
-        requested_profile_id = (
-            str(request.metadata.get("requested_worker_profile_id", "")).strip()
-            or str(request.metadata.get("agent_profile_id", "")).strip()
+        resolved_profile_id = requested_profile_id or resolve_delegation_target_profile_id(
+            request.metadata
         )
         if worker_type == "general" and not requested_profile_id:
             agent_profile, _ = await agent_context_service._resolve_agent_profile(
                 project=project,
                 requested_profile_id="",
             )
-            requested_profile_id = agent_profile.profile_id
+            resolved_profile_id = agent_profile.profile_id
         try:
             return await self._delegation_plane.capability_pack.resolve_profile_first_tools(
                 ToolIndexQuery(
@@ -1063,15 +1099,56 @@ class OrchestratorService:
                     limit=12,
                     tool_groups=[],
                     worker_type=worker_type,
-                    tool_profile=str(request.tool_profile).strip() or "standard",
+                    tool_profile=(
+                        str(tool_profile_override).strip()
+                        or str(request.tool_profile).strip()
+                        or "standard"
+                    ),
                     project_id=project.project_id if project is not None else "",
                     workspace_id=workspace.workspace_id if workspace is not None else "",
                 ),
                 worker_type=worker_type,
-                requested_profile_id=requested_profile_id,
+                requested_profile_id=resolved_profile_id,
             )
         except Exception:
             return None
+
+    async def _resolve_owner_self_worker_execution_choice(
+        self,
+        request: OrchestratorRequest,
+    ) -> _OwnerSelfWorkerExecutionChoice | None:
+        if self._delegation_plane is None:
+            return None
+        if request.worker_capability not in {"", "llm_generation"}:
+            return None
+        metadata = request.metadata
+        if str(metadata.get("parent_task_id", "")).strip():
+            return None
+        if str(metadata.get("spawned_by", "")).strip():
+            return None
+        if str(metadata.get("requested_worker_type", "")).strip():
+            return None
+        if str(metadata.get("target_kind", "")).strip():
+            return None
+        if resolve_delegation_target_profile_id(metadata):
+            return None
+        owner_profile_id = resolve_session_owner_profile_id(metadata)
+        if not owner_profile_id:
+            return None
+        binding = await self._delegation_plane.capability_pack.resolve_worker_binding(
+            requested_profile_id=owner_profile_id,
+            fallback_worker_type="general",
+        )
+        if binding.source_kind not in {"builtin_singleton", "worker_profile"}:
+            return None
+        return _OwnerSelfWorkerExecutionChoice(
+            profile_id=binding.profile_id,
+            profile_name=binding.profile_name,
+            worker_type=binding.worker_type,
+            model_alias=binding.model_alias,
+            tool_profile=binding.tool_profile,
+            source_kind=binding.source_kind,
+        )
 
     @staticmethod
     def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:
@@ -1284,6 +1361,167 @@ class OrchestratorService:
             dispatch_prefix="butler-direct",
         )
 
+    async def _dispatch_owner_self_worker_execution(
+        self,
+        *,
+        request: OrchestratorRequest,
+        gate_decision: OrchestratorPolicyDecision,
+        choice: _OwnerSelfWorkerExecutionChoice,
+    ) -> WorkerResult:
+        route_reason = f"owner_self_worker_execution:{choice.worker_type}"
+        selection = await self._resolve_single_loop_tool_selection(
+            request,
+            worker_type=choice.worker_type,
+            requested_profile_id=choice.profile_id,
+            tool_profile_override=choice.tool_profile,
+        )
+        selected_tools = list(selection.selected_tools) if selection is not None else []
+        if selection is not None:
+            route_reason = self._join_route_reason(
+                route_reason,
+                f"tool_resolution={selection.resolution_mode}",
+            )
+            task_service = TaskService(self._stores, self._sse_hub)
+            await task_service.append_structured_event(
+                task_id=request.task_id,
+                event_type=EventType.TOOL_INDEX_SELECTED,
+                actor=ActorType.KERNEL,
+                payload=ToolIndexSelectedPayload(
+                    selection_id=selection.selection_id,
+                    backend=selection.backend,
+                    is_fallback=selection.is_fallback,
+                    query=selection.query.query,
+                    selected_tools=selection.selected_tools,
+                    hit_count=len(selection.hits),
+                    warnings=selection.warnings,
+                ).model_dump(mode="json"),
+                trace_id=request.trace_id,
+                idempotency_key=f"owner-self-tool-index:{selection.selection_id}",
+            )
+
+        await self._write_orch_decision_event(
+            request=request,
+            route_reason=route_reason,
+            gate_decision=gate_decision,
+        )
+
+        task_service = TaskService(self._stores, self._sse_hub)
+        await task_service.ensure_task_running(
+            request.task_id,
+            trace_id=request.trace_id,
+        )
+        owner_metadata = {
+            **dict(request.metadata),
+            "final_speaker": "session_owner",
+            "owner_execution_mode": "worker_self",
+            "turn_executor_kind": TurnExecutorKind.WORKER.value,
+            "session_owner_profile_id": choice.profile_id,
+            "inherited_context_owner_profile_id": str(
+                request.metadata.get("inherited_context_owner_profile_id", "")
+            ).strip(),
+            "agent_profile_id": choice.profile_id,
+            "selected_worker_type": choice.worker_type,
+            "selected_tools": selected_tools,
+            "tool_selection": (
+                selection.model_dump(mode="json") if selection is not None else {}
+            ),
+            "requested_worker_profile_id": "",
+            "delegation_target_profile_id": "",
+        }
+        execution_context = await self._register_owner_self_execution_session(
+            request=request,
+            choice=choice,
+        )
+        await task_service.process_task_with_llm(
+            task_id=request.task_id,
+            user_text=request.user_text,
+            llm_service=self._llm_service,
+            model_alias=request.model_alias or choice.model_alias or "main",
+            execution_context=execution_context,
+            dispatch_metadata=owner_metadata,
+            worker_capability="llm_generation",
+            tool_profile=choice.tool_profile or "standard",
+            runtime_context=request.runtime_context,
+        )
+        task_after = await self._stores.task_store.get_task(request.task_id)
+        task_status = task_after.status if task_after is not None else TaskStatus.FAILED
+        await self._mark_owner_self_execution_terminal(
+            task_id=request.task_id,
+            task_status=task_status,
+            execution_context=execution_context,
+        )
+        return self._owner_self_worker_result(
+            request=request,
+            task_status=task_status,
+            worker_id=choice.profile_id or f"worker:{choice.worker_type}",
+            tool_profile=choice.tool_profile or "standard",
+            success_summary=f"owner_self_worker:{choice.worker_type}",
+            dispatch_prefix="owner-self-worker",
+        )
+
+    async def _register_owner_self_execution_session(
+        self,
+        *,
+        request: OrchestratorRequest,
+        choice: _OwnerSelfWorkerExecutionChoice,
+    ) -> ExecutionRuntimeContext:
+        worker_id = choice.profile_id or f"worker:{choice.worker_type}"
+        session_id = str(ULID())
+        runtime_kind = DelegationTargetKind.WORKER.value
+        await self._execution_console.register_session(
+            task_id=request.task_id,
+            session_id=session_id,
+            backend_job_id=session_id,
+            backend=ExecutionBackend.INLINE,
+            interactive=True,
+            input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
+            worker_id=worker_id,
+            metadata={
+                "work_id": str(request.metadata.get("work_id", "")),
+                "runtime_kind": runtime_kind,
+                "selected_worker_type": choice.worker_type,
+                "parent_work_id": str(request.metadata.get("parent_work_id", "")),
+                "parent_task_id": str(request.metadata.get("parent_task_id", "")),
+            },
+            message="owner-self worker selected inline backend",
+        )
+        return ExecutionRuntimeContext(
+            task_id=request.task_id,
+            trace_id=request.trace_id,
+            session_id=session_id,
+            worker_id=worker_id,
+            backend=ExecutionBackend.INLINE.value,
+            console=self._execution_console,
+            work_id=str(request.metadata.get("work_id", "")),
+            runtime_kind=runtime_kind,
+            agent_session_id=str(request.metadata.get("agent_session_id", "")),
+            runtime_context=request.runtime_context,
+        )
+
+    async def _mark_owner_self_execution_terminal(
+        self,
+        *,
+        task_id: str,
+        task_status: TaskStatus,
+        execution_context: ExecutionRuntimeContext,
+    ) -> None:
+        execution_status: ExecutionSessionState | None = None
+        if task_status == TaskStatus.SUCCEEDED:
+            execution_status = ExecutionSessionState.SUCCEEDED
+        elif task_status == TaskStatus.CANCELLED:
+            execution_status = ExecutionSessionState.CANCELLED
+        elif task_status in TERMINAL_STATES:
+            execution_status = ExecutionSessionState.FAILED
+
+        if execution_status is None:
+            return
+        await self._execution_console.mark_status(
+            task_id=task_id,
+            session_id=execution_context.session_id,
+            status=execution_status,
+            message=f"owner-self worker finished with task status={task_status.value}",
+        )
+
     def _is_butler_decision_eligible(self, request: OrchestratorRequest) -> bool:
         if request.worker_capability not in {"", "llm_generation"}:
             return False
@@ -1294,11 +1532,8 @@ class OrchestratorService:
             return False
         # 如果用户明确指定了非 singleton 的自定义 Worker profile，
         # 即使 worker_type 是 general，也应该路由到该 Worker 而非被 Butler 拦截。
-        # singleton:xxx 格式的内置 profile 仍然走 Butler 决策路径。
-        requested_profile_id = (
-            str(metadata.get("requested_worker_profile_id", "")).strip()
-            or str(metadata.get("agent_profile_id", "")).strip()
-        )
+        # singleton:xxx 格式的内置 delegation target 仍然走 Butler 决策路径。
+        requested_profile_id = resolve_delegation_target_profile_id(metadata)
         if requested_profile_id and not requested_profile_id.startswith("singleton:"):
             return False
         requested_worker_type = self._canonical_requested_worker_type(metadata)
@@ -2877,6 +3112,51 @@ class OrchestratorService:
             error_message=f"task status={task_status.value}",
             backend="inline",
             tool_profile="minimal",
+        )
+
+    def _owner_self_worker_result(
+        self,
+        *,
+        request: OrchestratorRequest,
+        task_status: TaskStatus,
+        worker_id: str,
+        tool_profile: str,
+        success_summary: str,
+        dispatch_prefix: str,
+    ) -> WorkerResult:
+        if task_status == TaskStatus.SUCCEEDED:
+            return WorkerResult(
+                dispatch_id=f"{dispatch_prefix}:{request.task_id}",
+                task_id=request.task_id,
+                worker_id=worker_id,
+                status=WorkerExecutionStatus.SUCCEEDED,
+                retryable=False,
+                summary=success_summary,
+                backend="inline",
+                tool_profile=tool_profile,
+            )
+        if task_status == TaskStatus.CANCELLED:
+            return WorkerResult(
+                dispatch_id=f"{dispatch_prefix}:{request.task_id}",
+                task_id=request.task_id,
+                worker_id=worker_id,
+                status=WorkerExecutionStatus.CANCELLED,
+                retryable=False,
+                summary="owner_self_worker_cancelled",
+                backend="inline",
+                tool_profile=tool_profile,
+            )
+        return WorkerResult(
+            dispatch_id=f"{dispatch_prefix}:{request.task_id}",
+            task_id=request.task_id,
+            worker_id=worker_id,
+            status=WorkerExecutionStatus.FAILED,
+            retryable=True,
+            summary=f"owner_self_worker_terminal:{task_status.value}",
+            error_type="OwnerSelfWorkerExecutionFailed",
+            error_message=f"task status={task_status.value}",
+            backend="inline",
+            tool_profile=tool_profile,
         )
 
     def _join_route_reason(self, *parts: str) -> str:

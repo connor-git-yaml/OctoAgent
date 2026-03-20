@@ -188,7 +188,13 @@ class SessionProjectionItem(BaseModel):
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
+    session_owner_profile_id: str = Field(default="")
+    turn_executor_kind: str = Field(default="")
+    delegation_target_profile_id: str = Field(default="")
     runtime_kind: str = Field(default="")
+    compatibility_flags: list[str] = Field(default_factory=list)
+    compatibility_message: str = Field(default="")
+    reset_recommended: bool = False
     lane: str = Field(default="queue")
     latest_message_summary: str = Field(default="")
     latest_event_at: datetime | None = None
@@ -676,6 +682,9 @@ class WorkProjectionItem(BaseModel):
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
+    session_owner_profile_id: str = Field(default="")
+    turn_executor_kind: str = Field(default="")
+    delegation_target_profile_id: str = Field(default="")
     requested_worker_profile_id: str = Field(default="")
     requested_worker_profile_version: int = Field(default=0, ge=0)
     effective_worker_snapshot_id: str = Field(default="")

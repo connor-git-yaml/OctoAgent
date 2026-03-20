@@ -173,4 +173,102 @@ describe("WorkbenchLayout", () => {
     expect(screen.getByText("有 1 项需要处理")).toBeInTheDocument();
     expect(screen.getByText("先看一下待处理事项，再继续会更稳。")).toBeInTheDocument();
   });
+
+  it("会话列表会区分对话 owner 和当前执行者", () => {
+    mockUseWorkbenchData.mockReturnValue({
+      snapshot: {
+        generated_at: "2026-03-20T01:00:00Z",
+        resources: {
+          project_selector: {
+            current_project_id: "project-default",
+            current_workspace_id: "workspace-default",
+            available_projects: [
+              {
+                project_id: "project-default",
+                slug: "default",
+                name: "Default Project",
+              },
+            ],
+            available_workspaces: [
+              {
+                workspace_id: "workspace-default",
+                project_id: "project-default",
+                slug: "primary",
+                name: "Primary Workspace",
+              },
+            ],
+          },
+          diagnostics: {
+            overall_status: "ready",
+          },
+          sessions: {
+            operator_summary: {
+              total_pending: 0,
+            },
+            operator_items: [],
+            sessions: [
+              {
+                session_id: "session-finance",
+                thread_id: "thread-finance",
+                task_id: "task-finance",
+                title: "finance",
+                status: "RUNNING",
+                channel: "web",
+                requester_id: "user:web",
+                project_id: "project-default",
+                workspace_id: "workspace-default",
+                agent_profile_id: "worker-profile-finance",
+                session_owner_profile_id: "worker-profile-finance",
+                turn_executor_kind: "worker",
+                delegation_target_profile_id: "worker-profile-finance",
+                runtime_kind: "direct_worker",
+                latest_message_summary: "继续看 finance",
+                latest_event_at: "2026-03-20T01:00:00Z",
+                execution_summary: {},
+                capabilities: [],
+                detail_refs: {},
+              },
+            ],
+          },
+          config: {
+            current_value: {
+              runtime: {
+                llm_mode: "litellm",
+              },
+            },
+          },
+          delegation: {
+            works: [],
+          },
+          worker_profiles: {
+            profiles: [
+              { profile_id: "worker-profile-finance", name: "研究员小 A" },
+            ],
+          },
+        },
+      },
+      loading: false,
+      error: null,
+      authError: null,
+      busyActionId: null,
+      lastAction: null,
+      refreshSnapshot: vi.fn(),
+      refreshResources: vi.fn(),
+      submitAction: vi.fn(),
+      clearError: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <Routes>
+          <Route element={<WorkbenchLayout />}>
+            <Route path="/chat" element={<div>Chat Slot</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("对话：研究员小 A")).toBeInTheDocument();
+    expect(screen.getByText("执行：研究员小 A")).toBeInTheDocument();
+  });
 });

@@ -63,6 +63,7 @@ from octoagent.core.models import (
     ControlPlaneTargetRef,
     CorpusKind,
     DelegationPlaneDocument,
+    DelegationTargetKind,
     DiagnosticsFailureSummary,
     DiagnosticsSubsystemStatus,
     DiagnosticsSummaryDocument,
@@ -122,6 +123,7 @@ from octoagent.core.models import (
     WorkProjectionItem,
     Workspace,
     WorkspaceOption,
+    TurnExecutorKind,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
 from octoagent.core.models.task import RequesterInfo
@@ -179,7 +181,12 @@ from ulid import ULID
 
 from .agent_context import build_projected_session_id, build_scope_aware_session_id
 from .butler_behavior import build_behavior_system_summary
-from .connection_metadata import merge_control_metadata
+from .connection_metadata import (
+    merge_control_metadata,
+    resolve_explicit_delegation_target_profile_id,
+    resolve_explicit_session_owner_profile_id,
+    resolve_turn_executor_kind,
+)
 from .mcp_registry import McpServerConfig
 from .task_service import TaskService
 
@@ -187,6 +194,10 @@ _AUDIT_TASK_ID = "ops-control-plane"
 _AUDIT_TRACE_ID = "trace-ops-control-plane"
 _POLICY_TASK_ID = "system"
 _POLICY_TRACE_ID = "trace-policy-engine"
+_LEGACY_CONTEXT_POLLUTED_FLAG = "legacy_context_polluted"
+_LEGACY_CONTEXT_POLLUTED_MESSAGE = (
+    "这条历史会话仍沿用旧版 profile 继承语义，建议先重置 continuity，再继续新的对话。"
+)
 _TERMINAL_WORK_STATUSES = {"succeeded", "failed", "cancelled", "merged", "timed_out", "deleted"}
 log = structlog.get_logger()
 
@@ -852,6 +863,7 @@ class ControlPlaneService:
         selected_workspace,
     ) -> list[SessionProjectionItem]:
         tasks = await self._stores.task_store.list_tasks()
+        works = await self._stores.work_store.list_works()
         session_states = await self._stores.agent_context_store.list_session_contexts(
             project_id=selected_project.project_id if selected_project is not None else None,
             workspace_id=(
@@ -859,6 +871,13 @@ class ControlPlaneService:
             ),
         )
         session_state_by_id = {item.session_id: item for item in session_states}
+        latest_work_by_task: dict[str, Work] = {}
+        for work in works:
+            current = latest_work_by_task.get(work.task_id)
+            if current is None or (work.updated_at or datetime.min.replace(tzinfo=UTC)) > (
+                current.updated_at or datetime.min.replace(tzinfo=UTC)
+            ):
+                latest_work_by_task[work.task_id] = work
         grouped: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
         for task in tasks:
             if task.task_id == _AUDIT_TASK_ID:
@@ -889,6 +908,21 @@ class ControlPlaneService:
         for session_id, entries in grouped.items():
             latest, workspace = max(entries, key=lambda item: item[0].updated_at)
             session_state = session_state_by_id.get(session_id)
+            session_runtime_kind = ""
+            session_runtime_owner_profile_id = ""
+            if session_state is not None and session_state.agent_session_id:
+                agent_session = await self._stores.agent_context_store.get_agent_session(
+                    session_state.agent_session_id
+                )
+                if agent_session is not None:
+                    session_runtime_kind = agent_session.kind.value
+                    runtime = await self._stores.agent_context_store.get_agent_runtime(
+                        agent_session.agent_runtime_id
+                    )
+                    if runtime is not None:
+                        session_runtime_owner_profile_id = str(
+                            runtime.worker_profile_id or runtime.agent_profile_id or ""
+                        ).strip()
             execution_summary: dict[str, Any] = {}
             latest_metadata = await self._extract_latest_user_metadata(latest.task_id)
             if self._task_runner is not None:
@@ -903,9 +937,39 @@ class ControlPlaneService:
                         "work_id": session.metadata.get("work_id", ""),
                     }
             latest_message = await self._extract_latest_user_message(latest.task_id)
-            session_agent_profile_id = await self._extract_latest_session_agent_profile_id(
-                latest.task_id
+            latest_work = latest_work_by_task.get(latest.task_id)
+            runtime_kind = str(
+                execution_summary.get(
+                    "runtime_kind",
+                    session_runtime_kind or latest_metadata.get("target_kind", ""),
+                )
             )
+            (
+                session_owner_profile_id,
+                turn_executor_kind,
+                delegation_target_profile_id,
+                session_agent_profile_id,
+                compatibility_flags,
+                compatibility_message,
+                reset_recommended,
+            ) = await self._resolve_session_projection_semantics(
+                latest_metadata=latest_metadata,
+                latest_work=latest_work,
+                runtime_kind=runtime_kind,
+                fallback_owner_profile_id=session_runtime_owner_profile_id,
+            )
+            if (
+                turn_executor_kind == TurnExecutorKind.SELF.value
+                and not delegation_target_profile_id
+                and session_owner_profile_id
+            ):
+                owner_worker_profile = (
+                    await self._stores.agent_context_store.get_worker_profile(
+                        session_owner_profile_id
+                    )
+                )
+                if owner_worker_profile is not None:
+                    turn_executor_kind = TurnExecutorKind.WORKER.value
             session_items.append(
                 SessionProjectionItem(
                     session_id=session_id,
@@ -921,12 +985,13 @@ class ControlPlaneService:
                     project_id=workspace.project_id,
                     workspace_id=workspace.workspace_id,
                     agent_profile_id=session_agent_profile_id,
-                    runtime_kind=str(
-                        execution_summary.get(
-                            "runtime_kind",
-                            latest_metadata.get("target_kind", ""),
-                        )
-                    ),
+                    session_owner_profile_id=session_owner_profile_id,
+                    turn_executor_kind=turn_executor_kind,
+                    delegation_target_profile_id=delegation_target_profile_id,
+                    runtime_kind=runtime_kind,
+                    compatibility_flags=compatibility_flags,
+                    compatibility_message=compatibility_message,
+                    reset_recommended=reset_recommended,
                     lane=self._session_lane_for_status(latest.status),
                     latest_message_summary=latest_message,
                     latest_event_at=latest.updated_at,
@@ -942,7 +1007,7 @@ class ControlPlaneService:
         # ── 第二遍：从 agent_sessions 补充没有 task 的会话 ──
         # 多 Session 侧边栏需要展示所有活跃会话（跨项目），
         # 不能只靠 tasks 推导——新创建的 Session 可能还没有任何 task。
-        existing_project_ids = {item.project_id for item in session_items}
+        existing_session_ids = {item.session_id for item in session_items}
         all_agent_sessions = await self._stores.agent_context_store.list_agent_sessions(
             limit=50,
         )
@@ -954,18 +1019,15 @@ class ControlPlaneService:
                 AgentSessionKind.SUBAGENT_INTERNAL,
             }:
                 continue
-            if agent_sess.project_id in existing_project_ids:
-                continue  # 该 project 已有 task-based 项，跳过
-            # 查找项目名
-            proj = await self._stores.project_store.get_project(agent_sess.project_id)
-            project_name = proj.name if proj else "未命名对话"
-            # 查找 agent profile
-            agent_profile_id = ""
-            runtime = await self._stores.agent_context_store.get_agent_runtime(
-                agent_sess.agent_runtime_id
-            )
-            if runtime is not None:
-                agent_profile_id = runtime.worker_profile_id or runtime.agent_profile_id
+            if agent_sess.kind is not AgentSessionKind.DIRECT_WORKER:
+                continue
+            if not self._matches_selected_scope(
+                item_project_id=agent_sess.project_id,
+                item_workspace_id=agent_sess.workspace_id,
+                selected_project=selected_project,
+                selected_workspace=selected_workspace,
+            ):
+                continue
             projected_session_id = build_projected_session_id(
                 thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
                 surface="web" if agent_sess.surface in ("", "chat", "web") else agent_sess.surface,
@@ -977,6 +1039,18 @@ class ControlPlaneService:
                 project_id=agent_sess.project_id,
                 workspace_id=agent_sess.workspace_id,
             )
+            if projected_session_id in existing_session_ids:
+                continue
+            # 查找项目名
+            proj = await self._stores.project_store.get_project(agent_sess.project_id)
+            project_name = proj.name if proj else "未命名对话"
+            # 查找 agent profile
+            agent_profile_id = ""
+            runtime = await self._stores.agent_context_store.get_agent_runtime(
+                agent_sess.agent_runtime_id
+            )
+            if runtime is not None:
+                agent_profile_id = runtime.worker_profile_id or runtime.agent_profile_id
             session_items.append(
                 SessionProjectionItem(
                     session_id=projected_session_id,
@@ -991,7 +1065,15 @@ class ControlPlaneService:
                     project_id=agent_sess.project_id,
                     workspace_id=agent_sess.workspace_id,
                     agent_profile_id=agent_profile_id,
+                    session_owner_profile_id=agent_profile_id,
+                    turn_executor_kind=self._default_turn_executor_kind_for_runtime(
+                        agent_sess.kind.value
+                    ),
+                    delegation_target_profile_id="",
                     runtime_kind=agent_sess.kind.value,
+                    compatibility_flags=[],
+                    compatibility_message="",
+                    reset_recommended=False,
                     lane="queue",
                     latest_message_summary="",
                     latest_event_at=agent_sess.updated_at,
@@ -1006,6 +1088,153 @@ class ControlPlaneService:
             reverse=True,
         )
         return session_items
+
+    @staticmethod
+    def _normalize_turn_executor_kind(
+        value: TurnExecutorKind | str | None,
+    ) -> str:
+        if isinstance(value, TurnExecutorKind):
+            return value.value
+        normalized = str(value or "").strip().lower()
+        if normalized in {item.value for item in TurnExecutorKind}:
+            return normalized
+        return ""
+
+    @staticmethod
+    def _default_turn_executor_kind_for_runtime(
+        runtime_kind: str,
+        *,
+        target_kind: str = "",
+    ) -> str:
+        normalized_runtime = str(runtime_kind).strip().lower()
+        normalized_target = str(target_kind).strip().lower()
+        if normalized_runtime in {
+            AgentSessionKind.WORKER_INTERNAL.value,
+            AgentSessionKind.DIRECT_WORKER.value,
+        }:
+            return TurnExecutorKind.WORKER.value
+        if normalized_runtime == AgentSessionKind.SUBAGENT_INTERNAL.value:
+            return TurnExecutorKind.SUBAGENT.value
+        if normalized_target == "subagent":
+            return TurnExecutorKind.SUBAGENT.value
+        if normalized_target == "worker":
+            return TurnExecutorKind.WORKER.value
+        return TurnExecutorKind.SELF.value
+
+    async def _is_worker_profile_id(self, profile_id: str) -> bool:
+        resolved_profile_id = str(profile_id or "").strip()
+        if not resolved_profile_id:
+            return False
+        profile = await self._stores.agent_context_store.get_worker_profile(resolved_profile_id)
+        return profile is not None
+
+    async def _resolve_session_projection_semantics(
+        self,
+        *,
+        latest_metadata: Mapping[str, Any] | None,
+        latest_work: Work | None,
+        runtime_kind: str,
+        fallback_owner_profile_id: str,
+    ) -> tuple[str, str, str, str, list[str], str, bool]:
+        explicit_owner_profile_id = resolve_explicit_session_owner_profile_id(latest_metadata)
+        explicit_delegation_target_profile_id = resolve_explicit_delegation_target_profile_id(
+            latest_metadata
+        )
+        legacy_agent_profile_id = str(
+            (latest_metadata or {}).get("agent_profile_id", "")
+            or (latest_work.agent_profile_id if latest_work is not None else "")
+        ).strip()
+        legacy_requested_worker_profile_id = str(
+            (latest_metadata or {}).get("requested_worker_profile_id", "")
+            or (latest_work.requested_worker_profile_id if latest_work is not None else "")
+        ).strip()
+        legacy_agent_is_worker = await self._is_worker_profile_id(legacy_agent_profile_id)
+        legacy_requested_is_worker = await self._is_worker_profile_id(
+            legacy_requested_worker_profile_id
+        )
+
+        session_owner_profile_id = (
+            explicit_owner_profile_id
+            or (latest_work.session_owner_profile_id if latest_work is not None else "")
+            or fallback_owner_profile_id
+        )
+        delegation_target_profile_id = (
+            explicit_delegation_target_profile_id
+            or (latest_work.delegation_target_profile_id if latest_work is not None else "")
+        )
+        normalized_runtime_kind = str(runtime_kind or "").strip().lower()
+        compatibility_flags: list[str] = []
+        compatibility_message = ""
+        reset_recommended = False
+
+        if (
+            not delegation_target_profile_id
+            and legacy_requested_worker_profile_id
+            and legacy_requested_is_worker
+        ):
+            if normalized_runtime_kind in {
+                AgentSessionKind.WORKER_INTERNAL.value,
+                AgentSessionKind.SUBAGENT_INTERNAL.value,
+            } or (
+                latest_work is not None
+                and latest_work.target_kind in {
+                    DelegationTargetKind.WORKER,
+                    DelegationTargetKind.SUBAGENT,
+                }
+            ):
+                delegation_target_profile_id = legacy_requested_worker_profile_id
+
+        if not session_owner_profile_id:
+            if normalized_runtime_kind == AgentSessionKind.DIRECT_WORKER.value:
+                session_owner_profile_id = (
+                    fallback_owner_profile_id
+                    or legacy_agent_profile_id
+                    or legacy_requested_worker_profile_id
+                )
+            elif legacy_agent_profile_id and not legacy_agent_is_worker:
+                session_owner_profile_id = legacy_agent_profile_id
+            elif legacy_requested_worker_profile_id and not legacy_requested_is_worker:
+                session_owner_profile_id = legacy_requested_worker_profile_id
+
+        turn_executor_kind = self._normalize_turn_executor_kind(
+            resolve_turn_executor_kind(latest_metadata)
+            or (latest_work.turn_executor_kind if latest_work is not None else None)
+        )
+        if not turn_executor_kind:
+            turn_executor_kind = self._default_turn_executor_kind_for_runtime(
+                runtime_kind,
+                target_kind=latest_work.target_kind.value if latest_work is not None else "",
+            )
+
+        legacy_context_polluted = (
+            normalized_runtime_kind == AgentSessionKind.BUTLER_MAIN.value
+            and not explicit_owner_profile_id
+            and legacy_agent_is_worker
+            and not delegation_target_profile_id
+        )
+        if legacy_context_polluted:
+            if _LEGACY_CONTEXT_POLLUTED_FLAG not in compatibility_flags:
+                compatibility_flags.append(_LEGACY_CONTEXT_POLLUTED_FLAG)
+            compatibility_message = _LEGACY_CONTEXT_POLLUTED_MESSAGE
+            reset_recommended = True
+            session_owner_profile_id = fallback_owner_profile_id or session_owner_profile_id
+            turn_executor_kind = TurnExecutorKind.SELF.value
+
+        legacy_agent_profile_id = (
+            session_owner_profile_id
+            or delegation_target_profile_id
+            or fallback_owner_profile_id
+            or legacy_agent_profile_id
+        )
+        return (
+            session_owner_profile_id,
+            turn_executor_kind,
+            delegation_target_profile_id,
+            legacy_agent_profile_id,
+            compatibility_flags,
+            compatibility_message,
+            reset_recommended,
+        )
 
     @staticmethod
     def _resolve_projected_session_id_for_task(
@@ -1197,11 +1426,19 @@ class ControlPlaneService:
                 for work in await self._delegation_plane_service.list_works()
                 if not visible_project_id or work.project_id == visible_project_id
             ]
+        worker_profile_ids = {profile.profile_id for profile in stored_profiles}
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)
         legacy_works_by_type: dict[str, list[Work]] = defaultdict(list)
         for work in project_works:
             if work.requested_worker_profile_id:
                 works_by_profile_id[work.requested_worker_profile_id].append(work)
+                continue
+            if (
+                work.turn_executor_kind is TurnExecutorKind.WORKER
+                and work.session_owner_profile_id in worker_profile_ids
+                and not work.delegation_target_profile_id
+            ):
+                works_by_profile_id[work.session_owner_profile_id].append(work)
                 continue
             legacy_works_by_type[work.selected_worker_type].append(work)
 
@@ -2677,6 +2914,9 @@ class ControlPlaneService:
                 project_id=work.project_id,
                 workspace_id=work.workspace_id,
                 agent_profile_id=work.agent_profile_id,
+                session_owner_profile_id=work.session_owner_profile_id,
+                turn_executor_kind=work.turn_executor_kind.value,
+                delegation_target_profile_id=work.delegation_target_profile_id,
                 requested_worker_profile_id=work.requested_worker_profile_id,
                 requested_worker_profile_version=work.requested_worker_profile_version,
                 effective_worker_snapshot_id=work.effective_worker_snapshot_id,
@@ -5550,10 +5790,18 @@ class ControlPlaneService:
                 "new_conversation_project_id": project_id,
                 "new_conversation_workspace_id": workspace_id,
                 "new_conversation_agent_profile_id": worker_profile_id,
+                "selected_project_id": project_id,
+                "selected_workspace_id": workspace_id,
                 "updated_at": now,
             }
         )
         self._state_store.save(state)
+        await self._sync_web_project_selector_state(
+            project=project,
+            workspace=workspace,
+            source="session_create_with_project",
+        )
+        await self._sync_policy_engine_for_project(project)
 
         await self._stores.conn.commit()
 
@@ -8913,7 +9161,10 @@ class ControlPlaneService:
             control = payload.get("control_metadata", {})
             if not isinstance(control, Mapping):
                 continue
-            value = str(control.get("agent_profile_id", "")).strip()
+            value = str(
+                control.get("session_owner_profile_id", "")
+                or control.get("agent_profile_id", "")
+            ).strip()
             if value:
                 return value
         return ""

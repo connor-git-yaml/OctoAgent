@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from octoagent.core.models import Event, EventType
+from octoagent.core.models import Event, EventType, TurnExecutorKind
 
 TURN_SCOPED_CONTROL_KEYS = frozenset(
     {
         "agent_profile_id",
         "requested_worker_profile_id",
+        "delegation_target_profile_id",
+        "turn_executor_kind",
         "requested_worker_profile_version",
         "effective_worker_snapshot_id",
         "tool_profile",
@@ -26,6 +28,8 @@ TURN_SCOPED_CONTROL_KEYS = frozenset(
 
 TASK_SCOPED_CONTROL_KEYS = frozenset(
     {
+        "session_owner_profile_id",
+        "inherited_context_owner_profile_id",
         "session_id",
         "thread_id",
         "parent_task_id",
@@ -46,7 +50,10 @@ CONTROL_METADATA_KEYS = TURN_SCOPED_CONTROL_KEYS | TASK_SCOPED_CONTROL_KEYS
 PROMPT_SAFE_CONTROL_KEYS = frozenset(
     {
         "agent_profile_id",
+        "session_owner_profile_id",
         "requested_worker_profile_id",
+        "delegation_target_profile_id",
+        "turn_executor_kind",
         "requested_worker_type",
         "selected_worker_type",
         "target_kind",
@@ -179,7 +186,7 @@ def summarize_control_metadata_for_prompt(metadata: Mapping[str, Any] | None) ->
             continue
         if isinstance(value, Mapping):
             summary[key] = {
-                "keys": sorted(str(item) for item in value.keys())[:8],
+                "keys": sorted(str(item) for item in value)[:8],
                 "count": len(value),
             }
             continue
@@ -195,6 +202,65 @@ def summarize_control_metadata_for_prompt(metadata: Mapping[str, Any] | None) ->
             continue
         summary[key] = value
     return summary
+
+
+def resolve_session_owner_profile_id(metadata: Mapping[str, Any] | None) -> str:
+    """解析当前会话 owner profile。"""
+
+    if metadata is None:
+        return ""
+    return (
+        resolve_explicit_session_owner_profile_id(metadata)
+        or str(metadata.get("agent_profile_id", "")).strip()
+    )
+
+
+def resolve_explicit_session_owner_profile_id(metadata: Mapping[str, Any] | None) -> str:
+    """只解析新语义中的会话 owner profile，不回退 legacy 字段。"""
+
+    if metadata is None:
+        return ""
+    return str(metadata.get("session_owner_profile_id", "")).strip()
+
+
+def resolve_delegation_target_profile_id(metadata: Mapping[str, Any] | None) -> str:
+    """解析本轮显式 delegation target profile。"""
+
+    if metadata is None:
+        return ""
+    return (
+        resolve_explicit_delegation_target_profile_id(metadata)
+        or str(metadata.get("requested_worker_profile_id", "")).strip()
+    )
+
+
+def resolve_explicit_delegation_target_profile_id(
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    """只解析新语义中的显式 delegation target，不回退 legacy 字段。"""
+
+    if metadata is None:
+        return ""
+    return str(metadata.get("delegation_target_profile_id", "")).strip()
+
+
+def resolve_turn_executor_kind(
+    metadata: Mapping[str, Any] | None,
+) -> TurnExecutorKind | None:
+    """解析当前轮次执行者语义。"""
+
+    if metadata is None:
+        return None
+    value = metadata.get("turn_executor_kind")
+    if isinstance(value, TurnExecutorKind):
+        return value
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    try:
+        return TurnExecutorKind(normalized)
+    except ValueError:
+        return None
 
 
 def _is_clear_marker(value: Any) -> bool:

@@ -12,6 +12,7 @@ from octoagent.core.models import (
     RequesterInfo,
     SkillPipelineRun,
     Task,
+    TurnExecutorKind,
     Work,
     WorkKind,
     WorkStatus,
@@ -56,6 +57,10 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         status=WorkStatus.WAITING_APPROVAL,
         kind=WorkKind.DELEGATION,
         target_kind=DelegationTargetKind.SUBAGENT,
+        session_owner_profile_id="agent-profile-parent",
+        inherited_context_owner_profile_id="agent-profile-parent",
+        delegation_target_profile_id="worker-profile-alpha",
+        turn_executor_kind=TurnExecutorKind.SUBAGENT,
         agent_profile_id="agent-profile-child",
         requested_worker_profile_id="worker-profile-alpha",
         requested_worker_profile_version=2,
@@ -74,6 +79,10 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
     assert stored is not None
     assert stored.parent_work_id == "work-parent"
     assert stored.status == WorkStatus.WAITING_APPROVAL
+    assert stored.session_owner_profile_id == "agent-profile-parent"
+    assert stored.inherited_context_owner_profile_id == "agent-profile-parent"
+    assert stored.delegation_target_profile_id == "worker-profile-alpha"
+    assert stored.turn_executor_kind == TurnExecutorKind.SUBAGENT
     assert stored.agent_profile_id == "agent-profile-child"
     assert stored.context_frame_id == "context-frame-child"
     assert stored.requested_worker_profile_id == "worker-profile-alpha"

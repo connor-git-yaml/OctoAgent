@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .capability import RuntimeKind
+from .orchestrator import TurnExecutorKind
 
 
 def _utc_now() -> datetime:
@@ -68,6 +69,10 @@ class Work(BaseModel):
     route_reason: str = Field(default="")
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")
+    session_owner_profile_id: str = Field(default="")
+    inherited_context_owner_profile_id: str = Field(default="")
+    delegation_target_profile_id: str = Field(default="")
+    turn_executor_kind: TurnExecutorKind = Field(default=TurnExecutorKind.WORKER)
     agent_profile_id: str = Field(default="")
     requested_worker_profile_id: str = Field(default="")
     requested_worker_profile_version: int = Field(default=0, ge=0)

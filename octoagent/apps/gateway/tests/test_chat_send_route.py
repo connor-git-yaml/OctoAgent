@@ -8,10 +8,24 @@ from pathlib import Path
 import octoagent.gateway.services.task_service as task_service_module
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import ControlPlaneState, Project, WorkerProfile, WorkerProfileStatus, Workspace
+from octoagent.core.models import (
+    AgentRuntime,
+    AgentRuntimeRole,
+    AgentSession,
+    AgentSessionKind,
+    ControlPlaneState,
+    Project,
+    SessionContextState,
+    WorkerProfile,
+    WorkerProfileStatus,
+    Workspace,
+)
+from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.agent_context import build_scope_aware_session_id
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
+from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
 
@@ -122,8 +136,9 @@ class TestChatSendRoute:
         user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
         assert user_events
         metadata = user_events[-1]["payload"]["control_metadata"]
+        assert metadata["session_owner_profile_id"] == "worker-profile-chat-alpha"
         assert metadata["agent_profile_id"] == "worker-profile-chat-alpha"
-        assert metadata["requested_worker_profile_id"] == "worker-profile-chat-alpha"
+        assert not metadata.get("requested_worker_profile_id")
 
     async def test_new_chat_consumes_pending_session_project_snapshot(
         self,
@@ -186,8 +201,9 @@ class TestChatSendRoute:
         metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["project_id"] == project.project_id
         assert metadata["workspace_id"] == workspace.workspace_id
+        assert metadata["session_owner_profile_id"] == "singleton:research"
         assert metadata["agent_profile_id"] == "singleton:research"
-        assert metadata["requested_worker_profile_id"] == "singleton:research"
+        assert not metadata.get("requested_worker_profile_id")
 
     async def test_new_chat_accepts_explicit_session_and_thread_seed(
         self,
@@ -272,8 +288,123 @@ class TestChatSendRoute:
         user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
         assert len(user_events) >= 2
         latest_metadata = user_events[-1]["payload"]["control_metadata"]
+        assert latest_metadata["session_owner_profile_id"] == "singleton:research"
         assert latest_metadata["agent_profile_id"] == "singleton:research"
-        assert latest_metadata["requested_worker_profile_id"] == "singleton:research"
+        assert not latest_metadata.get("requested_worker_profile_id")
+
+    async def test_continue_legacy_butler_session_ignores_polluted_worker_owner(
+        self,
+        client: AsyncClient,
+        test_app,
+        tmp_path: Path,
+    ) -> None:
+        store_group = test_app.state.store_group
+        project = Project(
+            project_id="project-legacy-continue",
+            slug="legacy-continue",
+            name="Legacy Continue",
+        )
+        workspace = Workspace(
+            workspace_id="workspace-legacy-continue-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Legacy Continue Primary",
+            root_path=str(tmp_path / "legacy-continue"),
+        )
+        await store_group.project_store.create_project(project)
+        await store_group.project_store.create_workspace(workspace)
+
+        worker_profile_id = "worker-profile-legacy"
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=worker_profile_id,
+                project_id=project.project_id,
+                name="旧版研究员",
+                summary="legacy polluted worker owner",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+
+        task_service = TaskService(store_group, test_app.state.sse_hub)
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                channel="web",
+                thread_id="thread-legacy-continue",
+                scope_id=f"workspace:{workspace.workspace_id}:chat:web:thread-legacy-continue",
+                sender_id="owner",
+                sender_name="Owner",
+                text="legacy first turn",
+                idempotency_key="legacy-butler-continue",
+            )
+        )
+        assert created is True
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+
+        await task_service.append_user_message(
+            task_id=task_id,
+            text="历史污染轮次",
+            control_metadata={"agent_profile_id": worker_profile_id},
+        )
+        projected_session_id = build_scope_aware_session_id(
+            task,
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+        await store_group.agent_context_store.save_agent_runtime(
+            AgentRuntime(
+                agent_runtime_id="runtime-legacy-continue",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                agent_profile_id="agent-profile-default",
+                role=AgentRuntimeRole.BUTLER,
+                name="Legacy Continue Runtime",
+            )
+        )
+        await store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="agent-session-legacy-continue",
+                agent_runtime_id="runtime-legacy-continue",
+                kind=AgentSessionKind.BUTLER_MAIN,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                thread_id=task.thread_id,
+                legacy_session_id=task.thread_id,
+            )
+        )
+        await store_group.agent_context_store.save_session_context(
+            SessionContextState(
+                session_id=projected_session_id,
+                agent_runtime_id="runtime-legacy-continue",
+                agent_session_id="agent-session-legacy-continue",
+                thread_id=task.thread_id,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                task_ids=[task_id],
+            )
+        )
+        await store_group.conn.commit()
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "继续这条历史 Butler 会话",
+                "task_id": task_id,
+            },
+        )
+        assert resp.status_code == 200
+        await asyncio.sleep(0.6)
+
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
+        assert len(user_events) >= 2
+        latest_metadata = user_events[-1]["payload"]["control_metadata"]
+        assert latest_metadata["session_owner_profile_id"] == "agent-profile-default"
+        assert latest_metadata["agent_profile_id"] == "agent-profile-default"
+        assert not latest_metadata.get("requested_worker_profile_id")
 
     async def test_continue_chat_appends_user_message_and_requeues(
         self, client: AsyncClient

@@ -19,6 +19,7 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     Workspace,
     WorkStatus,
+    TurnExecutorKind,
 )
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import build_scope_aware_session_id
@@ -199,13 +200,22 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
         )
     )
 
+    assert plan.work.session_owner_profile_id == "agent-profile-default"
     assert plan.work.agent_profile_id == "agent-profile-default"
+    assert plan.work.delegation_target_profile_id == ""
     assert plan.work.context_frame_id == "context-frame-1"
     assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.metadata["session_owner_profile_id"] == "agent-profile-default"
     assert plan.dispatch_envelope.metadata["agent_profile_id"] == "agent-profile-default"
+    assert plan.dispatch_envelope.metadata["delegation_target_profile_id"] == ""
     assert plan.dispatch_envelope.metadata["context_frame_id"] == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context is not None
+    assert (
+        plan.dispatch_envelope.runtime_context.session_owner_profile_id
+        == "agent-profile-default"
+    )
     assert plan.dispatch_envelope.runtime_context.agent_profile_id == "agent-profile-default"
+    assert plan.dispatch_envelope.runtime_context.delegation_target_profile_id == ""
     assert plan.dispatch_envelope.runtime_context.context_frame_id == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context.project_id == "project-default"
     assert plan.dispatch_envelope.runtime_context.workspace_id == "workspace-default"
@@ -253,11 +263,11 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
             trace_id=f"trace-{task_id}",
             user_text="帮我查一下深圳今天的天气",
             worker_capability="llm_generation",
-            metadata={"agent_profile_id": profile.profile_id},
+            metadata={"delegation_target_profile_id": profile.profile_id},
         )
     )
 
-    assert plan.work.agent_profile_id == profile.profile_id
+    assert plan.work.delegation_target_profile_id == profile.profile_id
     assert plan.work.requested_worker_profile_id == profile.profile_id
     assert plan.work.selected_worker_type == "general"
     assert plan.tool_selection.resolution_mode == "profile_first_core"
@@ -330,20 +340,62 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
             user_text="请帮我诊断当前运行状态",
             worker_capability="llm_generation",
             metadata={
-                "agent_profile_id": agent_profile.profile_id,
+                "session_owner_profile_id": agent_profile.profile_id,
                 "requested_worker_type": "ops",
             },
         )
     )
 
+    assert plan.work.session_owner_profile_id == agent_profile.profile_id
     assert plan.work.agent_profile_id == agent_profile.profile_id
-    assert plan.work.requested_worker_profile_id == agent_profile.profile_id
+    assert plan.work.requested_worker_profile_id == ""
+    assert plan.work.delegation_target_profile_id == ""
     assert plan.work.selected_worker_type == "ops"
     assert plan.tool_selection.effective_tool_universe is not None
     assert (
         plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
     )
     assert "runtime.inspect" in plan.tool_selection.selected_tools
+
+    await store_group.conn.close()
+
+
+async def test_prepare_dispatch_does_not_promote_session_owner_to_delegation_target(
+    tmp_path: Path,
+) -> None:
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(
+            text="继续由 finance root agent 自己处理",
+            thread_id="thread-owner-self",
+            idempotency_key="delegation-owner-not-target",
+        )
+    )
+
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="继续由 finance root agent 自己处理",
+            worker_capability="llm_generation",
+            metadata={
+                "session_owner_profile_id": "worker-profile-finance-root",
+                "agent_profile_id": "worker-profile-finance-root",
+            },
+        )
+    )
+
+    assert plan.work.session_owner_profile_id == "worker-profile-finance-root"
+    assert plan.work.agent_profile_id == "worker-profile-finance-root"
+    assert plan.work.delegation_target_profile_id == ""
+    assert plan.work.requested_worker_profile_id == ""
+    assert plan.work.turn_executor_kind == TurnExecutorKind.WORKER
+    assert plan.dispatch_envelope is not None
+    assert plan.dispatch_envelope.metadata["session_owner_profile_id"] == (
+        "worker-profile-finance-root"
+    )
+    assert not plan.dispatch_envelope.metadata.get("delegation_target_profile_id")
+    assert not plan.dispatch_envelope.metadata.get("requested_worker_profile_id")
 
     await store_group.conn.close()
 

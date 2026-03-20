@@ -3586,6 +3586,9 @@ class TestControlPlaneApi:
         assert item["thread_id"] == thread_id
         assert item["task_id"] == ""
         assert item["agent_profile_id"] == profile_id
+        assert item["session_owner_profile_id"] == profile_id
+        assert item["turn_executor_kind"] == "worker"
+        assert item["delegation_target_profile_id"] == ""
         assert item["runtime_kind"] == AgentSessionKind.DIRECT_WORKER.value
 
         internal_runtime = AgentRuntime(
@@ -3621,6 +3624,360 @@ class TestControlPlaneApi:
             and entry["runtime_kind"] != AgentSessionKind.WORKER_INTERNAL.value
             for entry in payload["sessions"]
         )
+
+    async def test_direct_session_first_message_recovers_owner_profile_from_session_anchor(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        profile_id = "worker-profile-finance-anchor"
+        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id="",
+                name="研究员小 A",
+                summary="finance direct session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.create_with_project",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": profile_id,
+                    "project_name": "fin-owner-anchor",
+                },
+            },
+        )
+        assert create_resp.status_code == 200
+        create_payload = create_resp.json()["result"]["data"]
+        projected_session_id = create_payload["session_id"]
+        thread_id = create_payload["thread_id"]
+        workspace_id = create_payload["workspace_id"]
+
+        send_resp = await control_plane_client.post(
+            "/api/chat/send",
+            json={
+                "message": "你好，直接会话第一条",
+                "session_id": projected_session_id,
+            },
+        )
+        assert send_resp.status_code == 200
+        task_id = send_resp.json()["task_id"]
+
+        await asyncio.sleep(0.6)
+
+        task = await control_plane_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.thread_id == thread_id
+        assert task.scope_id == f"workspace:{workspace_id}:chat:web:{thread_id}"
+
+        events = await control_plane_app.state.store_group.event_store.get_events_for_task(task_id)
+        user_events = [event for event in events if event.type.value == "USER_MESSAGE"]
+        assert user_events
+        metadata = user_events[-1].payload["control_metadata"]
+        assert metadata["session_owner_profile_id"] == profile_id
+        assert metadata["agent_profile_id"] == profile_id
+        assert metadata["session_id"] == projected_session_id
+        assert metadata["thread_id"] == thread_id
+        assert not metadata.get("requested_worker_profile_id")
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        item = next(
+            (entry for entry in payload["sessions"] if entry["task_id"] == task_id),
+            None,
+        )
+        assert item is not None
+        assert item["session_owner_profile_id"] == profile_id
+        assert item["delegation_target_profile_id"] == ""
+        assert item["turn_executor_kind"] == "worker"
+
+    async def test_direct_session_continue_message_preserves_owner_without_delegation_target(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        profile_id = "worker-profile-finance-continue"
+        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id="",
+                name="研究员小 A",
+                summary="finance direct session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.create_with_project",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": profile_id,
+                    "project_name": "finance-owner-continue",
+                },
+            },
+        )
+        assert create_resp.status_code == 200
+        projected_session_id = create_resp.json()["result"]["data"]["session_id"]
+
+        first_send = await control_plane_client.post(
+            "/api/chat/send",
+            json={
+                "message": "第一条 direct 会话消息",
+                "session_id": projected_session_id,
+            },
+        )
+        assert first_send.status_code == 200
+        task_id = first_send.json()["task_id"]
+        await asyncio.sleep(0.6)
+
+        second_send = await control_plane_client.post(
+            "/api/chat/send",
+            json={
+                "message": "继续这条直聊会话",
+                "task_id": task_id,
+            },
+        )
+        assert second_send.status_code == 200
+        assert second_send.json()["task_id"] == task_id
+        await asyncio.sleep(0.6)
+
+        events = await control_plane_app.state.store_group.event_store.get_events_for_task(task_id)
+        user_events = [event for event in events if event.type.value == "USER_MESSAGE"]
+        assert len(user_events) >= 2
+        latest_metadata = user_events[-1].payload["control_metadata"]
+        assert latest_metadata["session_owner_profile_id"] == profile_id
+        assert latest_metadata["agent_profile_id"] == profile_id
+        assert not latest_metadata.get("requested_worker_profile_id")
+
+    async def test_session_projection_reports_delegated_worker_execution(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+
+        worker_profile_id = "worker-profile-finance-delegated"
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=worker_profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name="金融研究员",
+                summary="delegated worker projection",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+
+        thread_id = "thread-delegated-finance"
+        task_id = await _create_task(
+            control_plane_app,
+            text="请交给金融研究员处理",
+            thread_id=thread_id,
+            scope_id=f"workspace:{workspace.workspace_id}:chat:web:{thread_id}",
+        )
+        task_service = TaskService(store_group, control_plane_app.state.sse_hub)
+        await task_service.append_user_message(
+            task_id=task_id,
+            text="继续当前主会话",
+            control_metadata={
+                "session_owner_profile_id": "agent-profile-default",
+                "agent_profile_id": "agent-profile-default",
+            },
+        )
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        projected_session_id = build_scope_aware_session_id(
+            task,
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+        await store_group.agent_context_store.save_agent_runtime(
+            AgentRuntime(
+                agent_runtime_id="runtime-delegated-main",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                agent_profile_id="agent-profile-default",
+                role=AgentRuntimeRole.BUTLER,
+                name="Delegated Main Runtime",
+            )
+        )
+        await store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="agent-session-delegated-main",
+                agent_runtime_id="runtime-delegated-main",
+                kind=AgentSessionKind.BUTLER_MAIN,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                thread_id=thread_id,
+                legacy_session_id=thread_id,
+            )
+        )
+        await store_group.agent_context_store.save_session_context(
+            SessionContextState(
+                session_id=projected_session_id,
+                agent_runtime_id="runtime-delegated-main",
+                agent_session_id="agent-session-delegated-main",
+                thread_id=thread_id,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                task_ids=[task_id],
+            )
+        )
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-delegated-finance",
+                task_id=task_id,
+                title="金融研究 delegated work",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.RUNNING,
+                target_kind=DelegationTargetKind.WORKER,
+                selected_worker_type="finance",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                session_owner_profile_id="agent-profile-default",
+                delegation_target_profile_id=worker_profile_id,
+                turn_executor_kind="worker",
+                agent_profile_id="agent-profile-default",
+                requested_worker_profile_id=worker_profile_id,
+            )
+        )
+        await store_group.conn.commit()
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        item = next(
+            (entry for entry in payload["sessions"] if entry["task_id"] == task_id),
+            None,
+        )
+        assert item is not None
+        assert item["session_owner_profile_id"] == "agent-profile-default"
+        assert item["turn_executor_kind"] == "worker"
+        assert item["delegation_target_profile_id"] == worker_profile_id
+        assert item["compatibility_flags"] == []
+        assert item["reset_recommended"] is False
+
+    async def test_legacy_butler_session_with_worker_profile_pollution_is_marked_for_reset(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+
+        worker_profile_id = "worker-profile-legacy-finance"
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=worker_profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name="旧版金融研究员",
+                summary="legacy polluted worker profile",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+
+        thread_id = "thread-legacy-polluted"
+        task_id = await _create_task(
+            control_plane_app,
+            text="legacy polluted session",
+            thread_id=thread_id,
+            scope_id=f"workspace:{workspace.workspace_id}:chat:web:{thread_id}",
+        )
+        task_service = TaskService(store_group, control_plane_app.state.sse_hub)
+        await task_service.append_user_message(
+            task_id=task_id,
+            text="继续旧会话",
+            control_metadata={"agent_profile_id": worker_profile_id},
+        )
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        projected_session_id = build_scope_aware_session_id(
+            task,
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+        await store_group.agent_context_store.save_agent_runtime(
+            AgentRuntime(
+                agent_runtime_id="runtime-legacy-polluted",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                agent_profile_id="agent-profile-default",
+                role=AgentRuntimeRole.BUTLER,
+                name="Legacy Polluted Runtime",
+            )
+        )
+        await store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="agent-session-legacy-polluted",
+                agent_runtime_id="runtime-legacy-polluted",
+                kind=AgentSessionKind.BUTLER_MAIN,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                thread_id=thread_id,
+                legacy_session_id=thread_id,
+            )
+        )
+        await store_group.agent_context_store.save_session_context(
+            SessionContextState(
+                session_id=projected_session_id,
+                agent_runtime_id="runtime-legacy-polluted",
+                agent_session_id="agent-session-legacy-polluted",
+                thread_id=thread_id,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                task_ids=[task_id],
+            )
+        )
+        await store_group.conn.commit()
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        item = next(
+            (entry for entry in payload["sessions"] if entry["task_id"] == task_id),
+            None,
+        )
+        assert item is not None
+        assert item["session_owner_profile_id"] == "agent-profile-default"
+        assert item["delegation_target_profile_id"] == ""
+        assert item["turn_executor_kind"] == "self"
+        assert item["compatibility_flags"] == ["legacy_context_polluted"]
+        assert item["compatibility_message"]
+        assert item["reset_recommended"] is True
 
     async def test_session_projection_exposes_lane_summary_and_unfocus(
         self,
@@ -4909,3 +5266,70 @@ class TestControlPlaneApi:
             "workers.review",
             "mcp.tools.list",
         ]
+
+    async def test_worker_profiles_document_includes_owner_self_worker_runs(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        project = await store_group.project_store.get_default_project()
+        assert project is not None
+        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        assert workspace is not None
+
+        profile = WorkerProfile(
+            profile_id="worker-profile-owner-self-dashboard",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id,
+            name="Owner Self Worker",
+            summary="owner-self worker should appear in behavior center",
+            model_alias="cheap",
+            tool_profile="standard",
+            default_tool_groups=["filesystem", "project"],
+            selected_tools=["filesystem.read_text"],
+            runtime_kinds=["worker", "subagent"],
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            draft_revision=1,
+            active_revision=1,
+        )
+        await store_group.agent_context_store.save_worker_profile(profile)
+
+        task_id = await _create_task(
+            control_plane_app,
+            text="owner-self worker dashboard binding",
+            thread_id="thread-owner-self-dashboard",
+            scope_id=project.project_id,
+        )
+        await store_group.work_store.save_work(
+            Work(
+                work_id="work-owner-self-dashboard",
+                task_id=task_id,
+                title="Owner-self worker run",
+                kind=WorkKind.DELEGATION,
+                status=WorkStatus.RUNNING,
+                target_kind=DelegationTargetKind.WORKER,
+                selected_worker_type="general",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                session_owner_profile_id=profile.profile_id,
+                delegation_target_profile_id="",
+                turn_executor_kind="worker",
+                agent_profile_id=profile.profile_id,
+                requested_worker_profile_id="",
+                selected_tools=["filesystem.read_text"],
+            )
+        )
+        await store_group.conn.commit()
+
+        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        assert worker_profiles_resp.status_code == 200
+        payload = worker_profiles_resp.json()
+        target = next(
+            item for item in payload["profiles"] if item["profile_id"] == profile.profile_id
+        )
+        assert target["dynamic_context"]["active_work_count"] == 1
+        assert target["dynamic_context"]["running_work_count"] == 1
+        assert target["dynamic_context"]["latest_work_id"] == "work-owner-self-dashboard"
+        assert target["dynamic_context"]["latest_work_status"] == "running"

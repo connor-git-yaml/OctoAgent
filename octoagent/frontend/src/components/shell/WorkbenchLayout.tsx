@@ -110,6 +110,27 @@ function formatSessionTitle(session: SessionProjectionItem): string {
     : "未命名对话";
 }
 
+function resolveSessionOwnerProfileId(session: SessionProjectionItem): string {
+  return session.session_owner_profile_id?.trim() || session.agent_profile_id?.trim() || "";
+}
+
+function resolveSessionExecutorLabel(
+  session: SessionProjectionItem,
+  resolveAgentName: (agentProfileId: string) => string,
+): string {
+  const ownerProfileId = resolveSessionOwnerProfileId(session);
+  const ownerLabel = ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent";
+  const executorKind = String(session.turn_executor_kind || "").trim().toLowerCase();
+  const delegationTargetProfileId = session.delegation_target_profile_id?.trim() || "";
+  if (executorKind === "worker") {
+    return delegationTargetProfileId ? resolveAgentName(delegationTargetProfileId) : ownerLabel;
+  }
+  if (executorKind === "subagent") {
+    return "子代理";
+  }
+  return ownerLabel;
+}
+
 // 基于 agent_profile_id 的稳定色板——同一 Agent 始终同色
 const SESSION_ACCENT_PALETTE = [
   "#1f6a5b", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444",
@@ -154,7 +175,11 @@ function ChatNavSection({
           const isRunning = ["running", "waiting_input", "waiting_approval"].includes(
             statusNormalized
           );
-          const accent = sessionAccentColor(session.agent_profile_id);
+          const ownerProfileId = resolveSessionOwnerProfileId(session);
+          const ownerLabel = ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent";
+          const executorLabel = resolveSessionExecutorLabel(session, resolveAgentName);
+          const executorKind = String(session.turn_executor_kind || "").trim().toLowerCase();
+          const accent = sessionAccentColor(ownerProfileId);
           return (
             <button
               type="button"
@@ -166,11 +191,18 @@ function ChatNavSection({
                 onNavigate();
               }}
             >
-              <span className="wb-nav-session-title">
-                {formatSessionTitle(session)}
-              </span>
-              <span className="wb-nav-session-agent">
-                {resolveAgentName(session.agent_profile_id)}
+              <span className="wb-nav-session-copy">
+                <span className="wb-nav-session-title">
+                  {formatSessionTitle(session)}
+                </span>
+                <span className="wb-nav-session-agent">
+                  对话：{ownerLabel}
+                </span>
+                {executorKind && executorKind !== "self" ? (
+                  <span className="wb-nav-session-executor">
+                    执行：{executorLabel}
+                  </span>
+                ) : null}
               </span>
             </button>
           );

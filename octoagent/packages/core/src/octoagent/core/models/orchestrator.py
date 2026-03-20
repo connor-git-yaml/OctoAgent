@@ -30,6 +30,14 @@ class WorkerRuntimeState(StrEnum):
     TIMED_OUT = "TIMED_OUT"
 
 
+class TurnExecutorKind(StrEnum):
+    """当前轮次执行者语义。"""
+
+    SELF = "self"
+    WORKER = "worker"
+    SUBAGENT = "subagent"
+
+
 class RuntimeControlContext(BaseModel):
     """一次运行链路的冻结控制上下文。"""
 
@@ -51,7 +59,23 @@ class RuntimeControlContext(BaseModel):
     work_id: str = Field(default="", description="work ID")
     parent_work_id: str = Field(default="", description="父 work ID")
     pipeline_run_id: str = Field(default="", description="pipeline run ID")
-    agent_profile_id: str = Field(default="", description="effective agent profile ID")
+    session_owner_profile_id: str = Field(default="", description="当前会话 owner profile ID")
+    inherited_context_owner_profile_id: str = Field(
+        default="",
+        description="继承上下文的 owner profile ID",
+    )
+    delegation_target_profile_id: str = Field(
+        default="",
+        description="本轮显式 delegation target profile ID",
+    )
+    turn_executor_kind: TurnExecutorKind = Field(
+        default=TurnExecutorKind.SELF,
+        description="当前轮次执行者语义",
+    )
+    agent_profile_id: str = Field(
+        default="",
+        description="legacy effective agent profile ID（兼容字段，默认镜像 session owner）",
+    )
     context_frame_id: str = Field(default="", description="继承/消费的 context frame ID")
     metadata: dict[str, Any] = Field(default_factory=dict, description="附加上下文")
 

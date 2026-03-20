@@ -1249,8 +1249,7 @@
 
 .wb-nav-session-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
   gap: 8px;
   padding: 6px 12px;
   border-radius: 10px;
@@ -1280,6 +1279,13 @@
   color: var(--cp-accent, #1f6a5b);
 }
 
+.wb-nav-session-copy {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
 .wb-nav-session-title {
   font-size: 0.78rem;
   overflow: hidden;
@@ -1299,8 +1305,17 @@
 .wb-nav-session-agent {
   font-size: 0.68rem;
   color: var(--cp-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  flex-shrink: 0;
+}
+
+.wb-nav-session-executor {
+  font-size: 0.68rem;
+  color: var(--cp-primary-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-nav-session-new {
@@ -2882,6 +2897,20 @@
 .wb-chat-head-summary {
   font-size: 0.94rem;
   color: var(--cp-muted, rgba(20, 32, 47, 0.55));
+}
+
+.wb-chat-head-statusline {
+  font-size: 0.8rem;
+  color: var(--cp-muted, rgba(20, 32, 47, 0.72));
+}
+
+.wb-chat-inline-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.wb-chat-inline-actions .wb-action-bar {
+  justify-content: flex-start;
 }
 
 .wb-chat-activity {

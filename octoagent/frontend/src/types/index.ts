@@ -528,7 +528,13 @@ export interface SessionProjectionItem {
   project_id: string;
   workspace_id: string;
   agent_profile_id: string;
+  session_owner_profile_id?: string;
+  turn_executor_kind?: string;
+  delegation_target_profile_id?: string;
   runtime_kind: string;
+  compatibility_flags?: string[];
+  compatibility_message?: string;
+  reset_recommended?: boolean;
   lane?: string;
   latest_message_summary: string;
   latest_event_at: string | null;
@@ -1183,6 +1189,9 @@ export interface WorkProjectionItem {
   project_id: string;
   workspace_id: string;
   agent_profile_id?: string;
+  session_owner_profile_id?: string;
+  turn_executor_kind?: string;
+  delegation_target_profile_id?: string;
   requested_worker_profile_id: string;
   requested_worker_profile_version: number;
   effective_worker_snapshot_id: string;

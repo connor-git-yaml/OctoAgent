@@ -24,6 +24,9 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     TaskStatus,
+    WorkerProfile,
+    WorkerProfileOriginKind,
+    WorkerProfileStatus,
     WorkerExecutionStatus,
     WorkerResult,
     Workspace,
@@ -37,6 +40,7 @@ from octoagent.gateway.services.agent_context import (
 )
 from octoagent.gateway.services.capability_pack import CapabilityPackService
 from octoagent.gateway.services.delegation_plane import DelegationPlaneService
+from octoagent.gateway.services.execution_context import get_current_execution_context
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.orchestrator import OrchestratorService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -183,6 +187,48 @@ class _SingleLoopLLMService:
             cost_unavailable=False,
             is_fallback=False,
             fallback_reason="",
+        )
+
+
+class _ExecutionContextCapturingLLMService(_SingleLoopLLMService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.context_snapshots: list[dict[str, str]] = []
+
+    async def call(
+        self,
+        prompt_or_messages,
+        model_alias: str | None = None,
+        *,
+        task_id: str | None = None,
+        trace_id: str | None = None,
+        metadata: dict | None = None,
+        worker_capability: str | None = None,
+        tool_profile: str | None = None,
+    ) -> ModelCallResult:
+        metadata_dict = dict(metadata or {})
+        if (
+            metadata_dict.get("owner_execution_mode") == "worker_self"
+            and not str(metadata_dict.get("decision_phase", "")).strip()
+        ):
+            ctx = get_current_execution_context()
+            self.context_snapshots.append(
+                {
+                    "task_id": ctx.task_id,
+                    "session_id": ctx.session_id,
+                    "worker_id": ctx.worker_id,
+                    "backend": ctx.backend,
+                    "runtime_kind": ctx.runtime_kind,
+                }
+            )
+        return await super().call(
+            prompt_or_messages,
+            model_alias=model_alias,
+            task_id=task_id,
+            trace_id=trace_id,
+            metadata=metadata,
+            worker_capability=worker_capability,
+            tool_profile=tool_profile,
         )
 
 
@@ -333,6 +379,133 @@ class TestOrchestrator:
         assert "ARTIFACT_CREATED" in event_types
 
         await store_group.conn.close()
+
+    async def test_dispatch_owner_self_worker_session_executes_without_delegation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        llm_service = _SingleLoopLLMService()
+        store_group, task_service, orchestrator = await _build_freshness_context(
+            tmp_path,
+            llm_service=llm_service,
+        )
+
+        try:
+            worker_profile = WorkerProfile(
+                profile_id="worker-profile-finance-root",
+                project_id="project-default",
+                name="Finance Root Agent",
+                model_alias="cheap",
+                tool_profile="standard",
+                default_tool_groups=["project", "filesystem", "terminal"],
+                selected_tools=["filesystem.list_dir", "filesystem.read_text"],
+                runtime_kinds=["worker", "subagent"],
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                draft_revision=1,
+                active_revision=1,
+            )
+            await store_group.agent_context_store.save_worker_profile(worker_profile)
+
+            msg = NormalizedMessage(
+                text="请总结当前项目 README 的一句话定位。",
+                idempotency_key="f071-owner-self-worker",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(
+                task_id=task_id,
+                user_text=msg.text,
+                metadata={
+                    "session_owner_profile_id": worker_profile.profile_id,
+                    "agent_profile_id": worker_profile.profile_id,
+                },
+            )
+
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.worker_id == worker_profile.profile_id
+            assert result.summary == "owner_self_worker:general"
+            assert len(llm_service.calls) >= 1
+            call = llm_service.calls[-1]
+            assert call["model_alias"] == "cheap"
+            assert call["worker_capability"] == "llm_generation"
+            metadata = dict(call["metadata"])
+            assert metadata["owner_execution_mode"] == "worker_self"
+            assert metadata["turn_executor_kind"] == "worker"
+            assert metadata["session_owner_profile_id"] == worker_profile.profile_id
+            assert metadata["agent_profile_id"] == worker_profile.profile_id
+            assert metadata.get("delegation_target_profile_id", "") == ""
+            assert metadata.get("single_loop_executor") is not True
+
+            sessions = await store_group.agent_context_store.list_agent_sessions(
+                project_id="project-default",
+                kind=AgentSessionKind.DIRECT_WORKER,
+                limit=10,
+            )
+            assert sessions
+            runtime = await store_group.agent_context_store.get_agent_runtime(
+                sessions[0].agent_runtime_id
+            )
+            assert runtime is not None
+            assert runtime.role is AgentRuntimeRole.WORKER
+            assert runtime.worker_profile_id == worker_profile.profile_id
+        finally:
+            await store_group.conn.close()
+
+    async def test_dispatch_owner_self_worker_session_binds_execution_context(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        llm_service = _ExecutionContextCapturingLLMService()
+        store_group, task_service, orchestrator = await _build_freshness_context(
+            tmp_path,
+            llm_service=llm_service,
+        )
+
+        try:
+            worker_profile = WorkerProfile(
+                profile_id="worker-profile-context-root",
+                project_id="project-default",
+                name="Context Root Agent",
+                model_alias="cheap",
+                tool_profile="standard",
+                default_tool_groups=["project", "filesystem", "terminal"],
+                selected_tools=["filesystem.list_dir", "filesystem.read_text"],
+                runtime_kinds=["worker", "subagent"],
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                draft_revision=1,
+                active_revision=1,
+            )
+            await store_group.agent_context_store.save_worker_profile(worker_profile)
+
+            msg = NormalizedMessage(
+                text="请读取当前 worker 的 execution context。",
+                idempotency_key="f071-owner-self-worker-context",
+            )
+            task_id, created = await task_service.create_task(msg)
+            assert created is True
+
+            result = await orchestrator.dispatch(
+                task_id=task_id,
+                user_text=msg.text,
+                metadata={
+                    "session_owner_profile_id": worker_profile.profile_id,
+                    "agent_profile_id": worker_profile.profile_id,
+                },
+            )
+
+            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert llm_service.context_snapshots
+            snapshot = llm_service.context_snapshots[-1]
+            assert snapshot["task_id"] == task_id
+            assert snapshot["worker_id"] == worker_profile.profile_id
+            assert snapshot["backend"] == "inline"
+            assert snapshot["runtime_kind"] == "worker"
+            assert snapshot["session_id"]
+        finally:
+            await store_group.conn.close()
 
     async def test_dispatch_prepared_roundtrips_through_a2a_and_restores_runtime_context(
         self, tmp_path: Path
@@ -913,7 +1086,7 @@ class TestOrchestrator:
             assert metadata["requested_worker_type"] == "research"
             assert metadata["requested_worker_profile_id"] == "singleton:research"
             assert metadata["single_loop_executor_mode"] == "butler_research"
-            assert metadata["requested_worker_type_source"] == "requested_worker_profile_id"
+            assert metadata["requested_worker_type_source"] == "delegation_target_profile_id"
             assert "decision_phase" not in metadata
         finally:
             await store_group.conn.close()

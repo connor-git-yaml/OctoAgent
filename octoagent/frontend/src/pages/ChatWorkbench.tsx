@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   attachExecutionInput,
@@ -213,8 +213,11 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
     return [];
   }
   const sessionItems = ensureArray(sessions.sessions);
-  const webSessions = sessionItems.filter((item) => item.channel === "web");
-  const candidates = webSessions.length > 0 ? webSessions : sessionItems;
+  const cleanSessionItems = sessionItems.filter((item) => !item.reset_recommended);
+  const webSessions = cleanSessionItems.filter(
+    (item) => item.channel === "web" && !item.reset_recommended
+  );
+  const candidates = webSessions.length > 0 ? webSessions : cleanSessionItems;
   const taskIds: string[] = [];
 
   if (sessions.focused_session_id) {
@@ -233,11 +236,27 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
   for (const item of candidates) {
     pushRestoreTaskId(taskIds, item.task_id);
   }
-  for (const item of sessionItems) {
+  for (const item of cleanSessionItems) {
     pushRestoreTaskId(taskIds, item.task_id);
   }
 
   return taskIds;
+}
+
+function resolveSessionOwnerProfileId(session: SessionProjectionDocument["sessions"][number] | null | undefined): string {
+  return session?.session_owner_profile_id?.trim() || session?.agent_profile_id?.trim() || "";
+}
+
+function resolveDelegationTargetProfileId(
+  session: SessionProjectionDocument["sessions"][number] | null | undefined,
+  work: WorkProjectionItem | null | undefined,
+): string {
+  return (
+    session?.delegation_target_profile_id?.trim() ||
+    work?.delegation_target_profile_id?.trim() ||
+    work?.requested_worker_profile_id?.trim() ||
+    ""
+  );
 }
 
 function readSummaryString(summary: Record<string, unknown>, key: string): string {
@@ -396,7 +415,7 @@ interface ChatTraceEntry {
   detailOutput?: string;
 }
 
-type RestoreChoice = "continue" | "new";
+type RestoreChoice = "prompt" | "continue" | "new";
 
 function summarizeDelegationIntent(work: WorkProjectionItem): string {
   const toolNames = ensureArray(work.selected_tools);
@@ -1100,6 +1119,7 @@ function buildWorkerActivity(
 
 export default function ChatWorkbench() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
+  const navigate = useNavigate();
   const { snapshot, refreshResources, submitAction, busyActionId } = useWorkbench();
   const sessionDocument = snapshot!.resources.sessions;
   const projectSelector = snapshot!.resources.project_selector;
@@ -1129,8 +1149,6 @@ export default function ChatWorkbench() {
         : null,
     [routeSessionId, sessions]
   );
-  // routeSession（URL 指定）或 webSessions[0]（默认首个）——用于 agent 名和标题
-  const currentSession = routeSessionId ? routeSession : webSessions[0] || null;
 
   // 当 URL 指定了 session（Worker 会话路由）时，restoreTaskIds 必须完全隔离于
   // 全局 focused_session_id 和 sessions 轮询变化，避免 deps 变化导致 fallthrough
@@ -1156,17 +1174,26 @@ export default function ChatWorkbench() {
     storedRestoreTaskId,
   ]);
   const restoreTaskIds = routeSessionId ? routeRestoreTaskIds : defaultRestoreTaskIds;
-  const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>("continue");
+  const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>(
+    routeSessionId ? "continue" : "prompt"
+  );
+  const resumeSession =
+    routeSessionId
+      ? routeSession
+      : restoreChoice === "continue"
+        ? webSessions[0] || null
+        : null;
 
   // 当 URL 指向已有 session 或已有 restore task 时，不传 newConversationToken——
   // 避免 stale token 把消息路由到错误的 project。
   // Token 只在通过 NewSessionModal 创建全新会话时使用。
-  const hasExistingSession = Boolean(routeSession?.task_id) || restoreTaskIds.length > 0;
-  const { messages, sendMessage, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
-    restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
+  const shouldContinueRestore = restoreChoice === "continue" && restoreTaskIds.length > 0;
+  const hasExistingSession = Boolean(routeSessionId) || shouldContinueRestore;
+  const { messages, sendMessage, resetConversation, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
+    shouldContinueRestore ? { taskIds: restoreTaskIds } : null,
     {
-      activeProjectId: currentSession?.project_id || projectSelector?.current_project_id || "",
-      activeWorkspaceId: currentSession?.workspace_id || projectSelector?.current_workspace_id || "",
+      activeProjectId: resumeSession?.project_id || projectSelector?.current_project_id || "",
+      activeWorkspaceId: resumeSession?.workspace_id || projectSelector?.current_workspace_id || "",
       newConversationToken: hasExistingSession ? "" : (sessionDocument?.new_conversation_token ?? ""),
       newConversationProjectId: hasExistingSession ? "" : (sessionDocument?.new_conversation_project_id ?? ""),
       newConversationWorkspaceId: hasExistingSession ? "" : (sessionDocument?.new_conversation_workspace_id ?? ""),
@@ -1206,6 +1233,14 @@ export default function ChatWorkbench() {
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
+  const currentSession =
+    taskId != null
+      ? activeSession ?? (routeSessionId ? routeSession : webSessions[0] || null)
+      : routeSessionId
+        ? routeSession
+        : restoreChoice === "continue"
+          ? webSessions[0] || null
+          : null;
   const activeExecutionSummary =
     activeSession?.execution_summary &&
     typeof activeSession.execution_summary === "object" &&
@@ -1219,7 +1254,14 @@ export default function ChatWorkbench() {
   const activeContextFrame =
     contextFrames.find((item) => item.task_id === taskId) ??
     (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
-  const activeSessionAgentProfileId = activeSession?.agent_profile_id ?? "";
+  const activeSessionOwnerProfileId = resolveSessionOwnerProfileId(activeSession);
+  const activeCompatibilityFlags = ensureArray(currentSession?.compatibility_flags);
+  const legacyResetRecommended = Boolean(currentSession?.reset_recommended);
+  const compatibilityMessage =
+    currentSession?.compatibility_message?.trim() ||
+    (activeCompatibilityFlags.includes("legacy_context_polluted")
+      ? "这条历史会话仍沿用旧版 owner/profile 继承语义，建议先重置 continuity，再继续新的对话。"
+      : "");
   const isDirectExecution = isDirectButlerExecution(activeWork);
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
@@ -1364,6 +1406,11 @@ export default function ChatWorkbench() {
   const isRestoringConversation = restoring && messages.length === 0;
   const isEmptyConversation =
     messages.length === 0 && !isRestoringConversation;
+  const shouldPromptForRestoreChoice =
+    !routeSessionId &&
+    restoreTaskIds.length > 0 &&
+    restoreChoice === "prompt" &&
+    isEmptyConversation;
   const shouldShowInlineActivity =
     Boolean(taskId) &&
     (streaming || !hasLoadedTaskStatus || !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus));
@@ -1489,14 +1536,42 @@ export default function ChatWorkbench() {
     Boolean(taskId) &&
     normalizedTaskStatus === "WAITING_INPUT" &&
     executionSession?.can_attach_input !== false;
-  // 当前 Session 关联的 Agent 名（用于标题和 placeholder）
-  // 优先级：活跃 task session → 当前 route/默认 session → pending conversation → 全局默认
-  const effectiveAgentProfileId =
-    activeSessionAgentProfileId || currentSession?.agent_profile_id || pendingConversationAgentProfileId || defaultRootAgentId;
-  const effectiveAgentName =
-    workerProfiles.find((p) => p.profile_id === effectiveAgentProfileId)?.name ||
+  // 会话 owner = 用户首先选择与之对话的 Agent；不是本轮执行 target。
+  const currentSessionOwnerProfileId =
+    activeSessionOwnerProfileId ||
+    resolveSessionOwnerProfileId(currentSession) ||
+    pendingConversationAgentProfileId ||
+    defaultRootAgentId;
+  const conversationOwnerName =
+    workerProfiles.find((p) => p.profile_id === currentSessionOwnerProfileId)?.name ||
     defaultRootAgent?.name ||
     "OctoAgent";
+  const currentTurnExecutorKind =
+    String(
+      activeSession?.turn_executor_kind ||
+      activeWork?.turn_executor_kind ||
+      currentSession?.turn_executor_kind ||
+      ""
+    )
+      .trim()
+      .toLowerCase() || (hasInternalCollaboration ? "worker" : "self");
+  const currentDelegationTargetProfileId = resolveDelegationTargetProfileId(
+    activeSession ?? currentSession,
+    activeWork
+  );
+  const currentExecutorName =
+    currentTurnExecutorKind === "worker"
+      ? workerProfiles.find((p) => p.profile_id === currentDelegationTargetProfileId)?.name ||
+        conversationOwnerName
+      : currentTurnExecutorKind === "subagent"
+        ? "子代理"
+        : conversationOwnerName;
+  const conversationExecutionSummary =
+    currentTurnExecutorKind === "worker"
+      ? `正在与 ${conversationOwnerName} 对话，本轮由 ${currentExecutorName} 执行。`
+      : currentTurnExecutorKind === "subagent"
+        ? `正在与 ${conversationOwnerName} 对话，本轮由子代理执行。`
+        : `正在与 ${conversationOwnerName} 对话，当前由 ${conversationOwnerName} 直接处理。`;
   // Session 展示名 = 项目名（作为默认）；后续可被别名覆盖
   const sessionDisplayName =
     (currentSession?.title?.trim()) ||
@@ -1505,20 +1580,35 @@ export default function ChatWorkbench() {
     "";
   const inputPlaceholder = canSteerCurrentRun
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
-    : `告诉 ${effectiveAgentName} 你现在要做什么`;
+    : `告诉 ${conversationOwnerName} 你现在要做什么`;
 
   useEffect(() => {
+    if (routeSessionId) {
+      setRestoreChoice("continue");
+      return;
+    }
     if (messages.length > 0 || taskId) {
       setRestoreChoice("continue");
       return;
     }
-    if (restoreTaskIds.length === 0 || sessionDocument?.new_conversation_token) {
-      setRestoreChoice((current) => (current === "new" ? current : "continue"));
+    if (sessionDocument?.new_conversation_token) {
+      setRestoreChoice("new");
       return;
     }
-    // 有可恢复会话时直接进入 continue，不再展示选择界面
-    setRestoreChoice((current) => (current === "new" ? current : "continue"));
-  }, [messages.length, restoreTaskIds.length, sessionDocument?.new_conversation_token, taskId]);
+    if (restoreTaskIds.length > 0) {
+      setRestoreChoice((current) =>
+        current === "continue" || current === "new" ? current : "prompt"
+      );
+      return;
+    }
+    setRestoreChoice("new");
+  }, [
+    messages.length,
+    restoreTaskIds.length,
+    routeSessionId,
+    sessionDocument?.new_conversation_token,
+    taskId,
+  ]);
 
   useEffect(() => {
     if (!isRestoringConversation) {
@@ -1752,6 +1842,33 @@ export default function ChatWorkbench() {
     }
   }
 
+  async function handleResetLegacySession() {
+    if (!currentSession?.session_id) {
+      return;
+    }
+    const result = await submitAction("session.reset", {
+      session_id: currentSession.session_id,
+    });
+    if (!result) {
+      setChatActionNotice({
+        tone: "error",
+        title: "这条历史会话还没有重置成功",
+        message: "你可以再试一次，或直接新开一条 Butler 会话。",
+      });
+      return;
+    }
+    setChatActionNotice({
+      tone: "success",
+      title: "这条历史会话已经重置",
+      message: result.message || "旧 continuity 已清空，接下来会按新的会话语义继续。",
+    });
+    setRestoreChoice("new");
+    await resetConversation();
+    if (routeSessionId) {
+      navigate("/chat");
+    }
+  }
+
   async function handleAttachInput(text: string) {
     if (!taskId) {
       return false;
@@ -1903,7 +2020,7 @@ export default function ChatWorkbench() {
     setPendingApprovals([]);
     setChatActionNotice(null);
     await sendMessage(text, {
-      agentProfileId: currentSession?.agent_profile_id || undefined,
+      agentProfileId: currentSessionOwnerProfileId || undefined,
       sessionId: !taskId ? currentSession?.session_id || routeSessionId || undefined : undefined,
       threadId: !taskId ? currentSession?.thread_id || undefined : undefined,
     });
@@ -1977,6 +2094,33 @@ export default function ChatWorkbench() {
       : streaming
         ? "加入队列"
         : "发送";
+  const legacyResetCallout = legacyResetRecommended ? (
+    <InlineCallout title="这条历史会话建议先重置再继续" tone="muted">
+      <div className="wb-chat-inline-actions">
+        <span>{compatibilityMessage}</span>
+        <div className="wb-action-bar">
+          <button
+            type="button"
+            className="wb-button wb-button-secondary"
+            onClick={() => void handleResetLegacySession()}
+            disabled={busyActionId === "session.reset"}
+          >
+            重置 continuity
+          </button>
+          <button
+            type="button"
+            className="wb-button wb-button-ghost"
+            onClick={() => {
+              setRestoreChoice("new");
+              void resetConversation();
+            }}
+          >
+            新开 Butler 会话
+          </button>
+        </div>
+      </div>
+    </InlineCallout>
+  ) : null;
 
   return (
     <div className="wb-page wb-chat-page">
@@ -1984,10 +2128,13 @@ export default function ChatWorkbench() {
         className={`wb-panel wb-chat-panel wb-chat-shell ${isEmptyConversation ? "is-empty" : ""}`}
       >
         <div className="wb-panel-head wb-chat-head">
-          <div className="wb-chat-head-copy wb-chat-head-inline">
-            <h3>{sessionDisplayName || conversationTitle}</h3>
-            <span className="wb-chat-head-sep">/</span>
-            <p className="wb-chat-head-summary">{effectiveAgentName}</p>
+          <div className="wb-chat-head-copy">
+            <div className="wb-chat-head-inline">
+              <h3>{sessionDisplayName || conversationTitle}</h3>
+              <span className="wb-chat-head-sep">/</span>
+              <p className="wb-chat-head-summary">对话：{conversationOwnerName}</p>
+            </div>
+            <p className="wb-chat-head-statusline">{conversationExecutionSummary}</p>
           </div>
           <div className="wb-chat-head-actions">
             {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}
@@ -2034,19 +2181,45 @@ export default function ChatWorkbench() {
                 {error}
               </InlineCallout>
             ) : null}
+            {legacyResetCallout}
+            {shouldPromptForRestoreChoice ? (
+              <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-choice">
+                <strong>继续最近会话，还是新开一条？</strong>
+                <span>最近这条会话已经有上下文。你可以继续沿用，也可以显式新开一条 Butler 会话。</span>
+                <div className="wb-action-bar wb-chat-restore-actions">
+                  <button
+                    type="button"
+                    className="wb-button wb-button-secondary"
+                    onClick={() => setRestoreChoice("continue")}
+                  >
+                    继续最近会话
+                  </button>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-primary"
+                    onClick={() => {
+                      setRestoreChoice("new");
+                      void resetConversation();
+                    }}
+                  >
+                    新开 Butler 会话
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleInputKeyDown}
                 placeholder={inputPlaceholder}
-                disabled={streaming}
+                disabled={streaming || shouldPromptForRestoreChoice}
                 rows={3}
               />
               <button
                 type="submit"
                 className="wb-button wb-button-primary"
-                disabled={streaming || !input.trim()}
+                disabled={streaming || shouldPromptForRestoreChoice || !input.trim()}
               >
                 {streaming ? "发送中" : "发送"}
               </button>
@@ -2087,6 +2260,7 @@ export default function ChatWorkbench() {
                 {error}
               </InlineCallout>
             ) : null}
+            {legacyResetCallout}
 
             {activeApprovalItem ? (
               <>

@@ -1277,6 +1277,79 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
         await store_group.conn.close()
 
 
+async def test_work_split_rejects_worker_to_worker_delegation(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请拆分一组 worker 子任务",
+                idempotency_key="feature-071-work-split-worker-to-worker",
+            )
+        )
+        assert created is True
+
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请拆分一组 worker 子任务",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-071-work-split-worker",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "work.split",
+                {
+                    "objectives": ["先调研 API", "再补一组测试"],
+                    "worker_type": "research",
+                    "target_kind": "worker",
+                },
+                broker_context,
+            )
+
+        assert result.is_error is True
+        assert result.error is not None
+        assert "worker runtime cannot delegate to another worker" in result.error
+        child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
+        assert child_works == []
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
 async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
     tmp_path: Path,
 ) -> None:
@@ -1636,6 +1709,78 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
         assert child.workspace_id == "workspace-default"
         assert child.metadata["requested_tool_profile"] == "standard"
         assert child.metadata["requested_worker_type"] == "research"
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_subagents_spawn_rejects_worker_to_worker_delegation(
+    tmp_path: Path,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请把这项工作交给另一个 worker",
+                idempotency_key="feature-071-subagents-spawn-worker-to-worker",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请把这项工作交给另一个 worker",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-071-spawn-worker",
+            worker_id="worker.supervisor",
+            backend="inline",
+            console=task_runner.execution_console,
+            work_id=plan.work.work_id,
+            runtime_kind="worker",
+            runtime_context=plan.dispatch_envelope.runtime_context,
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:supervisor",
+            profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "subagents.spawn",
+                {
+                    "objective": "请继续处理这项工作",
+                    "worker_type": "research",
+                    "target_kind": "worker",
+                    "title": "invalid-worker-hop",
+                },
+                broker_context,
+            )
+
+        assert result.is_error is True
+        assert result.error is not None
+        assert "worker runtime cannot delegate to another worker" in result.error
+        child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
+        assert child_works == []
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
