@@ -1351,9 +1351,8 @@ class ControlPlaneService:
 
     async def get_agent_profiles_document(self) -> AgentProfilesDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        profiles = await self._stores.agent_context_store.list_agent_profiles(
-            project_id=selected_project.project_id if selected_project is not None else None
-        )
+        # 全局加载所有 agent profiles，不按项目过滤——管理页面需要看到全部
+        profiles = await self._stores.agent_context_store.list_agent_profiles()
         items = [
             AgentProfileItem(
                 profile_id=profile.profile_id,
@@ -1386,12 +1385,6 @@ class ControlPlaneService:
                 updated_at=profile.updated_at,
             )
             for profile in profiles
-            if self._matches_selected_scope(
-                item_project_id=profile.project_id or None,
-                item_workspace_id=None,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            )
         ]
         return AgentProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
@@ -1416,18 +1409,13 @@ class ControlPlaneService:
     async def get_worker_profiles_document(self) -> WorkerProfilesDocument:
         _, selected_project, selected_workspace, _ = await self._resolve_selection()
         capability_pack = await self.get_capability_pack_document()
-        visible_project_id = selected_project.project_id if selected_project is not None else None
+        # 全局加载所有 worker profiles，不按项目过滤——Agents 管理页面需要看到全部
         stored_profiles = await self._stores.agent_context_store.list_worker_profiles(
-            project_id=visible_project_id,
             include_archived=True,
         )
         project_works: list[Work] = []
         if self._delegation_plane_service is not None:
-            project_works = [
-                work
-                for work in await self._delegation_plane_service.list_works()
-                if not visible_project_id or work.project_id == visible_project_id
-            ]
+            project_works = await self._delegation_plane_service.list_works()
         worker_profile_ids = {profile.profile_id for profile in stored_profiles}
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)
         legacy_works_by_type: dict[str, list[Work]] = defaultdict(list)
@@ -2745,17 +2733,10 @@ class ControlPlaneService:
         )
 
     async def get_automation_document(self) -> AutomationJobDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        # 全局展示所有自动化任务，不按项目过滤
         jobs = self._automation_store.list_jobs()
         items: list[AutomationJobItem] = []
         for job in jobs:
-            if not self._matches_selected_scope(
-                item_project_id=job.project_id,
-                item_workspace_id=job.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
-                continue
             runs = self._automation_store.list_runs(job.job_id, limit=1)
             degraded_reason = (
                 self._automation_scheduler.get_issue(job.job_id)
@@ -2802,15 +2783,11 @@ class ControlPlaneService:
         )
 
     async def get_capability_pack_document(self) -> CapabilityPackDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        # 能力包全局加载，不按项目过滤
         if self._capability_pack_service is None:
             return CapabilityPackDocument(
-                selected_project_id=(
-                    selected_project.project_id if selected_project is not None else ""
-                ),
-                selected_workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                selected_project_id="",
+                selected_workspace_id="",
                 degraded=ControlPlaneDegradedState(
                     is_degraded=True,
                     reasons=["capability_pack_unavailable"],
@@ -2818,19 +2795,13 @@ class ControlPlaneService:
                 warnings=["capability pack service unavailable"],
             )
         pack = await self._capability_pack_service.get_pack(
-            project_id=selected_project.project_id if selected_project is not None else "",
-            workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            project_id="",
+            workspace_id="",
         )
         return CapabilityPackDocument(
             pack=pack,
-            selected_project_id=(
-                selected_project.project_id if selected_project is not None else ""
-            ),
-            selected_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            selected_project_id="",
+            selected_workspace_id="",
             capabilities=[
                 ControlPlaneCapability(
                     capability_id="capability.refresh",
@@ -2845,7 +2816,6 @@ class ControlPlaneService:
         )
 
     async def get_delegation_document(self) -> DelegationPlaneDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
         if self._delegation_plane_service is None:
             return DelegationPlaneDocument(
                 degraded=ControlPlaneDegradedState(
@@ -2859,15 +2829,10 @@ class ControlPlaneService:
         for work in works:
             if work.parent_work_id:
                 child_map[work.parent_work_id].append(work.work_id)
+        # 全局展示所有 works，不按项目过滤——Work 页面是全局管理视图
         items = [
             self._build_work_projection_item(work=work, works=works, child_map=child_map)
             for work in works
-            if self._matches_selected_scope(
-                item_project_id=work.project_id,
-                item_workspace_id=work.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            )
         ]
         summary: dict[str, Any] = {
             "total": len(items),
@@ -3063,7 +3028,6 @@ class ControlPlaneService:
         )
 
     async def get_skill_pipeline_document(self) -> SkillPipelineDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
         if self._delegation_plane_service is None:
             return SkillPipelineDocument(
                 degraded=ControlPlaneDegradedState(
@@ -3073,17 +3037,11 @@ class ControlPlaneService:
                 warnings=["skill pipeline unavailable"],
             )
         runs = await self._delegation_plane_service.list_pipeline_runs()
+        # 全局展示所有 pipeline runs，不按项目过滤
         items: list[PipelineRunItem] = []
         for run in runs:
             work = await self._stores.work_store.get_work(run.work_id)
             if work is None:
-                continue
-            if not self._matches_selected_scope(
-                item_project_id=work.project_id,
-                item_workspace_id=work.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
                 continue
             frames = await self._delegation_plane_service.list_pipeline_replay(run.run_id)
             items.append(
@@ -8710,67 +8668,21 @@ class ControlPlaneService:
         )
 
     async def _get_import_source_in_scope(self, source_id: str):
-        document = await self._import_workbench_service.get_source(source_id)
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        if not self._matches_selected_scope(
-            item_project_id=document.active_project_id,
-            item_workspace_id=document.active_workspace_id,
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        ):
-            raise ImportWorkbenchError(
-                "IMPORT_SOURCE_NOT_ALLOWED",
-                "导入源不属于当前选中的 project/workspace。",
-            )
-        return document
+        return await self._import_workbench_service.get_source(source_id)
 
     async def _get_import_run_in_scope(self, run_id: str):
-        document = await self._import_workbench_service.get_run(run_id)
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        if not self._matches_selected_scope(
-            item_project_id=document.active_project_id,
-            item_workspace_id=document.active_workspace_id,
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        ):
-            raise ImportWorkbenchError(
-                "IMPORT_REPORT_NOT_ALLOWED",
-                "导入运行不属于当前选中的 project/workspace。",
-            )
-        return document
+        return await self._import_workbench_service.get_run(run_id)
 
     async def _get_automation_job_in_scope(self, job_id: str) -> AutomationJob:
         job = self._automation_store.get_job(job_id)
         if job is None:
             raise ControlPlaneActionError("JOB_NOT_FOUND", "automation job 不存在")
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        if not self._matches_selected_scope(
-            item_project_id=job.project_id,
-            item_workspace_id=job.workspace_id,
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        ):
-            raise ControlPlaneActionError(
-                "PROJECT_SCOPE_NOT_ALLOWED",
-                "automation job 不属于当前选中的 project/workspace。",
-            )
         return job
 
     async def _get_work_in_scope(self, work_id: str):
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             raise ControlPlaneActionError("WORK_NOT_FOUND", "work 不存在")
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        if not self._matches_selected_scope(
-            item_project_id=work.project_id,
-            item_workspace_id=work.workspace_id,
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        ):
-            raise ControlPlaneActionError(
-                "PROJECT_SCOPE_NOT_ALLOWED",
-                "work 不属于当前选中的 project/workspace。",
-            )
         return work
 
     async def _collect_bridge_refs(self) -> list[dict[str, Any]]:

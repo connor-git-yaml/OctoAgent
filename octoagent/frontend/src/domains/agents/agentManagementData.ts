@@ -348,11 +348,11 @@ export function deriveAgentManagementView(
   const builtinProfileById = Object.fromEntries(
     builtinProfiles.map((profile) => [profile.profile_id, profile])
   ) as Record<string, WorkerProfileItem>;
+  // 展示所有项目的自定义 Agent，不按 currentProjectId 过滤——Agents 页面是全局管理视图
   const currentProjectProfiles = profiles.filter(
     (profile) =>
       profile.origin_kind !== "builtin" &&
       profile.scope === "project" &&
-      profile.project_id === currentProjectId &&
       profile.status !== "archived"
   );
 
