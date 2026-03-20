@@ -14,4 +14,6 @@ export interface ChatRestoreTarget {
 
 export interface ChatSendOptions {
   agentProfileId?: string | null;
+  sessionId?: string | null;
+  threadId?: string | null;
 }

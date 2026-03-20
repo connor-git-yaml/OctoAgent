@@ -139,6 +139,10 @@ function buildSnapshot(): any {
 
 describe("ChatWorkbench", () => {
   beforeEach(() => {
+    Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
     fetchTaskDetailMock.mockResolvedValue(null);
     fetchTaskExecutionSessionMock.mockResolvedValue({ session: null });
     fetchApprovalsMock.mockResolvedValue({ approvals: [], total: 0 });
@@ -191,7 +195,11 @@ describe("ChatWorkbench", () => {
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith("检查今天的备份情况");
+      expect(sendMessage).toHaveBeenCalledWith("检查今天的备份情况", {
+        agentProfileId: undefined,
+        sessionId: undefined,
+        threadId: undefined,
+      });
     });
   });
 
@@ -284,7 +292,11 @@ describe("ChatWorkbench", () => {
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志");
+      expect(sendMessage).toHaveBeenCalledWith("继续检查今天的错误日志", {
+        agentProfileId: undefined,
+        sessionId: undefined,
+        threadId: undefined,
+      });
     });
   });
 
@@ -330,7 +342,7 @@ describe("ChatWorkbench", () => {
     expect(screen.queryByLabelText("当前处理进度")).not.toBeInTheDocument();
   });
 
-  it("可以显式开始新对话", async () => {
+  it("现有会话不再在头部额外渲染开始新对话按钮", async () => {
     const resetConversation = vi.fn();
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
@@ -368,9 +380,10 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "开始新对话" }));
-
-    expect(resetConversation).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "开始新对话" })
+    ).not.toBeInTheDocument();
+    expect(resetConversation).not.toHaveBeenCalled();
   });
 
   it("会显示待创建新会话的项目起点", () => {
@@ -442,6 +455,71 @@ describe("ChatWorkbench", () => {
     expect(
       screen.getByPlaceholderText("告诉 Research Root Agent 你现在要做什么")
     ).toBeInTheDocument();
+  });
+
+  it("空 direct session 会保留新会话 token，并在首条消息里带上 session/thread", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.new_conversation_token = "token-fin";
+    snapshot.resources.sessions.new_conversation_project_id = "project-fin";
+    snapshot.resources.sessions.new_conversation_workspace_id = "workspace-fin";
+    snapshot.resources.sessions.new_conversation_agent_profile_id = "worker-profile-finance";
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id:
+          "surface:web|scope:workspace:workspace-fin:chat:web:thread-fin|project:project-fin|workspace:workspace-fin|thread:thread-fin",
+        thread_id: "thread-fin",
+        task_id: "",
+        title: "fin",
+        latest_message_summary: "",
+        status: "created",
+        channel: "web",
+        project_id: "project-fin",
+        workspace_id: "workspace-fin",
+        agent_profile_id: "worker-profile-finance",
+        latest_event_at: "2026-03-19T10:00:00Z",
+        execution_summary: {},
+      },
+    ];
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [],
+      sendMessage,
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: null,
+    });
+    fetchTaskDetailMock.mockResolvedValue(null);
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/chat/surface:web|scope:workspace:workspace-fin:chat:web:thread-fin|project:project-fin|workspace:workspace-fin|thread:thread-fin",
+        ]}
+      >
+        <ChatWorkbench />
+      </MemoryRouter>
+    );
+
+    const latestUseChatStreamCall =
+      useChatStreamMock.mock.calls[useChatStreamMock.mock.calls.length - 1] ?? [];
+    const [, sessionScope] = latestUseChatStreamCall;
+    expect(sessionScope.newConversationToken).toBe("token-fin");
+
+    await userEvent.type(screen.getByPlaceholderText("告诉 NAS 管家 你现在要做什么"), "你好");
+    await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(sendMessage).toHaveBeenCalledWith("你好", {
+      agentProfileId: "worker-profile-finance",
+      sessionId:
+        "surface:web|scope:workspace:workspace-fin:chat:web:thread-fin|project:project-fin|workspace:workspace-fin|thread:thread-fin",
+      threadId: "thread-fin",
+    });
   });
 
   it("会明确提示当前会话绑定的项目与顶部选择不同", async () => {
@@ -538,13 +616,10 @@ describe("ChatWorkbench", () => {
       vi.advanceTimersByTime(1700);
     });
 
-    const resetButton = screen.getByRole("button", { name: "直接开始新对话" });
-    expect(resetButton).toHaveClass("wb-button-inline");
-
-    await act(async () => {
-      resetButton.click();
-    });
-    expect(resetConversation).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText("如果这一步还没结束，你可以从左侧开始一段新对话。")
+    ).toBeInTheDocument();
+    expect(resetConversation).not.toHaveBeenCalled();
 
     vi.useRealTimers();
   });
@@ -627,7 +702,9 @@ describe("ChatWorkbench", () => {
     await waitFor(() => {
       expect(fetchTaskDetailMock).toHaveBeenCalledWith("task-existing-1");
     });
-    expect(screen.getByRole("button", { name: "开始新对话" })).toHaveClass("wb-button-inline");
+    expect(
+      screen.queryByRole("button", { name: "开始新对话" })
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "打开任务" })).toHaveClass("wb-button-inline");
   });
 

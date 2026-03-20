@@ -26,6 +26,8 @@ TURN_SCOPED_CONTROL_KEYS = frozenset(
 
 TASK_SCOPED_CONTROL_KEYS = frozenset(
     {
+        "session_id",
+        "thread_id",
         "parent_task_id",
         "parent_work_id",
         "spawned_by",

@@ -50,7 +50,7 @@ from octoagent.core.models import (
     WorkspaceKind,
     WorkStatus,
 )
-from octoagent.gateway.services.agent_context import build_scope_aware_session_id
+from octoagent.gateway.services.agent_context import build_projected_session_id, build_scope_aware_session_id
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
@@ -3308,6 +3308,19 @@ class TestControlPlaneApi:
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
+        profile_id = "worker-profile-direct-research"
+        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                project_id="",
+                name="研究员小 A",
+                summary="direct research root",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -3319,7 +3332,7 @@ class TestControlPlaneApi:
                     "actor_label": "Owner",
                 },
                 "params": {
-                    "agent_profile_id": "singleton:research",
+                    "agent_profile_id": profile_id,
                 },
             },
         )
@@ -3327,12 +3340,123 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         result = resp.json()["result"]
         assert result["code"] == "SESSION_NEW_READY"
-        assert result["data"]["agent_profile_id"] == "singleton:research"
+        assert result["data"]["agent_profile_id"] == profile_id
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200
         payload = sessions_resp.json()
-        assert payload["new_conversation_agent_profile_id"] == "singleton:research"
+        assert payload["new_conversation_agent_profile_id"] == profile_id
+
+    async def test_session_create_with_project_returns_projected_session_id_and_thread_seed(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        profile_id = "worker-profile-fin-direct"
+        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id=profile_id,
+                project_id="",
+                name="研究员小 A",
+                summary="finance direct session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.create_with_project",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "agent_profile_id": profile_id,
+                    "project_name": "fin",
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SESSION_CREATED_WITH_PROJECT"
+        projected_session_id = result["data"]["session_id"]
+        agent_session_id = result["data"]["agent_session_id"]
+        thread_id = result["data"]["thread_id"]
+        project_id = result["data"]["project_id"]
+        workspace_id = result["data"]["workspace_id"]
+        assert projected_session_id == build_projected_session_id(
+            thread_id=thread_id,
+            surface="web",
+            scope_id=f"workspace:{workspace_id}:chat:web:{thread_id}",
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
+        agent_session = (
+            await control_plane_app.state.store_group.agent_context_store.get_agent_session(
+                agent_session_id
+            )
+        )
+        assert agent_session is not None
+        assert agent_session.kind is AgentSessionKind.DIRECT_WORKER
+        runtime = await control_plane_app.state.store_group.agent_context_store.get_agent_runtime(
+            agent_session.agent_runtime_id
+        )
+        assert runtime is not None
+        assert runtime.role is AgentRuntimeRole.WORKER
+        assert runtime.worker_profile_id == profile_id
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        item = next(
+            (entry for entry in payload["sessions"] if entry["session_id"] == projected_session_id),
+            None,
+        )
+        assert item is not None
+        assert item["thread_id"] == thread_id
+        assert item["task_id"] == ""
+        assert item["agent_profile_id"] == profile_id
+        assert item["runtime_kind"] == AgentSessionKind.DIRECT_WORKER.value
+
+        internal_runtime = AgentRuntime(
+            agent_runtime_id="runtime-internal-worker",
+            project_id=project_id,
+            workspace_id=workspace_id,
+            worker_profile_id=profile_id,
+            role=AgentRuntimeRole.WORKER,
+            name="internal worker",
+        )
+        await control_plane_app.state.store_group.agent_context_store.save_agent_runtime(
+            internal_runtime
+        )
+        await control_plane_app.state.store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="session-worker-internal",
+                agent_runtime_id=internal_runtime.agent_runtime_id,
+                kind=AgentSessionKind.WORKER_INTERNAL,
+                project_id=project_id,
+                workspace_id=workspace_id,
+                surface="web",
+                thread_id="thread-worker-internal",
+                legacy_session_id="thread-worker-internal",
+            )
+        )
+        await control_plane_app.state.store_group.conn.commit()
+
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        assert all(
+            entry["session_id"] != "session-worker-internal"
+            and entry["runtime_kind"] != AgentSessionKind.WORKER_INTERNAL.value
+            for entry in payload["sessions"]
+        )
 
     async def test_session_projection_exposes_lane_summary_and_unfocus(
         self,

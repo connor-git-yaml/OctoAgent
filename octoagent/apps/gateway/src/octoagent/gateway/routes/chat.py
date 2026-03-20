@@ -36,6 +36,7 @@ async def _enqueue_or_run(
     service,
     task_id: str,
     message: str,
+    model_alias: str | None = None,
     dispatch_metadata: dict[str, Any] | None = None,
 ) -> None:
     if not (
@@ -45,13 +46,14 @@ async def _enqueue_or_run(
         return
     task_runner = getattr(request.app.state, "task_runner", None)
     if task_runner is not None:
-        await task_runner.enqueue(task_id, message)
+        await task_runner.enqueue(task_id, message, model_alias=model_alias)
         return
     task = asyncio.create_task(
         service.process_task_with_llm(
             task_id,
             message,
             request.app.state.llm_service,
+            model_alias=model_alias,
             dispatch_metadata=dispatch_metadata or {},
         )
     )
@@ -157,6 +159,22 @@ async def _resolve_session_agent_profile_id(store_group, task_id: str) -> str:
     return ""
 
 
+async def _resolve_profile_model_alias(store_group, profile_id: str) -> str:
+    resolved_profile_id = str(profile_id or "").strip()
+    if not resolved_profile_id:
+        return ""
+
+    worker_profile = await store_group.agent_context_store.get_worker_profile(resolved_profile_id)
+    if worker_profile is not None:
+        return str(worker_profile.model_alias or "").strip()
+
+    agent_profile = await store_group.agent_context_store.get_agent_profile(resolved_profile_id)
+    if agent_profile is not None:
+        return str(agent_profile.model_alias or "").strip()
+
+    return ""
+
+
 def _build_workspace_scoped_chat_scope_id(
     *,
     workspace_id: str,
@@ -190,9 +208,19 @@ async def send_chat_message(
         requested_agent_profile_id = await _resolve_session_agent_profile_id(
             store_group, body.task_id
         )
+    requested_model_alias = await _resolve_profile_model_alias(
+        store_group,
+        requested_agent_profile_id,
+    )
     if requested_agent_profile_id:
         chat_control_metadata["agent_profile_id"] = requested_agent_profile_id
         chat_control_metadata["requested_worker_profile_id"] = requested_agent_profile_id
+    requested_session_id = str(body.session_id or "").strip()
+    requested_thread_id = str(body.thread_id or "").strip()
+    if requested_session_id:
+        chat_control_metadata["session_id"] = requested_session_id
+    if requested_thread_id:
+        chat_control_metadata["thread_id"] = requested_thread_id
     if project_id:
         chat_control_metadata["project_id"] = project_id
     if workspace_id:
@@ -209,18 +237,21 @@ async def send_chat_message(
     if not body.task_id:
         from octoagent.core.models.message import NormalizedMessage
 
+        effective_thread_id = requested_thread_id or task_id
+        effective_scope_id = (
+            _build_workspace_scoped_chat_scope_id(
+                workspace_id=workspace_id,
+                channel="web",
+                thread_id=effective_thread_id,
+            )
+            if workspace_id
+            else ""
+        )
+
         msg = NormalizedMessage(
             channel="web",
-            thread_id=task_id,
-            scope_id=(
-                _build_workspace_scoped_chat_scope_id(
-                    workspace_id=workspace_id,
-                    channel="web",
-                    thread_id=task_id,
-                )
-                if workspace_id
-                else ""
-            ),
+            thread_id=effective_thread_id,
+            scope_id=effective_scope_id,
             sender_id="owner",
             sender_name="Owner",
             text=body.message,
@@ -245,8 +276,8 @@ async def send_chat_message(
                 RuntimeControlContext(
                     task_id=task_id,
                     surface="web",
-                    scope_id=msg.scope_id,
-                    thread_id=msg.thread_id,
+                    scope_id=effective_scope_id,
+                    thread_id=effective_thread_id,
                     project_id=project_id,
                     workspace_id=workspace_id,
                     agent_profile_id=requested_agent_profile_id,
@@ -263,6 +294,7 @@ async def send_chat_message(
                     service,
                     task_id,
                     body.message,
+                    model_alias=requested_model_alias or None,
                     dispatch_metadata=dispatch_metadata,
                 )
             except Exception as exc:
@@ -305,6 +337,7 @@ async def send_chat_message(
                 service,
                 task_id,
                 body.message,
+                model_alias=requested_model_alias or None,
                 dispatch_metadata=dispatch_metadata,
             )
         except HTTPException:

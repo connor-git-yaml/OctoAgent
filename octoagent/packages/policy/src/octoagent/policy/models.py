@@ -481,6 +481,14 @@ class ChatSendRequest(BaseModel):
         default=None,
         description="可选的 workspace ID；新会话首条消息可显式传入。",
     )
+    session_id: str | None = Field(
+        default=None,
+        description="可选的会话投影 ID；direct session 首条消息可显式传入。",
+    )
+    thread_id: str | None = Field(
+        default=None,
+        description="可选的线程种子；direct session 首条消息可显式传入。",
+    )
 
 
 class ChatSendResponse(BaseModel):

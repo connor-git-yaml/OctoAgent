@@ -177,7 +177,7 @@ from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr
 from ulid import ULID
 
-from .agent_context import build_scope_aware_session_id
+from .agent_context import build_projected_session_id, build_scope_aware_session_id
 from .butler_behavior import build_behavior_system_summary
 from .connection_metadata import merge_control_metadata
 from .mcp_registry import McpServerConfig
@@ -873,10 +873,15 @@ class ControlPlaneService:
                 selected_workspace=selected_workspace,
             ):
                 continue
-            session_id = build_scope_aware_session_id(
-                task,
-                project_id=workspace.project_id,
-                workspace_id=workspace.workspace_id,
+            latest_metadata = await self._extract_latest_user_metadata(task.task_id)
+            if str(latest_metadata.get("parent_task_id", "")).strip() or str(
+                latest_metadata.get("parent_work_id", "")
+            ).strip():
+                continue
+            session_id = self._resolve_projected_session_id_for_task(
+                task=task,
+                workspace=workspace,
+                latest_metadata=latest_metadata,
             )
             grouped[session_id].append((task, workspace))
 
@@ -944,6 +949,11 @@ class ControlPlaneService:
         for agent_sess in all_agent_sessions:
             if agent_sess.status != AgentSessionStatus.ACTIVE:
                 continue
+            if agent_sess.kind in {
+                AgentSessionKind.WORKER_INTERNAL,
+                AgentSessionKind.SUBAGENT_INTERNAL,
+            }:
+                continue
             if agent_sess.project_id in existing_project_ids:
                 continue  # 该 project 已有 task-based 项，跳过
             # 查找项目名
@@ -955,10 +965,21 @@ class ControlPlaneService:
                 agent_sess.agent_runtime_id
             )
             if runtime is not None:
-                agent_profile_id = runtime.agent_profile_id
+                agent_profile_id = runtime.worker_profile_id or runtime.agent_profile_id
+            projected_session_id = build_projected_session_id(
+                thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
+                surface="web" if agent_sess.surface in ("", "chat", "web") else agent_sess.surface,
+                scope_id=(
+                    f"workspace:{agent_sess.workspace_id}:chat:web:{agent_sess.thread_id}"
+                    if agent_sess.workspace_id and agent_sess.thread_id
+                    else ""
+                ),
+                project_id=agent_sess.project_id,
+                workspace_id=agent_sess.workspace_id,
+            )
             session_items.append(
                 SessionProjectionItem(
-                    session_id=agent_sess.agent_session_id,
+                    session_id=projected_session_id,
                     thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
                     task_id="",
                     parent_task_id="",
@@ -985,6 +1006,23 @@ class ControlPlaneService:
             reverse=True,
         )
         return session_items
+
+    @staticmethod
+    def _resolve_projected_session_id_for_task(
+        *,
+        task: Task,
+        workspace,
+        latest_metadata: Mapping[str, Any] | None,
+    ) -> str:
+        metadata = latest_metadata or {}
+        explicit_session_id = str(metadata.get("session_id", "")).strip()
+        if explicit_session_id:
+            return explicit_session_id
+        return build_scope_aware_session_id(
+            task,
+            project_id=workspace.project_id,
+            workspace_id=workspace.workspace_id,
+        )
 
     @staticmethod
     def _session_lane_for_status(status: TaskStatus) -> str:
@@ -1067,11 +1105,12 @@ class ControlPlaneService:
                 selected_workspace=selected_workspace,
             ):
                 continue
+            latest_metadata = await self._extract_latest_user_metadata(task.task_id)
             if (
-                build_scope_aware_session_id(
-                    task,
-                    project_id=workspace.project_id,
-                    workspace_id=workspace.workspace_id,
+                self._resolve_projected_session_id_for_task(
+                    task=task,
+                    workspace=workspace,
+                    latest_metadata=latest_metadata,
                 )
                 == session_id
             ):
@@ -5311,14 +5350,8 @@ class ControlPlaneService:
             request.params.get("agent_profile_id", "")
         ).strip()
         if requested_agent_profile_id:
-            worker_profiles = await self.get_worker_profiles_document()
-            matched_profile = next(
-                (
-                    item
-                    for item in worker_profiles.profiles
-                    if item.profile_id == requested_agent_profile_id
-                ),
-                None,
+            matched_profile = await self._resolve_direct_session_worker_profile(
+                requested_agent_profile_id
             )
             if matched_profile is None:
                 return self._rejected_result(
@@ -5375,7 +5408,7 @@ class ControlPlaneService:
         import re
 
         # 参数解析
-        agent_profile_id = str(request.params.get("agent_profile_id", "")).strip()
+        worker_profile_id = str(request.params.get("agent_profile_id", "")).strip()
         project_name = str(request.params.get("project_name", "")).strip()
         if not project_name:
             return self._rejected_result(
@@ -5383,19 +5416,14 @@ class ControlPlaneService:
                 code="SESSION_CREATE_MISSING_NAME",
                 message="请为新对话输入一个名字。",
             )
-        if not agent_profile_id:
+        if not worker_profile_id:
             return self._rejected_result(
                 request=request,
                 code="SESSION_CREATE_MISSING_AGENT",
                 message="请选择一个 Agent 来承接新对话。",
             )
 
-        # 验证 Agent Profile 存在
-        worker_profiles = await self.get_worker_profiles_document()
-        matched_profile = next(
-            (item for item in worker_profiles.profiles if item.profile_id == agent_profile_id),
-            None,
-        )
+        matched_profile = await self._resolve_direct_session_worker_profile(worker_profile_id)
         if matched_profile is None:
             return self._rejected_result(
                 request=request,
@@ -5417,17 +5445,8 @@ class ControlPlaneService:
                 message=f"同名项目「{project_name}」已存在，请换个名字。",
             )
 
-        # 查找 Agent 对应的 AgentRuntime（找 primary_agent_id 回填用）
-        agent_profile = await self._stores.agent_context_store.get_agent_profile(agent_profile_id)
+        # direct session 对应独立 project，runtime 始终在新 project 下新建
         agent_runtime_id = ""
-        if agent_profile is not None:
-            runtimes = await self._stores.agent_context_store.list_agent_runtimes(
-                project_id=agent_profile.project_id or None,
-            )
-            for runtime in runtimes:
-                if runtime.agent_profile_id == agent_profile_id:
-                    agent_runtime_id = runtime.agent_runtime_id
-                    break
 
         # 创建 Project
         now = datetime.now(tz=UTC)
@@ -5439,7 +5458,7 @@ class ControlPlaneService:
             description=f"由用户创建的会话项目：{project_name}",
             status="active",
             is_default=False,
-            default_agent_profile_id=agent_profile_id,
+            default_agent_profile_id=worker_profile_id,
             primary_agent_id=agent_runtime_id,
             created_at=now,
             updated_at=now,
@@ -5464,13 +5483,13 @@ class ControlPlaneService:
             self._project_root,
             project_slug=slug,
         )
-        if agent_profile is not None:
-            agent_slug = resolve_behavior_agent_slug(agent_profile)
+        if matched_profile is not None:
+            agent_slug = resolve_behavior_agent_slug(matched_profile)
             materialize_agent_behavior_files(
                 self._project_root,
                 agent_slug=agent_slug,
-                agent_name=agent_profile.name,
-                is_worker_profile=False,
+                agent_name=matched_profile.name,
+                is_worker_profile=True,
             )
 
         # 确保有真实的 AgentRuntime（FK 约束要求 agent_runtime_id 必须存在）
@@ -5479,10 +5498,10 @@ class ControlPlaneService:
                 agent_runtime_id=f"runtime-{str(ULID())}",
                 project_id=project_id,
                 workspace_id=workspace_id,
-                agent_profile_id=agent_profile_id,
-                role=AgentRuntimeRole.BUTLER,
-                name=agent_profile.name if agent_profile else project_name,
-                persona_summary="",
+                worker_profile_id=worker_profile_id,
+                role=AgentRuntimeRole.WORKER,
+                name=matched_profile.name,
+                persona_summary=matched_profile.summary,
                 status=AgentRuntimeStatus.ACTIVE,
                 created_at=now,
                 updated_at=now,
@@ -5493,15 +5512,26 @@ class ControlPlaneService:
             project.primary_agent_id = agent_runtime_id
             await self._stores.project_store.set_primary_agent(project_id, agent_runtime_id)
 
-        # 创建 AgentSession
+        # 创建 AgentSession（内部 durable ID）与 projected session ID（前端路由 ID）
         session_id = f"session-{str(ULID())}"
+        thread_id_seed = f"thread-{str(ULID())}"
+        projected_session_id = build_projected_session_id(
+            thread_id=thread_id_seed,
+            surface="web",
+            scope_id=f"workspace:{workspace_id}:chat:web:{thread_id_seed}",
+            project_id=project_id,
+            workspace_id=workspace_id,
+        )
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=agent_runtime_id,
             project_id=project_id,
             workspace_id=workspace_id,
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.DIRECT_WORKER,
             status=AgentSessionStatus.ACTIVE,
+            surface="web",
+            thread_id=thread_id_seed,
+            legacy_session_id=thread_id_seed,
             created_at=now,
             updated_at=now,
         )
@@ -5511,12 +5541,12 @@ class ControlPlaneService:
         token = str(ULID())
         state = self._state_store.load().model_copy(
             update={
-                "focused_session_id": session_id,
-                "focused_thread_id": "",
+                "focused_session_id": projected_session_id,
+                "focused_thread_id": thread_id_seed,
                 "new_conversation_token": token,
                 "new_conversation_project_id": project_id,
                 "new_conversation_workspace_id": workspace_id,
-                "new_conversation_agent_profile_id": agent_profile_id,
+                "new_conversation_agent_profile_id": worker_profile_id,
                 "updated_at": now,
             }
         )
@@ -5529,17 +5559,28 @@ class ControlPlaneService:
             code="SESSION_CREATED_WITH_PROJECT",
             message=f"已创建对话「{project_name}」",
             data={
-                "session_id": session_id,
+                "session_id": projected_session_id,
+                "agent_session_id": session_id,
+                "thread_id": thread_id_seed,
                 "project_id": project_id,
                 "workspace_id": workspace_id,
                 "new_conversation_token": token,
-                "agent_profile_id": agent_profile_id,
+                "agent_profile_id": worker_profile_id,
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[
-                ControlPlaneTargetRef(target_type="session", target_id=session_id),
+                ControlPlaneTargetRef(target_type="session", target_id=projected_session_id),
             ],
         )
+
+    async def _resolve_direct_session_worker_profile(
+        self,
+        profile_id: str,
+    ) -> WorkerProfile | None:
+        profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
+        if profile is None or profile.status == WorkerProfileStatus.ARCHIVED:
+            return None
+        return profile
 
     # ------------------------------------------------------------------
     # Phase 4: 主 Agent 查询 + 管理工具

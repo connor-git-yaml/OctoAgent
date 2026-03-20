@@ -8,7 +8,7 @@ from pathlib import Path
 import octoagent.gateway.services.task_service as task_service_module
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import ControlPlaneState, Project, Workspace
+from octoagent.core.models import ControlPlaneState, Project, WorkerProfile, WorkerProfileStatus, Workspace
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -62,6 +62,45 @@ async def client(test_app) -> AsyncClient:
 
 
 class TestChatSendRoute:
+    async def test_send_chat_with_worker_profile_alias_uses_profile_model_alias(
+        self,
+        client: AsyncClient,
+        test_app,
+    ) -> None:
+        await test_app.state.store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id="worker-profile-finance",
+                project_id="",
+                name="研究员小 A",
+                summary="finance direct session",
+                model_alias="cheap",
+                status=WorkerProfileStatus.ACTIVE,
+            )
+        )
+        await test_app.state.store_group.conn.commit()
+
+        captured: dict[str, str | None] = {}
+        original_enqueue = test_app.state.task_runner.enqueue
+
+        async def capture_enqueue(task_id: str, user_text: str, model_alias: str | None = None):
+            captured["task_id"] = task_id
+            captured["user_text"] = user_text
+            captured["model_alias"] = model_alias
+            return await original_enqueue(task_id, user_text, model_alias=model_alias)
+
+        test_app.state.task_runner.enqueue = capture_enqueue
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "继续 finance direct session",
+                "agent_profile_id": "worker-profile-finance",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert captured["model_alias"] == "cheap"
+
     async def test_send_chat_with_agent_profile_id_persists_dispatch_metadata(
         self, client: AsyncClient
     ) -> None:
@@ -149,6 +188,60 @@ class TestChatSendRoute:
         assert metadata["workspace_id"] == workspace.workspace_id
         assert metadata["agent_profile_id"] == "singleton:research"
         assert metadata["requested_worker_profile_id"] == "singleton:research"
+
+    async def test_new_chat_accepts_explicit_session_and_thread_seed(
+        self,
+        client: AsyncClient,
+        test_app,
+        tmp_path: Path,
+    ) -> None:
+        project = Project(
+            project_id="project-chat-direct",
+            slug="chat-direct",
+            name="Chat Direct",
+        )
+        workspace = Workspace(
+            workspace_id="workspace-chat-direct-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Chat Direct Primary",
+            root_path=str(tmp_path / "chat-direct"),
+        )
+        await test_app.state.store_group.project_store.create_project(project)
+        await test_app.state.store_group.project_store.create_workspace(workspace)
+        await test_app.state.store_group.conn.commit()
+
+        resp = await client.post(
+            "/api/chat/send",
+            json={
+                "message": "direct session first turn",
+                "project_id": project.project_id,
+                "workspace_id": workspace.workspace_id,
+                "session_id": "surface:web|project:project-chat-direct|workspace:workspace-chat-direct-primary|thread:thread-fin",
+                "thread_id": "thread-fin",
+                "agent_profile_id": "worker-profile-finance",
+            },
+        )
+
+        assert resp.status_code == 200
+        task_id = resp.json()["task_id"]
+        await asyncio.sleep(0.6)
+
+        task = await test_app.state.store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.thread_id == "thread-fin"
+        assert task.scope_id == "workspace:workspace-chat-direct-primary:chat:web:thread-fin"
+
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        payload = detail.json()
+        user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
+        assert user_events
+        metadata = user_events[-1]["payload"]["control_metadata"]
+        assert metadata["session_id"] == (
+            "surface:web|project:project-chat-direct|workspace:workspace-chat-direct-primary|thread:thread-fin"
+        )
+        assert metadata["thread_id"] == "thread-fin"
 
     async def test_continue_chat_reuses_explicit_session_agent_profile(
         self,

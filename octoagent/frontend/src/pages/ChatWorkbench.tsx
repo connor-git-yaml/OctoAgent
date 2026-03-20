@@ -1130,7 +1130,7 @@ export default function ChatWorkbench() {
     [routeSessionId, sessions]
   );
   // routeSession（URL 指定）或 webSessions[0]（默认首个）——用于 agent 名和标题
-  const currentSession = routeSession || webSessions[0] || null;
+  const currentSession = routeSessionId ? routeSession : webSessions[0] || null;
 
   // 当 URL 指定了 session（Worker 会话路由）时，restoreTaskIds 必须完全隔离于
   // 全局 focused_session_id 和 sessions 轮询变化，避免 deps 变化导致 fallthrough
@@ -1161,7 +1161,7 @@ export default function ChatWorkbench() {
   // 当 URL 指向已有 session 或已有 restore task 时，不传 newConversationToken——
   // 避免 stale token 把消息路由到错误的 project。
   // Token 只在通过 NewSessionModal 创建全新会话时使用。
-  const hasExistingSession = Boolean(routeSessionId) || restoreTaskIds.length > 0;
+  const hasExistingSession = Boolean(routeSession?.task_id) || restoreTaskIds.length > 0;
   const { messages, sendMessage, streaming, restoring, error, taskId, liveApproval, approvalSignal } = useChatStream(
     restoreChoice === "continue" && restoreTaskIds.length > 0 ? { taskIds: restoreTaskIds } : null,
     {
@@ -1904,6 +1904,8 @@ export default function ChatWorkbench() {
     setChatActionNotice(null);
     await sendMessage(text, {
       agentProfileId: currentSession?.agent_profile_id || undefined,
+      sessionId: !taskId ? currentSession?.session_id || routeSessionId || undefined : undefined,
+      threadId: !taskId ? currentSession?.thread_id || undefined : undefined,
     });
   }
 

@@ -310,26 +310,43 @@ def legacy_session_id_for_task(task: Task) -> str:
     return task.thread_id or task.task_id
 
 
+def build_projected_session_id(
+    *,
+    thread_id: str,
+    surface: str,
+    scope_id: str = "",
+    project_id: str = "",
+    workspace_id: str = "",
+) -> str:
+    resolved_thread_id = thread_id.strip() or "task"
+    resolved_surface = surface.strip() or "unknown"
+    resolved_scope_id = scope_id.strip()
+    parts = [f"surface:{resolved_surface}"]
+    if resolved_scope_id:
+        parts.append(f"scope:{resolved_scope_id}")
+    if project_id:
+        parts.append(f"project:{project_id}")
+    elif not resolved_scope_id:
+        parts.append(f"project:{project_id or 'default'}")
+    if workspace_id:
+        parts.append(f"workspace:{workspace_id}")
+    parts.append(f"thread:{resolved_thread_id}")
+    return "|".join(parts)
+
+
 def build_scope_aware_session_id(
     task: Task,
     *,
     project_id: str = "",
     workspace_id: str = "",
 ) -> str:
-    thread_id = legacy_session_id_for_task(task).strip() or task.task_id
-    surface = task.requester.channel.strip() or "unknown"
-    scope_id = task.scope_id.strip()
-    parts = [f"surface:{surface}"]
-    if scope_id:
-        parts.append(f"scope:{scope_id}")
-    if project_id:
-        parts.append(f"project:{project_id}")
-    elif not scope_id:
-        parts.append(f"project:{project_id or 'default'}")
-    if workspace_id:
-        parts.append(f"workspace:{workspace_id}")
-    parts.append(f"thread:{thread_id}")
-    return "|".join(parts)
+    return build_projected_session_id(
+        thread_id=legacy_session_id_for_task(task).strip() or task.task_id,
+        surface=task.requester.channel,
+        scope_id=task.scope_id,
+        project_id=project_id,
+        workspace_id=workspace_id,
+    )
 
 
 def build_agent_runtime_id(
@@ -2458,10 +2475,24 @@ class AgentContextService:
         agent_runtime: AgentRuntime,
         session_state: SessionContextState,
     ) -> AgentSession:
+        parent_agent_session_id = (
+            str(request.runtime_metadata.get("parent_agent_session_id", "")).strip()
+            or str(request.delegation_metadata.get("parent_agent_session_id", "")).strip()
+            or str(request.delegation_metadata.get("target_agent_session_id", "")).strip()
+        )
+        is_direct_worker_session = (
+            agent_runtime.role is AgentRuntimeRole.WORKER
+            and not parent_agent_session_id
+            and not (request.work_id or "").strip()
+        )
         kind = (
-            AgentSessionKind.WORKER_INTERNAL
-            if agent_runtime.role is AgentRuntimeRole.WORKER
-            else AgentSessionKind.BUTLER_MAIN
+            AgentSessionKind.DIRECT_WORKER
+            if is_direct_worker_session
+            else (
+                AgentSessionKind.WORKER_INTERNAL
+                if agent_runtime.role is AgentRuntimeRole.WORKER
+                else AgentSessionKind.BUTLER_MAIN
+            )
         )
         agent_session_id = (
             request.agent_session_id or ""
@@ -2487,9 +2518,12 @@ class AgentContextService:
                     "parent_agent_session_id": (
                         existing.parent_agent_session_id
                         or (
-                            session_state.agent_session_id
-                            if kind is AgentSessionKind.WORKER_INTERNAL
-                            else ""
+                            parent_agent_session_id
+                            or (
+                                session_state.agent_session_id
+                                if kind is AgentSessionKind.WORKER_INTERNAL
+                                else ""
+                            )
                         )
                     ),
                     "metadata": {
@@ -2516,9 +2550,12 @@ class AgentContextService:
                 thread_id=request.thread_id or task.thread_id,
                 legacy_session_id=session_state.session_id,
                 parent_agent_session_id=(
-                    session_state.agent_session_id
-                    if kind is AgentSessionKind.WORKER_INTERNAL
-                    else ""
+                    parent_agent_session_id
+                    or (
+                        session_state.agent_session_id
+                        if kind is AgentSessionKind.WORKER_INTERNAL
+                        else ""
+                    )
                 ),
                 work_id=request.work_id or "",
                 metadata={

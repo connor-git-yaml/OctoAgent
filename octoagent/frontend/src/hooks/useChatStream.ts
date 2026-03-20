@@ -290,6 +290,8 @@ export function useChatStream(
             message: text,
             task_id: taskId,
             agent_profile_id: effectiveAgentProfileId || undefined,
+            session_id: !taskId ? options?.sessionId?.trim() || undefined : undefined,
+            thread_id: !taskId ? options?.threadId?.trim() || undefined : undefined,
             new_conversation_token:
               !taskId && pendingConversationScope?.token
                 ? pendingConversationScope.token
