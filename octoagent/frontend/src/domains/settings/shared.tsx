@@ -32,6 +32,7 @@ export interface ProviderDraftItem {
   name: string;
   auth_type: "api_key" | "oauth";
   api_key_env: string;
+  base_url: string;
   enabled: boolean;
 }
 
@@ -63,24 +64,28 @@ export const PROVIDER_PRESETS: Record<
     name: "OpenRouter",
     auth_type: "api_key",
     api_key_env: "OPENROUTER_API_KEY",
+    base_url: "",
   },
   openai: {
     id: "openai",
     name: "OpenAI",
     auth_type: "api_key",
     api_key_env: "OPENAI_API_KEY",
+    base_url: "",
   },
   anthropic: {
     id: "anthropic",
     name: "Anthropic",
     auth_type: "api_key",
     api_key_env: "ANTHROPIC_API_KEY",
+    base_url: "",
   },
   "openai-codex": {
     id: "openai-codex",
     name: "OpenAI Codex (ChatGPT Pro OAuth)",
     auth_type: "oauth",
     api_key_env: "OPENAI_API_KEY",
+    base_url: "",
   },
 };
 
@@ -307,6 +312,7 @@ export function parseProviderDrafts(rawValue: string | boolean | undefined): Pro
       name: String(item.name ?? ""),
       auth_type: item.auth_type === "oauth" ? "oauth" : "api_key",
       api_key_env: String(item.api_key_env ?? ""),
+      base_url: String(item.base_url ?? ""),
       enabled: item.enabled !== false,
     }))
     .filter((item) => item.id.trim());
@@ -319,6 +325,7 @@ export function stringifyProviderDrafts(items: ProviderDraftItem[]): string {
       name: item.name,
       auth_type: item.auth_type,
       api_key_env: item.api_key_env,
+      base_url: item.base_url,
       enabled: item.enabled,
     })),
     null,
@@ -371,6 +378,7 @@ export function buildProviderPreset(providerId: string): ProviderDraftItem {
     name: providerId.replace("-", " ").trim() || "Custom Provider",
     auth_type: "api_key",
     api_key_env: `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`,
+    base_url: "",
   };
   return {
     ...preset,

@@ -180,6 +180,7 @@ octo setup
 The setup flow is the main onboarding command for non-developers. It can:
 
 - choose a provider preset
+- configure a custom provider with `--provider custom` and `--base-url`
 - collect or connect credentials
 - write configuration to the managed instance
 - prepare LiteLLM proxy state
@@ -283,6 +284,7 @@ It typically updates:
 - `octoagent.yaml`
   - provider entries
   - model aliases
+  - memory alias bindings
   - runtime mode
   - front-door access mode
 - `.env.litellm`
@@ -292,6 +294,8 @@ It typically updates:
 - `litellm-config.yaml`
   - generated proxy-side routing config
 
+`octo setup` is the recommended human-facing path because it can save config and activate the managed runtime in one flow.
+
 ### Provider configuration model
 
 The example config file is [`octoagent.yaml.example`](./octoagent.yaml.example).
@@ -299,26 +303,30 @@ The example config file is [`octoagent.yaml.example`](./octoagent.yaml.example).
 Important sections:
 
 - `providers`
-  - defines provider IDs, display names, auth type, and which environment variable stores the credential
+  - defines provider IDs, display names, auth type, credential env names, and optional `base_url`
 - `model_aliases`
   - binds user-facing aliases like `main` and `cheap` to actual provider/model pairs
+  - these alias keys are also what the Gateway runtime consumes directly
+- `memory`
+  - binds `reasoning_model_alias` / `expand_model_alias` / `embedding_model_alias` / `rerank_model_alias` to existing aliases in `model_aliases`
 - `runtime`
   - controls `echo` vs `litellm`, proxy URL, and master key env names
 - `front_door`
   - controls whether the owner-facing APIs stay loopback-only or require bearer / trusted proxy protection
 
+`litellm-config.yaml` is derived from `octoagent.yaml`. Do not treat it as the primary configuration surface.
+
 ### Memory configuration model
 
 OctoAgent treats Memory as local-first, using the built-in SQLite / Vault / SoR path.
 
-Useful commands:
+Useful command:
 
 ```bash
 octo config memory show
-octo config memory local
 ```
 
-Memory works out of the box without any extra deployment or configuration.
+Memory works out of the box without any extra deployment. To change which model is used for Memory, edit the `memory.*_model_alias` fields in `octoagent.yaml` or the Web Settings screen.
 
 ### Credentials and secrets
 
@@ -328,6 +336,24 @@ The intended split is:
 
 - tracked config in `octoagent.yaml`
 - secret values in `.env.litellm` or runtime environment variables
+
+### `octo config sync`
+
+`octo config sync` only regenerates `litellm-config.yaml` from `octoagent.yaml`.
+
+It does **not** guarantee runtime restart or live activation. If you want the higher-level "save and enable real model" flow, prefer `octo setup`.
+
+For custom providers that need an explicit `base_url`, `octo setup` can also take the direct custom path:
+
+```bash
+octo setup --provider custom --provider-id siliconflow --base-url https://api.siliconflow.cn/v1 --main-model Qwen/Qwen3-32B --cheap-model Qwen/Qwen3-14B
+```
+
+The Web `Settings` page, `octo project edit --wizard`, and the lower-level CLI still work:
+
+```bash
+octo config provider add siliconflow --name "SiliconFlow" --api-key-env SILICONFLOW_API_KEY --base-url https://api.siliconflow.cn/v1
+```
 
 ### Docker and LiteLLM
 

@@ -13,6 +13,7 @@ from ulid import ULID
 
 from .config_schema import (
     ChannelsConfig,
+    MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
@@ -218,6 +219,11 @@ class WizardSessionService:
             "providers.0.api_key_env",
             advanced=advanced,
         )
+        provider_base_url = self._prompt_field(
+            field_hints,
+            "providers.0.base_url",
+            advanced=advanced,
+        )
         main_model = self._prompt_field(
             field_hints,
             "model_aliases.main.model",
@@ -226,6 +232,26 @@ class WizardSessionService:
         cheap_model = self._prompt_field(
             field_hints,
             "model_aliases.cheap.model",
+            advanced=advanced,
+        )
+        memory_reasoning_alias = self._prompt_field(
+            field_hints,
+            "memory.reasoning_model_alias",
+            advanced=advanced,
+        )
+        memory_expand_alias = self._prompt_field(
+            field_hints,
+            "memory.expand_model_alias",
+            advanced=advanced,
+        )
+        memory_embedding_alias = self._prompt_field(
+            field_hints,
+            "memory.embedding_model_alias",
+            advanced=advanced,
+        )
+        memory_rerank_alias = self._prompt_field(
+            field_hints,
+            "memory.rerank_model_alias",
             advanced=advanced,
         )
         llm_mode = self._prompt_choice(field_hints, "runtime.llm_mode")
@@ -282,6 +308,7 @@ class WizardSessionService:
                     name=provider_name,
                     auth_type=auth_type,
                     api_key_env=api_key_env,
+                    base_url=provider_base_url.strip(),
                 )
             ],
             model_aliases={
@@ -296,6 +323,12 @@ class WizardSessionService:
                     description="wizard cheap alias",
                 ),
             },
+            memory=MemoryConfig(
+                reasoning_model_alias=memory_reasoning_alias.strip(),
+                expand_model_alias=memory_expand_alias.strip(),
+                embedding_model_alias=memory_embedding_alias.strip(),
+                rerank_model_alias=memory_rerank_alias.strip(),
+            ),
             runtime=RuntimeConfig(
                 llm_mode=llm_mode,
                 litellm_proxy_url=proxy_url,

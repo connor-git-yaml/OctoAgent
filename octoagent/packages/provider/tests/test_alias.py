@@ -1,7 +1,7 @@
 """AliasRegistry 单元测试
 
 对齐 tasks.md T014: 验证 resolve()、get_alias()、get_aliases_by_category()、
-get_aliases_by_runtime_group()、list_all()、未知 alias 降级到 "main"、运行时 group 透传。
+get_aliases_by_runtime_group()、list_all()、配置 alias 优先于 legacy 语义 alias。
 """
 
 from octoagent.provider.alias import AliasConfig, AliasRegistry
@@ -47,6 +47,22 @@ class TestAliasRegistry:
         registry = AliasRegistry()
         assert registry.resolve("unknown_alias") == "main"
         assert registry.resolve("nonexistent") == "main"
+
+    def test_configured_runtime_alias_takes_precedence_over_legacy_mapping(self):
+        """显式配置 alias 与 legacy 名称冲突时，优先透传显式配置 alias。"""
+        registry = AliasRegistry.from_runtime_aliases({"main", "cheap", "summarizer", "compaction"})
+
+        assert registry.resolve("summarizer") == "summarizer"
+        assert registry.resolve("compaction") == "compaction"
+
+    def test_runtime_aliases_from_config_allow_custom_alias_passthrough(self):
+        """配置中的自定义 alias 应直接透传到运行时。"""
+        registry = AliasRegistry.from_runtime_aliases({"main", "cheap", "reasoning", "research-main"})
+
+        assert registry.resolve("reasoning") == "reasoning"
+        assert registry.resolve("research-main") == "research-main"
+        assert registry.resolve("planner") == "main"
+        assert registry.resolve("router") == "cheap"
 
     def test_get_alias_exists(self):
         """按名称查询已注册 alias"""

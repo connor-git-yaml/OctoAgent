@@ -1,8 +1,10 @@
-"""AliasRegistry -- 语义 alias 注册表
+"""AliasRegistry -- 运行时 alias 注册表
 
 对齐 data-model.md SS2.3/SS2.4 + contracts/provider-api.md SS3。
-管理语义 alias -> category -> runtime_group 双层映射。
+管理“配置 alias + legacy 语义 alias”的统一解析。
 """
+
+from collections.abc import Iterable
 
 import structlog
 from pydantic import BaseModel, Field
@@ -12,8 +14,7 @@ log = structlog.get_logger()
 # MVP 默认 alias 配置（对齐 data-model.md SS2.4）
 DEFAULT_ALIASES: list["AliasConfig"] = []  # 延迟初始化，避免前向引用
 
-# 已知运行时 group 名称
-KNOWN_RUNTIME_GROUPS = {"cheap", "main", "fallback"}
+DEFAULT_RUNTIME_ALIASES = {"cheap", "main", "fallback"}
 
 
 class AliasConfig(BaseModel):
@@ -87,60 +88,119 @@ def _get_default_aliases() -> list[AliasConfig]:
 
 
 class AliasRegistry:
-    """Alias 注册表 -- 管理语义 alias -> category -> runtime_group 映射
+    """Alias 注册表。
 
-    MVP：启动时从配置加载，运行期间不变。
-    查询接口供 LiteLLMClient 和后续 Feature 使用。
+    设计原则：
+    - `octoagent.yaml.model_aliases` 是运行时 alias 的主事实源
+    - legacy 语义 alias（如 planner / summarizer）仅做兼容映射
+    - 如果显式配置 alias 与 legacy 名称冲突，永远优先使用显式配置
     """
 
-    def __init__(self, aliases: list[AliasConfig] | None = None) -> None:
+    def __init__(
+        self,
+        aliases: list[AliasConfig] | None = None,
+        *,
+        runtime_aliases: Iterable[str] | None = None,
+        default_runtime_alias: str = "main",
+    ) -> None:
         """初始化注册表
 
         Args:
-            aliases: alias 配置列表，None 时使用 MVP 默认配置
+            aliases: legacy 语义 alias 配置列表，None 时使用 MVP 默认配置
+            runtime_aliases: 当前运行时允许直接透传的 alias 集合；通常来自
+                `octoagent.yaml.model_aliases.keys()`
+            default_runtime_alias: 未命中时的安全默认 alias
         """
         alias_list = aliases if aliases is not None else _get_default_aliases()
         # 按 name 建立索引，去重
         self._aliases: dict[str, AliasConfig] = {}
         for alias in alias_list:
             self._aliases[alias.name] = alias
+        normalized_runtime_aliases = {
+            str(alias).strip()
+            for alias in (runtime_aliases or DEFAULT_RUNTIME_ALIASES)
+            if str(alias).strip()
+        }
+        self._runtime_aliases = normalized_runtime_aliases or set(DEFAULT_RUNTIME_ALIASES)
+        self._default_runtime_alias = default_runtime_alias.strip() or "main"
+
+    @classmethod
+    def from_runtime_aliases(
+        cls,
+        runtime_aliases: Iterable[str],
+        *,
+        aliases: list[AliasConfig] | None = None,
+        default_runtime_alias: str = "main",
+    ) -> "AliasRegistry":
+        """从配置驱动的 runtime alias 集合构造注册表。"""
+        normalized = {
+            str(alias).strip()
+            for alias in runtime_aliases
+            if str(alias).strip()
+        }
+        if default_runtime_alias.strip():
+            normalized.add(default_runtime_alias.strip())
+        return cls(
+            aliases=aliases,
+            runtime_aliases=normalized,
+            default_runtime_alias=default_runtime_alias,
+        )
 
     def resolve(self, alias: str) -> str:
-        """将语义 alias 解析为运行时 group（Proxy model_name）
+        """将 alias 解析为最终运行时 alias（Proxy model_name）
 
-        映射链: 语义 alias -> AliasConfig -> runtime_group
+        解析顺序：
+            1. 如果 alias 已在 runtime alias 集合中，直接透传
+            2. 如果 alias 是 legacy 语义 alias，则解析到其 runtime_group，
+               但只有目标 alias 确实可用时才采用
+            3. 否则回退到安全默认值（通常是 `main`）
 
-        行为规则:
-            1. 如果 alias 在注册表中 -> 返回对应 runtime_group
-            2. 如果 alias 不在注册表中但是已知运行时 group（cheap/main/fallback）
-               -> 直接返回 alias（透传）
-            3. 如果都不匹配 -> 返回 "main"（安全默认值）
-               并记录 warning 日志
+        这样可保证：
+            - `octoagent.yaml` 中显式配置的 alias 永远优先
+            - legacy planner/summarizer 仍可兼容 main/cheap 语义
+            - 未知 alias 不会再意外覆盖显式配置
         """
-        # 规则 1: 注册表内的语义 alias
-        if alias in self._aliases:
-            return self._aliases[alias].runtime_group
+        normalized_alias = alias.strip()
+        if not normalized_alias:
+            return self._default_runtime_alias
 
-        # 规则 2: 已知运行时 group 直接透传
-        if alias in KNOWN_RUNTIME_GROUPS:
-            return alias
+        if normalized_alias in self._runtime_aliases:
+            return normalized_alias
 
-        # 规则 3: 未知 alias 降级到 main
-        log.warning("unknown_alias_fallback_to_main", alias=alias)
-        return "main"
+        legacy_alias = self._aliases.get(normalized_alias)
+        if legacy_alias is not None:
+            runtime_group = legacy_alias.runtime_group.strip()
+            if runtime_group in self._runtime_aliases:
+                return runtime_group
+
+        log.warning(
+            "unknown_alias_fallback_to_default",
+            alias=normalized_alias,
+            fallback_alias=self._default_runtime_alias,
+            runtime_aliases=sorted(self._runtime_aliases),
+        )
+        return self._default_runtime_alias
+
+    def has_runtime_alias(self, alias: str) -> bool:
+        """判断 alias 是否存在于当前运行时 alias 集。"""
+        return alias.strip() in self._runtime_aliases
+
+    def list_runtime_aliases(self) -> list[str]:
+        """列出当前运行时可直接消费的 alias。"""
+        return sorted(self._runtime_aliases)
 
     def get_alias(self, alias: str) -> AliasConfig | None:
-        """按名称查询单个 alias 配置"""
+        """按名称查询单个 legacy 语义 alias 配置"""
         return self._aliases.get(alias)
 
     def get_aliases_by_category(self, category: str) -> list[AliasConfig]:
-        """按 category 查询 alias 列表"""
+        """按 category 查询 legacy 语义 alias 列表"""
         return [a for a in self._aliases.values() if a.category == category]
 
     def get_aliases_by_runtime_group(self, group: str) -> list[AliasConfig]:
-        """按运行时 group 查询语义 alias 列表"""
+        """按运行时 group 查询 legacy 语义 alias 列表"""
         return [a for a in self._aliases.values() if a.runtime_group == group]
 
     def list_all(self) -> list[AliasConfig]:
-        """列出所有已注册的 alias（按 name 排序）"""
+        """列出所有 legacy 语义 alias（按 name 排序）"""
         return sorted(self._aliases.values(), key=lambda a: a.name)

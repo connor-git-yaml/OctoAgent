@@ -103,12 +103,16 @@ main.add_command(secrets_group)
 @main.command()
 @click.option(
     "--provider",
-    type=click.Choice(["openrouter", "openai", "openai-codex", "anthropic"]),
+    type=click.Choice(["openrouter", "openai", "openai-codex", "anthropic", "custom"]),
     default=None,
     help="直接指定 provider 预设，省略时交互选择",
 )
+@click.option("--provider-id", default=None, help="custom provider 的唯一 ID，如 siliconflow")
 @click.option("--provider-name", default=None, help="Provider 显示名称")
 @click.option("--api-key-env", default=None, help="Provider API Key 环境变量名")
+@click.option("--base-url", default="", help="custom provider 的 API Base URL")
+@click.option("--main-model", default=None, help="main 别名绑定的模型名")
+@click.option("--cheap-model", default=None, help="cheap 别名绑定的模型名；省略时沿用 main-model")
 @click.option(
     "--api-key",
     default=None,
@@ -127,8 +131,12 @@ main.add_command(secrets_group)
 )
 def setup(
     provider: str | None,
+    provider_id: str | None,
     provider_name: str | None,
     api_key_env: str | None,
+    base_url: str,
+    main_model: str | None,
+    cheap_model: str | None,
     api_key: str | None,
     master_key: str | None,
     skip_live_verify: bool,
@@ -149,27 +157,74 @@ def setup(
             type=click.Choice(list_bootstrap_provider_choices()),
             default="openrouter",
         )
-        default_config = build_bootstrap_config_for_provider(provider_choice)
-        default_provider = default_config.providers[0]
         resolved_provider_name = provider_name
         resolved_api_key_env = api_key_env
-        if provider_choice == "openai-codex":
-            resolved_provider_name = resolved_provider_name or default_provider.name
-            resolved_api_key_env = resolved_api_key_env or default_provider.api_key_env
-        else:
+        resolved_provider_id = provider_id
+        resolved_base_url = base_url.strip()
+        resolved_main_model = main_model
+        resolved_cheap_model = cheap_model
+
+        if provider_choice == "custom":
+            resolved_provider_id = (
+                resolved_provider_id
+                or click.prompt("Provider ID（如 siliconflow / ollama）", default="custom-provider")
+            ).strip().lower()
+            if not resolved_provider_id:
+                raise click.ClickException("Provider ID 不能为空。")
             resolved_provider_name = resolved_provider_name or click.prompt(
                 "Provider 显示名称",
-                default=default_provider.name,
+                default=resolved_provider_id,
             )
             resolved_api_key_env = resolved_api_key_env or click.prompt(
                 "凭证环境变量名",
-                default=default_provider.api_key_env,
+                default=f"{resolved_provider_id.upper().replace('-', '_')}_API_KEY",
             )
-        config = build_bootstrap_config_for_provider(
-            provider_choice,
-            provider_name=resolved_provider_name,
-            api_key_env=resolved_api_key_env,
-        )
+            if not resolved_base_url:
+                resolved_base_url = click.prompt(
+                    "API Base URL（如 https://api.siliconflow.cn/v1）",
+                    default="",
+                    show_default=False,
+                ).strip()
+            resolved_main_model = resolved_main_model or click.prompt(
+                "main 别名模型名",
+                default="",
+                show_default=False,
+            )
+            if not str(resolved_main_model or "").strip():
+                raise click.ClickException("main 别名模型名不能为空。")
+            resolved_cheap_model = resolved_cheap_model or click.prompt(
+                "cheap 别名模型名（留空沿用 main）",
+                default=str(resolved_main_model),
+            )
+            config = build_bootstrap_config_for_provider(
+                provider_choice,
+                provider_id=resolved_provider_id,
+                provider_name=resolved_provider_name,
+                api_key_env=resolved_api_key_env,
+                base_url=resolved_base_url,
+                main_model=resolved_main_model,
+                cheap_model=resolved_cheap_model,
+            )
+        else:
+            default_config = build_bootstrap_config_for_provider(provider_choice)
+            default_provider = default_config.providers[0]
+            if provider_choice == "openai-codex":
+                resolved_provider_name = resolved_provider_name or default_provider.name
+                resolved_api_key_env = resolved_api_key_env or default_provider.api_key_env
+            else:
+                resolved_provider_name = resolved_provider_name or click.prompt(
+                    "Provider 显示名称",
+                    default=default_provider.name,
+                )
+                resolved_api_key_env = resolved_api_key_env or click.prompt(
+                    "凭证环境变量名",
+                    default=default_provider.api_key_env,
+                )
+            config = build_bootstrap_config_for_provider(
+                provider_choice,
+                provider_name=resolved_provider_name,
+                api_key_env=resolved_api_key_env,
+            )
         provider_entry = config.providers[0]
         runtime = config.runtime
 

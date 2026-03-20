@@ -174,7 +174,7 @@ from octoagent.provider.dx.runtime_activation import (
     RuntimeActivationService,
 )
 from octoagent.provider.dx.secret_service import SecretService
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from ulid import ULID
 
 from .agent_context import build_projected_session_id, build_scope_aware_session_id
@@ -3666,6 +3666,9 @@ class ControlPlaneService:
         try:
             candidate_config = OctoAgentConfig.model_validate(config_data)
             candidate_config_payload = candidate_config.model_dump(mode="json")
+        except ValidationError as exc:
+            candidate_config = current_config
+            validation_errors.extend(self._format_config_validation_errors(exc))
         except Exception as exc:
             candidate_config = current_config
             validation_errors.append(str(exc))
@@ -5612,6 +5615,21 @@ class ControlPlaneService:
             data={"model_aliases": aliases},
         )
 
+    def _list_available_model_aliases(self) -> list[str]:
+        """返回当前配置中可用于 Agent / Worker 的模型别名集合。"""
+        try:
+            config = load_config(self._project_root)
+        except Exception:
+            return ["main"]
+        if config is None or not config.model_aliases:
+            return ["main"]
+        aliases = sorted(alias for alias in config.model_aliases.keys() if alias.strip())
+        return aliases or ["main"]
+
+    def _validate_model_alias(self, model_alias: str) -> tuple[bool, list[str]]:
+        available_aliases = self._list_available_model_aliases()
+        return model_alias.strip() in available_aliases, available_aliases
+
     async def _handle_agent_list_archetypes(
         self, request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -5717,9 +5735,9 @@ class ControlPlaneService:
             )
 
         # 验证 model_alias 存在
-        config = load_config(self._project_root)
-        if config is not None and model_alias not in config.model_aliases:
-            available = ", ".join(sorted(config.model_aliases.keys()))
+        model_alias_valid, available_aliases = self._validate_model_alias(model_alias)
+        if not model_alias_valid:
+            available = ", ".join(available_aliases)
             return self._rejected_result(
                 request=request,
                 code="WORKER_CREATE_INVALID_MODEL",
@@ -6701,6 +6719,12 @@ class ControlPlaneService:
         )
         if not profile.name:
             raise ControlPlaneActionError("AGENT_PROFILE_NAME_REQUIRED", "name 不能为空")
+        model_alias_valid, available_aliases = self._validate_model_alias(profile.model_alias)
+        if not model_alias_valid:
+            raise ControlPlaneActionError(
+                "AGENT_PROFILE_MODEL_ALIAS_INVALID",
+                f"模型别名 '{profile.model_alias}' 不存在，可选：{', '.join(available_aliases)}",
+            )
         saved = await self._stores.agent_context_store.save_agent_profile(
             AgentProfile(
                 profile_id=profile.profile_id,
@@ -9445,6 +9469,12 @@ class ControlPlaneService:
             save_errors.append("name 不能为空。")
         if scope == "project" and not project_id:
             save_errors.append("project scope 的 Root Agent 需要 project_id。")
+        model_alias_valid, available_aliases = self._validate_model_alias(model_alias or "main")
+        if not model_alias_valid:
+            save_errors.append(
+                "model_alias 必须引用已存在的模型别名。"
+                f" 当前为 '{model_alias or 'main'}'，可选：{', '.join(available_aliases)}。"
+            )
         if tool_profile not in valid_tool_profiles:
             save_errors.append("tool_profile 只支持 minimal / standard / privileged。")
         invalid_runtime_kinds = [item for item in runtime_kinds if item not in valid_runtime_kinds]
@@ -9792,6 +9822,89 @@ class ControlPlaneService:
         except Exception:
             return None
 
+    @staticmethod
+    def _format_config_validation_errors(exc: ValidationError) -> list[str]:
+        messages: list[str] = []
+        for item in exc.errors():
+            loc = ".".join(str(part) for part in item.get("loc", ()))
+            message = str(item.get("msg", "")).strip()
+            if loc and message:
+                messages.append(f"{loc}: {message}")
+            elif message:
+                messages.append(message)
+        return messages or [str(exc)]
+
+    def _collect_memory_alias_risks(
+        self,
+        *,
+        config: Mapping[str, Any],
+        config_ref: ControlPlaneResourceRef,
+    ) -> list[SetupRiskItem]:
+        memory_cfg = config.get("memory", {}) if isinstance(config.get("memory"), dict) else {}
+        model_aliases = (
+            config.get("model_aliases", {}) if isinstance(config.get("model_aliases"), dict) else {}
+        )
+        providers_raw = config.get("providers", []) if isinstance(config.get("providers"), list) else []
+        providers_by_id = {
+            str(item.get("id", "")).strip(): item
+            for item in providers_raw
+            if isinstance(item, dict) and str(item.get("id", "")).strip()
+        }
+        memory_bindings = [
+            ("reasoning_model_alias", "记忆加工", "main（默认）"),
+            ("expand_model_alias", "查询扩写", "main（默认）"),
+            ("embedding_model_alias", "语义检索", "内建 embedding"),
+            ("rerank_model_alias", "结果重排", "heuristic（默认）"),
+        ]
+        risks: list[SetupRiskItem] = []
+        for field_name, label, fallback_label in memory_bindings:
+            alias_name = str(memory_cfg.get(field_name, "")).strip()
+            if not alias_name:
+                continue
+            alias_payload = model_aliases.get(alias_name)
+            field_path = f"memory.{field_name}"
+            if not isinstance(alias_payload, dict):
+                risks.append(
+                    SetupRiskItem(
+                        risk_id=f"memory_alias_missing:{field_path}",
+                        severity="high",
+                        title=f"{label} 模型别名不存在",
+                        summary=(
+                            f"{field_path} 当前填写为 {alias_name}，"
+                            "但 model_aliases 中找不到这个 alias。"
+                        ),
+                        blocking=True,
+                        recommended_action=(
+                            f"把 {field_path} 改成已有 alias，"
+                            f"或先补齐 {alias_name} 的 model_aliases 配置。"
+                        ),
+                        source_ref=config_ref,
+                    )
+                )
+                continue
+            provider_id = str(alias_payload.get("provider", "")).strip()
+            provider_payload = providers_by_id.get(provider_id)
+            if provider_payload is None or provider_payload.get("enabled", True) is False:
+                risks.append(
+                    SetupRiskItem(
+                        risk_id=f"memory_alias_provider_unavailable:{field_path}",
+                        severity="warning",
+                        title=f"{label} 当前会回退",
+                        summary=(
+                            f"{field_path} 绑定的 alias {alias_name} 引用的 Provider "
+                            f"{provider_id or '(未填写)'} 当前不可用，"
+                            f"运行时会回退到 {fallback_label}。"
+                        ),
+                        blocking=False,
+                        recommended_action=(
+                            f"启用或修正 alias {alias_name} 对应的 Provider，"
+                            f"否则 Memory 会继续回退到 {fallback_label}。"
+                        ),
+                        source_ref=config_ref,
+                    )
+                )
+        return risks
+
     def _resolve_active_agent_profile_payload(
         self,
         *,
@@ -9960,6 +10073,12 @@ class ControlPlaneService:
                     source_ref=config_ref,
                 )
             )
+        provider_runtime_risks.extend(
+            self._collect_memory_alias_risks(
+                config=config,
+                config_ref=config_ref,
+            )
+        )
         for warning in config_warnings:
             provider_runtime_risks.append(
                 SetupRiskItem(

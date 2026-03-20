@@ -448,6 +448,55 @@ describe("SettingsPage", () => {
     expect(screen.getByDisplayValue("cheap")).toBeInTheDocument();
   });
 
+  it("Provider 的 base_url 会在页面和 setup.review 草稿中保留", async () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "siliconflow",
+        name: "SiliconFlow",
+        auth_type: "api_key",
+        api_key_env: "SILICONFLOW_API_KEY",
+        base_url: "https://api.siliconflow.cn/v1",
+        enabled: true,
+      },
+    ] as unknown as never[];
+    snapshot.resources.config.current_value.model_aliases = {
+      main: {
+        provider: "siliconflow",
+        model: "Qwen/Qwen3.5-32B",
+        description: "主模型",
+      },
+    } as never;
+    const submitAction = vi.fn().mockResolvedValue({
+      data: {
+        review: snapshot.resources.setup_governance.review,
+      },
+    });
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    const baseUrlInput = screen.getByDisplayValue("https://api.siliconflow.cn/v1");
+    expect(baseUrlInput).toBeInTheDocument();
+
+    await userEvent.clear(baseUrlInput);
+    await userEvent.type(baseUrlInput, "https://siliconflow.example.com/v1");
+    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+
+    await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
+
+    const draft = submitAction.mock.calls[0][1].draft;
+    expect(draft.config.providers[0].base_url).toBe("https://siliconflow.example.com/v1");
+  });
+
   it("保存时会自动补齐内部 LiteLLM 运行配置", async () => {
     const snapshot = buildSettingsSnapshot();
     const submitAction = vi.fn().mockResolvedValue({

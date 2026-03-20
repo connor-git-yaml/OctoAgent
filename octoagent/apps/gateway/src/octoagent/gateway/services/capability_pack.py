@@ -3461,6 +3461,18 @@ class CapabilityPackService:
         from octoagent.provider.dx.config_wizard import load_config as _load_config
         from octoagent.provider.dx.config_wizard import save_config as _save_config
 
+        def _parse_setup_draft_json(raw: str) -> dict[str, Any]:
+            text = str(raw or "").strip()
+            if not text:
+                return {}
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"draft_json 不是合法 JSON：{exc.msg}") from exc
+            if not isinstance(payload, dict):
+                raise ValueError("draft_json 必须是 object JSON")
+            return payload
+
         @tool_contract(
             name="config.inspect",
             side_effect_level=SideEffectLevel.NONE,
@@ -3506,13 +3518,14 @@ class CapabilityPackService:
         )
         async def config_add_provider(
             provider_id: str,
-            name: str,
-            auth_type: str = "api_key",
+            name: str = "",
+            auth_type: str = "",
             api_key_env: str = "",
             base_url: str = "",
-            enabled: bool = True,
+            enabled: bool | None = None,
+            clear_base_url: bool = False,
         ) -> str:
-            """添加或更新一个 LLM Provider 到 octoagent.yaml。修改后需执行 config.sync 生效。"""
+            """添加或更新一个 LLM Provider 到 octoagent.yaml。修改后可执行 config.sync 重新生成 LiteLLM 衍生配置。"""
             config = _load_config(self._project_root)
             if config is None:
                 return json.dumps(
@@ -3525,17 +3538,39 @@ class CapabilityPackService:
                     {"error": "MISSING_PARAM", "message": "provider_id 不能为空"},
                     ensure_ascii=False,
                 )
-            if not api_key_env.strip():
-                api_key_env = f"{provider_id.upper().replace('-', '_')}_API_KEY"
+            existing_provider = next((p for p in config.providers if p.id == provider_id), None)
+            resolved_name = name.strip() or (
+                existing_provider.name if existing_provider is not None else provider_id
+            )
+            resolved_auth_type = auth_type.strip() or (
+                existing_provider.auth_type if existing_provider is not None else "api_key"
+            )
+            resolved_api_key_env = api_key_env.strip() or (
+                existing_provider.api_key_env
+                if existing_provider is not None
+                else f"{provider_id.upper().replace('-', '_')}_API_KEY"
+            )
+            resolved_base_url = ""
+            if clear_base_url:
+                resolved_base_url = ""
+            elif base_url.strip():
+                resolved_base_url = base_url.strip()
+            elif existing_provider is not None:
+                resolved_base_url = existing_provider.base_url
+            resolved_enabled = (
+                enabled
+                if enabled is not None
+                else (existing_provider.enabled if existing_provider is not None else True)
+            )
 
             from octoagent.provider.dx.config_schema import ProviderEntry
             new_entry = ProviderEntry(
                 id=provider_id,
-                name=name.strip() or provider_id,
-                auth_type=auth_type,
-                api_key_env=api_key_env.strip(),
-                enabled=enabled,
-                **({"base_url": base_url.strip()} if base_url.strip() else {}),
+                name=resolved_name,
+                auth_type=resolved_auth_type,
+                api_key_env=resolved_api_key_env,
+                enabled=resolved_enabled,
+                base_url=resolved_base_url,
             )
             # 更新或追加
             found = False
@@ -3552,7 +3587,16 @@ class CapabilityPackService:
             _save_config(config, self._project_root)
             action = "updated" if found else "added"
             return json.dumps(
-                {"success": True, "action": action, "provider_id": provider_id, "hint": "执行 config.sync 使 LiteLLM 配置生效"},
+                {
+                    "success": True,
+                    "action": action,
+                    "provider_id": provider_id,
+                    "hint": (
+                        "执行 config.sync 重新生成 litellm-config.yaml；"
+                        "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
+                        "也可使用 Web 设置页或 CLI `octo setup`。"
+                    ),
+                },
                 ensure_ascii=False,
             )
 
@@ -3575,7 +3619,7 @@ class CapabilityPackService:
             description: str = "",
             thinking_level: str = "",
         ) -> str:
-            """设置模型别名（如 main, cheap）到具体 Provider + 模型。修改后需执行 config.sync 生效。"""
+            """设置模型别名（如 main, cheap）到具体 Provider + 模型。修改后可执行 config.sync 重新生成 LiteLLM 衍生配置。"""
             config = _load_config(self._project_root)
             if config is None:
                 return json.dumps(
@@ -3610,7 +3654,17 @@ class CapabilityPackService:
             config.updated_at = date.today().isoformat()
             _save_config(config, self._project_root)
             return json.dumps(
-                {"success": True, "alias": alias, "provider": provider.strip(), "model": model.strip(), "hint": "执行 config.sync 使 LiteLLM 配置生效"},
+                {
+                    "success": True,
+                    "alias": alias,
+                    "provider": provider.strip(),
+                    "model": model.strip(),
+                    "hint": (
+                        "执行 config.sync 重新生成 litellm-config.yaml；"
+                        "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
+                        "也可使用 Web 设置页或 CLI `octo setup`。"
+                    ),
+                },
                 ensure_ascii=False,
             )
 
@@ -3627,7 +3681,7 @@ class CapabilityPackService:
             },
         )
         async def config_sync() -> str:
-            """同步 octoagent.yaml 变更到 LiteLLM Proxy 配置并热重载。等同于 `octo config sync`。"""
+            """把 octoagent.yaml 重新生成到 litellm-config.yaml。等同于 `octo config sync`，但不会自动重启 runtime。"""
             try:
                 config = _load_config(self._project_root)
                 if config is None:
@@ -3645,10 +3699,15 @@ class CapabilityPackService:
                 return json.dumps(
                     {
                         "success": True,
-                        "message": "LiteLLM 配置已同步",
+                        "message": "LiteLLM 衍生配置已同步",
                         "output_path": str(out_path),
                         "enabled_providers": enabled_providers,
                         "enabled_aliases": enabled_aliases,
+                        "hint": (
+                            "这一步只会重新生成 litellm-config.yaml；"
+                            "如需启动或切换到真实模型，请使用 Web 设置页的“连接真实模型”"
+                            "或 CLI `octo setup`。"
+                        ),
                     },
                     ensure_ascii=False,
                 )
@@ -3657,6 +3716,96 @@ class CapabilityPackService:
                     {"error": "SYNC_FAILED", "message": str(exc)},
                     ensure_ascii=False,
                 )
+
+        @tool_contract(
+            name="setup.review",
+            side_effect_level=SideEffectLevel.NONE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="setup",
+            tags=["setup", "review", "config"],
+            manifest_ref="builtin://setup.review",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def setup_review(draft_json: str = "{}") -> str:
+            """调用 canonical setup.review 检查 draft 是否可保存。draft_json 需为 JSON object。"""
+            try:
+                draft = _parse_setup_draft_json(draft_json)
+            except ValueError as exc:
+                return json.dumps(
+                    {"error": "INVALID_DRAFT_JSON", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+
+            from octoagent.provider.dx.setup_governance_adapter import (
+                LocalSetupGovernanceAdapter,
+            )
+
+            adapter = LocalSetupGovernanceAdapter(self._project_root)
+            prepared = await adapter.prepare_wizard_draft(draft)
+            result = await adapter.review(prepared)
+            payload: dict[str, Any] = {
+                "success": str(result.status) == "completed",
+                "status": str(result.status),
+                "code": result.code,
+                "message": result.message,
+            }
+            if isinstance(result.data, dict):
+                if isinstance(result.data.get("review"), dict):
+                    payload["review"] = result.data["review"]
+                if result.data.get("warnings"):
+                    payload["warnings"] = result.data["warnings"]
+            if not payload["success"]:
+                payload["error"] = result.code
+            return json.dumps(payload, ensure_ascii=False)
+
+        @tool_contract(
+            name="setup.quick_connect",
+            side_effect_level=SideEffectLevel.REVERSIBLE,
+            tool_profile=ToolProfile.STANDARD,
+            tool_group="setup",
+            tags=["setup", "quick_connect", "activation"],
+            manifest_ref="builtin://setup.quick_connect",
+            metadata={
+                "entrypoints": ["agent_runtime", "web"],
+                "runtime_kinds": ["worker", "subagent", "graph_agent"],
+            },
+        )
+        async def setup_quick_connect(draft_json: str) -> str:
+            """调用 canonical setup.quick_connect 完成保存、同步衍生配置与 runtime activation。"""
+            try:
+                draft = _parse_setup_draft_json(draft_json)
+            except ValueError as exc:
+                return json.dumps(
+                    {"error": "INVALID_DRAFT_JSON", "message": str(exc)},
+                    ensure_ascii=False,
+                )
+
+            from octoagent.provider.dx.setup_governance_adapter import (
+                LocalSetupGovernanceAdapter,
+            )
+
+            adapter = LocalSetupGovernanceAdapter(self._project_root)
+            prepared = await adapter.prepare_wizard_draft(draft)
+            result = await adapter.quick_connect(prepared)
+            payload: dict[str, Any] = {
+                "success": str(result.status) == "completed",
+                "status": str(result.status),
+                "code": result.code,
+                "message": result.message,
+            }
+            if isinstance(result.data, dict):
+                if isinstance(result.data.get("review"), dict):
+                    payload["review"] = result.data["review"]
+                if isinstance(result.data.get("activation"), dict):
+                    payload["activation"] = result.data["activation"]
+                if result.data.get("resource_refs"):
+                    payload["resource_refs"] = result.data["resource_refs"]
+            if not payload["success"]:
+                payload["error"] = result.code
+            return json.dumps(payload, ensure_ascii=False)
 
         # Feature 057: skills tool -- LLM 主动发现和加载 SKILL.md
         from octoagent.skills.tools import SkillsTool as _SkillsTool
@@ -3782,6 +3931,8 @@ class CapabilityPackService:
             config_add_provider,
             config_set_model_alias,
             config_sync,
+            setup_review,
+            setup_quick_connect,
             skills,
         ):
             await self._tool_broker.try_register(
@@ -3822,6 +3973,7 @@ class CapabilityPackService:
             "automation",
             "media",
             "config",
+            "setup",
             "behavior",
         ]
         return {

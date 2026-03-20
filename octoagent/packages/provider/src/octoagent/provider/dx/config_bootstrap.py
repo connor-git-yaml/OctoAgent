@@ -108,18 +108,23 @@ _BOOTSTRAP_PRESETS: dict[str, _ProviderBootstrapPreset] = {
         cheap_description="低成本模型别名（用于 octo doctor --live ping）",
     ),
 }
+_CUSTOM_PROVIDER_CHOICE = "custom"
 
 
 def list_bootstrap_provider_choices() -> list[str]:
     """返回首次使用支持的 provider 预设列表。"""
-    return list(_BOOTSTRAP_PRESETS.keys())
+    return [*list(_BOOTSTRAP_PRESETS.keys()), _CUSTOM_PROVIDER_CHOICE]
 
 
 def build_bootstrap_config_for_provider(
     provider_choice: str,
     *,
+    provider_id: str | None = None,
     provider_name: str | None = None,
     api_key_env: str | None = None,
+    base_url: str = "",
+    main_model: str | None = None,
+    cheap_model: str | None = None,
     enable_telegram: bool = False,
     telegram_mode: Literal["webhook", "polling"] = "polling",
     telegram_webhook_url: str = "",
@@ -127,6 +132,58 @@ def build_bootstrap_config_for_provider(
     telegram_webhook_secret_env: str = "",
 ) -> OctoAgentConfig:
     """按指定 provider 预设构建最小可用配置。"""
+    if provider_choice == _CUSTOM_PROVIDER_CHOICE:
+        resolved_provider_id = str(provider_id or "").strip().lower()
+        if not resolved_provider_id:
+            raise ConfigBootstrapError("custom provider 需要 provider_id")
+        resolved_provider_name = str(provider_name or "").strip() or resolved_provider_id
+        resolved_api_key_env = str(api_key_env or "").strip() or (
+            f"{resolved_provider_id.upper().replace('-', '_')}_API_KEY"
+        )
+        resolved_main_model = str(main_model or "").strip()
+        resolved_cheap_model = str(cheap_model or "").strip() or resolved_main_model
+        if not resolved_main_model:
+            raise ConfigBootstrapError("custom provider 需要 main_model")
+        try:
+            provider_entry = ProviderEntry(
+                id=resolved_provider_id,
+                name=resolved_provider_name,
+                auth_type="api_key",
+                api_key_env=resolved_api_key_env,
+                base_url=base_url.strip(),
+            )
+        except Exception as exc:
+            raise ConfigBootstrapError(f"Provider 配置无效：{exc}") from exc
+
+        default_aliases = {
+            "main": ModelAlias(
+                provider=resolved_provider_id,
+                model=resolved_main_model,
+                description="主力模型别名",
+            ),
+            "cheap": ModelAlias(
+                provider=resolved_provider_id,
+                model=resolved_cheap_model,
+                description="低成本模型别名（用于 octo doctor --live ping）",
+            ),
+        }
+        config = OctoAgentConfig(
+            updated_at=date.today().isoformat(),
+            providers=[provider_entry],
+            model_aliases=default_aliases,
+            runtime=RuntimeConfig(llm_mode="litellm"),
+        )
+        if enable_telegram:
+            return apply_telegram_channel_config(
+                config,
+                enabled=True,
+                mode=telegram_mode,
+                bot_token_env=telegram_bot_token_env,
+                webhook_url=telegram_webhook_url,
+                webhook_secret_env=telegram_webhook_secret_env,
+            )
+        return config
+
     preset = _BOOTSTRAP_PRESETS.get(provider_choice)
     if preset is None:
         raise ConfigBootstrapError(f"不支持的 provider 预设：{provider_choice}")
@@ -239,10 +296,47 @@ def build_bootstrap_config(
         )
     )
     provider_choice = choice_func(
-        "Provider 预设（openrouter / openai / openai-codex / anthropic）",
+        "Provider 预设（openrouter / openai / openai-codex / anthropic / custom）",
         list_bootstrap_provider_choices(),
         "openrouter",
     )
+    if provider_choice == _CUSTOM_PROVIDER_CHOICE:
+        provider_id = prompt_func("Provider ID（如 siliconflow / ollama）", "custom-provider")
+        normalized_provider_id = provider_id.strip().lower()
+        provider_name = prompt_func(
+            "Provider 显示名称",
+            normalized_provider_id or "Custom Provider",
+        )
+        api_key_env_default = (
+            f"{normalized_provider_id.upper().replace('-', '_')}_API_KEY"
+            if normalized_provider_id
+            else "CUSTOM_PROVIDER_API_KEY"
+        )
+        api_key_env = prompt_func(
+            f"凭证环境变量名（如 {api_key_env_default}）",
+            api_key_env_default,
+        )
+        base_url = prompt_func(
+            "API Base URL（如 https://api.siliconflow.cn/v1）",
+            "",
+        )
+        main_model = prompt_func("main 别名模型名", "")
+        cheap_model = prompt_func("cheap 别名模型名（留空沿用 main）", main_model)
+        return build_bootstrap_config_for_provider(
+            provider_choice,
+            provider_id=normalized_provider_id,
+            provider_name=provider_name,
+            api_key_env=api_key_env,
+            base_url=base_url,
+            main_model=main_model,
+            cheap_model=cheap_model,
+            enable_telegram=enable_telegram,
+            telegram_mode=telegram_mode,
+            telegram_webhook_url=telegram_webhook_url,
+            telegram_bot_token_env=telegram_bot_token_env,
+            telegram_webhook_secret_env=telegram_webhook_secret_env,
+        )
+
     preset = _BOOTSTRAP_PRESETS[provider_choice]
     provider_name = prompt_func("Provider 显示名称", preset.provider_name)
     api_key_env = prompt_func(

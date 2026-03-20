@@ -358,6 +358,7 @@ export default function SettingsPage() {
             name: `Custom Provider ${customIndex}`,
             auth_type: "api_key" as const,
             api_key_env: `CUSTOM_PROVIDER_${customIndex}_API_KEY`,
+            base_url: "",
             enabled: true,
           }
         : buildProviderPreset(providerId);

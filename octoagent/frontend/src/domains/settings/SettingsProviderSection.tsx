@@ -196,6 +196,18 @@ export default function SettingsProviderSection({
                         <small>填写变量名，非实际密钥。</small>
                       </label>
                       <label className="wb-field wb-field-span-2">
+                        <span>API Base URL</span>
+                        <input
+                          type="text"
+                          value={provider.base_url}
+                          placeholder="留空使用 Provider 默认地址"
+                          onChange={(event) =>
+                            onUpdateProviderAt(index, { base_url: event.target.value })
+                          }
+                        />
+                        <small>SiliconFlow、DeepSeek、本地 vLLM / Ollama 等自定义网关通常需要填写。</small>
+                      </label>
+                      <label className="wb-field wb-field-span-2">
                         <span>启用状态</span>
                         <div className="wb-provider-toggle-row">
                           <input
@@ -259,6 +271,9 @@ export default function SettingsProviderSection({
         <div className="wb-panel-head">
           <div>
             <h3 style={{ fontSize: "1.1rem", margin: 0 }}>模型别名</h3>
+            <p className="wb-panel-copy" style={{ marginTop: "0.35rem" }}>
+              这里负责定义 alias 本身。Memory 绑定在本页配置；主 Agent / Worker 使用哪个 alias，请到 Agents 页面选择。
+            </p>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
             <button

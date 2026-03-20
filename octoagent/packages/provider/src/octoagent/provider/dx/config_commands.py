@@ -103,7 +103,9 @@ def _print_memory_summary(config: OctoAgentConfig) -> None:
     console.print("  engine:             内建记忆引擎")
     console.print(f"  reasoning_alias:    {memory.reasoning_model_alias or '(fallback → main)'}")
     console.print(f"  expand_alias:       {memory.expand_model_alias or '(fallback → main)'}")
-    console.print(f"  embedding_alias:    {memory.embedding_model_alias or '(内建 Qwen3-Embedding-0.6B)'}")
+    console.print(
+        f"  embedding_alias:    {memory.embedding_model_alias or '(内建 Qwen3-Embedding-0.6B)'}"
+    )
     console.print(f"  rerank_alias:       {memory.rerank_model_alias or '(heuristic)'}")
 
 
@@ -138,15 +140,16 @@ def _save_memory_patch(
 
 
 def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
-    """自动触发同步并打印简短摘要（FR-007）"""
+    """自动触发衍生配置同步并打印简短摘要（FR-007）"""
     try:
         out_path = generate_litellm_config(config, project_root)
         enabled_providers = [p.id for p in config.providers if p.enabled]
         enabled_aliases = [
-            k for k, v in config.model_aliases.items()
+            k
+            for k, v in config.model_aliases.items()
             if any(p.id == v.provider and p.enabled for p in config.providers)
         ]
-        console.print(f"[green]  已同步 litellm-config.yaml[/green] → {out_path}")
+        console.print(f"[green]  已同步 LiteLLM 衍生配置[/green] → {out_path}")
         console.print(
             f"  包含 {len(enabled_aliases)} 个 model aliases"
             + (f"（{', '.join(enabled_aliases)}）" if enabled_aliases else "")
@@ -155,6 +158,7 @@ def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
             f"  基于 {len(enabled_providers)} 个 enabled Provider"
             + (f"（{', '.join(enabled_providers)}）" if enabled_providers else "")
         )
+        console.print("  说明: 这一步只会重新生成 litellm-config.yaml，不会自动重启 runtime。")
     except Exception as exc:
         err_console.print(f"[yellow]警告：同步 litellm-config.yaml 失败：{exc}[/yellow]")
         err_console.print("  请稍后手动运行 octo config sync")
@@ -216,8 +220,7 @@ def _show_summary(yaml_path: str | None) -> None:
     for alias_key, alias_val in cfg.model_aliases.items():
         thinking_str = f"  thinking={alias_val.thinking_level}" if alias_val.thinking_level else ""
         console.print(
-            f"  {alias_key:<10} →  {alias_val.provider:<15} "
-            f"{alias_val.model}{thinking_str}"
+            f"  {alias_key:<10} →  {alias_val.provider:<15} {alias_val.model}{thinking_str}"
         )
 
     console.print()
@@ -247,8 +250,7 @@ def _print_not_configured_hint() -> None:
         "  # 一次写入 Provider + Telegram 最小配置"
     )
     console.print(
-        "  [cyan]octo config provider add openrouter[/cyan]"
-        "   # 添加 Provider 并自动初始化配置"
+        "  [cyan]octo config provider add openrouter[/cyan]   # 添加 Provider 并自动初始化配置"
     )
     console.print("  [cyan]octo config init[/cyan]                      # 全量交互式初始化")
     console.print()
@@ -383,6 +385,8 @@ def provider_group() -> None:
 @click.option("--auth-type", default=None, type=click.Choice(["api_key", "oauth"]))
 @click.option("--api-key-env", default=None, help="凭证环境变量名（如 OPENROUTER_API_KEY）")
 @click.option("--name", default=None, help="Provider 显示名称")
+@click.option("--base-url", default=None, help="自定义 API Base URL（如 https://api.siliconflow.cn/v1）")
+@click.option("--clear-base-url", is_flag=True, default=False, help="清空已有的 API Base URL")
 @click.option("--no-credential", is_flag=True, default=False, help="仅注册 Provider，不写 API Key")
 @click.pass_context
 def provider_add(
@@ -391,6 +395,8 @@ def provider_add(
     auth_type: str | None,
     api_key_env: str | None,
     name: str | None,
+    base_url: str | None,
+    clear_base_url: bool,
     no_credential: bool,
 ) -> None:
     """增量添加 Provider（FR-010）"""
@@ -415,18 +421,22 @@ def provider_add(
 
     # 混合模式：CLI 参数优先，缺失时交互补全（Q6）
     if auth_type is None:
+        default_auth_type = existing_provider.auth_type if existing_provider is not None else "api_key"
         if sys.stdin.isatty():
             auth_type = click.prompt(
                 "认证类型",
                 type=click.Choice(["api_key", "oauth"]),
-                default="api_key",
+                default=default_auth_type,
             )
         else:
-            err_console.print("[red]错误：--auth-type 未指定且终端非 TTY，无法交互输入。[/red]")
-            raise SystemExit(1)
+            auth_type = default_auth_type
 
     if api_key_env is None:
-        default_env = f"{provider_id.upper()}_API_KEY"
+        default_env = (
+            existing_provider.api_key_env
+            if existing_provider is not None
+            else f"{provider_id.upper()}_API_KEY"
+        )
         if sys.stdin.isatty():
             api_key_env = click.prompt(
                 "凭证环境变量名",
@@ -436,21 +446,39 @@ def provider_add(
             api_key_env = default_env
 
     if name is None:
-        name = provider_id.title()
+        name = existing_provider.name if existing_provider is not None else provider_id.title()
+    if base_url is None:
+        default_base_url = existing_provider.base_url if existing_provider is not None else ""
+        if sys.stdin.isatty():
+            base_url = click.prompt(
+                "API Base URL（留空使用 Provider 默认）",
+                default="" if clear_base_url else default_base_url,
+                show_default=bool(default_base_url and not clear_base_url),
+            )
+        else:
+            base_url = "" if clear_base_url else default_base_url
 
     # 构建 ProviderEntry
     try:
+        provider_kwargs: dict[str, object] = {
+            "id": provider_id,
+            "name": name,
+            "auth_type": auth_type,
+            "api_key_env": api_key_env,
+        }
+        if clear_base_url:
+            provider_kwargs["base_url"] = ""
+        elif str(base_url).strip():
+            provider_kwargs["base_url"] = str(base_url).strip()
         entry = ProviderEntry(
-            id=provider_id,
-            name=name,
-            auth_type=auth_type,
-            api_key_env=api_key_env,
+            **provider_kwargs,
         )
     except Exception as exc:
         err_console.print("[red]错误：Provider 配置无效[/red]")
         err_console.print(f"  {exc}")
         err_console.print(
-            "修复建议：检查 --api-key-env 是否为合法环境变量名（如 OPENROUTER_API_KEY）"
+            "修复建议：检查 --api-key-env 是否为合法环境变量名，"
+            "--base-url 是否为可接受的 URL 字符串"
         )
         raise SystemExit(1) from exc
 
@@ -459,8 +487,7 @@ def provider_add(
         import questionary
 
         api_key_value = questionary.password(
-            f"请输入 {api_key_env} 的值（API Key）"
-            "，留空跳过（可稍后手动配置 .env.litellm）："
+            f"请输入 {api_key_env} 的值（API Key），留空跳过（可稍后手动配置 .env.litellm）："
         ).ask()
         if api_key_value:
             from .litellm_generator import generate_env_litellm
@@ -475,7 +502,12 @@ def provider_add(
 
     # 更新配置（overwrite=True，因为用户已确认 update）
     overwrite = existing_provider is not None
-    updated, changed = wizard_update_provider(existing, entry, overwrite=overwrite)
+    updated, changed = wizard_update_provider(
+        existing,
+        entry,
+        overwrite=overwrite,
+        preserve_existing_base_url=not clear_base_url,
+    )
 
     # FR-003：首次创建配置时自动生成 main/cheap 默认别名（与 config init 行为一致）
     if is_new_config and not updated.model_aliases:
@@ -524,11 +556,19 @@ def provider_list(ctx: click.Context) -> None:
     table.add_column("名称")
     table.add_column("认证类型")
     table.add_column("环境变量")
+    table.add_column("API Base")
     table.add_column("状态")
 
     for p in cfg.providers:
         status_str = "[green]enabled[/green]" if p.enabled else "[yellow]disabled[/yellow]"
-        table.add_row(p.id, p.name, p.auth_type, p.api_key_env, status_str)
+        table.add_row(
+            p.id,
+            p.name,
+            p.auth_type,
+            p.api_key_env,
+            p.base_url or "-",
+            status_str,
+        )
 
     console.print(table)
 
@@ -552,9 +592,7 @@ def provider_disable(ctx: click.Context, provider_id: str, yes: bool) -> None:
         raise SystemExit(1)
 
     # 检查是否有 alias 引用此 Provider
-    referencing_aliases = [
-        k for k, v in cfg.model_aliases.items() if v.provider == provider_id
-    ]
+    referencing_aliases = [k for k, v in cfg.model_aliases.items() if v.provider == provider_id]
     if referencing_aliases:
         console.print(
             "[yellow]警告：以下 model alias 引用了此 Provider，"
@@ -655,9 +693,7 @@ def alias_set(
         if sys.stdin.isatty() and available_providers:
             import questionary
 
-            provider = questionary.select(
-                "选择 Provider", choices=available_providers
-            ).ask()
+            provider = questionary.select("选择 Provider", choices=available_providers).ask()
         elif sys.stdin.isatty():
             provider = click.prompt("Provider ID")
         else:
@@ -741,11 +777,6 @@ def memory_show(ctx: click.Context) -> None:
     console.print("══════════════════════════════════════════════")
 
 
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # config sync
 # ---------------------------------------------------------------------------
@@ -755,7 +786,7 @@ def memory_show(ctx: click.Context) -> None:
 @click.option("--dry-run", is_flag=True, default=False, help="仅预览，不写文件")
 @click.pass_context
 def config_sync(ctx: click.Context, dry_run: bool) -> None:
-    """手动触发同步（FR-007，NFR-001）"""
+    """手动重新生成 LiteLLM 衍生配置（FR-007，NFR-001）"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
     cfg = _load_or_none(project_root)
@@ -782,11 +813,12 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
         out_path = generate_litellm_config(cfg, project_root)
         enabled_providers = [p.id for p in cfg.providers if p.enabled]
         enabled_aliases = [
-            k for k, v in cfg.model_aliases.items()
+            k
+            for k, v in cfg.model_aliases.items()
             if any(p.id == v.provider and p.enabled for p in cfg.providers)
         ]
         console.print()
-        console.print("[bold green]同步完成[/bold green]")
+        console.print("[bold green]衍生配置同步完成[/bold green]")
         console.print(f"  写入: [cyan]{out_path}[/cyan]")
         console.print(
             f"  包含 {len(enabled_aliases)} 个 model aliases"
@@ -796,6 +828,8 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
             f"  基于 {len(enabled_providers)} 个 enabled Provider"
             + (f"（{', '.join(enabled_providers)}）" if enabled_providers else "")
         )
+        console.print("  说明: 这一步只会重新生成 litellm-config.yaml，不会自动重启 runtime。")
+        console.print("  如需一键保存并启用真实模型，请使用 `octo setup`。")
     except Exception as exc:
         err_console.print(f"[red]错误：同步失败：{exc}[/red]")
         raise SystemExit(1) from exc
@@ -892,14 +926,9 @@ def _print_migration_run(run, *, heading: str) -> None:
     )
     console.print(f"validation.ok: {run.validation.ok}")
     if run.validation.missing_binding_keys:
-        console.print(
-            "missing_binding_keys: "
-            + ", ".join(run.validation.missing_binding_keys)
-        )
+        console.print("missing_binding_keys: " + ", ".join(run.validation.missing_binding_keys))
     if run.validation.blocking_issues:
-        console.print(
-            "blocking_issues: " + "；".join(run.validation.blocking_issues)
-        )
+        console.print("blocking_issues: " + "；".join(run.validation.blocking_issues))
     if run.validation.warnings:
         console.print("warnings:")
         for warning in run.validation.warnings:
@@ -909,16 +938,12 @@ def _print_migration_run(run, *, heading: str) -> None:
         for item in run.validation.integrity_checks:
             console.print(f"  - {item}")
     if run.rollback_plan.delete_binding_ids:
-        console.print(
-            f"rollback.delete_binding_ids={len(run.rollback_plan.delete_binding_ids)}"
-        )
+        console.print(f"rollback.delete_binding_ids={len(run.rollback_plan.delete_binding_ids)}")
     if run.rollback_plan.delete_workspace_ids:
         console.print(
             f"rollback.delete_workspace_ids={len(run.rollback_plan.delete_workspace_ids)}"
         )
     if run.rollback_plan.delete_project_ids:
-        console.print(
-            f"rollback.delete_project_ids={len(run.rollback_plan.delete_project_ids)}"
-        )
+        console.print(f"rollback.delete_project_ids={len(run.rollback_plan.delete_project_ids)}")
     if run.error_message:
         console.print(f"[red]error: {run.error_message}[/red]")

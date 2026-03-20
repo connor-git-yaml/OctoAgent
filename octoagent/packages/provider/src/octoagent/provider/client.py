@@ -591,7 +591,7 @@ class LiteLLMClient:
 
         Args:
             messages: 消息列表，格式 [{"role": "user", "content": "..."}]
-            model_alias: 运行时 group 名称（由 AliasRegistry.resolve() 提供）
+            model_alias: 运行时 alias（由 AliasRegistry.resolve() 提供）
             temperature: 采样温度
             max_tokens: 最大生成 token 数，None 使用模型默认
             api_base: API base URL 覆盖（如 JWT 方案直连 Provider API）

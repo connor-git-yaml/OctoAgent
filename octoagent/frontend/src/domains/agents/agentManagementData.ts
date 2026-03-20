@@ -543,8 +543,6 @@ export function buildModelAliasOptions(snapshot: ControlPlaneSnapshot): string[]
   return uniqueStrings([
     ...Object.keys(toRecord(snapshot.resources.config.current_value.model_aliases)),
     DEFAULT_MODEL_ALIAS,
-    "cheap",
-    "reasoning",
   ]);
 }
 

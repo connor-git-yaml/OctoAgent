@@ -188,6 +188,56 @@ def test_resolve_stream_model_aliases_falls_back_to_litellm_config(
     assert gateway_main._resolve_stream_model_aliases(tmp_path) == {"main"}
 
 
+def test_build_runtime_alias_registry_uses_configured_aliases(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-03-07",
+            providers=[
+                ProviderEntry(
+                    id="openrouter",
+                    name="OpenRouter",
+                    auth_type="api_key",
+                    api_key_env="OPENROUTER_API_KEY",
+                    enabled=True,
+                ),
+            ],
+            model_aliases={
+                "main": ModelAlias(provider="openrouter", model="openrouter/auto"),
+                "cheap": ModelAlias(provider="openrouter", model="openrouter/auto"),
+                "reasoning": ModelAlias(provider="openrouter", model="openrouter/auto"),
+                "summarizer": ModelAlias(provider="openrouter", model="openrouter/auto"),
+            },
+        ),
+        tmp_path,
+    )
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+
+    registry = gateway_main._build_runtime_alias_registry(tmp_path)
+
+    assert registry.resolve("reasoning") == "reasoning"
+    assert registry.resolve("summarizer") == "summarizer"
+    assert registry.resolve("planner") == "main"
+    assert registry.resolve("router") == "cheap"
+
+
+def test_build_runtime_alias_registry_falls_back_when_config_invalid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "octoagent.yaml").write_text("not: [valid\n", encoding="utf-8")
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+
+    registry = gateway_main._build_runtime_alias_registry(tmp_path)
+
+    assert registry.resolve("planner") == "main"
+    assert registry.resolve("unknown-alias") == "main"
+
+
 def test_resolve_verify_url_from_explicit_env(monkeypatch) -> None:
     monkeypatch.setenv("OCTOAGENT_VERIFY_URL", "http://127.0.0.1:9000/ready?profile=core")
     monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")

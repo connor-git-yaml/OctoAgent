@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from octoagent.gateway.services.llm_service import LLMService
-from octoagent.provider import ModelCallResult, TokenUsage
+from octoagent.provider import AliasRegistry, ModelCallResult, TokenUsage
 from octoagent.skills import SkillOutputEnvelope, SkillRunResult, SkillRunStatus, SkillRunner
 from octoagent.skills.litellm_client import LiteLLMSkillClient
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
@@ -135,6 +135,32 @@ def _build_skill_result(content: str = "tool-answer") -> SkillRunResult:
         steps=1,
         duration_ms=123,
     )
+
+
+async def test_llm_service_preserves_configured_runtime_alias() -> None:
+    fallback_manager = _FakeFallbackManager()
+    service = LLMService(
+        fallback_manager=fallback_manager,
+        alias_registry=AliasRegistry.from_runtime_aliases({"main", "cheap", "summarizer"}),
+    )
+
+    result = await service.call("hello", model_alias="summarizer")
+
+    assert result.model_alias == "summarizer"
+    assert fallback_manager.calls[0]["model_alias"] == "summarizer"
+
+
+async def test_llm_service_legacy_semantic_alias_still_maps_to_runtime_alias() -> None:
+    fallback_manager = _FakeFallbackManager()
+    service = LLMService(
+        fallback_manager=fallback_manager,
+        alias_registry=AliasRegistry.from_runtime_aliases({"main", "cheap"}),
+    )
+
+    result = await service.call("hello", model_alias="planner")
+
+    assert result.model_alias == "main"
+    assert fallback_manager.calls[0]["model_alias"] == "main"
 
 
 async def test_llm_service_prefers_skill_runner_when_selected_tools_present() -> None:

@@ -62,7 +62,7 @@ class ModelCallResult(BaseModel):
     content: str = Field(description="LLM 响应文本内容")
 
     # 路由信息
-    model_alias: str = Field(description="请求时使用的语义 alias 或运行时 group")
+    model_alias: str = Field(description="请求时使用的配置 alias 或 legacy 兼容 alias")
     model_name: str = Field(default="", description="实际调用的模型名称（如 gpt-4o-mini）")
     provider: str = Field(default="", description="实际 provider（如 openai/anthropic）")
 

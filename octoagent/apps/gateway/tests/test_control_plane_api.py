@@ -50,7 +50,10 @@ from octoagent.core.models import (
     WorkspaceKind,
     WorkStatus,
 )
-from octoagent.gateway.services.agent_context import build_projected_session_id, build_scope_aware_session_id
+from octoagent.gateway.services.agent_context import (
+    build_projected_session_id,
+    build_scope_aware_session_id,
+)
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
@@ -662,8 +665,7 @@ class TestControlPlaneApi:
         assert any(item["action_id"] == "setup.apply" for item in payload["registry"]["actions"])
         assert any(item["action_id"] == "memory.query" for item in payload["registry"]["actions"])
         assert any(
-            item["action_id"] == "retrieval.index.start"
-            for item in payload["registry"]["actions"]
+            item["action_id"] == "retrieval.index.start" for item in payload["registry"]["actions"]
         )
         assert any(item["action_id"] == "work.cancel" for item in payload["registry"]["actions"])
         assert any(
@@ -740,12 +742,14 @@ class TestControlPlaneApi:
         assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
             "context-frame-default"
         )
-        assert payload["resources"]["context_continuity"]["agent_runtimes"][0][
-            "agent_runtime_id"
-        ] == "runtime-butler-default"
-        assert payload["resources"]["context_continuity"]["agent_sessions"][0][
-            "agent_session_id"
-        ] == "agent-session-butler-default"
+        assert (
+            payload["resources"]["context_continuity"]["agent_runtimes"][0]["agent_runtime_id"]
+            == "runtime-butler-default"
+        )
+        assert (
+            payload["resources"]["context_continuity"]["agent_sessions"][0]["agent_session_id"]
+            == "agent-session-butler-default"
+        )
         assert {
             item["kind"] for item in payload["resources"]["context_continuity"]["memory_namespaces"]
         } == {"project_shared", "butler_private"}
@@ -800,7 +804,9 @@ class TestControlPlaneApi:
         assert "schema_payload" not in config_payload
 
         profiles_resp = await control_plane_client.get("/api/control/resources/agent-profiles")
-        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        worker_profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
         owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
         bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
         context_resp = await control_plane_client.get("/api/control/resources/context-frames")
@@ -1160,9 +1166,7 @@ class TestControlPlaneApi:
             item["risk_id"] == "provider_missing" and item["blocking"] is False
             for item in review["provider_runtime_risks"]
         )
-        assert any(
-            "体验模式" in item["summary"] for item in review["provider_runtime_risks"]
-        )
+        assert any("体验模式" in item["summary"] for item in review["provider_runtime_risks"])
 
     async def test_setup_review_uses_draft_aliases_for_skill_governance(
         self,
@@ -1209,6 +1213,120 @@ class TestControlPlaneApi:
             not risk["risk_id"].startswith("skill:")
             for risk in review["tool_skill_readiness_risks"]
             if risk["blocking"]
+        )
+
+    async def test_setup_review_blocks_invalid_memory_alias_in_draft(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "runtime": {
+                                "llm_mode": "echo",
+                            },
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/auto",
+                                }
+                            },
+                            "memory": {
+                                "embedding_model_alias": "mem-embed",
+                            },
+                        }
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        review = resp.json()["result"]["data"]["review"]
+        assert any(
+            item["risk_id"] == "memory_alias_missing:memory.embedding_model_alias"
+            and item["blocking"] is True
+            for item in review["provider_runtime_risks"]
+        )
+        assert any(
+            "memory.embedding_model_alias" in item["summary"]
+            for item in review["provider_runtime_risks"]
+        )
+
+    async def test_setup_review_accepts_valid_memory_alias_in_draft(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "runtime": {
+                                "llm_mode": "echo",
+                            },
+                            "providers": [
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "auth_type": "api_key",
+                                    "api_key_env": "OPENROUTER_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/auto",
+                                },
+                                "mem-embed": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/qwen/qwen3-embedding-8b",
+                                },
+                            },
+                            "memory": {
+                                "embedding_model_alias": "mem-embed",
+                            },
+                        }
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        review = resp.json()["result"]["data"]["review"]
+        assert all(
+            not item["risk_id"].startswith("memory_alias_missing:")
+            and not item["risk_id"].startswith("memory_alias_provider_unavailable:")
+            for item in review["provider_runtime_risks"]
         )
 
     async def test_setup_review_blocks_empty_agent_name_in_draft(
@@ -1279,9 +1397,7 @@ class TestControlPlaneApi:
         skill_doc = (
             await control_plane_app.state.control_plane_service.get_skill_governance_document()
         )
-        target_skill = next(
-            item for item in skill_doc.items if item.source_kind == "builtin"
-        )
+        target_skill = next(item for item in skill_doc.items if item.source_kind == "builtin")
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -1335,12 +1451,8 @@ class TestControlPlaneApi:
         result = resp.json()["result"]
         assert result["code"] == "SETUP_APPLIED"
         assert result["data"]["review"]["ready"] is True
-        assert any(
-            item["resource_type"] == "policy_profiles" for item in result["resource_refs"]
-        )
-        assert any(
-            item["resource_type"] == "agent_profiles" for item in result["resource_refs"]
-        )
+        assert any(item["resource_type"] == "policy_profiles" for item in result["resource_refs"])
+        assert any(item["resource_type"] == "agent_profiles" for item in result["resource_refs"])
 
         config_doc = await control_plane_app.state.control_plane_service.get_config_schema()
         assert config_doc.current_value["providers"][0]["id"] == "openai"
@@ -1351,13 +1463,15 @@ class TestControlPlaneApi:
         )
         assert default_project is not None
         assert default_project.metadata["policy_profile_id"] == "strict"
-        assert target_skill.item_id in default_project.metadata["skill_selection"][
-            "disabled_item_ids"
-        ]
+        assert (
+            target_skill.item_id in default_project.metadata["skill_selection"]["disabled_item_ids"]
+        )
         assert default_project.default_agent_profile_id
 
-        saved_profile = await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
-            default_project.default_agent_profile_id
+        saved_profile = (
+            await control_plane_app.state.store_group.agent_context_store.get_agent_profile(
+                default_project.default_agent_profile_id
+            )
         )
         assert saved_profile is not None
         assert saved_profile.name == "安全优先主 Agent"
@@ -1385,10 +1499,10 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
-        target_skill = next(
-            item for item in skill_doc.items if item.source_kind == "builtin"
+        skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
         )
+        target_skill = next(item for item in skill_doc.items if item.source_kind == "builtin")
 
         resp = await control_plane_client.post(
             "/api/control/actions",
@@ -1417,9 +1531,9 @@ class TestControlPlaneApi:
             await control_plane_app.state.store_group.project_store.get_default_project()
         )
         assert default_project is not None
-        assert target_skill.item_id in default_project.metadata["skill_selection"][
-            "disabled_item_ids"
-        ]
+        assert (
+            target_skill.item_id in default_project.metadata["skill_selection"]["disabled_item_ids"]
+        )
 
     async def test_skills_selection_filters_runtime_tool_selection(
         self,
@@ -1427,7 +1541,9 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        )
         # Feature 057: 使用 SkillDiscovery 发现的第一个 skill 作为测试目标
         skill_items = [item for item in skill_doc.items if item.source_kind != "mcp"]
         assert skill_items, "至少需要一个 skill governance item"
@@ -1480,7 +1596,9 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
+        )
         # Feature 057: 使用 SkillDiscovery 发现的第一个 skill 作为测试目标
         skill_items = [item for item in skill_doc.items if item.source_kind != "mcp"]
         assert skill_items, "至少需要一个 skill governance item"
@@ -1617,10 +1735,10 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        skill_doc = await control_plane_app.state.control_plane_service.get_skill_governance_document()
-        target_skill = next(
-            item for item in skill_doc.items if item.source_kind == "builtin"
+        skill_doc = (
+            await control_plane_app.state.control_plane_service.get_skill_governance_document()
         )
+        target_skill = next(item for item in skill_doc.items if item.source_kind == "builtin")
         config_path = control_plane_app.state.project_root / "octoagent.yaml"
         assert config_path.exists() is False
 
@@ -1914,12 +2032,11 @@ class TestControlPlaneApi:
         assert env_path.exists()
         assert "OPENAI_API_KEY=oauth-access-token" in env_path.read_text(encoding="utf-8")
 
-        setup_doc = await control_plane_app.state.control_plane_service.get_setup_governance_document()
-        assert setup_doc.provider_runtime.details["openai_oauth_connected"] is True
-        assert (
-            setup_doc.provider_runtime.details["openai_oauth_profile"]
-            == "openai-codex-default"
+        setup_doc = (
+            await control_plane_app.state.control_plane_service.get_setup_governance_document()
         )
+        assert setup_doc.provider_runtime.details["openai_oauth_connected"] is True
+        assert setup_doc.provider_runtime.details["openai_oauth_profile"] == "openai-codex-default"
 
     async def test_setup_apply_rejects_blocking_review(
         self,
@@ -2079,7 +2196,10 @@ class TestControlPlaneApi:
         )
 
         assert resp.status_code == 200
-        saved_profile_id = resp.json()["result"]["data"]["profile_id"]
+        payload = resp.json()["result"]
+        assert payload["code"] == "AGENT_PROFILE_SAVED"
+        saved_profile_id = payload["data"]["profile_id"]
+
         reloaded_default = await control_plane_app.state.store_group.project_store.get_project(
             default_project.project_id
         )
@@ -2090,6 +2210,50 @@ class TestControlPlaneApi:
         assert reloaded_target is not None
         assert reloaded_default.default_agent_profile_id != saved_profile_id
         assert reloaded_target.default_agent_profile_id == saved_profile_id
+
+    async def test_agent_profile_save_rejects_unknown_model_alias(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
+        )
+        assert default_project is not None
+        original_default_profile_id = default_project.default_agent_profile_id
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "agent_profile.save",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "profile": {
+                        "scope": "project",
+                        "name": "错误 alias Agent",
+                        "tool_profile": "minimal",
+                        "model_alias": "reasoning",
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 400
+        payload = resp.json()["result"]
+        assert payload["code"] == "AGENT_PROFILE_MODEL_ALIAS_INVALID"
+        assert "模型别名 'reasoning' 不存在" in payload["message"]
+        reloaded_default = await control_plane_app.state.store_group.project_store.get_project(
+            default_project.project_id
+        )
+        assert reloaded_default is not None
+        assert reloaded_default.default_agent_profile_id == original_default_profile_id
+        agent_profiles = await control_plane_app.state.store_group.agent_context_store.list_agent_profiles()
+        assert all(profile.name != "错误 alias Agent" for profile in agent_profiles)
 
     async def test_policy_engine_uses_persisted_selected_project_profile_on_restart(
         self,
@@ -4214,7 +4378,8 @@ class TestControlPlaneApi:
         # 系统内置作业（如 system:memory-consolidate）可能存在，
         # 此处仅验证用户创建的 broken-job 未被保存
         user_jobs = [
-            j for j in automation_resp.json()["jobs"]
+            j
+            for j in automation_resp.json()["jobs"]
             if not j["job"]["job_id"].startswith("system:")
         ]
         assert user_jobs == []
@@ -4306,7 +4471,9 @@ class TestControlPlaneApi:
         assert create_payload["status"] == "draft"
         assert create_payload["draft_revision"] == 1
 
-        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        worker_profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
         assert worker_profiles_resp.status_code == 200
         profiles_payload = worker_profiles_resp.json()
         created_profile = next(
@@ -4369,10 +4536,53 @@ class TestControlPlaneApi:
         project = await control_plane_app.state.store_group.project_store.get_default_project()
         assert project is not None
         assert project.default_agent_profile_id == profile_id
-        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        worker_profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
         assert worker_profiles_resp.status_code == 200
         summary = worker_profiles_resp.json()["summary"]
         assert summary["default_profile_id"] == profile_id
+
+    async def test_worker_profile_review_reports_unknown_model_alias(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        project = await control_plane_app.state.store_group.project_store.get_default_project()
+        assert project is not None
+        draft = {
+            "scope": "project",
+            "project_id": project.project_id,
+            "name": "错误 alias Root Agent",
+            "summary": "故意用不存在的 alias。",
+            "model_alias": "reasoning",
+            "tool_profile": "standard",
+            "default_tool_groups": ["project"],
+            "runtime_kinds": ["worker"],
+        }
+
+        review_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.review",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": draft,
+                },
+            },
+        )
+
+        assert review_resp.status_code == 200
+        review_payload = review_resp.json()["result"]["data"]["review"]
+        assert review_payload["can_save"] is False
+        assert review_payload["ready"] is False
+        assert any("model_alias 必须引用已存在的模型别名" in item for item in review_payload["save_errors"])
 
     async def test_worker_profile_spawn_and_extract_actions(
         self,
@@ -4510,7 +4720,9 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        primary_workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        primary_workspace = await store_group.project_store.get_primary_workspace(
+            project.project_id
+        )
         assert primary_workspace is not None
 
         secondary_workspace = Workspace(
@@ -4673,7 +4885,9 @@ class TestControlPlaneApi:
         )
         await store_group.conn.commit()
 
-        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        worker_profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
         assert worker_profiles_resp.status_code == 200
         payload = worker_profiles_resp.json()
         target = next(
@@ -4681,10 +4895,7 @@ class TestControlPlaneApi:
         )
 
         assert target["dynamic_context"]["active_project_id"] == project.project_id
-        assert (
-            target["dynamic_context"]["active_workspace_id"]
-            == secondary_workspace.workspace_id
-        )
+        assert target["dynamic_context"]["active_workspace_id"] == secondary_workspace.workspace_id
         assert target["dynamic_context"]["active_work_count"] == 1
         assert target["dynamic_context"]["running_work_count"] == 1
         assert target["dynamic_context"]["attention_work_count"] == 1

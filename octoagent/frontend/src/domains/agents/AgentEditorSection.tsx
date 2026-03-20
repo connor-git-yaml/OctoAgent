@@ -74,6 +74,12 @@ export default function AgentEditorSection({
   onCancel,
   formatTokenLabel,
 }: AgentEditorSectionProps) {
+  const modelAliasMissingFromOptions =
+    draft.modelAlias.trim().length > 0 && !modelAliasOptions.includes(draft.modelAlias);
+  const effectiveModelAliasOptions = modelAliasMissingFromOptions
+    ? [draft.modelAlias, ...modelAliasOptions]
+    : modelAliasOptions;
+
   return (
     <section className="wb-panel wb-agent-editor-shell">
       <div className="wb-panel-head">
@@ -161,12 +167,17 @@ export default function AgentEditorSection({
             value={draft.modelAlias}
             onChange={(event) => onChangeDraft("modelAlias", event.target.value)}
           >
-            {modelAliasOptions.map((option) => (
+            {effectiveModelAliasOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
             ))}
           </select>
+          {modelAliasMissingFromOptions ? (
+            <small>当前值不在可用 alias 列表中。保存前需要切换到现有别名。</small>
+          ) : (
+            <small>这里列出的都是当前配置里真实可用的模型别名。</small>
+          )}
         </div>
       </div>
 

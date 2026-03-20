@@ -699,8 +699,8 @@ describe("AgentCenter", () => {
     expect(await screen.findByRole("heading", { name: "先选一个起点，再补最少必要信息" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "从空白开始" })).toBeInTheDocument();
 
-    // 选择通用协作模板
-    await userEvent.click(screen.getByRole("button", { name: /通用协作 模板/ }));
+    // 选择当前的主协调模板
+    await userEvent.click(screen.getByRole("button", { name: /Butler Root Agent/ }));
 
     // 进入编辑器
     expect(await screen.findByRole("heading", { name: "新建 Agent" })).toBeInTheDocument();
@@ -750,7 +750,7 @@ describe("AgentCenter", () => {
     );
 
     await userEvent.click((await screen.findAllByRole("button", { name: "新建 Agent" }))[0]);
-    await userEvent.click(screen.getByRole("button", { name: /通用协作 模板/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Butler Root Agent/ }));
 
     const nameInput = screen.getByLabelText(/名称/);
     await userEvent.clear(nameInput);
@@ -922,6 +922,99 @@ describe("AgentCenter", () => {
     });
   });
 
+  it("Agent 编辑器只展示当前配置里的真实 alias", async () => {
+    const snapshot = buildSnapshot({
+      customAgents: [
+        {
+          profile_id: "project-home:main",
+          name: "家庭主 Agent",
+          summary: "负责默认聊天入口和日常协调。",
+          status: "active",
+          model_alias: "main",
+          default_tool_groups: ["project"],
+          selected_tools: ["project.inspect"],
+        },
+      ],
+    });
+    snapshot.resources.config.current_value.model_aliases = {
+      main: "openrouter/main",
+      cheap: "openrouter/cheap",
+    };
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(mainCard).not.toBeNull();
+    await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
+
+    const modelField = screen.getByText("使用的模型").closest(".wb-field") as HTMLElement | null;
+    expect(modelField).not.toBeNull();
+    const modelSelect = within(modelField!).getByRole("combobox");
+    const optionTexts = within(modelSelect).getAllByRole("option").map((option) => option.textContent);
+    expect(optionTexts).toContain("main");
+    expect(optionTexts).toContain("cheap");
+    expect(optionTexts).not.toContain("reasoning");
+  });
+
+  it("当 Agent 当前 alias 已失效时会明确提示修复", async () => {
+    const snapshot = buildSnapshot({
+      customAgents: [
+        {
+          profile_id: "project-home:main",
+          name: "家庭主 Agent",
+          summary: "负责默认聊天入口和日常协调。",
+          status: "active",
+          model_alias: "main",
+          default_tool_groups: ["project"],
+          selected_tools: ["project.inspect"],
+        },
+        {
+          profile_id: "project-home:legacy",
+          name: "旧版 alias Agent",
+          summary: "还保留了历史 alias。",
+          status: "active",
+          model_alias: "reasoning",
+          default_tool_groups: ["runtime"],
+          selected_tools: ["runtime.inspect"],
+        },
+      ],
+    });
+    snapshot.resources.config.current_value.model_aliases = {
+      main: "openrouter/main",
+      cheap: "openrouter/cheap",
+    };
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    const agentCard = (await screen.findByText("旧版 alias Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(agentCard).not.toBeNull();
+    await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
+
+    expect(
+      await screen.findByText("当前值不在可用 alias 列表中。保存前需要切换到现有别名。")
+    ).toBeInTheDocument();
+  });
+
   it("当默认仍是内置模板时，会引导建立项目自己的主 Agent", async () => {
     const submitAction = vi.fn(async (actionId: string) => {
       if (actionId === "worker_profile.review") {
@@ -1026,19 +1119,10 @@ describe("AgentCenter", () => {
     });
   });
 
-  it("可以从 Agent 卡片直接开启会话并跳转到聊天页", async () => {
-    const submitAction = vi.fn(async () => ({
-      data: {
-        new_conversation_token: "token-nas",
-        project_id: "project-home",
-        workspace_id: "project-home-workspace",
-        agent_profile_id: "project-home:nas",
-      },
-    }));
-
+  it("可以从 Agent 卡片直接进入编辑器并加载当前 Agent 信息", async () => {
     useWorkbenchMock.mockReturnValue({
       snapshot: buildSnapshot(),
-      submitAction,
+      submitAction: vi.fn(),
       busyActionId: "",
     });
 
@@ -1051,14 +1135,11 @@ describe("AgentCenter", () => {
     const agentCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
 
-    await userEvent.click(within(agentCard!).getByRole("button", { name: "直接开启会话" }));
+    await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
 
-    await waitFor(() => {
-      expect(submitAction).toHaveBeenCalledWith("session.new", {
-        agent_profile_id: "project-home:nas",
-      });
-      expect(navigateMock).toHaveBeenCalledWith("/");
-    });
+    expect(await screen.findByRole("heading", { name: "NAS 巡检" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("NAS 巡检")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("reasoning")).toBeInTheDocument();
   });
 
   it("切换项目后只显示对应项目的 Agent", async () => {
@@ -1119,16 +1200,21 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    // 主 Agent 卡片应包含模型 alias、工具组数量和固定工具数量
+    // 主 Agent 卡片应包含模型 alias
     const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
     expect(mainCard).not.toBeNull();
-    // 模型信息渲染为 "模型 main" 在同一个 span 里，用文本内容匹配
     expect(
-      within(mainCard!).getByText((_, node) => node?.textContent === "模型 main")
+      within(mainCard!).getAllByText(
+        (_, node) => node?.tagName === "SPAN" && node.textContent === "模型 main"
+      )[0]
     ).toBeInTheDocument();
-    // 默认工具组 2（project, session）
+
+    const nasCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
+    expect(nasCard).not.toBeNull();
     expect(
-      within(mainCard!).getByText((_, node) => node?.textContent === "默认工具组 2")
+      within(nasCard!).getAllByText(
+        (_, node) => node?.tagName === "SPAN" && node.textContent === "进行中 1"
+      )[0]
     ).toBeInTheDocument();
   });
 

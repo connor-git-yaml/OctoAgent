@@ -67,3 +67,14 @@ def test_wizard_session_tolerates_unknown_ui_hints(
 
     assert result.record.status == "pending"
     assert "unknown_cli_hint" in result.schema_document.ui_hints["fields"]["providers.0.id"]
+
+
+def test_wizard_session_schema_includes_base_url_and_memory_aliases(tmp_path: Path) -> None:
+    project = _create_project(tmp_path)
+    service = WizardSessionService(tmp_path)
+
+    result = service.start_or_resume(project, interactive=False)
+
+    assert "providers.0.base_url" in result.schema_document.ui_hints["fields"]
+    assert "memory.reasoning_model_alias" in result.schema_document.ui_hints["fields"]
+    assert "memory.embedding_model_alias" in result.schema_document.ui_hints["fields"]

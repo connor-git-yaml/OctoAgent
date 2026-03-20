@@ -7,6 +7,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -179,6 +180,8 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert len(pack.tools) >= 20
         assert {
             "project.inspect",
+            "setup.review",
+            "setup.quick_connect",
             "workers.review",
             "subagents.spawn",
             "subagents.list",
@@ -239,6 +242,116 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             item for item in pack.bootstrap_files if item.file_id == "bootstrap:general"
         ]
         assert len(general_bootstraps) == 0
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()
+
+
+async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_flow(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        _delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    import octoagent.provider.dx.setup_governance_adapter as adapter_module
+
+    class FakeAdapter:
+        def __init__(self, project_root: Path) -> None:
+            self.project_root = project_root
+
+        async def prepare_wizard_draft(self, draft):
+            return dict(draft)
+
+        async def quick_connect(self, draft):
+            assert draft["config"]["providers"][0]["id"] == "siliconflow"
+            assert draft["config"]["providers"][0]["base_url"] == "https://api.siliconflow.cn/v1"
+            assert draft["config"]["memory"]["embedding_model_alias"] == "cheap"
+            return SimpleNamespace(
+                status="completed",
+                code="SETUP_QUICK_CONNECTED",
+                message="ok",
+                data={
+                    "review": {"ready": True},
+                    "activation": {"proxy_url": "http://localhost:4000"},
+                },
+            )
+
+    monkeypatch.setattr(adapter_module, "LocalSetupGovernanceAdapter", FakeAdapter)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请启用 siliconflow",
+                idempotency_key="feature-071-setup-quick-connect-tool",
+            )
+        )
+        assert created is True
+
+        runtime_context = ExecutionRuntimeContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            session_id="session-071-setup-quick-connect",
+            worker_id="worker.butler",
+            backend="inline",
+            console=task_runner.execution_console,
+            runtime_kind="worker",
+        )
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:butler",
+            profile=ToolProfile.STANDARD,
+            permission_preset=PermissionPreset.NORMAL,
+        )
+
+        with bind_execution_context(runtime_context):
+            result = await tool_broker.execute(
+                "setup.quick_connect",
+                {
+                    "draft_json": json.dumps(
+                        {
+                            "config": {
+                                "providers": [
+                                    {
+                                        "id": "siliconflow",
+                                        "name": "SiliconFlow",
+                                        "auth_type": "api_key",
+                                        "api_key_env": "SILICONFLOW_API_KEY",
+                                        "base_url": "https://api.siliconflow.cn/v1",
+                                    }
+                                ],
+                                "model_aliases": {
+                                    "main": {
+                                        "provider": "siliconflow",
+                                        "model": "Qwen/Qwen3.5-32B",
+                                    },
+                                    "cheap": {
+                                        "provider": "siliconflow",
+                                        "model": "Qwen/Qwen3.5-14B",
+                                    },
+                                },
+                                "memory": {
+                                    "embedding_model_alias": "cheap",
+                                },
+                            }
+                        }
+                    )
+                },
+                broker_context,
+            )
+
+        assert result.is_error is False
+        payload = json.loads(result.output)
+        assert payload["success"] is True
+        assert payload["activation"]["proxy_url"] == "http://localhost:4000"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

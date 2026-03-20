@@ -1359,12 +1359,12 @@ backend：
 - `summarizer`：摘要/压缩（小模型）
 - `fallback`：备用 provider
 
-#### 8.9.2 运行时 alias group（Proxy 侧，M1 默认）
+#### 8.9.2 运行时 alias（Proxy 侧）
 
-- `cheap`：承载 `router/extractor/summarizer`
-- `main`：承载 `planner/executor`
-- `fallback`：承载 `fallback`
-- 应用层始终使用语义 alias；由 `AliasRegistry` 统一映射到运行时 group，避免业务代码直接耦合具体模型组命名。
+- `octoagent.yaml.model_aliases` 是运行时 alias 的主事实源；LiteLLM `model_name` 与 Gateway runtime 必须直接对齐这些 alias key
+- `cheap` / `main` 仍是默认建议 alias，但不再是唯一允许的运行时组名
+- `router/extractor/planner/executor/summarizer/fallback` 只保留为 legacy 语义 alias 兼容层；若用户显式配置了同名 alias，必须优先使用显式配置值
+- `AliasRegistry` 的职责是“显式配置 alias 优先 + legacy 语义 alias fallback”，避免配置层、运行时层、Proxy 层出现三套事实源
 
 #### 8.9.3 统一成本治理
 
@@ -1375,12 +1375,12 @@ backend：
 
 #### 8.9.4 多 Provider 扩展与 Auth Adapter（M1）
 
-> 目标：新增 Provider 时**零代码变更**（仅修改 litellm-config.yaml），同时支持非标准认证模式。
+> 目标：新增 Provider 时**零代码变更**（仅修改 `octoagent.yaml`，再自动生成 `litellm-config.yaml`），同时支持非标准认证模式。
 
 **当前架构**（M0/M1）：
 
 - 业务代码通过语义 alias（`router`/`planner`/...）调用 → AliasRegistry 映射到运行时 group（`cheap`/`main`/`fallback`）→ LiteLLM Proxy 路由到真实模型
-- 新增 Provider 只需在 `litellm-config.yaml` 中添加 `model_list` 条目，支持 100+ Provider（OpenAI、Anthropic、OpenRouter、Azure、Google、本地 Ollama 等）
+- 新增 Provider 只需在 `octoagent.yaml` 的 `providers[]` 中追加条目，需要自定义网关时填写 `base_url`；`litellm-config.yaml` 由系统自动推导生成，支持 100+ Provider（OpenAI、Anthropic、OpenRouter、Azure、Google、本地 Ollama 等）
 - 示例：从 OpenAI 切换到 OpenRouter 仅需修改 `model` 前缀和 `api_key` 环境变量名
 
 **Auth Adapter 抽象层**（M1 基础 + M1.5 增强）：
@@ -1482,7 +1482,7 @@ backend：
 **扩展原则**：
 
 - 业务代码（Kernel/Worker/Skill）永远不感知具体 Provider 或认证方式
-- Provider 变更的影响范围限定在 `litellm-config.yaml` + `.env.litellm`
+- Provider 变更的用户主入口限定在 `octoagent.yaml`；`litellm-config.yaml` 只是衍生文件，`.env.litellm` 负责承载运行时凭证
 - Auth Adapter 变更的影响范围限定在 `packages/provider/auth/`
 - 新增 Provider 只需实现对应 `AuthAdapter` 子类 + 注册到 Handler Chain
 - JWT 直连路径通过 HandlerChainResult 路由覆盖实现，不影响 API Key 路径的默认行为
@@ -2751,7 +2751,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - irreversible 工具触发审批流，approve 后继续执行
 - 工具 schema 自动反射与代码签名一致（contract test 通过）
 - 每次模型调用生成 cost/tokens 事件
-- 语义 alias 路由正确（router/extractor/summarizer -> cheap；planner/executor -> main；fallback -> fallback）
+- 配置 alias 与运行时消费一致；legacy 语义 alias 仅在未显式配置同名 alias 时按兼容映射回退
 - Auth：OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
 - Auth：OAuth PKCE 全流程（本地回调 + 手动降级 + Token 自动刷新）
 - Auth/DX：`octo init`（历史路径）+ `octo config`（当前路径）可完成认证配置，`octo doctor` 诊断凭证状态
@@ -3179,7 +3179,7 @@ provider:
     base_url: "http://localhost:4000/v1"
     api_key: "ENV:LITELLM_API_KEY"
 
-# 对齐 §8.9.1 / §8.9.2：语义 alias -> 运行时 group
+# 对齐 §8.9.1 / §8.9.2：legacy 语义 alias fallback
 model_alias_map:
   router: "cheap"                  # 意图分类、风险分级（小模型）
   extractor: "cheap"               # 结构化抽取（小/中模型）

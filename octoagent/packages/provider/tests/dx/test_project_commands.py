@@ -5,6 +5,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 from octoagent.provider.dx.cli import main
+from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.project_selector import ProjectSelectorService
 from octoagent.provider.dx.wizard_session import WizardSessionService
 
@@ -44,12 +45,17 @@ def test_project_edit_wizard_status_and_apply(tmp_path: Path) -> None:
 
     wizard_input = "\n".join(
         [
-            "openrouter",
-            "OpenRouter",
+            "siliconflow",
+            "SiliconFlow",
             "api_key",
-            "OPENROUTER_API_KEY",
-            "openrouter/auto",
-            "openrouter/auto",
+            "SILICONFLOW_API_KEY",
+            "https://api.siliconflow.cn/v1",
+            "Qwen/Qwen3.5-32B",
+            "Qwen/Qwen3.5-14B",
+            "main",
+            "cheap",
+            "cheap",
+            "cheap",
             "litellm",
             "http://localhost:4000",
             "LITELLM_MASTER_KEY",
@@ -78,6 +84,11 @@ def test_project_edit_wizard_status_and_apply(tmp_path: Path) -> None:
     assert "SETUP_APPLIED" in applied.output
     # 配置已应用，octoagent.yaml 应被创建
     assert (tmp_path / "octoagent.yaml").exists()
+    config = load_config(tmp_path)
+    assert config is not None
+    assert config.providers[0].base_url == "https://api.siliconflow.cn/v1"
+    assert config.memory.reasoning_model_alias == "main"
+    assert config.memory.embedding_model_alias == "cheap"
 
 
 def test_wizard_build_setup_draft_does_not_force_agent_profile(tmp_path: Path) -> None:
@@ -93,8 +104,13 @@ def test_wizard_build_setup_draft_does_not_force_agent_profile(tmp_path: Path) -
             "OpenRouter",
             "api_key",
             "OPENROUTER_API_KEY",
+            "",
             "openrouter/auto",
             "openrouter/auto",
+            "",
+            "",
+            "",
+            "",
             "litellm",
             "http://localhost:4000",
             "LITELLM_MASTER_KEY",
@@ -118,6 +134,60 @@ def test_wizard_build_setup_draft_does_not_force_agent_profile(tmp_path: Path) -
 
     assert "config" in draft
     assert "agent_profile" not in draft
+
+
+def test_config_provider_add_preserves_existing_base_url_on_update(tmp_path: Path) -> None:
+    runner = CliRunner()
+    env = {"OCTOAGENT_PROJECT_ROOT": str(tmp_path)}
+
+    created = runner.invoke(
+        main,
+        [
+            "config",
+            "provider",
+            "add",
+            "siliconflow",
+            "--auth-type",
+            "api_key",
+            "--api-key-env",
+            "SILICONFLOW_API_KEY",
+            "--name",
+            "SiliconFlow",
+            "--base-url",
+            "https://api.siliconflow.cn/v1",
+            "--no-credential",
+        ],
+        env=env,
+        input="",
+    )
+    assert created.exit_code == 0
+
+    updated = runner.invoke(
+        main,
+        [
+            "config",
+            "provider",
+            "add",
+            "siliconflow",
+            "--auth-type",
+            "api_key",
+            "--api-key-env",
+            "SILICONFLOW_API_KEY",
+            "--name",
+            "SiliconFlow CN",
+            "--no-credential",
+        ],
+        env=env,
+        input="u\n\n",
+    )
+    assert updated.exit_code == 0
+
+    config = load_config(tmp_path)
+    assert config is not None
+    provider = config.get_provider("siliconflow")
+    assert provider is not None
+    assert provider.name == "SiliconFlow CN"
+    assert provider.base_url == "https://api.siliconflow.cn/v1"
 
 
 def test_provider_package_declares_gateway_dependency(tmp_path: Path) -> None:

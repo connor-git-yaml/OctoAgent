@@ -47,7 +47,7 @@ class FallbackManager:
 
         Args:
             messages: 消息列表
-            model_alias: 运行时 group 名称
+            model_alias: 运行时 alias 名称
             **kwargs: 传递给 primary.complete() 的额外参数
 
         Returns:

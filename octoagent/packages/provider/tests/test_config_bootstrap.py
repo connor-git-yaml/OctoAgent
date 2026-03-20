@@ -53,6 +53,29 @@ def test_build_bootstrap_config_openai_codex_oauth_preset() -> None:
     assert config.model_aliases["cheap"].thinking_level == "low"
 
 
+def test_build_bootstrap_config_custom_provider() -> None:
+    answers = iter(
+        [
+            "siliconflow",
+            "SiliconFlow",
+            "SILICONFLOW_API_KEY",
+            "https://api.siliconflow.cn/v1",
+            "Qwen/Qwen3-32B",
+            "Qwen/Qwen3-14B",
+        ]
+    )
+    config = build_bootstrap_config(
+        prompt=lambda _text, _default: next(answers),
+        choice_prompt=lambda _text, _choices, _default: "custom",
+    )
+
+    provider = config.providers[0]
+    assert provider.id == "siliconflow"
+    assert provider.base_url == "https://api.siliconflow.cn/v1"
+    assert config.model_aliases["main"].model == "Qwen/Qwen3-32B"
+    assert config.model_aliases["cheap"].model == "Qwen/Qwen3-14B"
+
+
 def test_bootstrap_config_writes_files(tmp_path: Path) -> None:
     answers = iter(["OpenRouter", "OPENROUTER_API_KEY"])
     result = bootstrap_config(

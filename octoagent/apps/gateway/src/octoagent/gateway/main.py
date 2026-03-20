@@ -146,6 +146,23 @@ def _resolve_responses_reasoning_aliases(project_root: Path) -> dict[str, Any]:
     return resolve_codex_reasoning_aliases(project_root)
 
 
+def _build_runtime_alias_registry(project_root: Path) -> AliasRegistry:
+    """构建 Gateway 运行时 alias 注册表。"""
+    try:
+        cfg = load_config(project_root)
+    except Exception as exc:
+        log.warning(
+            "runtime_alias_registry_config_invalid_fallback",
+            error_type=type(exc).__name__,
+        )
+        return AliasRegistry()
+
+    if cfg is None or not cfg.model_aliases:
+        return AliasRegistry()
+
+    return AliasRegistry.from_runtime_aliases(cfg.model_aliases.keys())
+
+
 def _resolve_verify_url(default_port: int = 8000, profile: str = "core") -> str:
     """解析 runtime verify URL。"""
     if explicit := os.environ.get("OCTOAGENT_VERIFY_URL"):
@@ -432,7 +449,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             primary=litellm_client,
             fallback=echo_adapter,
         )
-        alias_registry = AliasRegistry()  # 使用 MVP 默认配置
+        alias_registry = _build_runtime_alias_registry(project_root)
         llm_service = LLMService(
             fallback_manager=fallback_manager,
             alias_registry=alias_registry,
@@ -452,7 +469,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             primary=echo_adapter,
             fallback=None,
         )
-        alias_registry = AliasRegistry()
+        alias_registry = _build_runtime_alias_registry(project_root)
         llm_service = LLMService(
             fallback_manager=fallback_manager,
             alias_registry=alias_registry,

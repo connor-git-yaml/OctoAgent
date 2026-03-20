@@ -95,16 +95,25 @@ To switch from `echo` mode to a real model provider:
 octo setup
 ```
 
-Memory works in `local_only` mode by default. If you later want MemU, the product now supports both a local command path and a remote HTTP bridge:
+For custom providers such as SiliconFlow / local vLLM / Ollama, `octo setup` also supports a direct custom path:
+
+```bash
+octo setup --provider custom --provider-id siliconflow --base-url https://api.siliconflow.cn/v1 --main-model Qwen/Qwen3-32B --cheap-model Qwen/Qwen3-14B
+```
+
+The Web `Settings` page and `octo project edit --wizard` still work, and the lower-level CLI path also supports `--base-url`:
+
+```bash
+octo config provider add siliconflow --name "SiliconFlow" --api-key-env SILICONFLOW_API_KEY --base-url https://api.siliconflow.cn/v1
+```
+
+Memory defaults to the built-in local path. The configuration surface is the `memory` section in `octoagent.yaml`, where you can bind dedicated aliases for reasoning / expand / embedding / rerank:
 
 ```bash
 octo config memory show
-octo config memory local
-octo config memory memu-command --command "uv run python scripts/memu_bridge.py"
-octo config memory memu-http --bridge-url "https://memory.example.com"
 ```
 
-The Web `Settings > Memory` screen uses the same three modes: local memory, MemU via local command, and MemU via HTTP bridge.
+The Web `Settings > Memory` screen shows the same effective bindings and fallback behavior. Leave a field empty to use the built-in default or fallback path.
 
 Behavior files are also explicit now. They live in three layers:
 

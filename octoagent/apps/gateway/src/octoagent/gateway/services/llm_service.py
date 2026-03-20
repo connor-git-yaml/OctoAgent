@@ -203,7 +203,7 @@ class LLMService:
 
         Args:
             fallback_manager: 包含 primary + fallback 的降级管理器
-            alias_registry: 语义 alias 注册表
+            alias_registry: 运行时 alias 注册表（配置 alias 优先，legacy alias 兼容）
             default_provider: M0 兼容参数（废弃，仅向后兼容）
             skill_runner: SkillRunner 实例
             skill_discovery: Feature 057 SkillDiscovery 实例，用于注入已加载 Skill 到 system prompt
@@ -256,8 +256,8 @@ class LLMService:
                 - str: 纯文本 prompt（M0 兼容，自动转为 messages 格式）
                 - list[dict]: messages 格式（Feature 002 推荐）
             model_alias:
-                - 语义 alias（如 "planner"）-> AliasRegistry 解析为运行时 group
-                - 运行时 group（如 "main"）-> 直接透传
+                - 显式配置 alias（如 "main" / "compaction" / "research-main"）优先原样消费
+                - legacy 语义 alias（如 "planner"）仅在未显式配置时走兼容映射
                 - None -> 使用 "main" 默认
 
         Returns:

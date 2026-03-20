@@ -461,6 +461,27 @@ class OctoAgentConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_memory_alias_refs(self) -> OctoAgentConfig:
+        """校验 memory 配置中引用的 alias 必须存在于 model_aliases。"""
+        memory_alias_fields = {
+            "reasoning_model_alias": self.memory.reasoning_model_alias,
+            "expand_model_alias": self.memory.expand_model_alias,
+            "embedding_model_alias": self.memory.embedding_model_alias,
+            "rerank_model_alias": self.memory.rerank_model_alias,
+        }
+        available_aliases = sorted(self.model_aliases.keys())
+        for field_name, alias_name in memory_alias_fields.items():
+            normalized_alias = alias_name.strip()
+            if not normalized_alias:
+                continue
+            if normalized_alias not in self.model_aliases:
+                raise ValueError(
+                    f"memory.{field_name}='{normalized_alias}' "
+                    f"未在 model_aliases 中找到（可用 alias: {available_aliases}）"
+                )
+        return self
+
+    @model_validator(mode="after")
     def warn_alias_disabled_provider(self) -> OctoAgentConfig:
         """alias 指向已禁用 Provider 时发出 UserWarning（EC-5）"""
         disabled_ids = {p.id for p in self.providers if not p.enabled}
@@ -567,6 +588,7 @@ def build_config_schema_document(
             "project",
             "provider",
             "models",
+            "memory",
             "runtime",
             "telegram",
             "review",
@@ -580,6 +602,7 @@ def build_config_schema_document(
                     "providers.0.name",
                     "providers.0.auth_type",
                     "providers.0.api_key_env",
+                    "providers.0.base_url",
                 ],
             },
             "models": {
@@ -668,6 +691,13 @@ def build_config_schema_document(
                 "default": (
                     active_provider.api_key_env if active_provider else "OPENROUTER_API_KEY"
                 ),
+            },
+            "providers.0.base_url": {
+                "label": "API Base URL",
+                "input": "text",
+                "required": False,
+                "recommended": False,
+                "default": active_provider.base_url if active_provider else "",
             },
             "model_aliases.main.model": {
                 "label": "main 模型",
@@ -760,9 +790,7 @@ def build_config_schema_document(
                 "required": True,
                 "recommended": True,
                 "default": (
-                    config.front_door.bearer_token_env
-                    if config
-                    else "OCTOAGENT_FRONTDOOR_TOKEN"
+                    config.front_door.bearer_token_env if config else "OCTOAGENT_FRONTDOOR_TOKEN"
                 ),
             },
             "front_door.trusted_proxy_header": {
@@ -771,9 +799,7 @@ def build_config_schema_document(
                 "required": True,
                 "recommended": True,
                 "default": (
-                    config.front_door.trusted_proxy_header
-                    if config
-                    else "X-OctoAgent-Proxy-Auth"
+                    config.front_door.trusted_proxy_header if config else "X-OctoAgent-Proxy-Auth"
                 ),
             },
             "front_door.trusted_proxy_token_env": {

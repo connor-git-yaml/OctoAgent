@@ -106,6 +106,7 @@ def wizard_update_provider(
     config: OctoAgentConfig,
     entry: ProviderEntry,
     overwrite: bool = False,
+    preserve_existing_base_url: bool = True,
 ) -> tuple[OctoAgentConfig, bool]:
     """增量添加/更新 Provider 条目
 
@@ -115,12 +116,13 @@ def wizard_update_provider(
         config: 当前配置对象
         entry: 要添加/更新的 ProviderEntry
         overwrite: 若为 True，同 id 存在时覆盖；否则跳过（不修改）
+        preserve_existing_base_url: 更新时 incoming.base_url 为空是否保留已有值
 
     Returns:
         (更新后的 OctoAgentConfig, 是否实际修改了配置)
     """
-    existing_ids = [p.id for p in config.providers]
-    if entry.id in existing_ids:
+    existing_provider = next((p for p in config.providers if p.id == entry.id), None)
+    if existing_provider is not None:
         if not overwrite:
             # 不覆盖，直接返回原配置
             log.debug(
@@ -128,8 +130,12 @@ def wizard_update_provider(
                 provider_id=entry.id,
             )
             return config, False
-        # 覆盖模式：替换对应条目
-        new_providers = [p if p.id != entry.id else entry for p in config.providers]
+        merged_entry = merge_provider_entry(
+            existing_provider,
+            entry,
+            preserve_existing_base_url=preserve_existing_base_url,
+        )
+        new_providers = [p if p.id != entry.id else merged_entry for p in config.providers]
     else:
         new_providers = list(config.providers) + [entry]
 
@@ -140,6 +146,19 @@ def wizard_update_provider(
         }
     )
     return updated, True
+
+
+def merge_provider_entry(
+    existing: ProviderEntry,
+    incoming: ProviderEntry,
+    *,
+    preserve_existing_base_url: bool = True,
+) -> ProviderEntry:
+    """合并 Provider 更新，避免省略可选字段时误清空已有值。"""
+    merged = incoming.model_dump(mode="python")
+    if preserve_existing_base_url and not str(merged.get("base_url", "")).strip():
+        merged["base_url"] = existing.base_url
+    return existing.model_copy(update=merged)
 
 
 def wizard_update_model(

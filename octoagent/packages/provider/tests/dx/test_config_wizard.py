@@ -199,6 +199,63 @@ def test_wizard_update_provider_duplicate_with_overwrite() -> None:
     assert updated.providers[0].api_key_env == "OPENROUTER_NEW_KEY"
 
 
+def test_wizard_update_provider_preserves_existing_base_url_when_patch_omits_it() -> None:
+    config = _make_config(
+        [
+            ProviderEntry(
+                id="siliconflow",
+                name="SiliconFlow",
+                auth_type="api_key",
+                api_key_env="SILICONFLOW_API_KEY",
+                base_url="https://api.siliconflow.cn/v1",
+            )
+        ]
+    )
+    modified = ProviderEntry(
+        id="siliconflow",
+        name="SiliconFlow CN",
+        auth_type="api_key",
+        api_key_env="SILICONFLOW_API_KEY",
+    )
+
+    updated, changed = wizard_update_provider(config, modified, overwrite=True)
+
+    assert changed is True
+    assert updated.providers[0].name == "SiliconFlow CN"
+    assert updated.providers[0].base_url == "https://api.siliconflow.cn/v1"
+
+
+def test_wizard_update_provider_can_clear_base_url_when_explicitly_requested() -> None:
+    config = _make_config(
+        [
+            ProviderEntry(
+                id="siliconflow",
+                name="SiliconFlow",
+                auth_type="api_key",
+                api_key_env="SILICONFLOW_API_KEY",
+                base_url="https://api.siliconflow.cn/v1",
+            )
+        ]
+    )
+    modified = ProviderEntry(
+        id="siliconflow",
+        name="SiliconFlow",
+        auth_type="api_key",
+        api_key_env="SILICONFLOW_API_KEY",
+        base_url="",
+    )
+
+    updated, changed = wizard_update_provider(
+        config,
+        modified,
+        overwrite=True,
+        preserve_existing_base_url=False,
+    )
+
+    assert changed is True
+    assert updated.providers[0].base_url == ""
+
+
 def test_wizard_update_provider_preserves_other_providers() -> None:
     """新增 Provider 时不影响其他已有 Provider"""
     config = _make_config([_make_provider("openrouter")])

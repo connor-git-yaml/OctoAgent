@@ -14,6 +14,7 @@ from octoagent.provider.dx.config_schema import (
     ChannelsConfig,
     ConfigParseError,
     FrontDoorConfig,
+    MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
@@ -164,6 +165,33 @@ def test_duplicate_provider_ids() -> None:
     assert "openrouter" in str(exc_info.value)
 
 
+def test_memory_alias_references_nonexistent_model_alias() -> None:
+    with pytest.raises(Exception) as exc_info:
+        _make_config(
+            memory=MemoryConfig(embedding_model_alias="mem-embed"),
+        )
+
+    assert "memory.embedding_model_alias='mem-embed'" in str(exc_info.value)
+
+
+def test_memory_alias_references_existing_model_alias() -> None:
+    config = _make_config(
+        model_aliases={
+            "main": ModelAlias(
+                provider="openrouter",
+                model="openrouter/auto",
+            ),
+            "mem-embed": ModelAlias(
+                provider="openrouter",
+                model="openrouter/qwen/qwen3-embedding-8b",
+            ),
+        },
+        memory=MemoryConfig(embedding_model_alias="mem-embed"),
+    )
+
+    assert config.memory.embedding_model_alias == "mem-embed"
+
+
 # ---------------------------------------------------------------------------
 # 凭证泄露检测（NFR-004）
 # ---------------------------------------------------------------------------
@@ -271,6 +299,34 @@ def test_build_config_schema_document_uses_canonical_provider_target_key() -> No
 
     assert secret_target["target_key"] == "providers.anthropic.api_key_env"
     assert secret_target["target_key_template"] == "providers.{provider_id}.api_key_env"
+
+
+def test_build_config_schema_document_exposes_provider_base_url_and_memory_step() -> None:
+    config = _make_config(
+        providers=[
+            ProviderEntry(
+                id="siliconflow",
+                name="SiliconFlow",
+                auth_type="api_key",
+                api_key_env="SILICONFLOW_API_KEY",
+                base_url="https://api.siliconflow.cn/v1",
+            )
+        ],
+        model_aliases={
+            "main": ModelAlias(
+                provider="siliconflow",
+                model="Qwen/Qwen3.5-32B",
+            )
+        },
+    )
+
+    document = build_config_schema_document(config)
+
+    assert "memory" in document.ui_hints["wizard_order"]
+    assert "providers.0.base_url" in document.ui_hints["sections"]["provider"]["fields"]
+    assert document.ui_hints["fields"]["providers.0.base_url"]["default"] == (
+        "https://api.siliconflow.cn/v1"
+    )
 
 
 def test_from_yaml_invalid_syntax() -> None:
