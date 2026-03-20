@@ -101,10 +101,25 @@ async def stream_task_events(
             },
         )
 
-    try:
-        await scope_guard.ensure_task_visible(task)
-    except TaskScopeGuardError as exc:
-        return _task_scope_error(exc)
+    # 优先使用 query 参数中的 workspace_id 做 scope 校验（chat send 路由传入），
+    # 解决 Worker 聊天场景下全局控制面板状态指向其他 workspace 的问题。
+    hint_workspace_id = request.query_params.get("workspace_id", "").strip()
+    if hint_workspace_id:
+        task_ws = await store_group.project_store.resolve_workspace_for_scope(
+            task.scope_id or ""
+        )
+        if task_ws is None or task_ws.workspace_id != hint_workspace_id:
+            return _task_scope_error(
+                TaskScopeGuardError(
+                    "TASK_SCOPE_NOT_ALLOWED",
+                    "当前 task 不属于当前选中的 project/workspace。",
+                )
+            )
+    else:
+        try:
+            await scope_guard.ensure_task_visible(task)
+        except TaskScopeGuardError as exc:
+            return _task_scope_error(exc)
 
     # 解析事件游标：query 参数优先，其次 Last-Event-ID（断线重连）
     last_event_id = (
