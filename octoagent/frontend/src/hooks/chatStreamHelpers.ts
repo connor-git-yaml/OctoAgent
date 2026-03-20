@@ -99,7 +99,34 @@ export function isUserVisibleModelEvent(
   }
   const skillId = typeof payload.skill_id === "string" ? payload.skill_id.trim() : "";
   const artifactRef = typeof payload.artifact_ref === "string" ? payload.artifact_ref.trim() : "";
-  return !skillId || Boolean(artifactRef);
+  // 有 skill_id 但无 artifact_ref 的内部调用（如 inline skill 内层）不展示
+  if (skillId && !artifactRef) {
+    return false;
+  }
+  // 检查 response_summary 是否是内部结构化 JSON（如 memory recall plan）
+  const responseSummary =
+    typeof payload.response_summary === "string" ? payload.response_summary.trim() : "";
+  if (responseSummary && looksLikeInternalJsonResponse(responseSummary)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 检测文本是否是内部结构化 JSON 响应（如 memory recall plan）。
+ * 整段文本是一个 JSON 对象即判定为内部响应，不应直接展示给用户。
+ */
+function looksLikeInternalJsonResponse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
 }
 
 function extractUserMessage(event: TaskEvent): string {
@@ -295,6 +322,10 @@ export function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMes
         continue;
       }
       const artifactRef = extractArtifactRef(event as TaskEvent & { type: string });
+      // 有 artifact_ref 但不是 llm-response 类型的（如 memory-recall-plan-response），跳过
+      if (artifactRef && !llmArtifactsById.has(artifactRef)) {
+        continue;
+      }
       const artifact =
         (artifactRef ? llmArtifactsById.get(artifactRef) : undefined) ?? llmArtifacts[artifactIndex];
       const content =

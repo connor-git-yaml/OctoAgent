@@ -189,6 +189,7 @@ class SessionProjectionItem(BaseModel):
     workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
     session_owner_profile_id: str = Field(default="")
+    session_owner_name: str = Field(default="")
     turn_executor_kind: str = Field(default="")
     delegation_target_profile_id: str = Field(default="")
     runtime_kind: str = Field(default="")

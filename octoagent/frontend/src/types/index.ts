@@ -529,6 +529,7 @@ export interface SessionProjectionItem {
   workspace_id: string;
   agent_profile_id: string;
   session_owner_profile_id?: string;
+  session_owner_name?: string;
   turn_executor_kind?: string;
   delegation_target_profile_id?: string;
   runtime_kind: string;

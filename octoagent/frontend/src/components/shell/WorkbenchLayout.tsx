@@ -176,7 +176,7 @@ function ChatNavSection({
             statusNormalized
           );
           const ownerProfileId = resolveSessionOwnerProfileId(session);
-          const ownerLabel = ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent";
+          const ownerLabel = session.session_owner_name?.trim() || (ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent");
           const executorLabel = resolveSessionExecutorLabel(session, resolveAgentName);
           const executorKind = String(session.turn_executor_kind || "").trim().toLowerCase();
           const accent = sessionAccentColor(ownerProfileId);

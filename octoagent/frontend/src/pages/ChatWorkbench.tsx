@@ -415,7 +415,7 @@ interface ChatTraceEntry {
   detailOutput?: string;
 }
 
-type RestoreChoice = "prompt" | "continue" | "new";
+type RestoreChoice = "continue" | "new";
 
 function summarizeDelegationIntent(work: WorkProjectionItem): string {
   const toolNames = ensureArray(work.selected_tools);
@@ -1174,15 +1174,12 @@ export default function ChatWorkbench() {
     storedRestoreTaskId,
   ]);
   const restoreTaskIds = routeSessionId ? routeRestoreTaskIds : defaultRestoreTaskIds;
-  const [restoreChoice, setRestoreChoice] = useState<RestoreChoice>(
-    routeSessionId ? "continue" : "prompt"
-  );
+  // 始终自动续接最近会话，不再弹出"继续还是新开"选择面板
+  const restoreChoice: RestoreChoice = "continue";
   const resumeSession =
     routeSessionId
       ? routeSession
-      : restoreChoice === "continue"
-        ? webSessions[0] || null
-        : null;
+      : webSessions[0] || null;
 
   // 当 URL 指向已有 session 或已有 restore task 时，不传 newConversationToken——
   // 避免 stale token 把消息路由到错误的 project。
@@ -1406,11 +1403,6 @@ export default function ChatWorkbench() {
   const isRestoringConversation = restoring && messages.length === 0;
   const isEmptyConversation =
     messages.length === 0 && !isRestoringConversation;
-  const shouldPromptForRestoreChoice =
-    !routeSessionId &&
-    restoreTaskIds.length > 0 &&
-    restoreChoice === "prompt" &&
-    isEmptyConversation;
   const shouldShowInlineActivity =
     Boolean(taskId) &&
     (streaming || !hasLoadedTaskStatus || !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus));
@@ -1543,6 +1535,7 @@ export default function ChatWorkbench() {
     pendingConversationAgentProfileId ||
     defaultRootAgentId;
   const conversationOwnerName =
+    (activeSession ?? currentSession)?.session_owner_name?.trim() ||
     workerProfiles.find((p) => p.profile_id === currentSessionOwnerProfileId)?.name ||
     defaultRootAgent?.name ||
     "OctoAgent";
@@ -1582,33 +1575,6 @@ export default function ChatWorkbench() {
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
     : `告诉 ${conversationOwnerName} 你现在要做什么`;
 
-  useEffect(() => {
-    if (routeSessionId) {
-      setRestoreChoice("continue");
-      return;
-    }
-    if (messages.length > 0 || taskId) {
-      setRestoreChoice("continue");
-      return;
-    }
-    if (sessionDocument?.new_conversation_token) {
-      setRestoreChoice("new");
-      return;
-    }
-    if (restoreTaskIds.length > 0) {
-      setRestoreChoice((current) =>
-        current === "continue" || current === "new" ? current : "prompt"
-      );
-      return;
-    }
-    setRestoreChoice("new");
-  }, [
-    messages.length,
-    restoreTaskIds.length,
-    routeSessionId,
-    sessionDocument?.new_conversation_token,
-    taskId,
-  ]);
 
   useEffect(() => {
     if (!isRestoringConversation) {
@@ -1862,7 +1828,6 @@ export default function ChatWorkbench() {
       title: "这条历史会话已经重置",
       message: result.message || "旧 continuity 已清空，接下来会按新的会话语义继续。",
     });
-    setRestoreChoice("new");
     await resetConversation();
     if (routeSessionId) {
       navigate("/chat");
@@ -2111,7 +2076,6 @@ export default function ChatWorkbench() {
             type="button"
             className="wb-button wb-button-ghost"
             onClick={() => {
-              setRestoreChoice("new");
               void resetConversation();
             }}
           >
@@ -2182,44 +2146,19 @@ export default function ChatWorkbench() {
               </InlineCallout>
             ) : null}
             {legacyResetCallout}
-            {shouldPromptForRestoreChoice ? (
-              <div className="wb-empty-state wb-chat-empty-card wb-chat-restore-choice">
-                <strong>继续最近会话，还是新开一条？</strong>
-                <span>最近这条会话已经有上下文。你可以继续沿用，也可以显式新开一条 Butler 会话。</span>
-                <div className="wb-action-bar wb-chat-restore-actions">
-                  <button
-                    type="button"
-                    className="wb-button wb-button-secondary"
-                    onClick={() => setRestoreChoice("continue")}
-                  >
-                    继续最近会话
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    onClick={() => {
-                      setRestoreChoice("new");
-                      void resetConversation();
-                    }}
-                  >
-                    新开 Butler 会话
-                  </button>
-                </div>
-              </div>
-            ) : null}
             <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
               <textarea
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleInputKeyDown}
                 placeholder={inputPlaceholder}
-                disabled={streaming || shouldPromptForRestoreChoice}
+                disabled={streaming}
                 rows={3}
               />
               <button
                 type="submit"
                 className="wb-button wb-button-primary"
-                disabled={streaming || shouldPromptForRestoreChoice || !input.trim()}
+                disabled={streaming || !input.trim()}
               >
                 {streaming ? "发送中" : "发送"}
               </button>

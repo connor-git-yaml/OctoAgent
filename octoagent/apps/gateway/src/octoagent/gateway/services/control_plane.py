@@ -798,10 +798,7 @@ class ControlPlaneService:
 
     async def get_session_projection(self) -> SessionProjectionDocument:
         state, selected_project, selected_workspace, _ = await self._resolve_selection()
-        session_items = await self._build_session_projection_items(
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        )
+        session_items = await self._build_session_projection_items()
         focused_session_id, focused_thread_id = self._resolve_projected_focus(
             state=state,
             session_items=session_items,
@@ -862,18 +859,11 @@ class ControlPlaneService:
 
     async def _build_session_projection_items(
         self,
-        *,
-        selected_project,
-        selected_workspace,
     ) -> list[SessionProjectionItem]:
         tasks = await self._stores.task_store.list_tasks()
         works = await self._stores.work_store.list_works()
-        session_states = await self._stores.agent_context_store.list_session_contexts(
-            project_id=selected_project.project_id if selected_project is not None else None,
-            workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else None
-            ),
-        )
+        # 不按项目过滤 session context，侧边栏需要展示所有项目的活跃会话
+        session_states = await self._stores.agent_context_store.list_session_contexts()
         session_state_by_id = {item.session_id: item for item in session_states}
         latest_work_by_task: dict[str, Work] = {}
         for work in works:
@@ -888,13 +878,6 @@ class ControlPlaneService:
                 continue
             workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
             if workspace is None:
-                continue
-            if not self._matches_selected_scope(
-                item_project_id=workspace.project_id,
-                item_workspace_id=workspace.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
                 continue
             latest_metadata = await self._extract_latest_user_metadata(task.task_id)
             if str(latest_metadata.get("parent_task_id", "")).strip() or str(
@@ -974,6 +957,9 @@ class ControlPlaneService:
                 )
                 if owner_worker_profile is not None:
                     turn_executor_kind = TurnExecutorKind.WORKER.value
+            session_owner_name = await self._resolve_profile_display_name(
+                session_owner_profile_id
+            )
             session_items.append(
                 SessionProjectionItem(
                     session_id=session_id,
@@ -990,6 +976,7 @@ class ControlPlaneService:
                     workspace_id=workspace.workspace_id,
                     agent_profile_id=session_agent_profile_id,
                     session_owner_profile_id=session_owner_profile_id,
+                    session_owner_name=session_owner_name,
                     turn_executor_kind=turn_executor_kind,
                     delegation_target_profile_id=delegation_target_profile_id,
                     runtime_kind=runtime_kind,
@@ -1028,13 +1015,6 @@ class ControlPlaneService:
                 AgentSessionKind.BUTLER_MAIN,
             }:
                 continue
-            if not self._matches_selected_scope(
-                item_project_id=agent_sess.project_id,
-                item_workspace_id=agent_sess.workspace_id,
-                selected_project=selected_project,
-                selected_workspace=selected_workspace,
-            ):
-                continue
             projected_session_id = build_projected_session_id(
                 thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
                 surface="web" if agent_sess.surface in ("", "chat", "web") else agent_sess.surface,
@@ -1058,6 +1038,7 @@ class ControlPlaneService:
             )
             if runtime is not None:
                 agent_profile_id = runtime.worker_profile_id or runtime.agent_profile_id
+            owner_name = await self._resolve_profile_display_name(agent_profile_id)
             session_items.append(
                 SessionProjectionItem(
                     session_id=projected_session_id,
@@ -1073,6 +1054,7 @@ class ControlPlaneService:
                     workspace_id=agent_sess.workspace_id,
                     agent_profile_id=agent_profile_id,
                     session_owner_profile_id=agent_profile_id,
+                    session_owner_name=owner_name,
                     turn_executor_kind=self._default_turn_executor_kind_for_runtime(
                         agent_sess.kind.value
                     ),
@@ -1127,6 +1109,19 @@ class ControlPlaneService:
         if normalized_target == "worker":
             return TurnExecutorKind.WORKER.value
         return TurnExecutorKind.SELF.value
+
+    async def _resolve_profile_display_name(self, profile_id: str) -> str:
+        """从 worker_profile 或 agent_profile 解析可展示名称，跨项目。"""
+        resolved = str(profile_id or "").strip()
+        if not resolved:
+            return ""
+        worker_profile = await self._stores.agent_context_store.get_worker_profile(resolved)
+        if worker_profile is not None:
+            return worker_profile.name or ""
+        agent_profile = await self._stores.agent_context_store.get_agent_profile(resolved)
+        if agent_profile is not None:
+            return agent_profile.name or ""
+        return ""
 
     async def _is_worker_profile_id(self, profile_id: str) -> bool:
         resolved_profile_id = str(profile_id or "").strip()
@@ -6459,11 +6454,7 @@ class ControlPlaneService:
         requested_thread_id = self._param_str(request.params, "thread_id")
         requested_task_id = self._param_str(request.params, "task_id")
 
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        session_items = await self._build_session_projection_items(
-            selected_project=selected_project,
-            selected_workspace=selected_workspace,
-        )
+        session_items = await self._build_session_projection_items()
         focused_session_id, focused_thread_id = self._resolve_projected_focus(
             state=self._state_store.load(),
             session_items=session_items,
