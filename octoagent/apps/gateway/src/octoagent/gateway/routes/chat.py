@@ -490,24 +490,8 @@ async def send_chat_message(
                 task_id=task_id,
             ) from exc
 
-    # 同步控制面板的 project/workspace 选择到当前聊天的 workspace，
-    # 确保后续 scope guard 端点（SSE 流、task detail 等）能正确访问。
-    # 仅更新 workspace/project，不动 focused_session_id（避免抢走主聊天的 focus）。
-    if workspace_id and project_id:
-        cp_store = ControlPlaneStateStore(_resolve_project_root(request))
-        cp_state = cp_store.load()
-        if (
-            cp_state.selected_workspace_id != workspace_id
-            or cp_state.selected_project_id != project_id
-        ):
-            cp_store.save(
-                cp_state.model_copy(
-                    update={
-                        "selected_project_id": project_id,
-                        "selected_workspace_id": workspace_id,
-                    }
-                )
-            )
+    # selected_project_id 不再跟随每次聊天同步——project 上下文属于 session 自身，
+    # 不是全局状态。Task/SSE 路由已去掉 project scope guard，不再依赖全局 selected_project_id。
 
     # 构造 stream URL（携带 workspace_id 供 SSE scope guard 直接校验，
     # 作为控制面板状态的补充保障）

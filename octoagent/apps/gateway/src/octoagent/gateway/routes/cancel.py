@@ -11,23 +11,10 @@ from octoagent.core.models import TaskStatus
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from ..deps import get_sse_hub, get_store_group, get_task_scope_guard
-from ..services.task_scope import TaskScopeGuardError
+from ..deps import get_sse_hub, get_store_group
 from ..services.task_service import TaskService
 
 router = APIRouter()
-
-
-def _task_scope_error(exc: TaskScopeGuardError) -> JSONResponse:
-    return JSONResponse(
-        status_code=403,
-        content={
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-            }
-        },
-    )
 
 
 class CancelResponse(BaseModel):
@@ -43,7 +30,6 @@ async def cancel_task(
     request: Request,
     store_group=Depends(get_store_group),
     sse_hub=Depends(get_sse_hub),
-    scope_guard=Depends(get_task_scope_guard),
 ):
     """取消非终态的任务
 
@@ -63,11 +49,6 @@ async def cancel_task(
                 }
             },
         )
-
-    try:
-        await scope_guard.ensure_task_visible(existing)
-    except TaskScopeGuardError as exc:
-        return _task_scope_error(exc)
 
     task_runner = getattr(request.app.state, "task_runner", None)
     if task_runner is not None:

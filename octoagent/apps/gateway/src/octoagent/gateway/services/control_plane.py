@@ -5517,6 +5517,9 @@ class ControlPlaneService:
     async def _handle_session_focus(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
         session = await self._resolve_session_projection_target(request)
         current_state = self._state_store.load()
+        # 只更新 focused session，不改 selected_project_id——
+        # project 上下文属于 session 自身，不应作为全局状态切换，
+        # 否则多 tab 并发聊天、跨项目 session 切换都会互相干扰。
         state = current_state.model_copy(
             update={
                 "focused_session_id": session.session_id,
@@ -5525,33 +5528,10 @@ class ControlPlaneService:
                 "new_conversation_project_id": "",
                 "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": "",
-                "selected_project_id": session.project_id or current_state.selected_project_id,
-                "selected_workspace_id": (
-                    session.workspace_id or current_state.selected_workspace_id
-                ),
                 "updated_at": datetime.now(tz=UTC),
             }
         )
         self._state_store.save(state)
-        if session.project_id:
-            project = await self._stores.project_store.get_project(session.project_id)
-            workspace = (
-                await self._stores.project_store.get_workspace(session.workspace_id)
-                if session.workspace_id
-                else None
-            )
-            if project is not None:
-                if workspace is None or workspace.project_id != project.project_id:
-                    workspace = await self._stores.project_store.get_primary_workspace(
-                        project.project_id
-                    )
-                await self._sync_web_project_selector_state(
-                    project=project,
-                    workspace=workspace,
-                    source="session_focus",
-                )
-                await self._sync_policy_engine_for_project(project)
-                await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="SESSION_FOCUSED",

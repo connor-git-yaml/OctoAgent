@@ -11,24 +11,11 @@ from octoagent.core.models import ResumeFailureType
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from ..deps import get_store_group, get_task_scope_guard
+from ..deps import get_store_group
 from ..services.resume_engine import ResumeEngine
-from ..services.task_scope import TaskScopeGuardError
 from ..services.task_service import TaskService
 
 router = APIRouter()
-
-
-def _task_scope_error(exc: TaskScopeGuardError) -> JSONResponse:
-    return JSONResponse(
-        status_code=403,
-        content={
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-            }
-        },
-    )
 
 
 class TaskSummary(BaseModel):
@@ -85,12 +72,13 @@ class CheckpointListResponse(BaseModel):
 async def list_tasks(
     status: str | None = Query(default=None, description="按状态筛选"),
     store_group=Depends(get_store_group),
-    scope_guard=Depends(get_task_scope_guard),
 ):
-    """查询任务列表，支持按状态筛选，按 created_at 倒序"""
+    """查询任务列表，支持按状态筛选，按 created_at 倒序。
+
+    不做 project scope 过滤——单用户系统中 project 是组织维度而非访问控制边界。
+    """
     service = TaskService(store_group)
     tasks = await service.list_tasks(status)
-    tasks = await scope_guard.filter_visible_tasks(tasks)
 
     return TaskListResponse(
         tasks=[
@@ -196,7 +184,6 @@ async def resume_task(
     task_id: str,
     request: Request,
     store_group=Depends(get_store_group),
-    scope_guard=Depends(get_task_scope_guard),
 ):
     """手动触发恢复。"""
     task = await store_group.task_store.get_task(task_id)
@@ -210,11 +197,6 @@ async def resume_task(
                 }
             },
         )
-
-    try:
-        await scope_guard.ensure_task_visible(task)
-    except TaskScopeGuardError as exc:
-        return _task_scope_error(exc)
 
     task_runner = getattr(request.app.state, "task_runner", None)
     if task_runner is not None:
@@ -264,7 +246,6 @@ async def resume_task(
 async def list_task_checkpoints(
     task_id: str,
     store_group=Depends(get_store_group),
-    scope_guard=Depends(get_task_scope_guard),
 ):
     """查询任务 checkpoint 时间线（created_at 倒序）。"""
     task = await store_group.task_store.get_task(task_id)
@@ -278,11 +259,6 @@ async def list_task_checkpoints(
                 }
             },
         )
-
-    try:
-        await scope_guard.ensure_task_visible(task)
-    except TaskScopeGuardError as exc:
-        return _task_scope_error(exc)
 
     checkpoints = await store_group.checkpoint_store.list_checkpoints(task_id)
     return CheckpointListResponse(
