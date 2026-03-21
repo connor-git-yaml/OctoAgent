@@ -254,13 +254,10 @@ export default function AgentCenter() {
     const all = buildProjectOptions(snapshot!.resources.project_selector);
     return all.filter((option) => option.value === agentView.currentProjectId);
   }, [agentView.currentProjectId, snapshot!.resources.project_selector.generated_at]);
+  // 全局管理视图——行为文件区展示所有 agent profile，不按当前项目过滤
   const behaviorProfiles = useMemo(
-    () =>
-      agentProfilesDocument.profiles.filter(
-        (profile) =>
-          profile.scope === "system" || profile.project_id === "" || profile.project_id === agentView.currentProjectId
-      ),
-    [agentProfilesDocument.generated_at, agentView.currentProjectId]
+    () => agentProfilesDocument.profiles,
+    [agentProfilesDocument.generated_at]
   );
   const [selectedBehaviorProfileId, setSelectedBehaviorProfileId] = useState("");
 
@@ -340,12 +337,11 @@ export default function AgentCenter() {
       }
       const preferredProfileId =
         agentView.mainAgentProfile?.profile_id ||
-        behaviorProfiles.find((profile) => profile.project_id === agentView.currentProjectId)?.profile_id ||
         behaviorProfiles[0]?.profile_id ||
         "";
       return preferredProfileId;
     });
-  }, [agentView.currentProjectId, agentView.mainAgentProfile?.profile_id, behaviorProfiles]);
+  }, [agentView.mainAgentProfile?.profile_id, behaviorProfiles]);
 
   const selectedBehaviorProfile =
     behaviorProfiles.find((profile) => profile.profile_id === selectedBehaviorProfileId) ??
