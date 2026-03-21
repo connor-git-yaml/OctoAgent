@@ -1197,8 +1197,16 @@ class CapabilityPackService:
             workspace_root: Path,
             raw_path: str,
             *,
-            allow_home_read: bool = False,
+            allow_outside_workspace: bool = False,
         ) -> Path:
+            """解析路径，支持 workspace 内外访问。
+
+            路径安全策略与 Policy Engine 双维度模型对齐：
+            - allow_outside_workspace=True（读操作）：允许任意路径，
+              安全由 PresetBeforeHook + PolicyCheckHook 保障
+            - allow_outside_workspace=False（写操作）：限制在 workspace 内，
+              防止误写系统文件
+            """
             normalized = raw_path.strip()
             candidate = (
                 Path(normalized)
@@ -1212,15 +1220,11 @@ class CapabilityPackService:
                 candidate = workspace_root / candidate
             resolved = candidate.resolve()
             if resolved != workspace_root and not resolved.is_relative_to(workspace_root):
-                # 只读操作允许访问用户 HOME 目录下的路径
-                # （如 ~/.claude/mcp-servers/、~/.config/ 等）
-                home = Path.home().resolve()
-                if allow_home_read and resolved.is_relative_to(home):
+                if allow_outside_workspace:
                     return resolved
                 raise RuntimeError(
                     f"path escapes workspace root ({workspace_root}). "
-                    f"filesystem 工具仅能访问 workspace 内路径，"
-                    f"如需访问外部路径可使用 terminal.exec"
+                    f"写操作仅允许 workspace 内路径。"
                 )
             return resolved
 
@@ -1397,7 +1401,7 @@ class CapabilityPackService:
             """列出目录内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
             workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path, allow_home_read=True)
+            target = _resolve_workspace_path(workspace_root, path, allow_outside_workspace=True)
             if not target.exists():
                 raise RuntimeError(f"path not found: {target}")
             if not target.is_dir():
@@ -1443,7 +1447,7 @@ class CapabilityPackService:
             """读取文本文件内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
             workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path, allow_home_read=True)
+            target = _resolve_workspace_path(workspace_root, path, allow_outside_workspace=True)
             if not target.exists():
                 # 返回结构化的 "不存在" 响应，而非抛异常，让 Agent 更容易处理
                 return json.dumps(
