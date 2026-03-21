@@ -23,6 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
+from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.core.event_helpers import emit_task_event
 from octoagent.core.models import (
     A2AConversation,
@@ -85,7 +86,7 @@ class SubagentSpawnParams:
     """Subagent 业务层参数。"""
 
     task_description: str = ""
-    permission_preset: str = "normal"
+    permission_preset: str = DEFAULT_PERMISSION_PRESET
     model_alias: str | None = None
     usage_limits: dict[str, Any] | None = None  # max_steps, max_duration_seconds 等
     name: str = ""
@@ -507,6 +508,7 @@ async def spawn_subagent(
         name=effective_name,
         persona_summary=params.persona_summary,
         status=AgentRuntimeStatus.ACTIVE,
+        permission_preset=parent_runtime.permission_preset,
         metadata={
             "is_subagent": True,
             "parent_worker_runtime_id": parent_worker_runtime_id,

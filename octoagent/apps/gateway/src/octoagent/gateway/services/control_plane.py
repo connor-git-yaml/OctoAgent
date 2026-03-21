@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET, resolve_permission_preset
 from octoagent.core.behavior_workspace import (
     check_behavior_file_budget,
     ensure_filesystem_skeleton,
@@ -5808,6 +5809,7 @@ class ControlPlaneService:
                 name=matched_profile.name,
                 persona_summary=matched_profile.summary,
                 status=AgentRuntimeStatus.ACTIVE,
+                permission_preset=resolve_permission_preset(matched_profile),
                 created_at=now,
                 updated_at=now,
             )
@@ -6043,7 +6045,7 @@ class ControlPlaneService:
         tool_profile = str(request.params.get("tool_profile", "minimal")).strip()
         project_goal = str(request.params.get("project_goal", "")).strip()
         # Feature 061 T-030: permission_preset + role_card 参数
-        permission_preset = str(request.params.get("permission_preset", "normal")).strip().lower()
+        permission_preset = str(request.params.get("permission_preset", DEFAULT_PERMISSION_PRESET)).strip().lower()
         role_card = str(request.params.get("role_card", "")).strip()
 
         if not worker_name:

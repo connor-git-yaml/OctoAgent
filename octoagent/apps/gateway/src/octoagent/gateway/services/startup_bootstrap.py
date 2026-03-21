@@ -17,6 +17,7 @@ from octoagent.core.behavior_workspace import (
     resolve_behavior_agent_slug,
 )
 from ulid import ULID
+from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
@@ -320,6 +321,7 @@ async def ensure_butler_runtime_and_session(
             name=agent_profile.name,
             persona_summary="",
             status=AgentRuntimeStatus.ACTIVE,
+            permission_preset=resolve_permission_preset(agent_profile),
         )
         await store_group.agent_context_store.save_agent_runtime(butler_runtime)
         # 同步回填 primary_agent_id

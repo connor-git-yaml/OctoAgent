@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.provider import (
     AliasRegistry,
     EchoMessageAdapter,
@@ -390,7 +391,7 @@ class LLMService:
             agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
             work_id=str(metadata.get("work_id", "")).strip(),
             # Feature 061: 从 metadata 获取 Agent 权限 Preset
-            permission_preset=str(metadata.get("permission_preset", "normal")).strip() or "normal",
+            permission_preset=str(metadata.get("permission_preset", DEFAULT_PERMISSION_PRESET)).strip() or DEFAULT_PERMISSION_PRESET,
             conversation_messages=conversation_messages,
             metadata=metadata,
             usage_limits=usage_limits,

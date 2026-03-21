@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
+from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.behavior_workspace import (
     build_behavior_bootstrap_template_ids,
     resolve_behavior_workspace,
@@ -868,7 +869,7 @@ class AgentContextService:
             effective_agent_runtime_id=agent_runtime.agent_runtime_id,
             effective_agent_session_id=agent_session.agent_session_id,
             # Feature 061: 传递 permission_preset 到 CompiledTaskContext
-            permission_preset=getattr(agent_runtime, "permission_preset", "normal") or "normal",
+            permission_preset=agent_runtime.permission_preset,
             system_blocks=system_blocks,
             recent_summary=recent_summary,
             recall_frame_id=recall_frame.recall_frame_id,
@@ -2507,6 +2508,7 @@ class AgentContextService:
                 role=role,
                 name=runtime_name,
                 persona_summary=persona_summary,
+                permission_preset=resolve_permission_preset(agent_profile),
                 metadata={
                     "surface": request.surface,
                     "request_kind": request.request_kind.value,

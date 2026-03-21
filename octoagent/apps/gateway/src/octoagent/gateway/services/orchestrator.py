@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import structlog
+from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.models import (
     TERMINAL_STATES,
     A2AConversation,
@@ -3059,6 +3060,7 @@ class OrchestratorService:
             role=role,
             name=name,
             persona_summary=persona_summary,
+            permission_preset=resolve_permission_preset(worker_profile, agent_profile),
             metadata={
                 "created_by": "orchestrator.wave2",
                 "worker_capability": worker_capability,

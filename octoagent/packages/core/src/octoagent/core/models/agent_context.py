@@ -9,6 +9,28 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+# Feature 061: 权限 Preset 系统默认值（单一事实源）
+DEFAULT_PERMISSION_PRESET = "normal"
+
+
+def resolve_permission_preset(*profiles: Any, fallback: str = DEFAULT_PERMISSION_PRESET) -> str:
+    """从 profile 链中解析 permission_preset。
+
+    遍历传入的 AgentProfile / WorkerProfile（可为 None），
+    优先返回第一个在 metadata 中设置了 permission_preset 的值。
+    全部未设置时返回 fallback。
+    """
+    for profile in profiles:
+        if profile is None:
+            continue
+        meta = getattr(profile, "metadata", None) or {}
+        if isinstance(meta, dict):
+            preset = meta.get("permission_preset", "")
+            if preset and isinstance(preset, str) and preset.strip():
+                return preset.strip().lower()
+    return fallback
+
+
 def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
@@ -222,7 +244,7 @@ class AgentRuntime(BaseModel):
     status: AgentRuntimeStatus = AgentRuntimeStatus.ACTIVE
     # Feature 061: 权限 Preset（minimal/normal/full），决定工具调用的 allow/ask 策略
     permission_preset: str = Field(
-        default="normal",
+        default=DEFAULT_PERMISSION_PRESET,
         description="权限 Preset（minimal/normal/full）",
     )
     # Feature 061: 角色卡片，替代 WorkerType 多模板的角色引导

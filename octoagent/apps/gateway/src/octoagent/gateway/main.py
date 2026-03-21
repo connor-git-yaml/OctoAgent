@@ -535,6 +535,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await app.state.capability_pack_service.startup()
     if provider_config.llm_mode == "litellm":
+        # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
+        from .services.approval_bridge import ApprovalBridge
+
+        approval_bridge = ApprovalBridge(
+            approval_manager=app.state.approval_manager,
+            sse_hub=app.state.sse_hub,
+        )
+        app.state.approval_bridge = approval_bridge
+
         skill_runner = SkillRunner(
             model_client=LiteLLMSkillClient(
                 proxy_url=provider_config.proxy_base_url,
@@ -547,6 +556,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             tool_broker=tool_broker,
             event_store=store_group.event_store,
             hooks=[AgentSessionTurnHook(store_group)],
+            approval_bridge=approval_bridge,
         )
         app.state.llm_service = LLMService(
             fallback_manager=fallback_manager,

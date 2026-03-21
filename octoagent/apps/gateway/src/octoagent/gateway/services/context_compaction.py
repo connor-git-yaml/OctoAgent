@@ -11,6 +11,7 @@ from typing import Any
 
 import structlog
 from octoagent.core.models import EventType
+from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 
 log = structlog.get_logger()
 
@@ -183,7 +184,7 @@ class CompiledTaskContext:
     effective_agent_runtime_id: str = ""
     effective_agent_session_id: str = ""
     # Feature 061: Agent 权限 Preset（从 AgentRuntime 继承）
-    permission_preset: str = "normal"
+    permission_preset: str = DEFAULT_PERMISSION_PRESET
     system_blocks: list[dict[str, str]] = field(default_factory=list)
     recent_summary: str = ""
     recall_frame_id: str = ""
