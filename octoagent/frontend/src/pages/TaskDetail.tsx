@@ -146,7 +146,7 @@ export default function TaskDetail() {
   if (error || !task) {
     return (
       <div className="tv-page">
-        <Link to="/" className="back-link">&larr; Back to tasks</Link>
+        <Link to="/" className="tv-detail-back">&larr;</Link>
         <div className="error">Error: {error || "Task not found"}</div>
       </div>
     );
@@ -164,47 +164,42 @@ export default function TaskDetail() {
 
   return (
     <div className="tv-page">
-      <Link to="/" className="back-link">&larr; Back to tasks</Link>
-
-      {/* 紧凑头部：标题 + 状态 + 元信息一体化 */}
+      {/* 单行头部：← 标题 | 元信息 … 状态badge + 视图切换 */}
       <div className="tv-detail-header">
-        <div className="tv-detail-header-top">
+        <div className="tv-detail-header-row">
+          <Link to="/" className="tv-detail-back" aria-label="返回任务列表">&larr;</Link>
           <h1 className="tv-detail-title">{task.title}</h1>
-          <span className={`tv-detail-badge tv-detail-badge--${task.status.toLowerCase()}`}>
-            {STATUS_LABEL[task.status] || task.status}
-          </span>
-          {!isTerminal && (
-            <span
-              className={`sse-indicator ${sseStatus === "connected" ? "connected" : "disconnected"}`}
-              title={`SSE: ${sseStatus}`}
-            />
-          )}
-        </div>
-        <div className="tv-detail-meta">
-          <span className="tv-detail-meta-item">
-            {task.requester.channel}
-          </span>
-          <span className="tv-detail-meta-sep" />
-          <span className="tv-detail-meta-item">
-            {new Date(task.created_at).toLocaleString("zh-CN")}
-          </span>
-          {duration && (
-            <>
-              <span className="tv-detail-meta-sep" />
-              <span className="tv-detail-meta-item">
-                耗时 {duration}
-              </span>
-            </>
-          )}
-          <span className="tv-detail-meta-sep" />
-          <span className="tv-detail-meta-item tv-detail-meta-id" title={task.task_id}>
-            {task.task_id.slice(0, 12)}…
-          </span>
+          <div className="tv-detail-meta">
+            <span className="tv-detail-meta-item">{task.requester.channel}</span>
+            <span className="tv-detail-meta-sep" />
+            <span className="tv-detail-meta-item">
+              {new Date(task.created_at).toLocaleString("zh-CN")}
+            </span>
+            {duration && (
+              <>
+                <span className="tv-detail-meta-sep" />
+                <span className="tv-detail-meta-item">耗时 {duration}</span>
+              </>
+            )}
+            <span className="tv-detail-meta-sep" />
+            <span className="tv-detail-meta-item tv-detail-meta-id" title={task.task_id}>
+              {task.task_id}
+            </span>
+          </div>
+          <div className="tv-detail-header-right">
+            <span className={`tv-detail-badge tv-detail-badge--${task.status.toLowerCase()}`}>
+              {STATUS_LABEL[task.status] || task.status}
+            </span>
+            {!isTerminal && (
+              <span
+                className={`sse-indicator ${sseStatus === "connected" ? "connected" : "disconnected"}`}
+                title={`SSE: ${sseStatus}`}
+              />
+            )}
+            <SegmentedToggle value={viewMode} onChange={setViewMode} />
+          </div>
         </div>
       </div>
-
-      {/* 模式切换 */}
-      <SegmentedToggle value={viewMode} onChange={setViewMode} />
 
       {/* 可视化模式 */}
       {viewMode === "visual" && classified && (

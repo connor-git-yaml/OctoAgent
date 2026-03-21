@@ -418,24 +418,77 @@
   margin-bottom: var(--cp-space-4);
 }
 
-.tv-detail-header-top {
+.tv-detail-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--cp-radius-md);
+  color: var(--cp-muted);
+  font-size: 16px;
+  flex-shrink: 0;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tv-detail-back:hover {
+  background: var(--cp-soft);
+  color: var(--cp-ink);
+}
+
+.tv-detail-header-row {
   display: flex;
   align-items: center;
   gap: var(--cp-space-3);
-  flex-wrap: wrap;
+  min-height: 36px;
 }
 
 .tv-detail-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--cp-ink);
   margin: 0;
   line-height: 1.3;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tv-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--cp-space-2);
+  font-size: 12px;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.tv-detail-meta-item {
+  white-space: nowrap;
+}
+
+.tv-detail-meta-id {
+  font-family: monospace;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tv-detail-meta-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--cp-border);
+  flex-shrink: 0;
+}
+
+.tv-detail-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--cp-space-3);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .tv-detail-badge {
@@ -475,32 +528,9 @@
   color: var(--cp-muted);
 }
 
-.tv-detail-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--cp-space-2);
-  margin-top: var(--cp-space-2);
-  font-size: 12px;
-  color: var(--cp-muted);
-  flex-wrap: wrap;
-}
-
-.tv-detail-meta-item {
-  white-space: nowrap;
-}
-
-.tv-detail-meta-id {
-  font-family: monospace;
-  font-size: 11px;
-  opacity: 0.7;
-}
-
-.tv-detail-meta-sep {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--cp-border);
-  flex-shrink: 0;
+/* SegmentedToggle 内联到 header 时去掉自身的 margin */
+.tv-detail-header-right .tv-segmented {
+  margin-bottom: 0;
 }
 
 /* ─── RoundFlowCard ───────────────────────────────────────── */
