@@ -15,7 +15,7 @@ from octoagent.core.behavior_workspace import (
     ensure_filesystem_skeleton,
     materialize_agent_behavior_files,
     resolve_behavior_agent_slug,
-    validate_behavior_file_path,
+    resolve_write_path_by_file_id,
 )
 from octoagent.core.models import (
     A2AConversationItem,
@@ -3818,8 +3818,6 @@ class ControlPlaneService:
             return await self._handle_pipeline_resume(request)
         if action_id == "pipeline.retry_node":
             return await self._handle_pipeline_retry_node(request)
-        if action_id == "behavior.read_file":
-            return await self._handle_behavior_read_file(request)
         if action_id == "behavior.write_file":
             return await self._handle_behavior_write_file(request)
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {action_id}")
@@ -6930,57 +6928,31 @@ class ControlPlaneService:
             target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
         )
 
-    async def _handle_behavior_read_file(
-        self, request: ActionRequestEnvelope
-    ) -> ActionResultEnvelope:
-        """读取行为文件的内容（从磁盘）。"""
-        file_path = str(request.params.get("file_path", "")).strip()
-        if not file_path:
-            raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
-
-        try:
-            resolved = validate_behavior_file_path(self._project_root, file_path)
-        except ValueError as exc:
-            raise ControlPlaneActionError("INVALID_PATH", str(exc)) from exc
-
-        if not resolved.exists():
-            return self._completed_result(
-                request=request,
-                code="BEHAVIOR_FILE_NOT_FOUND",
-                message="文件不存在，可能尚未 materialize",
-                data={"file_path": file_path, "content": "", "exists": False},
-            )
-
-        try:
-            content = resolved.read_text(encoding="utf-8")
-        except Exception as exc:
-            raise ControlPlaneActionError(
-                "FILE_READ_ERROR", f"读取文件失败: {exc}"
-            ) from exc
-
-        return self._completed_result(
-            request=request,
-            code="BEHAVIOR_FILE_READ",
-            message="已读取行为文件",
-            data={"file_path": file_path, "content": content, "exists": True},
-        )
-
     async def _handle_behavior_write_file(
         self, request: ActionRequestEnvelope
     ) -> ActionResultEnvelope:
         """写入行为文件内容（到磁盘）。"""
-        file_path = str(request.params.get("file_path", "")).strip()
+        # 优先使用 file_id，兼容旧的 file_path
+        file_id = str(request.params.get("file_id", "") or request.params.get("file_path", "")).strip()
         content = str(request.params.get("content", ""))
-        if not file_path:
-            raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
+        if not file_id:
+            raise ControlPlaneActionError("MISSING_PARAM", "file_id 不能为空")
+
+        agent_slug = str(request.params.get("agent_slug", "butler")).strip()
+        project_slug = str(request.params.get("project_slug", "default")).strip()
 
         try:
-            resolved = validate_behavior_file_path(self._project_root, file_path)
+            resolved = resolve_write_path_by_file_id(
+                self._project_root,
+                file_id,
+                agent_slug=agent_slug,
+                project_slug=project_slug,
+            )
         except ValueError as exc:
-            raise ControlPlaneActionError("INVALID_PATH", str(exc)) from exc
+            raise ControlPlaneActionError("INVALID_FILE_ID", str(exc)) from exc
 
         # 字符预算检查
-        budget_result = check_behavior_file_budget(file_path, content)
+        budget_result = check_behavior_file_budget(file_id, content)
         if not budget_result["within_budget"]:
             raise ControlPlaneActionError(
                 "BUDGET_EXCEEDED",
@@ -7002,7 +6974,8 @@ class ControlPlaneService:
         log.info(
             "behavior_file_written",
             source="control_plane",
-            file_path=file_path,
+            file_id=file_id,
+            resolved_path=str(resolved),
             chars_written=len(content),
         )
 
@@ -7010,7 +6983,7 @@ class ControlPlaneService:
             request=request,
             code="BEHAVIOR_FILE_WRITTEN",
             message="已保存行为文件",
-            data={"file_path": file_path},
+            data={"file_id": file_id, "resolved_path": str(resolved)},
             resource_refs=[
                 self._resource_ref("agent_profiles", "agent:profiles"),
             ],

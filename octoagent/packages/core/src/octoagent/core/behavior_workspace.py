@@ -297,7 +297,7 @@ def truncate_behavior_content(content: str, budget: int) -> str:
     # 截断标记本身需要的空间（估算）
     marker_template = (
         "\n\n[... 中间内容已截断（原文 {total} 字符，预算 {budget} 字符），"
-        "完整内容请通过 behavior.read_file 读取 ...]\n\n"
+        "完整内容请使用 offset/limit 参数分段读取 ...]\n\n"
     )
     marker = marker_template.format(total=len(content), budget=budget)
     marker_len = len(marker)
@@ -1950,6 +1950,44 @@ def _is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
 # ---------------------------------------------------------------------------
 # 共享辅助函数（跨模块复用：capability_pack / control_plane / agent_decision）
 # ---------------------------------------------------------------------------
+
+
+def resolve_write_path_by_file_id(
+    project_root: Path,
+    file_id: str,
+    *,
+    agent_slug: str = "butler",
+    project_slug: str = "default",
+) -> Path:
+    """根据 file_id 短名自动解析行为文件的磁盘写入路径。
+
+    路由规则：
+    - SHARED (AGENTS.md, USER.md, TOOLS.md, BOOTSTRAP.md) → behavior/system/{file_id}
+    - PROJECT (PROJECT.md, KNOWLEDGE.md) → projects/{project_slug}/behavior/{file_id}
+    - AGENT PRIVATE (IDENTITY.md, SOUL.md, HEARTBEAT.md) → behavior/agents/{agent_slug}/{file_id}
+
+    Args:
+        project_root: 项目根目录
+        file_id: 文件短名（如 USER.md）
+        agent_slug: 当前 Agent slug
+        project_slug: 当前 Project slug
+
+    Returns:
+        resolved 绝对路径
+
+    Raises:
+        ValueError: file_id 不在已知列表中
+    """
+    if file_id in SHARED_BEHAVIOR_FILE_IDS:
+        return behavior_shared_dir(project_root) / file_id
+    if file_id in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
+        return behavior_project_dir(project_root, project_slug) / file_id
+    if file_id in AGENT_PRIVATE_BEHAVIOR_FILE_IDS:
+        return behavior_agent_dir(project_root, agent_slug) / file_id
+    raise ValueError(
+        f"未知的 file_id: {file_id!r}，"
+        f"已知列表: {SHARED_BEHAVIOR_FILE_IDS + PROJECT_SHARED_BEHAVIOR_FILE_IDS + AGENT_PRIVATE_BEHAVIOR_FILE_IDS}"
+    )
 
 
 def validate_behavior_file_path(project_root: Path, file_path: str) -> Path:

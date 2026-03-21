@@ -80,13 +80,11 @@ import structlog
 _log = structlog.get_logger()
 
 from octoagent.core.behavior_workspace import (
-    BEHAVIOR_FILE_BUDGETS,
     BOOTSTRAP_COMPLETED_MARKER,
     check_behavior_file_budget,
     get_behavior_file_review_modes,
     mark_onboarding_completed,
-    read_behavior_file_content,
-    validate_behavior_file_path,
+    resolve_write_path_by_file_id,
 )
 from octoagent.core.models.behavior import BehaviorReviewMode
 
@@ -3230,53 +3228,25 @@ class CapabilityPackService:
         # 预构建 review_mode 查找表（file_id -> BehaviorReviewMode）
         _behavior_review_modes = get_behavior_file_review_modes(include_advanced=True)
 
-        @tool_contract(
-            name="behavior.read_file",
-            side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
-            tool_group="behavior",
-            tags=["behavior", "file", "read", "context"],
-            manifest_ref="builtin://behavior.read_file",
-            metadata={
-                "entrypoints": ["agent_runtime", "web"],
-                "runtime_kinds": ["worker", "subagent", "graph_agent"],
-            },
-        )
-        async def behavior_read_file(file_path: str) -> str:
-            """读取行为文件当前内容。不存在时返回默认模板。"""
-            file_path = file_path.strip()
-            if not file_path:
-                return json.dumps(
-                    {"error": "MISSING_PARAM", "message": "file_path 不能为空"},
-                    ensure_ascii=False,
-                )
-            try:
-                validate_behavior_file_path(self._project_root, file_path)
-            except ValueError as exc:
-                return json.dumps(
-                    {"error": "INVALID_PATH", "message": str(exc)},
-                    ensure_ascii=False,
-                )
-            try:
-                content, exists, budget_chars = read_behavior_file_content(
-                    self._project_root,
-                    file_path,
-                )
-            except Exception as exc:
-                return json.dumps(
-                    {"error": "FILE_READ_ERROR", "message": str(exc)},
-                    ensure_ascii=False,
-                )
-            result: dict[str, Any] = {
-                "file_path": file_path,
-                "content": content,
-                "exists": exists,
-                "budget_chars": budget_chars,
-                "current_chars": len(content),
-            }
-            if not exists:
-                result["source"] = "default_template"
-            return json.dumps(result, ensure_ascii=False)
+        def _extract_agent_slug(ctx: Any) -> str:
+            """从执行上下文的 agent_runtime_id 中提取 agent slug。"""
+            runtime_id = getattr(ctx, "agent_runtime_id", "") or ""
+            for part in runtime_id.split("|"):
+                if part.startswith("worker_profile:"):
+                    return part.split(":", 1)[1].strip() or "butler"
+            return "butler"
+
+        def _extract_project_slug(ctx: Any) -> str:
+            """从执行上下文的 agent_runtime_id 中提取 project slug。"""
+            runtime_id = getattr(ctx, "agent_runtime_id", "") or ""
+            for part in runtime_id.split("|"):
+                if part.startswith("project:"):
+                    raw = part.split(":", 1)[1].strip()
+                    # project-default -> default
+                    if raw.startswith("project-"):
+                        return raw[len("project-"):]
+                    return raw or "default"
+            return "default"
 
         @tool_contract(
             name="behavior.write_file",
@@ -3291,31 +3261,43 @@ class CapabilityPackService:
             },
         )
         async def behavior_write_file(
-            file_path: str,
+            file_id: str,
             content: str,
             confirmed: bool = False,
         ) -> str:
-            """修改行为文件内容。review_mode=review_required 时需用户确认。"""
-            file_path = file_path.strip()
-            if not file_path:
+            """修改行为文件内容。file_id 为短名（如 USER.md），系统自动解析路径。"""
+            file_id = file_id.strip()
+            if not file_id:
                 return json.dumps(
-                    {"error": "MISSING_PARAM", "message": "file_path 不能为空"},
+                    {"error": "MISSING_PARAM", "message": "file_id 不能为空"},
                     ensure_ascii=False,
                 )
-            # 路径校验
+
+            # 从执行上下文获取 agent_slug 和 project_slug
+            ctx = get_current_execution_context()
+            agent_slug = _extract_agent_slug(ctx)
+            project_slug = _extract_project_slug(ctx)
+
+            # 根据 file_id 自动解析磁盘路径
             try:
-                resolved = validate_behavior_file_path(self._project_root, file_path)
+                resolved = resolve_write_path_by_file_id(
+                    self._project_root,
+                    file_id,
+                    agent_slug=agent_slug,
+                    project_slug=project_slug,
+                )
             except ValueError as exc:
                 return json.dumps(
-                    {"error": "INVALID_PATH", "message": str(exc)},
+                    {"error": "INVALID_FILE_ID", "message": str(exc)},
                     ensure_ascii=False,
                 )
+
             # 字符预算检查
-            budget_result = check_behavior_file_budget(file_path, content)
+            budget_result = check_behavior_file_budget(file_id, content)
             if not budget_result["within_budget"]:
                 return json.dumps(
                     {
-                        "file_path": file_path,
+                        "file_id": file_id,
                         "written": False,
                         "error": "BUDGET_EXCEEDED",
                         "current_chars": budget_result["current_chars"],
@@ -3327,8 +3309,8 @@ class CapabilityPackService:
                     },
                     ensure_ascii=False,
                 )
+
             # 查找 review_mode
-            file_id = Path(file_path).name
             review_mode = _behavior_review_modes.get(
                 file_id, BehaviorReviewMode.REVIEW_REQUIRED,
             )
@@ -3337,15 +3319,18 @@ class CapabilityPackService:
             if review_mode == BehaviorReviewMode.REVIEW_REQUIRED and not confirmed:
                 # 读取当前内容用于对比
                 try:
-                    current_content, exists, _ = read_behavior_file_content(
-                        self._project_root, file_path,
-                    )
+                    if resolved.exists():
+                        current_content = resolved.read_text(encoding="utf-8")
+                        exists = True
+                    else:
+                        current_content = ""
+                        exists = False
                 except Exception:
                     current_content = ""
                     exists = False
                 return json.dumps(
                     {
-                        "file_path": file_path,
+                        "file_id": file_id,
                         "proposal": True,
                         "review_mode": review_mode.value if hasattr(review_mode, "value") else str(review_mode),
                         "current_content": current_content,
@@ -3373,9 +3358,9 @@ class CapabilityPackService:
             _log.info(
                 "behavior_file_written",
                 source="llm_tool",
-                file_path=file_path,
-                chars_written=len(content),
                 file_id=file_id,
+                chars_written=len(content),
+                resolved_path=str(resolved),
             )
 
             # Feature 063 T1.4: 路径 A — 检测 BOOTSTRAP.md 的 <!-- COMPLETED --> 标记
@@ -3386,12 +3371,12 @@ class CapabilityPackService:
                     onboarding_completed = True
                     _log.info(
                         "onboarding_completed_via_marker",
-                        file_path=file_path,
+                        file_id=file_id,
                     )
                 except Exception:
                     _log.warning(
                         "onboarding_completion_mark_failed",
-                        file_path=file_path,
+                        file_id=file_id,
                     )
 
             # Feature 063 T2.4: 所有副作用完成后 invalidate 缓存
@@ -3403,7 +3388,7 @@ class CapabilityPackService:
             invalidate_behavior_pack_cache(project_root=self._project_root)
 
             result_payload: dict[str, Any] = {
-                "file_path": file_path,
+                "file_id": file_id,
                 "written": True,
                 "chars_written": len(content),
                 "budget_chars": budget_result["budget_chars"],
@@ -3881,7 +3866,6 @@ class CapabilityPackService:
             memory_search,
             memory_citations,
             memory_recall,
-            behavior_read_file,
             behavior_write_file,
             config_inspect,
             config_add_provider,
