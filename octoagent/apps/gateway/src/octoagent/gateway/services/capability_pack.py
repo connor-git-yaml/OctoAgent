@@ -2517,24 +2517,127 @@ class CapabilityPackService:
             install_source: str,
             package_name: str,
             env: str = "{}",
+            command: str = "",
+            args: str = "[]",
         ) -> str:
-            """安装一个 MCP server 并自动注册。
+            """安装或注册一个 MCP server。
+
+            支持三种模式：
+            1. npm 包安装: install_source="npm", package_name="@org/mcp-server-xxx"
+            2. pip 包安装: install_source="pip", package_name="mcp-server-xxx"
+            3. 本地注册: install_source="local", package_name 作为 server 名称,
+               command + args + env 指定运行配置
 
             Args:
-                install_source: 安装来源，"npm" 或 "pip"
-                package_name: 包名，如 "@anthropic/mcp-server-perplexity" 或 "mcp-server-fetch"
+                install_source: "npm"、"pip" 或 "local"
+                package_name: npm/pip 模式下为包名，local 模式下为 server 名称（如 "openrouter-perplexity"）
                 env: JSON 格式的环境变量，如 '{"API_KEY": "sk-xxx"}'
-            """
-            if self._mcp_installer is None:
-                return json.dumps(
-                    {"error": "MCP Installer 未绑定，无法安装 MCP server"},
-                    ensure_ascii=False,
+                command: local 模式下的启动命令（如 "node"）
+                args: local 模式下的启动参数，JSON 数组格式（如 '["/path/to/server.js"]'）
+
+            示例（本地注册）:
+                mcp_install(
+                    install_source="local",
+                    package_name="openrouter-perplexity",
+                    command="node",
+                    args='["/Users/xxx/.claude/mcp-servers/openrouter-perplexity/server.js"]',
+                    env='{"OPENROUTER_API_KEY": "sk-xxx", "OPENROUTER_MODEL": "perplexity/sonar-pro-search"}'
                 )
+            """
             try:
                 env_dict = json.loads(env) if env and env.strip() != "{}" else {}
             except json.JSONDecodeError as exc:
                 return json.dumps(
                     {"error": f"env 参数 JSON 格式不合法: {exc}"},
+                    ensure_ascii=False,
+                )
+
+            # local 模式：直接写入 mcp-servers.json 并触发发现
+            if install_source == "local":
+                if not package_name.strip():
+                    return json.dumps(
+                        {"error": "local 模式下 package_name 用作 server 名称，不能为空"},
+                        ensure_ascii=False,
+                    )
+                if not command.strip():
+                    return json.dumps(
+                        {"error": "local 模式下 command 不能为空（如 node、python）"},
+                        ensure_ascii=False,
+                    )
+                try:
+                    args_list = json.loads(args) if args and args.strip() != "[]" else []
+                    if not isinstance(args_list, list):
+                        raise ValueError("args 必须是 JSON 数组")
+                except (json.JSONDecodeError, ValueError) as exc:
+                    return json.dumps(
+                        {"error": f"args 参数格式不合法: {exc}"},
+                        ensure_ascii=False,
+                    )
+
+                if self._mcp_registry is None:
+                    return json.dumps(
+                        {"error": "MCP Registry 未绑定"},
+                        ensure_ascii=False,
+                    )
+
+                # 写入配置
+                try:
+                    config_path = self._mcp_registry.config_path
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    # 读取现有配置
+                    existing: dict[str, Any] = {}
+                    if config_path.exists():
+                        try:
+                            existing = json.loads(config_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            existing = {}
+                    if not isinstance(existing, dict):
+                        existing = {}
+
+                    server_name = package_name.strip()
+                    existing[server_name] = {
+                        "type": "stdio",
+                        "command": command.strip(),
+                        "args": args_list,
+                        "env": env_dict,
+                    }
+                    config_path.write_text(
+                        json.dumps(existing, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+
+                    # 触发 MCP 发现
+                    try:
+                        await self._mcp_registry.discover_and_register()
+                    except Exception as disc_exc:
+                        _log.warning(
+                            "mcp_local_register_discover_failed",
+                            server_name=server_name,
+                            error=str(disc_exc),
+                        )
+
+                    return json.dumps(
+                        {
+                            "status": "registered",
+                            "server_name": server_name,
+                            "config_path": str(config_path),
+                            "command": command.strip(),
+                            "args": args_list,
+                            "env_keys": list(env_dict.keys()),
+                            "message": f"MCP server '{server_name}' 已注册到 {config_path}",
+                        },
+                        ensure_ascii=False,
+                    )
+                except Exception as exc:
+                    return json.dumps(
+                        {"error": f"本地注册失败: {exc}"},
+                        ensure_ascii=False,
+                    )
+
+            # npm/pip 模式：走 MCP Installer
+            if self._mcp_installer is None:
+                return json.dumps(
+                    {"error": "MCP Installer 未绑定，无法安装 MCP server"},
                     ensure_ascii=False,
                 )
             try:
