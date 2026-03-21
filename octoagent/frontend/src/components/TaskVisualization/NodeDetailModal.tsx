@@ -181,7 +181,7 @@ function KindContent({
                 {toolCalls.map((tc, i) => (
                   <details key={i} className="tv-modal-payload-details">
                     <summary>{tc.tool_name || `tool_call_${i}`}</summary>
-                    {tc.arguments && (
+                    {tc.arguments != null && (
                       <pre className="tv-modal-payload">
                         {typeof tc.arguments === "string"
                           ? tc.arguments
