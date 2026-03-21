@@ -418,7 +418,6 @@ class ControlPlaneService:
         degraded_sections: list[str] = []
         resource_errors: dict[str, dict[str, str]] = {}
         resolvers: tuple[tuple[str, Any], ...] = (
-            ("wizard", self.get_wizard_session),
             ("config", self.get_config_schema),
             ("project_selector", self.get_project_selector),
             ("sessions", self.get_session_projection),
@@ -427,18 +426,14 @@ class ControlPlaneService:
             ("owner_profile", self.get_owner_profile_document),
             ("bootstrap_session", self.get_bootstrap_session_document),
             ("context_continuity", self.get_context_continuity_document),
-            ("policy_profiles", self.get_policy_profiles_document),
             ("capability_pack", self.get_capability_pack_document),
             ("skill_governance", self.get_skill_governance_document),
             ("mcp_provider_catalog", self.get_mcp_provider_catalog_document),
             ("setup_governance", self.get_setup_governance_document),
             ("delegation", self.get_delegation_document),
-            ("pipelines", self.get_skill_pipeline_document),
-            ("automation", self.get_automation_document),
             ("diagnostics", self.get_diagnostics_summary),
             ("retrieval_platform", self.get_retrieval_platform_document),
             ("memory", self.get_memory_console),
-            ("imports", self.get_import_workbench),
         )
         for section, resolver in resolvers:
             try:

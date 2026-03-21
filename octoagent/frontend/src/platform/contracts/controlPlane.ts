@@ -4,24 +4,19 @@ import type {
 } from "../../types";
 
 export type WorkbenchResourceRoute =
-  | "wizard"
   | "config"
   | "project-selector"
   | "sessions"
   | "worker-profiles"
   | "context-frames"
-  | "policy-profiles"
   | "capability-pack"
   | "skill-governance"
   | "mcp-provider-catalog"
   | "setup-governance"
   | "delegation"
-  | "pipelines"
-  | "automation"
   | "diagnostics"
   | "retrieval-platform"
-  | "memory"
-  | "import-workbench";
+  | "memory";
 
 export type SnapshotResourceKey = keyof ControlPlaneSnapshot["resources"];
 export type SnapshotResourcePayload =
@@ -42,14 +37,8 @@ export interface MemoryResourceQuery {
   subjectKey?: string;
 }
 
-export interface ImportWorkbenchQuery {
-  projectId?: string;
-  workspaceId?: string;
-}
-
 export interface SnapshotResourceLoadOptions {
   memoryQuery?: MemoryResourceQuery;
-  importQuery?: ImportWorkbenchQuery;
 }
 
 export interface ResourceQueryDescriptor {
@@ -57,20 +46,13 @@ export interface ResourceQueryDescriptor {
   snapshotKey: SnapshotResourceKey;
   label: string;
   endpointPath: string;
-  queryMode: "snapshot-resource" | "memory-query" | "import-query";
+  queryMode: "snapshot-resource" | "memory-query";
 }
 
 export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
   WorkbenchResourceRoute,
   ResourceQueryDescriptor
 > = {
-  wizard: {
-    route: "wizard",
-    snapshotKey: "wizard",
-    label: "初始化向导",
-    endpointPath: "/api/control/resources/wizard",
-    queryMode: "snapshot-resource",
-  },
   config: {
     route: "config",
     snapshotKey: "config",
@@ -104,13 +86,6 @@ export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
     snapshotKey: "context_continuity",
     label: "上下文帧",
     endpointPath: "/api/control/resources/context-frames",
-    queryMode: "snapshot-resource",
-  },
-  "policy-profiles": {
-    route: "policy-profiles",
-    snapshotKey: "policy_profiles",
-    label: "策略配置",
-    endpointPath: "/api/control/resources/policy-profiles",
     queryMode: "snapshot-resource",
   },
   "capability-pack": {
@@ -148,20 +123,6 @@ export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
     endpointPath: "/api/control/resources/delegation",
     queryMode: "snapshot-resource",
   },
-  pipelines: {
-    route: "pipelines",
-    snapshotKey: "pipelines",
-    label: "Skill Pipeline",
-    endpointPath: "/api/control/resources/pipelines",
-    queryMode: "snapshot-resource",
-  },
-  automation: {
-    route: "automation",
-    snapshotKey: "automation",
-    label: "自动任务",
-    endpointPath: "/api/control/resources/automation",
-    queryMode: "snapshot-resource",
-  },
   diagnostics: {
     route: "diagnostics",
     snapshotKey: "diagnostics",
@@ -183,36 +144,22 @@ export const CANONICAL_CONTROL_RESOURCE_MANIFEST: Record<
     endpointPath: "/api/control/resources/memory",
     queryMode: "memory-query",
   },
-  "import-workbench": {
-    route: "import-workbench",
-    snapshotKey: "imports",
-    label: "导入工作台",
-    endpointPath: "/api/control/resources/import-workbench",
-    queryMode: "import-query",
-  },
 };
 
 export const RESOURCE_ROUTE_BY_TYPE: Record<string, WorkbenchResourceRoute> = {
-  wizard_session: "wizard",
   config_schema: "config",
   project_selector: "project-selector",
   session_projection: "sessions",
   worker_profiles: "worker-profiles",
   context_continuity: "context-frames",
-  policy_profiles: "policy-profiles",
   capability_pack: "capability-pack",
   skill_governance: "skill-governance",
   mcp_provider_catalog: "mcp-provider-catalog",
   setup_governance: "setup-governance",
   delegation_plane: "delegation",
-  skill_pipeline: "pipelines",
-  automation_job: "automation",
   diagnostics_summary: "diagnostics",
   retrieval_platform: "retrieval-platform",
   memory_console: "memory",
-  import_workbench: "import-workbench",
-  import_source: "import-workbench",
-  import_run: "import-workbench",
 };
 
 export const SNAPSHOT_RESOURCE_KEY_BY_ROUTE: Record<

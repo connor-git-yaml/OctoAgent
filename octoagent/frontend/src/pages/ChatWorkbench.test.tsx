@@ -716,7 +716,7 @@ describe("ChatWorkbench", () => {
     vi.useRealTimers();
   });
 
-  it("进入 Chat 时有可恢复会话会先让用户选择是否继续恢复", async () => {
+  it("进入 Chat 时有可恢复会话会自动进入恢复状态", async () => {
     const snapshot = buildSnapshot();
     snapshot.resources.sessions.sessions = [
       {
@@ -748,9 +748,7 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("继续最近会话，还是新开一条？")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "继续最近会话" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
+    expect(screen.getByText("正在恢复最近对话")).toBeInTheDocument();
   });
 
   it("历史污染会话不会进入默认恢复候选", async () => {

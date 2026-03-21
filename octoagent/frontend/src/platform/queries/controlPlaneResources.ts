@@ -52,18 +52,8 @@ export function buildSnapshotRefreshOptions(
           limit: snapshot.resources.memory.filters.limit,
         }
       : undefined);
-  const importQuery =
-    overrides.importQuery ??
-    (snapshot.resources.imports != null
-      ? {
-          projectId: snapshot.resources.imports.active_project_id,
-          workspaceId: snapshot.resources.imports.active_workspace_id,
-        }
-      : undefined);
-
   return {
     memoryQuery,
-    importQuery,
   };
 }
 
@@ -88,7 +78,6 @@ export async function refreshWorkbenchSnapshotResources(
       routes.map((route) =>
         fetchSnapshotResource(route, {
           memoryQuery: route === "memory" ? loadOptions.memoryQuery : undefined,
-          importQuery: route === "import-workbench" ? loadOptions.importQuery : undefined,
         })
       )
     );

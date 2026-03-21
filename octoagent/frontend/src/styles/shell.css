@@ -48,24 +48,3 @@
   font-size: 0.84rem;
 }
 
-.wb-advanced-stack {
-  gap: var(--cp-space-4);
-}
-
-.wb-advanced-actions {
-  align-items: flex-start;
-}
-
-.wb-advanced-console-toggle {
-  flex-shrink: 0;
-}
-
-@media (max-width: 720px) {
-  .wb-advanced-actions {
-    flex-direction: column;
-  }
-
-  .wb-advanced-console-toggle {
-    width: 100%;
-  }
-}

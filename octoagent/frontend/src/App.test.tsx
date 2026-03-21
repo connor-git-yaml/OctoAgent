@@ -38,26 +38,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
       actions: [],
     },
     resources: {
-      wizard: {
-        contract_version: "1.0.0",
-        resource_type: "wizard_session",
-        resource_id: "wizard:default",
-        schema_version: 1,
-        generated_at: "2026-03-09T10:00:00Z",
-        updated_at: "2026-03-09T10:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        session_version: 1,
-        current_step: "complete",
-        resumable: true,
-        blocking_reason: "",
-        steps: [],
-        summary: {},
-        next_actions: [],
-      },
       config: {
         contract_version: "1.0.0",
         resource_type: "config_schema",
@@ -423,44 +403,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         sessions: [],
         frames: [],
       },
-      policy_profiles: {
-        contract_version: "1.0.0",
-        resource_type: "policy_profiles",
-        resource_id: "policy:profiles",
-        schema_version: 1,
-        generated_at: "2026-03-09T10:00:00Z",
-        updated_at: "2026-03-09T10:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        active_project_id: "project-default",
-        active_workspace_id: "workspace-default",
-        active_profile_id: "default",
-        profiles: [
-          {
-            profile_id: "strict",
-            label: "谨慎",
-            description: "更保守",
-            allowed_tool_profile: "minimal",
-            approval_policy: "可逆 / 不可逆操作都需要确认",
-            risk_level: "warning",
-            recommended_for: ["首次使用"],
-            is_active: false,
-          },
-          {
-            profile_id: "default",
-            label: "平衡",
-            description: "默认推荐",
-            allowed_tool_profile: "standard",
-            approval_policy: "仅不可逆操作需要确认",
-            risk_level: "info",
-            recommended_for: ["默认推荐"],
-            is_active: true,
-          },
-        ],
-      },
       capability_pack: {
         contract_version: "1.0.0",
         resource_type: "capability_pack",
@@ -662,36 +604,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         works: [],
         summary: { by_status: {} },
       },
-      pipelines: {
-        contract_version: "1.0.0",
-        resource_type: "skill_pipeline",
-        resource_id: "pipeline:overview",
-        schema_version: 1,
-        generated_at: "2026-03-09T10:00:00Z",
-        updated_at: "2026-03-09T10:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        runs: [],
-        summary: {},
-      },
-      automation: {
-        contract_version: "1.0.0",
-        resource_type: "automation_job",
-        resource_id: "automation:jobs",
-        schema_version: 1,
-        generated_at: "2026-03-09T10:00:00Z",
-        updated_at: "2026-03-09T10:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        jobs: [],
-        run_history_cursor: "",
-      },
       diagnostics: {
         contract_version: "1.0.0",
         resource_type: "diagnostics_summary",
@@ -832,31 +744,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
         available_partitions: [],
         available_layers: [],
         advanced_refs: {},
-      },
-      imports: {
-        contract_version: "1.0.0",
-        resource_type: "import_workbench",
-        resource_id: "imports:workbench",
-        schema_version: 1,
-        generated_at: "2026-03-09T10:00:00Z",
-        updated_at: "2026-03-09T10:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        active_project_id: "project-default",
-        active_workspace_id: "workspace-default",
-        summary: {
-          source_count: 0,
-          recent_run_count: 0,
-          resume_available_count: 0,
-          warning_count: 0,
-          error_count: 0,
-        },
-        sources: [],
-        recent_runs: [],
-        resume_entries: [],
       },
     },
   };
@@ -1011,40 +898,7 @@ describe("App workbench routing", () => {
     expect(screen.getAllByRole("button", { name: "新建 Agent" }).length).toBeGreaterThan(0);
   });
 
-  it("Advanced 路由默认先展示高级概览，再按需展开 legacy 控制台", async () => {
-    window.history.pushState({}, "", "/advanced");
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(buildSnapshot()));
-      }
-      if (url.includes("/api/control/events")) {
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            events: [],
-          })
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByRole("heading", { name: "高级诊断与恢复" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "OctoAgent Control Plane" })
-    ).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "打开详细控制台" }));
-
-    expect(
-      await screen.findByRole("heading", { name: "OctoAgent Control Plane" })
-    ).toBeInTheDocument();
-  });
-
-  it("黄金路径 smoke 覆盖 Chat / Agents / Settings / Memory / Advanced / Work", async () => {
+  it("黄金路径 smoke 覆盖 Chat / Agents / Settings / Memory", async () => {
     const snapshot = buildSnapshot();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
@@ -1085,7 +939,7 @@ describe("App workbench routing", () => {
         path: "/settings",
         assertRoute: async () => {
           expect(
-            await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" })
+            await screen.findByText("先连上至少一个模型 Provider")
           ).toBeInTheDocument();
         },
       },
@@ -1093,18 +947,6 @@ describe("App workbench routing", () => {
         path: "/memory",
         assertRoute: async () => {
           expect(await screen.findByText("筛选与刷新")).toBeInTheDocument();
-        },
-      },
-      {
-        path: "/advanced",
-        assertRoute: async () => {
-          expect(await screen.findByRole("heading", { name: "高级诊断与恢复" })).toBeInTheDocument();
-        },
-      },
-      {
-        path: "/work",
-        assertRoute: async () => {
-          expect(await screen.findByText("现在最该看")).toBeInTheDocument();
         },
       },
     ] satisfies Array<{ path: string; assertRoute: () => Promise<void> }>;
@@ -1207,11 +1049,6 @@ describe("App workbench routing", () => {
                   schema_version: 1,
                 },
                 {
-                  resource_type: "policy_profiles",
-                  resource_id: "policy:profiles",
-                  schema_version: 1,
-                },
-                {
                   resource_type: "skill_governance",
                   resource_id: "skills:governance",
                   schema_version: 1,
@@ -1237,9 +1074,6 @@ describe("App workbench routing", () => {
       if (url.includes("/api/control/resources/setup-governance")) {
         return Promise.resolve(jsonResponse(nextSnapshot.resources.setup_governance));
       }
-      if (url.includes("/api/control/resources/policy-profiles")) {
-        return Promise.resolve(jsonResponse(nextSnapshot.resources.policy_profiles));
-      }
       if (url.includes("/api/control/resources/skill-governance")) {
         return Promise.resolve(jsonResponse(nextSnapshot.resources.skill_governance));
       }
@@ -1251,7 +1085,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
+    await screen.findByText("先连上至少一个模型 Provider");
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
     await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
@@ -1399,7 +1233,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
+    await screen.findByText("先连上至少一个模型 Provider");
     await userEvent.click(screen.getAllByRole("button", { name: "连接真实模型" })[0]);
 
     await waitFor(() =>
@@ -1657,9 +1491,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
-    // 概览 chip 显示"未连接真实模型"
-    expect(screen.getByText("未连接真实模型")).toBeInTheDocument();
+    await screen.findByText("先连上至少一个模型 Provider");
     expect(screen.queryByText("agent_profile_name_missing")).not.toBeInTheDocument();
     expect(screen.queryByText(/主 Agent 的身份与边界只在 Agents 维护/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "去 Agents 调 Butler" })).not.toBeInTheDocument();
@@ -1754,7 +1586,7 @@ describe("App workbench routing", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" });
+    await screen.findByText("先连上至少一个模型 Provider");
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
     await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
 
@@ -2005,169 +1837,12 @@ describe("App workbench routing", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "先连上至少一个模型 Provider" })
+      await screen.findByText("先连上至少一个模型 Provider")
     ).toBeInTheDocument();
 
     await waitFor(() => {
       expect(scrollIntoView).toHaveBeenCalled();
     });
-  });
-
-  it("Work 页面会先展示 worker.review 方案，再批准 worker.apply", async () => {
-    window.history.pushState({}, "", "/work");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.delegation.works = [
-      buildWork("work-review", "running", {
-        title: "拆分调研和开发",
-        runtimeSummary: {
-          requested_tool_profile: "standard",
-        },
-        capabilities: [
-          {
-            capability_id: "worker.review",
-            label: "评审 Worker 方案",
-            action_id: "worker.review",
-            enabled: true,
-            support_status: "supported",
-            reason: "",
-          },
-        ],
-      }),
-    ] as typeof snapshot.resources.delegation.works;
-
-    const refreshedDelegation = structuredClone(snapshot.resources.delegation);
-    refreshedDelegation.works = [
-      buildWork("work-review", "running", {
-        title: "拆分调研和开发",
-        capabilities: [
-          {
-            capability_id: "worker.review",
-            label: "评审 Worker 方案",
-            action_id: "worker.review",
-            enabled: true,
-            support_status: "supported",
-            reason: "",
-          },
-        ],
-      }),
-      buildWork("child-research", "assigned", { title: "Research Child" }),
-      buildWork("child-dev", "assigned", { title: "Dev Child" }),
-    ] as typeof snapshot.resources.delegation.works;
-
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/control/actions") && init?.method === "POST") {
-        const body = String(init.body ?? "");
-        if (body.includes('"action_id":"worker.review"')) {
-          return Promise.resolve(
-            jsonResponse({
-              contract_version: "1.0.0",
-              result: {
-                contract_version: "1.0.0",
-                request_id: "req-worker-review",
-                correlation_id: "req-worker-review",
-                action_id: "worker.review",
-                status: "completed",
-                code: "WORKER_REVIEW_READY",
-                message: "已生成 Worker 评审方案。",
-                data: {
-                  plan: {
-                    plan_id: "plan-1",
-                    work_id: "work-review",
-                    task_id: "task-work-review",
-                    proposal_kind: "split",
-                    objective: "拆分调研和开发",
-                    summary: "建议拆成 research 和 dev 两条 worker。",
-                    requires_user_confirmation: true,
-                    assignments: [
-                      {
-                        objective: "先调研 API",
-                        worker_type: "research",
-                        target_kind: "subagent",
-                        tool_profile: "minimal",
-                        title: "Research",
-                        reason: "先收集事实",
-                      },
-                      {
-                        objective: "再补代码和测试",
-                        worker_type: "dev",
-                        target_kind: "subagent",
-                        tool_profile: "standard",
-                        title: "Dev",
-                        reason: "需要实现和验证",
-                      },
-                    ],
-                    merge_candidate_ids: [],
-                    warnings: ["批准前请检查权限级别"],
-                  },
-                },
-                resource_refs: [
-                  {
-                    resource_type: "delegation_plane",
-                    resource_id: "delegation:overview",
-                    schema_version: 1,
-                  },
-                ],
-                target_refs: [],
-                handled_at: "2026-03-09T10:06:00Z",
-              },
-            })
-          );
-        }
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            result: {
-              contract_version: "1.0.0",
-              request_id: "req-worker-apply",
-              correlation_id: "req-worker-apply",
-              action_id: "worker.apply",
-              status: "completed",
-              code: "WORKER_PLAN_APPLIED",
-              message: "已按批准的 Worker 方案执行。",
-              data: {
-                child_tasks: ["child-research", "child-dev"],
-              },
-              resource_refs: [
-                {
-                  resource_type: "delegation_plane",
-                  resource_id: "delegation:overview",
-                  schema_version: 1,
-                },
-              ],
-              target_refs: [],
-              handled_at: "2026-03-09T10:07:00Z",
-            },
-          })
-        );
-      }
-      if (url.includes("/api/control/resources/delegation")) {
-        return Promise.resolve(jsonResponse(refreshedDelegation));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("拆分调研和开发")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "评审 Worker 方案" }));
-
-    expect(await screen.findByText("建议拆成 research 和 dev 两条 worker。")).toBeInTheDocument();
-    expect(screen.getByText("Research · minimal")).toBeInTheDocument();
-    expect(screen.getByText("Dev · standard")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "批准并执行" }));
-
-    expect(await screen.findByText(/已按批准的 Worker 方案执行/)).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"worker.apply"')
-      )
-    ).toBe(true);
   });
 
   it("Memory 页面会收口成记忆主路径，不再混入 operator 与备份入口", async () => {
@@ -2440,40 +2115,6 @@ describe("App workbench routing", () => {
     expect(exportRequestBody).toBeNull();
   });
 
-  it("Work 页面会禁用 terminal work 的 worker.review 按钮", async () => {
-    window.history.pushState({}, "", "/work");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.delegation.works = [
-      buildWork("work-done", "succeeded", {
-        title: "Done Work",
-        capabilities: [
-          {
-            capability_id: "worker.review",
-            label: "评审 Worker 方案",
-            action_id: "worker.review",
-            enabled: false,
-            support_status: "supported",
-            reason: "",
-          },
-        ],
-      }),
-    ] as typeof snapshot.resources.delegation.works;
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    const button = await screen.findByRole("button", { name: "评审 Worker 方案" });
-    expect(button).toBeDisabled();
-  });
-
   it("重新进入 Chat 时会恢复当前聚焦会话的历史消息", async () => {
     window.history.pushState({}, "", "/");
 
@@ -2681,314 +2322,6 @@ describe("App workbench routing", () => {
     expect(await screen.findByText("帮我恢复最近的聊天")).toBeInTheDocument();
     expect(await screen.findByText("已经按最近的 Web 会话恢复。")).toBeInTheDocument();
     expect(window.sessionStorage.getItem("octoagent.chat.activeTaskId")).toBe("task-chat-fallback");
-  });
-
-  it("Work 看板会覆盖完整状态并在 split 失败时保留草稿", async () => {
-    window.history.pushState({}, "", "/work");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.delegation.works = [
-      buildWork("work-assigned", "assigned", { title: "Assigned Work" }),
-      buildWork("work-escalated", "escalated", { title: "Escalated Work" }),
-      buildWork("work-timeout", "timed_out", { title: "Timed Out Work" }),
-      buildWork("work-split", "running", {
-        title: "Split Work",
-        capabilities: [
-          {
-            capability_id: "work.split",
-            label: "拆分 Work",
-            action_id: "work.split",
-            enabled: true,
-            support_status: "supported",
-            reason: "",
-          },
-        ],
-      }),
-    ] as typeof snapshot.resources.delegation.works;
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/control/actions") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse(
-            {
-              error: {
-                code: "WORK_SPLIT_FAILED",
-                message: "拆分失败",
-              },
-            },
-            500
-          )
-        );
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    await screen.findByRole("heading", {
-      name: "3 条后台工作还没收尾",
-    });
-
-    const activeCard = screen.getAllByText("后台未收尾")[0]?.closest("article");
-    const doneCard = screen.getAllByText("已结束")[0]?.closest("article");
-    expect(activeCard).not.toBeNull();
-    expect(doneCard).not.toBeNull();
-    expect(within(activeCard!).getByText("3")).toBeInTheDocument();
-    expect(within(doneCard!).getByText("1")).toBeInTheDocument();
-
-    const textarea = await screen.findByLabelText("拆分成子目标");
-    await userEvent.type(textarea, "整理依赖\n补测试");
-    await userEvent.click(screen.getByRole("button", { name: "拆成子工作" }));
-
-    expect(await screen.findByText("拆分失败")).toBeInTheDocument();
-    expect(textarea).toHaveValue("整理依赖\n补测试");
-  });
-
-  it("Work 看板会把实时问题能力和相关运行真相翻译成可读摘要", async () => {
-    window.history.pushState({}, "", "/work");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.context_continuity.degraded = {
-      is_degraded: true,
-      reasons: ["owner_timezone_missing"],
-      unavailable_sections: [],
-    };
-    snapshot.resources.context_continuity.frames = [
-      {
-        context_frame_id: "frame-freshness-1",
-        task_id: "task-work-weather",
-        session_id: "session-work-weather",
-        project_id: "project-default",
-        workspace_id: "workspace-default",
-        agent_profile_id: "agent-profile-default",
-        recent_summary: "围绕天气查询更新了当前运行事实。",
-        memory_hit_count: 0,
-        memory_hits: [],
-        memory_recall: {},
-        budget: {},
-        source_refs: [],
-        degraded_reason: "owner_timezone_missing",
-        created_at: "2026-03-12T08:00:00Z",
-      },
-    ];
-    snapshot.resources.capability_pack.pack.worker_profiles = [
-      {
-        worker_type: "research",
-        capabilities: ["research", "web"],
-        default_model_alias: "main",
-        default_tool_profile: "standard",
-        default_tool_groups: ["network", "browser", "session"],
-        bootstrap_file_ids: ["bootstrap:shared", "bootstrap:research"],
-        runtime_kinds: ["worker", "subagent"],
-        metadata: {},
-      },
-    ];
-    snapshot.resources.capability_pack.pack.tools = [
-      {
-        tool_name: "runtime.now",
-        label: "Runtime Now",
-        description: "return local datetime",
-        tool_group: "session",
-        tool_profile: "minimal",
-        tier: "core",
-        side_effect_level: "none",
-        tags: ["time"],
-        worker_types: ["general", "research", "ops"],
-        manifest_ref: "builtin://runtime.now",
-        availability: "available",
-        availability_reason: "",
-        install_hint: "",
-        entrypoints: ["agent_runtime", "web"],
-        runtime_kinds: ["worker", "subagent"],
-        metadata: {},
-      },
-      {
-        tool_name: "web.search",
-        label: "Web Search",
-        description: "search web",
-        tool_group: "network",
-        tool_profile: "standard",
-        tier: "deferred",
-        side_effect_level: "none",
-        tags: ["web"],
-        worker_types: ["research", "ops"],
-        manifest_ref: "builtin://web.search",
-        availability: "available",
-        availability_reason: "",
-        install_hint: "",
-        entrypoints: ["agent_runtime", "web"],
-        runtime_kinds: ["worker", "subagent"],
-        metadata: {},
-      },
-      {
-        tool_name: "browser.status",
-        label: "Browser Status",
-        description: "inspect browser session",
-        tool_group: "browser",
-        tool_profile: "standard",
-        tier: "deferred",
-        side_effect_level: "reversible",
-        tags: ["browser"],
-        worker_types: ["research", "ops"],
-        manifest_ref: "builtin://browser.status",
-        availability: "degraded",
-        availability_reason: "browser_controller_missing",
-        install_hint: "",
-        entrypoints: ["agent_runtime", "web"],
-        runtime_kinds: ["worker", "subagent"],
-        metadata: {},
-      },
-    ];
-    snapshot.resources.delegation.works = [
-      buildWork("work-weather", "running", {
-        title: "查询北京今天会不会下雨",
-        runtimeSummary: {
-          delegation_strategy: "butler_owned_freshness",
-          final_speaker: "butler",
-          research_route_reason: "worker_type=research | fallback=single_worker",
-          research_tool_profile: "standard",
-          research_a2a_conversation_id: "a2a-weather-1",
-          research_worker_agent_session_id: "agent-session-worker-research-1",
-          research_a2a_message_count: 2,
-          research_child_status: "SUCCEEDED",
-        },
-      }),
-    ];
-    snapshot.resources.delegation.works[0]!.selected_worker_type = "general";
-    snapshot.resources.delegation.works[0]!.route_reason =
-      "delegation_strategy=butler_owned_freshness";
-    snapshot.resources.delegation.works[0]!.selected_tools = [];
-
-    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/control/actions") && input) {
-        return Promise.resolve(jsonResponse({}));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("实时问题能力已经部分可用")).toBeInTheDocument();
-    expect(
-      screen.getByText(/主链已经存在，但当前还有降级或环境限制/)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Research Worker · 标准工具面 · network \/ browser \/ session/)).toBeInTheDocument();
-    expect(screen.getAllByText(/owner timezone 未配置/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Butler 会先接住这条实时问题/).length).toBeGreaterThan(0);
-  });
-
-  it("Work 看板会显示后台 embedding 迁移，并允许切换到新索引", async () => {
-    window.history.pushState({}, "", "/work");
-
-    const snapshot = buildSnapshot();
-    snapshot.resources.retrieval_platform!.corpora[0] = {
-      ...snapshot.resources.retrieval_platform!.corpora[0],
-      pending_generation_id: "gen-memory-next",
-      desired_profile_id: "alias:knowledge-embed",
-      desired_profile_target: "knowledge-embed",
-      state: "migration_pending",
-      summary: "新的 embedding 已准备好切换，但当前查询仍继续使用旧索引。",
-      warnings: ["embedding 迁移尚未 cutover；当前仍使用 engine-default。"],
-    };
-    snapshot.resources.retrieval_platform!.generations.push({
-      generation_id: "gen-memory-next",
-      corpus_kind: "memory",
-      profile_id: "alias:knowledge-embed",
-      profile_target: "knowledge-embed",
-      label: "knowledge-embed",
-      status: "ready_to_cutover",
-      is_active: false,
-      build_job_id: "job-memory-next",
-      previous_generation_id: "gen-memory-default",
-      created_at: "2026-03-09T10:10:00Z",
-      updated_at: "2026-03-09T10:15:00Z",
-      activated_at: null,
-      completed_at: "2026-03-09T10:15:00Z",
-      rollback_deadline: null,
-      warnings: [],
-      metadata: {},
-    });
-    snapshot.resources.retrieval_platform!.build_jobs.push({
-      job_id: "job-memory-next",
-      corpus_kind: "memory",
-      generation_id: "gen-memory-next",
-      stage: "ready_to_cutover",
-      summary: "新索引已经准备好，等待切换。",
-      total_items: 120,
-      processed_items: 120,
-      percent_complete: 100,
-      can_cancel: true,
-      eta_seconds: 0,
-      created_at: "2026-03-09T10:10:00Z",
-      updated_at: "2026-03-09T10:15:00Z",
-      completed_at: "2026-03-09T10:15:00Z",
-      latest_error: "",
-      latest_maintenance_run_id: "run-memory-next",
-      metadata: {},
-    });
-
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes("/api/control/snapshot")) {
-        return Promise.resolve(jsonResponse(snapshot));
-      }
-      if (url.includes("/api/control/actions") && init?.method === "POST") {
-        return Promise.resolve(
-          jsonResponse({
-            contract_version: "1.0.0",
-            result: {
-              contract_version: "1.0.0",
-              request_id: "req-retrieval-cutover",
-              correlation_id: "req-retrieval-cutover",
-              action_id: "retrieval.index.cutover",
-              status: "completed",
-              code: "RETRIEVAL_GENERATION_CUTOVER_READY",
-              message: "已切换到新的 embedding 索引。",
-              data: {},
-              resource_refs: [
-                {
-                  resource_type: "retrieval_platform",
-                  resource_id: "retrieval:platform",
-                  schema_version: 1,
-                },
-              ],
-              target_refs: [],
-              handled_at: "2026-03-09T10:16:00Z",
-            },
-          })
-        );
-      }
-      if (url.includes("/api/control/resources/retrieval-platform")) {
-        return Promise.resolve(jsonResponse(snapshot.resources.retrieval_platform!));
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("后台索引任务")).toBeInTheDocument();
-    expect(screen.getByText("Embedding 迁移正在后台准备，不会中断当前检索")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "切换到新索引" }));
-
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes('"action_id":"retrieval.index.cutover"')
-      )
-    ).toBe(true);
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String((call as FetchArgs)[1]?.body ?? "").includes('"generation_id":"gen-memory-next"')
-      )
-    ).toBe(true);
   });
 
   it("Memory 页面会按当前筛选条件提交查询并展示可读摘要", async () => {

@@ -88,14 +88,10 @@ function renderNavDescription(path: string): string {
       return "查看和管理技能";
     case "/mcp":
       return "外部工具和服务连接";
-    case "/work":
-      return "看进行中的事情";
     case "/memory":
       return "回看系统记住的背景";
     case "/settings":
       return "连接模型与常用入口";
-    case "/advanced":
-      return "只有排错时再来";
     default:
       return "";
   }
@@ -325,10 +321,8 @@ export default function WorkbenchLayout() {
               { to: "/agents", label: "Agents" },
               { to: "/skills", label: "Skills" },
               { to: "/mcp", label: "MCP" },
-              { to: "/work", label: "Work" },
               { to: "/memory", label: "Memory" },
               { to: "/settings", label: "Settings" },
-              { to: "/advanced", label: "Advanced" },
             ].map((item) => (
               <NavLink
                 key={item.to}

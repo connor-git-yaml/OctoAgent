@@ -17,12 +17,6 @@ describe("controlPlane contract manifest", () => {
     expect(manifest).toMatchInlineSnapshot(`
       [
         {
-          "endpointPath": "/api/control/resources/wizard",
-          "queryMode": "snapshot-resource",
-          "route": "wizard",
-          "snapshotKey": "wizard",
-        },
-        {
           "endpointPath": "/api/control/resources/config",
           "queryMode": "snapshot-resource",
           "route": "config",
@@ -51,12 +45,6 @@ describe("controlPlane contract manifest", () => {
           "queryMode": "snapshot-resource",
           "route": "context-frames",
           "snapshotKey": "context_continuity",
-        },
-        {
-          "endpointPath": "/api/control/resources/policy-profiles",
-          "queryMode": "snapshot-resource",
-          "route": "policy-profiles",
-          "snapshotKey": "policy_profiles",
         },
         {
           "endpointPath": "/api/control/resources/capability-pack",
@@ -89,18 +77,6 @@ describe("controlPlane contract manifest", () => {
           "snapshotKey": "delegation",
         },
         {
-          "endpointPath": "/api/control/resources/pipelines",
-          "queryMode": "snapshot-resource",
-          "route": "pipelines",
-          "snapshotKey": "pipelines",
-        },
-        {
-          "endpointPath": "/api/control/resources/automation",
-          "queryMode": "snapshot-resource",
-          "route": "automation",
-          "snapshotKey": "automation",
-        },
-        {
           "endpointPath": "/api/control/resources/diagnostics",
           "queryMode": "snapshot-resource",
           "route": "diagnostics",
@@ -117,12 +93,6 @@ describe("controlPlane contract manifest", () => {
           "queryMode": "memory-query",
           "route": "memory",
           "snapshotKey": "memory",
-        },
-        {
-          "endpointPath": "/api/control/resources/import-workbench",
-          "queryMode": "import-query",
-          "route": "import-workbench",
-          "snapshotKey": "imports",
         },
       ]
     `);

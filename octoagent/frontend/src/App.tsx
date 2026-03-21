@@ -3,7 +3,6 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import RootErrorBoundary from "./components/shell/RootErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
-const AdvancedControlPlane = lazy(() => import("./pages/AdvancedControlPlane"));
 const AgentCenter = lazy(() => import("./pages/AgentCenter"));
 const ChatWorkbench = lazy(() => import("./pages/ChatWorkbench"));
 const MemoryCenter = lazy(() => import("./pages/MemoryCenter"));
@@ -11,7 +10,6 @@ const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
 const SkillCenter = lazy(() => import("./pages/SkillCenter"));
 const TaskDetail = lazy(() => import("./pages/TaskDetail"));
-const WorkbenchBoard = lazy(() => import("./pages/WorkbenchBoard"));
 
 function RouteFallback() {
   return (
@@ -44,13 +42,8 @@ export default function App() {
             {/* 兼容旧路径 */}
             <Route path="agents/skills" element={<Navigate to="/skills" replace />} />
             <Route path="agents/mcp" element={<Navigate to="/mcp" replace />} />
-            <Route path="work" element={withRouteSuspense(<WorkbenchBoard />)} />
             <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
             <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
-            <Route
-              path="advanced"
-              element={withRouteSuspense(<AdvancedControlPlane />)}
-            />
           </Route>
           <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />)} />
         </Routes>

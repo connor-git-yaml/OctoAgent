@@ -40,32 +40,6 @@ function buildSnapshot(): ControlPlaneSnapshot {
         },
         records: [],
       },
-      imports: {
-        active_project_id: "project-default",
-        active_workspace_id: "workspace-default",
-        sources: [],
-        recent_runs: [],
-      },
-      wizard: {
-        contract_version: "1.0.0",
-        resource_type: "wizard_session",
-        resource_id: "wizard:default",
-        schema_version: 1,
-        generated_at: "2026-03-13T00:00:00Z",
-        updated_at: "2026-03-13T00:00:00Z",
-        status: "ready",
-        degraded: { is_degraded: false, reasons: [], unavailable_sections: [] },
-        warnings: [],
-        capabilities: [],
-        refs: {},
-        session_version: 1,
-        current_step: "complete",
-        resumable: true,
-        blocking_reason: "",
-        steps: [],
-        summary: {},
-        next_actions: [],
-      },
     } as unknown as ControlPlaneSnapshot["resources"],
   };
 }
@@ -76,7 +50,7 @@ describe("workbenchRefresh", () => {
     fetchWorkbenchResourceMock.mockReset();
   });
 
-  it("根据当前 snapshot 生成 memory/import 局部刷新参数", () => {
+  it("根据当前 snapshot 生成 memory 局部刷新参数", () => {
     const snapshot = buildSnapshot();
 
     expect(buildSnapshotRefreshOptions(snapshot)).toEqual({
@@ -90,10 +64,6 @@ describe("workbenchRefresh", () => {
         includeHistory: true,
         includeVaultRefs: false,
         limit: 25,
-      },
-      importQuery: {
-        projectId: "project-default",
-        workspaceId: "workspace-default",
       },
     });
   });
@@ -130,7 +100,6 @@ describe("workbenchRefresh", () => {
         query: "alice",
         includeHistory: true,
       }),
-      importQuery: undefined,
     });
   });
 
@@ -144,8 +113,8 @@ describe("workbenchRefresh", () => {
 
     const result = await refreshWorkbenchSnapshotResources(buildSnapshot(), [
       {
-        resource_type: "wizard_session",
-        resource_id: "wizard:default",
+        resource_type: "config_schema",
+        resource_id: "config:octoagent",
         schema_version: 1,
       },
     ]);

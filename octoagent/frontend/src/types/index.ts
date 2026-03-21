@@ -1844,7 +1844,6 @@ export interface ControlPlaneEvent {
 export interface ControlPlaneSnapshot {
   contract_version: string;
   resources: {
-    wizard: WizardSessionDocument;
     config: ConfigSchemaDocument;
     project_selector: ProjectSelectorDocument;
     sessions: SessionProjectionDocument;
@@ -1853,18 +1852,14 @@ export interface ControlPlaneSnapshot {
     owner_profile: OwnerProfileDocument;
     bootstrap_session: BootstrapSessionDocument;
     context_continuity: ContextContinuityDocument;
-    policy_profiles: PolicyProfilesDocument;
     capability_pack: CapabilityPackDocument;
     skill_governance: SkillGovernanceDocument;
     mcp_provider_catalog: McpProviderCatalogDocument;
     setup_governance: SetupGovernanceDocument;
     delegation: DelegationPlaneDocument;
-    pipelines: SkillPipelineDocument;
-    automation: AutomationJobDocument;
     diagnostics: DiagnosticsSummaryDocument;
     retrieval_platform?: RetrievalPlatformDocument;
     memory: MemoryConsoleDocument;
-    imports: ImportWorkbenchDocument;
   };
   registry: ActionRegistryDocument;
   generated_at: string;

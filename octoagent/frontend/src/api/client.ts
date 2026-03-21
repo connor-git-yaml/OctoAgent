@@ -9,17 +9,11 @@ import type {
   AttachExecutionInputResponse,
   BackupBundle,
   ControlPlaneActionResponse,
-  ControlPlaneEventsResponse,
   ControlPlaneSnapshot,
   ExecutionSessionResponse,
   ExportFilter,
   ExportManifest,
-  ImportRunDocument,
-  ImportSourceDocument,
-  ImportWorkbenchDocument,
   MemoryConsoleDocument,
-  MemoryProposalAuditDocument,
-  MemorySubjectHistoryDocument,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
@@ -27,12 +21,10 @@ import type {
   TaskDetailResponse,
   TaskListResponse,
   UpdateAttemptSummary,
-  VaultAuthorizationDocument,
   WorkerProfileRevisionsDocument,
 } from "../types";
 import {
   CANONICAL_CONTROL_RESOURCE_MANIFEST,
-  type ImportWorkbenchQuery,
   type MemoryResourceQuery,
   type SnapshotResourceLoadOptions,
   type SnapshotResourcePayload,
@@ -320,8 +312,6 @@ export async function fetchWorkbenchResource(
   switch (descriptor.queryMode) {
     case "memory-query":
       return fetchMemoryConsole(options.memoryQuery ?? {});
-    case "import-query":
-      return fetchImportWorkbench(options.importQuery ?? {});
     default:
       return fetchControlResource(route as SnapshotControlResourceRoute);
   }
@@ -350,89 +340,6 @@ export async function fetchMemoryConsole(
       include_vault_refs: params.includeVaultRefs,
       limit: params.limit,
     })}`
-  );
-}
-
-export async function fetchMemorySubjectHistory(
-  subjectKey: string,
-  params: MemoryResourceQuery = {}
-): Promise<MemorySubjectHistoryDocument> {
-  return apiFetch<MemorySubjectHistoryDocument>(
-    `/api/control/resources/memory-subjects/${encodeURIComponent(subjectKey)}${buildQueryString(
-      {
-        project_id: params.projectId,
-        workspace_id: params.workspaceId,
-        scope_id: params.scopeId,
-      }
-    )}`
-  );
-}
-
-export async function fetchMemoryProposals(
-  params: MemoryResourceQuery = {}
-): Promise<MemoryProposalAuditDocument> {
-  return apiFetch<MemoryProposalAuditDocument>(
-    `/api/control/resources/memory-proposals${buildQueryString({
-      project_id: params.projectId,
-      workspace_id: params.workspaceId,
-      scope_id: params.scopeId,
-      status: params.status,
-      source: params.source,
-      limit: params.limit,
-    })}`
-  );
-}
-
-export async function fetchVaultAuthorization(
-  params: MemoryResourceQuery = {}
-): Promise<VaultAuthorizationDocument> {
-  return apiFetch<VaultAuthorizationDocument>(
-    `/api/control/resources/vault-authorization${buildQueryString({
-      project_id: params.projectId,
-      workspace_id: params.workspaceId,
-      scope_id: params.scopeId,
-      subject_key: params.subjectKey,
-    })}`
-  );
-}
-
-export async function fetchImportWorkbench(
-  params: ImportWorkbenchQuery = {}
-): Promise<ImportWorkbenchDocument> {
-  return apiFetch<ImportWorkbenchDocument>(
-    `/api/control/resources/import-workbench${buildQueryString({
-      project_id: params.projectId,
-      workspace_id: params.workspaceId,
-    })}`
-  );
-}
-
-export async function fetchImportSource(
-  sourceId: string
-): Promise<ImportSourceDocument> {
-  return apiFetch<ImportSourceDocument>(
-    `/api/control/resources/import-sources/${encodeURIComponent(sourceId)}`
-  );
-}
-
-export async function fetchImportRun(runId: string): Promise<ImportRunDocument> {
-  return apiFetch<ImportRunDocument>(
-    `/api/control/resources/import-runs/${encodeURIComponent(runId)}`
-  );
-}
-
-/** GET /api/control/events -- 读取 control-plane event stream */
-export async function fetchControlEvents(
-  after?: string,
-  limit = 100
-): Promise<ControlPlaneEventsResponse> {
-  const params = new URLSearchParams();
-  if (after) {
-    params.set("after", after);
-  }
-  params.set("limit", String(limit));
-  return apiFetch<ControlPlaneEventsResponse>(
-    `/api/control/events?${params.toString()}`
   );
 }
 
