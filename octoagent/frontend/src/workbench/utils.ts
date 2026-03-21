@@ -41,6 +41,29 @@ export function formatWorkerTemplateLabel(
   return /模板$/.test(templateName) ? templateName : `${templateName} 模板`;
 }
 
+export function formatSessionDisplayTitle(options: {
+  alias?: string | null;
+  title?: string | null;
+  latestMessageSummary?: string | null;
+  fallbackTitle?: string | null;
+  latestMessageLimit?: number;
+}): string {
+  const alias = options.alias?.trim() || "";
+  if (alias) {
+    return alias;
+  }
+  const title = options.title?.trim() || "";
+  if (title) {
+    return title;
+  }
+  const latestMessageSummary = options.latestMessageSummary?.trim() || "";
+  if (latestMessageSummary) {
+    const limit = options.latestMessageLimit ?? 30;
+    return latestMessageSummary.slice(0, limit);
+  }
+  return options.fallbackTitle?.trim() || "未命名对话";
+}
+
 export function formatSupportStatus(status?: ControlPlaneSupportStatus): string {
   switch (status) {
     case "supported":

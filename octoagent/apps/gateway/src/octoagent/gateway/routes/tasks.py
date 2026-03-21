@@ -7,7 +7,8 @@ GET /api/tasks/{task_id}/checkpoints: 查询 checkpoint 时间线。
 """
 
 from fastapi import APIRouter, Depends, Query, Request
-from octoagent.core.models import ResumeFailureType
+from octoagent.core.models import ResumeFailureType, Task
+from octoagent.core.store import StoreGroup
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -68,6 +69,56 @@ class CheckpointListResponse(BaseModel):
     checkpoints: list[CheckpointItem]
 
 
+async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> str:
+    workspace = await store_group.project_store.resolve_workspace_for_scope(task.scope_id)
+    project_id = workspace.project_id if workspace is not None else None
+    workspace_id = workspace.workspace_id if workspace is not None else None
+
+    related_sessions = []
+    seen_agent_session_ids: set[str] = set()
+
+    def _append(agent_session) -> None:
+        if agent_session is None or agent_session.agent_session_id in seen_agent_session_ids:
+            return
+        seen_agent_session_ids.add(agent_session.agent_session_id)
+        related_sessions.append(agent_session)
+
+    candidate_legacy_session_ids = {str(task.thread_id).strip()}
+
+    session_states = await store_group.agent_context_store.list_session_contexts(
+        project_id=project_id,
+        workspace_id=workspace_id,
+    )
+    for item in session_states:
+        if str(item.thread_id).strip() != str(task.thread_id).strip():
+            continue
+        if item.agent_session_id:
+            _append(
+                await store_group.agent_context_store.get_agent_session(item.agent_session_id)
+            )
+        if item.session_id:
+            candidate_legacy_session_ids.add(str(item.session_id).strip())
+
+    for legacy_session_id in candidate_legacy_session_ids:
+        if not legacy_session_id:
+            continue
+        candidates = await store_group.agent_context_store.list_agent_sessions(
+            legacy_session_id=legacy_session_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            limit=200,
+        )
+        for item in candidates:
+            _append(item)
+
+    related_sessions.sort(key=lambda item: item.updated_at, reverse=True)
+    for item in related_sessions:
+        alias = item.alias.strip()
+        if alias:
+            return alias
+    return ""
+
+
 @router.get("/api/tasks", response_model=TaskListResponse)
 async def list_tasks(
     status: str | None = Query(default=None, description="按状态筛选"),
@@ -124,6 +175,7 @@ async def get_task_detail(
     # 查询关联的事件和 artifacts
     events = await store_group.event_store.get_events_for_task(task_id)
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    session_alias = await _resolve_task_session_alias(task, store_group)
 
     # 序列化事件
     events_data = [
@@ -163,6 +215,7 @@ async def get_task_detail(
         "updated_at": task.updated_at.isoformat(),
         "status": task.status.value,
         "title": task.title,
+        "alias": session_alias,
         "thread_id": task.thread_id,
         "scope_id": task.scope_id,
         "requester": {

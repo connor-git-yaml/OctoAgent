@@ -4,7 +4,11 @@ import NewSessionModal from "../ChatUI/NewSessionModal";
 import FrontDoorGate from "../FrontDoorGate";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
 import type { SessionProjectionDocument, SessionProjectionItem } from "../../types";
-import { formatDateTime, getValueAtPath } from "../../workbench/utils";
+import {
+  formatDateTime,
+  formatSessionDisplayTitle,
+  getValueAtPath,
+} from "../../workbench/utils";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
@@ -98,15 +102,11 @@ function renderNavDescription(path: string): string {
 }
 
 function formatSessionTitle(session: SessionProjectionItem): string {
-  if (session.alias?.trim()) {
-    return session.alias.trim();
-  }
-  if (session.title?.trim()) {
-    return session.title.trim();
-  }
-  return session.latest_message_summary?.trim()
-    ? session.latest_message_summary.slice(0, 30)
-    : "未命名对话";
+  return formatSessionDisplayTitle({
+    alias: session.alias,
+    title: session.title,
+    latestMessageSummary: session.latest_message_summary,
+  });
 }
 
 function resolveSessionOwnerProfileId(session: SessionProjectionItem): string {

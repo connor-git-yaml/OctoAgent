@@ -28,6 +28,7 @@ import { classifyEvents, TERMINAL_STATUSES } from "../utils/phaseClassifier";
 import { splitIntoRounds } from "../utils/roundSplitter";
 import type { FlowNode } from "../utils/roundSplitter";
 import { formatTime } from "../utils/formatTime";
+import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
   TaskDetail as TaskDetailType,
   TaskDetailResponse,
@@ -263,6 +264,11 @@ export default function TaskDetail() {
     if (diff < 60_000) return `${(diff / 1000).toFixed(0)}s`;
     return `${(diff / 60_000).toFixed(1)}min`;
   })();
+  const taskDisplayTitle = formatSessionDisplayTitle({
+    alias: task.alias,
+    title: task.title,
+    fallbackTitle: task.title,
+  });
 
   return (
     <div className="tv-page">
@@ -270,7 +276,7 @@ export default function TaskDetail() {
       <div className="tv-detail-header">
         <div className="tv-detail-header-row">
           <Link to="/" className="tv-detail-back" aria-label="返回任务列表">&larr;</Link>
-          <h1 className="tv-detail-title">{task.title}</h1>
+          <h1 className="tv-detail-title">{taskDisplayTitle}</h1>
           <div className="tv-detail-meta">
             <span className="tv-detail-meta-item">{task.requester.channel}</span>
             <span className="tv-detail-meta-sep" />

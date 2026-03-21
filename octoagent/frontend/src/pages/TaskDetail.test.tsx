@@ -306,4 +306,65 @@ describe("TaskDetail", () => {
     expect(screen.getByText("lane-screenshot.png")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Events (2)" })).toBeTruthy();
   });
+
+  it("标题优先使用 session alias，而不是 task.title", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      class FakeEventSource {
+        static CLOSED = 2;
+        readyState = FakeEventSource.CLOSED;
+        onopen: ((this: EventSource, ev: Event) => void) | null = null;
+        onerror:
+          | ((this: EventSource, ev: Event) => void)
+          | null = null;
+        onmessage:
+          | ((this: EventSource, ev: MessageEvent) => void)
+          | null = null;
+
+        constructor() {}
+
+        addEventListener(): void {}
+
+        removeEventListener(): void {}
+
+        close(): void {}
+      }
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        task: {
+          task_id: "task-alias",
+          created_at: "2026-03-21T10:00:00Z",
+          updated_at: "2026-03-21T10:01:00Z",
+          status: "SUCCEEDED",
+          title: "请帮我创建安装一下 openrouter-perplexity MCP，下面的配置里面有你可以参考的信息",
+          alias: "深圳",
+          thread_id: "thread-alias",
+          scope_id: "scope-alias",
+          requester: {
+            channel: "web",
+            sender_id: "owner",
+          },
+          risk_level: "low",
+        },
+        events: [],
+        artifacts: [],
+      })
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/tasks/task-alias"]}>
+        <Routes>
+          <Route path="/tasks/:taskId" element={<TaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "深圳" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "请帮我创建安装一下 openrouter-perplexity MCP，下面的配置里面有你可以参考的信息",
+      })
+    ).not.toBeInTheDocument();
+  });
 });

@@ -13,6 +13,7 @@ import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } fro
 import { useChatStream } from "../hooks/useChatStream";
 import { readStoredTaskId } from "../hooks/chatStreamHelpers";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
+import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
   ApprovalListItem,
   ExecutionSessionDocument,
@@ -1537,8 +1538,12 @@ export default function ChatWorkbench() {
     (activeSession?.title?.trim()) ||
     effectiveProjectLabel ||
     "";
-  const sessionDisplayName = currentSessionAlias || sessionTitleBase;
-  const sessionTitleLabel = sessionDisplayName || conversationTitle;
+  const sessionDisplayName = formatSessionDisplayTitle({
+    alias: currentSessionAlias,
+    title: sessionTitleBase,
+    fallbackTitle: conversationTitle,
+  });
+  const sessionTitleLabel = sessionDisplayName;
   const editableSessionId =
     currentSession?.session_id || activeSession?.session_id || routeSessionId || "";
   const editableThreadId =

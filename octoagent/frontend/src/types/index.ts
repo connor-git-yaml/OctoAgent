@@ -56,6 +56,7 @@ export interface TaskDetail {
   updated_at: string;
   status: TaskStatus;
   title: string;
+  alias?: string;
   thread_id: string;
   scope_id: string;
   requester: RequesterInfo;

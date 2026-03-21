@@ -292,6 +292,88 @@ class TestChatSendRoute:
         assert latest_metadata["agent_profile_id"] == "singleton:research"
         assert not latest_metadata.get("requested_worker_profile_id")
 
+    async def test_task_detail_prefers_projected_session_alias(
+        self,
+        client: AsyncClient,
+        test_app,
+        tmp_path: Path,
+    ) -> None:
+        store_group = test_app.state.store_group
+        project = Project(
+            project_id="project-task-alias",
+            slug="task-alias",
+            name="Task Alias",
+        )
+        workspace = Workspace(
+            workspace_id="workspace-task-alias-primary",
+            project_id=project.project_id,
+            slug="primary",
+            name="Task Alias Primary",
+            root_path=str(tmp_path / "task-alias"),
+        )
+        await store_group.project_store.create_project(project)
+        await store_group.project_store.create_workspace(workspace)
+
+        task_service = TaskService(store_group, test_app.state.sse_hub)
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                channel="web",
+                thread_id="thread-task-alias",
+                scope_id=f"workspace:{workspace.workspace_id}:chat:web:thread-task-alias",
+                sender_id="owner",
+                sender_name="Owner",
+                text="请帮我创建安装一下 openrouter-perplexity MCP，下面的配置里面有你可以参考的信息",
+                idempotency_key="task-detail-alias-001",
+            )
+        )
+        assert created is True
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+
+        projected_session_id = build_scope_aware_session_id(
+            task,
+            project_id=project.project_id,
+            workspace_id=workspace.workspace_id,
+        )
+        await store_group.agent_context_store.save_agent_runtime(
+            AgentRuntime(
+                agent_runtime_id="runtime-task-alias",
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                agent_profile_id="agent-profile-task-alias",
+                role=AgentRuntimeRole.MAIN,
+                name="Task Alias Runtime",
+            )
+        )
+        await store_group.agent_context_store.save_agent_session(
+            AgentSession(
+                agent_session_id="agent-session-task-alias",
+                agent_runtime_id="runtime-task-alias",
+                kind=AgentSessionKind.DIRECT_WORKER,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                thread_id=task.thread_id,
+                legacy_session_id=projected_session_id,
+                alias="深圳",
+            )
+        )
+        await store_group.agent_context_store.save_session_context(
+            SessionContextState(
+                session_id=projected_session_id,
+                agent_runtime_id="runtime-task-alias",
+                agent_session_id="agent-session-task-alias",
+                thread_id=task.thread_id,
+                project_id=project.project_id,
+                workspace_id=workspace.workspace_id,
+                task_ids=[task_id],
+            )
+        )
+        await store_group.conn.commit()
+
+        detail = await client.get(f"/api/tasks/{task_id}")
+        assert detail.status_code == 200
+        assert detail.json()["task"]["alias"] == "深圳"
+
     async def test_continue_legacy_butler_session_ignores_polluted_worker_owner(
         self,
         client: AsyncClient,
