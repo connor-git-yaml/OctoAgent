@@ -137,6 +137,13 @@ class SessionMemoryExtractor:
         self._project_root = project_root
         # per-Session asyncio.Lock 字典
         self._session_locks: dict[str, asyncio.Lock] = {}
+        # 从配置读取记忆加工 model alias，对齐 Settings 页面"记忆加工"字段
+        try:
+            from octoagent.provider.dx.llm_common import resolve_default_model_alias
+
+            self._model_alias = resolve_default_model_alias(project_root)
+        except Exception:
+            self._model_alias = "main"
 
     async def extract_and_commit(
         self,
@@ -280,7 +287,7 @@ class SessionMemoryExtractor:
                         "content": f"以下是最近的对话内容（{len(new_turns)} 轮）：\n\n{extraction_input}",
                     },
                 ],
-                model_alias="fast",
+                model_alias=self._model_alias,
             )
         except Exception as exc:
             log.warning(
