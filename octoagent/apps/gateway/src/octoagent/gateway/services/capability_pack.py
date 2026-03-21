@@ -1228,11 +1228,16 @@ class CapabilityPackService:
                 )
             return resolved
 
-        def _truncate_text(value: str, *, limit: int = 4000) -> str:
+        def _truncate_text(value: str, *, limit: int = 100_000) -> str:
             text = value.strip()
             if len(text) <= limit:
                 return text
-            return f"{text[:limit].rstrip()}\n...[truncated]"
+            omitted = len(text) - limit
+            return (
+                f"{text[:limit].rstrip()}\n\n"
+                f"⚠️ [内容已截断：原文 {len(text)} 字符，已显示前 {limit} 字符，"
+                f"省略 {omitted} 字符。如需完整内容请增大 max_chars 参数。]"
+            )
 
         async def _current_work_context() -> tuple[Any, Any]:
             _, context, task = await _current_parent()
