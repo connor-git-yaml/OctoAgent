@@ -9,7 +9,7 @@
  * 5. 进行中任务通过 useSSE 实时追加新事件
  */
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   ApiError,
@@ -28,7 +28,14 @@ import { classifyEvents, TERMINAL_STATUSES } from "../utils/phaseClassifier";
 import { splitIntoRounds } from "../utils/roundSplitter";
 import type { FlowNode } from "../utils/roundSplitter";
 import { formatTime } from "../utils/formatTime";
-import type { TaskDetail as TaskDetailType, TaskEvent, Artifact, SSEEventData, TaskStatus } from "../types";
+import type {
+  TaskDetail as TaskDetailType,
+  TaskDetailResponse,
+  TaskEvent,
+  Artifact,
+  SSEEventData,
+  TaskStatus,
+} from "../types";
 
 /** 状态 badge 的用户友好文案 */
 const STATUS_LABEL: Record<string, string> = {
@@ -57,6 +64,33 @@ function payloadSummary(payload: Record<string, unknown>): string {
   return parts.join("\n");
 }
 
+function getLatestStateTransitionSeq(events: TaskEvent[]): number {
+  return events.reduce((latest, event) => {
+    if (event.type !== "STATE_TRANSITION") {
+      return latest;
+    }
+    return Math.max(latest, event.task_seq);
+  }, 0);
+}
+
+function mergeTaskSnapshot(
+  currentTask: TaskDetailType | null,
+  nextTask: TaskDetailType,
+  currentStatusSeq: number,
+  nextStatusSeq: number,
+): TaskDetailType {
+  if (!currentTask || nextStatusSeq >= currentStatusSeq) {
+    return nextTask;
+  }
+  return {
+    ...nextTask,
+    status: currentTask.status,
+    updated_at: currentTask.updated_at > nextTask.updated_at
+      ? currentTask.updated_at
+      : nextTask.updated_at,
+  };
+}
+
 export default function TaskDetail() {
   const { taskId } = useParams<{ taskId: string }>();
   const [task, setTask] = useState<TaskDetailType | null>(null);
@@ -67,6 +101,33 @@ export default function TaskDetail() {
   const [authError, setAuthError] = useState<ApiError | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("visual");
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+  const latestStatusSeqRef = useRef(0);
+  const artifactRefreshInFlightRef = useRef(false);
+  const artifactRefreshQueuedRef = useRef(false);
+
+  useEffect(() => {
+    latestStatusSeqRef.current = 0;
+    artifactRefreshInFlightRef.current = false;
+    artifactRefreshQueuedRef.current = false;
+  }, [taskId]);
+
+  const applyTaskDetail = useCallback((
+    data: TaskDetailResponse,
+    options?: { replaceEvents?: boolean },
+  ) => {
+    const currentStatusSeq = latestStatusSeqRef.current;
+    const nextStatusSeq = getLatestStateTransitionSeq(data.events);
+    latestStatusSeqRef.current = Math.max(currentStatusSeq, nextStatusSeq);
+
+    setTask((prev) =>
+      mergeTaskSnapshot(prev, data.task, currentStatusSeq, nextStatusSeq)
+    );
+    if (options?.replaceEvents ?? true) {
+      setEvents(data.events);
+    }
+    setArtifacts(data.artifacts);
+    setAuthError(null);
+  }, []);
 
   const loadTask = useCallback(async () => {
     if (!taskId) {
@@ -76,17 +137,39 @@ export default function TaskDetail() {
     setError(null);
     try {
       const data = await fetchTaskDetail(taskId);
-      setTask(data.task);
-      setEvents(data.events);
-      setArtifacts(data.artifacts);
-      setAuthError(null);
+      applyTaskDetail(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load task");
       setAuthError(isFrontDoorApiError(err) ? err : null);
     } finally {
       setLoading(false);
     }
-  }, [taskId]);
+  }, [taskId, applyTaskDetail]);
+
+  const refreshArtifacts = useCallback(async () => {
+    if (!taskId) {
+      return;
+    }
+    if (artifactRefreshInFlightRef.current) {
+      artifactRefreshQueuedRef.current = true;
+      return;
+    }
+
+    artifactRefreshInFlightRef.current = true;
+    try {
+      const data = await fetchTaskDetail(taskId);
+      applyTaskDetail(data, { replaceEvents: false });
+      setError(null);
+    } catch {
+      // 静默刷新失败时保持现状，避免打断进行中的页面交互。
+    } finally {
+      artifactRefreshInFlightRef.current = false;
+      if (artifactRefreshQueuedRef.current) {
+        artifactRefreshQueuedRef.current = false;
+        void refreshArtifacts();
+      }
+    }
+  }, [taskId, applyTaskDetail]);
 
   // 加载初始数据
   useEffect(() => {
@@ -109,13 +192,32 @@ export default function TaskDetail() {
       }];
     });
 
-    // 如果是状态变更，更新任务状态
-    if (eventData.type === "STATE_TRANSITION" && eventData.payload.to_status) {
+    const isCurrentTaskEvent = eventData.task_id === taskId;
+
+    // 只用当前任务自己的、且 task_seq 单调递增的 transition 更新头部状态，
+    // 避免子任务冒泡事件或历史重放把 badge 回刷到旧状态。
+    if (
+      isCurrentTaskEvent &&
+      eventData.type === "STATE_TRANSITION" &&
+      eventData.payload.to_status &&
+      eventData.task_seq > latestStatusSeqRef.current
+    ) {
+      latestStatusSeqRef.current = eventData.task_seq;
       setTask((prev) =>
-        prev ? { ...prev, status: eventData.payload.to_status as TaskStatus } : prev
+        prev
+          ? {
+            ...prev,
+            status: eventData.payload.to_status as TaskStatus,
+            updated_at: eventData.ts,
+          }
+          : prev
       );
     }
-  }, []);
+
+    if (isCurrentTaskEvent && eventData.type === "ARTIFACT_CREATED") {
+      void refreshArtifacts();
+    }
+  }, [taskId, refreshArtifacts]);
 
   // SSE 连接（仅非终态任务）
   const isTerminal = task ? TERMINAL_STATUSES.has(task.status) : true;
