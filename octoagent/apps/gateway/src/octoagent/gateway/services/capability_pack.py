@@ -2494,6 +2494,7 @@ class CapabilityPackService:
 
             if self._mcp_registry is None:
                 return json.dumps({"status": "unbound", "tools": []}, ensure_ascii=False)
+            self.invalidate_pack()
             await self.refresh()
             return json.dumps(
                 {
@@ -2618,7 +2619,7 @@ class CapabilityPackService:
                         encoding="utf-8",
                     )
 
-                    # 触发 MCP 发现
+                    # 触发 MCP 发现 + 刷新 pack 缓存
                     try:
                         await self._mcp_registry.discover_and_register()
                     except Exception as disc_exc:
@@ -2627,6 +2628,10 @@ class CapabilityPackService:
                             server_name=server_name,
                             error=str(disc_exc),
                         )
+                    # MCP 工具注入到 ToolBroker 后必须刷新 pack 缓存，
+                    # 否则后续 resolve_profile_first_tools 用的仍是旧 pack（不含 MCP 工具）
+                    self.invalidate_pack()
+                    await self.refresh()
 
                     return json.dumps(
                         {
