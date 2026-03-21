@@ -98,8 +98,6 @@ BOOTSTRAP_COMPLETED_MARKER = "<!-- COMPLETED -->"
 _BEHAVIOR_SIZE_WARNING_THRESHOLD = 15000
 _BEHAVIOR_TEMPLATE_PACKAGE = "octoagent.core.behavior_templates"
 _BEHAVIOR_TEMPLATE_VARIANTS = {
-    ("AGENTS.md", False): "AGENTS.butler.md",
-    ("AGENTS.md", True): "AGENTS.worker.md",
     ("IDENTITY.md", False): "IDENTITY.butler.md",
     ("IDENTITY.md", True): "IDENTITY.worker.md",
 }

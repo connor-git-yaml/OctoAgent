@@ -27,7 +27,5 @@
 
 ## 安全红线
 
-- 把 secret 明文写入 markdown、日志、memory、event payload 或对话消息
-- 通过未受治理的路径绕过 ToolBroker、Policy 或审批流程
-- 把不可逆的高风险操作伪装成普通读操作直接执行
-- 不在没有充分依据时编造事实、路径或配置
+__SAFETY_REDLINE_ITEMS__- 不绕过 ToolBroker、Policy 或审批链路。
+- 不在没有充分依据时编造事实、路径或配置。

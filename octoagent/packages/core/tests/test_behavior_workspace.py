@@ -6,14 +6,12 @@ import json
 from pathlib import Path
 
 import pytest
-
 from octoagent.core.behavior_workspace import (
+    _PROFILE_ALLOWLIST,
     ALL_BEHAVIOR_FILE_IDS,
     BEHAVIOR_FILE_BUDGETS,
-    BOOTSTRAP_COMPLETED_MARKER,
     BehaviorLoadProfile,
     OnboardingState,
-    _PROFILE_ALLOWLIST,
     _default_content_for_file,
     _onboarding_state_path,
     ensure_filesystem_skeleton,
@@ -106,7 +104,7 @@ class TestBootstrapSeeding:
     """T1.2: ensure_filesystem_skeleton 创建 BOOTSTRAP.md 时写入 bootstrap_seeded_at。"""
 
     def test_skeleton_creates_bootstrap_and_seeds_state(self, tmp_path: Path) -> None:
-        created = ensure_filesystem_skeleton(tmp_path)
+        ensure_filesystem_skeleton(tmp_path)
         # BOOTSTRAP.md 应该被创建
         bootstrap_path = tmp_path / "behavior" / "system" / "BOOTSTRAP.md"
         assert bootstrap_path.exists()
@@ -280,7 +278,14 @@ class TestResolveWithLoadProfile:
         )
         file_ids = {f.file_id for f in workspace.files}
         # FULL 默认应包含 6 个核心文件（不含 advanced，除非 agent_private 文件存在）
-        for fid in ("AGENTS.md", "USER.md", "PROJECT.md", "KNOWLEDGE.md", "TOOLS.md", "BOOTSTRAP.md"):
+        for fid in (
+            "AGENTS.md",
+            "USER.md",
+            "PROJECT.md",
+            "KNOWLEDGE.md",
+            "TOOLS.md",
+            "BOOTSTRAP.md",
+        ):
             assert fid in file_ids, f"{fid} 应在 FULL profile 中"
 
     def test_worker_profile_returns_subset(self, tmp_path: Path) -> None:
@@ -419,7 +424,6 @@ class TestDefaultTemplateBudgetCompliance:
         "file_id,is_worker",
         [
             ("AGENTS.md", False),
-            ("AGENTS.md", True),
             ("USER.md", False),
             ("PROJECT.md", False),
             ("KNOWLEDGE.md", False),
@@ -453,32 +457,19 @@ class TestDefaultTemplateBudgetCompliance:
 class TestDefaultTemplateContentDomains:
     """T015: 内容域覆盖关键词测试。"""
 
-    def test_agents_butler_content_domains(self) -> None:
-        """Butler 版 AGENTS.md 包含角色定位、委派框架、安全红线、内存协议。"""
+    def test_agents_content_domains(self) -> None:
+        """共享版 AGENTS.md 包含文件用途、协作规则、存储边界和治理。"""
         content = _default_content_for_file(
             file_id="AGENTS.md",
             is_worker_profile=False,
-            agent_name="Butler",
+            agent_name="Agent",
             project_label="default",
         )
-        assert "委派" in content or "delegate" in content.lower()
-        assert "Worker" in content
-        assert "安全" in content or "红线" in content
+        assert "文件用途" in content
+        assert "共享协作规则" in content
         assert "Memory" in content or "记忆" in content or "内存" in content
-        assert "A2A" in content
-
-    def test_agents_worker_content_domains(self) -> None:
-        """Worker 版 AGENTS.md 包含 Worker 角色、Butler 协作、Subagent、objective。"""
-        content = _default_content_for_file(
-            file_id="AGENTS.md",
-            is_worker_profile=True,
-            agent_name="Worker",
-            project_label="default",
-        )
-        assert "Worker" in content
-        assert "Butler" in content
-        assert "Subagent" in content or "子代理" in content
-        assert "objective" in content or "目标" in content
+        assert "project_path_manifest" in content
+        assert "安全" in content or "红线" in content
 
     def test_tools_content_domains(self) -> None:
         """TOOLS.md 包含优先级、secrets 安全、delegate 规范、读写指引。"""
