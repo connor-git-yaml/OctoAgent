@@ -2903,6 +2903,7 @@ class AgentContextService:
                     memory_service_factory=self.get_memory_service,
                     llm_service=self._llm_service or self._shared_llm_service,
                     project_root=self._project_root,
+                    llm_service_resolver=lambda: self._llm_service or self._shared_llm_service,
                 )
             except Exception:
                 log.warning("session_memory_extractor_init_failed", exc_info=True)

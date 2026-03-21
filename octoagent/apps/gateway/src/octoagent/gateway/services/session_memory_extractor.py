@@ -128,13 +128,15 @@ class SessionMemoryExtractor:
         self,
         agent_context_store: SqliteAgentContextStore,
         memory_service_factory: Any,  # callable(project, workspace) -> MemoryService
-        llm_service: LlmServiceProtocol | None,
-        project_root: Path,
+        llm_service: LlmServiceProtocol | None = None,
+        project_root: Path | None = None,
+        llm_service_resolver: Any | None = None,  # callable() -> LlmServiceProtocol | None
     ) -> None:
         self._agent_context_store = agent_context_store
         self._memory_service_factory = memory_service_factory
         self._llm_service = llm_service
-        self._project_root = project_root
+        self._llm_service_resolver = llm_service_resolver
+        self._project_root = project_root or Path.cwd()
         # per-Session asyncio.Lock 字典
         self._session_locks: dict[str, asyncio.Lock] = {}
         # 从配置读取记忆加工 model alias，对齐 Settings 页面"记忆加工"字段
@@ -182,8 +184,13 @@ class SessionMemoryExtractor:
                 )
                 return result
 
-            # 2. 检查 LLM 服务可用性
-            if self._llm_service is None:
+            # 2. 检查 LLM 服务可用性（动态获取，避免 hot-reload 类变量丢失）
+            llm_service = self._llm_service
+            if llm_service is None and self._llm_service_resolver is not None:
+                llm_service = self._llm_service_resolver()
+                if llm_service is not None:
+                    self._llm_service = llm_service  # 缓存成功获取的实例
+            if llm_service is None:
                 result.skipped_reason = "llm_unavailable"
                 log.info(
                     "session_memory_extraction_skipped",
