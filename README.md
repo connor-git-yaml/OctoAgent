@@ -162,6 +162,7 @@ For the full product guide, detailed setup, and configuration walkthrough, see [
 
 - Product guide and detailed setup: [`octoagent/README.md`](./octoagent/README.md)
 - Engineering blueprint: [`docs/blueprint.md`](./docs/blueprint.md)
+- Current codebase architecture guide: [`docs/codebase-architecture/README.md`](./docs/codebase-architecture/README.md)
 - Runtime refactor plan: [`docs/agent-runtime-refactor-plan.md`](./docs/agent-runtime-refactor-plan.md)
 - Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
