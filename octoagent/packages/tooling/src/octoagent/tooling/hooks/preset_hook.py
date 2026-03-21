@@ -13,17 +13,28 @@ from typing import Any, Protocol
 
 import structlog
 
+from pathlib import Path
+
 from ..models import (
     BeforeHookResult,
     ExecutionContext,
     FailMode,
+    PermissionPreset,
     PresetCheckResult,
     PresetDecision,
+    SideEffectLevel,
     ToolMeta,
     preset_decision,
 )
 
 logger = structlog.get_logger(__name__)
+
+# 需要路径感知升级的内置 filesystem 工具名
+_FILESYSTEM_PATH_TOOLS = frozenset({
+    "filesystem.list_dir",
+    "filesystem.read_text",
+    "filesystem.write_text",
+})
 
 
 class ApprovalOverrideCacheProtocol(Protocol):
@@ -111,9 +122,22 @@ class PresetBeforeHook:
             )
             return BeforeHookResult(proceed=True)
 
+        # 路径感知升级：filesystem 工具访问 workspace 外路径时，
+        # 将 effective side_effect_level 升级为 IRREVERSIBLE，
+        # 使 NORMAL preset 触发 ASK（弹审批框），FULL preset 仍为 ALLOW。
+        # 对齐 OpenClaw security=allowlist 语义。
+        effective_side_effect = tool_meta.side_effect_level
+        if (
+            tool_meta.name in _FILESYSTEM_PATH_TOOLS
+            and context.permission_preset != PermissionPreset.FULL
+        ):
+            effective_side_effect = self._escalate_for_outside_workspace(
+                args, effective_side_effect, context,
+            )
+
         decision = preset_decision(
             context.permission_preset,
-            tool_meta.side_effect_level,
+            effective_side_effect,
         )
 
         # 构建检查结果（用于事件记录）
@@ -191,3 +215,58 @@ class PresetBeforeHook:
                 "preset_check_event_failed",
                 error=str(e),
             )
+
+    @staticmethod
+    def _escalate_for_outside_workspace(
+        args: dict[str, Any],
+        current_level: SideEffectLevel,
+        context: ExecutionContext,
+    ) -> SideEffectLevel:
+        """检测 filesystem 工具是否访问 workspace 外路径。
+
+        若路径在 workspace 外，将 effective side_effect_level 升级为
+        IRREVERSIBLE，使 NORMAL preset 触发 ASK（弹审批框）。
+        对齐 OpenClaw security=allowlist 语义：
+        - FULL preset → ALLOW（任意路径，不审批）
+        - NORMAL preset + workspace 内 → ALLOW
+        - NORMAL preset + workspace 外 → ASK（弹审批）
+        - MINIMAL preset → ASK（任何 reversible+ 都审批）
+
+        workspace root 默认 ~/.octoagent（OCTOAGENT_HOME 环境变量可覆盖）。
+        """
+        import os
+
+        raw_path = str(args.get("path", "") or args.get("cwd", "")).strip()
+        if not raw_path:
+            return current_level
+
+        # workspace root: 环境变量 > 默认 ~/.octoagent
+        workspace_root_str = os.environ.get(
+            "OCTOAGENT_HOME", str(Path.home() / ".octoagent")
+        )
+
+        try:
+            candidate = Path(raw_path)
+            if str(candidate).startswith("~"):
+                candidate = candidate.expanduser()
+            if not candidate.is_absolute():
+                candidate = Path(workspace_root_str) / candidate
+            resolved = candidate.resolve()
+            workspace_resolved = Path(workspace_root_str).resolve()
+
+            if resolved != workspace_resolved and not resolved.is_relative_to(
+                workspace_resolved
+            ):
+                logger.debug(
+                    "preset_path_escalated",
+                    path=raw_path,
+                    workspace_root=workspace_root_str,
+                    from_level=current_level.value,
+                    to_level=SideEffectLevel.IRREVERSIBLE.value,
+                )
+                return SideEffectLevel.IRREVERSIBLE
+        except Exception:
+            # 路径解析失败 → 保守升级
+            return SideEffectLevel.IRREVERSIBLE
+
+        return current_level
