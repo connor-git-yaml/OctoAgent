@@ -14,8 +14,10 @@ from octoagent.core.behavior_workspace import (
     check_behavior_file_budget,
     ensure_filesystem_skeleton,
     materialize_agent_behavior_files,
+    read_behavior_file_content,
     resolve_behavior_agent_slug,
     resolve_write_path_by_file_id,
+    validate_behavior_file_path,
 )
 from octoagent.core.models import (
     A2AConversationItem,
@@ -3818,6 +3820,8 @@ class ControlPlaneService:
             return await self._handle_pipeline_resume(request)
         if action_id == "pipeline.retry_node":
             return await self._handle_pipeline_retry_node(request)
+        if action_id == "behavior.read_file":
+            return await self._handle_behavior_read_file(request)
         if action_id == "behavior.write_file":
             return await self._handle_behavior_write_file(request)
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {action_id}")
@@ -6926,6 +6930,49 @@ class ControlPlaneService:
                 self._resource_ref("skill_pipeline", "pipeline:overview"),
             ],
             target_refs=[ControlPlaneTargetRef(target_type="work", target_id=work_id)],
+        )
+
+    async def _handle_behavior_read_file(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        """读取行为文件的内容（从磁盘）。供 Web UI 行为文件面板使用。"""
+        file_path = str(request.params.get("file_path", "")).strip()
+        if not file_path:
+            raise ControlPlaneActionError("MISSING_PARAM", "file_path 不能为空")
+
+        try:
+            resolved = validate_behavior_file_path(self._project_root, file_path)
+        except ValueError as exc:
+            raise ControlPlaneActionError("INVALID_PATH", str(exc)) from exc
+
+        if not resolved.exists():
+            # 文件不存在时 fallback 到默认模板
+            try:
+                content, exists, budget_chars = read_behavior_file_content(
+                    self._project_root, file_path,
+                )
+            except Exception:
+                content, exists, budget_chars = "", False, 0
+            return self._completed_result(
+                request=request,
+                code="BEHAVIOR_FILE_READ",
+                message="文件尚未创建，返回默认模板",
+                data={"file_path": file_path, "content": content, "exists": False,
+                      "budget_chars": budget_chars},
+            )
+
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise ControlPlaneActionError(
+                "FILE_READ_ERROR", f"读取文件失败: {exc}"
+            ) from exc
+
+        return self._completed_result(
+            request=request,
+            code="BEHAVIOR_FILE_READ",
+            message="已读取行为文件",
+            data={"file_path": file_path, "content": content, "exists": True},
         )
 
     async def _handle_behavior_write_file(
