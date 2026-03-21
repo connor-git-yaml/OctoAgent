@@ -853,6 +853,11 @@ class ControlPlaneService:
                     action_id="session.set_alias",
                 ),
                 ControlPlaneCapability(
+                    capability_id="session.delete",
+                    label="删除对话",
+                    action_id="session.delete",
+                ),
+                ControlPlaneCapability(
                     capability_id="session.export",
                     label="导出会话",
                     action_id="session.export",
@@ -3686,6 +3691,8 @@ class ControlPlaneService:
             return await self._handle_session_reset(request)
         if action_id == "session.set_alias":
             return await self._handle_session_set_alias(request)
+        if action_id == "session.delete":
+            return await self._handle_session_delete(request)
         if action_id == "session.export":
             return await self._handle_session_export(request)
         if action_id == "session.interrupt":
@@ -6356,6 +6363,86 @@ class ControlPlaneService:
                 ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
                 ControlPlaneTargetRef(target_type="thread", target_id=session.thread_id),
                 ControlPlaneTargetRef(target_type="task", target_id=session.task_id),
+            ],
+        )
+
+    async def _handle_session_delete(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
+        """删除整个 session 及其所有关联数据。"""
+        from octoagent.core.store.session_delete import delete_session_cascade
+
+        session = await self._resolve_session_projection_target(request)
+        if session is None:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_NOT_FOUND",
+                message="找不到要删除的对话。",
+            )
+
+        # 1. 获取关联 task_ids
+        session_state = await self._stores.agent_context_store.get_session_context(
+            session.session_id
+        )
+        task_ids: list[str] = []
+        if session_state is not None:
+            task_ids = list(session_state.task_ids) if session_state.task_ids else []
+
+        # 2. 检查活跃任务
+        active_task_statuses = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"}
+        active_tasks: list[tuple[str, str]] = []
+        for tid in task_ids:
+            task = await self._stores.task_store.get_task(tid)
+            if task is not None and task.status.value in active_task_statuses:
+                active_tasks.append((task.task_id, task.title or task.task_id))
+        if active_tasks:
+            task_info = "、".join(f"「{title}」" for _, title in active_tasks[:3])
+            extra = f"等 {len(active_tasks)} 个" if len(active_tasks) > 3 else ""
+            return self._rejected_result(
+                request=request,
+                code="SESSION_DELETE_BLOCKED",
+                message=f"无法删除：{task_info}{extra}任务正在运行中。请先取消或等待任务完成后再删除。",
+            )
+
+        # 3. 收集关联 agent_session_ids
+        related_sessions = await self._list_related_agent_sessions_for_projection(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            project_id=session.project_id,
+            workspace_id=session.workspace_id,
+            session_state=session_state,
+        )
+        agent_session_ids = [s.agent_session_id for s in related_sessions]
+
+        # 4. 级联删除
+        stats = await delete_session_cascade(
+            stores=self._stores,
+            session_id=session.session_id,
+            task_ids=task_ids,
+            agent_session_ids=agent_session_ids,
+        )
+
+        # 5. 若删除的是当前 focused session，清除 focus
+        state = self._state_store.load()
+        if state.focused_session_id == session.session_id:
+            state = state.model_copy(
+                update={
+                    "focused_session_id": "",
+                    "focused_thread_id": "",
+                    "new_conversation_token": "",
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+            self._state_store.save(state)
+
+        return self._completed_result(
+            request=request,
+            code="SESSION_DELETED",
+            message=f"已删除对话及 {stats.get('tasks', 0)} 个任务的所有关联数据。",
+            data={
+                "session_id": session.session_id,
+                "stats": stats,
+            },
+            resource_refs=[
+                self._resource_ref("session_projection", "sessions:overview"),
             ],
         )
 

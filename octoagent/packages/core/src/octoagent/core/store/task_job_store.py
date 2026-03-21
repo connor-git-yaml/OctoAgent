@@ -250,3 +250,16 @@ class SqliteTaskJobStore:
             started_at=row[8],
             finished_at=row[9],
         )
+
+    async def delete_jobs_by_task_ids(self, task_ids: list[str]) -> int:
+        """按 task_id 批量删除 task_jobs（不自动提交）。"""
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" * len(task_ids))
+        await self._conn.execute(
+            f"DELETE FROM task_jobs WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0

@@ -257,3 +257,16 @@ class SqliteEventStore:
                 idempotency_key=row[11],
             ),
         )
+
+    async def delete_events_by_task_ids(self, task_ids: list[str]) -> int:
+        """按 task_id 批量删除事件（不自动提交）。"""
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" * len(task_ids))
+        await self._conn.execute(
+            f"DELETE FROM events WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0

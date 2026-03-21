@@ -376,3 +376,20 @@ class SqliteA2AStore:
                 lock = asyncio.Lock()
                 self._conversation_locks[a2a_conversation_id] = lock
             return lock
+
+    async def delete_by_task_ids(self, task_ids: list[str]) -> int:
+        """按 task_id 级联删除 A2A 数据（不自动提交）。"""
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" * len(task_ids))
+        await self._conn.execute(
+            f"DELETE FROM a2a_messages WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        await self._conn.execute(
+            f"DELETE FROM a2a_conversations WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0

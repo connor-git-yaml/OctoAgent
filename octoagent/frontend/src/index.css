@@ -1296,6 +1296,7 @@
   text-align: left;
   font: inherit;
   color: inherit;
+  position: relative;
   transition:
     background 120ms ease,
     border-color 120ms ease;
@@ -1345,6 +1346,45 @@
 .wb-nav-session-new:hover {
   color: var(--cp-accent, #1f6a5b);
   border-color: rgba(31, 106, 91, 0.2);
+}
+
+.wb-nav-session-delete {
+  display: none;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--cp-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+.wb-nav-session-item:hover .wb-nav-session-delete {
+  display: block;
+}
+
+.wb-nav-session-delete:hover {
+  color: var(--cp-danger, #e53e3e);
+  background: rgba(229, 62, 62, 0.08);
+}
+
+.wb-button--danger {
+  background: var(--cp-danger, #e53e3e);
+  color: #fff;
+  border-color: transparent;
+}
+
+.wb-button--danger:hover:not(:disabled) {
+  background: #c53030;
+}
+
+.wb-button--danger:disabled {
+  opacity: 0.5;
 }
 
 .wb-sidebar-grid,

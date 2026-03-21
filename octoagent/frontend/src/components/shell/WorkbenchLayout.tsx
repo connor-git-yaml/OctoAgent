@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import NewSessionModal from "../ChatUI/NewSessionModal";
+import DeleteSessionModal from "../ChatUI/DeleteSessionModal";
 import FrontDoorGate from "../FrontDoorGate";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
 import type { SessionProjectionDocument, SessionProjectionItem } from "../../types";
@@ -132,12 +133,14 @@ function ChatNavSection({
   currentPath,
   onNavigate,
   onNewSession,
+  onDeleteSession,
   resolveAgentName,
 }: {
   sessions: SessionProjectionDocument;
   currentPath: string;
   onNavigate: () => void;
   onNewSession: () => void;
+  onDeleteSession: (session: SessionProjectionItem) => void;
   resolveAgentName: (agentProfileId: string) => string;
 }) {
   const navigate = useNavigate();
@@ -179,6 +182,19 @@ function ChatNavSection({
                   {ownerLabel}
                 </span>
               </span>
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                className="wb-nav-session-delete"
+                title="删除对话"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteSession(session);
+                }}
+              >
+                ×
+              </span>
             </button>
           );
         })}
@@ -199,6 +215,8 @@ export default function WorkbenchLayout() {
   const [navOpen, setNavOpen] = useState(false);
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [newSessionBusy, setNewSessionBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SessionProjectionItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -302,6 +320,7 @@ export default function WorkbenchLayout() {
               currentPath={location.pathname}
               onNavigate={() => setNavOpen(false)}
               onNewSession={() => setShowNewSessionModal(true)}
+              onDeleteSession={setDeleteTarget}
               resolveAgentName={resolveAgentName}
             />
             {[
@@ -418,6 +437,32 @@ export default function WorkbenchLayout() {
             />
           );
         })()}
+        {deleteTarget && (
+          <DeleteSessionModal
+            sessionTitle={formatSessionTitle(deleteTarget)}
+            taskCount={0}
+            busy={deleteBusy}
+            onConfirm={async () => {
+              setDeleteBusy(true);
+              try {
+                const result = await workbench.submitAction("session.delete", {
+                  session_id: deleteTarget.session_id,
+                });
+                if (result?.status === "completed") {
+                  setDeleteTarget(null);
+                  if (location.pathname === `/chat/${deleteTarget.session_id}`) {
+                    navigate("/");
+                  }
+                } else if (result?.message) {
+                  alert(result.message);
+                }
+              } finally {
+                setDeleteBusy(false);
+              }
+            }}
+            onClose={() => setDeleteTarget(null)}
+          />
+        )}
       </div>
     </WorkbenchContext.Provider>
   );

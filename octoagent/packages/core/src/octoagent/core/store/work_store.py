@@ -414,3 +414,24 @@ class SqliteWorkStore:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
+
+    async def delete_by_task_ids(self, task_ids: list[str]) -> int:
+        """按 task_id 级联删除 works 及其子表（不自动提交）。"""
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" * len(task_ids))
+        await self._conn.execute(
+            f"DELETE FROM skill_pipeline_checkpoints WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        await self._conn.execute(
+            f"DELETE FROM skill_pipeline_runs WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        await self._conn.execute(
+            f"DELETE FROM works WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0

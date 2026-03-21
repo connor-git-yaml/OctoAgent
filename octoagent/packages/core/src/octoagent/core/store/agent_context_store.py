@@ -1584,3 +1584,52 @@ class SqliteAgentContextStore:
             metadata=cls._load(row["metadata"], {}),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    async def delete_agent_sessions_by_ids(self, agent_session_ids: list[str]) -> int:
+        """按 agent_session_id 批量删除 agent_sessions（不自动提交）。"""
+        if not agent_session_ids:
+            return 0
+        placeholders = ",".join("?" * len(agent_session_ids))
+        await self._conn.execute(
+            f"DELETE FROM agent_sessions WHERE agent_session_id IN ({placeholders})",
+            tuple(agent_session_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def delete_agent_session_turns_by_session_ids(self, agent_session_ids: list[str]) -> int:
+        """按 agent_session_id 批量删除 turns（不自动提交）。"""
+        if not agent_session_ids:
+            return 0
+        placeholders = ",".join("?" * len(agent_session_ids))
+        await self._conn.execute(
+            f"DELETE FROM agent_session_turns WHERE agent_session_id IN ({placeholders})",
+            tuple(agent_session_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def delete_context_frames_by_session_id(self, session_id: str) -> int:
+        """按 session_id 删除 context_frames（不自动提交）。"""
+        await self._conn.execute(
+            "DELETE FROM context_frames WHERE session_id = ?",
+            (session_id,),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def delete_recall_frames_by_agent_session_ids(self, agent_session_ids: list[str]) -> int:
+        """按 agent_session_id 批量删除 recall_frames（不自动提交）。"""
+        if not agent_session_ids:
+            return 0
+        placeholders = ",".join("?" * len(agent_session_ids))
+        await self._conn.execute(
+            f"DELETE FROM recall_frames WHERE agent_session_id IN ({placeholders})",
+            tuple(agent_session_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0

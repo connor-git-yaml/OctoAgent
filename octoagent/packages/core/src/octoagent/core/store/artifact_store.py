@@ -181,3 +181,28 @@ class SqliteArtifactStore:
             hash=row[8],
             version=row[9],
         )
+
+    async def collect_storage_refs_for_tasks(self, task_ids: list[str]) -> list[str]:
+        """收集指定 tasks 的 artifact storage_ref（事务后文件清理用）。"""
+        if not task_ids:
+            return []
+        placeholders = ",".join("?" * len(task_ids))
+        cursor = await self._conn.execute(
+            f"SELECT storage_ref FROM artifacts WHERE task_id IN ({placeholders}) AND storage_ref IS NOT NULL AND storage_ref != ''",
+            tuple(task_ids),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows if row[0]]
+
+    async def delete_artifacts_by_task_ids(self, task_ids: list[str]) -> int:
+        """按 task_id 批量删除 artifact 元数据（不自动提交）。"""
+        if not task_ids:
+            return 0
+        placeholders = ",".join("?" * len(task_ids))
+        await self._conn.execute(
+            f"DELETE FROM artifacts WHERE task_id IN ({placeholders})",
+            tuple(task_ids),
+        )
+        cursor = await self._conn.execute("SELECT changes()")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
