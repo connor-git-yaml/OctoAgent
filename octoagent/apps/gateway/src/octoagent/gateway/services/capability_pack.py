@@ -2585,29 +2585,36 @@ class CapabilityPackService:
                         ensure_ascii=False,
                     )
 
-                # 写入配置
+                # 写入配置（格式：{"servers": [McpServerConfig, ...]}）
                 try:
                     config_path = self._mcp_registry.config_path
                     config_path.parent.mkdir(parents=True, exist_ok=True)
                     # 读取现有配置
-                    existing: dict[str, Any] = {}
+                    existing_servers: list[dict[str, Any]] = []
                     if config_path.exists():
                         try:
-                            existing = json.loads(config_path.read_text(encoding="utf-8"))
+                            raw = json.loads(config_path.read_text(encoding="utf-8"))
+                            if isinstance(raw, dict) and "servers" in raw:
+                                existing_servers = raw["servers"]
+                            elif isinstance(raw, list):
+                                existing_servers = raw
                         except Exception:
-                            existing = {}
-                    if not isinstance(existing, dict):
-                        existing = {}
+                            pass
 
                     server_name = package_name.strip()
-                    existing[server_name] = {
-                        "type": "stdio",
+                    # 移除同名 server（如已存在则更新）
+                    existing_servers = [
+                        s for s in existing_servers
+                        if isinstance(s, dict) and s.get("name") != server_name
+                    ]
+                    existing_servers.append({
+                        "name": server_name,
                         "command": command.strip(),
                         "args": args_list,
                         "env": env_dict,
-                    }
+                    })
                     config_path.write_text(
-                        json.dumps(existing, indent=2, ensure_ascii=False),
+                        json.dumps({"servers": existing_servers}, indent=2, ensure_ascii=False),
                         encoding="utf-8",
                     )
 
