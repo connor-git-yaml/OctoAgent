@@ -1,17 +1,16 @@
 const SCOPE_LABELS: Record<string, string> = {
   project_shared: "项目共享",
-  butler_private: "Butler 私有",
+  agent_private: "Agent 私有",
   worker_private: "Worker 私有",
 };
 
 function formatScopeLabel(scopeId: string): string {
   if (!scopeId) return "全部作用域";
-  // 尝试从 scope_id 中提取 kind 标签
   const lower = scopeId.toLowerCase();
   if (lower.includes("/shared/") || lower.includes("project_shared"))
     return SCOPE_LABELS.project_shared;
-  if (lower.includes("butler_private") || lower.includes("/butler/"))
-    return SCOPE_LABELS.butler_private;
+  if (lower.includes("agent_private") || lower.includes("butler_private") || lower.includes("/butler/"))
+    return SCOPE_LABELS.agent_private;
   if (lower.includes("/private/")) return SCOPE_LABELS.worker_private;
   // 截取最后一段作为可读标签
   const parts = scopeId.split("/");

@@ -273,7 +273,7 @@ async def _backfill_primary_agent_id(
 
     # 查找该 Project 的 Butler AgentRuntime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
-        role=AgentRuntimeRole.BUTLER,
+        role=AgentRuntimeRole.MAIN,
         project_id=project.project_id,
     )
     if not runtimes:
@@ -304,7 +304,7 @@ async def ensure_butler_runtime_and_session(
 
     # 查找或创建 Butler Runtime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
-        role=AgentRuntimeRole.BUTLER,
+        role=AgentRuntimeRole.MAIN,
         project_id=project.project_id,
     )
     if runtimes:
@@ -316,7 +316,7 @@ async def ensure_butler_runtime_and_session(
             project_id=project.project_id,
             workspace_id=workspace_id,
             agent_profile_id=agent_profile.profile_id,
-            role=AgentRuntimeRole.BUTLER,
+            role=AgentRuntimeRole.MAIN,
             name=agent_profile.name,
             persona_summary="",
             status=AgentRuntimeStatus.ACTIVE,
@@ -331,14 +331,14 @@ async def ensure_butler_runtime_and_session(
     # 查找或创建活跃 AgentSession
     existing_session = await store_group.agent_context_store.get_active_session_for_project(
         project.project_id,
-        kind=AgentSessionKind.BUTLER_MAIN,
+        kind=AgentSessionKind.MAIN_BOOTSTRAP,
     )
     if existing_session is None:
         session_id = f"session-{str(ULID())}"
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=butler_runtime.agent_runtime_id,
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
             status=AgentSessionStatus.ACTIVE,
             project_id=project.project_id,
             workspace_id=workspace_id,

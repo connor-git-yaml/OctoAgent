@@ -1066,7 +1066,8 @@ export interface SetupGovernanceDocument extends ControlPlaneDocumentBase {
   review: SetupReviewSummary;
 }
 
-export type WorkerType = "general" | "ops" | "research" | "dev";
+/** @deprecated Worker 分类已统一为 general，保留类型兼容 API response */
+export type WorkerType = string;
 
 export type RuntimeKind =
   | "worker"

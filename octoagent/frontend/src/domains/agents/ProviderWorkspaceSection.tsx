@@ -18,7 +18,7 @@ interface ProviderWorkspaceSectionProps {
   onCapabilitySelectionChange: (itemId: string, selected: boolean) => void;
   onSaveCapabilitySelection: () => void;
   onResetCapabilitySelection: () => void;
-  onOpenButler: () => void;
+  onOpenMainAgent: () => void;
   onOpenTemplates: () => void;
 }
 
@@ -46,7 +46,7 @@ export default function ProviderWorkspaceSection({
   onCapabilitySelectionChange,
   onSaveCapabilitySelection,
   onResetCapabilitySelection,
-  onOpenButler,
+  onOpenMainAgent,
   onOpenTemplates,
 }: ProviderWorkspaceSectionProps) {
   const groupedItems = capabilityItems.reduce<Record<"Skills" | "MCP", SkillGovernanceItem[]>>(
@@ -64,19 +64,19 @@ export default function ProviderWorkspaceSection({
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">Providers</p>
-            <h3>先安装能力 Provider，再把它们绑定给 Butler 或 Worker</h3>
+            <h3>先安装能力 Provider，再把它们绑定给 主 Agent 或 Worker</h3>
             <p className="wb-panel-copy">
               这里统一管理 Skill / MCP Provider 目录，以及当前项目的默认启用范围。更细的
-              Agent 白名单，请回 Butler 或 Worker 模板页勾选。
+              Agent 白名单，请回 主 Agent 或 Worker 模板页勾选。
             </p>
           </div>
           <div className="wb-inline-actions wb-inline-actions-wrap">
             <button
               type="button"
               className="wb-button wb-button-secondary"
-              onClick={onOpenButler}
+              onClick={onOpenMainAgent}
             >
-              去 Butler 白名单
+              去 主 Agent 白名单
             </button>
             <button
               type="button"
@@ -119,7 +119,7 @@ export default function ProviderWorkspaceSection({
           <article className="wb-card">
             <p className="wb-card-label">绑定规则</p>
             <strong>先安装，再按 Agent 收窄</strong>
-            <span>这里决定当前项目默认可见范围；Butler / Worker 模板还能继续收窄。</span>
+            <span>这里决定当前项目默认可见范围；主 Agent / Worker 模板还能继续收窄。</span>
           </article>
         </div>
       </section>
@@ -153,7 +153,7 @@ export default function ProviderWorkspaceSection({
         <div className="wb-inline-banner is-muted">
           <strong>先看默认，再看单个 Agent</strong>
           <span>
-            如果这里只保留最常用 Provider，Butler 和 Worker 模板里的白名单会更容易理解，也更不容易误绑。
+            如果这里只保留最常用 Provider，主 Agent 和 Worker 模板里的白名单会更容易理解，也更不容易误绑。
           </span>
         </div>
 

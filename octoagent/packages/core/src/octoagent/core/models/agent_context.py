@@ -51,8 +51,9 @@ class ContextRequestKind(StrEnum):
 
 
 class AgentRuntimeRole(StrEnum):
-    BUTLER = "butler"
+    MAIN = "main"
     WORKER = "worker"
+    BUTLER = "butler"  # 历史兼容别名，新代码用 MAIN
 
 
 class AgentRuntimeStatus(StrEnum):
@@ -61,10 +62,11 @@ class AgentRuntimeStatus(StrEnum):
 
 
 class AgentSessionKind(StrEnum):
-    BUTLER_MAIN = "butler_main"
+    MAIN_BOOTSTRAP = "main_bootstrap"
     WORKER_INTERNAL = "worker_internal"
     DIRECT_WORKER = "direct_worker"
     SUBAGENT_INTERNAL = "subagent_internal"
+    BUTLER_MAIN = "butler_main"  # 历史兼容别名，新代码用 MAIN_BOOTSTRAP
 
 
 class AgentSessionStatus(StrEnum):
@@ -82,8 +84,9 @@ class AgentSessionTurnKind(StrEnum):
 
 class MemoryNamespaceKind(StrEnum):
     PROJECT_SHARED = "project_shared"
-    BUTLER_PRIVATE = "butler_private"
+    AGENT_PRIVATE = "agent_private"
     WORKER_PRIVATE = "worker_private"
+    BUTLER_PRIVATE = "butler_private"  # 历史兼容别名，新代码用 AGENT_PRIVATE
 
 
 class AgentProfile(BaseModel):
@@ -213,7 +216,7 @@ class AgentRuntime(BaseModel):
     workspace_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
     worker_profile_id: str = Field(default="")
-    role: AgentRuntimeRole = AgentRuntimeRole.BUTLER
+    role: AgentRuntimeRole = AgentRuntimeRole.MAIN
     name: str = Field(default="")
     persona_summary: str = Field(default="")
     status: AgentRuntimeStatus = AgentRuntimeStatus.ACTIVE
@@ -238,7 +241,7 @@ class AgentSession(BaseModel):
 
     agent_session_id: str = Field(min_length=1)
     agent_runtime_id: str = Field(min_length=1)
-    kind: AgentSessionKind = AgentSessionKind.BUTLER_MAIN
+    kind: AgentSessionKind = AgentSessionKind.MAIN_BOOTSTRAP
     status: AgentSessionStatus = AgentSessionStatus.ACTIVE
     project_id: str = Field(default="")
     workspace_id: str = Field(default="")

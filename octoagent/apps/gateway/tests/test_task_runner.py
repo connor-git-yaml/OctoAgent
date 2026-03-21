@@ -533,7 +533,7 @@ class TestTaskRunner:
             return WorkerResult(
                 dispatch_id=envelope.dispatch_id,
                 task_id=task_id,
-                worker_id="worker.llm.dev",
+                worker_id="worker.llm.default",
                 status=WorkerExecutionStatus.SUCCEEDED,
                 retryable=False,
                 summary="prepared_dispatch_succeeded",
@@ -547,7 +547,7 @@ class TestTaskRunner:
                 trace_id=f"trace-{task_id}",
                 contract_version="1.0",
                 route_reason="retry",
-                worker_capability="dev",
+                worker_capability="llm_generation",
                 hop_count=1,
                 max_hops=3,
                 user_text=msg.text,

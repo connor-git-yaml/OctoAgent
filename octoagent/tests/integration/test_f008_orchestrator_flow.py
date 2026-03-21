@@ -80,6 +80,6 @@ class TestFeature008OrchestratorFlow:
 
         event_types = [event["type"] for event in task_data["events"]]
         assert "ORCH_DECISION" in event_types
-        assert "WORKER_DISPATCHED" in event_types
-        assert "WORKER_RETURNED" in event_types
+        # Butler Direct Execution 路径不经过 Worker 派发，
+        # 因此不产生 WORKER_DISPATCHED/WORKER_RETURNED 事件
         assert "MODEL_CALL_COMPLETED" in event_types

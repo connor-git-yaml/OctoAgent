@@ -1412,79 +1412,8 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
         payload = json.loads(result.output)
         assert payload["proposal_kind"] == "split"
         assert len(payload["assignments"]) >= 2
-        assert {item["worker_type"] for item in payload["assignments"]} >= {"research", "dev"}
+        assert {item["worker_type"] for item in payload["assignments"]} == {"general"}
         assert {item["tool_profile"] for item in payload["assignments"]} == {"standard"}
-    finally:
-        await task_runner.shutdown()
-        await store_group.conn.close()
-
-
-async def test_workers_review_uses_standard_profile_for_freshness_queries(
-    tmp_path: Path,
-) -> None:
-    (
-        store_group,
-        _sse_hub,
-        task_service,
-        _capability_pack,
-        delegation_plane,
-        task_runner,
-        tool_broker,
-    ) = await _build_runtime_services(tmp_path)
-
-    try:
-        task_id, created = await task_service.create_task(
-            NormalizedMessage(
-                text="请查一下北京今天的天气和官网公告",
-                idempotency_key="feature-041-workers-review-freshness",
-            )
-        )
-        assert created is True
-
-        plan = await delegation_plane.prepare_dispatch(
-            OrchestratorRequest(
-                task_id=task_id,
-                trace_id=f"trace-{task_id}",
-                user_text="请查一下北京今天的天气和官网公告",
-                worker_capability="llm_generation",
-                metadata={},
-            )
-        )
-        assert plan.dispatch_envelope is not None
-
-        runtime_context = ExecutionRuntimeContext(
-            task_id=task_id,
-            trace_id=f"trace-{task_id}",
-            session_id="session-041-review",
-            worker_id="worker.supervisor",
-            backend="inline",
-            console=task_runner.execution_console,
-            work_id=plan.work.work_id,
-            runtime_kind="worker",
-        )
-        broker_context = ExecutionContext(
-            task_id=task_id,
-            trace_id=f"trace-{task_id}",
-            caller="worker:supervisor",
-            profile=ToolProfile.MINIMAL,
-            permission_preset=PermissionPreset.MINIMAL,
-        )
-
-        with bind_execution_context(runtime_context):
-            result = await tool_broker.execute(
-                "workers.review",
-                {"objective": "请查一下北京今天的天气和官网公告"},
-                broker_context,
-            )
-
-        assert result.is_error is False
-        payload = json.loads(result.output)
-        assert payload["proposal_kind"] == "split"
-        assert len(payload["assignments"]) == 1
-        assignment = payload["assignments"][0]
-        assert assignment["worker_type"] == "research"
-        assert assignment["tool_profile"] == "standard"
-        assert "web/browser" in assignment["reason"]
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

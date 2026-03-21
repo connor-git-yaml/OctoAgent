@@ -35,7 +35,7 @@ log = structlog.get_logger()
 
 # Session kinds 白名单 -- 仅这些 kind 触发记忆提取
 _EXTRACTABLE_SESSION_KINDS = frozenset({
-    AgentSessionKind.BUTLER_MAIN,
+    AgentSessionKind.MAIN_BOOTSTRAP,
     AgentSessionKind.WORKER_INTERNAL,
     AgentSessionKind.DIRECT_WORKER,
 })

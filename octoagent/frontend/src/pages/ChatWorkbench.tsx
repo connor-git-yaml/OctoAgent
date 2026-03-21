@@ -286,7 +286,7 @@ function resolveWorkStatus(work: WorkProjectionItem): string {
     .toUpperCase();
 }
 
-function isDirectButlerExecution(work: WorkProjectionItem | null | undefined): boolean {
+function isAgentDirectExecution(work: WorkProjectionItem | null | undefined): boolean {
   if (!work) {
     return false;
   }
@@ -809,7 +809,7 @@ function buildModelTraceEntry(workEvents: TaskEvent[]): ChatTraceEntry | null {
   return null;
 }
 
-function buildButlerTraceEntries(
+function buildAgentTraceEntries(
   work: WorkProjectionItem,
   workEvents: TaskEvent[],
   latestMessageType: string,
@@ -878,7 +878,7 @@ function buildButlerTraceEntries(
     stateLabel: "已发送",
     tone: "running",
     summary: summarizeDelegationIntent(work),
-    detailInput: "Butler 已经把这轮问题改写成内部执行目标。",
+    detailInput: "Agent 已经把这轮问题改写成内部执行目标。",
     detailOutput: summarizeDelegationIntent(work),
   });
   entries.push({
@@ -1008,7 +1008,7 @@ function buildWorkerTraceEntries(
   return entries;
 }
 
-function buildButlerActivity(
+function buildAgentActivity(
   taskStatus: string,
   streaming: boolean,
   hasInternalCollaboration: boolean,
@@ -1088,7 +1088,7 @@ function buildWorkerActivity(
   work: WorkProjectionItem,
   fallbackLatestMessageType: string
 ): ChatActivityItem | null {
-  if (isDirectButlerExecution(work)) {
+  if (isAgentDirectExecution(work)) {
     return null;
   }
   const actor = formatAgentRoleLabel(resolveWorkActor(work));
@@ -1250,7 +1250,7 @@ export default function ChatWorkbench() {
     (activeCompatibilityFlags.includes("legacy_context_polluted")
       ? "这条历史会话仍沿用旧版 owner/profile 继承语义，建议先重置 continuity，再继续新的对话。"
       : "");
-  const isDirectExecution = isDirectButlerExecution(activeWork);
+  const isDirectExecution = isAgentDirectExecution(activeWork);
   const activeConversationId =
     readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
     activeWork?.a2a_conversation_id ||
@@ -1369,7 +1369,7 @@ export default function ChatWorkbench() {
       : taskId
         ? [
             {
-              ...buildButlerActivity(
+              ...buildAgentActivity(
                 normalizedTaskStatus,
                 streaming,
                 hasInternalCollaboration,
@@ -1378,7 +1378,7 @@ export default function ChatWorkbench() {
               ),
               traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
               traceEntries: activeWork
-                ? buildButlerTraceEntries(
+                ? buildAgentTraceEntries(
                     activeWork,
                     workEvents,
                     activeConversationLatestType,
@@ -1808,7 +1808,7 @@ export default function ChatWorkbench() {
       setChatActionNotice({
         tone: "error",
         title: "这条历史会话还没有重置成功",
-        message: "你可以再试一次，或直接新开一条 Butler 会话。",
+        message: "你可以再试一次，或直接新开一条 新会话。",
       });
       return;
     }
@@ -2129,7 +2129,7 @@ export default function ChatWorkbench() {
               void resetConversation();
             }}
           >
-            新开 Butler 会话
+            新开 新会话
           </button>
         </div>
       </div>

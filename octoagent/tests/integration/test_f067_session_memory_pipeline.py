@@ -69,7 +69,7 @@ async def setup_full_session(store: SqliteAgentContextStore):
     session = AgentSession(
         agent_session_id="sess-int-001",
         agent_runtime_id="rt-int-001",
-        kind=AgentSessionKind.BUTLER_MAIN,
+        kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="proj-int-001",
         workspace_id="ws-int-001",
     )

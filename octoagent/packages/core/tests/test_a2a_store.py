@@ -50,7 +50,7 @@ async def test_a2a_store_roundtrip(tmp_path: Path) -> None:
         target_agent_runtime_id="runtime-worker-research",
         target_agent_session_id="session-worker-research",
         source_agent="agent://butler.main",
-        target_agent="agent://worker.llm.research",
+        target_agent="agent://worker.llm.default",
         context_frame_id="context-frame-alpha",
         request_message_id="message-1",
         latest_message_id="message-2",
@@ -58,7 +58,7 @@ async def test_a2a_store_roundtrip(tmp_path: Path) -> None:
         status=A2AConversationStatus.COMPLETED,
         message_count=2,
         trace_id="trace-task-weather",
-        metadata={"worker_capability": "research"},
+        metadata={"worker_capability": "llm_generation"},
     )
     task_message = A2AMessageRecord(
         a2a_message_id="message-1",

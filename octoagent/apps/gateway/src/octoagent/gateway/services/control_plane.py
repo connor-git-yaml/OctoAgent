@@ -180,7 +180,7 @@ from pydantic import SecretStr, ValidationError
 from ulid import ULID
 
 from .agent_context import build_projected_session_id, build_scope_aware_session_id
-from .butler_behavior import build_behavior_system_summary
+from .agent_decision import build_behavior_system_summary
 from .connection_metadata import (
     merge_control_metadata,
     resolve_explicit_delegation_target_profile_id,
@@ -940,8 +940,8 @@ class ControlPlaneService:
                     session_runtime_kind or latest_metadata.get("target_kind", ""),
                 )
             )
-            # 跳过 BUTLER_MAIN 内部 bootstrap 会话——不应出现在侧边栏
-            if runtime_kind == AgentSessionKind.BUTLER_MAIN.value:
+            # 跳过 MAIN_BOOTSTRAP 内部 bootstrap 会话——不应出现在侧边栏
+            if runtime_kind == AgentSessionKind.MAIN_BOOTSTRAP.value:
                 continue
             (
                 session_owner_profile_id,
@@ -1220,7 +1220,7 @@ class ControlPlaneService:
             )
 
         legacy_context_polluted = (
-            normalized_runtime_kind == AgentSessionKind.BUTLER_MAIN.value
+            normalized_runtime_kind == AgentSessionKind.MAIN_BOOTSTRAP.value
             and not explicit_owner_profile_id
             and legacy_agent_is_worker
             and not delegation_target_profile_id
@@ -5908,7 +5908,7 @@ class ControlPlaneService:
                 await self._stores.conn.commit()
                 return await self._stores.agent_context_store.get_active_session_for_project(
                     project.project_id,
-                    kind=AgentSessionKind.BUTLER_MAIN,
+                    kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 )
 
         return None

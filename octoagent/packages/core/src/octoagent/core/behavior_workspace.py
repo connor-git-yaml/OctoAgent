@@ -1948,7 +1948,7 @@ def _is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 共享辅助函数（跨模块复用：capability_pack / control_plane / butler_behavior）
+# 共享辅助函数（跨模块复用：capability_pack / control_plane / agent_decision）
 # ---------------------------------------------------------------------------
 
 

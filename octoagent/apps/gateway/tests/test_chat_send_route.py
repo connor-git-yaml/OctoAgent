@@ -358,7 +358,7 @@ class TestChatSendRoute:
                 project_id=project.project_id,
                 workspace_id=workspace.workspace_id,
                 agent_profile_id="agent-profile-default",
-                role=AgentRuntimeRole.BUTLER,
+                role=AgentRuntimeRole.MAIN,
                 name="Legacy Continue Runtime",
             )
         )
@@ -366,7 +366,7 @@ class TestChatSendRoute:
             AgentSession(
                 agent_session_id="agent-session-legacy-continue",
                 agent_runtime_id="runtime-legacy-continue",
-                kind=AgentSessionKind.BUTLER_MAIN,
+                kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 project_id=project.project_id,
                 workspace_id=workspace.workspace_id,
                 thread_id=task.thread_id,

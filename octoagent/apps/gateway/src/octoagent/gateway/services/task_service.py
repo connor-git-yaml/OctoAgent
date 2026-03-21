@@ -1941,7 +1941,7 @@ class TaskService:
                         for item in namespaces
                         if item.kind
                         in {
-                            MemoryNamespaceKind.BUTLER_PRIVATE,
+                            MemoryNamespaceKind.AGENT_PRIVATE,
                             MemoryNamespaceKind.WORKER_PRIVATE,
                         }
                         and item.memory_scope_ids

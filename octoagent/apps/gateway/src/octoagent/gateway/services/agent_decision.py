@@ -1,4 +1,4 @@
-"""Feature 049: Butler persona / clarification behavior helpers。"""
+"""Agent 决策与行为辅助模块（原 butler_behavior）。"""
 
 from __future__ import annotations
 
@@ -25,9 +25,9 @@ from octoagent.core.models import (
     BehaviorPackFile,
     BehaviorSliceEnvelope,
     BehaviorWorkspace,
-    ButlerDecision,
-    ButlerDecisionMode,
-    ButlerLoopPlan,
+    AgentDecision,
+    AgentDecisionMode,
+    AgentLoopPlan,
     ClarificationAction,
     ClarificationDecision,
     DynamicToolSelection,
@@ -580,7 +580,7 @@ def build_behavior_system_summary(
     return {
         "source_chain": list(pack.source_chain),
         "clarification_policy": dict(pack.clarification_policy),
-        "decision_modes": [item.value for item in ButlerDecisionMode],
+        "decision_modes": [item.value for item in AgentDecisionMode],
         "runtime_hint_fields": [
             "explicit_web_search_requested",
             "can_delegate_research",
@@ -724,7 +724,7 @@ def render_behavior_system_block(
         "clarification_policy: "
         f"{pack.clarification_policy}\n"
         "decision_modes: "
-        f"{', '.join(item.value for item in ButlerDecisionMode)}\n"
+        f"{', '.join(item.value for item in AgentDecisionMode)}\n"
         f"{chr(10).join(rendered_layers)}\n"
         f"{chr(10).join(manifest_lines)}\n"
         f"{chr(10).join(storage_lines)}"
@@ -866,7 +866,7 @@ def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundl
     )
 
 
-def _build_butler_pipeline_context(
+def _build_pipeline_context(
     pipeline_items: list[Any] | None,
 ) -> str:
     """Feature 065 T-029: 构建 Butler system prompt 中的 Pipeline 上下文段落。
@@ -910,7 +910,7 @@ def _build_butler_pipeline_context(
     return "\n".join(lines)
 
 
-def build_butler_decision_messages(
+def build_agent_decision_messages(
     *,
     user_text: str,
     behavior_system_block: str,
@@ -919,7 +919,7 @@ def build_butler_decision_messages(
     project_name: str = "",
     project_slug: str = "",
 ) -> list[dict[str, str]]:
-    # Feature 067: Pipeline 匹配已迁移到 decide_butler_decision() 规则决策层，
+    # Feature 067: Pipeline 匹配已迁移到 decide_agent_routing() 规则决策层，
     # 此函数不再接收 pipeline_items 参数。
     mode_values = (
         "direct_answer | ask_once | delegate_research | delegate_dev | "
@@ -945,7 +945,7 @@ def build_butler_decision_messages(
         {
             "role": "system",
             "content": (
-                "你是 OctoAgent 的 ButlerDecision resolver。"
+                "你是 OctoAgent 的 AgentDecision resolver。"
                 "你的任务不是直接回答用户，而是先基于显式上下文判断下一步动作。"
                 "你必须只返回一个 JSON object，不要输出 Markdown、解释或代码块。"
             ),
@@ -995,14 +995,14 @@ def build_butler_decision_messages(
         "role": "user",
         "content": (
             f"当前用户消息：{user_text.strip() or 'N/A'}\n\n"
-            "请优先输出一个 ButlerLoopPlan JSON："
-            "{\"decision\": <ButlerDecision>, \"recall_plan\": <RecallPlan>}。"
-            "如果你只能输出旧版 ButlerDecision JSON，也允许。"
+            "请优先输出一个 AgentLoopPlan JSON："
+            "{\"decision\": <AgentDecision>, \"recall_plan\": <RecallPlan>}。"
+            "如果你只能输出旧版 AgentDecision JSON，也允许。"
             "RecallPlan schema: "
             "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
             "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
             "\"allow_vault\":false,\"limit\":4}\n"
-            f"ButlerDecision 字段模板：{json.dumps(schema, ensure_ascii=False)}"
+            f"AgentDecision 字段模板：{json.dumps(schema, ensure_ascii=False)}"
         ),
     })
 
@@ -1019,7 +1019,7 @@ def _parse_recall_plan_payload(payload: dict[str, Any]) -> RecallPlan | None:
     return plan
 
 
-def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | None:
+def _parse_agent_decision_payload(payload: dict[str, Any]) -> AgentDecision | None:
     normalized = dict(payload)
     if not normalized.get("target_worker_type") and normalized.get("mode") == "delegate_research":
         normalized["target_worker_type"] = "research"
@@ -1029,13 +1029,13 @@ def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | 
         normalized["target_worker_type"] = "ops"
     # Feature 065: delegate_graph 模式确保 pipeline_id 字段透传
     if normalized.get("mode") == "delegate_graph":
-        # pipeline_id 和 pipeline_params 直接透传给 ButlerDecision
+        # pipeline_id 和 pipeline_params 直接透传给 AgentDecision
         pass
     try:
-        decision = ButlerDecision.model_validate(normalized)
+        decision = AgentDecision.model_validate(normalized)
     except Exception:
         return None
-    if decision.mode is ButlerDecisionMode.ASK_ONCE and not decision.reply_prompt:
+    if decision.mode is AgentDecisionMode.ASK_ONCE and not decision.reply_prompt:
         decision = decision.model_copy(
             update={
                 "reply_prompt": build_clarification_reply(
@@ -1044,7 +1044,7 @@ def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | 
                 )
             }
         )
-    if decision.mode is ButlerDecisionMode.BEST_EFFORT_ANSWER and not decision.reply_prompt:
+    if decision.mode is AgentDecisionMode.BEST_EFFORT_ANSWER and not decision.reply_prompt:
         decision = decision.model_copy(
             update={
                 "reply_prompt": build_best_effort_reply(
@@ -1056,14 +1056,14 @@ def _parse_butler_decision_payload(payload: dict[str, Any]) -> ButlerDecision | 
     return decision
 
 
-def parse_butler_decision_response(content: str) -> ButlerDecision | None:
-    loop_plan = parse_butler_loop_plan_response(content)
+def parse_agent_decision_response(content: str) -> AgentDecision | None:
+    loop_plan = parse_agent_loop_plan_response(content)
     if loop_plan is not None:
         return loop_plan.decision
     return None
 
 
-def parse_butler_loop_plan_response(content: str) -> ButlerLoopPlan | None:
+def parse_agent_loop_plan_response(content: str) -> AgentLoopPlan | None:
     raw = content.strip()
     if not raw:
         return None
@@ -1088,19 +1088,19 @@ def parse_butler_loop_plan_response(content: str) -> ButlerLoopPlan | None:
                 decision_payload = {}
             if not isinstance(recall_payload, dict):
                 recall_payload = {}
-            decision = _parse_butler_decision_payload(decision_payload) or ButlerDecision()
+            decision = _parse_agent_decision_payload(decision_payload) or AgentDecision()
             recall_plan = _parse_recall_plan_payload(recall_payload) or RecallPlan()
-            return ButlerLoopPlan(
+            return AgentLoopPlan(
                 decision=decision,
                 recall_plan=recall_plan,
                 metadata={
                     "loop_plan_source": "wrapped_json",
                 },
             )
-        decision = _parse_butler_decision_payload(payload)
+        decision = _parse_agent_decision_payload(payload)
         if decision is None:
             continue
-        return ButlerLoopPlan(
+        return AgentLoopPlan(
             decision=decision,
             recall_plan=RecallPlan(),
             metadata={
@@ -1302,7 +1302,7 @@ def _is_trivial_direct_answer(user_text: str) -> bool:
 def _match_pipeline_trigger(
     user_text: str,
     pipeline_items: list[Any] | None,
-) -> ButlerDecision | None:
+) -> AgentDecision | None:
     """Feature 067: 当用户请求匹配 Pipeline trigger_hint 时返回 DELEGATE_GRAPH。
 
     简单的关键词包含匹配：将 trigger_hint 中的关键词与用户输入对比。
@@ -1314,7 +1314,7 @@ def _match_pipeline_trigger(
         pipeline_items: PipelineListItem 列表
 
     Returns:
-        匹配成功返回 ButlerDecision(DELEGATE_GRAPH)，否则 None
+        匹配成功返回 AgentDecision(DELEGATE_GRAPH)，否则 None
     """
     if not pipeline_items:
         return None
@@ -1328,8 +1328,8 @@ def _match_pipeline_trigger(
 
         # 1. pipeline_id 整体出现在用户输入中
         if pid and pid.lower() in lower_text:
-            return ButlerDecision(
-                mode=ButlerDecisionMode.DELEGATE_GRAPH,
+            return AgentDecision(
+                mode=AgentDecisionMode.DELEGATE_GRAPH,
                 pipeline_id=pid,
                 rationale=f"用户输入中包含 pipeline_id '{pid}'，匹配确定性 Pipeline。",
                 metadata={"pipeline_tags": list(tags), "match_type": "pipeline_id"},
@@ -1339,8 +1339,8 @@ def _match_pipeline_trigger(
         if hint:
             hint_words = [w for w in hint.lower().split() if len(w) > 1]
             if hint_words and all(w in lower_text for w in hint_words):
-                return ButlerDecision(
-                    mode=ButlerDecisionMode.DELEGATE_GRAPH,
+                return AgentDecision(
+                    mode=AgentDecisionMode.DELEGATE_GRAPH,
                     pipeline_id=pid,
                     rationale=f"用户请求匹配 Pipeline '{pid}' 的 trigger_hint。",
                     metadata={"pipeline_tags": list(tags), "match_type": "trigger_hint"},
@@ -1349,153 +1349,40 @@ def _match_pipeline_trigger(
     return None
 
 
-def decide_butler_decision(
+def decide_agent_routing(
     user_text: str,
     *,
     runtime_hints: RuntimeHintBundle | None = None,
     pipeline_items: list[Any] | None = None,
-) -> ButlerDecision:
+) -> AgentDecision:
+    """Agent 规则快速路径决策——判断直答 vs Pipeline 委派。
+
+    天气等场景不再做专属分支，统一由 Agent Direct Execution + web.search 处理。
+    """
     normalized = user_text.strip()
     if not normalized:
-        return ButlerDecision()
+        return AgentDecision()
 
-    hints = runtime_hints or build_runtime_hint_bundle(user_text=normalized)
-
-    # Feature 067: Pipeline trigger_hint 规则匹配（优先级低于天气等已有规则）
-    # 在天气规则之前检查，因为 Pipeline 匹配是显式精确的
+    # Pipeline trigger_hint 规则匹配
     pipeline_match = _match_pipeline_trigger(normalized, pipeline_items)
     if pipeline_match is not None:
         return pipeline_match
 
-    if (
-        hints.recent_clarification_category == "weather_location"
-        and hints.current_location_hint
-        and not hints.weather_query
-    ):
-        rewritten = build_weather_followup_query(
-            location_text=hints.current_location_hint,
-            original_user_text=hints.recent_clarification_source_text or "今天天气怎么样？",
-        )
-        return _compatibility_fallback_decision(
-            ButlerDecision(
-            mode=ButlerDecisionMode.DELEGATE_RESEARCH,
-            category="weather_location_followup",
-            rationale="检测到上一轮天气补问后的地点补充，恢复 research 链路。",
-            assumptions=[f"用户补充的位置是 {hints.current_location_hint}。"],
-            tool_intent="web.search",
-            target_worker_type="research",
-            metadata={
-                "delegation_strategy": "butler_owned_freshness",
-                "followup_mode": "weather_location",
-                "rewritten_user_text": rewritten,
-                "resolved_location": hints.current_location_hint,
-            },
-            ),
-            fallback_reason="weather_followup_resume",
-        )
-
-    if hints.weather_query:
-        if not hints.effective_location_hint:
-            if (
-                hints.explicit_web_search_requested
-                and hints.recent_clarification_category == "weather_location"
-            ):
-                return _compatibility_fallback_decision(
-                    ButlerDecision(
-                    mode=ButlerDecisionMode.BEST_EFFORT_ANSWER,
-                    category="weather_location_missing",
-                    rationale=(
-                        "用户再次显式要求 WebSearch，"
-                        "但仍缺位置，不能假装已完成准确实时查询。"
-                    ),
-                    missing_inputs=["城市或区县"],
-                    tool_intent="web.search",
-                    target_worker_type="research",
-                    user_visible_boundary_note="缺少城市 / 区县，无法给出准确的实时天气结果。",
-                    reply_prompt=build_best_effort_reply(
-                        category="weather_location_missing",
-                        user_text=normalized,
-                    ),
-                    metadata={"clarification_needed": "weather_location"},
-                    ),
-                    fallback_reason="weather_location_missing_best_effort",
-                )
-            return _compatibility_fallback_decision(
-                ButlerDecision(
-                mode=ButlerDecisionMode.ASK_ONCE,
-                category="weather_location",
-                rationale="实时天气查询缺城市/区县，继续委派前需要先补关键位置。",
-                missing_inputs=["城市或区县"],
-                tool_intent="web.search",
-                target_worker_type="research",
-                reply_prompt=build_clarification_reply(
-                    category="weather_location",
-                    user_text=normalized,
-                ),
-                metadata={
-                    "clarification_needed": "weather_location",
-                    "followup_mode": "weather_location",
-                },
-                ),
-                fallback_reason="weather_location_missing_clarify",
-            )
-
-        assumptions: list[str] = []
-        if hints.current_location_hint != hints.effective_location_hint:
-            assumptions.append(f"沿用最近确认的位置：{hints.effective_location_hint}。")
-        return _compatibility_fallback_decision(
-            ButlerDecision(
-            mode=ButlerDecisionMode.DELEGATE_RESEARCH,
-            category="weather_location_resolved",
-            rationale="天气查询的位置线索已齐，可以直接进入 research。",
-            assumptions=assumptions,
-            tool_intent="web.search",
-            target_worker_type="research",
-            metadata={
-                "delegation_strategy": "butler_owned_freshness",
-                "resolved_location": hints.effective_location_hint,
-            },
-            ),
-            fallback_reason="weather_location_resolved",
-        )
-
-    return ButlerDecision()
-
-
-def _compatibility_fallback_decision(
-    decision: ButlerDecision,
-    *,
-    fallback_reason: str,
-) -> ButlerDecision:
-    return decision.model_copy(
-        update={
-            "metadata": {
-                **dict(decision.metadata),
-                "decision_source": "compatibility_fallback",
-                "decision_fallback_reason": fallback_reason,
-            }
-        }
-    )
+    return AgentDecision()
 
 
 def decide_clarification(user_text: str) -> ClarificationDecision:
-    decision = decide_butler_decision(user_text)
-    if decision.mode is ButlerDecisionMode.ASK_ONCE:
-        action = ClarificationAction.CLARIFY
-        if decision.category == "weather_location" and decision.target_worker_type == "research":
-            action = ClarificationAction.DELEGATE_AFTER_CLARIFICATION
+    decision = decide_agent_routing(user_text)
+    if decision.mode is AgentDecisionMode.ASK_ONCE:
         return ClarificationDecision(
-            action=action,
+            action=ClarificationAction.CLARIFY,
             category=decision.category,
             rationale=decision.rationale,
             missing_inputs=list(decision.missing_inputs),
             followup_prompt=decision.reply_prompt,
-            delegate_after_clarification=(
-                action is ClarificationAction.DELEGATE_AFTER_CLARIFICATION
-            ),
             metadata=dict(decision.metadata),
         )
-    if decision.mode is ButlerDecisionMode.BEST_EFFORT_ANSWER:
+    if decision.mode is AgentDecisionMode.BEST_EFFORT_ANSWER:
         return ClarificationDecision(
             action=ClarificationAction.BEST_EFFORT_FALLBACK,
             category=decision.category,
@@ -1550,16 +1437,6 @@ def build_best_effort_reply(*, category: str, user_text: str) -> str:
         )
     return ""
 
-
-def build_weather_followup_query(*, location_text: str, original_user_text: str) -> str:
-    location = location_text.strip()
-    original = original_user_text.strip() or "今天天气怎么样？"
-    if not location:
-        return original
-    if contains_explicit_location(original):
-        return original
-    normalized_original = re.sub(r"^[，,。？！!?:：\s]+", "", original)
-    return f"{location}，{normalized_original}"
 
 
 def _looks_like_work_priority_request(user_text: str) -> bool:

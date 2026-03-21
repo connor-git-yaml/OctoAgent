@@ -24,7 +24,7 @@ async def test_agent_session_turn_hook_records_tool_call_and_result(tmp_path: Pa
     await store_group.agent_context_store.save_agent_runtime(
         AgentRuntime(
             agent_runtime_id="runtime-hook-001",
-            role=AgentRuntimeRole.BUTLER,
+            role=AgentRuntimeRole.MAIN,
             name="Hook Runtime",
         )
     )
@@ -32,7 +32,7 @@ async def test_agent_session_turn_hook_records_tool_call_and_result(tmp_path: Pa
         AgentSession(
             agent_session_id="agent-session-hook-001",
             agent_runtime_id="runtime-hook-001",
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
             thread_id="thread-hook-001",
             legacy_session_id="thread-hook-001",
         )

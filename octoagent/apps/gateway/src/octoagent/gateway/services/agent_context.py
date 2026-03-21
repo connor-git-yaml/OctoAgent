@@ -73,7 +73,7 @@ from octoagent.provider.dx.memory_retrieval_profile import (
 from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
-from .butler_behavior import (
+from .agent_decision import (
     build_behavior_tool_guide_block,
     build_runtime_hint_bundle,
     is_worker_behavior_profile,
@@ -415,7 +415,7 @@ def build_private_memory_scope_ids(
     agent_session_id: str = "",
 ) -> list[str]:
     if kind not in {
-        MemoryNamespaceKind.BUTLER_PRIVATE,
+        MemoryNamespaceKind.AGENT_PRIVATE,
         MemoryNamespaceKind.WORKER_PRIVATE,
     }:
         return []
@@ -2353,7 +2353,7 @@ class AgentContextService:
             or turn_executor_kind in {TurnExecutorKind.WORKER, TurnExecutorKind.SUBAGENT}
         ):
             return AgentRuntimeRole.WORKER
-        return AgentRuntimeRole.BUTLER
+        return AgentRuntimeRole.MAIN
 
     @staticmethod
     def _build_agent_runtime_id(
@@ -2445,7 +2445,7 @@ class AgentContextService:
             if worker_profile_id
             else None
         )
-        if role is AgentRuntimeRole.BUTLER:
+        if role is AgentRuntimeRole.MAIN:
             runtime_name = agent_profile.name
             persona_summary = agent_profile.persona_summary
         else:
@@ -2531,7 +2531,7 @@ class AgentContextService:
             else (
                 AgentSessionKind.WORKER_INTERNAL
                 if agent_runtime.role is AgentRuntimeRole.WORKER
-                else AgentSessionKind.BUTLER_MAIN
+                else AgentSessionKind.MAIN_BOOTSTRAP
             )
         )
         agent_session_id = (
@@ -2687,7 +2687,7 @@ class AgentContextService:
         private_kind = (
             MemoryNamespaceKind.WORKER_PRIVATE
             if agent_runtime.role is AgentRuntimeRole.WORKER
-            else MemoryNamespaceKind.BUTLER_PRIVATE
+            else MemoryNamespaceKind.AGENT_PRIVATE
         )
         private_namespace_id = self._build_memory_namespace_id(
             kind=private_kind,
@@ -3767,7 +3767,7 @@ class AgentContextService:
                 0
                 if namespace.kind
                 in {
-                    MemoryNamespaceKind.BUTLER_PRIVATE,
+                    MemoryNamespaceKind.AGENT_PRIVATE,
                     MemoryNamespaceKind.WORKER_PRIVATE,
                 }
                 else 1,

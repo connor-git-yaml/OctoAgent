@@ -328,7 +328,7 @@ class TestContextCompaction:
                 if namespace is not None:
                     namespaces.append(namespace)
             private_namespace = next(
-                item for item in namespaces if item.kind.value == "butler_private"
+                item for item in namespaces if item.kind.value == "agent_private"
             )
             cursor = await store_group.conn.execute(
                 """
@@ -427,7 +427,7 @@ class TestContextCompaction:
                 trace_id=f"trace-{task_id}",
                 contract_version="1.0",
                 route_reason="test-subagent-bypass",
-                worker_capability="research",
+                worker_capability="llm_generation",
                 hop_count=1,
                 max_hops=3,
                 user_text=user_3,

@@ -576,7 +576,7 @@ class CapabilityPackService:
                     default_tool_groups=list(builtin_profile.default_tool_groups),
                     selected_tools=[],
                     source_kind="builtin_singleton",
-                    profile_name=self._worker_profile_label(builtin_worker_type),
+                    profile_name="Root Agent",
                 )
             stored_profile = await self._stores.agent_context_store.get_worker_profile(
                 normalized_profile_id
@@ -627,7 +627,7 @@ class CapabilityPackService:
             default_tool_groups=list(builtin_profile.default_tool_groups),
             selected_tools=[],
             source_kind="builtin_fallback",
-            profile_name=self._worker_profile_label(builtin_profile.worker_type),
+            profile_name="Root Agent",
         )
 
     async def resolve_worker_type_for_profile(self, profile_id: str) -> str | None:
@@ -692,7 +692,7 @@ class CapabilityPackService:
         effective_tool_profile = request.tool_profile or binding.tool_profile
         context_profile = self._coerce_tool_profile(effective_tool_profile)
         tool_by_name = {tool.tool_name: tool for tool in pack.tools}
-        if self._requires_weather_toolset(request.query, binding.worker_type):
+        if self._requires_weather_toolset(request.query):
             desired_tools = self._dedupe_preserve_order(
                 [
                     *binding.selected_tools,
@@ -1304,7 +1304,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="project",
             tags=["project", "workspace", "context"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://project.inspect",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1327,7 +1326,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["task", "session", "status"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://task.inspect",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1364,7 +1362,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="artifact",
             tags=["artifact", "history", "output"],
-            worker_types=["research", "dev", "general"],
             manifest_ref="builtin://artifact.list",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1389,7 +1386,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="filesystem",
             tags=["filesystem", "directory", "list"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://filesystem.list_dir",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1436,7 +1432,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="filesystem",
             tags=["filesystem", "file", "read"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://filesystem.read_text",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1476,7 +1471,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="filesystem",
             tags=["filesystem", "file", "write"],
-            worker_types=["ops", "dev", "general"],
             manifest_ref="builtin://filesystem.write_text",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1517,7 +1511,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="terminal",
             tags=["terminal", "command", "exec"],
-            worker_types=["ops", "dev", "general"],
             manifest_ref="builtin://terminal.exec",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1588,7 +1581,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["runtime", "diagnostics", "health"],
-            worker_types=["ops", "general"],
             manifest_ref="builtin://runtime.inspect",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1619,7 +1611,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["runtime", "time", "clock"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://runtime.now",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1665,7 +1656,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["work", "delegation", "ownership"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://work.inspect",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1699,7 +1689,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["agents", "workers", "profiles"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://agents.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1726,7 +1715,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["sessions", "threads", "tasks"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://sessions.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1761,7 +1749,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["session", "status", "execution"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://session.status",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1795,7 +1782,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "child_task", "delegation"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://subagents.spawn",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -1815,7 +1801,6 @@ class CapabilityPackService:
                 worker_type=worker_type,
                 target_kind=target_kind,
                 tool_profile=self._effective_tool_profile_for_objective(
-                    self._coerce_worker_type_name(worker_type),
                     objective=objective,
                 ),
                 title=title,
@@ -1828,7 +1813,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["subagent", "list", "delegation"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://subagents.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1883,7 +1867,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "cancel", "kill"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://subagents.kill",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1926,7 +1909,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "steer", "input"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://subagents.steer",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1976,7 +1958,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["worker", "review", "governance"],
-            worker_types=["general", "ops"],
             manifest_ref="builtin://workers.review",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -1999,7 +1980,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "split", "child_work"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://work.split",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2022,7 +2002,6 @@ class CapabilityPackService:
                     worker_type=worker_type,
                     target_kind=target_kind,
                     tool_profile=self._effective_tool_profile_for_objective(
-                        self._coerce_worker_type_name(worker_type),
                         objective=item,
                     ),
                 )
@@ -2043,7 +2022,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "merge", "child_work"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://work.merge",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2082,7 +2060,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "delete", "archive"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://work.delete",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2126,7 +2103,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="network",
             tags=["web", "http", "fetch"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://web.fetch",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2165,7 +2141,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="network",
             tags=["web", "search", "http"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://web.search",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2192,7 +2167,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "open", "url"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.open",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2215,7 +2189,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="browser",
             tags=["browser", "status", "session"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.status",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2245,7 +2218,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "navigate", "url"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.navigate",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2268,7 +2240,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="browser",
             tags=["browser", "snapshot", "dom"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.snapshot",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2295,7 +2266,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "act", "click"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.act",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2335,7 +2305,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "close", "session"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://browser.close",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2361,7 +2330,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["gateway", "inspect", "metrics"],
-            worker_types=["ops", "general"],
             manifest_ref="builtin://gateway.inspect",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2398,7 +2366,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="automation",
             tags=["cron", "automation", "scheduler"],
-            worker_types=["ops", "general"],
             manifest_ref="builtin://cron.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2420,7 +2387,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["nodes", "runtime", "host"],
-            worker_types=["ops", "general"],
             manifest_ref="builtin://nodes.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2451,7 +2417,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "servers", "discovery"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://mcp.servers.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2480,7 +2445,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "tools", "discovery"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://mcp.tools.list",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2510,7 +2474,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "tools", "refresh"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://mcp.tools.refresh",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2540,7 +2503,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="mcp",
             tags=["mcp", "install"],
-            worker_types=["ops", "dev", "general"],
             manifest_ref="builtin://mcp.install",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2599,7 +2561,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "install", "status"],
-            worker_types=["ops", "dev", "general"],
             manifest_ref="builtin://mcp.install_status",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2652,7 +2613,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="mcp",
             tags=["mcp", "uninstall"],
-            worker_types=["ops", "dev", "general"],
             manifest_ref="builtin://mcp.uninstall",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2690,7 +2650,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="document",
             tags=["pdf", "document", "inspect"],
-            worker_types=["research", "dev", "general"],
             manifest_ref="builtin://pdf.inspect",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2709,7 +2668,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="media",
             tags=["image", "media", "inspect"],
-            worker_types=["research", "dev", "general"],
             manifest_ref="builtin://image.inspect",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2728,7 +2686,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="media",
             tags=["tts", "speech", "audio"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://tts.speak",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2760,7 +2717,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="canvas",
             tags=["canvas", "artifact", "write"],
-            worker_types=["research", "dev", "general"],
             manifest_ref="builtin://canvas.write",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -2795,7 +2751,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "subject", "history"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.read",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2828,7 +2783,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "browse", "directory"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.browse",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2869,7 +2823,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "search", "records"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.search",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2926,7 +2879,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "citations", "evidence"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.citations",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -2971,7 +2923,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "recall", "context"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.recall",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -3060,7 +3011,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "write", "persist"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://memory.write",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -3284,7 +3234,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="behavior",
             tags=["behavior", "file", "read", "context"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://behavior.read_file",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -3333,7 +3282,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.STANDARD,
             tool_group="behavior",
             tags=["behavior", "file", "write", "context"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://behavior.write_file",
             metadata={
                 "entrypoints": ["agent_runtime"],
@@ -3446,7 +3394,7 @@ class CapabilityPackService:
 
             # Feature 063 T2.4: 所有副作用完成后 invalidate 缓存
             # 确保 onboarding 标记等状态变更已落盘，避免缓存重建读到过期状态
-            from octoagent.gateway.services.butler_behavior import (
+            from octoagent.gateway.services.agent_decision import (
                 invalidate_behavior_pack_cache,
             )
 
@@ -3825,7 +3773,6 @@ class CapabilityPackService:
             tool_profile=ToolProfile.MINIMAL,
             tool_group="skills",
             tags=["skills", "discovery", "knowledge"],
-            worker_types=["ops", "research", "dev", "general"],
             manifest_ref="builtin://skills",
             metadata={
                 "entrypoints": ["agent_runtime", "web"],
@@ -4027,16 +3974,6 @@ class CapabilityPackService:
         }
 
     @staticmethod
-    def _worker_profile_label(worker_type: str) -> str:
-        labels = {
-            "general": "Butler Root Agent",
-            "ops": "Ops Root Agent",
-            "research": "Research Root Agent",
-            "dev": "Dev Root Agent",
-        }
-        return labels.get(worker_type, worker_type)
-
-    @staticmethod
     def _builtin_worker_type_from_profile_id(profile_id: str) -> str | None:
         normalized = profile_id.strip().lower()
         if not normalized.startswith("singleton:"):
@@ -4118,40 +4055,7 @@ class CapabilityPackService:
         return [normalized]
 
     @staticmethod
-    def _classify_worker_type(objective: str) -> str:
-        """根据目标文本分类 worker 类型标签（仅用于 UI 标记，不影响工具集）。"""
-        lowered = objective.lower()
-        if any(token in lowered for token in ("代码", "修复", "实现", "测试", "patch", "dev")):
-            return "dev"
-        if any(
-            token in lowered
-            for token in ("部署", "运行", "恢复", "诊断", "日志", "监控", "重启", "ops")
-        ):
-            return "ops"
-        if any(
-            token in lowered
-            for token in ("调研", "分析", "资料", "阅读", "总结", "research", "investigate")
-        ):
-            return "research"
-        return "research"
-
-    @staticmethod
-    def _coerce_worker_type_name(worker_type: str) -> str:
-        normalized = worker_type.strip().lower()
-        if normalized in {"general", "ops", "research", "dev"}:
-            return normalized
-        return "general"
-
-    @staticmethod
-    def _target_kind_for_worker_type(worker_type: str) -> str:
-        if worker_type == "dev":
-            return RuntimeKind.GRAPH_AGENT.value
-        if worker_type == "ops":
-            return RuntimeKind.ACP_RUNTIME.value
-        return RuntimeKind.SUBAGENT.value
-
-    @staticmethod
-    def _requires_standard_web_access(objective: str, worker_type: str = "general") -> bool:
+    def _requires_standard_web_access(objective: str) -> bool:
         lowered = objective.lower()
         common_tokens = (
             "天气",
@@ -4174,15 +4078,10 @@ class CapabilityPackService:
             "website",
             "official",
         )
-        ops_tokens = ("状态页", "status page", "console", "health", "incident", "控制台", "健康")
-        if any(token in lowered for token in common_tokens):
-            return worker_type in {"research", "ops", "general"}
-        return worker_type == "ops" and any(token in lowered for token in ops_tokens)
+        return any(token in lowered for token in common_tokens)
 
     @staticmethod
-    def _requires_weather_toolset(objective: str, worker_type: str = "general") -> bool:
-        if worker_type not in {"research", "general"}:
-            return False
+    def _requires_weather_toolset(objective: str) -> bool:
         lowered = objective.lower()
         weather_tokens = (
             "天气",
@@ -4196,14 +4095,9 @@ class CapabilityPackService:
         )
         return any(token in lowered for token in weather_tokens)
 
-    @classmethod
-    def _effective_tool_profile_for_objective(
-        cls,
-        worker_type: str,
-        *,
-        objective: str,
-    ) -> str:
-        del worker_type, objective
+    @staticmethod
+    def _effective_tool_profile_for_objective(*, objective: str) -> str:
+        del objective
         return ToolProfile.STANDARD.value
 
     def _build_worker_assignment(
@@ -4212,29 +4106,14 @@ class CapabilityPackService:
         *,
         index: int,
     ) -> _WorkerPlanAssignment:
-        worker_type = self._classify_worker_type(objective)
-        tool_profile = self._effective_tool_profile_for_objective(
-            worker_type,
-            objective=objective,
-        )
-        reason = f"该子任务更适合由 {worker_type} worker 处理。"
-        if worker_type == "research" and tool_profile == ToolProfile.STANDARD.value:
-            reason = (
-                "该子任务涉及最新公开信息或网页资料，"
-                "适合由 research worker 使用受治理 web/browser 工具处理。"
-            )
-        elif worker_type == "ops" and tool_profile == ToolProfile.STANDARD.value:
-            reason = (
-                "该子任务涉及外部状态或网页检查，"
-                "适合由 ops worker 使用受治理 runtime/web 工具处理。"
-            )
+        tool_profile = ToolProfile.STANDARD.value
         return _WorkerPlanAssignment(
             objective=objective,
-            worker_type=worker_type,
-            target_kind=self._target_kind_for_worker_type(worker_type),
+            worker_type="general",
+            target_kind=RuntimeKind.SUBAGENT.value,
             tool_profile=tool_profile,
-            title=f"{worker_type}-worker-{index}",
-            reason=reason,
+            title=f"worker-{index}",
+            reason="子任务由 worker 处理。",
         )
 
     async def _launch_child_task(

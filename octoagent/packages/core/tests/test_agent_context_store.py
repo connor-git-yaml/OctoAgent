@@ -142,14 +142,14 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
         agent_runtime_id="runtime-butler-alpha",
         project_id="project-alpha",
         agent_profile_id="agent-profile-alpha",
-        role=AgentRuntimeRole.BUTLER,
-        name="Alpha Butler",
+        role=AgentRuntimeRole.MAIN,
+        name="Alpha Agent",
         persona_summary="负责用户主会话与 worker 协调。",
     )
     session = AgentSession(
         agent_session_id="agent-session-butler-alpha",
         agent_runtime_id=runtime.agent_runtime_id,
-        kind=AgentSessionKind.BUTLER_MAIN,
+        kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="project-alpha",
         surface="chat",
         thread_id="thread-alpha",
@@ -162,9 +162,9 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
         namespace_id="namespace-butler-alpha",
         project_id="project-alpha",
         agent_runtime_id=runtime.agent_runtime_id,
-        kind=MemoryNamespaceKind.BUTLER_PRIVATE,
-        name="Butler Private",
-        description="Butler 私有长期记忆。",
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        name="Agent Private",
+        description="Agent 私有长期记忆。",
         memory_scope_ids=["project-alpha:butler"],
     )
     recall = RecallFrame(
@@ -203,15 +203,15 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
     )
 
     assert stored_runtime is not None
-    assert stored_runtime.role == AgentRuntimeRole.BUTLER
-    assert stored_runtime.name == "Alpha Butler"
+    assert stored_runtime.role == AgentRuntimeRole.MAIN
+    assert stored_runtime.name == "Alpha Agent"
 
     assert stored_session is not None
     assert stored_session.legacy_session_id == "project:alpha:thread-alpha"
     assert stored_session.last_recall_frame_id == "recall-frame-alpha"
 
     assert stored_namespace is not None
-    assert stored_namespace.kind == MemoryNamespaceKind.BUTLER_PRIVATE
+    assert stored_namespace.kind == MemoryNamespaceKind.AGENT_PRIVATE
     assert stored_namespace.memory_scope_ids == ["project-alpha:butler"]
 
     assert stored_recall is not None
@@ -220,14 +220,14 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
 
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
         project_id="project-alpha",
-        role=AgentRuntimeRole.BUTLER,
+        role=AgentRuntimeRole.MAIN,
     )
     sessions = await store_group.agent_context_store.list_agent_sessions(
         legacy_session_id="project:alpha:thread-alpha",
     )
     namespaces = await store_group.agent_context_store.list_memory_namespaces(
         agent_runtime_id=runtime.agent_runtime_id,
-        kind=MemoryNamespaceKind.BUTLER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
     )
     recalls = await store_group.agent_context_store.list_recall_frames(
         agent_session_id=session.agent_session_id,

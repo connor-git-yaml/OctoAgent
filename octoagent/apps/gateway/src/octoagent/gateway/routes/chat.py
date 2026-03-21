@@ -181,7 +181,7 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
                 continue
             if session.kind is AgentSessionKind.DIRECT_WORKER:
                 return profile_id
-            if not anchored_owner_profile_id and session.kind is AgentSessionKind.BUTLER_MAIN:
+            if not anchored_owner_profile_id and session.kind is AgentSessionKind.MAIN_BOOTSTRAP:
                 anchored_owner_profile_id = profile_id
 
     events = await store_group.event_store.get_events_for_task(task_id)

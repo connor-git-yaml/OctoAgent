@@ -321,8 +321,8 @@ async def _seed_session_continuity(project_root: Path) -> None:
     await store_group.agent_context_store.save_agent_runtime(
         AgentRuntime(
             agent_runtime_id="runtime-001",
-            role=AgentRuntimeRole.BUTLER,
-            name="Backup Export Butler",
+            role=AgentRuntimeRole.MAIN,
+            name="Backup Export Agent",
             persona_summary="负责 continuity export 测试。",
             updated_at=now,
         )
@@ -347,7 +347,7 @@ async def _seed_session_continuity(project_root: Path) -> None:
         AgentSession(
             agent_session_id="agent-session-001",
             agent_runtime_id="runtime-001",
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
             thread_id="thread-1",
             legacy_session_id="thread-1",
             last_context_frame_id="context-frame-001",

@@ -293,9 +293,9 @@ function KindContent({
 
     case "decision": {
       const routeReason = String(event.payload?.route_reason || "");
-      const isButlerDirect = routeReason.startsWith("butler_direct_execution:");
+      const isDirectExec = routeReason.startsWith("butler_direct_execution:");
       return (
-        <Section title={isButlerDirect ? "Butler 直接处理" : "调度决策"}>
+        <Section title={isDirectExec ? "Agent 直接处理" : "调度决策"}>
           <div className="tv-modal-meta">
             {!!event.payload?.decision && (
               <Row label="决策">{s(event.payload.decision)}</Row>

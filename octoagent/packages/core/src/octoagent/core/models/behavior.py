@@ -54,12 +54,15 @@ class ClarificationAction(StrEnum):
     DELEGATE_AFTER_CLARIFICATION = "delegate_after_clarification"
 
 
-class ButlerDecisionMode(StrEnum):
+class AgentDecisionMode(StrEnum):
     DIRECT_ANSWER = "direct_answer"
     ASK_ONCE = "ask_once"
-    DELEGATE_RESEARCH = "delegate_research"
     BEST_EFFORT_ANSWER = "best_effort_answer"
-    DELEGATE_GRAPH = "delegate_graph"  # Feature 065: 委派到 Graph Pipeline
+    DELEGATE_GRAPH = "delegate_graph"
+
+
+# 历史兼容别名
+ButlerDecisionMode = AgentDecisionMode
 
 
 class RecallPlanMode(StrEnum):
@@ -247,8 +250,8 @@ class RecallEvidenceBundle(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ButlerDecision(BaseModel):
-    mode: ButlerDecisionMode = ButlerDecisionMode.DIRECT_ANSWER
+class AgentDecision(BaseModel):
+    mode: AgentDecisionMode = AgentDecisionMode.DIRECT_ANSWER
     category: str = Field(default="")
     rationale: str = Field(default="")
     missing_inputs: list[str] = Field(default_factory=list)
@@ -267,12 +270,18 @@ class ButlerDecision(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ButlerLoopPlan(BaseModel):
-    """Butler 预路由与 recall 统一规划结果。"""
+ButlerDecision = AgentDecision
 
-    decision: ButlerDecision = Field(default_factory=ButlerDecision)
+
+class AgentLoopPlan(BaseModel):
+    """Agent 预路由与 recall 统一规划结果。"""
+
+    decision: AgentDecision = Field(default_factory=AgentDecision)
     recall_plan: RecallPlan = Field(default_factory=RecallPlan)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+ButlerLoopPlan = AgentLoopPlan
 
 
 class ClarificationDecision(BaseModel):

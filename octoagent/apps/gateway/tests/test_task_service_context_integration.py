@@ -492,12 +492,12 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
 
     runtime = await store_group.agent_context_store.get_agent_runtime(frame.agent_runtime_id)
     assert runtime is not None
-    assert runtime.role is AgentRuntimeRole.BUTLER
+    assert runtime.role is AgentRuntimeRole.MAIN
     assert runtime.name == "Alpha Agent"
 
     agent_session = await store_group.agent_context_store.get_agent_session(frame.agent_session_id)
     assert agent_session is not None
-    assert agent_session.kind is AgentSessionKind.BUTLER_MAIN
+    assert agent_session.kind is AgentSessionKind.MAIN_BOOTSTRAP
     assert agent_session.legacy_session_id == frame.session_id
     assert agent_session.last_recall_frame_id == frame.recall_frame_id
     assert agent_session.rolling_summary
@@ -542,17 +542,17 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     )
     assert {item.kind for item in namespaces} == {
         MemoryNamespaceKind.PROJECT_SHARED,
-        MemoryNamespaceKind.BUTLER_PRIVATE,
+        MemoryNamespaceKind.AGENT_PRIVATE,
     }
     expected_scope_ids = {
         scope_id
         for namespace in namespaces
         for scope_id in namespace.memory_scope_ids
     }
-    butler_private_namespace = next(
-        item for item in namespaces if item.kind is MemoryNamespaceKind.BUTLER_PRIVATE
+    agent_private_namespace = next(
+        item for item in namespaces if item.kind is MemoryNamespaceKind.AGENT_PRIVATE
     )
-    assert len(butler_private_namespace.memory_scope_ids) == 2
+    assert len(agent_private_namespace.memory_scope_ids) == 2
     assert set(frame.budget["memory_recall"]["scope_ids"]) == expected_scope_ids
 
     recalls = await store_group.agent_context_store.list_recall_frames(task_id=task_id, limit=5)
@@ -948,7 +948,7 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
     await store_group.agent_context_store.save_agent_runtime(
         AgentRuntime(
             agent_runtime_id=runtime_id,
-            role=AgentRuntimeRole.BUTLER,
+            role=AgentRuntimeRole.MAIN,
             project_id="project-default",
             workspace_id="workspace-default",
         )
@@ -957,7 +957,7 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
         AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=runtime_id,
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
             rolling_summary="之前已经确认过 Alpha continuity 的长期约束。",
             metadata={},
         )
@@ -1097,7 +1097,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
         agent_runtime_id=worker_runtime_id,
@@ -1175,7 +1175,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         workspace_id="workspace-alpha",
         work_id="work-alpha-1",
         agent_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
@@ -1187,7 +1187,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         task_id=task_id,
         user_text=message.text,
         llm_service=llm_service,
-        worker_capability="research",
+        worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
@@ -1319,7 +1319,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
         agent_runtime_id=worker_runtime_id,
@@ -1414,7 +1414,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         workspace_id="workspace-alpha",
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
@@ -1426,7 +1426,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         task_id=task_id,
         user_text=message.text,
         llm_service=llm_service,
-        worker_capability="research",
+        worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
@@ -1516,7 +1516,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
         agent_runtime_id=worker_runtime_id,
@@ -1595,7 +1595,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         workspace_id="workspace-alpha",
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
@@ -1607,7 +1607,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         task_id=task_id,
         user_text=message.text,
         llm_service=llm_service,
-        worker_capability="research",
+        worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
@@ -1669,7 +1669,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
     )
     service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
@@ -1701,7 +1701,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             workspace_id="workspace-alpha",
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
-            worker_capability="research",
+            worker_capability="llm_generation",
             metadata={
                 "agent_runtime_id": worker_runtime_id,
                 "agent_session_id": agent_session_id,
@@ -1712,7 +1712,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             task_id=task_id,
             user_text=message.text,
             llm_service=llm_service,
-            worker_capability="research",
+            worker_capability="llm_generation",
             runtime_context=runtime_context,
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),
@@ -1817,7 +1817,7 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runti
         workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
-        worker_capability="research",
+        worker_capability="llm_generation",
     )
     service = TaskService(store_group, SSEHub())
 
@@ -1938,7 +1938,7 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runti
             workspace_id="workspace-alpha",
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
-            worker_capability="research",
+            worker_capability="llm_generation",
             metadata={
                 "agent_runtime_id": worker_runtime_id,
                 "agent_session_id": agent_session_id,
@@ -1949,7 +1949,7 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runti
             task_id=task_id,
             user_text=message.text,
             llm_service=llm_service,
-            worker_capability="research",
+            worker_capability="llm_generation",
             runtime_context=runtime_context,
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),

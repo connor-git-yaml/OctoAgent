@@ -257,7 +257,7 @@ type DispatchMode = "direct" | "worker";
 
 /**
  * 扫描事件流，检测本轮的 dispatch 模式：
- * - "direct": Butler 直接执行（无 WORKER_DISPATCHED 事件）
+ * - "direct": Agent 直接执行（无 WORKER_DISPATCHED 事件）
  * - "worker": 传统 Worker 路由（存在 WORKER_DISPATCHED 事件）
  */
 function detectDispatchMode(nodes: FlowNode[]): DispatchMode {
@@ -274,7 +274,7 @@ function assignAgents(nodes: FlowNode[]): void {
   const mode = detectDispatchMode(nodes);
 
   if (mode === "direct") {
-    // Butler 直接执行：所有事件归入 Orchestrator 单泳道
+    // Agent 直接执行：所有事件归入 Orchestrator 单泳道
     for (const node of nodes) {
       node.agent = "Orchestrator";
     }
@@ -580,13 +580,13 @@ function makeSingleNode(
 
     case "ORCH_DECISION": {
       const routeReason = String(event.payload?.route_reason || "");
-      const isButlerDirect = routeReason.startsWith("butler_direct_execution:");
+      const isDirectExec = routeReason.startsWith("butler_direct_execution:");
       return {
         ...base,
         id: event.event_id,
         kind: "decision",
-        label: isButlerDirect
-          ? "Butler 直接处理"
+        label: isDirectExec
+          ? "Agent 直接处理"
           : str(event.payload?.decision, 20) || "调度决策",
         status: "neutral",
         events: [event],
