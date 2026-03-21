@@ -424,6 +424,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             artifact_store=store_group.artifact_store,
             event_store=store_group.event_store,
             event_broadcaster=app.state.sse_hub,
+            context_window_tokens=128_000,
         )
     )
     app.state.tool_broker = tool_broker

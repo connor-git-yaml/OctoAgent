@@ -133,23 +133,24 @@ class TestFullPipeline:
         event_hook = EventGenerationHook(event_store=mock_event_store)
         large_output_hook = LargeOutputHandler(
             artifact_store=mock_artifact_store,
+            context_window_tokens=500,  # 极小窗口强制触发截断（阈值=2000 字符）
         )
         broker.add_hook(event_hook)
         broker.add_hook(large_output_hook)
 
-        # 3. 执行生成大输出（800 > 500 默认阈值）
-        result = await broker.execute("generate_large_output", {"size": 800}, _make_context())
+        # 3. 执行生成大输出（3000 > 2000 最小阈值）
+        result = await broker.execute("generate_large_output", {"size": 3000}, _make_context())
 
         # 4. 验证裁切
         assert result.truncated is True
         assert result.artifact_ref is not None
-        assert "artifact:" in result.output
-        assert len(result.output) < 500
+        assert "⚠️" in result.output
+        assert len(result.output) < 3000
 
         # 5. 验证 ArtifactStore 存储了完整内容
         assert len(mock_artifact_store.contents) == 1
         stored_content = list(mock_artifact_store.contents.values())[0]
-        assert len(stored_content) == 800  # "A" * 800 的 UTF-8 字节
+        assert len(stored_content) == 3000  # "A" * 3000 的 UTF-8 字节
 
         # 6. 验证事件（Broker 内联 + EventGenerationHook）
         events = mock_event_store.events

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 import structlog
@@ -40,26 +41,121 @@ logger = structlog.get_logger(__name__)
 # LargeOutputHandler -- 大输出自动裁切
 # ============================================================
 
+# 参考 OpenClaw：单个工具结果最多占上下文窗口的指定比例。
+# 参考 Agent Zero：工具结果首次返回时尽量保留完整内容，
+# 只在极端超长时截断。上下文预算管理在更上层（历史压缩）处理。
+_CONTEXT_SHARE_RATIO = 0.5  # 单工具结果最多占上下文窗口的 50%
+_CHARS_PER_TOKEN = 4  # 粗略估计：1 token ≈ 4 字符
+_HARD_MAX_CHARS = 400_000  # 硬上限，防止极端情况撑爆内存
+_MIN_THRESHOLD = 2_000  # 最低阈值，即使上下文窗口很小也不低于此值
+_DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000  # 默认上下文窗口（未配置时的 fallback）
+
+# Head + Tail 截断时检测"重要尾部"的关键词
+_TAIL_IMPORTANCE_KEYWORDS = re.compile(
+    r"error|exception|failed|fatal|traceback|panic|stack.?trace|errno|exit.?code"
+    r"|total|summary|result|complete|finished|done",
+    re.IGNORECASE,
+)
+_TAIL_BUDGET_RATIO = 0.3  # 重要尾部占截断预算的 30%
+_TAIL_MAX_CHARS = 4_000  # 重要尾部最大字符数
+
+
+def calculate_max_tool_result_chars(context_window_tokens: int) -> int:
+    """根据上下文窗口大小计算单个工具结果的最大字符数。
+
+    参考 OpenClaw 的 calculateMaxToolResultChars：
+    - 按上下文窗口的 50% 计算
+    - 受硬上限 400K 字符约束
+    - 不低于 2K 字符
+    """
+    max_tokens = int(context_window_tokens * _CONTEXT_SHARE_RATIO)
+    max_chars = max_tokens * _CHARS_PER_TOKEN
+    return max(
+        _MIN_THRESHOLD,
+        min(max_chars, _HARD_MAX_CHARS),
+    )
+
+
+def head_tail_truncate(text: str, max_chars: int) -> str:
+    """Head + Tail 智能截断：保留头尾，中间加占位符。
+
+    参考 OpenClaw 的 truncateToolResultText：
+    1. 检测尾部是否包含错误/总结等重要信息
+    2. 有重要尾部时，按 70/30 分配头尾预算
+    3. 无重要尾部时，只保留头部
+    4. 尽量在换行符边界切割，避免截断不完整的行
+
+    截断标记引导 LLM 使用 offset/limit 参数重读特定区段。
+    """
+    if len(text) <= max_chars:
+        return text
+
+    omitted_chars = len(text) - max_chars
+    # 粗略估计省略的 token 数
+    omitted_tokens_est = omitted_chars // _CHARS_PER_TOKEN
+
+    # 检测尾部是否有"重要信息"
+    tail_check_len = min(2000, len(text))
+    tail_snippet = text[-tail_check_len:]
+    has_important_tail = bool(_TAIL_IMPORTANCE_KEYWORDS.search(tail_snippet))
+
+    if has_important_tail:
+        # 尾部预算：30% 的可用空间，最多 _TAIL_MAX_CHARS
+        tail_budget = min(int(max_chars * _TAIL_BUDGET_RATIO), _TAIL_MAX_CHARS)
+        marker = (
+            f"\n\n⚠️ [... 中间省略约 {omitted_tokens_est} tokens ..."
+            f" 使用 offset/limit 参数分段读取完整内容 ...]\n\n"
+        )
+        head_budget = max_chars - tail_budget - len(marker)
+        if head_budget < 200:
+            head_budget = 200
+            tail_budget = max_chars - head_budget - len(marker)
+
+        # 尽量在换行符边界切割
+        head = text[:head_budget]
+        last_nl = head.rfind("\n")
+        if last_nl > head_budget * 0.7:
+            head = head[:last_nl + 1]
+
+        tail = text[-tail_budget:]
+        first_nl = tail.find("\n")
+        if 0 < first_nl < tail_budget * 0.3:
+            tail = tail[first_nl + 1:]
+
+        return head + marker + tail
+    else:
+        # 无重要尾部：只保留头部
+        marker = (
+            f"\n\n⚠️ [内容已截断 — 原文 {len(text)} 字符（约 {len(text) // _CHARS_PER_TOKEN} tokens）。"
+            f" 以上为部分内容。如需更多，请使用 offset/limit 参数分段读取。]"
+        )
+        head_budget = max_chars - len(marker)
+        head = text[:head_budget]
+        last_nl = head.rfind("\n")
+        if last_nl > head_budget * 0.7:
+            head = head[:last_nl + 1]
+
+        return head + marker
+
 
 class LargeOutputHandler:
     """大输出自动裁切 -- 对齐 spec FR-016/017/018, C11 Context Hygiene
 
-    作为 after hook 运行，对工具输出超过阈值时：
-    1. 完整输出存入 ArtifactStore
-    2. ToolResult.output 替换为引用摘要
-    3. ToolResult.artifact_ref 设置为 Artifact ID
+    参考 OpenClaw / Agent Zero 的设计：
+    - 阈值按上下文窗口的 50% 动态计算（而非硬编码 500 字符）
+    - Head + Tail 智能截断（保留头部上下文 + 尾部错误/总结）
+    - 截断标记引导 LLM 用 offset/limit 重读
+    - ArtifactStore 仅用于审计存档，不作为 LLM 恢复完整内容的途径
 
-    降级策略：ArtifactStore 不可用时保留原始输出（FR-018）。
+    降级策略：ArtifactStore 不可用时仍执行截断（FR-018）。
     """
-
-    DEFAULT_THRESHOLD = 500  # 默认裁切阈值（字符）
 
     def __init__(
         self,
         artifact_store: ArtifactStoreProtocol,
         event_store: EventStoreProtocol | None = None,
         event_broadcaster: EventBroadcasterProtocol | None = None,
-        default_threshold: int = DEFAULT_THRESHOLD,
+        context_window_tokens: int = _DEFAULT_CONTEXT_WINDOW_TOKENS,
     ) -> None:
         """初始化 LargeOutputHandler
 
@@ -67,12 +163,13 @@ class LargeOutputHandler:
             artifact_store: ArtifactStore 实例
             event_store: EventStore 实例（可选，用于补写 ARTIFACT_CREATED 审计）
             event_broadcaster: 事件广播器（可选，用于实时推送增量事件）
-            default_threshold: 全局默认裁切阈值（字符数）
+            context_window_tokens: 模型上下文窗口大小（token 数），用于动态计算截断阈值
         """
         self._artifact_store = artifact_store
         self._event_store = event_store
         self._event_broadcaster = event_broadcaster
-        self._default_threshold = default_threshold
+        self._context_window_tokens = context_window_tokens
+        self._default_threshold = calculate_max_tool_result_chars(context_window_tokens)
 
     @property
     def name(self) -> str:
@@ -106,39 +203,40 @@ class LargeOutputHandler:
         if result.is_error:
             return result
 
-        # 确定阈值（FR-017: 工具级 > 全局默认）
+        # 确定阈值（FR-017: 工具级 > 动态默认）
         threshold = tool_meta.output_truncate_threshold or self._default_threshold
 
         # 未超阈值不裁切
         if len(result.output) <= threshold:
             return result
 
-        # 超阈值：尝试存入 ArtifactStore
+        # Head + Tail 智能截断
+        truncated_output = head_tail_truncate(result.output, threshold)
+
+        # 尝试将完整输出存入 ArtifactStore（用于审计，非 LLM 恢复）
+        artifact_id: str | None = None
         try:
             artifact_id = await self._store_as_artifact(
                 output=result.output,
                 tool_name=tool_meta.name,
                 context=context,
             )
-            prefix = result.output[:200]
-            return result.model_copy(
-                update={
-                    "output": (
-                        f"[Output truncated. Full content: artifact:{artifact_id}]\n{prefix}..."
-                    ),
-                    "artifact_ref": artifact_id,
-                    "truncated": True,
-                }
-            )
         except Exception as e:
-            # FR-018: ArtifactStore 不可用 -> 降级：保留原始输出
+            # FR-018: ArtifactStore 不可用不影响截断
             logger.warning(
                 "artifact_store_unavailable",
                 tool_name=tool_meta.name,
                 output_length=len(result.output),
                 error=str(e),
             )
-            return result
+
+        return result.model_copy(
+            update={
+                "output": truncated_output,
+                "artifact_ref": artifact_id,
+                "truncated": True,
+            }
+        )
 
     async def _store_as_artifact(
         self,
