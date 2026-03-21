@@ -910,15 +910,13 @@
 }
 
 .tv-modal-event-id {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
   color: var(--cp-muted);
-  background: var(--cp-soft);
-  padding: 2px 8px;
-  border-radius: 10px;
   font-family: monospace;
   white-space: nowrap;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
   cursor: default;
 }
 

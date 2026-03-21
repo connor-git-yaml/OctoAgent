@@ -39,10 +39,10 @@ export default function NodeDetailModal({ node, onClose }: Props) {
       <div className="tv-modal" onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className="tv-modal-header">
-          <span className="tv-modal-event-id" title={event.event_id}>
-            #{event.task_seq}
-          </span>
           <h3 className="tv-modal-title">{kindTitle(node.kind)}</h3>
+          <span className="tv-modal-event-id" title={event.event_id}>
+            {event.event_id}
+          </span>
           <button className="tv-modal-close" onClick={onClose}>
             ✕
           </button>
