@@ -172,11 +172,11 @@ function ChatNavSection({
               }}
             >
               <span className="wb-nav-session-copy">
-                <span className="wb-nav-session-agent-name">
-                  {ownerLabel}
-                </span>
                 <span className="wb-nav-session-title">
                   {formatSessionTitle(session)}
+                </span>
+                <span className="wb-nav-session-agent-name">
+                  {ownerLabel}
                 </span>
               </span>
             </button>

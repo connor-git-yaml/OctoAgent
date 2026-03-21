@@ -272,8 +272,7 @@ describe("WorkbenchLayout", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("fin")).toBeInTheDocument();
-    expect(screen.getByText("研究员小 A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^fin\s*研究员小 A$/ })).toBeInTheDocument();
     expect(screen.queryByText(/对话：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/执行：/)).not.toBeInTheDocument();
   });
