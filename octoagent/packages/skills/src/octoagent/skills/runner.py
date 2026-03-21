@@ -834,17 +834,23 @@ class SkillRunner:
         attempt: int,
         step: int,
     ) -> None:
+        payload: dict[str, object] = {
+            "skill_id": manifest.skill_id,
+            "model_alias": manifest.model_alias,
+            "attempt": attempt,
+            "step": step,
+            "response_summary": output.content[:200],
+            "token_usage": output.token_usage or {},
+        }
+        if output.tool_calls:
+            payload["tool_calls"] = [
+                {"tool_name": tc.tool_name, "arguments": tc.arguments}
+                for tc in output.tool_calls
+            ]
         await self._emit_event(
             execution_context=execution_context,
             event_type=EventType.MODEL_CALL_COMPLETED,
-            payload={
-                "skill_id": manifest.skill_id,
-                "model_alias": manifest.model_alias,
-                "attempt": attempt,
-                "step": step,
-                "response_summary": output.content[:200],
-                "token_usage": {},
-            },
+            payload=payload,
         )
 
     async def _emit_usage_report(

@@ -409,7 +409,8 @@
 
 .tv-page {
   padding: 0 var(--cp-space-5);
-  max-width: 1200px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* ─── TaskDetail 头部 ─────────────────────────────────────── */
@@ -899,7 +900,7 @@
 .tv-modal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--cp-space-2);
   padding: var(--cp-space-4);
   border-bottom: 1px solid var(--cp-border);
   position: sticky;
@@ -908,11 +909,25 @@
   z-index: 1;
 }
 
+.tv-modal-event-id {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cp-muted);
+  background: var(--cp-soft);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
 .tv-modal-title {
   font-size: 16px;
   font-weight: 600;
   color: var(--cp-ink);
   margin: 0;
+  flex: 1;
 }
 
 .tv-modal-close {

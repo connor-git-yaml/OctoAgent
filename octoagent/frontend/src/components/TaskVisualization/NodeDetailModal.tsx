@@ -39,6 +39,9 @@ export default function NodeDetailModal({ node, onClose }: Props) {
       <div className="tv-modal" onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className="tv-modal-header">
+          <span className="tv-modal-event-id" title={event.event_id}>
+            #{event.task_seq}
+          </span>
           <h3 className="tv-modal-title">{kindTitle(node.kind)}</h3>
           <button className="tv-modal-close" onClick={onClose}>
             ✕
@@ -159,6 +162,7 @@ function KindContent({
         unknown
       >;
       const duration = Number(p.duration_ms) || 0;
+      const toolCalls = (p.tool_calls || []) as Array<{ tool_name?: string; arguments?: unknown }>;
       return (
         <Section title="LLM 调用详情">
           <div className="tv-modal-meta">
@@ -171,6 +175,24 @@ function KindContent({
             )}
             {duration > 0 && <Row label="耗时">{fmtMs(duration)}</Row>}
           </div>
+          {toolCalls.length > 0 && (
+            <Section title={`工具调用 (${toolCalls.length})`}>
+              <div className="tv-modal-tool-calls">
+                {toolCalls.map((tc, i) => (
+                  <details key={i} className="tv-modal-payload-details">
+                    <summary>{tc.tool_name || `tool_call_${i}`}</summary>
+                    {tc.arguments && (
+                      <pre className="tv-modal-payload">
+                        {typeof tc.arguments === "string"
+                          ? tc.arguments
+                          : JSON.stringify(tc.arguments, null, 2)}
+                      </pre>
+                    )}
+                  </details>
+                ))}
+              </div>
+            </Section>
+          )}
           {node.status === "error" && !!p.error && (
             <div className="tv-modal-error">{String(p.error)}</div>
           )}
