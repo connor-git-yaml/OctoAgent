@@ -294,7 +294,6 @@ export default function WorkbenchLayout() {
                   <span className="wb-brand-tagline">Personal AI OS</span>
                 </div>
               </div>
-              <p>把对话、设置和运行中的事情放在一个地方，常用入口都在这里。</p>
             </div>
 
           <nav className="wb-nav" aria-label="Workbench Navigation">

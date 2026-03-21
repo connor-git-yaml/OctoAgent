@@ -100,6 +100,9 @@ describe("WorkbenchLayout", () => {
     expect(screen.queryByText(/\[SETUP_REVIEW_READY\]/)).not.toBeInTheDocument();
     expect(screen.getByText("有 2 项需要处理")).toBeInTheDocument();
     expect(screen.getByText("Perplexity MCP 当前失败")).toBeInTheDocument();
+    expect(
+      screen.queryByText("把对话、设置和运行中的事情放在一个地方，常用入口都在这里。")
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/可见 work/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/记忆记录/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/current records/i)).not.toBeInTheDocument();
