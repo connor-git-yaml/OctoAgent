@@ -281,7 +281,19 @@ export default function WorkbenchLayout() {
         <aside className={`wb-sidebar ${navOpen ? "is-open" : ""}`}>
             <div className="wb-sidebar-card wb-sidebar-brand">
               <p className="wb-kicker">你的工作台</p>
-              <h1>OctoAgent</h1>
+              <div className="wb-brand-lockup">
+                <img
+                  className="wb-brand-mark"
+                  src="/octo-mark.svg"
+                  alt="OctoAgent logo"
+                  width={60}
+                  height={60}
+                />
+                <div className="wb-brand-copy">
+                  <h1>OctoAgent</h1>
+                  <span className="wb-brand-tagline">Personal AI OS</span>
+                </div>
+              </div>
               <p>把对话、设置和运行中的事情放在一个地方，常用入口都在这里。</p>
             </div>
 

@@ -1,4 +1,8 @@
-# OctoAgent
+<div align="center">
+  <img src="octoagent/frontend/public/octo-mark.svg" alt="OctoAgent logo" width="140" />
+  <h1>OctoAgent</h1>
+  <p><strong>Personal AI OS</strong></p>
+</div>
 
 ![Version](https://img.shields.io/badge/version-0.1.0-0f766e.svg)
 ![Python](https://img.shields.io/badge/python-3.12%2B-2563eb.svg)

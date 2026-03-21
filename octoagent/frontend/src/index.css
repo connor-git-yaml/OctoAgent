@@ -1176,6 +1176,34 @@
   line-height: 1;
 }
 
+.wb-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.wb-brand-mark {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 14px 24px rgba(21, 122, 105, 0.16));
+}
+
+.wb-brand-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.wb-brand-tagline {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(21, 122, 105, 0.8);
+}
+
 .wb-sidebar-brand p,
 .wb-topbar p,
 .wb-hero p,
@@ -1199,6 +1227,14 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--cp-primary-ink);
+}
+
+.wb-route-fallback-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 14px auto 8px;
+  filter: drop-shadow(0 14px 24px rgba(21, 122, 105, 0.16));
 }
 
 .wb-nav {

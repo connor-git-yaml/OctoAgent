@@ -16,6 +16,13 @@ function RouteFallback() {
     <div className="wb-route-fallback">
       <div className="wb-route-fallback-card">
         <p className="wb-kicker">OctoAgent Workbench</p>
+        <img
+          className="wb-route-fallback-logo"
+          src="/octo-mark.svg"
+          alt="OctoAgent logo"
+          width={56}
+          height={56}
+        />
         <h1>正在切换页面</h1>
         <p>我们在加载当前页面的数据与界面骨架。</p>
       </div>
