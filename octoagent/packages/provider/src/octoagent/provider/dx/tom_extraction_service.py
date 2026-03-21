@@ -154,11 +154,9 @@ class ToMExtractionService:
         # 4. 调用 LLM
         resolved_alias = model_alias or self._resolve_default_model_alias()
         try:
-            llm_result = await self._llm_service.call_with_fallback(
-                messages=messages,
+            llm_result = await self._llm_service.call(
+                messages,
                 model_alias=resolved_alias,
-                temperature=0.3,
-                max_tokens=4096,
             )
             response_text = llm_result.content.strip()
         except Exception as exc:

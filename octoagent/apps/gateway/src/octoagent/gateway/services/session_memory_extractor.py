@@ -272,8 +272,8 @@ class SessionMemoryExtractor:
         # 7. 调用 LLM
         assert self._llm_service is not None
         try:
-            llm_response = await self._llm_service.call_with_fallback(
-                messages=[
+            llm_response = await self._llm_service.call(
+                [
                     {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
                     {
                         "role": "user",
@@ -281,8 +281,6 @@ class SessionMemoryExtractor:
                     },
                 ],
                 model_alias="fast",
-                temperature=0.3,
-                max_tokens=4096,
             )
         except Exception as exc:
             log.warning(

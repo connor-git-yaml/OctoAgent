@@ -279,11 +279,9 @@ class ConsolidationService:
         # 6. 调用 LLM
         resolved_alias = model_alias or self._resolve_default_model_alias()
         try:
-            result = await self._llm_service.call_with_fallback(
-                messages=messages,
+            result = await self._llm_service.call(
+                messages,
                 model_alias=resolved_alias,
-                temperature=0.3,
-                max_tokens=4096,
             )
             response_text = result.content.strip()
         except Exception as exc:
@@ -645,11 +643,9 @@ class ConsolidationService:
         ]
 
         try:
-            result = await self._llm_service.call_with_fallback(
-                messages=messages,
+            result = await self._llm_service.call(
+                messages,
                 model_alias=model_alias,
-                temperature=0.2,
-                max_tokens=2048,
             )
             response_text = result.content.strip()
         except Exception as exc:
