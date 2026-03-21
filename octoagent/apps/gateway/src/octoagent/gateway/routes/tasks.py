@@ -113,9 +113,12 @@ async def list_tasks(
 async def get_task_detail(
     task_id: str,
     store_group=Depends(get_store_group),
-    scope_guard=Depends(get_task_scope_guard),
 ):
-    """查询任务详情，包含关联的 events 和 artifacts 列表"""
+    """查询任务详情，包含关联的 events 和 artifacts 列表。
+
+    不做 project scope 隔离——聊天恢复需要跨项目读取 task detail，
+    用户在侧边栏点击了 session 即代表有意查看该 task。
+    """
     service = TaskService(store_group)
     task = await service.get_task(task_id)
 
@@ -129,11 +132,6 @@ async def get_task_detail(
                 }
             },
         )
-
-    try:
-        await scope_guard.ensure_task_visible(task)
-    except TaskScopeGuardError as exc:
-        return _task_scope_error(exc)
 
     # 查询关联的事件和 artifacts
     events = await store_group.event_store.get_events_for_task(task_id)
