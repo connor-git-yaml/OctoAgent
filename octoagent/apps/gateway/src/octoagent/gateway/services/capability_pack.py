@@ -2134,7 +2134,7 @@ class CapabilityPackService:
                     "status_code": page.status_code,
                     "content_type": page.content_type,
                     "title": page.title,
-                    "body_preview": page.text_content[: max(100, min(max_chars, 500_000))],
+                    "body_preview": _truncate_text(page.text_content, limit=max(100, min(max_chars, 500_000))),
                     "body_length": page.body_length,
                     "links": [
                         {"ref": item.ref, "text": item.text, "url": item.url}
@@ -4834,7 +4834,7 @@ class CapabilityPackService:
             headers={"User-Agent": "OctoAgent Browser Tool/0.1"},
         ) as client:
             response = await client.get(normalized_url, follow_redirects=True)
-        html = response.text[:200_000]
+        html = response.text[:500_000]  # 安全保底，LargeOutputHandler 按上下文比例统一管理
         final_url = str(response.url)
         snapshot = self._parse_browser_snapshot(final_url, html)
         return _BrowserSessionState(
@@ -4847,7 +4847,7 @@ class CapabilityPackService:
             content_type=response.headers.get("content-type", ""),
             title=snapshot.title,
             text_content=snapshot.text,
-            html_preview=html[:10_000],
+            html_preview=html[:50_000],
             body_length=len(response.text),
             links=snapshot.links,
         )
@@ -4921,7 +4921,7 @@ class CapabilityPackService:
             "content_type": session.content_type,
             "title": session.title,
             "body_length": session.body_length,
-            "text_preview": session.text_content[:effective_chars],
+            "text_preview": _truncate_text(session.text_content, limit=effective_chars),
             "links": [
                 {"ref": item.ref, "text": item.text, "url": item.url}
                 for item in session.links[:effective_links]
