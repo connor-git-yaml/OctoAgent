@@ -690,28 +690,17 @@ class CapabilityPackService:
         effective_tool_profile = request.tool_profile or binding.tool_profile
         context_profile = self._coerce_tool_profile(effective_tool_profile)
         tool_by_name = {tool.tool_name: tool for tool in pack.tools}
-        if self._requires_weather_toolset(request.query):
-            desired_tools = self._dedupe_preserve_order(
-                [
-                    *binding.selected_tools,
-                    *self._profile_first_core_tool_names(),
-                    "runtime.now",
-                    "web.search",
-                    "web.fetch",
-                ]
-            )
-        else:
-            desired_tools = self._dedupe_preserve_order(
-                [
-                    *binding.selected_tools,
-                    *self._profile_first_core_tool_names(),
-                    *[
-                        tool.tool_name
-                        for tool in pack.tools
-                        if tool.tool_group in binding.default_tool_groups
-                    ],
-                ]
-            )
+        desired_tools = self._dedupe_preserve_order(
+            [
+                *binding.selected_tools,
+                *self._profile_first_core_tool_names(),
+                *[
+                    tool.tool_name
+                    for tool in pack.tools
+                    if tool.tool_group in binding.default_tool_groups
+                ],
+            ]
+        )
         mounted_tools: list[ToolAvailabilityExplanation] = []
         blocked_tools: list[ToolAvailabilityExplanation] = []
         mounted_names: list[str] = []
@@ -4174,47 +4163,6 @@ class CapabilityPackService:
         if len(items) > 1:
             return items[:4]
         return [normalized]
-
-    @staticmethod
-    def _requires_standard_web_access(objective: str) -> bool:
-        lowered = objective.lower()
-        common_tokens = (
-            "天气",
-            "今天",
-            "最新",
-            "官网",
-            "官方",
-            "网页",
-            "网站",
-            "站点",
-            "搜索",
-            "查一下",
-            "查找",
-            "browser",
-            "navigate",
-            "search",
-            "latest",
-            "today",
-            "weather",
-            "website",
-            "official",
-        )
-        return any(token in lowered for token in common_tokens)
-
-    @staticmethod
-    def _requires_weather_toolset(objective: str) -> bool:
-        lowered = objective.lower()
-        weather_tokens = (
-            "天气",
-            "weather",
-            "气温",
-            "温度",
-            "下雨",
-            "降雨",
-            "体感",
-            "穿衣",
-        )
-        return any(token in lowered for token in weather_tokens)
 
     @staticmethod
     def _effective_tool_profile_for_objective(*, objective: str) -> str:

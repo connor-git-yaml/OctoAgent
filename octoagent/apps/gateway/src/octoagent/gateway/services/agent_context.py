@@ -3871,10 +3871,6 @@ class AgentContextService:
             recent_clarification_source_text=str(
                 dispatch_metadata.get("clarification_source_text", "")
             ).strip(),
-            recent_location_hint=str(
-                dispatch_metadata.get("freshness_followup_location_text", "")
-            ).strip(),
-            default_location_hint=self._resolve_default_location_hint(owner_profile),
             metadata={
                 "route_reason": runtime_context.route_reason if runtime_context is not None else "",
             },
@@ -4253,14 +4249,6 @@ class AgentContextService:
             f"result_text: {result_text}\n"
             f"error_summary: {error_summary}"
         )
-
-    def _resolve_default_location_hint(self, owner_profile: OwnerProfile) -> str:
-        metadata = owner_profile.metadata
-        for key in ("default_location", "default_city", "city", "location"):
-            value = str(metadata.get(key, "")).strip()
-            if value:
-                return value
-        return ""
 
     def _fit_prompt_budget(
         self,

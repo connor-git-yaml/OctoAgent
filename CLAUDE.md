@@ -79,6 +79,8 @@ octoagent/
 6. **Degrade Gracefully** - 任一插件/依赖不可用时，系统不得整体不可用
 7. **User-in-Control** - 高风险动作必须可审批，任务必须可取消
 8. **Observability is a Feature** - 每个任务必须可查看状态、步骤、消耗、失败原因
+9. **Agent Autonomy** - 禁止用硬编码关键词/规则替代 LLM 决策（如天气检测、请求分类、位置提取）；系统层只负责提供完整工具集和上下文，由 LLM 自主选择工具和决策路径
+10. **Policy-Driven Access** - 工具访问控制统一走 Policy Engine 双维度模型（PolicyAction × ApprovalDecision），工具层不得自行做路径/权限拦截
 
 ## 里程碑
 

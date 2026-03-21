@@ -209,12 +209,7 @@ class ToolUniverseHints(BaseModel):
 
 class RuntimeHintBundle(BaseModel):
     surface: str = Field(default="")
-    explicit_web_search_requested: bool = False
     can_delegate_research: bool = False
-    weather_query: bool = False
-    current_location_hint: str = Field(default="")
-    recent_location_hint: str = Field(default="")
-    effective_location_hint: str = Field(default="")
     recent_clarification_category: str = Field(default="")
     recent_clarification_source_text: str = Field(default="")
     recent_worker_lane_worker_type: str = Field(default="")

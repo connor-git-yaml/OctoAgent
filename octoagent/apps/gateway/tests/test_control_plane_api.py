@@ -701,7 +701,7 @@ class TestControlPlaneApi:
             ]
         )
         assert (
-            "effective_location_hint"
+            "can_delegate_research"
             in payload["resources"]["agent_profiles"]["profiles"][0]["behavior_system"][
                 "runtime_hint_fields"
             ]

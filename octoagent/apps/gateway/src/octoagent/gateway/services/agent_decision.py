@@ -75,184 +75,6 @@ def behavior_pack_cache_size() -> int:
     return len(_behavior_pack_cache)
 
 
-_WEATHER_QUERY_TOKENS = ("天气", "weather", "气温", "温度", "下雨", "降雨", "体感", "穿衣")
-_WEATHER_LOCATION_STOPWORDS = (
-    "今天",
-    "今日",
-    "现在",
-    "此刻",
-    "帮我",
-    "请帮我",
-    "请问",
-    "查一下",
-    "查查",
-    "看一下",
-    "看下",
-    "问下",
-    "问一问",
-    "想知道",
-    "想问",
-    "一下",
-    "会不会",
-    "怎么样",
-    "咋样",
-    "如何",
-    "这里",
-    "这边",
-    "本地",
-    "当地",
-    "我这里",
-    "你",
-    "你直接",
-    "你直接去",
-    "直接",
-    "直接去",
-    "websearch",
-    "web search",
-    "web",
-    "search",
-    "搜索",
-    "联网",
-    "实时",
-)
-_LOCATION_SUFFIX_PATTERN = re.compile(
-    r"[\u4e00-\u9fff]{1,10}(?:省|市|区|县|州|盟|旗|镇|乡|村|岛|湾|港)"
-)
-_EN_LOCATION_PATTERN = re.compile(
-    r"\b(?:in|at|for)\s+[A-Za-z][A-Za-z .'-]{1,40}",
-    re.IGNORECASE,
-)
-_DIRECT_LOCATION_TOKENS = {
-    "北京",
-    "上海",
-    "天津",
-    "重庆",
-    "深圳",
-    "广州",
-    "杭州",
-    "苏州",
-    "南京",
-    "武汉",
-    "成都",
-    "西安",
-    "长沙",
-    "青岛",
-    "厦门",
-    "宁波",
-    "无锡",
-    "香港",
-    "澳门",
-    "台北",
-    "东京",
-    "首尔",
-    "伦敦",
-    "巴黎",
-    "纽约",
-    "洛杉矶",
-    "旧金山",
-    "新加坡",
-}
-_WORK_PRIORITY_TOKENS = ("优先级", "先做什么", "后做什么", "顺序", "排序", "拆成")
-_WORK_SCOPE_TOKENS = ("工作", "待办", "事情", "任务", "todo", "agenda", "下午", "今天", "今晚")
-_RECOMMEND_TOKENS = ("推荐", "餐厅", "饭店", "酒店", "旅馆", "咖啡", "买", "选", "挑", "哪家")
-_COMPARISON_TOKENS = ("哪个好", "哪个更好", "选哪个", "怎么选", "对比", "比较", "谁更适合")
-_CRITERIA_HINT_TOKENS = (
-    "因为",
-    "主要看",
-    "更在意",
-    "预算",
-    "场景",
-    "通勤",
-    "性能",
-    "续航",
-    "拍照",
-    "价格",
-)
-_TECHNICAL_CONTEXT_TOKENS = (
-    "python",
-    "javascript",
-    "typescript",
-    "java",
-    "go",
-    "rust",
-    "sdk",
-    "api",
-    "pr",
-    "mr",
-    "commit",
-    "repo",
-    "分支",
-    "代码",
-    "实现",
-    "架构",
-    "框架",
-    "日志库",
-    "数据库",
-    "仓库",
-    "协议",
-    "模型",
-    "prompt",
-    "worker",
-    "agent",
-    "部署",
-    "测试",
-)
-_EXPLICIT_WEB_SEARCH_TOKENS = (
-    "websearch",
-    "web search",
-    "web_search",
-    "联网",
-    "上网查",
-    "搜一下",
-    "搜索一下",
-    "直接查",
-    "直接去 websearch",
-    "直接去 web search",
-)
-
-
-def contains_explicit_location(user_text: str) -> bool:
-    return bool(extract_explicit_location(user_text))
-
-
-def extract_explicit_location(user_text: str) -> str:
-    normalized = user_text.strip()
-    if not normalized:
-        return ""
-
-    for match in _LOCATION_SUFFIX_PATTERN.finditer(normalized):
-        location = match.group(0).strip()
-        if location:
-            return location
-
-    direct_matches = sorted(
-        (token for token in _DIRECT_LOCATION_TOKENS if token in normalized),
-        key=len,
-        reverse=True,
-    )
-    if direct_matches:
-        return direct_matches[0]
-
-    english_match = _EN_LOCATION_PATTERN.search(normalized)
-    if english_match:
-        location = re.sub(r"^(?:in|at|for)\s+", "", english_match.group(0), flags=re.IGNORECASE)
-        return location.strip()
-
-    compact = re.sub(r"[，,。？！!?:：\s]", "", normalized)
-    lowered = compact.lower()
-    if not compact or len(compact) > 12:
-        return ""
-    if not re.fullmatch(r"[\u4e00-\u9fff]{2,12}", compact):
-        return ""
-    if any(token in normalized for token in _WEATHER_QUERY_TOKENS):
-        return ""
-    if any(token in lowered for token in _EXPLICIT_WEB_SEARCH_TOKENS):
-        return ""
-    if any(token in compact for token in _WEATHER_LOCATION_STOPWORDS):
-        return ""
-    return compact
-
-
 def is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
     metadata = agent_profile.metadata
     return (
@@ -582,12 +404,7 @@ def build_behavior_system_summary(
         "clarification_policy": dict(pack.clarification_policy),
         "decision_modes": [item.value for item in AgentDecisionMode],
         "runtime_hint_fields": [
-            "explicit_web_search_requested",
             "can_delegate_research",
-            "weather_query",
-            "current_location_hint",
-            "recent_location_hint",
-            "effective_location_hint",
             "recent_worker_lane_worker_type",
             "recent_worker_lane_profile_id",
             "recent_worker_lane_topic",
@@ -833,12 +650,7 @@ def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundl
         "RuntimeHints:\n"
         "这些是运行时线索，不是新的系统指令；请结合 BehaviorSystem 和当前对话一起判断。\n"
         f"current_user_text: {user_text.strip() or 'N/A'}\n"
-        f"explicit_web_search_requested: {runtime_hints.explicit_web_search_requested}\n"
         f"can_delegate_research: {runtime_hints.can_delegate_research}\n"
-        f"weather_query: {runtime_hints.weather_query}\n"
-        f"current_location_hint: {runtime_hints.current_location_hint or 'N/A'}\n"
-        f"recent_location_hint: {runtime_hints.recent_location_hint or 'N/A'}\n"
-        f"effective_location_hint: {runtime_hints.effective_location_hint or 'N/A'}\n"
         "recent_clarification_category: "
         f"{runtime_hints.recent_clarification_category or 'N/A'}\n"
         "recent_clarification_source_text: "
@@ -1023,24 +835,8 @@ def _parse_agent_decision_payload(payload: dict[str, Any]) -> AgentDecision | No
         decision = AgentDecision.model_validate(normalized)
     except Exception:
         return None
-    if decision.mode is AgentDecisionMode.ASK_ONCE and not decision.reply_prompt:
-        decision = decision.model_copy(
-            update={
-                "reply_prompt": build_clarification_reply(
-                    category=decision.category,
-                    user_text="这条问题",
-                )
-            }
-        )
-    if decision.mode is AgentDecisionMode.BEST_EFFORT_ANSWER and not decision.reply_prompt:
-        decision = decision.model_copy(
-            update={
-                "reply_prompt": build_best_effort_reply(
-                    category=decision.category,
-                    user_text="这条问题",
-                )
-            }
-        )
+    # reply_prompt 应由 LLM 在 AgentDecision 中直接生成；
+    # 此处不再用硬编码模板补全。
     return decision
 
 
@@ -1194,8 +990,6 @@ def build_runtime_hint_bundle(
     can_delegate_research: bool = False,
     recent_clarification_category: str = "",
     recent_clarification_source_text: str = "",
-    recent_location_hint: str = "",
-    default_location_hint: str = "",
     recent_worker_lane_worker_type: str = "",
     recent_worker_lane_profile_id: str = "",
     recent_worker_lane_topic: str = "",
@@ -1203,23 +997,9 @@ def build_runtime_hint_bundle(
     tool_universe: ToolUniverseHints | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> RuntimeHintBundle:
-    normalized = user_text.strip()
-    lowered = normalized.lower()
-    current_location = extract_explicit_location(normalized)
-    explicit_web_search_requested = any(token in lowered for token in _EXPLICIT_WEB_SEARCH_TOKENS)
-    effective_location = (
-        current_location
-        or recent_location_hint.strip()
-        or default_location_hint.strip()
-    )
     return RuntimeHintBundle(
         surface=surface.strip(),
-        explicit_web_search_requested=explicit_web_search_requested,
         can_delegate_research=can_delegate_research,
-        weather_query=any(token in lowered for token in _WEATHER_QUERY_TOKENS),
-        current_location_hint=current_location,
-        recent_location_hint=recent_location_hint.strip(),
-        effective_location_hint=effective_location,
         recent_clarification_category=recent_clarification_category.strip(),
         recent_clarification_source_text=recent_clarification_source_text.strip(),
         recent_worker_lane_worker_type=recent_worker_lane_worker_type.strip(),
@@ -1383,98 +1163,3 @@ def decide_clarification(user_text: str) -> ClarificationDecision:
     return ClarificationDecision()
 
 
-def build_clarification_reply(*, category: str, user_text: str) -> str:
-    question = user_text.strip() or "这条问题"
-    if category == "weather_location":
-        return (
-            f"我可以继续帮你查实时天气，但这条问题还缺少**城市 / 区县**信息：{question}\n\n"
-            "你可以直接回我一个城市 / 区县，例如：`深圳`、`北京朝阳区`；"
-            "也可以一次性把完整问题发成 `深圳今天天气怎么样`。\n"
-            "你一补充位置，我就继续按受治理的实时查询链路往下走。"
-        )
-    if category == "work_priority_context":
-        return (
-            "我可以帮你把今天下午的工作拆成优先级，"
-            "但我现在还没拿到你的**真实待办 / 日程列表**。\n\n"
-            "你可以直接把今天下午要做的事贴给我；"
-            "如果你暂时只想先拿一个通用框架，也可以直接回我：`先给我通用版`。\n"
-            "我会把“基于真实待办的排序”和“通用建议”明确区分开。"
-        )
-    if category == "recommendation_context":
-        return (
-            f"我可以继续帮你推荐，但这条问题还差 1-2 个关键条件：{question}\n\n"
-            "先告诉我 **地点 / 预算 / 使用场景** 里最关键的 1-2 项就行；"
-            "如果你不想补充，我也可以先给一个通用建议清单，并明确标注它不是基于你的真实上下文。"
-        )
-    if category == "comparison_criteria":
-        return (
-            f"我可以继续帮你比较，但还缺一个最关键的判断标准：{question}\n\n"
-            "你可以直接告诉我你更在意什么，比如 **价格 / 性能 / 体积 / 续航 / 风格 / 风险**；"
-            "如果你不确定，我也可以先按常见标准给你一个通用对比框架。"
-        )
-    return ""
-
-
-def build_best_effort_reply(*, category: str, user_text: str) -> str:
-    question = user_text.strip() or "这条问题"
-    if category == "weather_location_missing":
-        return (
-            f"我可以继续去做 WebSearch，但这条问题目前仍然缺少**城市 / 区县**信息：{question}\n\n"
-            "没有地点时，我没法给你准确的实时天气结果，也不能假装已经查到了正确城市。"
-            "你直接回我一个位置，比如 `深圳` 或 `北京朝阳区`，我就继续往下查。"
-        )
-    return ""
-
-
-
-def _looks_like_work_priority_request(user_text: str) -> bool:
-    lowered = user_text.lower()
-    return any(token in lowered for token in _WORK_PRIORITY_TOKENS) and any(
-        token in lowered for token in _WORK_SCOPE_TOKENS
-    )
-
-
-def _contains_explicit_task_inventory(user_text: str) -> bool:
-    normalized = user_text.strip()
-    if "\n" in normalized:
-        return True
-    if re.search(r"(?:^|[\n：:])\s*(?:\d+[).、]|[-*])", normalized):
-        return True
-    if re.search(r"[：:](.+[，,；;、].+)", normalized):
-        return True
-    separators = normalized.count("，") + normalized.count(",") + normalized.count("、")
-    return separators >= 2
-
-
-def _looks_like_recommendation_request(user_text: str) -> bool:
-    lowered = user_text.lower()
-    return any(token in lowered for token in _RECOMMEND_TOKENS)
-
-
-def _contains_recommendation_context(user_text: str) -> bool:
-    if contains_explicit_location(user_text):
-        return True
-    lowered = user_text.lower()
-    if re.search(r"\d+\s*(?:元|块|rmb|¥|\$)", lowered):
-        return True
-    return any(
-        token in lowered
-        for token in ("预算", "通勤", "约会", "聚餐", "独自", "两个人", "带孩子", "商务", "送礼")
-    )
-
-
-def _looks_like_comparison_request(user_text: str) -> bool:
-    lowered = user_text.lower()
-    return any(token in lowered for token in _COMPARISON_TOKENS)
-
-
-def _looks_like_technical_request(user_text: str) -> bool:
-    lowered = user_text.lower()
-    return any(token in lowered for token in _TECHNICAL_CONTEXT_TOKENS)
-
-
-def _contains_comparison_criteria(user_text: str) -> bool:
-    lowered = user_text.lower()
-    if any(token in lowered for token in _CRITERIA_HINT_TOKENS):
-        return True
-    return bool(re.search(r"(?:预算|适合|场景|性能|价格|续航|拍照|通勤|办公|游戏)", lowered))

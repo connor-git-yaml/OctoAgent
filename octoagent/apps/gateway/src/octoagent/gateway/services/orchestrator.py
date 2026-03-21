@@ -44,7 +44,6 @@ from octoagent.core.models import (
     HumanInputPolicy,
     OrchestratorDecisionPayload,
     OrchestratorRequest,
-    OwnerProfile,
     RecallPlan,
     RiskLevel,
     SessionContextState,
@@ -1444,12 +1443,9 @@ class OrchestratorService:
     async def _build_request_runtime_hints(
         self,
         request: OrchestratorRequest,
-        *,
-        owner_profile: OwnerProfile | None = None,
     ):
         latest_category = ""
         latest_source_text = ""
-        latest_location_hint = ""
         works = await self._stores.work_store.list_works(task_id=request.task_id)
         if works:
             latest_work = works[0]
@@ -1461,17 +1457,6 @@ class OrchestratorService:
             latest_source_text = str(
                 latest_metadata.get("clarification_source_text", "")
             ).strip()
-            latest_location_hint = str(
-                latest_metadata.get("freshness_followup_location_text", "")
-            ).strip()
-
-        default_location = ""
-        if owner_profile is not None:
-            for key in ("default_location", "default_city", "city", "location"):
-                value = str(owner_profile.metadata.get(key, "")).strip()
-                if value:
-                    default_location = value
-                    break
 
         recent_worker_lane = await self._resolve_recent_worker_lane(task_id=request.task_id)
 
@@ -1480,8 +1465,6 @@ class OrchestratorService:
             can_delegate_research=self._delegation_plane is not None,
             recent_clarification_category=latest_category,
             recent_clarification_source_text=latest_source_text,
-            recent_location_hint=latest_location_hint,
-            default_location_hint=default_location,
             recent_worker_lane_worker_type=(
                 recent_worker_lane.worker_type if recent_worker_lane is not None else ""
             ),
@@ -1983,8 +1966,8 @@ class OrchestratorService:
         *,
         request: OrchestratorRequest,
         task_status: TaskStatus,
-        success_summary: str = "butler_freshness_synthesized",
-        dispatch_prefix: str = "butler-freshness",
+        success_summary: str = "butler_inline_completed",
+        dispatch_prefix: str = "butler-inline",
     ) -> WorkerResult:
         if task_status == TaskStatus.SUCCEEDED:
             return WorkerResult(
@@ -2004,7 +1987,7 @@ class OrchestratorService:
                 worker_id="butler.main",
                 status=WorkerExecutionStatus.CANCELLED,
                 retryable=False,
-                summary="butler_freshness_cancelled",
+                summary=f"{dispatch_prefix}_cancelled",
                 backend="inline",
                 tool_profile="minimal",
             )
@@ -2014,8 +1997,8 @@ class OrchestratorService:
             worker_id="butler.main",
             status=WorkerExecutionStatus.FAILED,
             retryable=True,
-            summary=f"butler_freshness_terminal:{task_status.value}",
-            error_type="ButlerFreshnessSynthesisFailed",
+            summary=f"{dispatch_prefix}_terminal:{task_status.value}",
+            error_type="ButlerInlineExecutionFailed",
             error_message=f"task status={task_status.value}",
             backend="inline",
             tool_profile="minimal",
