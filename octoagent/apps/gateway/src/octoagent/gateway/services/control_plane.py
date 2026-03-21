@@ -9329,9 +9329,17 @@ class ControlPlaneService:
     ) -> AgentProfile:
         metadata = dict(existing.metadata) if existing is not None else {}
         metadata.update(dict(profile.metadata))
+        # behavior_agent_slug 是 behavior 文件系统的 canonical slug，
+        # 必须与 materialize_agent_behavior_files 写入时使用的 slug 一致。
+        # materialize 用的是 profile.name（如 "小A" → slugify → "a"），
+        # 所以这里也写 profile.name，由 resolve_behavior_agent_slug 优先读取。
+        from octoagent.core.behavior_workspace import normalize_behavior_agent_slug
         metadata.update(
             {
-                "source_kind": "worker_profile_sync",
+                "source_kind": "worker_profile_mirror",
+                "behavior_agent_slug": normalize_behavior_agent_slug(
+                    profile.name or profile.profile_id
+                ),
                 "worker_profile_id": profile.profile_id,
                 "worker_profile_revision": revision,
                 "worker_profile_status": profile.status.value,
