@@ -1440,7 +1440,7 @@ class CapabilityPackService:
         )
         async def filesystem_read_text(
             path: str,
-            max_chars: int = 12_000,
+            max_chars: int = 100_000,
         ) -> str:
             """读取文本文件内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
@@ -1455,7 +1455,8 @@ class CapabilityPackService:
             if not target.is_file():
                 raise RuntimeError(f"path is not a file: {target}")
             content = target.read_text(encoding="utf-8")
-            bounded_limit = max(200, min(max_chars, 100_000))
+            # 工具层不做低阈值截断——由 LargeOutputHandler 按上下文比例统一管理
+            bounded_limit = max(200, min(max_chars, 500_000))
             return json.dumps(
                 {
                     "workspace_root": str(workspace_root),
@@ -1521,7 +1522,7 @@ class CapabilityPackService:
             command: str,
             cwd: str = ".",
             timeout_seconds: float = 300.0,
-            max_output_chars: int = 12_000,
+            max_output_chars: int = 200_000,
         ) -> str:
             """在当前 workspace 内执行受治理终端命令。"""
 
@@ -1531,7 +1532,8 @@ class CapabilityPackService:
                 raise RuntimeError(f"cwd is not a directory: {working_dir}")
             # 超时上限 600s（对齐 MCP 安装等长命令场景）
             bounded_timeout = max(1.0, min(timeout_seconds, 600.0))
-            bounded_limit = max(200, min(max_output_chars, 100_000))
+            # 工具层不做低阈值截断——由 LargeOutputHandler 按上下文比例统一管理
+            bounded_limit = max(200, min(max_output_chars, 500_000))
             cwd_label = "." if working_dir == workspace_root else str(
                 working_dir.relative_to(workspace_root)
             )
@@ -2112,7 +2114,7 @@ class CapabilityPackService:
         async def web_fetch(
             url: str,
             timeout_seconds: float = 30.0,
-            max_chars: int = 8_000,
+            max_chars: int = 100_000,
             link_limit: int = 10,
         ) -> str:
             """抓取网页内容摘要。"""
@@ -2125,7 +2127,7 @@ class CapabilityPackService:
                     "status_code": page.status_code,
                     "content_type": page.content_type,
                     "title": page.title,
-                    "body_preview": page.text_content[: max(100, min(max_chars, 20_000))],
+                    "body_preview": page.text_content[: max(100, min(max_chars, 500_000))],
                     "body_length": page.body_length,
                     "links": [
                         {"ref": item.ref, "text": item.text, "url": item.url}
@@ -2246,7 +2248,7 @@ class CapabilityPackService:
                 "runtime_kinds": ["worker", "subagent", "graph_agent"],
             },
         )
-        async def browser_snapshot(max_chars: int = 8_000, link_limit: int = 20) -> str:
+        async def browser_snapshot(max_chars: int = 100_000, link_limit: int = 20) -> str:
             """读取当前浏览器会话的文本快照与可点击 link refs。"""
 
             page = self._require_browser_session(get_current_execution_context())
@@ -4796,10 +4798,10 @@ class CapabilityPackService:
         session: _BrowserSessionState,
         *,
         action: str,
-        max_chars: int = 4000,
+        max_chars: int = 100_000,
         link_limit: int = 20,
     ) -> dict[str, Any]:
-        effective_chars = max(100, min(max_chars, 20_000))
+        effective_chars = max(100, min(max_chars, 500_000))
         effective_links = max(1, min(link_limit, 20))
         return {
             "action": action,
