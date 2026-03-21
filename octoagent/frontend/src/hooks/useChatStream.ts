@@ -178,10 +178,12 @@ export function useChatStream(
     if (prev === restoreTaskIdSignature) {
       return;
     }
-    // 如果当前已有活跃的 taskId（刚发过消息），且新 signature 包含该 taskId，
-    // 说明这只是轮询更新 session 列表导致 routeSession.task_id 从空变为已有值，
-    // 不是真正的 session 切换，不应该重置状态。
-    if (taskId && restoreTaskIdSignature.includes(taskId)) {
+    // 如果当前已有活跃的 taskId（刚发过消息），且 focused session 的首个候选 task 仍是当前 taskId，
+    // 说明这只是轮询更新 session 列表导致引用变化，不是真正的 session 切换，不应该重置状态。
+    // 注意：不能用 includes——因为 signature 包含所有 session 的 taskId，切换 session 后
+    // 旧 taskId 仍然在 signature 里，会导致切换被误判为"未变化"。
+    const primaryCandidateId = restoreTaskIdSignature.split("|")[0] || "";
+    if (taskId && primaryCandidateId === taskId) {
       return;
     }
     // restoreTaskIdSignature 变化说明用户切换了 Session

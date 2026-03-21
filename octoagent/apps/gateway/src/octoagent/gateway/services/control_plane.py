@@ -945,6 +945,9 @@ class ControlPlaneService:
                     session_runtime_kind or latest_metadata.get("target_kind", ""),
                 )
             )
+            # 跳过 BUTLER_MAIN 内部 bootstrap 会话——不应出现在侧边栏
+            if runtime_kind == AgentSessionKind.BUTLER_MAIN.value:
+                continue
             (
                 session_owner_profile_id,
                 turn_executor_kind,
