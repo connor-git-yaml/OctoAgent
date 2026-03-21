@@ -1324,12 +1324,27 @@ class AgentContextService:
         if agent_session is not None:
             extractor = self.get_session_memory_extractor()
             if extractor is not None:
-                asyncio.create_task(
+                task = asyncio.create_task(
                     extractor.extract_and_commit(
                         agent_session=agent_session,
                         project=project,
                         workspace=workspace,
                     )
+                )
+
+                def _on_extraction_done(t: asyncio.Task) -> None:
+                    if t.exception() is not None:
+                        log.error(
+                            "session_memory_extraction_task_failed",
+                            error=str(t.exception()),
+                        )
+
+                task.add_done_callback(_on_extraction_done)
+            else:
+                log.warning(
+                    "session_memory_extractor_unavailable",
+                    llm_service_set=self._llm_service is not None,
+                    shared_llm_service_set=self._shared_llm_service is not None,
                 )
 
     async def record_delayed_recall_state(
@@ -2875,6 +2890,7 @@ class AgentContextService:
         """获取 SessionMemoryExtractor 实例（Feature 067）。
 
         延迟创建，首次调用时实例化。若依赖不可用则返回 None。
+        LLM service 每次从实例或类变量动态获取，避免构造时序问题。
         """
         if not hasattr(self, "_session_memory_extractor"):
             try:
@@ -2883,10 +2899,11 @@ class AgentContextService:
                 self._session_memory_extractor = SessionMemoryExtractor(
                     agent_context_store=self._stores.agent_context_store,
                     memory_service_factory=self.get_memory_service,
-                    llm_service=self._llm_service,
+                    llm_service=self._llm_service or self._shared_llm_service,
                     project_root=self._project_root,
                 )
             except Exception:
+                log.warning("session_memory_extractor_init_failed", exc_info=True)
                 self._session_memory_extractor = None
         return self._session_memory_extractor
 
