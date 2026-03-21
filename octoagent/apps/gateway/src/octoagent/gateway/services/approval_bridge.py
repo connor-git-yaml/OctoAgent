@@ -74,6 +74,7 @@ class ApprovalBridge:
             risk_explanation=f"工具 {tool_name} 需要用户审批（{ask_reason}）",
             policy_label="preset_check",
             side_effect_level=side_effect,
+            agent_runtime_id=agent_runtime_id,
             expires_at=now + timedelta(seconds=self._timeout_s),
             created_at=now,
         )
