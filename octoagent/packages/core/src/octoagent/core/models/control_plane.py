@@ -182,6 +182,7 @@ class SessionProjectionItem(BaseModel):
     parent_task_id: str = Field(default="")
     parent_work_id: str = Field(default="")
     title: str = Field(default="")
+    alias: str = Field(default="")
     status: str = Field(default="")
     channel: str = Field(default="")
     requester_id: str = Field(default="")

@@ -850,6 +850,11 @@ class ControlPlaneService:
                     action_id="session.reset",
                 ),
                 ControlPlaneCapability(
+                    capability_id="session.set_alias",
+                    label="修改会话名称",
+                    action_id="session.set_alias",
+                ),
+                ControlPlaneCapability(
                     capability_id="session.export",
                     label="导出会话",
                     action_id="session.export",
@@ -895,6 +900,15 @@ class ControlPlaneService:
         for session_id, entries in grouped.items():
             latest, workspace = max(entries, key=lambda item: item[0].updated_at)
             session_state = session_state_by_id.get(session_id)
+            related_agent_sessions = await self._list_related_agent_sessions_for_projection(
+                session_id=session_id,
+                thread_id=(session_state.thread_id if session_state is not None else "")
+                or latest.thread_id,
+                project_id=workspace.project_id,
+                workspace_id=workspace.workspace_id,
+                session_state=session_state,
+            )
+            session_alias = self._resolve_projected_session_alias(related_agent_sessions)
             session_runtime_kind = ""
             session_runtime_owner_profile_id = ""
             if session_state is not None and session_state.agent_session_id:
@@ -969,6 +983,7 @@ class ControlPlaneService:
                     parent_task_id=str(latest_metadata.get("parent_task_id", "")),
                     parent_work_id=str(latest_metadata.get("parent_work_id", "")),
                     title=latest.title,
+                    alias=session_alias,
                     status=latest.status.value,
                     channel=latest.requester.channel,
                     requester_id=latest.requester.sender_id,
@@ -1044,6 +1059,7 @@ class ControlPlaneService:
                     parent_task_id="",
                     parent_work_id="",
                     title=project_name,
+                    alias=agent_sess.alias,
                     status="created",
                     channel="web" if agent_sess.surface in ("chat", "web", "") else agent_sess.surface,
                     requester_id="",
@@ -3667,6 +3683,8 @@ class ControlPlaneService:
             return await self._handle_session_create_with_project(request)
         if action_id == "session.reset":
             return await self._handle_session_reset(request)
+        if action_id == "session.set_alias":
+            return await self._handle_session_set_alias(request)
         if action_id == "session.export":
             return await self._handle_session_export(request)
         if action_id == "session.interrupt":
@@ -6264,23 +6282,13 @@ class ControlPlaneService:
             )
             reset_context = True
 
-        related_sessions: list[AgentSession] = []
-        seen_agent_session_ids: set[str] = set()
-        for legacy_session_id in {session.session_id, session.thread_id}:
-            normalized = str(legacy_session_id).strip()
-            if not normalized:
-                continue
-            candidates = await self._stores.agent_context_store.list_agent_sessions(
-                legacy_session_id=normalized,
-                project_id=session.project_id or None,
-                workspace_id=session.workspace_id or None,
-                limit=200,
-            )
-            for item in candidates:
-                if item.agent_session_id in seen_agent_session_ids:
-                    continue
-                seen_agent_session_ids.add(item.agent_session_id)
-                related_sessions.append(item)
+        related_sessions = await self._list_related_agent_sessions_for_projection(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            project_id=session.project_id,
+            workspace_id=session.workspace_id,
+            session_state=session_state,
+        )
         reset_agent_sessions = 0
         for item in related_sessions:
             await self._stores.agent_context_store.delete_agent_session_turns(
@@ -6402,6 +6410,69 @@ class ControlPlaneService:
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
         )
 
+    async def _handle_session_set_alias(
+        self, request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        session = await self._resolve_session_projection_target(
+            request,
+            use_focused_when_empty=True,
+        )
+        session_state = await self._stores.agent_context_store.get_session_context(session.session_id)
+        if session_state is None and session.thread_id:
+            session_states = await self._stores.agent_context_store.list_session_contexts(
+                project_id=session.project_id or None,
+                workspace_id=session.workspace_id or None,
+            )
+            session_state = next(
+                (item for item in session_states if item.thread_id == session.thread_id),
+                None,
+            )
+        alias = self._param_str(request.params, "alias").strip()
+        related_sessions = await self._list_related_agent_sessions_for_projection(
+            session_id=session.session_id,
+            thread_id=session.thread_id,
+            project_id=session.project_id,
+            workspace_id=session.workspace_id,
+            session_state=session_state,
+        )
+        if not related_sessions:
+            return self._rejected_result(
+                request=request,
+                code="SESSION_ALIAS_TARGET_NOT_FOUND",
+                message="当前找不到可以改名的会话实体。",
+            )
+        now = datetime.now(tz=UTC)
+        updated_count = 0
+        for item in related_sessions:
+            if item.alias == alias:
+                continue
+            await self._stores.agent_context_store.save_agent_session(
+                item.model_copy(
+                    update={
+                        "alias": alias,
+                        "updated_at": now,
+                    }
+                )
+            )
+            updated_count += 1
+        await self._stores.conn.commit()
+        message = "已恢复默认会话名称" if not alias else f"已将会话改名为「{alias}」"
+        return self._completed_result(
+            request=request,
+            code="SESSION_ALIAS_UPDATED",
+            message=message,
+            data={
+                "session_id": session.session_id,
+                "thread_id": session.thread_id,
+                "alias": alias,
+                "updated_sessions": updated_count,
+            },
+            resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
+            target_refs=[
+                ControlPlaneTargetRef(target_type="session", target_id=session.session_id),
+            ],
+        )
+
     async def _resolve_session_projection_target(
         self,
         request: ActionRequestEnvelope,
@@ -6474,6 +6545,55 @@ class ControlPlaneService:
                 "当前作用域存在多个同 thread_id 会话，请显式提供 session_id",
             )
         return matches[0]
+
+    async def _list_related_agent_sessions_for_projection(
+        self,
+        *,
+        session_id: str,
+        thread_id: str,
+        project_id: str,
+        workspace_id: str,
+        session_state: SessionContextState | None = None,
+    ) -> list[AgentSession]:
+        related_sessions: list[AgentSession] = []
+        seen_agent_session_ids: set[str] = set()
+
+        def _append(item: AgentSession | None) -> None:
+            if item is None or item.agent_session_id in seen_agent_session_ids:
+                return
+            seen_agent_session_ids.add(item.agent_session_id)
+            related_sessions.append(item)
+
+        if session_state is not None and session_state.agent_session_id:
+            _append(
+                await self._stores.agent_context_store.get_agent_session(
+                    session_state.agent_session_id
+                )
+            )
+
+        for legacy_session_id in {session_id, thread_id}:
+            normalized = str(legacy_session_id).strip()
+            if not normalized:
+                continue
+            candidates = await self._stores.agent_context_store.list_agent_sessions(
+                legacy_session_id=normalized,
+                project_id=project_id or None,
+                workspace_id=workspace_id or None,
+                limit=200,
+            )
+            for item in candidates:
+                _append(item)
+
+        related_sessions.sort(key=lambda item: item.updated_at, reverse=True)
+        return related_sessions
+
+    @staticmethod
+    def _resolve_projected_session_alias(related_sessions: list[AgentSession]) -> str:
+        for item in related_sessions:
+            alias = item.alias.strip()
+            if alias:
+                return alias
+        return ""
 
     async def _handle_session_interrupt(
         self, request: ActionRequestEnvelope
@@ -11230,6 +11350,7 @@ class ControlPlaneService:
                 definition("session.new", "开始新对话", category="sessions"),
                 definition("session.create_with_project", "创建对话（含 Project）", category="sessions"),
                 definition("session.reset", "重置会话 continuity", category="sessions"),
+                definition("session.set_alias", "修改会话名称", category="sessions"),
                 definition("agent.list_available_models", "查询可用模型别名", category="agent_management"),
                 definition("agent.list_worker_archetypes", "查询 Worker archetype", category="agent_management"),
                 definition("agent.list_tool_profiles", "查询工具权限等级", category="agent_management"),

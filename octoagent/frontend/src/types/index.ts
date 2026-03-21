@@ -522,6 +522,7 @@ export interface SessionProjectionItem {
   parent_task_id: string;
   parent_work_id: string;
   title: string;
+  alias?: string;
   status: string;
   channel: string;
   requester_id: string;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -245,18 +245,6 @@ function resolveRestorableTaskIds(sessions: SessionProjectionDocument): string[]
 
 function resolveSessionOwnerProfileId(session: SessionProjectionDocument["sessions"][number] | null | undefined): string {
   return session?.session_owner_profile_id?.trim() || session?.agent_profile_id?.trim() || "";
-}
-
-function resolveDelegationTargetProfileId(
-  session: SessionProjectionDocument["sessions"][number] | null | undefined,
-  work: WorkProjectionItem | null | undefined,
-): string {
-  return (
-    session?.delegation_target_profile_id?.trim() ||
-    work?.delegation_target_profile_id?.trim() ||
-    work?.requested_worker_profile_id?.trim() ||
-    ""
-  );
 }
 
 function readSummaryString(summary: Record<string, unknown>, key: string): string {
@@ -1207,6 +1195,8 @@ export default function ChatWorkbench() {
   const [input, setInput] = useState("");
   const [showSessionInternalRefs, setShowSessionInternalRefs] = useState(false);
   const [showRestoreEscape, setShowRestoreEscape] = useState(false);
+  const [isEditingSessionAlias, setIsEditingSessionAlias] = useState(false);
+  const [sessionAliasDraft, setSessionAliasDraft] = useState("");
 
   // 消息列表变化时自动滚动到底部
   useEffect(() => {
@@ -1226,6 +1216,7 @@ export default function ChatWorkbench() {
   const [approvalNow, setApprovalNow] = useState(() => Date.now());
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const sessionAliasInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
@@ -1539,38 +1530,21 @@ export default function ChatWorkbench() {
     workerProfiles.find((p) => p.profile_id === currentSessionOwnerProfileId)?.name ||
     defaultRootAgent?.name ||
     "OctoAgent";
-  const currentTurnExecutorKind =
-    String(
-      activeSession?.turn_executor_kind ||
-      activeWork?.turn_executor_kind ||
-      currentSession?.turn_executor_kind ||
-      ""
-    )
-      .trim()
-      .toLowerCase() || (hasInternalCollaboration ? "worker" : "self");
-  const currentDelegationTargetProfileId = resolveDelegationTargetProfileId(
-    activeSession ?? currentSession,
-    activeWork
-  );
-  const currentExecutorName =
-    currentTurnExecutorKind === "worker"
-      ? workerProfiles.find((p) => p.profile_id === currentDelegationTargetProfileId)?.name ||
-        conversationOwnerName
-      : currentTurnExecutorKind === "subagent"
-        ? "子代理"
-        : conversationOwnerName;
-  const conversationExecutionSummary =
-    currentTurnExecutorKind === "worker"
-      ? `正在与 ${conversationOwnerName} 对话，本轮由 ${currentExecutorName} 执行。`
-      : currentTurnExecutorKind === "subagent"
-        ? `正在与 ${conversationOwnerName} 对话，本轮由子代理执行。`
-        : `正在与 ${conversationOwnerName} 对话，当前由 ${conversationOwnerName} 直接处理。`;
-  // Session 展示名 = 项目名（作为默认）；后续可被别名覆盖
-  const sessionDisplayName =
+  const currentSessionAlias =
+    currentSession?.alias?.trim() || activeSession?.alias?.trim() || "";
+  const sessionTitleBase =
     (currentSession?.title?.trim()) ||
     (activeSession?.title?.trim()) ||
     effectiveProjectLabel ||
     "";
+  const sessionDisplayName = currentSessionAlias || sessionTitleBase;
+  const sessionTitleLabel = sessionDisplayName || conversationTitle;
+  const editableSessionId =
+    currentSession?.session_id || activeSession?.session_id || routeSessionId || "";
+  const editableThreadId =
+    currentSession?.thread_id || activeSession?.thread_id || routeSession?.thread_id || "";
+  const canEditSessionAlias = Boolean(editableSessionId);
+  const isSavingSessionAlias = busyActionId === "session.set_alias";
   const inputPlaceholder = canSteerCurrentRun
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"
     : `告诉 ${conversationOwnerName} 你现在要做什么`;
@@ -1611,6 +1585,21 @@ export default function ChatWorkbench() {
       window.clearInterval(timer);
     };
   }, [activeApprovalItem?.item_id, activeApprovalItem?.expires_at]);
+
+  useEffect(() => {
+    if (isEditingSessionAlias) {
+      return;
+    }
+    setSessionAliasDraft(sessionDisplayName || conversationTitle);
+  }, [conversationTitle, isEditingSessionAlias, sessionDisplayName]);
+
+  useEffect(() => {
+    if (!isEditingSessionAlias) {
+      return;
+    }
+    sessionAliasInputRef.current?.focus();
+    sessionAliasInputRef.current?.select();
+  }, [isEditingSessionAlias]);
 
   useEffect(() => {
     if (freshTurnStartedAt == null) {
@@ -1949,6 +1938,67 @@ export default function ChatWorkbench() {
     });
   }
 
+  const handleStartSessionAliasEdit = useCallback(() => {
+    if (!canEditSessionAlias || isSavingSessionAlias) {
+      return;
+    }
+    setSessionAliasDraft(sessionTitleLabel);
+    setIsEditingSessionAlias(true);
+  }, [canEditSessionAlias, isSavingSessionAlias, sessionTitleLabel]);
+
+  const handleCancelSessionAliasEdit = useCallback(() => {
+    setSessionAliasDraft(sessionTitleLabel);
+    setIsEditingSessionAlias(false);
+  }, [sessionTitleLabel]);
+
+  const handleSaveSessionAlias = useCallback(async () => {
+    if (!canEditSessionAlias) {
+      setIsEditingSessionAlias(false);
+      return;
+    }
+    const normalizedDraft = sessionAliasDraft.trim();
+    const normalizedBaseTitle = sessionTitleBase.trim();
+    const nextAlias =
+      !normalizedDraft || (normalizedBaseTitle && normalizedDraft === normalizedBaseTitle)
+        ? ""
+        : normalizedDraft;
+    if (nextAlias === currentSessionAlias.trim()) {
+      setSessionAliasDraft(nextAlias || normalizedBaseTitle || conversationTitle);
+      setIsEditingSessionAlias(false);
+      return;
+    }
+    const result = await submitAction("session.set_alias", {
+      session_id: editableSessionId,
+      thread_id: editableThreadId,
+      alias: nextAlias,
+    });
+    if (result) {
+      setSessionAliasDraft(nextAlias || normalizedBaseTitle || conversationTitle);
+      setIsEditingSessionAlias(false);
+    }
+  }, [
+    canEditSessionAlias,
+    conversationTitle,
+    currentSessionAlias,
+    editableSessionId,
+    editableThreadId,
+    sessionAliasDraft,
+    sessionTitleBase,
+    submitAction,
+  ]);
+
+  function handleSessionAliasInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void handleSaveSessionAlias();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      handleCancelSessionAliasEdit();
+    }
+  }
+
   async function submitCurrentInput() {
     const text = input.trim();
     if (!text || restoring || steeringBusy) {
@@ -2094,11 +2144,35 @@ export default function ChatWorkbench() {
         <div className="wb-panel-head wb-chat-head">
           <div className="wb-chat-head-copy">
             <div className="wb-chat-head-inline">
-              <h3>{sessionDisplayName || conversationTitle}</h3>
-              <span className="wb-chat-head-sep">/</span>
-              <p className="wb-chat-head-summary">对话：{conversationOwnerName}</p>
+              <h3 className="wb-chat-head-title-heading">
+                {isEditingSessionAlias ? (
+                  <input
+                    ref={sessionAliasInputRef}
+                    className="wb-chat-head-title-input"
+                    value={sessionAliasDraft}
+                    onChange={(event) => setSessionAliasDraft(event.target.value)}
+                    onBlur={() => {
+                      void handleSaveSessionAlias();
+                    }}
+                    onKeyDown={handleSessionAliasInputKeyDown}
+                    disabled={isSavingSessionAlias}
+                    aria-label="编辑会话名称"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="wb-chat-head-title-button"
+                    onClick={handleStartSessionAliasEdit}
+                    disabled={!canEditSessionAlias || isSavingSessionAlias}
+                    aria-label="编辑会话名称"
+                  >
+                    <span className="wb-chat-head-title-label">{sessionTitleLabel}</span>
+                  </button>
+                )}
+              </h3>
+              <span className="wb-chat-head-sep">·</span>
+              <p className="wb-chat-head-summary">{conversationOwnerName}</p>
             </div>
-            <p className="wb-chat-head-statusline">{conversationExecutionSummary}</p>
           </div>
           <div className="wb-chat-head-actions">
             {taskId ? <StatusBadge tone={taskStatusTone}>{taskStatusLabel}</StatusBadge> : null}

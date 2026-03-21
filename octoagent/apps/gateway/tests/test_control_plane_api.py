@@ -3983,6 +3983,68 @@ class TestControlPlaneApi:
         assert reopened_session is not None
         assert result["data"]["agent_session_id"] == reopened_session.agent_session_id
 
+    async def test_session_set_alias_updates_projection_and_related_agent_sessions(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        store_group = control_plane_app.state.store_group
+        sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert sessions_resp.status_code == 200
+        payload = sessions_resp.json()
+        target = next(
+            item
+            for item in payload["sessions"]
+            if item["runtime_kind"] == AgentSessionKind.BUTLER_MAIN.value
+        )
+
+        alias_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "session.set_alias",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "session_id": target["session_id"],
+                    "alias": "新的会话名字",
+                },
+            },
+        )
+
+        assert alias_resp.status_code == 200
+        result = alias_resp.json()["result"]
+        assert result["code"] == "SESSION_ALIAS_UPDATED"
+        assert result["data"]["alias"] == "新的会话名字"
+
+        refreshed_sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
+        assert refreshed_sessions_resp.status_code == 200
+        refreshed_payload = refreshed_sessions_resp.json()
+        refreshed_target = next(
+            item for item in refreshed_payload["sessions"] if item["session_id"] == target["session_id"]
+        )
+        assert refreshed_target["alias"] == "新的会话名字"
+        assert refreshed_target["title"] == target["title"]
+
+        related_agent_sessions = await store_group.agent_context_store.list_agent_sessions(
+            legacy_session_id=target["thread_id"],
+            project_id=target.get("project_id") or None,
+            workspace_id=target.get("workspace_id") or None,
+            limit=20,
+        )
+        if not related_agent_sessions:
+            related_agent_sessions = await store_group.agent_context_store.list_agent_sessions(
+                legacy_session_id=target["session_id"],
+                project_id=target.get("project_id") or None,
+                workspace_id=target.get("workspace_id") or None,
+                limit=20,
+            )
+        assert related_agent_sessions
+        assert all(item.alias == "新的会话名字" for item in related_agent_sessions)
+
     async def test_direct_session_first_message_recovers_owner_profile_from_session_anchor(
         self,
         control_plane_app,

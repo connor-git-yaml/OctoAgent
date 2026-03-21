@@ -102,6 +102,9 @@ function renderNavDescription(path: string): string {
 }
 
 function formatSessionTitle(session: SessionProjectionItem): string {
+  if (session.alias?.trim()) {
+    return session.alias.trim();
+  }
   if (session.title?.trim()) {
     return session.title.trim();
   }

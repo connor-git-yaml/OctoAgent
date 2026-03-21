@@ -245,6 +245,7 @@ class AgentSession(BaseModel):
     surface: str = Field(default="chat")
     thread_id: str = Field(default="")
     legacy_session_id: str = Field(default="")
+    alias: str = Field(default="")
     parent_agent_session_id: str = Field(default="")
     parent_worker_runtime_id: str = Field(default="")
     """Subagent 所属 Worker 的 AgentRuntime ID（仅 SUBAGENT_INTERNAL 类型使用）。"""

@@ -552,13 +552,13 @@ class SqliteAgentContextStore:
             """
             INSERT INTO agent_sessions (
                 agent_session_id, agent_runtime_id, kind, status, project_id,
-                workspace_id, surface, thread_id, legacy_session_id,
+                workspace_id, surface, thread_id, legacy_session_id, alias,
                 parent_agent_session_id, work_id, a2a_conversation_id,
                 last_context_frame_id, last_recall_frame_id, recent_transcript,
                 rolling_summary, metadata, created_at, updated_at, closed_at,
                 parent_worker_runtime_id, memory_cursor_seq
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
@@ -568,6 +568,7 @@ class SqliteAgentContextStore:
                 surface = excluded.surface,
                 thread_id = excluded.thread_id,
                 legacy_session_id = excluded.legacy_session_id,
+                alias = excluded.alias,
                 parent_agent_session_id = excluded.parent_agent_session_id,
                 work_id = excluded.work_id,
                 a2a_conversation_id = excluded.a2a_conversation_id,
@@ -591,6 +592,7 @@ class SqliteAgentContextStore:
                 session.surface,
                 session.thread_id,
                 session.legacy_session_id,
+                session.alias,
                 session.parent_agent_session_id,
                 session.work_id,
                 session.a2a_conversation_id,
@@ -1377,6 +1379,7 @@ class SqliteAgentContextStore:
             surface=row["surface"],
             thread_id=row["thread_id"],
             legacy_session_id=row["legacy_session_id"],
+            alias=row["alias"] if "alias" in row.keys() else "",
             parent_agent_session_id=row["parent_agent_session_id"],
             work_id=row["work_id"],
             a2a_conversation_id=row["a2a_conversation_id"],

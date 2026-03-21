@@ -416,8 +416,8 @@ describe("ChatWorkbench", () => {
 
     // 头部标题显示新会话对应的项目名
     expect(screen.getByRole("heading", { name: "运维项目" })).toBeInTheDocument();
-    // 副标题显示默认 Agent 名
-    expect(screen.getByText("对话：NAS 管家")).toBeInTheDocument();
+    // 同行展示默认 Agent 名
+    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
   });
 
   it("显式开启专长 Agent 会话时，会明确提示下一条消息的直接入口", () => {
@@ -449,8 +449,8 @@ describe("ChatWorkbench", () => {
       </MemoryRouter>
     );
 
-    // 副标题显示 Research Root Agent
-    expect(screen.getByText("对话：Research Root Agent")).toBeInTheDocument();
+    // 同行展示 Research Root Agent
+    expect(screen.getByText("Research Root Agent")).toBeInTheDocument();
     // placeholder 使用 Research Root Agent 而非默认 NAS 管家
     expect(
       screen.getByPlaceholderText("告诉 Research Root Agent 你现在要做什么")
@@ -591,13 +591,91 @@ describe("ChatWorkbench", () => {
 
     // 头部标题显示会话标题
     expect(screen.getByRole("heading", { name: "运维排障" })).toBeInTheDocument();
-    // 副标题区分会话 owner 与本轮执行语义
-    expect(screen.getByText("对话：NAS 管家")).toBeInTheDocument();
-    expect(
-      screen.getByText("正在与 NAS 管家 对话，当前由 NAS 管家 直接处理。")
-    ).toBeInTheDocument();
+    // 同行展示会话 owner，旧状态文案已移除
+    expect(screen.getByText("NAS 管家")).toBeInTheDocument();
+    expect(screen.queryByText(/正在与/)).not.toBeInTheDocument();
     // 正常消息渲染
     expect(screen.getByText("正在排查。")).toBeInTheDocument();
+  });
+
+  it("点击标题后可编辑 alias，并在失焦时自动保存", async () => {
+    const snapshot = buildSnapshot();
+    snapshot.resources.sessions.sessions = [
+      {
+        session_id: "session-hello",
+        thread_id: "thread-hello",
+        task_id: "task-hello",
+        parent_task_id: "",
+        parent_work_id: "",
+        title: "hello",
+        alias: "",
+        status: "SUCCEEDED",
+        channel: "web",
+        requester_id: "owner",
+        project_id: "project-default",
+        workspace_id: "workspace-default",
+        agent_profile_id: "",
+        session_owner_profile_id: "project-default:nas-guardian",
+        turn_executor_kind: "self",
+        delegation_target_profile_id: "",
+        runtime_kind: "butler_main",
+        lane: "history",
+        latest_message_summary: "你好",
+        latest_event_at: "2026-03-21T10:00:00Z",
+        execution_summary: {},
+        capabilities: [],
+        detail_refs: {},
+      },
+    ];
+    const submitAction = vi.fn().mockResolvedValue({
+      message: "已将会话改名为「新的名字」",
+    });
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      refreshResources: vi.fn().mockResolvedValue(undefined),
+      submitAction,
+      busyActionId: null,
+    });
+    useChatStreamMock.mockReturnValue({
+      messages: [],
+      sendMessage: vi.fn().mockResolvedValue(undefined),
+      resetConversation: vi.fn(),
+      streaming: false,
+      restoring: false,
+      error: null,
+      taskId: "task-hello",
+    });
+    fetchTaskDetailMock.mockResolvedValue({
+      task: {
+        task_id: "task-hello",
+        title: "hello",
+        status: "SUCCEEDED",
+      },
+      events: [],
+      artifacts: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/chat/session-hello"]}>
+        <Routes>
+          <Route path="/chat/:sessionId" element={<ChatWorkbench />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "编辑会话名称" }));
+    const input = screen.getByLabelText("编辑会话名称");
+    await userEvent.clear(input);
+    await userEvent.type(input, "新的名字");
+    await userEvent.tab();
+
+    await waitFor(() => {
+      expect(submitAction).toHaveBeenCalledWith("session.set_alias", {
+        session_id: "session-hello",
+        thread_id: "thread-hello",
+        alias: "新的名字",
+      });
+    });
   });
 
   it("恢复状态停留较久时会给出直接开始新对话的出口", async () => {

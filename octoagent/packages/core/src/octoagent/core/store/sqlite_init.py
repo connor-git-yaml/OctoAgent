@@ -454,6 +454,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     surface                  TEXT NOT NULL DEFAULT 'chat',
     thread_id                TEXT NOT NULL DEFAULT '',
     legacy_session_id        TEXT NOT NULL DEFAULT '',
+    alias                    TEXT NOT NULL DEFAULT '',
     parent_agent_session_id  TEXT NOT NULL DEFAULT '',
     work_id                  TEXT NOT NULL DEFAULT '',
     a2a_conversation_id      TEXT NOT NULL DEFAULT '',
@@ -987,6 +988,11 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE agent_sessions "
             "ADD COLUMN rolling_summary TEXT NOT NULL DEFAULT ''"
+        )
+    if agent_session_columns and "alias" not in agent_session_columns:
+        await conn.execute(
+            "ALTER TABLE agent_sessions "
+            "ADD COLUMN alias TEXT NOT NULL DEFAULT ''"
         )
     if agent_session_columns and "parent_worker_runtime_id" not in agent_session_columns:
         await conn.execute(

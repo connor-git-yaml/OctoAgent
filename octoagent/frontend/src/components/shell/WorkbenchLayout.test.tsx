@@ -212,6 +212,7 @@ describe("WorkbenchLayout", () => {
                 thread_id: "thread-finance",
                 task_id: "task-finance",
                 title: "finance",
+                alias: "fin",
                 status: "RUNNING",
                 channel: "web",
                 requester_id: "user:web",
@@ -268,6 +269,7 @@ describe("WorkbenchLayout", () => {
       </MemoryRouter>
     );
 
+    expect(screen.getByText("fin")).toBeInTheDocument();
     expect(screen.getByText("对话：研究员小 A")).toBeInTheDocument();
     expect(screen.getByText("执行：研究员小 A")).toBeInTheDocument();
   });

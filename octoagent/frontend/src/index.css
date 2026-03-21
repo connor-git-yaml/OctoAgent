@@ -2884,8 +2884,55 @@
   flex-wrap: wrap;
 }
 
-.wb-chat-head-inline h3 {
+.wb-chat-head-title-heading {
   margin: 0;
+  min-width: 0;
+}
+
+.wb-chat-head-title-button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.wb-chat-head-title-button:disabled {
+  cursor: default;
+}
+
+.wb-chat-head-title-label {
+  display: inline-block;
+  min-width: 0;
+  font-family: var(--font-display, "Fraunces", Georgia, serif);
+  font-size: 2rem;
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.wb-chat-head-title-input {
+  min-width: min(420px, 100%);
+  max-width: 100%;
+  padding: 4px 0;
+  border: none;
+  border-bottom: 1.5px solid rgba(15, 118, 110, 0.22);
+  background: transparent;
+  font-family: var(--font-display, "Fraunces", Georgia, serif);
+  font-size: 2rem;
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--cp-ink, #14202f);
+}
+
+.wb-chat-head-title-input:focus {
+  outline: none;
+  border-bottom-color: rgba(15, 118, 110, 0.68);
 }
 
 .wb-chat-head-sep {
@@ -2897,11 +2944,6 @@
 .wb-chat-head-summary {
   font-size: 0.94rem;
   color: var(--cp-muted, rgba(20, 32, 47, 0.55));
-}
-
-.wb-chat-head-statusline {
-  font-size: 0.8rem;
-  color: var(--cp-muted, rgba(20, 32, 47, 0.72));
 }
 
 .wb-chat-inline-actions {
