@@ -478,6 +478,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("llm_service_initialized", mode="echo")
 
     app.state.llm_service = llm_service
+    # Feature 067: 注入 LLMService 到 AgentContextService，
+    # 供 SessionMemoryExtractor / ConsolidationService 等使用
+    from .services.agent_context import AgentContextService
+    AgentContextService.set_llm_service(llm_service)
     app.state.alias_registry = alias_registry
     app.state.background_tasks: set[asyncio.Task] = set()
     app.state.capability_pack_service = CapabilityPackService(
@@ -549,6 +553,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             skill_runner=skill_runner,
             skill_discovery=app.state.skill_discovery,
         )
+        AgentContextService.set_llm_service(app.state.llm_service)
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,
         store_group=store_group,

@@ -498,8 +498,23 @@ class SessionReplayProjection:
 class AgentContextService:
     """统一装配 AgentProfile / bootstrap / recency / memory。"""
 
-    def __init__(self, store_group, *, project_root: Path | None = None) -> None:
+    # 启动时由 main.py 设置，所有实例共享
+    _shared_llm_service: Any | None = None
+
+    @classmethod
+    def set_llm_service(cls, llm_service: Any) -> None:
+        """启动时注入 LLMService 单例，供 SessionMemoryExtractor 等使用。"""
+        cls._shared_llm_service = llm_service
+
+    def __init__(
+        self,
+        store_group,
+        *,
+        project_root: Path | None = None,
+        llm_service: Any | None = None,
+    ) -> None:
         self._stores = store_group
+        self._llm_service = llm_service or self._shared_llm_service
         self._budget_config = ContextCompactionConfig.from_env()
         self._project_root = (project_root or Path.cwd()).resolve()
         self._memory_runtime = MemoryRuntimeService(
@@ -2773,8 +2788,7 @@ class AgentContextService:
                 from octoagent.provider.dx.consolidation_service import ConsolidationService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
-                # LLM 服务通过 store_group 获取（若可用）
-                llm_service = getattr(self._stores, "llm_service", None)
+                llm_service = self._llm_service
 
                 # Phase 2: 创建 DerivedExtractionService 并注入
                 derived_service = self.get_derived_extraction_service()
@@ -2803,7 +2817,7 @@ class AgentContextService:
                 from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
-                llm_service = getattr(self._stores, "llm_service", None)
+                llm_service = self._llm_service
                 self._derived_extraction_service = DerivedExtractionService(
                     memory_store=memory_store,
                     llm_service=llm_service,
@@ -2824,7 +2838,7 @@ class AgentContextService:
                 from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
-                llm_service = getattr(self._stores, "llm_service", None)
+                llm_service = self._llm_service
                 self._tom_extraction_service = ToMExtractionService(
                     memory_store=memory_store,
                     llm_service=llm_service,
@@ -2845,7 +2859,7 @@ class AgentContextService:
                 from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
-                llm_service = getattr(self._stores, "llm_service", None)
+                llm_service = self._llm_service
                 self._profile_generator_service = ProfileGeneratorService(
                     memory_store=memory_store,
                     llm_service=llm_service,
@@ -2866,11 +2880,10 @@ class AgentContextService:
             try:
                 from .session_memory_extractor import SessionMemoryExtractor
 
-                llm_service = getattr(self._stores, "llm_service", None)
                 self._session_memory_extractor = SessionMemoryExtractor(
                     agent_context_store=self._stores.agent_context_store,
                     memory_service_factory=self.get_memory_service,
-                    llm_service=llm_service,
+                    llm_service=self._llm_service,
                     project_root=self._project_root,
                 )
             except Exception:
