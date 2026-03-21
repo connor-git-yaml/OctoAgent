@@ -1275,15 +1275,19 @@
   border-color: rgba(31, 106, 91, 0.2);
 }
 
-.wb-nav-session-item.is-running .wb-nav-session-status {
-  color: var(--cp-accent, #1f6a5b);
-}
-
 .wb-nav-session-copy {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   flex: 1;
   min-width: 0;
+}
+
+.wb-nav-session-agent-name {
+  font-size: 0.68rem;
+  color: var(--cp-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .wb-nav-session-title {
@@ -1293,29 +1297,6 @@
   white-space: nowrap;
   flex: 1;
   min-width: 0;
-}
-
-.wb-nav-session-status {
-  font-size: 0.68rem;
-  color: var(--cp-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.wb-nav-session-agent {
-  font-size: 0.68rem;
-  color: var(--cp-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-nav-session-executor {
-  font-size: 0.68rem;
-  color: var(--cp-primary-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .wb-nav-session-new {
@@ -2933,12 +2914,6 @@
 .wb-chat-head-title-input:focus {
   outline: none;
   border-bottom-color: rgba(15, 118, 110, 0.68);
-}
-
-.wb-chat-head-sep {
-  color: var(--cp-muted, rgba(20, 32, 47, 0.3));
-  font-weight: 300;
-  font-size: 1rem;
 }
 
 .wb-chat-head-summary {

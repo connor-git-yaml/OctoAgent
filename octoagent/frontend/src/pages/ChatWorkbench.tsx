@@ -2170,7 +2170,6 @@ export default function ChatWorkbench() {
                   </button>
                 )}
               </h3>
-              <span className="wb-chat-head-sep">·</span>
               <p className="wb-chat-head-summary">{conversationOwnerName}</p>
             </div>
           </div>

@@ -594,6 +594,7 @@ describe("ChatWorkbench", () => {
     // 同行展示会话 owner，旧状态文案已移除
     expect(screen.getByText("NAS 管家")).toBeInTheDocument();
     expect(screen.queryByText(/正在与/)).not.toBeInTheDocument();
+    expect(document.querySelector(".wb-chat-head-sep")).toBeNull();
     // 正常消息渲染
     expect(screen.getByText("正在排查。")).toBeInTheDocument();
   });

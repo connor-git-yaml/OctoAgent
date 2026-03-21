@@ -270,7 +270,8 @@ describe("WorkbenchLayout", () => {
     );
 
     expect(screen.getByText("fin")).toBeInTheDocument();
-    expect(screen.getByText("对话：研究员小 A")).toBeInTheDocument();
-    expect(screen.getByText("执行：研究员小 A")).toBeInTheDocument();
+    expect(screen.getByText("研究员小 A")).toBeInTheDocument();
+    expect(screen.queryByText(/对话：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/执行：/)).not.toBeInTheDocument();
   });
 });
