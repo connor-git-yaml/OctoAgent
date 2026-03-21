@@ -3891,11 +3891,22 @@ class CapabilityPackService:
                     )
                     if agent_session is not None:
                         session_metadata = agent_session.metadata
-                except Exception:
-                    pass
+                except Exception as _skill_sess_exc:
+                    _log.warning(
+                        "skills_session_lookup_failed",
+                        agent_session_id=agent_session_id[:80],
+                        error=str(_skill_sess_exc),
+                    )
 
             if session_metadata is None and action in ("load", "unload"):
-                return f"Error: 无法获取当前会话上下文，{action} 操作需要有效的会话。"
+                # 降级：使用空 metadata 而非拒绝执行。
+                # skill load 只需要读写 loaded_skill_names，空 dict 足以让首次 load 工作。
+                _log.warning(
+                    "skills_session_metadata_fallback",
+                    agent_session_id=agent_session_id[:80],
+                    action=action,
+                )
+                session_metadata = {}
 
             result = await _skills_tool.execute(
                 action=action,
