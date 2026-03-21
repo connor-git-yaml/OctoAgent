@@ -398,7 +398,7 @@ export function deriveAgentManagementView(
     .map((profile) => mapProfileToCard(
       profile,
       selector.available_projects,
-      Boolean(profile.is_default_for_project),
+      false, // 只有 mainProfile 才是主 Agent，其他 profile 即使是某项目的 default 也不标"主 Agent"
     ))
     .sort((left, right) => left.name.localeCompare(right.name, "zh-Hans-CN"));
 
