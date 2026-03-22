@@ -66,6 +66,14 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
             provider_entry.id,
             alias_val.model,
         )
+        # 自定义 base_url 的 provider（如 SiliconFlow、DeepSeek 等）使用 OpenAI-compatible API，
+        # LiteLLM 需要 openai/ 前缀才能识别 provider
+        if (
+            provider_entry.base_url
+            and not normalized_model.startswith("openai/")
+            and provider_entry.auth_type != "oauth"
+        ):
+            normalized_model = f"openai/{normalized_model}"
         litellm_params: dict = {
             "model": normalized_model,
             "api_key": f"os.environ/{provider_entry.api_key_env}",

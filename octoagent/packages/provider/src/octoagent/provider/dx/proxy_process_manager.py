@@ -105,9 +105,10 @@ class ProxyProcessManager:
                 proxy_url=self._proxy_url,
             )
             ok = await self._start_docker(compose_file)
-            if not ok:
-                return False
-            return await self._wait_for_proxy(timeout_s)
+            if ok:
+                return await self._wait_for_proxy(timeout_s)
+            # Docker Compose 失败（daemon 未运行等），fallback 到直接进程
+            log.warning("proxy_docker_failed_fallback_to_direct")
 
         # 策略 2: 直接进程
         if self._config_path.exists():
@@ -178,6 +179,10 @@ class ProxyProcessManager:
         pid_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # 直接进程模式下 LiteLLM 不解析 os.environ/ 引用，
+        # 需要生成一份已替换的临时 config
+        resolved_config = self._resolve_config_env_refs(env)
+
         try:
             log_file = log_path.open("a", encoding="utf-8")
             proc = await asyncio.create_subprocess_exec(
@@ -185,7 +190,7 @@ class ProxyProcessManager:
                 "run",
                 "litellm",
                 "--config",
-                str(self._config_path),
+                str(resolved_config),
                 "--port",
                 str(self._port),
                 stdout=log_file,
@@ -265,11 +270,11 @@ class ProxyProcessManager:
     # ------------------------------------------------------------------
 
     async def _docker_available(self) -> bool:
+        """检查 Docker daemon 是否可用（不仅是 CLI 安装）。"""
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker",
-                "compose",
-                "version",
+                "info",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -315,6 +320,36 @@ class ProxyProcessManager:
         except OSError as exc:
             log.warning("proxy_env_file_read_failed", error=str(exc))
         return env
+
+    def _resolve_config_env_refs(self, env: dict[str, str]) -> Path:
+        """生成一份将 os.environ/XXX 引用替换为实际值的临时 config。
+
+        LiteLLM 的 os.environ/ 语法仅在 Docker 容器模式下可靠，
+        直接进程模式需要将 api_key 等字段替换为实际值。
+        同时加 openai/ 前缀给有 api_base 的自定义 provider（SiliconFlow 等）。
+        """
+        import re
+
+        resolved_path = self._instance_root / "data" / "ops" / "litellm-config-resolved.yaml"
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            content = self._config_path.read_text(encoding="utf-8")
+            # 替换 os.environ/XXX 引用
+            def _replace_env_ref(match: re.Match) -> str:
+                env_name = match.group(1)
+                return env.get(env_name, f"MISSING_{env_name}")
+
+            content = re.sub(r"os\.environ/(\w+)", _replace_env_ref, content)
+            resolved_path.write_text(content, encoding="utf-8")
+            resolved_path.chmod(0o600)
+            return resolved_path
+        except Exception as exc:
+            log.warning(
+                "proxy_config_resolve_failed",
+                error=str(exc),
+            )
+            return self._config_path  # fallback 用原文件
 
     @staticmethod
     def _parse_port(url: str) -> int:
