@@ -2602,6 +2602,7 @@ class CapabilityPackService:
                         "command": command.strip(),
                         "args": args_list,
                         "env": env_dict,
+                        "mount_policy": "auto_all",
                     })
                     config_path.write_text(
                         json.dumps({"servers": existing_servers}, indent=2, ensure_ascii=False),
