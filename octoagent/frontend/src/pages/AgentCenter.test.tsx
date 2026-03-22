@@ -705,11 +705,10 @@ describe("AgentCenter", () => {
     // 进入编辑器
     expect(await screen.findByRole("heading", { name: "新建 Agent" })).toBeInTheDocument();
     expect(screen.getByLabelText(/名称/)).toBeInTheDocument();
-    expect(screen.getByText("使用的模型")).toBeInTheDocument();
+    expect(screen.getByText("模型")).toBeInTheDocument();
     expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
-    // Feature 061: 新编辑器展示行为文件和已授权工具
+    // Feature 061: 新编辑器展示行为文件（创建模式不显示已授权工具）
     expect(screen.getAllByText("行为文件").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("已授权工具")).toBeInTheDocument();
   });
 
   it("保存新 Agent 时会先 review，再发布为当前项目 Agent", async () => {
@@ -949,7 +948,7 @@ describe("AgentCenter", () => {
     expect(mainCard).not.toBeNull();
     await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
-    const modelField = screen.getByText("使用的模型").closest(".wb-field") as HTMLElement | null;
+    const modelField = screen.getByText("模型").closest(".wb-field") as HTMLElement | null;
     expect(modelField).not.toBeNull();
     const modelSelect = within(modelField!).getByRole("combobox");
     const optionTexts = within(modelSelect).getAllByRole("option").map((option) => option.textContent);
@@ -1002,9 +1001,13 @@ describe("AgentCenter", () => {
     expect(agentCard).not.toBeNull();
     await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
 
-    expect(
-      await screen.findByText("当前值不在可用 alias 列表中。保存前需要切换到现有别名。")
-    ).toBeInTheDocument();
+    // 失效 alias 仍在 select 选项中（兼容展示），用户可切换
+    const modelField = screen.getByText("模型").closest(".wb-field") as HTMLElement | null;
+    expect(modelField).not.toBeNull();
+    const modelSelect = within(modelField!).getByRole("combobox");
+    const optionTexts = within(modelSelect).getAllByRole("option").map((o) => o.textContent);
+    expect(optionTexts).toContain("reasoning");
+    expect(optionTexts).toContain("main");
   });
 
   it("主 Agent 默认显示为可编辑状态", async () => {

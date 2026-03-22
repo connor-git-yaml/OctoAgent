@@ -769,6 +769,7 @@ export default function AgentCenter() {
                       ? "编辑 Agent 配置。"
                       : "创建新 Agent。"
                 }
+                isCreate={editorState.mode === "create" && !editorState.draft.profileId}
                 saveLabel={
                   editorState.mode === "main"
                     ? "保存"

@@ -2,16 +2,16 @@ import type { AgentEditorDraft, AgentEditorReview, ApprovalOverrideDisplay, Beha
 
 /** 行为文件描述（固定 3 个 Agent 私有文件） */
 const BEHAVIOR_FILE_META: Record<string, { title: string; description: string }> = {
-  "IDENTITY.md": { title: "身份补充", description: "Agent 的名称和角色定位。" },
-  "SOUL.md": { title: "表达风格", description: "个性、语气和协作方式。" },
-  "HEARTBEAT.md": { title: "运行节奏", description: "内部运行节奏和自检策略。" },
+  "IDENTITY.md": { title: "身份", description: "名称和角色定位。" },
+  "SOUL.md": { title: "风格", description: "语气和协作方式。" },
+  "HEARTBEAT.md": { title: "节奏", description: "运行策略和自检。" },
 };
 
 const RUNTIME_KIND_OPTIONS: Array<{ value: string; label: string; description: string }> = [
-  { value: "worker", label: "Worker", description: "适合日常任务拆分和持续推进。" },
-  { value: "subagent", label: "Subagent", description: "适合短链路的专项协助。" },
-  { value: "acp_runtime", label: "ACP Runtime", description: "适合需要工具 runtime 的执行场景。" },
-  { value: "graph_agent", label: "Graph Agent", description: "适合有固定步骤的流程处理。" },
+  { value: "worker", label: "Worker", description: "日常任务拆分和持续推进。" },
+  { value: "subagent", label: "Subagent", description: "短链路专项协助。" },
+  { value: "acp_runtime", label: "ACP Runtime", description: "需要工具 runtime 的执行场景。" },
+  { value: "graph_agent", label: "Graph Agent", description: "固定步骤的流程处理。" },
 ];
 
 interface AgentEditorSectionProps {
@@ -21,6 +21,7 @@ interface AgentEditorSectionProps {
   draft: AgentEditorDraft;
   review: AgentEditorReview | null;
   busy: boolean;
+  isCreate: boolean;
   modelAliasOptions: string[];
   behaviorFiles: BehaviorFileInfo[];
   approvalOverrides: ApprovalOverrideDisplay[];
@@ -50,11 +51,11 @@ function formatOverrideTime(iso: string): string {
 
 export default function AgentEditorSection({
   title,
-  description,
   saveLabel,
   draft,
   review,
   busy,
+  isCreate,
   modelAliasOptions,
   behaviorFiles,
   approvalOverrides,
@@ -75,11 +76,11 @@ export default function AgentEditorSection({
 
   return (
     <section className="wb-panel wb-agent-editor-shell">
+      {/* 顶部操作栏：标题 + 保存/取消 */}
       <div className="wb-panel-head">
         <div>
           <p className="wb-card-label">编辑 Agent</p>
           <h3>{title}</h3>
-          <p className="wb-panel-copy">{description}</p>
         </div>
         <div className="wb-inline-actions">
           <button
@@ -96,7 +97,7 @@ export default function AgentEditorSection({
             disabled={busy}
             onClick={onCancel}
           >
-            先不改了
+            取消
           </button>
         </div>
       </div>
@@ -113,33 +114,29 @@ export default function AgentEditorSection({
         >
           <strong>
             {review.ready && review.canSave
-              ? "这个 Agent 可以保存。"
+              ? "可以保存。"
               : review.blockingReasons.length > 0
-                ? "保存前还有问题要处理。"
-                : "当前配置还需要再确认。"}
+                ? "保存前需处理以下问题。"
+                : "请确认当前配置。"}
           </strong>
           <span>
-            {review.nextActions[0] || review.blockingReasons[0] || review.warnings[0] || "没有额外提示。"}
+            {review.nextActions[0] || review.blockingReasons[0] || review.warnings[0] || ""}
           </span>
         </div>
       ) : null}
 
-      <div className="wb-form-grid wb-agent-editor-grid">
-        <label className="wb-field">
+      {/* 名称 + 模型：同一行 */}
+      <div className="wb-agent-editor-grid wb-agent-name-model-row">
+        <label className="wb-field" style={{ flex: 1 }}>
           <span>名称</span>
           <input
             type="text"
             value={draft.name}
             onChange={(event) => onChangeDraft("name", event.target.value)}
           />
-          <small>用户在列表里会直接看到这个名字。</small>
         </label>
-
-      </div>
-
-      <div className="wb-agent-editor-grid">
-        <div className="wb-field">
-          <span>使用的模型</span>
+        <div className="wb-field" style={{ flex: 0, minWidth: 160 }}>
+          <span>模型</span>
           <select
             value={draft.modelAlias}
             onChange={(event) => onChangeDraft("modelAlias", event.target.value)}
@@ -150,14 +147,10 @@ export default function AgentEditorSection({
               </option>
             ))}
           </select>
-          {modelAliasMissingFromOptions ? (
-            <small>当前值不在可用 alias 列表中。保存前需要切换到现有别名。</small>
-          ) : (
-            <small>这里列出的都是当前配置里真实可用的模型别名。</small>
-          )}
         </div>
       </div>
 
+      {/* 权限模式 + 行为文件：同一行 */}
       <div className="wb-agent-editor-grid">
         <label className="wb-field">
           <span>权限模式</span>
@@ -165,11 +158,10 @@ export default function AgentEditorSection({
             value={draft.permissionPreset}
             onChange={(event) => onChangeDraft("permissionPreset", event.target.value)}
           >
-            <option value="minimal">保守模式 — 只读操作直接执行，其余需要你确认</option>
-            <option value="normal">标准模式 — 读写操作直接执行，不可逆操作需要确认</option>
-            <option value="full">完全信任 — 所有操作直接执行，不需要确认</option>
+            <option value="minimal">保守 — 只读直接执行，其余需确认</option>
+            <option value="normal">标准 — 读写直接执行，不可逆需确认</option>
+            <option value="full">完全信任 — 所有操作直接执行</option>
           </select>
-          <small>决定这个 Agent 执行工具时需不需要你先确认。大多数情况选标准模式就好。</small>
         </label>
 
         <div className="wb-field">
@@ -193,7 +185,7 @@ export default function AgentEditorSection({
                 >
                   <div className="wb-agent-option-copy">
                     <strong>{fileId}</strong>
-                    <p>{meta?.description ?? "Agent 私有行为配置。"}</p>
+                    <p>{meta?.description ?? "Agent 私有配置。"}</p>
                     <small>
                       {meta?.title ?? fileId}
                       {" · "}
@@ -204,65 +196,62 @@ export default function AgentEditorSection({
               );
             })}
           </div>
-          <small>点击文件名可以查看和编辑。这些文件定义了 Agent 的身份、风格和运行节奏。</small>
         </div>
       </div>
 
-      {/* ── 已授权工具（审批覆盖） ── */}
-      <div className="wb-note-stack">
-        <div className="wb-panel-head">
-          <div>
-            <strong>已授权工具</strong>
-            <p className="wb-panel-copy">
-              Agent 运行过程中你选择"始终允许"的工具会出现在这里。如果想收回授权，点击撤销即可。
-            </p>
+      {/* 已授权工具 —— 仅已保存的 Agent 才显示 */}
+      {!isCreate && (
+        <div className="wb-note-stack">
+          <div className="wb-panel-head">
+            <div>
+              <strong>已授权工具</strong>
+              <p className="wb-panel-copy">
+                运行中选择"始终允许"的工具会出现在这里，可随时撤销。
+              </p>
+            </div>
+            <span className="wb-chip">{approvalOverrides.length} 条</span>
           </div>
-          <span className="wb-chip">{approvalOverrides.length} 条授权</span>
-        </div>
-        {approvalOverridesLoading ? (
-          <div className="wb-note">
-            <span>加载中…</span>
-          </div>
-        ) : approvalOverrides.length === 0 ? (
-          <div className="wb-note">
-            <span>还没有额外授权记录。Agent 工作时如果遇到需要确认的工具，你可以选择"始终允许"来跳过后续确认。</span>
-          </div>
-        ) : (
-          <div className="wb-agent-tool-browser">
-            {approvalOverrides.map((override) => (
-              <div
-                key={`${override.agentRuntimeId}:${override.toolName}`}
-                className="wb-agent-tool-row"
-              >
-                <div>
-                  <strong>{formatTokenLabel(override.toolName)}</strong>
-                  <p>
-                    始终允许 · 授权于 {formatOverrideTime(override.createdAt)}
-                  </p>
-                  <small>{override.toolName}</small>
-                </div>
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={() => onRevokeOverride(override.agentRuntimeId, override.toolName)}
+          {approvalOverridesLoading ? (
+            <div className="wb-note"><span>加载中…</span></div>
+          ) : approvalOverrides.length === 0 ? (
+            <div className="wb-note"><span>暂无授权记录。</span></div>
+          ) : (
+            <div className="wb-agent-tool-browser">
+              {approvalOverrides.map((override) => (
+                <div
+                  key={`${override.agentRuntimeId}:${override.toolName}`}
+                  className="wb-agent-tool-row"
                 >
-                  撤销
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                  <div>
+                    <strong>{formatTokenLabel(override.toolName)}</strong>
+                    <p>
+                      始终允许 · 授权于 {formatOverrideTime(override.createdAt)}
+                    </p>
+                    <small>{override.toolName}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="wb-button wb-button-tertiary"
+                    onClick={() => onRevokeOverride(override.agentRuntimeId, override.toolName)}
+                  >
+                    撤销
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
+      {/* 高级设置 */}
       <details className="wb-agent-details">
         <summary>高级设置</summary>
-        <div className="wb-form-grid wb-agent-editor-grid">
-
+        <div className="wb-agent-editor-grid">
           <div className="wb-field">
             <span>运行形态</span>
-            <div className="wb-agent-check-grid">
+            <div className="wb-agent-check-grid wb-agent-check-grid--compact">
               {RUNTIME_KIND_OPTIONS.map((option) => (
-                <label key={option.value} className="wb-agent-option-card">
+                <label key={option.value} className="wb-agent-option-card wb-agent-option-card--compact">
                   <div className="wb-agent-option-copy">
                     <strong>{option.label}</strong>
                     <p>{option.description}</p>
@@ -276,7 +265,6 @@ export default function AgentEditorSection({
               ))}
             </div>
           </div>
-
         </div>
       </details>
     </section>

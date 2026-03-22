@@ -2448,6 +2448,22 @@
   align-items: start;
 }
 
+/* 名称 + 模型同行 */
+.wb-agent-name-model-row {
+  display: flex !important;
+  gap: var(--cp-space-4);
+  align-items: flex-start;
+}
+
+/* 高级设置紧凑 */
+.wb-agent-check-grid--compact {
+  gap: var(--cp-space-2) !important;
+}
+
+.wb-agent-option-card--compact {
+  padding: 8px 12px !important;
+}
+
 /* ── Modal overlay ── */
 .wb-modal-overlay {
   position: fixed;
