@@ -388,7 +388,10 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
 
     tool_broker.add_hook(_PolicyCheckpointHook())
 
-    readme = tmp_path / "README.txt"
+    # workspace_root 现在解析为 projects/{slug}/，测试文件放到对应目录
+    project_dir = tmp_path / "projects" / "default"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    readme = project_dir / "README.txt"
     readme.write_text("Alpha runtime context\n", encoding="utf-8")
 
     try:
