@@ -24,6 +24,7 @@ dev = [
     "octoagent-policy",
     "octoagent-memory",
     "octoagent-protocol",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.uv.sources]
