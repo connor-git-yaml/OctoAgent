@@ -465,7 +465,7 @@ function readLatestApprovalContext(
         readPayloadString(latestPendingApproval.payload ?? {}, "risk_explanation") ||
         readPayloadString(latestPendingApproval.payload ?? {}, "summary"),
       createdAt: latestPendingApproval.ts,
-      expiresAt: new Date(Date.parse(latestPendingApproval.ts) + 120 * 1000).toISOString(),
+      expiresAt: new Date(Date.parse(latestPendingApproval.ts) + 600 * 1000).toISOString(),
     };
   }
   const latestToolStarted = [...relevantEvents]
@@ -480,7 +480,7 @@ function readLatestApprovalContext(
     argsSummary: readPayloadString(latestToolStarted.payload ?? {}, "args_summary"),
     summary: "系统已经进入高风险工具调用前的等待确认阶段。",
     createdAt: latestToolStarted.ts,
-    expiresAt: new Date(Date.parse(latestToolStarted.ts) + 120 * 1000).toISOString(),
+    expiresAt: new Date(Date.parse(latestToolStarted.ts) + 600 * 1000).toISOString(),
   };
 }
 
@@ -1506,9 +1506,10 @@ export default function ChatWorkbench() {
   const activeApprovalRemainingSeconds = Number.isFinite(activeApprovalExpiresAtMs)
     ? Math.max(0, Math.ceil((activeApprovalExpiresAtMs - approvalNow) / 1000))
     : null;
-  const latestExpiredApprovalAgeSeconds = latestExpiredApprovalContext?.expiredAt
-    ? Math.max(0, Math.floor((approvalNow - Date.parse(latestExpiredApprovalContext.expiredAt)) / 1000))
-    : null;
+  const shouldShowApprovalBanner = Boolean(
+    activeApprovalItem &&
+      (activeApprovalRemainingSeconds == null || activeApprovalRemainingSeconds > 0)
+  );
   const slashCommandMatches = useMemo(() => {
     const normalized = input.trim().toLowerCase();
     if (!normalized.startsWith("/")) {
@@ -2279,7 +2280,7 @@ export default function ChatWorkbench() {
             ) : null}
             {legacyResetCallout}
 
-            {activeApprovalItem ? (
+            {shouldShowApprovalBanner ? (
               <>
                 <InlineCallout
                   title={
@@ -2325,15 +2326,6 @@ export default function ChatWorkbench() {
                   <code>/deny</code>。
                 </p>
               </>
-            ) : null}
-
-            {!activeApprovalItem && latestExpiredApprovalContext && latestExpiredApprovalAgeSeconds != null && latestExpiredApprovalAgeSeconds < 300 ? (
-              <InlineCallout title="刚才有一步审批已经超时" tone="error">
-                {`${latestExpiredApprovalContext.toolName || "这一步"} 在 ${Math.max(
-                  1,
-                  latestExpiredApprovalAgeSeconds
-                )} 秒前因为没等到确认而自动拒绝了。你可以重试这轮，或换成不需要审批的路径。`}
-              </InlineCallout>
             ) : null}
 
             {chatActionNotice ? (

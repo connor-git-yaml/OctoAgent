@@ -157,7 +157,7 @@ class PolicyProfile(BaseModel):
 
     # === 超时配置 ===
     approval_timeout_seconds: float = Field(
-        default=120.0,
+        default=600.0,
         description="审批等待超时（秒）",
     )
 
@@ -170,7 +170,7 @@ DEFAULT_PROFILE = PolicyProfile(
     reversible_action=PolicyAction.ALLOW,
     irreversible_action=PolicyAction.ASK,
     allowed_tool_profile=ToolProfile.STANDARD,
-    approval_timeout_seconds=120.0,
+    approval_timeout_seconds=600.0,
 )
 
 STRICT_PROFILE = PolicyProfile(
@@ -180,7 +180,7 @@ STRICT_PROFILE = PolicyProfile(
     reversible_action=PolicyAction.ASK,
     irreversible_action=PolicyAction.ASK,
     allowed_tool_profile=ToolProfile.MINIMAL,
-    approval_timeout_seconds=60.0,
+    approval_timeout_seconds=600.0,
 )
 
 PERMISSIVE_PROFILE = PolicyProfile(
@@ -190,7 +190,7 @@ PERMISSIVE_PROFILE = PolicyProfile(
     reversible_action=PolicyAction.ALLOW,
     irreversible_action=PolicyAction.ALLOW,
     allowed_tool_profile=ToolProfile.PRIVILEGED,
-    approval_timeout_seconds=300.0,
+    approval_timeout_seconds=600.0,
 )
 
 

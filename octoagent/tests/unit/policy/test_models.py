@@ -197,7 +197,7 @@ class TestPolicyProfile:
         assert DEFAULT_PROFILE.reversible_action == PolicyAction.ALLOW
         assert DEFAULT_PROFILE.irreversible_action == PolicyAction.ASK
         assert DEFAULT_PROFILE.allowed_tool_profile == ToolProfile.STANDARD
-        assert DEFAULT_PROFILE.approval_timeout_seconds == 120.0
+        assert DEFAULT_PROFILE.approval_timeout_seconds == 600.0
 
     def test_strict_profile(self) -> None:
         """STRICT_PROFILE 预期值"""
