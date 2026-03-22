@@ -53,7 +53,7 @@ M0: Task/Event/Artifact+SSE+Web UI | M1: LLM+Skill+Policy | M2: Telegram+Worker+
 - **代码**：公共函数完整类型注解 / Pydantic BaseModel / async 优先 / 模块需 unit test
 - **架构整洁优先**：先从长期演进视角判断合理架构，不以"最小改动"为默认目标；不堆叠临时 patch 和兼容层；删除功能时直接删代码，不注释保留
 - **Web UI**：面向非技术用户，不暴露内部术语（详见 `.agent-config/refs/ux-guidelines.md`）
-- **Git**：主分支 `master`；Commit `<type>(<scope>): <desc>`（type: feat/fix/refactor/docs/test/chore）
+- **Git**：主分支 `master`；Commit `<type>(<scope>): <desc>`（type: feat/fix/refactor/docs/test/chore）；**禁止 force push**（`--force` / `--force-with-lease` 全部禁止），已推送的 commit 不得 amend 后再推；冲突只能 `fetch + rebase` 解决后正常推送
 
 ## 按需参考
 
