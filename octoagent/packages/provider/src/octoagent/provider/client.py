@@ -114,6 +114,47 @@ class LiteLLMClient:
         self._auth_refresh_callback = auth_refresh_callback
 
     @staticmethod
+    def _normalize_system_messages(
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """将分散的 system 消息合并到开头。
+
+        部分模型（Qwen、Gemma 等）要求 system 消息只能出现在对话最前面。
+        OctoAgent 的 context 构建在历史消息中间也插入 system 消息
+        （runtime hints、behavior tool guide 等）。
+        此方法将所有 system 消息提取合并为一条放在最前面。
+        """
+        if not messages:
+            return messages
+
+        system_parts: list[str] = []
+        non_system: list[dict[str, str]] = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = msg.get("content", "").strip()
+                if content:
+                    system_parts.append(content)
+            else:
+                non_system.append(msg)
+
+        if not system_parts:
+            return messages
+
+        # 检查是否需要合并（所有 system 已在开头则不变）
+        first_non_system_idx = next(
+            (i for i, m in enumerate(messages) if m.get("role") != "system"),
+            len(messages),
+        )
+        has_system_after = any(
+            m.get("role") == "system" for m in messages[first_non_system_idx:]
+        )
+        if not has_system_after:
+            return messages  # 已经全在开头，不需要处理
+
+        merged_system = {"role": "system", "content": "\n\n".join(system_parts)}
+        return [merged_system, *non_system]
+
+    @staticmethod
     def _is_auth_error(e: Exception) -> bool:
         """判断异常是否为认证类错误（401/403）
 
@@ -483,9 +524,12 @@ class LiteLLMClient:
             # OpenAI 兼容端点直接转发到 Proxy，由 Proxy 负责路由到真实模型。
             proxy_model = f"openai/{model_alias}"
             use_stream = model_alias in self._stream_model_aliases
+            # 非 OpenAI 模型（Qwen 等）要求 system 消息在开头，
+            # 预处理：合并所有 system 消息到第一条
+            normalized_messages = self._normalize_system_messages(messages)
             call_kwargs = {
                 "model": proxy_model,
-                "messages": messages,
+                "messages": normalized_messages,
                 "api_base": resolved_api_base,
                 "api_key": resolved_api_key,
                 "temperature": temperature,
