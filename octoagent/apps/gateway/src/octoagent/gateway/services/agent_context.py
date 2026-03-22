@@ -2957,12 +2957,15 @@ class AgentContextService:
         ):
             workspace = None
         if project is None:
-            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-            project = (
-                await self._stores.project_store.get_project(workspace.project_id)
-                if workspace is not None
-                else None
-            )
+            # 优先用 project: 前缀解析，兼容 workspace: 前缀旧数据
+            project = await self._stores.project_store.resolve_project_for_scope(task.scope_id)
+            if project is None:
+                workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
+                project = (
+                    await self._stores.project_store.get_project(workspace.project_id)
+                    if workspace is not None
+                    else None
+                )
         selector = await self._stores.project_store.get_selector_state(surface)
         if project is None and selector is not None:
             project = await self._stores.project_store.get_project(selector.active_project_id)
