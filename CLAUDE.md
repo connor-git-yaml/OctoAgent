@@ -137,6 +137,7 @@ octoagent/
 - Commit 格式：`<type>(<scope>): <description>`
   - type: feat / fix / refactor / docs / test / chore
   - scope: core / gateway / kernel / worker / memory / tooling / ...
+- **禁止 force push**：绝对不允许使用 `--force`、`--force-with-lease` 或任何形式的强制推送。已推送的 commit 不得 amend/rebase 后再推送。遇到推送冲突时，必须 `git fetch` + `git rebase` 处理冲突，review 冲突解决结果后再正常推送。违反此规则曾导致线上 commit 丢失。
 
 ## 关键设计决策记录
 
