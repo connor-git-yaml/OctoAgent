@@ -482,7 +482,7 @@ def render_behavior_system_block(
     effective_layers = (
         build_behavior_slice_envelope(pack).layers
         if load_profile == BehaviorLoadProfile.WORKER
-        else pack.layers
+        else build_behavior_layers(pack.files)
     )
     path_manifest = dict(pack.metadata.get("path_manifest", {}))
     storage_boundary_hints = dict(pack.metadata.get("storage_boundary_hints", {}))
