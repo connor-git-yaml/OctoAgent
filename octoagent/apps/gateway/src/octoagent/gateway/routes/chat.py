@@ -232,13 +232,14 @@ async def _resolve_owner_turn_executor_kind(store_group, profile_id: str) -> Tur
     return TurnExecutorKind.SELF
 
 
-def _build_workspace_scoped_chat_scope_id(
+def _build_project_scoped_chat_scope_id(
     *,
-    workspace_id: str,
+    project_id: str,
     channel: str,
     thread_id: str,
 ) -> str:
-    return f"workspace:{workspace_id}:chat:{channel}:{thread_id}"
+    """构建 project 维度的 chat scope_id。"""
+    return f"project:{project_id}:chat:{channel}:{thread_id}"
 
 
 def _parse_projected_session_ref(session_id: str) -> tuple[str, str, str]:
@@ -372,13 +373,13 @@ async def send_chat_message(
 
         effective_thread_id = requested_thread_id or task_id
         effective_scope_id = (
-            _build_workspace_scoped_chat_scope_id(
-                workspace_id=workspace_id,
+            _build_project_scoped_chat_scope_id(
+                project_id=project_id,
                 channel="web",
                 thread_id=effective_thread_id,
             )
-            if workspace_id
-            else ""
+            if project_id
+            else f"chat:web:{effective_thread_id}"
         )
 
         msg = NormalizedMessage(
