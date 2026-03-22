@@ -128,6 +128,9 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
         },
         "litellm_settings": {
             "drop_params": True,
+            # 非 OpenAI 模型（如 Qwen）要求 system 消息在开头，
+            # modify_params 让 LiteLLM 自动合并分散的 system 消息
+            "modify_params": True,
         },
     }
 
