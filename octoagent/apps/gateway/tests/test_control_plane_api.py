@@ -3056,6 +3056,41 @@ class TestControlPlaneApi:
 
         # /api/control/resources/vault-authorization 资源路由已移除
 
+    async def test_memory_query_action_accepts_extended_filters(
+        self,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        seeded = seeded_memory_control_plane.state.seeded_memory
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "memory.query",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "project_id": seeded["project_id"],
+                    "workspace_id": seeded["workspace_id"],
+                    "scope_id": seeded["scope_id"],
+                    "derived_type": "tom",
+                    "status": "derived",
+                    "updated_after": "2026-01-01T00:00:00Z",
+                    "updated_before": "2026-12-31T23:59:59Z",
+                    "limit": 20,
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        payload = resp.json()["result"]
+        assert payload["code"] == "MEMORY_QUERY_COMPLETED"
+        assert payload["data"]["record_count"] >= 1
+
     async def test_memory_maintenance_actions_are_registered_and_runnable(
         self,
         control_plane_client: AsyncClient,

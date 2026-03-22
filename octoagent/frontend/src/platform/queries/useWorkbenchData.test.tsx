@@ -140,6 +140,10 @@ describe("useWorkbenchData", () => {
         include_history: true,
         include_vault_refs: true,
         limit: 10,
+        derived_type: "tom",
+        status: "derived",
+        updated_after: "2026-03-01T00:00:00Z",
+        updated_before: "2026-03-31T23:59:59Z",
       });
     });
 
@@ -157,6 +161,10 @@ describe("useWorkbenchData", () => {
           includeHistory: true,
           includeVaultRefs: true,
           limit: 10,
+          derivedType: "tom",
+          status: "derived",
+          updatedAfter: "2026-03-01T00:00:00Z",
+          updatedBefore: "2026-03-31T23:59:59Z",
         },
       }
     );

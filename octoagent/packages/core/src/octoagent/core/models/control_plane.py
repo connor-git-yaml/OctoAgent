@@ -832,6 +832,10 @@ class MemoryConsoleFilter(BaseModel):
     include_history: bool = False
     include_vault_refs: bool = False
     limit: int = Field(default=50, ge=1, le=200)
+    derived_type: str = Field(default="")
+    status: str = Field(default="")
+    updated_after: str = Field(default="")
+    updated_before: str = Field(default="")
     cursor: str = Field(default="")
 
 

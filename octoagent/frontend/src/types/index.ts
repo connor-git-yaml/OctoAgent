@@ -1356,6 +1356,10 @@ export interface MemoryConsoleFilter {
   include_history: boolean;
   include_vault_refs: boolean;
   limit: number;
+  derived_type?: string;
+  status?: string;
+  updated_after?: string;
+  updated_before?: string;
   cursor: string;
 }
 

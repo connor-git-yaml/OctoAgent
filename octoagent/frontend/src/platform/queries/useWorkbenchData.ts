@@ -87,6 +87,8 @@ function buildActionRefreshOptions(
     memoryQuery: {
       projectId:
         readStringParam(params, "project_id") ?? currentMemory?.active_project_id,
+      workspaceId:
+        readStringParam(params, "workspace_id") ?? currentMemory?.active_workspace_id,
       scopeId:
         readStringParam(params, "scope_id") ??
         (currentMemory?.filters.scope_id || undefined),
@@ -106,6 +108,18 @@ function buildActionRefreshOptions(
         readBooleanParam(params, "include_vault_refs") ??
         currentMemory?.filters.include_vault_refs,
       limit: readNumberParam(params, "limit") ?? currentMemory?.filters.limit,
+      derivedType:
+        readStringParam(params, "derived_type") ??
+        (currentMemory?.filters.derived_type || undefined),
+      status:
+        readStringParam(params, "status") ??
+        (currentMemory?.filters.status || undefined),
+      updatedAfter:
+        readStringParam(params, "updated_after") ??
+        (currentMemory?.filters.updated_after || undefined),
+      updatedBefore:
+        readStringParam(params, "updated_before") ??
+        (currentMemory?.filters.updated_before || undefined),
     },
   };
 }

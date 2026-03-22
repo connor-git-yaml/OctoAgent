@@ -44,6 +44,7 @@ export function buildSnapshotRefreshOptions(
     (snapshot.resources.memory != null
       ? {
           projectId: snapshot.resources.memory.active_project_id,
+          workspaceId: snapshot.resources.memory.active_workspace_id || undefined,
           scopeId: snapshot.resources.memory.filters.scope_id || undefined,
           partition: snapshot.resources.memory.filters.partition || undefined,
           layer: snapshot.resources.memory.filters.layer || undefined,
@@ -51,6 +52,10 @@ export function buildSnapshotRefreshOptions(
           includeHistory: snapshot.resources.memory.filters.include_history,
           includeVaultRefs: snapshot.resources.memory.filters.include_vault_refs,
           limit: snapshot.resources.memory.filters.limit,
+          derivedType: snapshot.resources.memory.filters.derived_type || undefined,
+          status: snapshot.resources.memory.filters.status || undefined,
+          updatedAfter: snapshot.resources.memory.filters.updated_after || undefined,
+          updatedBefore: snapshot.resources.memory.filters.updated_before || undefined,
         }
       : undefined);
   return {

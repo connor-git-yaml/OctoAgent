@@ -140,6 +140,10 @@ async def get_control_memory(
     include_history: bool = Query(default=False),
     include_vault_refs: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
+    derived_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    updated_after: str | None = Query(default=None),
+    updated_before: str | None = Query(default=None),
     control_plane=Depends(get_control_plane_service),
 ):
     return (
@@ -153,6 +157,10 @@ async def get_control_memory(
             include_history=include_history,
             include_vault_refs=include_vault_refs,
             limit=limit,
+            derived_type=derived_type,
+            status=status,
+            updated_after=updated_after,
+            updated_before=updated_before,
         )
     ).model_dump(mode="json", by_alias=True)
 

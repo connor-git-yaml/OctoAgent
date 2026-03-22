@@ -338,6 +338,7 @@ export async function fetchMemoryConsole(
   return apiFetch<MemoryConsoleDocument>(
     `/api/control/resources/memory${buildQueryString({
       project_id: params.projectId,
+      workspace_id: params.workspaceId,
       scope_id: params.scopeId,
       partition: params.partition,
       layer: params.layer,
@@ -345,6 +346,10 @@ export async function fetchMemoryConsole(
       include_history: params.includeHistory,
       include_vault_refs: params.includeVaultRefs,
       limit: params.limit,
+      derived_type: params.derivedType,
+      status: params.status,
+      updated_after: params.updatedAfter,
+      updated_before: params.updatedBefore,
     })}`
   );
 }

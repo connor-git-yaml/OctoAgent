@@ -3408,6 +3408,10 @@ class ControlPlaneService:
         include_history: bool = False,
         include_vault_refs: bool = False,
         limit: int = 50,
+        derived_type: str | None = None,
+        status: str | None = None,
+        updated_after: str | None = None,
+        updated_before: str | None = None,
     ) -> MemoryConsoleDocument:
         _, selected_project, _, fallback_reason = await self._resolve_selection()
         resolved_project_id = project_id or (
@@ -3441,6 +3445,10 @@ class ControlPlaneService:
             include_history=include_history,
             include_vault_refs=include_vault_refs,
             limit=limit,
+            derived_type=derived_type or "",
+            status=status or "",
+            updated_after=updated_after or "",
+            updated_before=updated_before or "",
         )
         document.retrieval_profile = load_memory_retrieval_profile(
             self._project_root,

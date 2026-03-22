@@ -24,6 +24,7 @@ export type SnapshotResourcePayload =
 
 export interface MemoryResourceQuery {
   projectId?: string;
+  workspaceId?: string;
   scopeId?: string;
   partition?: string;
   layer?: string;
@@ -31,9 +32,10 @@ export interface MemoryResourceQuery {
   includeHistory?: boolean;
   includeVaultRefs?: boolean;
   limit?: number;
+  derivedType?: string;
   status?: string;
-  source?: string;
-  subjectKey?: string;
+  updatedAfter?: string;
+  updatedBefore?: string;
 }
 
 export interface SnapshotResourceLoadOptions {
