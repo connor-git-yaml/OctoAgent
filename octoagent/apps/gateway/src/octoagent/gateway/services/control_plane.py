@@ -4084,11 +4084,27 @@ class ControlPlaneService:
         )
         review = SetupReviewSummary.model_validate(review_result.data.get("review", {}))
         if not review.ready:
-            blocking = "、".join(review.blocking_reasons) or "存在未通过项"
-            raise ControlPlaneActionError(
-                "SETUP_REVIEW_BLOCKED",
-                f"配置检查未通过，当前不能保存：{blocking}",
+            # 如果 blocking 原因是 secret_missing 但 draft 中已包含对应密钥值，
+            # 则不阻止保存——密钥即将在本次 apply 中写入。
+            secret_values = draft.get("secret_values", {})
+            pending_env_names = (
+                {str(k).strip() for k, v in secret_values.items() if str(v).strip()}
+                if isinstance(secret_values, Mapping)
+                else set()
             )
+            effective_blocking = [
+                reason for reason in review.blocking_reasons
+                if not (
+                    reason.startswith("secret_missing:")
+                    and reason.split(":", 1)[1] in pending_env_names
+                )
+            ]
+            if effective_blocking:
+                blocking = "、".join(effective_blocking) or "存在未通过项"
+                raise ControlPlaneActionError(
+                    "SETUP_REVIEW_BLOCKED",
+                    f"配置检查未通过，当前不能保存：{blocking}",
+                )
 
         current_config = load_config(self._project_root)
         if current_config is None:
