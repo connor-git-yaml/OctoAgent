@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import NewSessionModal from "../ChatUI/NewSessionModal";
 import DeleteSessionModal from "../ChatUI/DeleteSessionModal";
@@ -148,14 +148,32 @@ function ChatNavSection({
   // 只展示 web 渠道的 session，如果没有 web session 才退化到全部
   const webSessions = sessionItems.filter((item) => item.channel === "web");
   const displaySessions = webSessions.length > 0 ? webSessions : sessionItems;
+  const totalSessions = sessions.summary?.total_sessions ?? displaySessions.length;
+  const [cachedSessions, setCachedSessions] = useState<SessionProjectionItem[]>([]);
+
+  useEffect(() => {
+    if (displaySessions.length > 0) {
+      setCachedSessions(displaySessions);
+    }
+  }, [displaySessions]);
+
+  useEffect(() => {
+    if (totalSessions === 0) {
+      setCachedSessions([]);
+    }
+  }, [totalSessions]);
+
+  const shouldUseCache =
+    displaySessions.length === 0 && cachedSessions.length > 0 && totalSessions > 0;
+  const effectiveSessions = shouldUseCache ? cachedSessions : displaySessions;
 
   return (
     <div className="wb-nav-group">
       <div className="wb-nav-session-list">
-        {displaySessions.map((session) => {
+        {effectiveSessions.map((session) => {
           const sessionPath = `/chat/${session.session_id}`;
           const isActive = currentPath === sessionPath
-            || (currentPath === "/" && session === displaySessions[0]);
+            || (currentPath === "/" && session === effectiveSessions[0]);
           const statusNormalized = session.status?.toLowerCase() ?? "";
           const isRunning = ["running", "waiting_input", "waiting_approval"].includes(
             statusNormalized
