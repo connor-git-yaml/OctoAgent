@@ -1357,8 +1357,8 @@
   bottom: 0;
   align-items: center;
   justify-content: center;
-  padding: 0 10px 0 18px;
-  background: linear-gradient(to right, transparent, var(--cp-bg) 8px);
+  padding: 0 10px 0 28px;
+  background: linear-gradient(to right, transparent, var(--cp-bg) 24px);
   border: none;
   color: var(--cp-muted);
   cursor: pointer;
@@ -1369,12 +1369,12 @@
 
 .wb-nav-session-item:hover .wb-nav-session-delete {
   display: flex;
-  background: linear-gradient(to right, transparent, #f0f5f3 8px);
+  background: linear-gradient(to right, transparent, #f0f5f3 24px);
 }
 
 .wb-nav-session-item.is-active .wb-nav-session-delete,
 .wb-nav-session-item.is-active:hover .wb-nav-session-delete {
-  background: linear-gradient(to right, transparent, #e3edea 8px);
+  background: linear-gradient(to right, transparent, #e3edea 24px);
 }
 
 .wb-nav-session-delete:hover {

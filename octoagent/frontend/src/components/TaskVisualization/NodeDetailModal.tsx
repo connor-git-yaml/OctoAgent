@@ -183,9 +183,9 @@ function KindContent({
                     <summary>{tc.tool_name || `tool_call_${i}`}</summary>
                     {tc.arguments != null && (
                       <pre className="tv-modal-payload">
-                        {typeof tc.arguments === "string"
+                        {String(typeof tc.arguments === "string"
                           ? tc.arguments
-                          : JSON.stringify(tc.arguments, null, 2)}
+                          : JSON.stringify(tc.arguments, null, 2))}
                       </pre>
                     )}
                   </details>
