@@ -240,13 +240,13 @@ export default function SettingsPage() {
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
     }
-    const savedSecrets = result?.data?.saved_secrets;
+    const savedSecrets = result?.data?.saved_secrets as Record<string, unknown> | undefined;
     if (savedSecrets && typeof savedSecrets === "object") {
       const litellmNames = Array.isArray(savedSecrets.litellm_env_names)
-        ? savedSecrets.litellm_env_names.map((item: unknown) => String(item))
+        ? (savedSecrets.litellm_env_names as unknown[]).map((item) => String(item))
         : [];
       const runtimeNames = Array.isArray(savedSecrets.runtime_env_names)
-        ? savedSecrets.runtime_env_names.map((item: unknown) => String(item))
+        ? (savedSecrets.runtime_env_names as unknown[]).map((item) => String(item))
         : [];
       const merged = [...litellmNames, ...runtimeNames].filter((name) => name.trim());
       if (merged.length > 0) {
@@ -319,13 +319,13 @@ export default function SettingsPage() {
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
     }
-    const savedSecrets = result?.data?.saved_secrets;
+    const savedSecrets = result?.data?.saved_secrets as Record<string, unknown> | undefined;
     if (savedSecrets && typeof savedSecrets === "object") {
       const litellmNames = Array.isArray(savedSecrets.litellm_env_names)
-        ? savedSecrets.litellm_env_names.map((item: unknown) => String(item))
+        ? (savedSecrets.litellm_env_names as unknown[]).map((item) => String(item))
         : [];
       const runtimeNames = Array.isArray(savedSecrets.runtime_env_names)
-        ? savedSecrets.runtime_env_names.map((item: unknown) => String(item))
+        ? (savedSecrets.runtime_env_names as unknown[]).map((item) => String(item))
         : [];
       const merged = [...litellmNames, ...runtimeNames].filter((name) => name.trim());
       if (merged.length > 0) {
