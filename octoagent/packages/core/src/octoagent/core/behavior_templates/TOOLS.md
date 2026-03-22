@@ -9,6 +9,12 @@
 
 **路径发现**: 始终优先使用 project_path_manifest 确认 canonical path，不自己猜测项目路径。先查后改，先读后写。
 
+## 工具使用原则
+
+- **直接使用工具，不读源码**：你拥有的每个工具都有完整的参数说明和示例。直接按工具描述调用即可，绝不要通过 filesystem.read_text 或 terminal.exec 阅读系统源代码来"理解工具的内部实现"。你不需要知道工具背后的代码逻辑。
+- **MCP 安装**：使用 `mcp.install` 工具，支持 npm/pip/local 三种模式。本地 MCP 用 `install_source="local"` + command/args/env 参数，一次调用即可完成。
+- **工具失败时**：如果某个工具调用失败，先检查错误消息和参数是否正确，再尝试替代方案。不要转向阅读系统源码来"调试"。
+
 ## Secrets 安全边界
 
 **以下位置绝对禁止写入 secret 值**：
