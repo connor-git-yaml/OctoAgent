@@ -547,10 +547,14 @@ class UpdateService:
 
         env = os.environ.copy()
         env.update(descriptor.environment_overrides)
-        env["OCTOAGENT_PROJECT_ROOT"] = str(self._root)
+        # descriptor.environment_overrides 已包含正确的 OCTOAGENT_PROJECT_ROOT
+        # （指向实例根 ~/.octoagent），不再用 self._root（源码目录）覆盖。
+        start_cwd = Path(
+            descriptor.environment_overrides.get("OCTOAGENT_PROJECT_ROOT", str(self._root))
+        )
         process = subprocess.Popen(  # noqa: S603
             descriptor.start_command,
-            cwd=self._root,
+            cwd=start_cwd,
             env=env,
             start_new_session=True,
             stdout=subprocess.DEVNULL,
