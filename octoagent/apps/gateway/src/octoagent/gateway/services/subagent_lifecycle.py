@@ -712,7 +712,7 @@ async def _create_subagent_executor(
 
     # 5. 创建独立 UsageLimits
     limits_kwargs: dict[str, Any] = {
-        "max_steps": 30,
+        "max_steps": 100,
         "max_duration_seconds": 1800.0,
     }
     if usage_limits:

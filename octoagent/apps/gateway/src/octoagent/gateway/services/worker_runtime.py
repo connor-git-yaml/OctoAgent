@@ -74,7 +74,7 @@ class WorkerRuntimeConfig:
 
     # 默认值对齐长任务场景（如 MCP 安装、代码生成等），
     # 参考 Claude Code 可连续执行数小时的设计。
-    max_steps: int = 50
+    max_steps: int = 200
     first_output_timeout_seconds: float = 120.0
     between_output_timeout_seconds: float = 120.0
     max_execution_timeout_seconds: float = 7200.0  # 2 小时
@@ -115,7 +115,7 @@ class WorkerRuntimeConfig:
             return max(0.01, value)
 
         return cls(
-            max_steps=_int_env("OCTOAGENT_WORKER_MAX_STEPS", 50),
+            max_steps=_int_env("OCTOAGENT_WORKER_MAX_STEPS", 200),
             first_output_timeout_seconds=_float_env(
                 "OCTOAGENT_WORKER_TIMEOUT_FIRST_OUTPUT_S", 120.0
             ),

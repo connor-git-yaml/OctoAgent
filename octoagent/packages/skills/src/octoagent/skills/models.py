@@ -65,7 +65,7 @@ class LoopGuardPolicy(BaseModel):
     """
 
     max_steps: int = Field(default=30, ge=1, le=200)
-    repeat_signature_threshold: int = Field(default=10, ge=2, le=20)
+    repeat_signature_threshold: int = Field(default=100, ge=2, le=200)
 
     def to_usage_limits(self) -> UsageLimits:
         """转换为 UsageLimits。"""
@@ -88,7 +88,7 @@ class UsageLimits(BaseModel):
     max_tool_calls: int | None = Field(default=None, ge=1)
     max_budget_usd: float | None = Field(default=None, ge=0.0)
     max_duration_seconds: float = Field(default=7200.0, ge=1.0)
-    repeat_signature_threshold: int = Field(default=10, ge=2, le=20)
+    repeat_signature_threshold: int = Field(default=100, ge=2, le=200)
 
 
 @dataclass
