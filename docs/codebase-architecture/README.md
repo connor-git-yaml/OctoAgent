@@ -129,7 +129,7 @@ Web / Telegram 输入
 当前 Provider、alias、runtime、memory、front-door、channels 等主配置已经收敛到 `octoagent.yaml`。  
 `litellm-config.yaml` 是衍生文件，不是应该被人手工维护的主配置。
 
-这一块的专题细节可继续看 [LLM Provider 配置到调用架构专题](../llm-provider-config-architecture.md)。
+这一块的专题细节可继续看 [LLM Provider 配置到调用架构专题](../design/llm-provider-config-architecture.md)。
 
 ## 6. 当前模块阅读地图
 
@@ -145,7 +145,7 @@ Web / Telegram 输入
 先读：
 
 - [Provider / LLM Stack](./modules/03-provider-and-llm-stack.md)
-- [LLM Provider 配置专题](../llm-provider-config-architecture.md)
+- [LLM Provider 配置专题](../design/llm-provider-config-architecture.md)
 
 ### 6.3 如果你想理解工具、审批、Skill
 
@@ -172,6 +172,6 @@ Web / Telegram 输入
 - 它解释 **当前真实代码是怎么组织的**
 - 它不会替代 [blueprint](../blueprint.md) 的产品设计与目标架构角色
 - 它不会替代 [octoagent/README.md](../../octoagent/README.md) 的用户上手说明
-- 它不会替代专题深挖文档，例如 [LLM Provider 配置专题](../llm-provider-config-architecture.md)
+- 它不会替代专题深挖文档，例如 [LLM Provider 配置专题](../design/llm-provider-config-architecture.md)
 
 如果你不确定某件事应该看哪份文档，继续看 [当前技术文档地图](./current-doc-map.md)。

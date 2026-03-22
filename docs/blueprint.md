@@ -2807,7 +2807,7 @@ Feature 007（已完成）验证快照（2026-03-02）：
 ### M1.5（最小 Agent 闭环）：Orchestrator + Worker + Checkpoint（2 周）✅ 已交付
 
 > **完成日期**：2026-03-04（核心闭环 008-013）/ 2026-03-06（DX 收口 014）  
-> **拆解文档**：`docs/m1.5-feature-split.md`
+> **拆解文档**：`docs/milestone/m1.5-feature-split.md`
 
 - [x] Feature 008：Orchestrator Skeleton（版本化派发契约 + Worker 回传）
 - [x] Feature 009：Worker Runtime（Free Loop + Docker/timeout/cancel）
@@ -2839,7 +2839,7 @@ M1.5 交付约束（已验证）：
 
 ### M2（多渠道 + 运行治理体验化）：Telegram + A2A + JobRunner + Memory（4-5 周）✅ 已交付
 
-- 拆解文档：`docs/m2-feature-split.md`（2026-03-06 新增）
+- 拆解文档：`docs/milestone/m2-feature-split.md`（2026-03-06 新增）
 - 当前基线（2026-03-08）：015 / 016 / 017 / 018 / 019 / 020 / 021 / 022 / 023 已交付
 - [x] Feature 015：`octo onboard` + doctor guided remediation（首次使用闭环）
 - [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
@@ -2872,7 +2872,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 
 ### M3（用户 Ready 增强）：统一配置 / 管理台 / 记忆产品化（补位中）
 
-- 拆解文档：`docs/m3-feature-split.md`（2026-03-09 已同步到“033 context continuity 补位”版本）
+- 拆解文档：`docs/milestone/m3-feature-split.md`（2026-03-09 已同步到“033 context continuity 补位”版本）
 - 本阶段目标不是继续堆“高级能力名词”，而是把 OctoAgent 推到**普通用户可安装、可配置、可升级、可恢复、可迁移**的状态
 - 参考复核（2026-03-08）：OpenClaw 的 wizard / onboarding protocol / Control UI / updating / export session / subagents；Agent Zero 的 projects / backup / memory / settings / tunnel
 - 当前里程碑判断：Feature 024-031 已交付并合入 `master`；2026-03-09 的 live-usage 复核曾发现主 Agent 缺少 context continuity 主链，后续以 Feature 033 完成补位并关闭该 gate
@@ -3108,7 +3108,7 @@ M4 约束：
 - 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
 - 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
 - 035/036/040 必须显式处理 `context_continuity` 的实际运行状态；若未来再次 degraded，不能把缺失的上下文连续性静默隐藏
-- 本轮从架构纠偏到实现落地的正式执行顺序，见 `docs/agent-runtime-refactor-plan.md`
+- 本轮从架构纠偏到实现落地的正式执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
 
 ### M5（文件工作台 / 语音多模态 / Companion / Attention）
 

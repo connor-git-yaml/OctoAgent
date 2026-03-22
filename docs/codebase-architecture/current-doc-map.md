@@ -9,9 +9,11 @@
 1. **目标态 / 设计依据**：看 [`docs/blueprint.md`](../blueprint.md)
 2. **当前产品使用说明**：看 [`octoagent/README.md`](../../octoagent/README.md)
 3. **当前代码实现导览**：看 [本组 codebase architecture 文档](./README.md)
-4. **专题深挖**：看单一主题的专门文档，例如 [`docs/llm-provider-config-architecture.md`](../llm-provider-config-architecture.md)
-5. **里程碑拆解 / 历史规划**：看 `docs/m*-feature-split.md`
-6. **Feature 研发制品**：看 `.specify/features/*`
+4. **专题深挖**：看 [`docs/design/`](../design/README.md) 下的单一主题文档
+5. **重构方案**：看 [`docs/refactor-plan/`](../refactor-plan/README.md)
+6. **里程碑拆解 / 历史规划**：看 [`docs/milestone/`](../milestone/README.md)
+7. **Feature 研发制品**：看 `.specify/features/*`
+8. **Agent/Codex 配置同步说明**：看 [`.agent-config/agent-config-sync.md`](../../.agent-config/agent-config-sync.md)
 
 ## 2. 现有文档按角色分类
 
@@ -33,20 +35,34 @@
 
 | 文档 | 角色 | 适合什么时候看 | 注意事项 |
 | --- | --- | --- | --- |
-| [`docs/llm-provider-config-architecture.md`](../llm-provider-config-architecture.md) | LLM Provider / alias / setup / 协议与竞品对标专题 | 想深挖模型配置到调用这条链时 | 它是专题文档，不是总代码地图 |
-| [`docs/agent-runtime-refactor-plan.md`](../agent-runtime-refactor-plan.md) | Agent runtime 重构方向和问题收口计划 | 评估 runtime 演进方向时 | 它偏计划和改造方向，不是当前实现总览 |
+| [`docs/design/README.md`](../design/README.md) | 设计专题目录入口 | 想先看有哪些深挖主题时 | 作为设计文档索引，不替代 blueprint 或 codebase map |
+| [`docs/design/llm-provider-config-architecture.md`](../design/llm-provider-config-architecture.md) | LLM Provider / alias / setup / 协议与竞品对标专题 | 想深挖模型配置到调用这条链时 | 它是专题文档，不是总代码地图 |
 
 ### 2.4 里程碑和规划拆解
 
 | 文档 | 角色 | 适合什么时候看 | 注意事项 |
 | --- | --- | --- | --- |
-| [`docs/m1-feature-split.md`](../m1-feature-split.md) | M1 拆解 | 回溯 M1 规划时 | 偏历史规划 |
-| [`docs/m1.5-feature-split.md`](../m1.5-feature-split.md) | M1.5 拆解 | 回溯 runtime 闭环演进时 | 偏历史规划 |
-| [`docs/m2-feature-split.md`](../m2-feature-split.md) | M2 拆解 | 回溯多渠道与治理演进时 | 偏历史规划 |
-| [`docs/m3-feature-split.md`](../m3-feature-split.md) | M3 拆解 | 回溯工作台/配置/记忆产品化演进时 | 偏历史规划 |
-| [`docs/m4-feature-split.md`](../m4-feature-split.md) | M4 拆解 | 回溯 setup governance / runtime safety 演进时 | 偏规划和任务拆解 |
+| [`docs/milestone/README.md`](../milestone/README.md) | 里程碑文档目录入口 | 想先看有哪些历史拆解时 | 作为里程碑索引入口 |
+| [`docs/milestone/m1-feature-split.md`](../milestone/m1-feature-split.md) | M1 拆解 | 回溯 M1 规划时 | 偏历史规划 |
+| [`docs/milestone/m1.5-feature-split.md`](../milestone/m1.5-feature-split.md) | M1.5 拆解 | 回溯 runtime 闭环演进时 | 偏历史规划 |
+| [`docs/milestone/m2-feature-split.md`](../milestone/m2-feature-split.md) | M2 拆解 | 回溯多渠道与治理演进时 | 偏历史规划 |
+| [`docs/milestone/m3-feature-split.md`](../milestone/m3-feature-split.md) | M3 拆解 | 回溯工作台/配置/记忆产品化演进时 | 偏历史规划 |
+| [`docs/milestone/m4-feature-split.md`](../milestone/m4-feature-split.md) | M4 拆解 | 回溯 setup governance / runtime safety 演进时 | 偏规划和任务拆解 |
 
-### 2.5 Feature 制品
+### 2.5 Refactor Plans
+
+| 文档 | 角色 | 适合什么时候看 | 注意事项 |
+| --- | --- | --- | --- |
+| [`docs/refactor-plan/README.md`](../refactor-plan/README.md) | 重构方案目录入口 | 发现结构性坏味道、想看成体系改法时 | 它是方案和迁移建议，不等于已实现事实 |
+| [`docs/refactor-plan/capability-pack-simplification.md`](../refactor-plan/capability-pack-simplification.md) | Capability Pack / 默认工具面重构方案 | 想讨论工具面收窄、surface 分层、registry 拆分时 | 当前仍是提案，不是既成实现 |
+
+### 2.6 Repo Meta Docs
+
+| 文档 | 角色 | 适合什么时候看 | 注意事项 |
+| --- | --- | --- | --- |
+| [`.agent-config/agent-config-sync.md`](../../.agent-config/agent-config-sync.md) | Claude/Codex 共享配置同步说明 | 需要修改或同步 `CLAUDE.md` / `AGENTS.md` 时 | 它解释的是生成链，不是产品架构 |
+
+### 2.7 Feature 制品
 
 `.specify/features/<feature-id>-<slug>/` 下的文档是 Feature 级研发制品，适合回答：
 

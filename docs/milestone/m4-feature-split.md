@@ -366,7 +366,7 @@ M4 现在不再等同于“语音 / companion / 远程陪伴”。从 Feature 03
 
 本轮纠偏后，`039 / 041` 不再适合继续按“局部补丁”推进。正式实施顺序见：
 
-- `docs/agent-runtime-refactor-plan.md`
+- `docs/codebase-architecture/README.md`
 
 执行原则：
 
