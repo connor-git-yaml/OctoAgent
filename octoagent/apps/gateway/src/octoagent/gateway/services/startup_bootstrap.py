@@ -97,6 +97,24 @@ async def _ensure_owner_profile(store_group: StoreGroup) -> OwnerProfile:
     return profile
 
 
+async def _backfill_permission_preset(
+    store_group: StoreGroup,
+    profile: AgentProfile,
+) -> AgentProfile:
+    """已有 Butler profile 若缺少 permission_preset，自动补为 full 并持久化。"""
+    meta = profile.metadata or {}
+    if meta.get("permission_preset"):
+        return profile
+    updated = profile.model_copy(
+        update={
+            "metadata": {**meta, "permission_preset": "full"},
+            "updated_at": datetime.now(tz=UTC),
+        }
+    )
+    await store_group.agent_context_store.save_agent_profile(updated)
+    return updated
+
+
 async def _ensure_agent_profile(
     store_group: StoreGroup,
     project: Project,
@@ -117,10 +135,12 @@ async def _ensure_agent_profile(
             project_default_profile_id
         )
         if existing is not None:
+            existing = await _backfill_permission_preset(store_group, existing)
             return existing
 
     existing = await store_group.agent_context_store.get_agent_profile(canonical_profile_id)
     if existing is not None:
+        existing = await _backfill_permission_preset(store_group, existing)
         if project_default_profile_id != existing.profile_id:
             await store_group.project_store.save_project(
                 project.model_copy(
@@ -148,6 +168,7 @@ async def _ensure_agent_profile(
         tool_profile="standard",
         model_alias="main",
         bootstrap_template_ids=bootstrap_template_ids,
+        metadata={"permission_preset": "full"},
     )
     await store_group.agent_context_store.save_agent_profile(profile)
 
