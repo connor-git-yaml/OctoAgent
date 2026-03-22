@@ -406,7 +406,7 @@ export default function WorkbenchLayout() {
           const workerProfiles = snapshot.resources.worker_profiles;
           const profiles = Array.isArray(workerProfiles?.profiles) ? workerProfiles.profiles : [];
           const agentOptions = profiles
-            .filter((p) => p.status === "active")
+            .filter((p) => p.status === "active" && p.origin_kind !== "builtin")
             .map((p) => ({
               profile_id: p.profile_id,
               name: p.name,
