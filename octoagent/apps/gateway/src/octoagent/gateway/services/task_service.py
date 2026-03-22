@@ -13,6 +13,7 @@ import inspect
 import json
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -119,11 +120,11 @@ class TaskService:
     _max_task_seq_retries = 3
     _pipeline_nodes = PIPELINE_NODES
 
-    def __init__(self, store_group: StoreGroup, sse_hub=None) -> None:
+    def __init__(self, store_group: StoreGroup, sse_hub=None, *, project_root: Path | None = None) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._context_compaction = ContextCompactionService(store_group)
-        self._agent_context = AgentContextService(store_group)
+        self._agent_context = AgentContextService(store_group, project_root=project_root)
         self._budget_planner = ContextBudgetPlanner(config=self._context_compaction._config)
 
     async def create_task(self, message: NormalizedMessage) -> tuple[str, bool]:

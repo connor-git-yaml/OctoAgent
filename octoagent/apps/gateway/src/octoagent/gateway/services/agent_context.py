@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -523,7 +524,10 @@ class AgentContextService:
         self._stores = store_group
         self._llm_service = llm_service or self._shared_llm_service
         self._budget_config = ContextCompactionConfig.from_env()
-        self._project_root = (project_root or Path.cwd()).resolve()
+        _env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
+        self._project_root = (
+            project_root or (Path(_env_root) if _env_root else Path.cwd())
+        ).resolve()
         self._memory_runtime = MemoryRuntimeService(
             self._project_root,
             store_group=store_group,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -401,7 +402,10 @@ class OrchestratorService:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._llm_service = llm_service
-        self._project_root = (project_root or Path.cwd()).resolve()
+        _env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
+        self._project_root = (
+            project_root or (Path(_env_root) if _env_root else Path.cwd())
+        ).resolve()
         self._policy_gate = policy_gate or OrchestratorPolicyGate(approval_manager=approval_manager)
         self._router = router or SingleWorkerRouter()
         self._delegation_plane = delegation_plane
@@ -851,7 +855,7 @@ class OrchestratorService:
             worker_type=worker_type,
         )
         if selection is not None:
-            await TaskService(self._stores, self._sse_hub).append_structured_event(
+            await TaskService(self._stores, self._sse_hub, project_root=self._project_root).append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
                 actor=ActorType.KERNEL,
@@ -1093,7 +1097,7 @@ class OrchestratorService:
             route_reason=route_reason,
             gate_decision=gate_decision,
         )
-        task_service = TaskService(self._stores, self._sse_hub)
+        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         await task_service.ensure_task_running(
             request.task_id,
             trace_id=request.trace_id,
@@ -1179,7 +1183,7 @@ class OrchestratorService:
                 route_reason,
                 f"tool_resolution={selection.resolution_mode}",
             )
-            task_service = TaskService(self._stores, self._sse_hub)
+            task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
             await task_service.append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
@@ -1220,7 +1224,7 @@ class OrchestratorService:
                     selection.effective_tool_universe.profile_id,
                 )
 
-        task_service = TaskService(self._stores, self._sse_hub)
+        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         await task_service.ensure_task_running(
             request.task_id,
             trace_id=request.trace_id,
@@ -1271,7 +1275,7 @@ class OrchestratorService:
                 route_reason,
                 f"tool_resolution={selection.resolution_mode}",
             )
-            task_service = TaskService(self._stores, self._sse_hub)
+            task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
             await task_service.append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
@@ -1295,7 +1299,7 @@ class OrchestratorService:
             gate_decision=gate_decision,
         )
 
-        task_service = TaskService(self._stores, self._sse_hub)
+        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         await task_service.ensure_task_running(
             request.task_id,
             trace_id=request.trace_id,
@@ -3221,7 +3225,7 @@ class OrchestratorService:
         if task is None or task.status in TERMINAL_STATES:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(
@@ -3263,7 +3267,7 @@ class OrchestratorService:
         if task is None or task.status in TERMINAL_STATES:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(
@@ -3349,7 +3353,7 @@ class OrchestratorService:
         if target is None:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(
