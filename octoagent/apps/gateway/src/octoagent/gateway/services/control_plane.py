@@ -390,6 +390,10 @@ class ControlPlaneService:
                 error=str(exc),
             )
 
+    def bind_proxy_manager(self, proxy_manager: Any | None) -> None:
+        """绑定 ProxyProcessManager，供 setup.apply / quick_connect 后重启 Proxy。"""
+        self._proxy_manager = proxy_manager
+
     def bind_mcp_installer(self, installer: Any) -> None:
         """绑定 McpInstallerService（Feature 058: MCP 安装生命周期）。"""
         self._mcp_installer = installer
@@ -4209,6 +4213,18 @@ class ControlPlaneService:
             data["skill_selection"] = dict(skill_result.data)
             resource_refs.extend(skill_result.resource_refs)
 
+        # 密钥或配置变更后重启 Proxy
+        proxy_manager = getattr(self, "_proxy_manager", None)
+        if proxy_manager is not None:
+            try:
+                await proxy_manager.restart()
+            except Exception as exc:
+                log.warning(
+                    "proxy_restart_after_setup_apply_failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
         return self._completed_result(
             request=request,
             code="SETUP_APPLIED",
@@ -4230,6 +4246,18 @@ class ControlPlaneService:
             failure_prefix="配置已保存，但 LiteLLM Proxy 启动失败",
             raise_on_failure=True,
         )
+
+        # quick_connect 后重启 Proxy（apply 内部已触发一次，这里在 activation 之后再次同步）
+        proxy_manager = getattr(self, "_proxy_manager", None)
+        if proxy_manager is not None:
+            try:
+                await proxy_manager.restart()
+            except Exception as exc:
+                log.warning(
+                    "proxy_restart_after_quick_connect_failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
 
         review_result = await self._handle_setup_review(
             request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})

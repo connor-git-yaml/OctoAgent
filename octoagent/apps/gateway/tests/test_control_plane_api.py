@@ -741,10 +741,7 @@ class TestControlPlaneApi:
             payload["resources"]["context_continuity"]["agent_runtimes"][0]["agent_runtime_id"]
             == "runtime-butler-default"
         )
-        assert (
-            payload["resources"]["context_continuity"]["agent_sessions"][0]["agent_session_id"]
-            == "agent-session-butler-default"
-        )
+        assert payload["resources"]["context_continuity"]["agent_sessions"][0]["agent_session_id"]  # 非空即可，ID 格式已改为动态生成
         assert {
             item["kind"] for item in payload["resources"]["context_continuity"]["memory_namespaces"]
         } == {"project_shared", "agent_private"}
@@ -766,7 +763,7 @@ class TestControlPlaneApi:
         assert frame["project_id"]
         assert frame["workspace_id"]
         assert frame["agent_runtime_id"] == "runtime-butler-default"
-        assert frame["agent_session_id"] == "agent-session-butler-default"
+        assert frame["agent_session_id"] # 动态生成 ID
         assert frame["recall_frame_id"] == "recall-frame-default"
         assert set(frame["memory_namespace_ids"]) == {
             "memory-namespace-project-default",
@@ -826,9 +823,7 @@ class TestControlPlaneApi:
         assert context_payload["sessions"][0]["agent_runtime_id"] == "runtime-butler-default"
         assert context_payload["sessions"][0]["last_recall_frame_id"] == "recall-frame-default"
         assert context_payload["frames"][0]["memory_recall"]["hit_count"] == 1
-        assert context_payload["recall_frames"][0]["agent_session_id"] == (
-            "agent-session-butler-default"
-        )
+        assert context_payload["recall_frames"][0]["agent_session_id"]  # 动态生成 ID
         assert context_payload["a2a_conversations"][0]["target_agent"] == (
             "agent://worker.llm.default"
         )

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -98,7 +99,17 @@ class RuntimeActivationService:
         )
 
     async def start_proxy(self, *, timeout_seconds: float = 25.0) -> RuntimeActivationSummary:
-        """拉起 LiteLLM Proxy 并等待 liveliness。"""
+        """拉起 LiteLLM Proxy 并等待 liveliness。
+
+        .. deprecated::
+            Gateway 主流程已改用 ``ProxyProcessManager`` 管理 Proxy 生命周期。
+            本方法仅保留供 CLI 等旧路径使用，后续版本将移除。
+        """
+        warnings.warn(
+            "start_proxy() 已弃用，Gateway 主流程改用 ProxyProcessManager。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.load_runtime_env(override=True)
 
         env_file = self._root / ".env.litellm"

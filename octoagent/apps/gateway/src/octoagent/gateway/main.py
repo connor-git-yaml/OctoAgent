@@ -434,6 +434,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.provider_config = provider_config
 
     if provider_config.llm_mode == "litellm":
+        # ProxyProcessManager: 在 LiteLLMClient 初始化之前确保 Proxy 进程就绪
+        try:
+            from octoagent.provider.dx.proxy_process_manager import ProxyProcessManager
+
+            proxy_manager = ProxyProcessManager(
+                instance_root=project_root,
+                proxy_url=provider_config.proxy_base_url,
+            )
+            proxy_ok = await proxy_manager.ensure_running()
+            if not proxy_ok:
+                log.warning(
+                    "litellm_proxy_start_failed",
+                    proxy_url=provider_config.proxy_base_url,
+                )
+            app.state.proxy_manager = proxy_manager
+        except Exception as exc:
+            log.warning(
+                "proxy_process_manager_unavailable",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            app.state.proxy_manager = None
+
         # LiteLLM 模式：LiteLLMClient + FallbackManager
         litellm_client = LiteLLMClient(
             proxy_base_url=provider_config.proxy_base_url,
@@ -476,6 +499,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             alias_registry=alias_registry,
         )
         app.state.litellm_client = None
+        app.state.proxy_manager = None
         log.info("llm_service_initialized", mode="echo")
 
     app.state.llm_service = llm_service
@@ -698,6 +722,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         automation_store=app.state.control_plane_service.automation_store,
     )
     app.state.control_plane_service.bind_automation_scheduler(app.state.automation_scheduler)
+    app.state.control_plane_service.bind_proxy_manager(app.state.proxy_manager)
     # Feature 065: 注册系统内置自动化作业（在 scheduler.startup 之前）
     await app.state.control_plane_service.ensure_system_automation_jobs()
     # Feature 058: 绑定 McpInstallerService 到 ControlPlaneService 并启动
@@ -752,6 +777,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await app.state.mcp_installer.shutdown()
     if hasattr(app.state, "mcp_registry") and app.state.mcp_registry:
         await app.state.mcp_registry.shutdown()
+
+    # 关闭：停止 ProxyProcessManager
+    proxy_manager = getattr(app.state, "proxy_manager", None)
+    if proxy_manager is not None:
+        try:
+            await proxy_manager.stop()
+        except Exception as exc:
+            log.warning(
+                "proxy_manager_stop_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
 
     # 关闭：清理数据库连接
     update_status_store = getattr(app.state, "update_status_store", None)
