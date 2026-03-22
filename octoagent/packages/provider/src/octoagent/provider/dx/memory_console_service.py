@@ -1280,7 +1280,12 @@ class MemoryConsoleService:
         for binding in bindings:
             if binding.binding_type not in _MEMORY_BINDING_TYPES:
                 continue
-            if workspace is not None and binding.workspace_id not in {None, workspace.workspace_id}:
+            # memory_scope 类型的 binding 跨 workspace 可见（记忆是全局资源）
+            if (
+                binding.binding_type != ProjectBindingType.MEMORY_SCOPE
+                and workspace is not None
+                and binding.workspace_id not in {None, workspace.workspace_id}
+            ):
                 continue
             scope_bindings[binding.binding_key] = _BoundScope(
                 scope_id=binding.binding_key,
