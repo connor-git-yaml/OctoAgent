@@ -147,7 +147,7 @@ async def _resolve_chat_scope_snapshot(
     return (
         new_conversation_token,
         project.project_id,
-        workspace.workspace_id if workspace is not None else "",
+        "",
         requested_agent_profile_id,
     )
 
@@ -160,7 +160,7 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
         session_candidates = await store_group.agent_context_store.list_agent_sessions(
             legacy_session_id=task.thread_id,
             project_id=workspace.project_id if workspace is not None else None,
-            workspace_id=workspace.workspace_id if workspace is not None else None,
+            workspace_id=None,
             limit=8,
         )
         if not session_candidates and workspace is not None:

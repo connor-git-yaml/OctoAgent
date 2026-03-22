@@ -938,8 +938,22 @@ class SqliteAgentContextStore:
         self,
         *,
         project_id: str,
-        workspace_id: str = "",
+        workspace_id: str = "",  # DEPRECATED: workspace 概念已废弃，保留参数用于兼容旧数据 fallback
     ) -> BootstrapSession | None:
+        # 优先按 project_id 查询
+        if project_id:
+            row = await self._fetchone(
+                """
+                SELECT * FROM bootstrap_sessions
+                WHERE project_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (project_id,),
+            )
+            if row is not None:
+                return self._row_to_bootstrap_session(row)
+        # fallback：用 workspace_id 兼容旧数据
         if workspace_id:
             row = await self._fetchone(
                 """
@@ -952,16 +966,7 @@ class SqliteAgentContextStore:
             )
             if row is not None:
                 return self._row_to_bootstrap_session(row)
-        row = await self._fetchone(
-            """
-            SELECT * FROM bootstrap_sessions
-            WHERE project_id = ?
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (project_id,),
-        )
-        return self._row_to_bootstrap_session(row) if row is not None else None
+        return None
 
     async def list_bootstrap_sessions(
         self,

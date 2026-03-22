@@ -995,7 +995,7 @@ class OrchestratorService:
                         or "standard"
                     ),
                     project_id=project.project_id if project is not None else "",
-                    workspace_id=workspace.workspace_id if workspace is not None else "",
+                    workspace_id="",
                 ),
                 worker_type=worker_type,
                 requested_profile_id=resolved_profile_id,
@@ -2262,11 +2262,7 @@ class OrchestratorService:
             source_frame.project_id if source_frame is not None else "",
             str(envelope.metadata.get("project_id", "")),
         )
-        workspace_id = self._first_non_empty(
-            runtime_context.workspace_id if runtime_context is not None else "",
-            source_frame.workspace_id if source_frame is not None else "",
-            str(envelope.metadata.get("workspace_id", "")),
-        )
+        workspace_id = ""
         source_agent_profile_id = self._first_non_empty(
             runtime_context.agent_profile_id if runtime_context is not None else "",
             source_frame.agent_profile_id if source_frame is not None else "",
@@ -2308,7 +2304,6 @@ class OrchestratorService:
             build_scope_aware_session_id(
                 task,
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             if task is not None
             else "",
@@ -2938,7 +2933,7 @@ class OrchestratorService:
                 task_id=conversation.task_id,
                 work_id=conversation.work_id,
                 project_id=conversation.project_id,
-                workspace_id=conversation.workspace_id,
+                workspace_id="",
                 source_agent_runtime_id=source_agent_runtime_id,
                 source_agent_session_id=source_agent_session_id,
                 target_agent_runtime_id=target_agent_runtime_id,
@@ -3000,7 +2995,6 @@ class OrchestratorService:
         runtime_id = agent_runtime_id.strip() or build_agent_runtime_id(
             role=role,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_profile_id=agent_profile_id,
             worker_profile_id=worker_profile_id,
             worker_capability=worker_capability,
@@ -3037,7 +3031,7 @@ class OrchestratorService:
         runtime = AgentRuntime(
             agent_runtime_id=runtime_id,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             agent_profile_id=agent_profile_id,
             worker_profile_id=worker_profile_id,
             role=role,
@@ -3059,7 +3053,7 @@ class OrchestratorService:
         agent_runtime: AgentRuntime,
         kind: AgentSessionKind,
         project_id: str,
-        workspace_id: str,
+        workspace_id: str = "",
         surface: str,
         thread_id: str,
         legacy_session_id: str,
@@ -3093,7 +3087,7 @@ class OrchestratorService:
             agent_runtime_id=agent_runtime.agent_runtime_id,
             kind=kind,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             surface=surface or "chat",
             thread_id=thread_id,
             legacy_session_id=legacy_session_id,

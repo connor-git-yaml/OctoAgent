@@ -50,7 +50,7 @@ def _make_llm_response(items: list[dict]) -> MagicMock:
 
 def _make_llm_service(response: Any = None) -> MagicMock:
     svc = MagicMock()
-    svc.call_with_fallback = AsyncMock(return_value=response)
+    svc.call = AsyncMock(return_value=response)
     return svc
 
 
@@ -145,7 +145,7 @@ async def test_llm_call_failure():
     from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
 
     llm = MagicMock()
-    llm.call_with_fallback = AsyncMock(side_effect=RuntimeError("API timeout"))
+    llm.call = AsyncMock(side_effect=RuntimeError("API timeout"))
     store = _make_memory_store()
 
     svc = DerivedExtractionService(
@@ -210,7 +210,7 @@ async def test_empty_committed_sors():
     assert result.extracted == 0
     assert not result.errors
     # LLM 不应被调用
-    llm.call_with_fallback.assert_not_called()
+    llm.call.assert_not_called()
 
 
 @pytest.mark.asyncio

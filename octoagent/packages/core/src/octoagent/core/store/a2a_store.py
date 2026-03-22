@@ -66,7 +66,7 @@ class SqliteA2AStore:
                 conversation.task_id,
                 conversation.work_id,
                 conversation.project_id,
-                conversation.workspace_id,
+                "",  # DEPRECATED: workspace_id 不再写入实际值
                 conversation.source_agent_runtime_id,
                 conversation.source_agent_session_id,
                 conversation.target_agent_runtime_id,
@@ -210,7 +210,7 @@ class SqliteA2AStore:
                 message.task_id,
                 message.work_id,
                 message.project_id,
-                message.workspace_id,
+                "",  # DEPRECATED: workspace_id 不再写入实际值
                 message.source_agent_runtime_id,
                 message.source_agent_session_id,
                 message.target_agent_runtime_id,

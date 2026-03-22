@@ -77,7 +77,7 @@ class SqliteWorkStore:
                 work.selected_worker_type,
                 work.route_reason,
                 work.project_id,
-                work.workspace_id,
+                "",  # DEPRECATED: workspace_id 不再写入实际值
                 work.session_owner_profile_id,
                 work.inherited_context_owner_profile_id,
                 work.delegation_target_profile_id,

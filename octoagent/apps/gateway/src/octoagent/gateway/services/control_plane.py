@@ -125,8 +125,6 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkerProfileViewItem,
     WorkProjectionItem,
-    Workspace,
-    WorkspaceOption,
     TurnExecutorKind,
 )
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
@@ -400,7 +398,6 @@ class ControlPlaneService:
         self,
         *,
         project,
-        workspace,
         source: str,
         warnings: list[str] | None = None,
     ) -> None:
@@ -409,7 +406,7 @@ class ControlPlaneService:
                 selector_id="selector-web",
                 surface="web",
                 active_project_id=project.project_id,
-                active_workspace_id=workspace.workspace_id if workspace else None,
+                active_workspace_id="",
                 source=source,
                 warnings=list(warnings or []),
                 updated_at=datetime.now(tz=UTC),
@@ -602,8 +599,6 @@ class ControlPlaneService:
         ):
             action_id = "project.select"
             params["project_id"] = parts[2]
-            if len(parts) >= 4:
-                params["workspace_id"] = parts[3]
         elif (
             command == "/approve"
             and len(parts) >= 3
@@ -797,14 +792,12 @@ class ControlPlaneService:
         (
             state,
             selected_project,
-            selected_workspace,
+            _selected_workspace,
             fallback_reason,
         ) = await self._resolve_selection()
         projects = await self._stores.project_store.list_projects()
         available_projects: list[ProjectOption] = []
-        available_workspaces: list[WorkspaceOption] = []
         for project in projects:
-            workspaces = await self._stores.project_store.list_workspaces(project.project_id)
             available_projects.append(
                 ProjectOption(
                     project_id=project.project_id,
@@ -812,39 +805,24 @@ class ControlPlaneService:
                     name=project.name,
                     is_default=project.is_default,
                     status=project.status.value,
-                    workspace_ids=[item.workspace_id for item in workspaces],
+                    workspace_ids=[],
                 )
             )
-            for workspace in workspaces:
-                if (
-                    selected_project is not None
-                    and workspace.project_id == selected_project.project_id
-                ):
-                    available_workspaces.append(
-                        WorkspaceOption(
-                            workspace_id=workspace.workspace_id,
-                            project_id=workspace.project_id,
-                            slug=workspace.slug,
-                            name=workspace.name,
-                            kind=workspace.kind.value,
-                            root_path=workspace.root_path,
-                        )
-                    )
 
-        switch_allowed = len(available_projects) > 1 or len(available_workspaces) > 1
+        switch_allowed = len(available_projects) > 1
         warnings: list[str] = []
         if fallback_reason:
             warnings.append(fallback_reason)
         return ProjectSelectorDocument(
             current_project_id=selected_project.project_id if selected_project else "",
-            current_workspace_id=selected_workspace.workspace_id if selected_workspace else "",
+            current_workspace_id="",
             default_project_id=(await self._stores.project_store.get_default_project()).project_id
             if await self._stores.project_store.get_default_project()
             else "",
             fallback_reason=fallback_reason,
             switch_allowed=switch_allowed,
             available_projects=available_projects,
-            available_workspaces=available_workspaces,
+            available_workspaces=[],
             warnings=warnings,
             degraded=ControlPlaneDegradedState(
                 is_degraded=selected_project is None,
@@ -867,7 +845,7 @@ class ControlPlaneService:
         )
 
     async def get_session_projection(self) -> SessionProjectionDocument:
-        state, selected_project, selected_workspace, _ = await self._resolve_selection()
+        state, selected_project, _, _ = await self._resolve_selection()
         session_items = await self._build_session_projection_items()
         focused_session_id, focused_thread_id = self._resolve_projected_focus(
             state=state,
@@ -892,7 +870,7 @@ class ControlPlaneService:
             focused_thread_id=focused_thread_id,
             new_conversation_token=state.new_conversation_token,
             new_conversation_project_id=state.new_conversation_project_id,
-            new_conversation_workspace_id=state.new_conversation_workspace_id,
+            new_conversation_workspace_id="",
             new_conversation_agent_profile_id=state.new_conversation_agent_profile_id,
             sessions=session_items,
             summary=session_summary,
@@ -956,8 +934,8 @@ class ControlPlaneService:
         for task in tasks:
             if task.task_id == _AUDIT_TASK_ID:
                 continue
-            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-            if workspace is None:
+            project = await self._stores.project_store.resolve_project_for_scope(task.scope_id)
+            if project is None:
                 continue
             latest_metadata = await self._extract_latest_user_metadata(task.task_id)
             if str(latest_metadata.get("parent_task_id", "")).strip() or str(
@@ -966,21 +944,21 @@ class ControlPlaneService:
                 continue
             session_id = self._resolve_projected_session_id_for_task(
                 task=task,
-                workspace=workspace,
+                project=project,
                 latest_metadata=latest_metadata,
             )
-            grouped[session_id].append((task, workspace))
+            grouped[session_id].append((task, project))
 
         session_items: list[SessionProjectionItem] = []
         for session_id, entries in grouped.items():
-            latest, workspace = max(entries, key=lambda item: item[0].updated_at)
+            latest, project = max(entries, key=lambda item: item[0].updated_at)
             session_state = session_state_by_id.get(session_id)
             related_agent_sessions = await self._list_related_agent_sessions_for_projection(
                 session_id=session_id,
                 thread_id=(session_state.thread_id if session_state is not None else "")
                 or latest.thread_id,
-                project_id=workspace.project_id,
-                workspace_id=workspace.workspace_id,
+                project_id=project.project_id,
+                workspace_id="",
                 session_state=session_state,
             )
             session_alias = self._resolve_projected_session_alias(related_agent_sessions)
@@ -1065,8 +1043,8 @@ class ControlPlaneService:
                     status=latest.status.value,
                     channel=latest.requester.channel,
                     requester_id=latest.requester.sender_id,
-                    project_id=workspace.project_id,
-                    workspace_id=workspace.workspace_id,
+                    project_id=project.project_id,
+                    workspace_id="",
                     agent_profile_id=session_agent_profile_id,
                     session_owner_profile_id=session_owner_profile_id,
                     session_owner_name=session_owner_name,
@@ -1109,12 +1087,11 @@ class ControlPlaneService:
                 thread_id=agent_sess.thread_id or agent_sess.agent_session_id,
                 surface="web" if agent_sess.surface in ("", "chat", "web") else agent_sess.surface,
                 scope_id=(
-                    f"workspace:{agent_sess.workspace_id}:chat:web:{agent_sess.thread_id}"
-                    if agent_sess.workspace_id and agent_sess.thread_id
+                    f"project:{agent_sess.project_id}:chat:web:{agent_sess.thread_id}"
+                    if agent_sess.project_id and agent_sess.thread_id
                     else ""
                 ),
                 project_id=agent_sess.project_id,
-                workspace_id=agent_sess.workspace_id,
             )
             if projected_session_id in existing_session_ids:
                 continue
@@ -1142,7 +1119,7 @@ class ControlPlaneService:
                     channel="web" if agent_sess.surface in ("chat", "web", "") else agent_sess.surface,
                     requester_id="",
                     project_id=agent_sess.project_id,
-                    workspace_id=agent_sess.workspace_id,
+                    workspace_id="",
                     agent_profile_id=agent_profile_id,
                     session_owner_profile_id=agent_profile_id,
                     session_owner_name=owner_name,
@@ -1333,7 +1310,7 @@ class ControlPlaneService:
     def _resolve_projected_session_id_for_task(
         *,
         task: Task,
-        workspace,
+        project,
         latest_metadata: Mapping[str, Any] | None,
     ) -> str:
         metadata = latest_metadata or {}
@@ -1342,8 +1319,7 @@ class ControlPlaneService:
             return explicit_session_id
         return build_scope_aware_session_id(
             task,
-            project_id=workspace.project_id,
-            workspace_id=workspace.workspace_id,
+            project_id=project.project_id,
         )
 
     @staticmethod
@@ -1416,14 +1392,14 @@ class ControlPlaneService:
         for task in tasks:
             if task.task_id == _AUDIT_TASK_ID:
                 continue
-            workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-            if workspace is None:
+            project = await self._stores.project_store.resolve_project_for_scope(task.scope_id)
+            if project is None:
                 continue
             latest_metadata = await self._extract_latest_user_metadata(task.task_id)
             if (
                 self._resolve_projected_session_id_for_task(
                     task=task,
-                    workspace=workspace,
+                    project=project,
                     latest_metadata=latest_metadata,
                 )
                 == session_id
@@ -1433,7 +1409,7 @@ class ControlPlaneService:
         return matched
 
     async def get_agent_profiles_document(self) -> AgentProfilesDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         # 全局加载所有 agent profiles，不按项目过滤——管理页面需要看到全部
         profiles = await self._stores.agent_context_store.list_agent_profiles()
         items = [
@@ -1453,15 +1429,9 @@ class ControlPlaneService:
                     project_name=selected_project.name if selected_project is not None else "",
                     project_slug=selected_project.slug if selected_project is not None else "",
                     project_root=self._project_root,
-                    workspace_id=(
-                        selected_workspace.workspace_id if selected_workspace is not None else ""
-                    ),
-                    workspace_slug=(
-                        selected_workspace.slug if selected_workspace is not None else ""
-                    ),
-                    workspace_root_path=(
-                        selected_workspace.root_path if selected_workspace is not None else ""
-                    ),
+                    workspace_id="",
+                    workspace_slug="",
+                    workspace_root_path="",
                 ),
                 metadata=dict(profile.metadata),
                 resource_limits=dict(profile.resource_limits),
@@ -1471,9 +1441,7 @@ class ControlPlaneService:
         ]
         return AgentProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             profiles=items,
             capabilities=[
                 ControlPlaneCapability(
@@ -1490,7 +1458,7 @@ class ControlPlaneService:
         )
 
     async def get_worker_profiles_document(self) -> WorkerProfilesDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         capability_pack = await self.get_capability_pack_document()
         # 全局加载所有 worker profiles，不按项目过滤——Agents 管理页面需要看到全部
         stored_profiles = await self._stores.agent_context_store.list_worker_profiles(
@@ -1518,11 +1486,9 @@ class ControlPlaneService:
         # 预备 behavior_system 构建所需的项目/工作区上下文
         _bs_project_name = selected_project.name if selected_project is not None else ""
         _bs_project_slug = selected_project.slug if selected_project is not None else ""
-        _bs_workspace_id = selected_workspace.workspace_id if selected_workspace is not None else ""
-        _bs_workspace_slug = selected_workspace.slug if selected_workspace is not None else ""
-        _bs_workspace_root = (
-            selected_workspace.root_path if selected_workspace is not None else ""
-        )
+        _bs_workspace_id = ""
+        _bs_workspace_slug = ""
+        _bs_workspace_root = ""
 
         items: list[WorkerProfileViewItem] = []
         for profile in stored_profiles:
@@ -1609,11 +1575,7 @@ class ControlPlaneService:
                         fallback_project_id=(
                             selected_project.project_id if selected_project is not None else ""
                         ),
-                        fallback_workspace_id=(
-                            selected_workspace.workspace_id
-                            if selected_workspace is not None
-                            else ""
-                        ),
+                        fallback_workspace_id="",
                     ),
                     behavior_system=behavior_sys,
                     warnings=warnings,
@@ -1691,11 +1653,7 @@ class ControlPlaneService:
                         fallback_project_id=(
                             selected_project.project_id if selected_project is not None else ""
                         ),
-                        fallback_workspace_id=(
-                            selected_workspace.workspace_id
-                            if selected_workspace is not None
-                            else ""
-                        ),
+                        fallback_workspace_id="",
                     ),
                     behavior_system=builtin_behavior_sys,
                     warnings=[] if builtin_latest is not None else ["当前还没有运行中的 work。"],
@@ -1731,9 +1689,7 @@ class ControlPlaneService:
 
         return WorkerProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             profiles=items,
             summary={
                 "profile_count": len(items),
@@ -1898,7 +1854,7 @@ class ControlPlaneService:
         )
 
     async def get_owner_profile_document(self) -> OwnerProfileDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         profiles = await self._stores.agent_context_store.list_owner_profiles()
         profile = next(
             (item for item in profiles if item.owner_profile_id == "owner-profile-default"),
@@ -1913,9 +1869,7 @@ class ControlPlaneService:
         )
         return OwnerProfileDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             profile=profile.model_dump(mode="json") if profile is not None else {},
             overlays=[item.model_dump(mode="json") for item in overlays],
             warnings=[] if profile is not None else ["尚未创建 owner profile。"],
@@ -1926,20 +1880,16 @@ class ControlPlaneService:
         )
 
     async def get_bootstrap_session_document(self) -> BootstrapSessionDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         session = None
         if selected_project is not None:
             session = await self._stores.agent_context_store.get_latest_bootstrap_session(
                 project_id=selected_project.project_id,
-                workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                workspace_id="",
             )
         return BootstrapSessionDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             session=session.model_dump(mode="json") if session is not None else {},
             resumable=bool(session is not None and session.status.value != "completed"),
             warnings=[] if session is not None else ["当前 project 没有 bootstrap session。"],
@@ -1950,11 +1900,9 @@ class ControlPlaneService:
         )
 
     async def get_context_continuity_document(self) -> ContextContinuityDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         active_project_id = selected_project.project_id if selected_project is not None else ""
-        active_workspace_id = (
-            selected_workspace.workspace_id if selected_workspace is not None else ""
-        )
+        active_workspace_id = ""
         sessions = await self._stores.agent_context_store.list_session_contexts(
             project_id=active_project_id or None,
             workspace_id=active_workspace_id or None,
@@ -2178,7 +2126,7 @@ class ControlPlaneService:
         )
 
     async def get_policy_profiles_document(self) -> PolicyProfilesDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         active_profile_id, _ = self._resolve_effective_policy_profile(selected_project)
         profiles = [
             PolicyProfileItem(
@@ -2195,9 +2143,7 @@ class ControlPlaneService:
         ]
         return PolicyProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             active_profile_id=active_profile_id,
             profiles=profiles,
             capabilities=[
@@ -2339,18 +2285,14 @@ class ControlPlaneService:
         selected_workspace: Any | None = None,
         draft_selection: Mapping[str, Any] | None = None,
     ) -> SkillGovernanceDocument:
-        if selected_project is None and selected_workspace is None:
-            _, selected_project, selected_workspace, _ = await self._resolve_selection()
-        elif selected_project is None:
+        if selected_project is None:
             _, selected_project, _, _ = await self._resolve_selection()
         if self._capability_pack_service is None:
             capability_pack = CapabilityPackDocument(
                 selected_project_id=(
                     selected_project.project_id if selected_project is not None else ""
                 ),
-                selected_workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                selected_workspace_id="",
             )
         else:
             capability_pack = CapabilityPackDocument(
@@ -2358,9 +2300,7 @@ class ControlPlaneService:
                 selected_project_id=(
                     selected_project.project_id if selected_project is not None else ""
                 ),
-                selected_workspace_id=(
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                selected_workspace_id="",
             )
         capability_snapshot = (
             self._capability_pack_service.capability_snapshot()
@@ -2470,9 +2410,7 @@ class ControlPlaneService:
         warnings = [] if items else ["当前没有可治理的 skills / MCP readiness 条目。"]
         return SkillGovernanceDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             items=items,
             summary={
                 "item_count": len(items),
@@ -2492,7 +2430,7 @@ class ControlPlaneService:
         )
 
     async def get_mcp_provider_catalog_document(self) -> McpProviderCatalogDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         mcp_registry = (
             None
             if self._capability_pack_service is None
@@ -2501,7 +2439,7 @@ class ControlPlaneService:
         if mcp_registry is None:
             return McpProviderCatalogDocument(
                 active_project_id=selected_project.project_id if selected_project else "",
-                active_workspace_id=selected_workspace.workspace_id if selected_workspace else "",
+                active_workspace_id="",
                 warnings=["MCP registry 尚未绑定，无法加载 MCP providers。"],
                 degraded=ControlPlaneDegradedState(
                     is_degraded=True,
@@ -2511,7 +2449,6 @@ class ControlPlaneService:
         servers = {item.server_name: item for item in mcp_registry.list_servers()}
         governance = await self.get_skill_governance_document(
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
         )
         governance_map = {item.item_id: item for item in governance.items}
 
@@ -2568,9 +2505,7 @@ class ControlPlaneService:
             )
         return McpProviderCatalogDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             items=items,
             summary={
                 "installed_count": len(items),
@@ -2608,7 +2543,7 @@ class ControlPlaneService:
         )
 
     async def get_setup_governance_document(self) -> SetupGovernanceDocument:
-        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        _, selected_project, _, fallback_reason = await self._resolve_selection()
         project_selector = await self.get_project_selector()
         config = await self.get_config_schema()
         diagnostics = await self.get_diagnostics_summary()
@@ -2628,7 +2563,7 @@ class ControlPlaneService:
             config=config.current_value,
             config_warnings=config.warnings,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             diagnostics=diagnostics,
             active_agent_profile=active_agent_profile,
             policy_profile_id=policy_profiles.active_profile_id,
@@ -2643,7 +2578,7 @@ class ControlPlaneService:
             summary=(
                 (
                     f"{selected_project.name} / "
-                    f"{self._workspace_summary_label(selected_workspace)}"
+                    f"{self._workspace_summary_label(None)}"
                 )
                 if selected_project is not None
                 else "当前还没有可用 project。"
@@ -2653,10 +2588,8 @@ class ControlPlaneService:
             details={
                 "project_id": selected_project.project_id if selected_project is not None else "",
                 "project_name": selected_project.name if selected_project is not None else "",
-                "workspace_id": (
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
-                "workspace_name": selected_workspace.name if selected_workspace is not None else "",
+                "workspace_id": "",
+                "workspace_name": "",
                 "fallback_reason": fallback_reason,
                 "default_project_id": project_selector.default_project_id,
             },
@@ -2781,9 +2714,7 @@ class ControlPlaneService:
             warnings.append("当前 setup 仍有待完成项。")
         return SetupGovernanceDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id=(
-                selected_workspace.workspace_id if selected_workspace is not None else ""
-            ),
+            active_workspace_id="",
             project_scope=project_scope,
             provider_runtime=provider_runtime,
             channel_access=channel_access,
@@ -3212,13 +3143,11 @@ class ControlPlaneService:
         )
         channel_summary = self._build_channel_summary()
         wizard = await self.get_wizard_session()
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         project_selector = await self.get_project_selector()
         memory_backend = await self._memory_console_service.get_backend_status(
             project_id=selected_project.project_id if selected_project is not None else "",
-            workspace_id=selected_workspace.workspace_id
-            if selected_workspace is not None
-            else None,
+            workspace_id=None,
         )
 
         subsystems.append(
@@ -3358,7 +3287,7 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         partition: str | None = None,
         layer: str | None = None,
@@ -3367,23 +3296,17 @@ class ControlPlaneService:
         include_vault_refs: bool = False,
         limit: int = 50,
     ) -> MemoryConsoleDocument:
-        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        _, selected_project, _, fallback_reason = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
-        )
+        resolved_workspace_id = None
         resolved_project = (
             await self._stores.project_store.get_project(resolved_project_id)
             if resolved_project_id
             else selected_project
         )
-        resolved_workspace = (
-            await self._stores.project_store.get_workspace(resolved_workspace_id)
-            if resolved_workspace_id
-            else selected_workspace
-        )
+        resolved_workspace = None
         backend_status = await self._memory_console_service.get_backend_status(
             project_id=resolved_project_id,
             workspace_id=resolved_workspace_id,
@@ -3423,15 +3346,13 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
     ) -> RetrievalPlatformDocument:
-        _, selected_project, selected_workspace, fallback_reason = await self._resolve_selection()
+        _, selected_project, _, fallback_reason = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else ""
-        )
+        resolved_workspace_id = ""
         backend_status = await self._memory_console_service.get_backend_status(
             project_id=resolved_project_id,
             workspace_id=resolved_workspace_id or None,
@@ -3452,18 +3373,15 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
     ) -> ImportWorkbenchDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else None
         )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
-        )
         return await self._import_workbench_service.get_workbench(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
+            workspace_id=None,
         )
 
     async def get_import_source(self, source_id: str) -> ImportSourceDocument:
@@ -3477,20 +3395,17 @@ class ControlPlaneService:
         subject_key: str,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
     ) -> MemorySubjectHistoryDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
-        )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
         )
         return await self._memory_console_service.get_memory_subject_history(
             subject_key=subject_key,
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
+            workspace_id=None,
             scope_id=scope_id,
         )
 
@@ -3498,19 +3413,17 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         status: str | None = None,
         source: str | None = None,
         limit: int = 50,
     ) -> MemoryProposalAuditDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
-        )
+        resolved_workspace_id = None
         proposal_status = ProposalStatus(status) if status else None
         return await self._memory_console_service.get_proposal_audit(
             project_id=resolved_project_id,
@@ -3525,17 +3438,15 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
+        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         subject_key: str | None = None,
     ) -> VaultAuthorizationDocument:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = workspace_id or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
-        )
+        resolved_workspace_id = None
         return await self._memory_console_service.get_vault_authorization(
             project_id=resolved_project_id,
             workspace_id=resolved_workspace_id,
@@ -3908,31 +3819,22 @@ class ControlPlaneService:
 
     async def _handle_project_select(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
         project_id = str(request.params.get("project_id", "")).strip()
-        workspace_id = str(request.params.get("workspace_id", "")).strip()
         if not project_id:
             raise ControlPlaneActionError("PROJECT_ID_REQUIRED", "project_id 不能为空")
         project = await self._stores.project_store.get_project(project_id)
         if project is None:
             raise ControlPlaneActionError("PROJECT_NOT_FOUND", "目标 project 不存在")
 
-        if workspace_id:
-            workspace = await self._stores.project_store.get_workspace(workspace_id)
-            if workspace is None or workspace.project_id != project_id:
-                raise ControlPlaneActionError("WORKSPACE_NOT_FOUND", "目标 workspace 不存在")
-        else:
-            workspace = await self._stores.project_store.get_primary_workspace(project_id)
-
         state = self._state_store.load().model_copy(
             update={
                 "selected_project_id": project_id,
-                "selected_workspace_id": workspace.workspace_id if workspace else "",
+                "selected_workspace_id": "",
                 "updated_at": datetime.now(tz=UTC),
             }
         )
         self._state_store.save(state)
         await self._sync_web_project_selector_state(
             project=project,
-            workspace=workspace,
             source="control_plane_action",
         )
         await self._sync_policy_engine_for_project(project)
@@ -3943,7 +3845,7 @@ class ControlPlaneService:
             message="已切换当前 project",
             data={
                 "project_id": project_id,
-                "workspace_id": workspace.workspace_id if workspace else "",
+                "workspace_id": "",
             },
             resource_refs=[self._resource_ref("project_selector", "project:selector")],
             target_refs=[
@@ -3975,7 +3877,7 @@ class ControlPlaneService:
             candidate_config = current_config
             validation_errors.append(str(exc))
 
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         draft_skill_selection = (
             draft.get("skill_selection")
             if isinstance(draft.get("skill_selection"), Mapping)
@@ -3987,7 +3889,7 @@ class ControlPlaneService:
                 normalized_skill_selection = await self._normalize_skill_selection_for_scope(
                     draft_skill_selection,
                     selected_project=selected_project,
-                    selected_workspace=selected_workspace,
+                    selected_workspace=None,
                 )
             except ControlPlaneActionError as exc:
                 validation_errors.append(str(exc))
@@ -4012,7 +3914,7 @@ class ControlPlaneService:
             config_value=candidate_config_payload,
             policy_profile_id=policy_profile_id,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             draft_selection=normalized_skill_selection,
         )
         diagnostics = await self.get_diagnostics_summary()
@@ -4023,7 +3925,7 @@ class ControlPlaneService:
             config=candidate_config_payload,
             config_warnings=[],
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             diagnostics=diagnostics,
             active_agent_profile=active_agent_profile,
             policy_profile_id=policy_profile_id,
@@ -4046,14 +3948,14 @@ class ControlPlaneService:
         if not isinstance(draft, dict):
             raise ControlPlaneActionError("SETUP_DRAFT_REQUIRED", "draft 必须是对象")
 
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         skill_selection = draft.get("skill_selection")
         normalized_skill_selection: dict[str, Any] | None = None
         if isinstance(skill_selection, Mapping):
             normalized_skill_selection = await self._normalize_skill_selection_for_scope(
                 skill_selection,
                 selected_project=selected_project,
-                selected_workspace=selected_workspace,
+                selected_workspace=None,
             )
 
         review_result = await self._handle_setup_review(
@@ -4350,7 +4252,7 @@ class ControlPlaneService:
             raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
         document = await self.get_skill_governance_document(
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
         allowed_item_ids = {item.item_id for item in document.items}
         return self._normalize_skill_selection_payload(
@@ -4371,14 +4273,14 @@ class ControlPlaneService:
                 "selection 必须是对象",
             )
 
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         if selected_project is None:
             raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
 
         normalized = await self._normalize_skill_selection_for_scope(
             raw_selection,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
 
         metadata = dict(selected_project.metadata)
@@ -4395,7 +4297,7 @@ class ControlPlaneService:
 
         refreshed = await self.get_skill_governance_document(
             selected_project=selected_project.model_copy(update={"metadata": metadata}),
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
         return self._completed_result(
             request=request,
@@ -4725,13 +4627,11 @@ class ControlPlaneService:
         self,
         request: ActionRequestEnvelope,
     ) -> tuple[str, str | None]:
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         project_id = self._param_str(request.params, "project_id") or (
             selected_project.project_id if selected_project is not None else ""
         )
-        workspace_id = self._param_str(request.params, "workspace_id") or (
-            selected_workspace.workspace_id if selected_workspace is not None else None
-        )
+        workspace_id = None
         return project_id, workspace_id
 
     async def _handle_memory_query(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
@@ -5674,7 +5574,7 @@ class ControlPlaneService:
             allow_empty=True,
             use_focused_when_empty=True,
         )
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         requested_agent_profile_id = str(
             request.params.get("agent_profile_id", "")
         ).strip()
@@ -5697,9 +5597,7 @@ class ControlPlaneService:
                 "new_conversation_project_id": (
                     selected_project.project_id if selected_project is not None else ""
                 ),
-                "new_conversation_workspace_id": (
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": requested_agent_profile_id,
                 "updated_at": datetime.now(tz=UTC),
             }
@@ -5718,9 +5616,7 @@ class ControlPlaneService:
             data={
                 "new_conversation_token": token,
                 "project_id": selected_project.project_id if selected_project is not None else "",
-                "workspace_id": (
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                "workspace_id": "",
                 "agent_profile_id": requested_agent_profile_id,
                 "previous_session_id": target.session_id if target is not None else "",
                 "previous_thread_id": target.thread_id if target is not None else "",
@@ -5768,12 +5664,8 @@ class ControlPlaneService:
 
         existing_project = await self._stores.project_store.get_project_by_slug(slug)
         if existing_project is not None:
-            workspace = await self._stores.project_store.get_primary_workspace(
-                existing_project.project_id
-            )
             existing_session = await self._ensure_existing_project_session(
                 project=existing_project,
-                workspace=workspace,
             )
             if existing_session is not None:
                 session_anchor = str(
@@ -5789,12 +5681,11 @@ class ControlPlaneService:
                         else existing_session.surface
                     ),
                     scope_id=(
-                        f"workspace:{workspace.workspace_id}:chat:web:{session_anchor}"
-                        if workspace is not None and session_anchor
+                        f"project:{existing_project.project_id}:chat:web:{session_anchor}"
+                        if session_anchor
                         else ""
                     ),
                     project_id=existing_project.project_id,
-                    workspace_id=workspace.workspace_id if workspace is not None else "",
                 )
                 existing_runtime = await self._stores.agent_context_store.get_agent_runtime(
                     existing_session.agent_runtime_id
@@ -5813,7 +5704,7 @@ class ControlPlaneService:
                         "agent_session_id": existing_session.agent_session_id,
                         "thread_id": session_anchor,
                         "project_id": existing_project.project_id,
-                        "workspace_id": workspace.workspace_id if workspace is not None else "",
+                        "workspace_id": "",
                         "agent_profile_id": existing_owner_profile_id or worker_profile_id,
                     },
                     resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
@@ -5850,19 +5741,6 @@ class ControlPlaneService:
         )
         await self._stores.project_store.create_project(project)
 
-        # 创建 Workspace
-        workspace_id = f"workspace-{str(ULID())}"
-        workspace = Workspace(
-            workspace_id=workspace_id,
-            project_id=project_id,
-            slug="primary",
-            name="Primary",
-            kind="primary",
-            created_at=now,
-            updated_at=now,
-        )
-        await self._stores.project_store.create_workspace(workspace)
-
         # 创建行为文件骨架
         ensure_filesystem_skeleton(
             self._project_root,
@@ -5882,7 +5760,7 @@ class ControlPlaneService:
             new_runtime = AgentRuntime(
                 agent_runtime_id=f"runtime-{str(ULID())}",
                 project_id=project_id,
-                workspace_id=workspace_id,
+                workspace_id="",
                 worker_profile_id=worker_profile_id,
                 role=AgentRuntimeRole.WORKER,
                 name=matched_profile.name,
@@ -5904,15 +5782,14 @@ class ControlPlaneService:
         projected_session_id = build_projected_session_id(
             thread_id=thread_id_seed,
             surface="web",
-            scope_id=f"workspace:{workspace_id}:chat:web:{thread_id_seed}",
+            scope_id=f"project:{project_id}:chat:web:{thread_id_seed}",
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=agent_runtime_id,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             kind=AgentSessionKind.DIRECT_WORKER,
             status=AgentSessionStatus.ACTIVE,
             surface="web",
@@ -5931,17 +5808,16 @@ class ControlPlaneService:
                 "focused_thread_id": thread_id_seed,
                 "new_conversation_token": token,
                 "new_conversation_project_id": project_id,
-                "new_conversation_workspace_id": workspace_id,
+                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": worker_profile_id,
                 "selected_project_id": project_id,
-                "selected_workspace_id": workspace_id,
+                "selected_workspace_id": "",
                 "updated_at": now,
             }
         )
         self._state_store.save(state)
         await self._sync_web_project_selector_state(
             project=project,
-            workspace=workspace,
             source="session_create_with_project",
         )
         await self._sync_policy_engine_for_project(project)
@@ -5957,7 +5833,7 @@ class ControlPlaneService:
                 "agent_session_id": session_id,
                 "thread_id": thread_id_seed,
                 "project_id": project_id,
-                "workspace_id": workspace_id,
+                "workspace_id": "",
                 "new_conversation_token": token,
                 "agent_profile_id": worker_profile_id,
             },
@@ -5971,7 +5847,6 @@ class ControlPlaneService:
         self,
         *,
         project: Project,
-        workspace: Workspace | None,
     ) -> AgentSession | None:
         existing_session = await self._stores.agent_context_store.get_active_session_for_project(
             project.project_id
@@ -5985,7 +5860,7 @@ class ControlPlaneService:
                 await ensure_butler_runtime_and_session(
                     self._stores,
                     project,
-                    workspace,
+                    None,
                     agent_profile,
                 )
                 await self._stores.conn.commit()
@@ -6227,19 +6102,6 @@ class ControlPlaneService:
         agent_profile.project_id = project_id
         await self._stores.agent_context_store.save_agent_profile(agent_profile)
 
-        # 创建 Workspace
-        workspace_id = f"workspace-{str(ULID())}"
-        workspace = Workspace(
-            workspace_id=workspace_id,
-            project_id=project_id,
-            slug="primary",
-            name="Primary",
-            kind="primary",
-            created_at=now,
-            updated_at=now,
-        )
-        await self._stores.project_store.create_workspace(workspace)
-
         # 创建行为文件骨架
         ensure_filesystem_skeleton(
             self._project_root,
@@ -6258,7 +6120,7 @@ class ControlPlaneService:
         worker_runtime = AgentRuntime(
             agent_runtime_id=runtime_id,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             agent_profile_id=agent_profile_id,
             worker_profile_id=worker_profile_id,
             role=AgentRuntimeRole.WORKER,
@@ -6279,7 +6141,7 @@ class ControlPlaneService:
             agent_session_id=session_id,
             agent_runtime_id=runtime_id,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             kind=AgentSessionKind.WORKER_INTERNAL,
             status=AgentSessionStatus.ACTIVE,
             created_at=now,
@@ -6300,7 +6162,7 @@ class ControlPlaneService:
                 "worker_profile_id": worker_profile_id,
                 "agent_profile_id": agent_profile_id,
                 "project_id": project_id,
-                "workspace_id": workspace_id,
+                "workspace_id": "",
                 "session_id": session_id,
                 "runtime_id": runtime_id,
             },
@@ -6386,31 +6248,19 @@ class ControlPlaneService:
                 "focused_thread_id": "",
                 "new_conversation_token": token,
                 "new_conversation_project_id": session.project_id,
-                "new_conversation_workspace_id": session.workspace_id,
+                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": "",
                 "selected_project_id": session.project_id or current_state.selected_project_id,
-                "selected_workspace_id": (
-                    session.workspace_id or current_state.selected_workspace_id
-                ),
+                "selected_workspace_id": "",
                 "updated_at": now,
             }
         )
         self._state_store.save(state)
         if session.project_id:
             project = await self._stores.project_store.get_project(session.project_id)
-            workspace = (
-                await self._stores.project_store.get_workspace(session.workspace_id)
-                if session.workspace_id
-                else None
-            )
             if project is not None:
-                if workspace is None or workspace.project_id != project.project_id:
-                    workspace = await self._stores.project_store.get_primary_workspace(
-                        project.project_id
-                    )
                 await self._sync_web_project_selector_state(
                     project=project,
-                    workspace=workspace,
                     source="session_reset",
                 )
                 await self._sync_policy_engine_for_project(project)
@@ -7514,7 +7364,7 @@ class ControlPlaneService:
     ) -> ActionResultEnvelope:
         draft = request.params.get("draft")
         raw = draft if isinstance(draft, Mapping) else request.params
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
 
         source_profile: WorkerProfile | None = None
         existing: WorkerProfile | None = None
@@ -7538,7 +7388,7 @@ class ControlPlaneService:
             existing=existing,
             source_profile=source_profile,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             origin_kind=(
                 WorkerProfileOriginKind.CLONED if mode == "clone" else None
             ),
@@ -7583,12 +7433,12 @@ class ControlPlaneService:
                     "WORKER_PROFILE_ALREADY_EXISTS",
                     "同名 Root Agent profile 已存在，请改名或使用 clone/update。",
                 )
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=raw,
             mode="create",
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.CUSTOM,
         )
         if not bool(review.get("can_save")):
@@ -7648,13 +7498,13 @@ class ControlPlaneService:
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能直接修改，请先 clone 一个新的 Root Agent。",
             )
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=raw,
             mode="update",
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "Root Agent 草稿不能保存。"
@@ -7709,13 +7559,13 @@ class ControlPlaneService:
             raw["name"] = name
         raw["profile_id"] = ""
         raw["origin_kind"] = WorkerProfileOriginKind.CLONED.value
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=raw,
             mode="clone",
             source_profile=source_profile,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.CLONED,
         )
         if not bool(review.get("can_save")):
@@ -7818,13 +7668,13 @@ class ControlPlaneService:
                         "内建 archetype 不能直接 apply，请先 clone 一个新的 Root Agent。",
                     )
                 mode = "update"
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=raw,
             mode=mode,
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "Root Agent 草稿不能保存。"
@@ -7918,13 +7768,13 @@ class ControlPlaneService:
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能直接发布 revision。",
             )
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=existing.model_dump(mode="python"),
             mode="publish",
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
         )
         if not bool(review.get("ready")):
             blocking = "；".join(review.get("blocking_reasons", [])) or "当前 review 未通过。"
@@ -8045,14 +7895,12 @@ class ControlPlaneService:
         )
         if not objective:
             raise ControlPlaneActionError("OBJECTIVE_REQUIRED", "objective 不能为空。")
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         project_id = (
             profile.project_id
             or (selected_project.project_id if selected_project is not None else "")
         )
-        workspace_id = (
-            selected_workspace.workspace_id if selected_workspace is not None else ""
-        )
+        workspace_id = ""
         requested_revision = profile.active_revision or profile.draft_revision or 1
         message = NormalizedMessage(
             channel="web",
@@ -8117,7 +7965,7 @@ class ControlPlaneService:
         if not work_id:
             raise ControlPlaneActionError("WORK_ID_REQUIRED", "work_id 不能为空。")
         work = await self._get_work_in_scope(work_id)
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         raw = {
             "name": self._param_str(request.params, "name")
             or f"{self._worker_profile_label(work.selected_worker_type)} 提炼草稿",
@@ -8141,7 +7989,7 @@ class ControlPlaneService:
             raw=raw,
             mode="extract",
             selected_project=selected_project,
-            selected_workspace=selected_workspace,
+            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.EXTRACTED,
         )
         if not bool(review.get("can_save")):
@@ -8538,16 +8386,10 @@ class ControlPlaneService:
             ) from exc
 
         project_id = str(request.params.get("project_id", "")).strip()
-        workspace_id = str(request.params.get("workspace_id", "")).strip()
-        _, selected_project, selected_workspace, _ = await self._resolve_selection()
+        workspace_id = ""
+        _, selected_project, _, _ = await self._resolve_selection()
         if not project_id and selected_project is not None:
             project_id = selected_project.project_id
-        if (
-            not workspace_id
-            and selected_workspace is not None
-            and selected_workspace.project_id == project_id
-        ):
-            workspace_id = selected_workspace.workspace_id
         if not project_id:
             raise ControlPlaneActionError(
                 "PROJECT_SELECTION_REQUIRED",
@@ -8560,21 +8402,6 @@ class ControlPlaneService:
                 "PROJECT_NOT_FOUND",
                 f"project 不存在: {project_id}",
             )
-        if workspace_id:
-            workspace = await self._stores.project_store.get_workspace(workspace_id)
-            if workspace is None or workspace.project_id != project_id:
-                raise ControlPlaneActionError(
-                    "WORKSPACE_NOT_FOUND",
-                    "workspace 不存在或不属于指定 project",
-                )
-        else:
-            workspace = await self._stores.project_store.get_primary_workspace(project_id)
-            if workspace is None:
-                raise ControlPlaneActionError(
-                    "WORKSPACE_NOT_FOUND",
-                    f"project 缺少 primary workspace: {project_id}",
-                )
-            workspace_id = workspace.workspace_id
         job = AutomationJob(
             job_id=str(ULID()),
             name=name,
@@ -8880,37 +8707,12 @@ class ControlPlaneService:
             if project is not None and state.selected_project_id:
                 fallback_reason = "selected project 不存在，已回退到 default project"
 
-        workspace = (
-            await self._stores.project_store.get_workspace(state.selected_workspace_id)
-            if state.selected_workspace_id
-            else None
-        )
-        if workspace is None and selector is not None and selector.active_workspace_id:
-            candidate_workspace = await self._stores.project_store.get_workspace(
-                selector.active_workspace_id
-            )
-            if candidate_workspace is not None and (
-                project is None or candidate_workspace.project_id == project.project_id
-            ):
-                workspace = candidate_workspace
-        if project is not None and (
-            workspace is None or workspace.project_id != project.project_id
-        ):
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
-            if state.selected_workspace_id and workspace is not None:
-                fallback_reason = (
-                    fallback_reason or "selected workspace 不存在，已回退到 primary workspace"
-                )
-
-        if project is not None and (
-            state.selected_project_id != project.project_id
-            or (workspace is not None and state.selected_workspace_id != workspace.workspace_id)
-        ):
+        if project is not None and state.selected_project_id != project.project_id:
             self._state_store.save(
                 state.model_copy(
                     update={
                         "selected_project_id": project.project_id,
-                        "selected_workspace_id": workspace.workspace_id if workspace else "",
+                        "selected_workspace_id": "",
                         "updated_at": datetime.now(tz=UTC),
                     }
                 )
@@ -8918,16 +8720,14 @@ class ControlPlaneService:
         if project is not None and (
             selector is None
             or selector.active_project_id != project.project_id
-            or selector.active_workspace_id != (workspace.workspace_id if workspace else None)
         ):
             await self._sync_web_project_selector_state(
                 project=project,
-                workspace=workspace,
                 source="control_plane_sync",
                 warnings=[fallback_reason] if fallback_reason else [],
             )
             await self._stores.conn.commit()
-        return state, project, workspace, fallback_reason
+        return state, project, None, fallback_reason
 
     @staticmethod
     def _matches_selected_scope(
@@ -8941,11 +8741,7 @@ class ControlPlaneService:
             return not item_project_id
         if item_project_id and item_project_id != selected_project.project_id:
             return False
-        return not (
-            selected_workspace is not None
-            and item_workspace_id
-            and item_workspace_id != selected_workspace.workspace_id
-        )
+        return True
 
     async def _get_import_source_in_scope(self, source_id: str):
         return await self._import_workbench_service.get_source(source_id)
@@ -10150,9 +9946,7 @@ class ControlPlaneService:
             },
             "dynamic_context_hint": {
                 "project_id": selected_project.project_id if selected_project is not None else "",
-                "workspace_id": (
-                    selected_workspace.workspace_id if selected_workspace is not None else ""
-                ),
+                "workspace_id": "",
             },
         }
 

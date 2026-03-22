@@ -235,7 +235,6 @@ export default function AgentCenter() {
     generated_at: "",
     profiles: [],
     active_project_id: "",
-    active_workspace_id: "",
   };
 
   const agentView = useMemo(() => deriveAgentManagementView(snapshot!), [snapshot]);

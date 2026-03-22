@@ -168,16 +168,6 @@ function buildSnapshot(proxyUrl = "http://localhost:4000"): ControlPlaneSnapshot
             warnings: [],
           },
         ],
-        available_workspaces: [
-          {
-            workspace_id: "workspace-default",
-            project_id: "project-default",
-            slug: "primary",
-            name: "Primary",
-            kind: "primary",
-            root_path: "/tmp/default",
-          },
-        ],
       },
       sessions: {
         contract_version: "1.0.0",

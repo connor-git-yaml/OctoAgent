@@ -18,6 +18,7 @@ class ProjectStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+# DEPRECATED: workspace 概念已废弃，所有语义由 project_id 承担
 class WorkspaceKind(StrEnum):
     PRIMARY = "primary"
     CHAT = "chat"
@@ -84,6 +85,7 @@ class Project(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+# DEPRECATED: workspace 概念已废弃，所有语义由 project_id 承担
 class Workspace(BaseModel):
     """Project 内部工作边界。"""
 
@@ -115,12 +117,7 @@ class ProjectBinding(BaseModel):
 
     @model_validator(mode="after")
     def validate_workspace_requirement(self) -> ProjectBinding:
-        if self.binding_type in {
-            ProjectBindingType.SCOPE,
-            ProjectBindingType.MEMORY_SCOPE,
-            ProjectBindingType.IMPORT_SCOPE,
-        } and not self.workspace_id:
-            raise ValueError("scope/memory_scope/import_scope binding 必须关联 workspace_id")
+        # DEPRECATED: workspace_id 不再强制要求，workspace 概念已废弃
         return self
 
 
@@ -129,7 +126,7 @@ class ProjectSecretBinding(BaseModel):
 
     binding_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str | None = None
+    workspace_id: str | None = None  # DEPRECATED: workspace 概念已废弃
     target_kind: SecretTargetKind
     target_key: str = Field(min_length=1)
     env_name: str = Field(min_length=1)
@@ -152,7 +149,7 @@ class ProjectSelectorState(BaseModel):
     selector_id: str = Field(min_length=1)
     surface: str = Field(min_length=1)
     active_project_id: str = Field(min_length=1)
-    active_workspace_id: str | None = None
+    active_workspace_id: str | None = None  # DEPRECATED: workspace 概念已废弃
     source: str = ""
     warnings: list[str] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=_utc_now)

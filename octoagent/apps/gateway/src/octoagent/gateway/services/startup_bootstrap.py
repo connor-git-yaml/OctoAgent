@@ -174,11 +174,11 @@ async def _ensure_bootstrap_session(
 ) -> BootstrapSession:
     """确保默认 bootstrap session 存在。"""
     project_id = project.project_id
-    workspace_id = workspace.workspace_id if workspace is not None else ""
+    workspace_id = ""
 
     existing = await store_group.agent_context_store.get_latest_bootstrap_session(
         project_id=project_id,
-        workspace_id=workspace_id,
+        workspace_id="",
     )
     if existing is not None:
         return existing
@@ -244,9 +244,7 @@ async def _ensure_bootstrap_session(
     }
 
     session = BootstrapSession(
-        bootstrap_id=(
-            f"bootstrap-{workspace_id}" if workspace_id else f"bootstrap-{project_id}"
-        ),
+        bootstrap_id=f"bootstrap-{project_id}",
         project_id=project_id,
         workspace_id=workspace_id,
         owner_profile_id=owner_profile.owner_profile_id,
@@ -301,7 +299,7 @@ async def ensure_butler_runtime_and_session(
 
     多 Session 侧边栏需要 agent_sessions 行才能展示会话列表。
     """
-    workspace_id = workspace.workspace_id if workspace else ""
+    workspace_id = ""
 
     # 查找或创建 Butler Runtime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(

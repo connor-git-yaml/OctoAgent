@@ -62,7 +62,7 @@ async def _setup_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="workspace-default",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -118,7 +118,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
-                workspace_id="workspace-default",
+                workspace_id="",
                 surface="web",
             )
 
@@ -132,7 +132,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             # 内容包含核心元信息
             content = rendered[0]["content"]
             assert "Project: Default Project" in content
-            assert "Workspace: primary" in content
+            assert "Workspace:" in content  # workspace 概念已废弃，值为空
             assert f"Worker Type: {wtype}" in content
     finally:
         await task_runner.shutdown()
@@ -153,7 +153,7 @@ async def test_role_card_present_on_agent_runtime(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-rolecard",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Test Worker",
@@ -186,7 +186,7 @@ async def test_role_card_empty_by_default(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-empty-rolecard",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Plain Worker",

@@ -155,7 +155,7 @@ class DelegationPlaneService:
             request=request,
             task=task,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             work_id=work_id,
             parent_work_id=str(request.metadata.get("parent_work_id", "")),
             pipeline_run_id="",
@@ -180,7 +180,7 @@ class DelegationPlaneService:
             selected_worker_type=requested_worker_type or "general",
             route_reason=initial_route_reason,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             session_owner_profile_id=session_owner_profile_id,
             inherited_context_owner_profile_id=inherited_agent_profile_id,
             delegation_target_profile_id=requested_worker_profile_id,
@@ -676,7 +676,7 @@ class DelegationPlaneService:
                 trace_id=str(state.get("trace_id", f"trace-{work.task_id}")),
                 contract_version=str(state.get("contract_version", "1.0")),
                 project_id=work.project_id,
-                workspace_id=work.workspace_id,
+                workspace_id="",
                 hop_count=max(int(state.get("hop_count", 0)) + 1, 0),
                 max_hops=max(int(state.get("max_hops", 3)), 1),
                 worker_capability=str(
@@ -851,10 +851,9 @@ class DelegationPlaneService:
             session_id=build_scope_aware_session_id(
                 task,
                 project_id=project_id,
-                workspace_id=workspace_id,
             ),
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             hop_count=request.hop_count + 1,
             max_hops=request.max_hops,
             worker_capability=worker_capability,
@@ -1209,7 +1208,6 @@ class DelegationPlaneService:
         session_id = build_scope_aware_session_id(
             task,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
         )
         session_state = await self._stores.agent_context_store.get_session_context(session_id)
         if session_state is None:
@@ -1221,7 +1219,7 @@ class DelegationPlaneService:
                 legacy_state,
                 task=task,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else "",
+                workspace_id="",
             ):
                 session_state = legacy_state
         if session_state is not None and session_state.last_context_frame_id:

@@ -154,7 +154,7 @@ async def test_consolidate_scope_normal():
     """LLM 正常返回时正确提取事实。"""
     fragments = [_make_fragment(fragment_id="frag-1")]
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(
+    llm.call = AsyncMock(
         return_value=_make_llm_response(
             [
                 {
@@ -204,7 +204,7 @@ async def test_consolidate_scope_llm_call_failed():
     """LLM 调用失败时降级。"""
     fragments = [_make_fragment()]
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(side_effect=RuntimeError("timeout"))
+    llm.call = AsyncMock(side_effect=RuntimeError("timeout"))
     service, store, memory = _build_service(llm_service=llm, fragments=fragments)
 
     result = await service.consolidate_scope(
@@ -224,7 +224,7 @@ async def test_consolidate_scope_llm_bad_format():
     llm = AsyncMock()
     bad_response = MagicMock()
     bad_response.content = "这不是JSON"
-    llm.call_with_fallback = AsyncMock(return_value=bad_response)
+    llm.call = AsyncMock(return_value=bad_response)
     service, store, memory = _build_service(llm_service=llm, fragments=fragments)
 
     result = await service.consolidate_scope(
@@ -242,7 +242,7 @@ async def test_consolidate_scope_commit_failure_continues():
     """单条事实 commit 失败继续处理下一条。"""
     fragments = [_make_fragment(fragment_id="frag-1")]
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(
+    llm.call = AsyncMock(
         return_value=_make_llm_response(
             [
                 {
@@ -298,7 +298,7 @@ async def test_consolidate_scope_skips_already_consolidated():
         _make_fragment(fragment_id="frag-2"),
     ]
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(
+    llm.call = AsyncMock(
         return_value=_make_llm_response(
             [{"subject_key": "fact", "content": "事实", "confidence": 0.9, "source_fragment_ids": ["frag-2"]}]
         )
@@ -324,7 +324,7 @@ async def test_consolidate_scope_no_fragments():
 
     assert result.consolidated == 0
     assert result.skipped == 0
-    llm.call_with_fallback.assert_not_called()
+    llm.call.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ async def test_consolidate_by_run_id_filters():
         _make_fragment(fragment_id="frag-3", metadata={}),
     ]
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(
+    llm.call = AsyncMock(
         return_value=_make_llm_response(
             [{"subject_key": "fact", "content": "事实", "confidence": 0.9, "source_fragment_ids": ["frag-1"]}]
         )
@@ -367,7 +367,7 @@ async def test_consolidate_by_run_id_filters():
 async def test_consolidate_all_pending_multiple_scopes():
     """逐 scope 处理，汇总结果。"""
     llm = AsyncMock()
-    llm.call_with_fallback = AsyncMock(
+    llm.call = AsyncMock(
         return_value=_make_llm_response(
             [{"subject_key": "fact", "content": "事实", "confidence": 0.9, "source_fragment_ids": ["frag-1"]}]
         )
@@ -392,7 +392,7 @@ async def test_consolidate_all_pending_scope_failure_continues():
     llm = AsyncMock()
     call_count = 0
 
-    async def _mock_call(**kwargs):
+    async def _mock_call(*args, **kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -401,7 +401,7 @@ async def test_consolidate_all_pending_scope_failure_continues():
             [{"subject_key": "fact", "content": "事实", "confidence": 0.9, "source_fragment_ids": ["frag-1"]}]
         )
 
-    llm.call_with_fallback = AsyncMock(side_effect=_mock_call)
+    llm.call = AsyncMock(side_effect=_mock_call)
     fragments = [_make_fragment(fragment_id="frag-1")]
     service, store, memory = _build_service(llm_service=llm, fragments=fragments)
 

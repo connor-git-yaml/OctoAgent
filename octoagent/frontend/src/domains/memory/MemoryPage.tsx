@@ -165,7 +165,7 @@ export default function MemoryPage() {
   async function refreshMemory() {
     await submitAction("memory.query", {
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
       scope_id: scopeDraft,
       query: queryDraft.trim(),
       layer: layerDraft,
@@ -186,7 +186,7 @@ export default function MemoryPage() {
     setLimitDraft("50");
     await submitAction("memory.query", {
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
       scope_id: "",
       query: "",
       layer: "",
@@ -200,7 +200,7 @@ export default function MemoryPage() {
   async function startEmbeddingMigration() {
     await submitAction("retrieval.index.start", {
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
     });
   }
 
@@ -208,7 +208,7 @@ export default function MemoryPage() {
     await submitAction("retrieval.index.cancel", {
       generation_id: generationId,
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
     });
   }
 
@@ -216,7 +216,7 @@ export default function MemoryPage() {
     await submitAction("retrieval.index.cutover", {
       generation_id: generationId,
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
     });
   }
 
@@ -224,7 +224,7 @@ export default function MemoryPage() {
     await submitAction("retrieval.index.rollback", {
       generation_id: generationId,
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
     });
   }
 
@@ -236,7 +236,7 @@ export default function MemoryPage() {
     setConsolidateIsError(false);
     const result = await submitAction("memory.consolidate", {
       project_id: memoryResource.active_project_id,
-      workspace_id: memoryResource.active_workspace_id,
+      workspace_id: "",
     });
     const data = result?.data as { errors?: unknown[]; message?: string } | undefined;
     const hasErrors = (data?.errors?.length ?? 0) > 0;

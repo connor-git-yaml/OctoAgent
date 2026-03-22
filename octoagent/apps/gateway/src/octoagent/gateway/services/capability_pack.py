@@ -888,9 +888,9 @@ class CapabilityPackService:
             "{{project_id}}": project.project_id if project is not None else "",
             "{{project_slug}}": project.slug if project is not None else "default",
             "{{project_name}}": project.name if project is not None else "Default Project",
-            "{{workspace_id}}": workspace.workspace_id if workspace is not None else "",
-            "{{workspace_slug}}": workspace.slug if workspace is not None else "primary",
-            "{{workspace_root}}": workspace.root_path if workspace is not None else "",
+            "{{workspace_id}}": "",
+            "{{workspace_slug}}": "",
+            "{{workspace_root}}": "",
             "{{current_datetime_local}}": ambient_runtime["current_datetime_local"],
             "{{current_date_local}}": ambient_runtime["current_date_local"],
             "{{current_time_local}}": ambient_runtime["current_time_local"],
@@ -2886,7 +2886,7 @@ class CapabilityPackService:
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else None,
+                workspace_id=None,
                 scope_id=scope_id or None,
             )
             return json.dumps(document.model_dump(mode="json"), ensure_ascii=False)
@@ -2921,7 +2921,7 @@ class CapabilityPackService:
             )
             result = await self._memory_console_service.browse_memory(
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else None,
+                workspace_id=None,
                 scope_id=scope_id or "",
                 prefix=prefix,
                 partition=partition,
@@ -2972,7 +2972,7 @@ class CapabilityPackService:
             )
             document = await self._memory_console_service.get_memory_console(
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else None,
+                workspace_id=None,
                 scope_id=scope_id or None,
                 partition=MemoryPartition(partition) if partition else None,
                 layer=MemoryLayer(layer) if layer else None,
@@ -3014,7 +3014,7 @@ class CapabilityPackService:
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else None,
+                workspace_id=None,
                 scope_id=scope_id or None,
             )
             citations = []

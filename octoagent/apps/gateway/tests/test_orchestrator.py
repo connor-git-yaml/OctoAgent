@@ -231,7 +231,7 @@ async def _build_freshness_context(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="workspace-default",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -474,7 +474,7 @@ class TestOrchestrator:
                 trace_id=f"trace-{task_id}",
                 session_id="session-a2a",
                 project_id="project-default",
-                workspace_id="workspace-default",
+                workspace_id="",
                 tool_profile="minimal",
                 work_id="work-a2a",
             ),
@@ -485,7 +485,7 @@ class TestOrchestrator:
                     trace_id=f"trace-{task_id}",
                     session_id="session-a2a",
                     project_id="project-default",
-                    workspace_id="workspace-default",
+                    workspace_id="",
                     tool_profile="minimal",
                     work_id="work-a2a",
                 ).model_dump_json(),

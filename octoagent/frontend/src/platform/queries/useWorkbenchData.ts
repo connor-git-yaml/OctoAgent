@@ -87,8 +87,6 @@ function buildActionRefreshOptions(
     memoryQuery: {
       projectId:
         readStringParam(params, "project_id") ?? currentMemory?.active_project_id,
-      workspaceId:
-        readStringParam(params, "workspace_id") ?? currentMemory?.active_workspace_id,
       scopeId:
         readStringParam(params, "scope_id") ??
         (currentMemory?.filters.scope_id || undefined),

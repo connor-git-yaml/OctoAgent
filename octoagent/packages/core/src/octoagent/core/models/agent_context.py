@@ -194,7 +194,7 @@ class OwnerProfileOverlay(BaseModel):
     owner_profile_id: str = Field(min_length=1)
     scope: OwnerOverlayScope = OwnerOverlayScope.PROJECT
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     assistant_identity_overrides: dict[str, Any] = Field(default_factory=dict)
     working_style_override: str = Field(default="")
     interaction_preferences_override: list[str] = Field(default_factory=list)
@@ -212,7 +212,7 @@ class BootstrapSession(BaseModel):
 
     bootstrap_id: str = Field(min_length=1)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     owner_profile_id: str = Field(default="")
     owner_overlay_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
@@ -235,7 +235,7 @@ class AgentRuntime(BaseModel):
 
     agent_runtime_id: str = Field(min_length=1)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     worker_profile_id: str = Field(default="")
     role: AgentRuntimeRole = AgentRuntimeRole.MAIN
@@ -266,7 +266,7 @@ class AgentSession(BaseModel):
     kind: AgentSessionKind = AgentSessionKind.MAIN_BOOTSTRAP
     status: AgentSessionStatus = AgentSessionStatus.ACTIVE
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     surface: str = Field(default="chat")
     thread_id: str = Field(default="")
     legacy_session_id: str = Field(default="")
@@ -316,7 +316,7 @@ class MemoryNamespace(BaseModel):
 
     namespace_id: str = Field(min_length=1)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_runtime_id: str = Field(default="")
     kind: MemoryNamespaceKind = MemoryNamespaceKind.PROJECT_SHARED
     name: str = Field(default="")
@@ -336,7 +336,7 @@ class SessionContextState(BaseModel):
     agent_session_id: str = Field(default="")
     thread_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     task_ids: list[str] = Field(default_factory=list)
     recent_turn_refs: list[str] = Field(default_factory=list)
     recent_artifact_refs: list[str] = Field(default_factory=list)
@@ -363,7 +363,7 @@ class ContextResolveRequest(BaseModel):
     request_kind: ContextRequestKind
     surface: str = Field(default="chat")
     project_id: str = Field(default="")
-    workspace_id: str | None = None
+    workspace_id: str | None = None  # DEPRECATED: workspace 概念已废弃
     task_id: str | None = None
     session_id: str | None = None
     work_id: str | None = None
@@ -392,7 +392,7 @@ class ContextFrame(BaseModel):
     agent_runtime_id: str = Field(default="")
     agent_session_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     owner_profile_id: str = Field(default="")
     owner_overlay_id: str = Field(default="")
@@ -419,7 +419,7 @@ class RecallFrame(BaseModel):
     context_frame_id: str = Field(default="")
     task_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     query: str = Field(default="")
     recent_summary: str = Field(default="")
     memory_namespace_ids: list[str] = Field(default_factory=list)

@@ -491,29 +491,19 @@ export interface ProjectOption {
   name: string;
   is_default: boolean;
   status: string;
-  workspace_ids: string[];
+  workspace_ids?: string[];
   warnings: string[];
-}
-
-export interface WorkspaceOption {
-  workspace_id: string;
-  project_id: string;
-  slug: string;
-  name: string;
-  kind: string;
-  root_path: string;
 }
 
 export interface ProjectSelectorDocument extends ControlPlaneDocumentBase {
   resource_type: "project_selector";
   resource_id: "project:selector";
   current_project_id: string;
-  current_workspace_id: string;
+  current_workspace_id?: string;
   default_project_id: string;
   fallback_reason: string;
   switch_allowed: boolean;
   available_projects: ProjectOption[];
-  available_workspaces: WorkspaceOption[];
 }
 
 export interface SessionProjectionItem {
@@ -528,7 +518,7 @@ export interface SessionProjectionItem {
   channel: string;
   requester_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   agent_profile_id: string;
   session_owner_profile_id?: string;
   session_owner_name?: string;
@@ -561,7 +551,7 @@ export interface SessionProjectionDocument extends ControlPlaneDocumentBase {
   focused_thread_id: string;
   new_conversation_token: string;
   new_conversation_project_id: string;
-  new_conversation_workspace_id: string;
+  new_conversation_workspace_id?: string;
   new_conversation_agent_profile_id: string;
   sessions: SessionProjectionItem[];
   summary?: SessionProjectionSummary | null;
@@ -687,7 +677,7 @@ export interface AgentProfilesDocument extends ControlPlaneDocumentBase {
   resource_type: "agent_profiles";
   resource_id: "agent-profiles:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   profiles: AgentProfileItem[];
 }
 
@@ -714,7 +704,7 @@ export interface WorkerProfileStaticConfig {
 
 export interface WorkerProfileDynamicContext {
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   active_work_count: number;
   running_work_count: number;
   attention_work_count: number;
@@ -757,7 +747,7 @@ export interface WorkerProfilesDocument extends ControlPlaneDocumentBase {
   resource_type: "worker_profiles";
   resource_id: "worker-profiles:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   profiles: WorkerProfileItem[];
   summary: Record<string, unknown>;
 }
@@ -784,7 +774,7 @@ export interface OwnerProfileDocument extends ControlPlaneDocumentBase {
   resource_type: "owner_profile";
   resource_id: "owner-profile:default";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   profile: Record<string, unknown>;
   overlays: Array<Record<string, unknown>>;
 }
@@ -793,7 +783,7 @@ export interface BootstrapSessionDocument extends ControlPlaneDocumentBase {
   resource_type: "bootstrap_session";
   resource_id: "bootstrap:current";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   session: Record<string, unknown>;
   resumable: boolean;
 }
@@ -802,7 +792,7 @@ export interface ContextSessionItem {
   session_id: string;
   thread_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   rolling_summary: string;
   last_context_frame_id: string;
   updated_at: string | null;
@@ -812,7 +802,7 @@ export interface AgentRuntimeItem {
   agent_runtime_id: string;
   role: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   agent_profile_id: string;
   worker_profile_id: string;
   worker_capability: string;
@@ -826,7 +816,7 @@ export interface AgentSessionContinuityItem {
   kind: string;
   status: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   thread_id: string;
   legacy_session_id: string;
   work_id: string;
@@ -839,7 +829,7 @@ export interface MemoryNamespaceItem {
   namespace_id: string;
   kind: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   agent_runtime_id: string;
   name: string;
   description: string;
@@ -854,7 +844,7 @@ export interface RecallFrameItem {
   context_frame_id: string;
   task_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   query: string;
   recent_summary: string;
   memory_namespace_ids: string[];
@@ -868,7 +858,7 @@ export interface A2AConversationItem {
   task_id: string;
   work_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   source_agent_runtime_id: string;
   source_agent_session_id: string;
   target_agent_runtime_id: string;
@@ -913,7 +903,7 @@ export interface ContextFrameItem {
   task_id: string;
   session_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   agent_profile_id: string;
   recent_summary: string;
   memory_hit_count: number;
@@ -929,7 +919,7 @@ export interface ContextContinuityDocument extends ControlPlaneDocumentBase {
   resource_type: "context_continuity";
   resource_id: "context:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   sessions: ContextSessionItem[];
   frames: ContextFrameItem[];
   agent_runtimes?: AgentRuntimeItem[];
@@ -989,7 +979,7 @@ export interface PolicyProfilesDocument extends ControlPlaneDocumentBase {
   resource_type: "policy_profiles";
   resource_id: "policy:profiles";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   active_profile_id: string;
   profiles: PolicyProfileItem[];
 }
@@ -1015,7 +1005,7 @@ export interface SkillGovernanceDocument extends ControlPlaneDocumentBase {
   resource_type: "skill_governance";
   resource_id: "skills:governance";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   items: SkillGovernanceItem[];
   summary: Record<string, unknown>;
 }
@@ -1049,7 +1039,7 @@ export interface McpProviderCatalogDocument extends ControlPlaneDocumentBase {
   resource_type: "mcp_provider_catalog";
   resource_id: "mcp-providers:catalog";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   items: McpProviderItem[];
   summary: Record<string, unknown>;
 }
@@ -1058,7 +1048,7 @@ export interface SetupGovernanceDocument extends ControlPlaneDocumentBase {
   resource_type: "setup_governance";
   resource_id: "setup:governance";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   project_scope: SetupGovernanceSection;
   provider_runtime: SetupGovernanceSection;
   channel_access: SetupGovernanceSection;
@@ -1175,7 +1165,7 @@ export interface CapabilityPackDocument extends ControlPlaneDocumentBase {
   resource_id: "capability:bundled";
   pack: BundledCapabilityPack;
   selected_project_id: string;
-  selected_workspace_id: string;
+  selected_workspace_id?: string;
 }
 
 export interface WorkProjectionItem {
@@ -1192,7 +1182,7 @@ export interface WorkProjectionItem {
   pipeline_run_id: string;
   runtime_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   agent_profile_id?: string;
   session_owner_profile_id?: string;
   turn_executor_kind?: string;
@@ -1290,7 +1280,7 @@ export interface AutomationJob {
   action_id: string;
   params: Record<string, unknown>;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   schedule_kind: AutomationScheduleKind;
   schedule_expr: string;
   timezone: string;
@@ -1358,7 +1348,7 @@ export interface DiagnosticsSummaryDocument extends ControlPlaneDocumentBase {
 
 export interface MemoryConsoleFilter {
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   partition: string;
   layer: string;
@@ -1373,7 +1363,7 @@ export interface MemoryRecordProjection {
   record_id: string;
   layer: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   partition: string;
   subject_key: string;
@@ -1522,7 +1512,7 @@ export interface RetrievalPlatformDocument extends ControlPlaneDocumentBase {
   resource_type: "retrieval_platform";
   resource_id: "retrieval:platform";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   profiles: EmbeddingProfile[];
   corpora: RetrievalCorpusState[];
   generations: IndexGeneration[];
@@ -1534,7 +1524,7 @@ export interface MemoryConsoleDocument extends ControlPlaneDocumentBase {
   resource_type: "memory_console";
   resource_id: "memory:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   backend_id: string;
   retrieval_backend: string;
   backend_state: string;
@@ -1609,7 +1599,7 @@ export interface ImportResumeEntry {
   source_id: string;
   source_type: ImportSourceType;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   last_cursor: string;
   last_batch_id: string;
@@ -1623,7 +1613,7 @@ export interface ImportSourceDocument extends ControlPlaneDocumentBase {
   resource_type: "import_source";
   resource_id: string;
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   source_id: string;
   source_type: ImportSourceType;
   input_ref: ImportInputRef;
@@ -1640,7 +1630,7 @@ export interface ImportRunDocument extends ControlPlaneDocumentBase {
   resource_type: "import_run";
   resource_id: string;
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   source_id: string;
   source_type: ImportSourceType;
   status: ImportRunStatus;
@@ -1662,7 +1652,7 @@ export interface ImportWorkbenchDocument extends ControlPlaneDocumentBase {
   resource_type: "import_workbench";
   resource_id: "imports:workbench";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   summary: ImportWorkbenchSummary;
   sources: ImportSourceDocument[];
   recent_runs: ImportRunDocument[];
@@ -1673,7 +1663,7 @@ export interface MemorySubjectHistoryDocument extends ControlPlaneDocumentBase {
   resource_type: "memory_subject_history";
   resource_id: "memory-subject:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   scope_id: string;
   subject_key: string;
   current_record: MemoryRecordProjection | null;
@@ -1708,7 +1698,7 @@ export interface MemoryProposalAuditDocument extends ControlPlaneDocumentBase {
   resource_type: "memory_proposal_audit";
   resource_id: "memory-proposals:overview";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   summary: MemoryProposalSummary;
   items: MemoryProposalAuditItem[];
 }
@@ -1716,7 +1706,7 @@ export interface MemoryProposalAuditDocument extends ControlPlaneDocumentBase {
 export interface VaultAccessRequestItem {
   request_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   partition: string;
   subject_key: string;
@@ -1735,7 +1725,7 @@ export interface VaultAccessGrantItem {
   grant_id: string;
   request_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   partition: string;
   subject_key: string;
@@ -1751,7 +1741,7 @@ export interface VaultAccessGrantItem {
 export interface VaultRetrievalAuditItem {
   retrieval_id: string;
   project_id: string;
-  workspace_id: string;
+  workspace_id?: string;
   scope_id: string;
   partition: string;
   subject_key: string;
@@ -1771,7 +1761,7 @@ export interface VaultAuthorizationDocument extends ControlPlaneDocumentBase {
   resource_type: "vault_authorization";
   resource_id: "vault:authorization";
   active_project_id: string;
-  active_workspace_id: string;
+  active_workspace_id?: string;
   active_requests: VaultAccessRequestItem[];
   active_grants: VaultAccessGrantItem[];
   recent_retrievals: VaultRetrievalAuditItem[];

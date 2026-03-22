@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
 from octoagent.core.models import (
     Project,
     ProjectBinding,
@@ -31,18 +30,19 @@ def test_project_model_roundtrip() -> None:
     assert restored == project
 
 
-def test_workspace_binding_requires_workspace_id_for_scope_types() -> None:
-    with pytest.raises(ValueError, match="workspace_id"):
-        ProjectBinding(
-            binding_id="binding-1",
-            project_id="project-default",
-            workspace_id=None,
-            binding_type=ProjectBindingType.SCOPE,
-            binding_key="ops/default",
-            binding_value="ops/default",
-            source="tasks",
-            migration_run_id="run-1",
-        )
+def test_workspace_binding_allows_none_workspace_id_for_scope_types() -> None:
+    # DEPRECATED: workspace_id 不再强制要求（workspace 概念已废弃）
+    binding = ProjectBinding(
+        binding_id="binding-1",
+        project_id="project-default",
+        workspace_id=None,
+        binding_type=ProjectBindingType.SCOPE,
+        binding_key="ops/default",
+        binding_value="ops/default",
+        source="tasks",
+        migration_run_id="run-1",
+    )
+    assert binding.workspace_id is None
 
 
 def test_project_migration_validation_derives_ok_from_missing_items() -> None:

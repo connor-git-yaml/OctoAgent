@@ -194,7 +194,7 @@ async def _seed_project_context(store_group) -> None:
         ProjectBinding(
             binding_id="binding-scope-alpha",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             binding_type=ProjectBindingType.SCOPE,
             binding_key="chat:web:thread-alpha",
             binding_value="chat:web:thread-alpha",
@@ -206,7 +206,7 @@ async def _seed_project_context(store_group) -> None:
         ProjectBinding(
             binding_id="binding-memory-alpha",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             binding_type=ProjectBindingType.MEMORY_SCOPE,
             binding_key="memory/project-alpha",
             binding_value="memory/project-alpha",
@@ -247,7 +247,7 @@ async def _seed_project_context(store_group) -> None:
         BootstrapSession(
             bootstrap_id="bootstrap-alpha",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             owner_profile_id="owner-profile-default",
             owner_overlay_id="owner-overlay-alpha",
             agent_profile_id="agent-profile-alpha",
@@ -264,7 +264,7 @@ async def _seed_project_context(store_group) -> None:
             session_id="thread-alpha",
             thread_id="thread-alpha",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             task_ids=["legacy-task"],
             recent_turn_refs=["legacy-task"],
             recent_artifact_refs=["artifact-legacy"],
@@ -592,7 +592,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "resolve_request_kind: chat" in request_text
     assert (
         "session_id: surface:web|scope:chat:web:thread-alpha|"
-        "project:project-alpha|workspace:workspace-alpha|thread:thread-alpha" in request_text
+        "project:project-alpha|thread:thread-alpha" in request_text
     )
     assert "AmbientRuntime:" in request_text
     assert "timezone: UTC" in request_text
@@ -950,7 +950,7 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
             agent_runtime_id=runtime_id,
             role=AgentRuntimeRole.MAIN,
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
         )
     )
     await store_group.agent_context_store.save_agent_session(
@@ -1094,7 +1094,6 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     worker_runtime_id = build_agent_runtime_id(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1172,7 +1171,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+        workspace_id="",
         work_id="work-alpha-1",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1316,7 +1315,6 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
     worker_runtime_id = build_agent_runtime_id(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1411,7 +1409,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+        workspace_id="",
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1513,7 +1511,6 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
     worker_runtime_id = build_agent_runtime_id(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1592,7 +1589,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+        workspace_id="",
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1666,7 +1663,6 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     worker_runtime_id = build_agent_runtime_id(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1698,7 +1694,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             thread_id="thread-alpha",
             session_id="worker-thread-alpha",
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
+            workspace_id="",
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
             worker_capability="llm_generation",
@@ -1814,7 +1810,6 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runti
     worker_runtime_id = build_agent_runtime_id(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
         agent_profile_id=worker_profile.profile_id,
         worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1935,7 +1930,7 @@ async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runti
             thread_id="thread-alpha",
             session_id="worker-thread-alpha",
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
+            workspace_id="",
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
             worker_capability="llm_generation",
@@ -2196,8 +2191,6 @@ async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_
     assert "RuntimeHints:" in joined
     assert "current_user_text: 深圳" in joined
     assert "can_delegate_research: True" in joined
-    assert "effective_location_hint: 深圳" in joined
-    assert "recent_clarification_category: weather_location" in joined
 
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
     request_artifact = next(item for item in artifacts if item.name == "llm-request-context")
@@ -2207,7 +2200,7 @@ async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_
     assert request_content is not None
     request_text = request_content.decode("utf-8")
     assert "RuntimeHints:" in request_text
-    assert "effective_location_hint: 深圳" in request_text
+    # effective_location_hint 已废弃（硬编码天气定位逻辑已删除）
 
     await store_group.conn.close()
 
@@ -2419,7 +2412,7 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
             session_id="thread-alpha",
             thread_id="thread-alpha",
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
+            workspace_id="",
             task_ids=["legacy-task"],
             recent_turn_refs=["legacy-task"],
             rolling_summary=long_summary,
@@ -2498,7 +2491,6 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     session_id = build_scope_aware_session_id(
         task,
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
     )
     migrated_state = await store_group.agent_context_store.get_session_context(session_id)
     legacy_state = await store_group.agent_context_store.get_session_context("thread-alpha")
@@ -2547,7 +2539,7 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-alpha",
-            active_workspace_id="workspace-alpha",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -2576,10 +2568,9 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
         session_id=build_scope_aware_session_id(
             task,
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
         ),
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+        workspace_id="",
         hop_count=1,
         max_hops=3,
         worker_capability="llm_generation",
@@ -2593,7 +2584,7 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-beta",
-            active_workspace_id="workspace-beta",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -2615,7 +2606,7 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
     assert len(frames) == 1
     assert frames[0].project_id == "project-alpha"
-    assert frames[0].workspace_id == "workspace-alpha"
+    assert frames[0].workspace_id == ""
     assert any(
         ref["ref_type"] == "runtime_context" for ref in frames[0].source_refs
     )

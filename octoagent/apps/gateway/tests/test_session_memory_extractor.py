@@ -63,7 +63,7 @@ async def setup_session(store: SqliteAgentContextStore):
     runtime = AgentRuntime(
         agent_runtime_id="rt-ext-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         name="Extractor Test Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -73,7 +73,7 @@ async def setup_session(store: SqliteAgentContextStore):
         agent_runtime_id="rt-ext-001",
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
     )
     await store.save_agent_session(session)
 
@@ -81,7 +81,7 @@ async def setup_session(store: SqliteAgentContextStore):
     ns = MemoryNamespace(
         namespace_id="ns-proj-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         agent_runtime_id="rt-ext-001",
         kind=MemoryNamespaceKind.PROJECT_SHARED,
         memory_scope_ids=["proj-001/default"],
@@ -107,14 +107,14 @@ def _make_llm_service(response_json: list | str | None = None, raise_exc: Except
     """构造 mock LLM service。"""
     llm_service = AsyncMock()
     if raise_exc is not None:
-        llm_service.call_with_fallback = AsyncMock(side_effect=raise_exc)
+        llm_service.call = AsyncMock(side_effect=raise_exc)
     elif response_json is not None:
         if isinstance(response_json, list):
-            llm_service.call_with_fallback = AsyncMock(return_value=json.dumps(response_json))
+            llm_service.call = AsyncMock(return_value=json.dumps(response_json))
         else:
-            llm_service.call_with_fallback = AsyncMock(return_value=response_json)
+            llm_service.call = AsyncMock(return_value=response_json)
     else:
-        llm_service.call_with_fallback = AsyncMock(return_value="[]")
+        llm_service.call = AsyncMock(return_value="[]")
     return llm_service
 
 
@@ -213,7 +213,7 @@ async def test_normal_flow_extracts_and_commits(
     assert updated_session.memory_cursor_seq == 3
 
     # 验证 LLM 被调用
-    llm_service.call_with_fallback.assert_called_once()
+    llm_service.call.assert_called_once()
 
     # 验证 propose-validate-commit 被调用
     memory_service.propose_write.assert_called()
@@ -317,7 +317,7 @@ async def test_try_lock_skips_concurrent(
         return "[]"
 
     llm_service = AsyncMock()
-    llm_service.call_with_fallback = slow_llm
+    llm_service.call = slow_llm
     extractor = _make_extractor(store, llm_service=llm_service)
 
     session = await store.get_agent_session("sess-ext-001")
@@ -350,7 +350,7 @@ async def test_subagent_session_skipped(
     runtime = AgentRuntime(
         agent_runtime_id="rt-sub-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         name="Subagent Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -360,7 +360,7 @@ async def test_subagent_session_skipped(
         agent_runtime_id="rt-sub-001",
         kind=AgentSessionKind.SUBAGENT_INTERNAL,
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
     )
     await store.save_agent_session(session)
 
@@ -411,7 +411,7 @@ async def test_no_new_turns_skips(store: SqliteAgentContextStore, setup_session:
 
     assert result.skipped_reason == "no_new_turns"
     # LLM 不应被调用
-    llm_service.call_with_fallback.assert_not_called()
+    llm_service.call.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -668,4 +668,4 @@ async def test_no_new_turns_returns_skipped(
     )
 
     assert result.skipped_reason == "no_new_turns"
-    llm_service.call_with_fallback.assert_not_called()
+    llm_service.call.assert_not_called()

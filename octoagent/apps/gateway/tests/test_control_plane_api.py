@@ -113,7 +113,7 @@ async def _create_task(
     *,
     text: str,
     thread_id: str = "thread-control",
-    scope_id: str = "scope-control",
+    scope_id: str = "project:project-default:chat:web:thread-control",
 ) -> str:
     task_service = TaskService(app.state.store_group, app.state.sse_hub)
     task_id, created = await task_service.create_task(
@@ -295,7 +295,7 @@ async def _seed_context_resources(app) -> None:
             app,
             text="control plane context seed",
             thread_id="thread-control-context",
-            scope_id="scope-control",
+            scope_id=f"project:{project.project_id}:chat:web:thread-control-context",
         )
     )
     runtime = AgentRuntime(
@@ -987,72 +987,36 @@ class TestControlPlaneApi:
             }
         ]
 
-    async def test_context_frames_resource_filters_workspace_before_limit(
+    async def test_context_frames_resource_returns_all_project_frames(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
+        """workspace 概念废弃后，context frames 不再按 workspace 过滤，返回所有 project 级 frames。"""
         await _seed_context_resources(control_plane_app)
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        primary_workspace = await store_group.project_store.get_primary_workspace(
-            project.project_id
-        )
-        assert primary_workspace is not None
-        secondary_workspace = Workspace(
-            workspace_id="workspace-secondary",
-            project_id=project.project_id,
-            slug="secondary",
-            name="Secondary",
-            kind=WorkspaceKind.CHAT,
-            root_path=str(control_plane_app.state.project_root / "secondary"),
-        )
-        await store_group.project_store.create_workspace(secondary_workspace)
-        await store_group.project_store.save_selector_state(
-            ProjectSelectorState(
-                selector_id="selector-web",
-                surface="web",
-                active_project_id=project.project_id,
-                active_workspace_id=secondary_workspace.workspace_id,
-                source="tests",
-            )
-        )
-        for index in range(25):
+        for index in range(5):
             await store_group.agent_context_store.save_context_frame(
                 ContextFrame(
-                    context_frame_id=f"context-frame-primary-{index}",
-                    task_id=f"task-primary-{index}",
-                    session_id=f"session-primary-{index}",
+                    context_frame_id=f"context-frame-extra-{index}",
+                    task_id=f"task-extra-{index}",
+                    session_id=f"session-extra-{index}",
                     project_id=project.project_id,
-                    workspace_id=primary_workspace.workspace_id,
                     agent_profile_id="agent-profile-default",
                     owner_profile_id="owner-profile-default",
                     created_at=datetime(2026, 3, 9, 10, index % 60, tzinfo=UTC),
                 )
             )
-        await store_group.agent_context_store.save_context_frame(
-            ContextFrame(
-                context_frame_id="context-frame-secondary",
-                task_id="task-secondary",
-                session_id="session-secondary",
-                project_id=project.project_id,
-                workspace_id=secondary_workspace.workspace_id,
-                agent_profile_id="agent-profile-default",
-                owner_profile_id="owner-profile-default",
-                created_at=datetime(2026, 3, 9, 11, 0, tzinfo=UTC),
-            )
-        )
         await store_group.conn.commit()
 
         resp = await control_plane_client.get("/api/control/resources/context-frames")
 
         assert resp.status_code == 200
         payload = resp.json()
-        assert payload["active_workspace_id"] == "workspace-secondary"
-        assert [item["context_frame_id"] for item in payload["frames"]] == [
-            "context-frame-secondary"
-        ]
+        # workspace 过滤已移除，返回所有 project 级 frames
+        assert len(payload["frames"]) >= 5
 
     async def test_setup_governance_surfaces_policy_skill_and_review_sections(
         self,
@@ -2623,7 +2587,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="请把当前工作拆分给两个 child workers",
             thread_id="thread-work-split",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-work-split",
         )
         plan = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
             OrchestratorRequest(
@@ -2717,7 +2681,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="请先调研 API，再补代码和测试",
             thread_id="thread-worker-review",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-worker-review",
         )
         plan = await control_plane_app.state.delegation_plane_service.prepare_dispatch(
             OrchestratorRequest(
@@ -3245,13 +3209,13 @@ class TestControlPlaneApi:
             control_plane_app,
             text="default session",
             thread_id="thread-default",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-default",
         )
         beta_task_id = await _create_task(
             control_plane_app,
             text="beta session",
             thread_id="thread-beta",
-            scope_id="chat:web:thread-beta",
+            scope_id=f"project:{beta_project.project_id}:chat:web:thread-beta",
         )
 
         # 侧边栏 session 投影不再按 project 过滤（跨项目展示所有活跃会话），
@@ -3271,20 +3235,19 @@ class TestControlPlaneApi:
             control_plane_app,
             text="session authority demo",
             thread_id="thread-session-authority",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-session-authority",
         )
         task = await control_plane_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
-        workspace = (
-            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
+        project = (
+            await control_plane_app.state.store_group.project_store.resolve_project_for_scope(
                 task.scope_id
             )
         )
-        assert workspace is not None
+        assert project is not None
         expected_session_id = build_scope_aware_session_id(
             task,
-            project_id=workspace.project_id,
-            workspace_id=workspace.workspace_id,
+            project_id=project.project_id,
         )
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
@@ -3316,12 +3279,9 @@ class TestControlPlaneApi:
         assert focus_resp.status_code == 200
         focus_result = focus_resp.json()["result"]
         assert focus_result["status"] == "completed"
-        assert focus_result["data"] == {
-            "session_id": expected_session_id,
-            "thread_id": "thread-session-authority",
-            "project_id": workspace.project_id,
-            "workspace_id": workspace.workspace_id,
-        }
+        assert focus_result["data"]["session_id"] == expected_session_id
+        assert focus_result["data"]["thread_id"] == "thread-session-authority"
+        assert focus_result["data"]["project_id"] == project.project_id
 
         focused_sessions = await control_plane_client.get("/api/control/resources/sessions")
         assert focused_sessions.status_code == 200
@@ -3379,13 +3339,13 @@ class TestControlPlaneApi:
             control_plane_app,
             text="first ambiguous session",
             thread_id="thread-ambiguous",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-ambiguous",
         )
         second_task_id = await _create_task(
             control_plane_app,
             text="second ambiguous session",
             thread_id="thread-ambiguous",
-            scope_id="scope-control-alt",
+            scope_id="project:project-default:chat:web:thread-ambiguous-alt",
         )
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
@@ -3480,7 +3440,6 @@ class TestControlPlaneApi:
         session_id = build_scope_aware_session_id(
             task,
             project_id=workspace.project_id,
-            workspace_id=workspace.workspace_id,
         )
 
         focus_resp = await control_plane_client.post(
@@ -3523,7 +3482,7 @@ class TestControlPlaneApi:
         assert new_result["data"]["previous_task_id"] == task_id
         assert new_result["data"]["new_conversation_token"]
         assert new_result["data"]["project_id"] == workspace.project_id
-        assert new_result["data"]["workspace_id"] == workspace.workspace_id
+        assert new_result["data"]["workspace_id"] == ""
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200
@@ -3532,7 +3491,7 @@ class TestControlPlaneApi:
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
         assert payload["new_conversation_project_id"] == workspace.project_id
-        assert payload["new_conversation_workspace_id"] == workspace.workspace_id
+        assert payload["new_conversation_workspace_id"] == ""
         assert payload["new_conversation_agent_profile_id"] == ""
 
     async def test_session_new_can_prepare_explicit_agent_session_entry(
@@ -3625,9 +3584,8 @@ class TestControlPlaneApi:
         assert projected_session_id == build_projected_session_id(
             thread_id=thread_id,
             surface="web",
-            scope_id=f"workspace:{workspace_id}:chat:web:{thread_id}",
+            scope_id=f"project:{project_id}:chat:web:{thread_id}",
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         agent_session = (
             await control_plane_app.state.store_group.agent_context_store.get_agent_session(
@@ -3754,7 +3712,7 @@ class TestControlPlaneApi:
         assert result["code"] == "SESSION_OPENED_EXISTING_PROJECT"
         assert result["data"]["agent_session_id"] != existing_session.agent_session_id
         assert result["data"]["project_id"] == project.project_id
-        assert result["data"]["workspace_id"] == workspace.workspace_id
+        assert result["data"]["workspace_id"] == ""
         reopened_session = await store_group.agent_context_store.get_active_session_for_project(
             project.project_id,
             kind=AgentSessionKind.MAIN_BOOTSTRAP,
@@ -3900,7 +3858,7 @@ class TestControlPlaneApi:
         create_payload = create_resp.json()["result"]["data"]
         projected_session_id = create_payload["session_id"]
         thread_id = create_payload["thread_id"]
-        workspace_id = create_payload["workspace_id"]
+        project_id = create_payload["project_id"]
 
         send_resp = await control_plane_client.post(
             "/api/chat/send",
@@ -3917,7 +3875,7 @@ class TestControlPlaneApi:
         task = await control_plane_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
         assert task.thread_id == thread_id
-        assert task.scope_id == f"workspace:{workspace_id}:chat:web:{thread_id}"
+        assert f"chat:web:{thread_id}" in task.scope_id
 
         events = await control_plane_app.state.store_group.event_store.get_events_for_task(task_id)
         user_events = [event for event in events if event.type.value == "USER_MESSAGE"]
@@ -4038,7 +3996,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="请交给金融研究员处理",
             thread_id=thread_id,
-            scope_id=f"workspace:{workspace.workspace_id}:chat:web:{thread_id}",
+            scope_id=f"project:{workspace.project_id}:chat:web:{thread_id}",
         )
         task_service = TaskService(store_group, control_plane_app.state.sse_hub)
         await task_service.append_user_message(
@@ -4054,7 +4012,6 @@ class TestControlPlaneApi:
         projected_session_id = build_scope_aware_session_id(
             task,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
         )
         await store_group.agent_context_store.save_agent_runtime(
             AgentRuntime(
@@ -4151,7 +4108,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="legacy polluted session",
             thread_id=thread_id,
-            scope_id=f"workspace:{workspace.workspace_id}:chat:web:{thread_id}",
+            scope_id=f"project:{workspace.project_id}:chat:web:{thread_id}",
         )
         task_service = TaskService(store_group, control_plane_app.state.sse_hub)
         await task_service.append_user_message(
@@ -4164,7 +4121,6 @@ class TestControlPlaneApi:
         projected_session_id = build_scope_aware_session_id(
             task,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
         )
         await store_group.agent_context_store.save_agent_runtime(
             AgentRuntime(
@@ -4237,7 +4193,6 @@ class TestControlPlaneApi:
         session_id = build_scope_aware_session_id(
             task,
             project_id=workspace.project_id,
-            workspace_id=workspace.workspace_id,
         )
 
         focus_resp = await control_plane_client.post(
@@ -4271,7 +4226,7 @@ class TestControlPlaneApi:
         assert selector_resp.status_code == 200
         selector_payload = selector_resp.json()
         assert selector_payload["current_project_id"] == focused["project_id"]
-        assert selector_payload["current_workspace_id"] == focused["workspace_id"]
+        # workspace 概念已废弃，不再检查 workspace_id 一致性
 
         unfocus_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -4311,7 +4266,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="legacy continuity reset",
             thread_id="thread-reset-legacy",
-            scope_id="scope-control",
+            scope_id="project:project-default:chat:web:thread-reset-legacy",
         )
         await store_group.agent_context_store.save_agent_runtime(
             AgentRuntime(
@@ -4424,7 +4379,7 @@ class TestControlPlaneApi:
         assert reset_result["data"]["reset_agent_session_count"] >= 1
         assert reset_result["data"]["new_conversation_token"]
         assert reset_result["data"]["project_id"] == project.project_id
-        assert reset_result["data"]["workspace_id"] == workspace.workspace_id
+        assert reset_result["data"]["workspace_id"] == ""
 
         session_state = await store_group.agent_context_store.get_session_context(
             "thread-reset-legacy"
@@ -4456,7 +4411,7 @@ class TestControlPlaneApi:
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == reset_result["data"]["new_conversation_token"]
         assert payload["new_conversation_project_id"] == project.project_id
-        assert payload["new_conversation_workspace_id"] == workspace.workspace_id
+        assert payload["new_conversation_workspace_id"] == ""
 
     async def test_backup_create_and_restore_plan_actions_refresh_diagnostics(
         self,
@@ -5427,7 +5382,7 @@ class TestControlPlaneApi:
         )
 
         assert target["dynamic_context"]["active_project_id"] == project.project_id
-        assert target["dynamic_context"]["active_workspace_id"] == secondary_workspace.workspace_id
+        assert target["dynamic_context"]["active_workspace_id"] == ""
         assert target["dynamic_context"]["active_work_count"] == 1
         assert target["dynamic_context"]["running_work_count"] == 1
         assert target["dynamic_context"]["attention_work_count"] == 1

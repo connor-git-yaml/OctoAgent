@@ -82,7 +82,7 @@ def _make_llm_service(response_items: list[dict[str, Any]] | None = None) -> Mag
     items = response_items if response_items is not None else _make_tom_items()
     result_mock = MagicMock()
     result_mock.content = json.dumps(items)
-    service.call_with_fallback = AsyncMock(return_value=result_mock)
+    service.call = AsyncMock(return_value=result_mock)
     return service
 
 
@@ -161,7 +161,7 @@ class TestToMExtractionService:
         llm = MagicMock()
         bad_result = MagicMock()
         bad_result.content = "这不是有效的JSON"
-        llm.call_with_fallback = AsyncMock(return_value=bad_result)
+        llm.call = AsyncMock(return_value=bad_result)
 
         svc = ToMExtractionService(
             memory_store=store,
@@ -199,7 +199,7 @@ class TestToMExtractionService:
 
         assert result.extracted == 0
         assert result.errors == []
-        llm.call_with_fallback.assert_not_called()
+        llm.call.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_derived_write_failure(self):

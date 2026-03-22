@@ -44,7 +44,6 @@ export function buildSnapshotRefreshOptions(
     (snapshot.resources.memory != null
       ? {
           projectId: snapshot.resources.memory.active_project_id,
-          workspaceId: snapshot.resources.memory.active_workspace_id,
           scopeId: snapshot.resources.memory.filters.scope_id || undefined,
           partition: snapshot.resources.memory.filters.partition || undefined,
           layer: snapshot.resources.memory.filters.layer || undefined,

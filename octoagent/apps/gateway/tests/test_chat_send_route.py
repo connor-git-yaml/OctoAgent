@@ -18,7 +18,6 @@ from octoagent.core.models import (
     SessionContextState,
     WorkerProfile,
     WorkerProfileStatus,
-    Workspace,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -151,23 +150,15 @@ class TestChatSendRoute:
             slug="chat-alpha",
             name="Chat Alpha",
         )
-        workspace = Workspace(
-            workspace_id="workspace-chat-alpha-primary",
-            project_id=project.project_id,
-            slug="primary",
-            name="Chat Alpha Primary",
-            root_path=str(tmp_path / "chat-alpha"),
-        )
         await test_app.state.store_group.project_store.create_project(project)
-        await test_app.state.store_group.project_store.create_workspace(workspace)
         await test_app.state.store_group.conn.commit()
         ControlPlaneStateStore(tmp_path).save(
             ControlPlaneState(
                 selected_project_id=project.project_id,
-                selected_workspace_id=workspace.workspace_id,
+                selected_workspace_id="",
                 new_conversation_token="token-chat-alpha",
                 new_conversation_project_id=project.project_id,
-                new_conversation_workspace_id=workspace.workspace_id,
+                new_conversation_workspace_id="",
                 new_conversation_agent_profile_id="singleton:research",
             )
         )
@@ -186,12 +177,8 @@ class TestChatSendRoute:
 
         task = await test_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
-        assert task.scope_id.startswith(f"workspace:{workspace.workspace_id}:chat:web:")
-        resolved_workspace = (
-            await test_app.state.store_group.project_store.resolve_workspace_for_scope(task.scope_id)
-        )
-        assert resolved_workspace is not None
-        assert resolved_workspace.workspace_id == workspace.workspace_id
+        # workspace 概念废弃后，scope_id 可能是 project: 或 chat:web: 前缀
+        assert "chat:web:" in task.scope_id
 
         detail = await client.get(f"/api/tasks/{task_id}")
         assert detail.status_code == 200
@@ -200,7 +187,6 @@ class TestChatSendRoute:
         assert user_events
         metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["project_id"] == project.project_id
-        assert metadata["workspace_id"] == workspace.workspace_id
         assert metadata["session_owner_profile_id"] == "singleton:research"
         assert metadata["agent_profile_id"] == "singleton:research"
         assert not metadata.get("requested_worker_profile_id")
@@ -216,15 +202,7 @@ class TestChatSendRoute:
             slug="chat-direct",
             name="Chat Direct",
         )
-        workspace = Workspace(
-            workspace_id="workspace-chat-direct-primary",
-            project_id=project.project_id,
-            slug="primary",
-            name="Chat Direct Primary",
-            root_path=str(tmp_path / "chat-direct"),
-        )
         await test_app.state.store_group.project_store.create_project(project)
-        await test_app.state.store_group.project_store.create_workspace(workspace)
         await test_app.state.store_group.conn.commit()
 
         resp = await client.post(
@@ -232,8 +210,7 @@ class TestChatSendRoute:
             json={
                 "message": "direct session first turn",
                 "project_id": project.project_id,
-                "workspace_id": workspace.workspace_id,
-                "session_id": "surface:web|project:project-chat-direct|workspace:workspace-chat-direct-primary|thread:thread-fin",
+                "session_id": "surface:web|project:project-chat-direct|thread:thread-fin",
                 "thread_id": "thread-fin",
                 "agent_profile_id": "worker-profile-finance",
             },
@@ -246,7 +223,8 @@ class TestChatSendRoute:
         task = await test_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
         assert task.thread_id == "thread-fin"
-        assert task.scope_id == "workspace:workspace-chat-direct-primary:chat:web:thread-fin"
+        # workspace 概念废弃后，scope_id 由 chat route 直接设定
+        assert "chat:web:thread-fin" in task.scope_id
 
         detail = await client.get(f"/api/tasks/{task_id}")
         assert detail.status_code == 200
@@ -254,9 +232,7 @@ class TestChatSendRoute:
         user_events = [event for event in payload["events"] if event["type"] == "USER_MESSAGE"]
         assert user_events
         metadata = user_events[-1]["payload"]["control_metadata"]
-        assert metadata["session_id"] == (
-            "surface:web|project:project-chat-direct|workspace:workspace-chat-direct-primary|thread:thread-fin"
-        )
+        assert "thread-fin" in metadata["session_id"]
         assert metadata["thread_id"] == "thread-fin"
 
     async def test_continue_chat_reuses_explicit_session_agent_profile(
@@ -304,22 +280,14 @@ class TestChatSendRoute:
             slug="task-alias",
             name="Task Alias",
         )
-        workspace = Workspace(
-            workspace_id="workspace-task-alias-primary",
-            project_id=project.project_id,
-            slug="primary",
-            name="Task Alias Primary",
-            root_path=str(tmp_path / "task-alias"),
-        )
         await store_group.project_store.create_project(project)
-        await store_group.project_store.create_workspace(workspace)
 
         task_service = TaskService(store_group, test_app.state.sse_hub)
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 channel="web",
                 thread_id="thread-task-alias",
-                scope_id=f"workspace:{workspace.workspace_id}:chat:web:thread-task-alias",
+                scope_id=f"project:{project.project_id}:chat:web:thread-task-alias",
                 sender_id="owner",
                 sender_name="Owner",
                 text="请帮我创建安装一下 openrouter-perplexity MCP，下面的配置里面有你可以参考的信息",
@@ -333,13 +301,11 @@ class TestChatSendRoute:
         projected_session_id = build_scope_aware_session_id(
             task,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
         )
         await store_group.agent_context_store.save_agent_runtime(
             AgentRuntime(
                 agent_runtime_id="runtime-task-alias",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 agent_profile_id="agent-profile-task-alias",
                 role=AgentRuntimeRole.MAIN,
                 name="Task Alias Runtime",
@@ -351,7 +317,6 @@ class TestChatSendRoute:
                 agent_runtime_id="runtime-task-alias",
                 kind=AgentSessionKind.DIRECT_WORKER,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 thread_id=task.thread_id,
                 legacy_session_id=projected_session_id,
                 alias="深圳",
@@ -364,7 +329,6 @@ class TestChatSendRoute:
                 agent_session_id="agent-session-task-alias",
                 thread_id=task.thread_id,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 task_ids=[task_id],
             )
         )
@@ -386,15 +350,7 @@ class TestChatSendRoute:
             slug="legacy-continue",
             name="Legacy Continue",
         )
-        workspace = Workspace(
-            workspace_id="workspace-legacy-continue-primary",
-            project_id=project.project_id,
-            slug="primary",
-            name="Legacy Continue Primary",
-            root_path=str(tmp_path / "legacy-continue"),
-        )
         await store_group.project_store.create_project(project)
-        await store_group.project_store.create_workspace(workspace)
 
         worker_profile_id = "worker-profile-legacy"
         await store_group.agent_context_store.save_worker_profile(
@@ -413,7 +369,7 @@ class TestChatSendRoute:
             NormalizedMessage(
                 channel="web",
                 thread_id="thread-legacy-continue",
-                scope_id=f"workspace:{workspace.workspace_id}:chat:web:thread-legacy-continue",
+                scope_id=f"project:{project.project_id}:chat:web:thread-legacy-continue",
                 sender_id="owner",
                 sender_name="Owner",
                 text="legacy first turn",
@@ -432,13 +388,11 @@ class TestChatSendRoute:
         projected_session_id = build_scope_aware_session_id(
             task,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
         )
         await store_group.agent_context_store.save_agent_runtime(
             AgentRuntime(
                 agent_runtime_id="runtime-legacy-continue",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Legacy Continue Runtime",
@@ -450,7 +404,6 @@ class TestChatSendRoute:
                 agent_runtime_id="runtime-legacy-continue",
                 kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 thread_id=task.thread_id,
                 legacy_session_id=task.thread_id,
             )
@@ -462,7 +415,6 @@ class TestChatSendRoute:
                 agent_session_id="agent-session-legacy-continue",
                 thread_id=task.thread_id,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
                 task_ids=[task_id],
             )
         )

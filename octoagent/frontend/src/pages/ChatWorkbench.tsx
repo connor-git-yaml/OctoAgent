@@ -1179,10 +1179,10 @@ export default function ChatWorkbench() {
     shouldContinueRestore ? { taskIds: restoreTaskIds } : null,
     {
       activeProjectId: resumeSession?.project_id || projectSelector?.current_project_id || "",
-      activeWorkspaceId: resumeSession?.workspace_id || projectSelector?.current_workspace_id || "",
+      activeWorkspaceId: "",
       newConversationToken: hasExistingSession ? "" : (sessionDocument?.new_conversation_token ?? ""),
       newConversationProjectId: hasExistingSession ? "" : (sessionDocument?.new_conversation_project_id ?? ""),
-      newConversationWorkspaceId: hasExistingSession ? "" : (sessionDocument?.new_conversation_workspace_id ?? ""),
+      newConversationWorkspaceId: "",
       newConversationAgentProfileId: hasExistingSession
         ? ""
         : (sessionDocument?.new_conversation_agent_profile_id ?? ""),

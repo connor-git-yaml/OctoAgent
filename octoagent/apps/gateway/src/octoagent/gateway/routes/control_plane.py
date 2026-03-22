@@ -118,7 +118,7 @@ async def get_control_diagnostics(control_plane=Depends(get_control_plane_servic
 @router.get("/api/control/resources/retrieval-platform")
 async def get_control_retrieval_platform(
     project_id: str | None = Query(default=None),
-    workspace_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None, deprecated=True),
     control_plane=Depends(get_control_plane_service),
 ):
     return (
@@ -132,7 +132,7 @@ async def get_control_retrieval_platform(
 @router.get("/api/control/resources/memory")
 async def get_control_memory(
     project_id: str | None = Query(default=None),
-    workspace_id: str | None = Query(default=None),
+    workspace_id: str | None = Query(default=None, deprecated=True),
     scope_id: str | None = Query(default=None),
     partition: str | None = Query(default=None),
     layer: str | None = Query(default=None),

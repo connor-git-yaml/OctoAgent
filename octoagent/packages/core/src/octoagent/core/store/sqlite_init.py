@@ -201,8 +201,7 @@ CREATE TABLE IF NOT EXISTS project_bindings (
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
 
-    FOREIGN KEY (project_id) REFERENCES projects(project_id),
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
 );
 """
 
@@ -226,8 +225,7 @@ CREATE TABLE IF NOT EXISTS project_secret_bindings (
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
 
-    FOREIGN KEY (project_id) REFERENCES projects(project_id),
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+    FOREIGN KEY (project_id) REFERENCES projects(project_id)
 );
 """
 
@@ -241,8 +239,7 @@ CREATE TABLE IF NOT EXISTS project_selector_state (
     warnings            TEXT NOT NULL DEFAULT '[]',
     updated_at          TEXT NOT NULL,
 
-    FOREIGN KEY (active_project_id) REFERENCES projects(project_id),
-    FOREIGN KEY (active_workspace_id) REFERENCES workspaces(workspace_id)
+    FOREIGN KEY (active_project_id) REFERENCES projects(project_id)
 );
 """
 

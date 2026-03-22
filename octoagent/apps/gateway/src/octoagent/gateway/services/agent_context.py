@@ -323,7 +323,6 @@ def build_projected_session_id(
     surface: str,
     scope_id: str = "",
     project_id: str = "",
-    workspace_id: str = "",
 ) -> str:
     resolved_thread_id = thread_id.strip() or "task"
     resolved_surface = surface.strip() or "unknown"
@@ -335,8 +334,6 @@ def build_projected_session_id(
         parts.append(f"project:{project_id}")
     elif not resolved_scope_id:
         parts.append(f"project:{project_id or 'default'}")
-    if workspace_id:
-        parts.append(f"workspace:{workspace_id}")
     parts.append(f"thread:{resolved_thread_id}")
     return "|".join(parts)
 
@@ -345,29 +342,40 @@ def build_scope_aware_session_id(
     task: Task,
     *,
     project_id: str = "",
-    workspace_id: str = "",
 ) -> str:
     return build_projected_session_id(
         thread_id=legacy_session_id_for_task(task).strip() or task.task_id,
         surface=task.requester.channel,
         scope_id=task.scope_id,
         project_id=project_id,
-        workspace_id=workspace_id,
     )
+
+
+def _parse_scope_id(scope_id: str) -> tuple[str, str]:
+    """解析 scope_id，兼容新旧格式。
+
+    旧格式: ``workspace:{wid}:chat:web:{tid}`` → 返回 (wid, tid)
+    新格式: ``project:{pid}:chat:web:{tid}``  → 返回 (pid, tid)
+    """
+    if not scope_id:
+        return ("", "")
+    parts = scope_id.split(":")
+    # 至少需要 prefix:value:...:tid 共 5 段
+    if len(parts) >= 5 and parts[0] in ("workspace", "project"):
+        return (parts[1], parts[-1])
+    # 无法识别的格式，原样返回空 project hint
+    return ("", scope_id)
 
 
 def build_agent_runtime_id(
     *,
     role: AgentRuntimeRole,
     project_id: str,
-    workspace_id: str,
     agent_profile_id: str,
     worker_profile_id: str,
     worker_capability: str,
 ) -> str:
     parts = [f"role:{role.value}", f"project:{project_id or 'default'}"]
-    if workspace_id:
-        parts.append(f"workspace:{workspace_id}")
     if role is AgentRuntimeRole.WORKER:
         if worker_profile_id:
             parts.append(f"worker_profile:{worker_profile_id}")
@@ -398,12 +406,10 @@ def build_memory_namespace_id(
     *,
     kind: MemoryNamespaceKind,
     project_id: str,
-    workspace_id: str,
+    workspace_id: str = "",
     agent_runtime_id: str = "",
 ) -> str:
     parts = [f"memory_namespace:{kind.value}", f"project:{project_id or 'default'}"]
-    if workspace_id:
-        parts.append(f"workspace:{workspace_id}")
     if agent_runtime_id:
         parts.append(f"runtime:{agent_runtime_id}")
     return "|".join(parts)
@@ -441,7 +447,7 @@ def session_state_matches_scope(
         return False
     if project_id and state.project_id and state.project_id != project_id:
         return False
-    return not (workspace_id and state.workspace_id and state.workspace_id != workspace_id)
+    return True
 
 
 @dataclass(slots=True)
@@ -738,7 +744,7 @@ class AgentContextService:
             context_frame_id=context_frame_id,
             task_id=task.task_id,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             query=compiled.latest_user_text or task.title,
             recent_summary=recent_summary,
             memory_namespace_ids=memory_namespace_ids,
@@ -765,7 +771,7 @@ class AgentContextService:
             agent_runtime_id=agent_runtime.agent_runtime_id,
             agent_session_id=agent_session.agent_session_id,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             agent_profile_id=agent_profile.profile_id,
             owner_profile_id=owner_profile.owner_profile_id,
             owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
@@ -987,7 +993,7 @@ class AgentContextService:
                 else task.requester.channel or "chat"
             ),
             project_id=runtime_context.project_id if runtime_context is not None else "",
-            workspace_id=runtime_context.workspace_id if runtime_context is not None else None,
+            workspace_id="",
             task_id=task.task_id,
             session_id=runtime_context.session_id if runtime_context is not None else None,
             work_id=runtime_context.work_id if runtime_context is not None else None,
@@ -1028,7 +1034,7 @@ class AgentContextService:
             task=task,
             surface=request.surface,
             project_id=request.project_id,
-            workspace_id=request.workspace_id or "",
+            workspace_id="",
         )
         agent_profile, degraded_reasons = await self._resolve_agent_profile(
             project=project,
@@ -1149,11 +1155,7 @@ class AgentContextService:
                 if frame.project_id
                 else None
             )
-            workspace = (
-                await self._stores.project_store.get_workspace(frame.workspace_id)
-                if frame.workspace_id
-                else None
-            )
+            workspace = None
             if frame.session_id:
                 state = await self._stores.agent_context_store.get_session_context(frame.session_id)
 
@@ -1162,7 +1164,7 @@ class AgentContextService:
                 task=task,
                 surface=task.requester.channel,
                 project_id=frame.project_id if frame is not None else "",
-                workspace_id=frame.workspace_id if frame is not None else "",
+                workspace_id="",
             )
             state = await self._load_session_context(
                 task=task,
@@ -2376,7 +2378,6 @@ class AgentContextService:
         *,
         role: AgentRuntimeRole,
         project_id: str,
-        workspace_id: str,
         agent_profile_id: str,
         worker_profile_id: str,
         worker_capability: str,
@@ -2384,7 +2385,6 @@ class AgentContextService:
         return build_agent_runtime_id(
             role=role,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_profile_id=agent_profile_id,
             worker_profile_id=worker_profile_id,
             worker_capability=worker_capability,
@@ -2412,13 +2412,13 @@ class AgentContextService:
         *,
         kind: MemoryNamespaceKind,
         project_id: str,
-        workspace_id: str,
+        workspace_id: str = "",
         agent_runtime_id: str = "",
     ) -> str:
         return build_memory_namespace_id(
             kind=kind,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id="",
             agent_runtime_id=agent_runtime_id,
         )
 
@@ -2432,7 +2432,7 @@ class AgentContextService:
     ) -> AgentRuntime:
         role = self._resolve_agent_runtime_role(request)
         project_id = project.project_id if project is not None else ""
-        workspace_id = workspace.workspace_id if workspace is not None else ""
+        workspace_id = ""
         worker_profile_id = str(
             resolve_delegation_target_profile_id(request.delegation_metadata)
         ).strip()
@@ -2450,7 +2450,6 @@ class AgentContextService:
         ).strip() or self._build_agent_runtime_id(
             role=role,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_profile_id=agent_profile.profile_id,
             worker_profile_id=worker_profile_id,
             worker_capability=worker_capability,
@@ -2567,7 +2566,7 @@ class AgentContextService:
                     "agent_runtime_id": agent_runtime.agent_runtime_id,
                     "kind": kind,
                     "project_id": project.project_id if project is not None else "",
-                    "workspace_id": workspace.workspace_id if workspace is not None else "",
+                    "workspace_id": "",
                     "surface": request.surface,
                     "thread_id": request.thread_id or task.thread_id,
                     "legacy_session_id": session_state.session_id,
@@ -2602,7 +2601,7 @@ class AgentContextService:
                 agent_runtime_id=agent_runtime.agent_runtime_id,
                 kind=kind,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=workspace.workspace_id if workspace is not None else "",
+                workspace_id="",
                 surface=request.surface,
                 thread_id=request.thread_id or task.thread_id,
                 legacy_session_id=session_state.session_id,
@@ -2652,7 +2651,7 @@ class AgentContextService:
         project_memory_scope_ids: list[str],
     ) -> list[MemoryNamespace]:
         project_id = project.project_id if project is not None else ""
-        workspace_id = workspace.workspace_id if workspace is not None else ""
+        workspace_id = ""
         project_scope_ids = list(
             dict.fromkeys(scope for scope in project_memory_scope_ids if scope)
         )
@@ -3186,7 +3185,7 @@ class AgentContextService:
         )
         existing = await self._stores.agent_context_store.get_owner_overlay_for_scope(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
         )
         if existing is not None:
             if existing.bootstrap_template_ids != bootstrap_template_ids:
@@ -3199,17 +3198,11 @@ class AgentContextService:
                 await self._stores.agent_context_store.save_owner_overlay(existing)
             return existing
         overlay = OwnerProfileOverlay(
-            owner_overlay_id=(
-                f"owner-overlay-{workspace.workspace_id}"
-                if workspace is not None
-                else f"owner-overlay-{project.project_id}"
-            ),
+            owner_overlay_id=f"owner-overlay-{project.project_id}",
             owner_profile_id=owner_profile.owner_profile_id,
-            scope=(
-                OwnerOverlayScope.WORKSPACE if workspace is not None else OwnerOverlayScope.PROJECT
-            ),
+            scope=OwnerOverlayScope.PROJECT,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             assistant_identity_overrides={
                 "assistant_name": f"{project.name} Agent",
                 "project_slug": project.slug,
@@ -3233,7 +3226,7 @@ class AgentContextService:
         surface: str,
     ) -> BootstrapSession:
         project_id = project.project_id if project is not None else ""
-        workspace_id = workspace.workspace_id if workspace is not None else ""
+        workspace_id = ""
         bootstrap_steps = [
             "owner_identity",
             "assistant_identity",
@@ -3339,11 +3332,7 @@ class AgentContextService:
                 await self._stores.agent_context_store.save_bootstrap_session(existing)
             return existing
         session = BootstrapSession(
-            bootstrap_id=(
-                f"bootstrap-{workspace_id}"
-                if workspace_id
-                else f"bootstrap-{project_id or 'default'}"
-            ),
+            bootstrap_id=f"bootstrap-{project_id or 'default'}",
             project_id=project_id,
             workspace_id=workspace_id,
             owner_profile_id=owner_profile.owner_profile_id,
@@ -3379,13 +3368,12 @@ class AgentContextService:
         session_id = session_id_hint or build_scope_aware_session_id(
             task,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
         )
         state = SessionContextState(
             session_id=session_id,
             thread_id=task.thread_id,
             project_id=project.project_id if project is not None else "",
-            workspace_id=workspace.workspace_id if workspace is not None else "",
+            workspace_id="",
             task_ids=[task.task_id],
             recent_turn_refs=[task.task_id],
             recent_artifact_refs=[],
@@ -3404,7 +3392,7 @@ class AgentContextService:
         session_id_hint: str = "",
     ) -> SessionContextState | None:
         project_id = project.project_id if project is not None else ""
-        workspace_id = workspace.workspace_id if workspace is not None else ""
+        workspace_id = ""
         hinted_session_id = session_id_hint.strip()
         if hinted_session_id:
             hinted_state = await self._stores.agent_context_store.get_session_context(
@@ -3421,7 +3409,6 @@ class AgentContextService:
         session_id = build_scope_aware_session_id(
             task,
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         state = await self._stores.agent_context_store.get_session_context(session_id)
         if state is not None:
@@ -3443,7 +3430,7 @@ class AgentContextService:
             update={
                 "session_id": session_id,
                 "project_id": project_id,
-                "workspace_id": workspace_id,
+                "workspace_id": "",
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -3765,8 +3752,7 @@ class AgentContextService:
         for binding in bindings:
             if binding.binding_type not in _MEMORY_BINDING_TYPES:
                 continue
-            if workspace is not None and binding.workspace_id not in {None, workspace.workspace_id}:
-                continue
+            # workspace 过滤已移除（Phase 3b workspace 空化）
             if binding.binding_key:
                 scope_ids.append(binding.binding_key)
         if not scope_ids and task.scope_id:
@@ -3919,9 +3905,9 @@ class AgentContextService:
                     project_name=project.name if project is not None else "",
                     project_slug=project.slug if project is not None else "",
                     project_root=self._project_root,
-                    workspace_id=workspace.workspace_id if workspace is not None else "",
-                    workspace_slug=workspace.slug if workspace is not None else "",
-                    workspace_root_path=workspace.root_path if workspace is not None else "",
+                    workspace_id="",
+                    workspace_slug="",
+                    workspace_root_path="",
                     # Feature 063 T2.7: 根据 Agent 角色选择 load_profile
                     load_profile=effective_load_profile,
                 ),
@@ -3939,11 +3925,9 @@ class AgentContextService:
                         agent_profile=agent_profile,
                         project_name=project.name if project is not None else "",
                         project_slug=project.slug if project is not None else "",
-                        workspace_id=workspace.workspace_id if workspace is not None else "",
-                        workspace_slug=workspace.slug if workspace is not None else "",
-                        workspace_root_path=(
-                            workspace.root_path if workspace is not None else ""
-                        ),
+                        workspace_id="",
+                        workspace_slug="",
+                        workspace_root_path="",
                         # Feature 063: 透传 load_profile
                         load_profile=effective_load_profile,
                     ),
@@ -3996,7 +3980,7 @@ class AgentContextService:
                     "content": (
                         f"ProjectContext: {project.name} ({project.slug})\n"
                         f"description: {truncate_chars(project.description or 'N/A', 360)}\n"
-                        f"workspace: {workspace.name if workspace is not None else 'default'}\n"
+                        f"workspace: default\n"
                         f"task_scope_id: {task.scope_id or 'N/A'}"
                     ),
                 }
@@ -4178,7 +4162,7 @@ class AgentContextService:
                 runtime_summary = (
                     f"session_id={runtime_context.session_id or 'N/A'}, "
                     f"project_id={runtime_context.project_id or 'N/A'}, "
-                    f"workspace_id={runtime_context.workspace_id or 'N/A'}, "
+                    f"workspace_id=N/A, "
                     f"work_id={runtime_context.work_id or 'N/A'}, "
                     f"context_frame_id={runtime_context.context_frame_id or 'N/A'}, "
                     f"route_reason={runtime_context.route_reason or 'N/A'}"
@@ -4493,14 +4477,6 @@ class AgentContextService:
         if project is not None:
             refs.append(
                 {"ref_type": "project", "ref_id": project.project_id, "label": project.slug}
-            )
-        if workspace is not None:
-            refs.append(
-                {
-                    "ref_type": "workspace",
-                    "ref_id": workspace.workspace_id,
-                    "label": workspace.slug,
-                }
             )
         if owner_overlay is not None:
             refs.append(

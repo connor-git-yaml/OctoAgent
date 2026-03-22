@@ -571,6 +571,33 @@ class SqliteProjectStore:
         await self.delete_workspaces(run.rollback_plan.delete_workspace_ids)
         await self.delete_projects(run.rollback_plan.delete_project_ids)
 
+    async def resolve_project_for_scope(self, scope_id: str) -> Project | None:
+        """通过 scope_id 解析到 Project。
+
+        - scope_id 以 ``workspace:`` 开头时，提取 workspace_id 再查 workspaces 表找到 project_id
+        - scope_id 以 ``project:`` 开头时，直接提取 project_id
+        - 其他情况返回 None
+        """
+        if not scope_id:
+            return None
+
+        if scope_id.startswith("project:"):
+            project_id = scope_id.split(":", 2)[1].strip()
+            if project_id:
+                return await self.get_project(project_id)
+            return None
+
+        if scope_id.startswith("workspace:"):
+            workspace_id = scope_id.split(":", 2)[1].strip()
+            if workspace_id:
+                workspace = await self.get_workspace(workspace_id)
+                if workspace is not None:
+                    return await self.get_project(workspace.project_id)
+            return None
+
+        return None
+
+    # DEPRECATED: workspace 概念已废弃，请使用 resolve_project_for_scope
     async def resolve_workspace_for_scope(
         self,
         scope_id: str,

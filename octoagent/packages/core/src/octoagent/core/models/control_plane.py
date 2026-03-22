@@ -167,7 +167,7 @@ class ProjectSelectorDocument(ControlPlaneDocument):
     resource_type: str = "project_selector"
     resource_id: str = "project:selector"
     current_project_id: str = Field(default="")
-    current_workspace_id: str = Field(default="")
+    current_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     default_project_id: str = Field(default="")
     fallback_reason: str = Field(default="")
     switch_allowed: bool = False
@@ -220,7 +220,7 @@ class SessionProjectionDocument(ControlPlaneDocument):
     focused_thread_id: str = Field(default="")
     new_conversation_token: str = Field(default="")
     new_conversation_project_id: str = Field(default="")
-    new_conversation_workspace_id: str = Field(default="")
+    new_conversation_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     new_conversation_agent_profile_id: str = Field(default="")
     sessions: list[SessionProjectionItem] = Field(default_factory=list)
     summary: SessionProjectionSummary = Field(default_factory=SessionProjectionSummary)
@@ -249,7 +249,7 @@ class AgentProfilesDocument(ControlPlaneDocument):
     resource_type: str = "agent_profiles"
     resource_id: str = "agent-profiles:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     profiles: list[AgentProfileItem] = Field(default_factory=list)
 
 
@@ -267,7 +267,7 @@ class WorkerProfileStaticConfig(BaseModel):
 
 class WorkerProfileDynamicContext(BaseModel):
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     active_work_count: int = Field(default=0, ge=0)
     running_work_count: int = Field(default=0, ge=0)
     attention_work_count: int = Field(default=0, ge=0)
@@ -312,7 +312,7 @@ class WorkerProfilesDocument(ControlPlaneDocument):
     resource_type: str = "worker_profiles"
     resource_id: str = "worker-profiles:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     profiles: list[WorkerProfileViewItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
@@ -339,7 +339,7 @@ class OwnerProfileDocument(ControlPlaneDocument):
     resource_type: str = "owner_profile"
     resource_id: str = "owner-profile:default"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     profile: dict[str, Any] = Field(default_factory=dict)
     overlays: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -348,7 +348,7 @@ class BootstrapSessionDocument(ControlPlaneDocument):
     resource_type: str = "bootstrap_session"
     resource_id: str = "bootstrap:current"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     session: dict[str, Any] = Field(default_factory=dict)
     resumable: bool = False
 
@@ -493,7 +493,7 @@ class ContextContinuityDocument(ControlPlaneDocument):
     resource_type: str = "context_continuity"
     resource_id: str = "context:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     sessions: list[ContextSessionItem] = Field(default_factory=list)
     frames: list[ContextFrameItem] = Field(default_factory=list)
     agent_runtimes: list[AgentRuntimeItem] = Field(default_factory=list)
@@ -553,7 +553,7 @@ class PolicyProfilesDocument(ControlPlaneDocument):
     resource_type: str = "policy_profiles"
     resource_id: str = "policy:profiles"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     active_profile_id: str = Field(default="")
     profiles: list[PolicyProfileItem] = Field(default_factory=list)
 
@@ -583,7 +583,7 @@ class SkillGovernanceDocument(ControlPlaneDocument):
     resource_type: str = "skill_governance"
     resource_id: str = "skills:governance"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     items: list[SkillGovernanceItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
@@ -618,7 +618,7 @@ class McpProviderCatalogDocument(ControlPlaneDocument):
     resource_type: str = "mcp_provider_catalog"
     resource_id: str = "mcp-providers:catalog"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     items: list[McpProviderItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
@@ -627,7 +627,7 @@ class SetupGovernanceDocument(ControlPlaneDocument):
     resource_type: str = "setup_governance"
     resource_id: str = "setup:governance"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     project_scope: SetupGovernanceSection = Field(
         default_factory=lambda: SetupGovernanceSection(
             section_id="project_scope",
@@ -666,7 +666,7 @@ class CapabilityPackDocument(ControlPlaneDocument):
     resource_id: str = "capability:bundled"
     pack: BundledCapabilityPack = Field(default_factory=BundledCapabilityPack)
     selected_project_id: str = Field(default="")
-    selected_workspace_id: str = Field(default="")
+    selected_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
 
 
 class WorkProjectionItem(BaseModel):
@@ -993,7 +993,7 @@ class RetrievalPlatformDocument(ControlPlaneDocument):
     resource_type: str = "retrieval_platform"
     resource_id: str = "retrieval:platform"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     profiles: list[EmbeddingProfile] = Field(default_factory=list)
     corpora: list[RetrievalCorpusState] = Field(default_factory=list)
     generations: list[IndexGeneration] = Field(default_factory=list)
@@ -1005,7 +1005,7 @@ class MemoryConsoleDocument(ControlPlaneDocument):
     resource_type: str = "memory_console"
     resource_id: str = "memory:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     backend_id: str = Field(default="")
     retrieval_backend: str = Field(default="")
     backend_state: str = Field(default="")
@@ -1024,7 +1024,7 @@ class MemorySubjectHistoryDocument(ControlPlaneDocument):
     resource_type: str = "memory_subject_history"
     resource_id: str = "memory-subject:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     retrieval_backend: str = Field(default="")
     backend_state: str = Field(default="")
     index_health: dict[str, Any] = Field(default_factory=dict)
@@ -1063,7 +1063,7 @@ class MemoryProposalAuditDocument(ControlPlaneDocument):
     resource_type: str = "memory_proposal_audit"
     resource_id: str = "memory-proposals:overview"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     retrieval_backend: str = Field(default="")
     backend_state: str = Field(default="")
     summary: MemoryProposalSummary = Field(default_factory=MemoryProposalSummary)
@@ -1128,7 +1128,7 @@ class VaultAuthorizationDocument(ControlPlaneDocument):
     resource_type: str = "vault_authorization"
     resource_id: str = "vault:authorization"
     active_project_id: str = Field(default="")
-    active_workspace_id: str = Field(default="")
+    active_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     retrieval_backend: str = Field(default="")
     backend_state: str = Field(default="")
     active_requests: list[VaultAccessRequestItem] = Field(default_factory=list)
@@ -1204,11 +1204,11 @@ class ControlPlaneEvent(BaseModel):
 
 class ControlPlaneState(BaseModel):
     selected_project_id: str = Field(default="")
-    selected_workspace_id: str = Field(default="")
+    selected_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     focused_session_id: str = Field(default="")
     focused_thread_id: str = Field(default="")
     new_conversation_token: str = Field(default="")
     new_conversation_project_id: str = Field(default="")
-    new_conversation_workspace_id: str = Field(default="")
+    new_conversation_workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     new_conversation_agent_profile_id: str = Field(default="")
     updated_at: datetime = Field(default_factory=_utc_now)

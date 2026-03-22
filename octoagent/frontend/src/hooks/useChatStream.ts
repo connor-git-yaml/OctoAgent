@@ -74,6 +74,7 @@ export interface ChatSessionScopeSnapshot {
   activeWorkspaceId?: string | null;
   newConversationToken?: string | null;
   newConversationProjectId?: string | null;
+  /** @deprecated workspace 概念已移除，保留字段仅为兼容 */
   newConversationWorkspaceId?: string | null;
   newConversationAgentProfileId?: string | null;
 }
@@ -81,7 +82,6 @@ export interface ChatSessionScopeSnapshot {
 interface PendingConversationScope {
   token: string;
   projectId: string;
-  workspaceId: string;
   agentProfileId: string;
 }
 
@@ -122,7 +122,6 @@ function buildPendingConversationScope(
   return {
     token,
     projectId: String(snapshot?.newConversationProjectId ?? "").trim(),
-    workspaceId: String(snapshot?.newConversationWorkspaceId ?? "").trim(),
     agentProfileId: String(snapshot?.newConversationAgentProfileId ?? "").trim(),
   };
 }
@@ -278,9 +277,6 @@ export function useChatStream(
         const effectiveProjectId =
           pendingConversationScope?.projectId ||
           String(sessionScope?.activeProjectId ?? "").trim();
-        const effectiveWorkspaceId =
-          pendingConversationScope?.workspaceId ||
-          String(sessionScope?.activeWorkspaceId ?? "").trim();
         const effectiveAgentProfileId =
           (!taskId && pendingConversationScope?.token
             ? pendingConversationScope.agentProfileId
@@ -299,7 +295,6 @@ export function useChatStream(
                 ? pendingConversationScope.token
                 : undefined,
             project_id: !taskId && effectiveProjectId ? effectiveProjectId : undefined,
-            workspace_id: !taskId && effectiveWorkspaceId ? effectiveWorkspaceId : undefined,
           }),
         });
 
@@ -510,7 +505,6 @@ export function useChatStream(
       const nextScope = {
         newConversationToken: String(resultData.new_conversation_token ?? ""),
         newConversationProjectId: String(resultData.project_id ?? ""),
-        newConversationWorkspaceId: String(resultData.workspace_id ?? ""),
         newConversationAgentProfileId: String(resultData.agent_profile_id ?? ""),
       };
       setPendingConversationScope(buildPendingConversationScope(nextScope));
@@ -527,7 +521,6 @@ export function useChatStream(
   }, [
     sessionScope?.newConversationToken,
     sessionScope?.newConversationProjectId,
-    sessionScope?.newConversationWorkspaceId,
     sessionScope?.newConversationAgentProfileId,
     taskId,
   ]);

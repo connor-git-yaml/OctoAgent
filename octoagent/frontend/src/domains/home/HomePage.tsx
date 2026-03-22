@@ -273,10 +273,6 @@ export default function HomePage() {
     selector.available_projects.find((item) => item.project_id === selector.current_project_id) ??
     null;
   const [selectedProjectId, setSelectedProjectId] = useState(selector.current_project_id);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(selector.current_workspace_id);
-  const availableWorkspaces = selector.available_workspaces.filter(
-    (item) => item.project_id === selectedProjectId
-  );
   const operatorItems = (sessions.operator_items ?? []).filter((item) => item.state === "pending");
   const activeWorks = delegation.works.filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
@@ -308,8 +304,7 @@ export default function HomePage() {
     nextActions: setup.review.next_actions,
     blockingReasons: setup.review.blocking_reasons,
   });
-  const showContextSwitcher =
-    selector.available_projects.length > 1 || availableWorkspaces.length > 1;
+  const showContextSwitcher = selector.available_projects.length > 1;
   const latestSessionTitle = latestSession?.title?.trim() || "还没有最近对话";
   const latestSessionSummary = latestSession?.latest_message_summary?.trim()
     ? buildSessionSummary(latestSession.latest_message_summary)
@@ -317,15 +312,7 @@ export default function HomePage() {
 
   useEffect(() => {
     setSelectedProjectId(selector.current_project_id);
-    setSelectedWorkspaceId(selector.current_workspace_id);
-  }, [selector.current_project_id, selector.current_workspace_id]);
-
-  useEffect(() => {
-    if (availableWorkspaces.some((item) => item.workspace_id === selectedWorkspaceId)) {
-      return;
-    }
-    setSelectedWorkspaceId(availableWorkspaces[0]?.workspace_id ?? "");
-  }, [availableWorkspaces, selectedWorkspaceId]);
+  }, [selector.current_project_id]);
 
   return (
     <div className="wb-page">
@@ -526,8 +513,7 @@ export default function HomePage() {
               </div>
             </div>
             <p className="wb-panel-copy">
-              当前项目 <strong>{currentProject?.name ?? selector.current_project_id}</strong>，当前
-              workspace <strong>{selector.current_workspace_id}</strong>。
+              当前项目 <strong>{currentProject?.name ?? selector.current_project_id}</strong>。
             </p>
             {selector.fallback_reason ? (
               <p className="wb-panel-copy wb-copy-warning">{selector.fallback_reason}</p>
@@ -548,33 +534,16 @@ export default function HomePage() {
                   </select>
                 </label>
               ) : null}
-              {availableWorkspaces.length > 1 ? (
-                <label className="wb-field">
-                  <span>切换 Workspace</span>
-                  <select
-                    value={selectedWorkspaceId}
-                    onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-                  >
-                    {availableWorkspaces.map((workspace) => (
-                      <option key={workspace.workspace_id} value={workspace.workspace_id}>
-                        {workspace.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
               <button
                 type="button"
                 className="wb-button wb-button-secondary"
                 disabled={
                   busyActionId === "project.select" ||
-                  (selectedProjectId === selector.current_project_id &&
-                    selectedWorkspaceId === selector.current_workspace_id)
+                  selectedProjectId === selector.current_project_id
                 }
                 onClick={() =>
                   void submitAction("project.select", {
                     project_id: selectedProjectId,
-                    workspace_id: selectedWorkspaceId,
                   })
                 }
               >

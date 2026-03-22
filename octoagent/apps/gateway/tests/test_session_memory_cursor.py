@@ -46,7 +46,7 @@ async def session_with_turns(store: SqliteAgentContextStore):
     runtime = AgentRuntime(
         agent_runtime_id="rt-test-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         name="Test Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -56,7 +56,7 @@ async def session_with_turns(store: SqliteAgentContextStore):
         agent_runtime_id="rt-test-001",
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
     )
     await store.save_agent_session(session)
 
@@ -81,7 +81,7 @@ async def test_cursor_default_value(store: SqliteAgentContextStore):
     runtime = AgentRuntime(
         agent_runtime_id="rt-default-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         name="Default Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -193,7 +193,7 @@ async def test_save_agent_session_preserves_cursor(store: SqliteAgentContextStor
     runtime = AgentRuntime(
         agent_runtime_id="rt-cursor-001",
         project_id="proj-001",
-        workspace_id="ws-001",
+        workspace_id="",
         name="Cursor Runtime",
     )
     await store.save_agent_runtime(runtime)

@@ -69,7 +69,7 @@ def _make_llm_service(response_dict: dict | None = None) -> MagicMock:
     d = response_dict if response_dict is not None else _make_profile_json()
     result_mock = MagicMock()
     result_mock.content = json.dumps(d, ensure_ascii=False)
-    service.call_with_fallback = AsyncMock(return_value=result_mock)
+    service.call = AsyncMock(return_value=result_mock)
     return service
 
 
@@ -179,7 +179,7 @@ class TestProfileGeneratorService:
         )
 
         assert result.skipped is True
-        llm.call_with_fallback.assert_not_called()
+        llm.call.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_null_dimension_skipped(self):
@@ -299,7 +299,7 @@ class TestProfileGeneratorService:
         llm = MagicMock()
         bad_result = MagicMock()
         bad_result.content = "不是有效的JSON"
-        llm.call_with_fallback = AsyncMock(return_value=bad_result)
+        llm.call = AsyncMock(return_value=bad_result)
 
         memory = _make_memory_service()
 

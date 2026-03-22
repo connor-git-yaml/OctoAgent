@@ -119,7 +119,7 @@ async def _build_runtime_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="workspace-default",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -486,7 +486,7 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="research",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             surface="web",
         )
         joined = "\n".join(item["content"] for item in rendered)
@@ -521,7 +521,7 @@ async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="research",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             surface="web",
         )
         joined = "\n".join(item["content"] for item in rendered)
@@ -562,7 +562,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="workspace-default",
+            active_workspace_id="",
             source="tests",
         )
     )
@@ -1635,7 +1635,7 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
         assert len(child_works) == 1
         child = child_works[0]
         assert child.project_id == "project-default"
-        assert child.workspace_id == "workspace-default"
+        assert child.workspace_id == ""
         assert child.metadata["requested_tool_profile"] == "standard"
         assert child.metadata["requested_worker_type"] == "research"
     finally:
@@ -1968,7 +1968,7 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
-                workspace_id="workspace-default",
+                workspace_id="",
                 surface="web",
             )
             assert len(rendered) == 1  # 只有 shared
@@ -2039,7 +2039,7 @@ async def test_bootstrap_token_budget_within_limit(
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="general",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             surface="web",
         )
 

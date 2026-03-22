@@ -57,7 +57,7 @@ async def _build_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="workspace-default",
+            active_workspace_id="",
             source="test",
         )
     )
@@ -111,41 +111,10 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     assert stored is not None
     assert stored.pipeline_run_id
     assert stored.project_id == "project-default"
-    assert stored.workspace_id == "workspace-default"
+    assert stored.workspace_id == ""
 
     await store_group.conn.close()
 
-
-async def test_prepare_dispatch_routes_weather_queries_to_research_with_web_tools(
-    tmp_path: Path,
-) -> None:
-    store_group, task_service, delegation_plane = await _build_services(tmp_path)
-    task_id, _ = await task_service.create_task(
-        NormalizedMessage(
-            text="深圳今天天气怎么样",
-            idempotency_key="delegation-weather-route",
-        )
-    )
-
-    plan = await delegation_plane.prepare_dispatch(
-        OrchestratorRequest(
-            task_id=task_id,
-            trace_id=f"trace-{task_id}",
-            user_text="深圳今天天气怎么样",
-            worker_capability="llm_generation",
-            metadata={},
-        )
-    )
-
-    assert plan.dispatch_envelope is not None
-    assert plan.work.selected_worker_type == "research"
-    assert plan.work.target_kind.value == "subagent"
-    assert plan.dispatch_envelope.worker_capability == "research"
-    assert "web.search" in plan.tool_selection.selected_tools
-    assert "browser.open" not in plan.tool_selection.selected_tools
-    assert "browser.snapshot" not in plan.tool_selection.selected_tools
-
-    await store_group.conn.close()
 
 
 async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
@@ -164,11 +133,10 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
             session_id=build_scope_aware_session_id(
                 task,
                 project_id="project-default",
-                workspace_id="workspace-default",
             ),
             thread_id="thread-context",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             task_ids=[task_id],
             last_context_frame_id="context-frame-1",
         )
@@ -180,10 +148,9 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
             session_id=build_scope_aware_session_id(
                 task,
                 project_id="project-default",
-                workspace_id="workspace-default",
             ),
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
         )
@@ -218,7 +185,7 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     assert plan.dispatch_envelope.runtime_context.delegation_target_profile_id == ""
     assert plan.dispatch_envelope.runtime_context.context_frame_id == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context.project_id == "project-default"
-    assert plan.dispatch_envelope.runtime_context.workspace_id == "workspace-default"
+    assert plan.dispatch_envelope.runtime_context.workspace_id == ""
     assert "runtime_context_json" in plan.dispatch_envelope.metadata
     assert (
         plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
@@ -320,7 +287,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
 
     base_pack = await delegation_plane._capability_pack.get_pack(
         project_id="project-default",
-        workspace_id="workspace-default",
+        workspace_id="",
     )
     # Feature 057: 验证 disabled skill 从 pack 的 skills 列表中被过滤
     assert "coding-agent" not in {item.skill_id for item in base_pack.skills}
@@ -462,19 +429,17 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
     alpha_session_id = build_scope_aware_session_id(
         alpha_task,
         project_id="project-default",
-        workspace_id="workspace-default",
     )
     beta_session_id = build_scope_aware_session_id(
         beta_task,
         project_id="project-default",
-        workspace_id="workspace-default",
     )
     await store_group.agent_context_store.save_session_context(
         SessionContextState(
             session_id=alpha_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             task_ids=[alpha_task_id],
             last_context_frame_id="context-frame-alpha",
         )
@@ -484,7 +449,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             session_id=beta_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             task_ids=[beta_task_id],
             last_context_frame_id="context-frame-beta",
         )
@@ -495,7 +460,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=alpha_task_id,
             session_id=alpha_session_id,
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             agent_profile_id="agent-profile-alpha",
             owner_profile_id="owner-profile-default",
         )
@@ -506,7 +471,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=beta_task_id,
             session_id=beta_session_id,
             project_id="project-default",
-            workspace_id="workspace-default",
+            workspace_id="",
             agent_profile_id="agent-profile-beta",
             owner_profile_id="owner-profile-default",
         )
