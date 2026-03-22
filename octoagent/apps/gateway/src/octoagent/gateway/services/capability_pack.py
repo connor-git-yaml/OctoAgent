@@ -1215,6 +1215,16 @@ class CapabilityPackService:
                     f"path escapes workspace root ({workspace_root}). "
                     f"写操作仅允许 workspace 内路径。"
                 )
+            # 禁止访问系统源码目录——Agent 不应该读自己的实现代码，
+            # 就像 Claude Code 不能读 Claude Code 的源码一样。
+            # Agent 应该通过工具描述和参数说明来使用工具，不需要理解内部实现。
+            app_source_dir = workspace_root / "app" / "octoagent"
+            if resolved.is_relative_to(app_source_dir):
+                raise RuntimeError(
+                    f"'{raw_path}' 位于系统源码目录（app/octoagent/），不可访问。"
+                    f"你不需要阅读系统源码来完成任务——直接按工具描述使用工具即可。"
+                    f"例如安装 MCP 请使用 mcp.install 工具。"
+                )
             return resolved
 
         def _truncate_text(value: str, *, limit: int = 100_000) -> str:
@@ -1526,6 +1536,17 @@ class CapabilityPackService:
             working_dir = _resolve_workspace_path(workspace_root, cwd)
             if not working_dir.exists() or not working_dir.is_dir():
                 raise RuntimeError(f"cwd is not a directory: {working_dir}")
+            # 禁止通过 terminal 访问系统源码目录
+            _app_source_marker = str(workspace_root / "app" / "octoagent")
+            if _app_source_marker in command or "app/octoagent" in command:
+                return json.dumps({
+                    "error": "SYSTEM_SOURCE_BLOCKED",
+                    "message": (
+                        "app/octoagent/ 是系统源码目录，不可通过 terminal 访问。"
+                        "你不需要阅读系统源码——直接按工具描述使用工具即可。"
+                        "例如安装 MCP 请使用 mcp.install 工具。"
+                    ),
+                }, ensure_ascii=False)
             # 超时上限 600s（对齐 MCP 安装等长命令场景）
             bounded_timeout = max(1.0, min(timeout_seconds, 600.0))
             # 工具层不做低阈值截断——由 LargeOutputHandler 按上下文比例统一管理
