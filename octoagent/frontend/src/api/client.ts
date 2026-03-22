@@ -287,8 +287,15 @@ function buildQueryString(params: Record<string, unknown>): string {
 }
 
 /** GET /api/control/snapshot -- control plane 首屏快照 */
-export async function fetchControlSnapshot(): Promise<ControlPlaneSnapshot> {
-  return apiFetch<ControlPlaneSnapshot>("/api/control/snapshot");
+export async function fetchControlSnapshot(
+  options: {
+    mode?: "lite" | "full";
+  } = {}
+): Promise<ControlPlaneSnapshot> {
+  const mode = options.mode && options.mode !== "full" ? options.mode : undefined;
+  return apiFetch<ControlPlaneSnapshot>(
+    `/api/control/snapshot${buildQueryString({ mode })}`
+  );
 }
 
 type SnapshotControlResourceRoute = Exclude<

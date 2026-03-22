@@ -205,8 +205,65 @@ export function useWorkbenchData(
       setLoading(false);
       return;
     }
-    void refreshSnapshot();
-  }, []);
+    if (options.initialSnapshot) {
+      void refreshSnapshot();
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadInitialSnapshot = async () => {
+      setError(null);
+      setAuthError(null);
+      try {
+        const liteSnapshot = await fetchWorkbenchSnapshot("lite");
+        if (cancelled) {
+          return;
+        }
+        setSnapshot(liteSnapshot);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        try {
+          const fullSnapshot = await fetchWorkbenchSnapshot();
+          if (cancelled) {
+            return;
+          }
+          setSnapshot(fullSnapshot);
+        } catch (fullErr) {
+          if (cancelled) {
+            return;
+          }
+          setError(fullErr instanceof Error ? fullErr.message : "工作台加载失败");
+          setAuthError(isFrontDoorApiError(fullErr) ? fullErr : null);
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        }
+        return;
+      }
+
+      void (async () => {
+        try {
+          const fullSnapshot = await fetchWorkbenchSnapshot();
+          if (!cancelled) {
+            setSnapshot(fullSnapshot);
+          }
+        } catch {
+          // lite snapshot 已就绪时保持静默
+        }
+      })();
+    };
+
+    void loadInitialSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [options.autoRefresh, options.initialSnapshot, refreshSnapshot]);
 
   return {
     snapshot,

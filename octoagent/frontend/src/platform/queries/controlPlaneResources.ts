@@ -22,8 +22,10 @@ export interface RefreshSnapshotResult {
   routes: WorkbenchResourceRoute[];
 }
 
-export async function fetchWorkbenchSnapshot(): Promise<ControlPlaneSnapshot> {
-  return fetchControlSnapshot();
+export async function fetchWorkbenchSnapshot(
+  mode?: "lite" | "full"
+): Promise<ControlPlaneSnapshot> {
+  return fetchControlSnapshot(mode ? { mode } : undefined);
 }
 
 export async function fetchSnapshotResource(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
@@ -415,7 +416,7 @@ class ControlPlaneService:
             )
         )
 
-    async def get_snapshot(self) -> dict[str, Any]:
+    async def get_snapshot(self, *, mode: str | None = None) -> dict[str, Any]:
         registry = self.get_action_registry()
         resources: dict[str, Any] = {}
         degraded_sections: list[str] = []
@@ -438,30 +439,91 @@ class ControlPlaneService:
             ("retrieval_platform", self.get_retrieval_platform_document),
             ("memory", self.get_memory_console),
         )
-        for section, resolver in resolvers:
+        lite_sections = {
+            "config",
+            "project_selector",
+            "sessions",
+            "agent_profiles",
+            "worker_profiles",
+            "owner_profile",
+            "bootstrap_session",
+            "context_continuity",
+            "capability_pack",
+            "skill_governance",
+            "mcp_provider_catalog",
+            "setup_governance",
+            "delegation",
+            "diagnostics",
+        }
+        selected_resolvers = (
+            [item for item in resolvers if item[0] in lite_sections]
+            if str(mode or "").strip().lower() == "lite"
+            else list(resolvers)
+        )
+        skipped_sections = {
+            name for name, _ in resolvers
+            if str(mode or "").strip().lower() == "lite" and name not in lite_sections
+        }
+
+        async def _run_resolver(section: str, resolver: Any) -> tuple[str, Any, Exception | None]:
             try:
                 document = await resolver()
-                resources[section] = document.model_dump(mode="json", by_alias=True)
+                return section, document, None
             except Exception as exc:  # pragma: no cover - 通过 API 测试覆盖
-                log.warning(
-                    "control_plane_snapshot_section_failed",
-                    section=section,
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                    exc_info=True,
-                )
-                degraded_sections.append(section)
-                resource_errors[section] = {
-                    "code": "SNAPSHOT_SECTION_UNAVAILABLE",
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                }
-                resources[section] = self._degraded_snapshot_resource(
-                    section=section,
-                    error_type=type(exc).__name__,
-                    message=str(exc),
-                )
-        return {
+                return section, None, exc
+
+        snapshot_started = time.perf_counter()
+        section_timings_ms: dict[str, float] = {}
+
+        async def _run_timed_resolver(section: str, resolver: Any) -> tuple[str, Any, Exception | None]:
+            started = time.perf_counter()
+            try:
+                return await _run_resolver(section, resolver)
+            finally:
+                section_timings_ms[section] = (time.perf_counter() - started) * 1000
+
+        results = await asyncio.gather(
+            *[
+                _run_timed_resolver(section, resolver)
+                for section, resolver in selected_resolvers
+            ]
+        )
+        for section, document, exc in results:
+            if exc is None:
+                resources[section] = document.model_dump(mode="json", by_alias=True)
+                continue
+            log.warning(
+                "control_plane_snapshot_section_failed",
+                section=section,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                exc_info=True,
+            )
+            degraded_sections.append(section)
+            resource_errors[section] = {
+                "code": "SNAPSHOT_SECTION_UNAVAILABLE",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            }
+            resources[section] = self._degraded_snapshot_resource(
+                section=section,
+                error_type=type(exc).__name__,
+                message=str(exc),
+            )
+
+        for section in skipped_sections:
+            degraded_sections.append(section)
+            resource_errors[section] = {
+                "code": "SNAPSHOT_SECTION_SKIPPED",
+                "error_type": "LiteSnapshot",
+                "message": "该资源在 lite snapshot 中跳过，稍后会自动补齐。",
+            }
+            resources[section] = self._degraded_snapshot_resource(
+                section=section,
+                error_type="LiteSnapshot",
+                message="该资源在 lite snapshot 中跳过，稍后会自动补齐。",
+            )
+        snapshot_payload = {
             "status": "degraded" if degraded_sections else "ready",
             "contract_version": registry.contract_version,
             "resources": resources,
@@ -470,6 +532,16 @@ class ControlPlaneService:
             "resource_errors": resource_errors,
             "generated_at": datetime.now(tz=UTC).isoformat(),
         }
+        total_ms = (time.perf_counter() - snapshot_started) * 1000
+        log.info(
+            "control_plane_snapshot_ready",
+            mode=(str(mode).strip().lower() if mode is not None else "full"),
+            total_ms=round(total_ms, 2),
+            section_ms={key: round(value, 2) for key, value in section_timings_ms.items()},
+            skipped_sections=sorted(skipped_sections),
+            degraded_sections=sorted(degraded_sections),
+        )
+        return snapshot_payload
 
     @staticmethod
     def _degraded_snapshot_resource(

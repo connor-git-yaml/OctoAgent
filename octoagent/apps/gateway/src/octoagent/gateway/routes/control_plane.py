@@ -12,8 +12,11 @@ router = APIRouter()
 
 
 @router.get("/api/control/snapshot")
-async def get_control_snapshot(control_plane=Depends(get_control_plane_service)):
-    return await control_plane.get_snapshot()
+async def get_control_snapshot(
+    mode: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    return await control_plane.get_snapshot(mode=mode)
 
 
 @router.get("/api/control/resources/config")
