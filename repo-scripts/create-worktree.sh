@@ -2,7 +2,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+resolve_repo_root() {
+  local candidate_repo
+  local common_dir
+  candidate_repo="$(git -C "${SCRIPT_DIR}/.." rev-parse --show-toplevel 2>/dev/null || true)"
+  common_dir="$(git -C "${SCRIPT_DIR}/.." rev-parse --git-common-dir 2>/dev/null || true)"
+
+  if [[ -n "${common_dir}" ]]; then
+    if [[ "${common_dir}" = /* ]]; then
+      local root_from_common
+      root_from_common="$(cd "${common_dir}/.." && pwd)"
+      if [[ -d "${root_from_common}" ]]; then
+        printf '%s\n' "${root_from_common}"
+        return 0
+      fi
+    elif [[ -n "${candidate_repo}" ]]; then
+      local root_from_relative_common
+      root_from_relative_common="$(cd "${candidate_repo}/${common_dir}/.." && pwd)"
+      if [[ -d "${root_from_relative_common}" ]]; then
+        printf '%s\n' "${root_from_relative_common}"
+        return 0
+      fi
+    fi
+  fi
+
+  if [[ -n "${candidate_repo}" ]]; then
+    printf '%s\n' "${candidate_repo}"
+    return 0
+  fi
+
+  cd "${SCRIPT_DIR}/.." && pwd
+}
+
+ROOT_DIR="$(resolve_repo_root)"
 SYNC_SCRIPT="${ROOT_DIR}/repo-scripts/sync-worktree-links.sh"
 
 WORKTREE_PATH=""

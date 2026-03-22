@@ -156,6 +156,9 @@ git clone https://github.com/connor-git-yaml/OctoAgent.git
 cd OctoAgent/octoagent
 uv sync
 npm install --prefix frontend
+cd ..
+./repo-scripts/install-git-hooks.sh
+cd octoagent
 ./scripts/install-octo-home.sh
 ./scripts/run-octo-home.sh
 ```
@@ -167,7 +170,10 @@ For the full product guide, detailed setup, and configuration walkthrough, see [
 - Product guide and detailed setup: [`octoagent/README.md`](./octoagent/README.md)
 - Engineering blueprint: [`docs/blueprint.md`](./docs/blueprint.md)
 - Current codebase architecture guide: [`docs/codebase-architecture/README.md`](./docs/codebase-architecture/README.md)
-- Runtime refactor plan: [`docs/agent-runtime-refactor-plan.md`](./docs/agent-runtime-refactor-plan.md)
+- Design deep dives: [`docs/design/README.md`](./docs/design/README.md)
+- Milestone and rollout splits: [`docs/milestone/README.md`](./docs/milestone/README.md)
+- Refactor plans: [`docs/refactor-plan/README.md`](./docs/refactor-plan/README.md)
+- Agent/Codex config sync: [`.agent-config/agent-config-sync.md`](./.agent-config/agent-config-sync.md)
 - Contribution guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - Code of conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
 
@@ -175,7 +181,8 @@ For the full product guide, detailed setup, and configuration walkthrough, see [
 
 ```text
 .
-├── docs/                  # Blueprint, milestone splits, runtime plans
+├── docs/                  # Blueprint, design deep dives, milestone splits, refactor plans
+├── .agent-config/         # Shared Claude/Codex config source and sync docs
 ├── repo-scripts/          # Repository-level install and maintenance scripts
 ├── skills/                # Shared prompt / workflow skills
 ├── .specify/              # Spec-driven feature artifacts

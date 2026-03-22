@@ -9,7 +9,8 @@ OctoAgent is developed as a Personal AI OS with a durable runtime, a Butler + Wo
 Please read these documents first:
 
 - [`docs/blueprint.md`](./docs/blueprint.md)
-- [`docs/agent-runtime-refactor-plan.md`](./docs/agent-runtime-refactor-plan.md)
+- [`docs/codebase-architecture/README.md`](./docs/codebase-architecture/README.md)
+- [`docs/milestone/README.md`](./docs/milestone/README.md)
 - The relevant feature directory under `.specify/features/`
 
 Blueprint rules are the upstream source of truth. If implementation and documentation disagree, update the spec trail first or as part of the same change.
@@ -35,19 +36,25 @@ uv sync
 npm install --prefix frontend
 ```
 
-4. Initialize a local instance:
+4. Install repository git hooks (required for automatic worktree shared-link sync):
+
+```bash
+./repo-scripts/install-git-hooks.sh
+```
+
+5. Initialize a local instance:
 
 ```bash
 ./scripts/install-octo-home.sh
 ```
 
-5. Start the local runtime:
+6. Start the local runtime:
 
 ```bash
 ./scripts/run-octo-home.sh
 ```
 
-6. Optional: run the frontend dev server separately:
+7. Optional: run the frontend dev server separately:
 
 ```bash
 cd frontend

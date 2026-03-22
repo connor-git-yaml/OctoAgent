@@ -2,7 +2,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+resolve_default_source_root() {
+  local candidate_repo
+  local common_dir
+  candidate_repo="$(git -C "${SCRIPT_DIR}/.." rev-parse --show-toplevel 2>/dev/null || true)"
+  common_dir="$(git -C "${SCRIPT_DIR}/.." rev-parse --git-common-dir 2>/dev/null || true)"
+
+  if [[ -n "${common_dir}" ]]; then
+    if [[ "${common_dir}" = /* ]]; then
+      local root_from_common
+      root_from_common="$(cd "${common_dir}/.." && pwd)"
+      if [[ -d "${root_from_common}" ]]; then
+        printf '%s\n' "${root_from_common}"
+        return 0
+      fi
+    elif [[ -n "${candidate_repo}" ]]; then
+      local root_from_relative_common
+      root_from_relative_common="$(cd "${candidate_repo}/${common_dir}/.." && pwd)"
+      if [[ -d "${root_from_relative_common}" ]]; then
+        printf '%s\n' "${root_from_relative_common}"
+        return 0
+      fi
+    fi
+  fi
+
+  if [[ -n "${candidate_repo}" ]]; then
+    printf '%s\n' "${candidate_repo}"
+    return 0
+  fi
+
+  cd "${SCRIPT_DIR}/.." && pwd
+}
+
+DEFAULT_SOURCE_ROOT="$(resolve_default_source_root)"
 MANIFEST_FILE="${DEFAULT_SOURCE_ROOT}/repo-scripts/worktree-shared-paths.txt"
 
 SOURCE_ROOT="${DEFAULT_SOURCE_ROOT}"
@@ -19,6 +52,7 @@ usage() {
   - 默认把当前仓库根目录作为共享源目录
   - 只处理 repo-scripts/worktree-shared-paths.txt 中声明的路径
   - 默认不会覆盖普通文件或目录；如果目标已有实体文件，请使用 --force
+  - 默认把冲突视为告警，不阻断整体同步；详细结果看 conflicts 计数
 EOF
 }
 
@@ -142,7 +176,4 @@ while IFS= read -r raw_line || [[ -n "${raw_line}" ]]; do
 done < "${MANIFEST_FILE}"
 
 log "完成: linked=${linked_count} skipped=${skipped_count} conflicts=${conflict_count}"
-
-if [[ "${conflict_count}" -gt 0 ]]; then
-  exit 2
-fi
+exit 0
