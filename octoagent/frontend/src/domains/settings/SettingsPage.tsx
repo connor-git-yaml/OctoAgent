@@ -46,6 +46,7 @@ export default function SettingsPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [review, setReview] = useState<SetupReviewSummary>(setup.review);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const [savedSecretEnvNames, setSavedSecretEnvNames] = useState<string[]>([]);
   const [pendingRuntimeRefresh, setPendingRuntimeRefresh] = useState(false);
 
   useEffect(() => {
@@ -99,7 +100,10 @@ export default function SettingsPage() {
       label: item.name?.trim() ? `${item.name} · ${item.id}` : item.id,
     }))
     .filter((item) => item.value.trim());
-  const savedEnvNames = envPresence(providerRuntimeDetails);
+  const savedEnvNames = new Set([
+    ...envPresence(providerRuntimeDetails),
+    ...savedSecretEnvNames,
+  ]);
   const gatewayProxyUrl =
     String(
       fieldState["runtime.litellm_proxy_url"] ??
@@ -236,6 +240,21 @@ export default function SettingsPage() {
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
     }
+    const savedSecrets = result?.data?.saved_secrets;
+    if (savedSecrets && typeof savedSecrets === "object") {
+      const litellmNames = Array.isArray(savedSecrets.litellm_env_names)
+        ? savedSecrets.litellm_env_names.map((item: unknown) => String(item))
+        : [];
+      const runtimeNames = Array.isArray(savedSecrets.runtime_env_names)
+        ? savedSecrets.runtime_env_names.map((item: unknown) => String(item))
+        : [];
+      const merged = [...litellmNames, ...runtimeNames].filter((name) => name.trim());
+      if (merged.length > 0) {
+        setSavedSecretEnvNames((current) =>
+          Array.from(new Set([...current, ...merged]))
+        );
+      }
+    }
     setPendingRuntimeRefresh(requiresRuntimeRefresh);
   }
 
@@ -299,6 +318,21 @@ export default function SettingsPage() {
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
+    }
+    const savedSecrets = result?.data?.saved_secrets;
+    if (savedSecrets && typeof savedSecrets === "object") {
+      const litellmNames = Array.isArray(savedSecrets.litellm_env_names)
+        ? savedSecrets.litellm_env_names.map((item: unknown) => String(item))
+        : [];
+      const runtimeNames = Array.isArray(savedSecrets.runtime_env_names)
+        ? savedSecrets.runtime_env_names.map((item: unknown) => String(item))
+        : [];
+      const merged = [...litellmNames, ...runtimeNames].filter((name) => name.trim());
+      if (merged.length > 0) {
+        setSavedSecretEnvNames((current) =>
+          Array.from(new Set([...current, ...merged]))
+        );
+      }
     }
     if (result) {
       setPendingRuntimeRefresh(false);
