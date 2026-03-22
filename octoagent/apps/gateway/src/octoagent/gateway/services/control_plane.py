@@ -414,6 +414,7 @@ class ControlPlaneService:
         )
 
     async def get_snapshot(self, *, mode: str | None = None) -> dict[str, Any]:
+        await self._ensure_default_main_agent_bootstrap()
         registry = self.get_action_registry()
         resources: dict[str, Any] = {}
         degraded_sections: list[str] = []
@@ -539,6 +540,118 @@ class ControlPlaneService:
             degraded_sections=sorted(degraded_sections),
         )
         return snapshot_payload
+
+    async def _ensure_default_main_agent_bootstrap(self) -> None:
+        """确保默认 Project 有主 Agent + 直接会话（仅缺失时创建）。"""
+        project = await self._stores.project_store.get_default_project()
+        if project is None:
+            return
+
+        now = datetime.now(tz=UTC)
+        agent_profile_id = project.default_agent_profile_id
+        worker_profile_id = ""
+        dirty = False
+
+        if agent_profile_id:
+            existing_agent_profile = await self._stores.agent_context_store.get_agent_profile(
+                agent_profile_id
+            )
+            if existing_agent_profile is None:
+                agent_profile_id = ""
+
+        if not agent_profile_id:
+            worker_profile_id = f"worker-profile-{str(ULID())}"
+            worker_profile = WorkerProfile(
+                profile_id=worker_profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name=f"{project.name} 主 Agent",
+                summary="",
+                model_alias="main",
+                tool_profile="standard",
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                created_at=now,
+                updated_at=now,
+            )
+            await self._stores.agent_context_store.save_worker_profile(worker_profile)
+            dirty = True
+
+            agent_profile_id = f"agent-profile-{worker_profile_id}"
+            agent_profile = AgentProfile(
+                profile_id=agent_profile_id,
+                scope=AgentProfileScope.PROJECT,
+                project_id=project.project_id,
+                name=worker_profile.name,
+                persona_summary="",
+                model_alias=worker_profile.model_alias,
+                tool_profile=worker_profile.tool_profile,
+            )
+            await self._stores.agent_context_store.save_agent_profile(agent_profile)
+            dirty = True
+
+            project = project.model_copy(
+                update={
+                    "default_agent_profile_id": agent_profile_id,
+                    "updated_at": now,
+                }
+            )
+            await self._stores.project_store.save_project(project)
+            dirty = True
+
+        if agent_profile_id.startswith("agent-profile-"):
+            worker_profile_id = agent_profile_id.replace("agent-profile-", "", 1)
+
+        runtimes = await self._stores.agent_context_store.list_agent_runtimes(
+            project_id=project.project_id,
+            role=AgentRuntimeRole.MAIN,
+        )
+        runtime = next(
+            (item for item in runtimes if item.agent_profile_id == agent_profile_id),
+            None,
+        )
+        if runtime is None:
+            runtime = AgentRuntime(
+                agent_runtime_id=f"runtime-{str(ULID())}",
+                project_id=project.project_id,
+                workspace_id="",
+                agent_profile_id=agent_profile_id,
+                worker_profile_id=worker_profile_id,
+                role=AgentRuntimeRole.MAIN,
+                name=project.name,
+                persona_summary="",
+                status=AgentRuntimeStatus.ACTIVE,
+                permission_preset=DEFAULT_PERMISSION_PRESET,
+                role_card="",
+                metadata={},
+                created_at=now,
+                updated_at=now,
+            )
+            await self._stores.agent_context_store.save_agent_runtime(runtime)
+            dirty = True
+
+        sessions = await self._stores.agent_context_store.list_agent_sessions(
+            agent_runtime_id=runtime.agent_runtime_id,
+            kind=AgentSessionKind.DIRECT_WORKER,
+            limit=1,
+        )
+        if not sessions:
+            session = AgentSession(
+                agent_session_id=f"session-{str(ULID())}",
+                agent_runtime_id=runtime.agent_runtime_id,
+                project_id=project.project_id,
+                workspace_id="",
+                kind=AgentSessionKind.DIRECT_WORKER,
+                status=AgentSessionStatus.ACTIVE,
+                surface="chat",
+                created_at=now,
+                updated_at=now,
+            )
+            await self._stores.agent_context_store.save_agent_session(session)
+            dirty = True
+
+        if dirty:
+            await self._stores.conn.commit()
 
     @staticmethod
     def _degraded_snapshot_resource(
@@ -6135,15 +6248,16 @@ class ControlPlaneService:
         )
         await self._stores.agent_context_store.save_agent_runtime(worker_runtime)
 
-        # 创建 AgentSession
+        # 创建 AgentSession（Direct Worker，确保会话列表可见）
         session_id = f"session-{str(ULID())}"
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=runtime_id,
             project_id=project_id,
             workspace_id="",
-            kind=AgentSessionKind.WORKER_INTERNAL,
+            kind=AgentSessionKind.DIRECT_WORKER,
             status=AgentSessionStatus.ACTIVE,
+            surface="chat",
             created_at=now,
             updated_at=now,
         )

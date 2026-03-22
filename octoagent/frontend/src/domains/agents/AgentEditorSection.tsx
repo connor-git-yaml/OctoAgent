@@ -1,10 +1,5 @@
 import type { AgentEditorDraft, AgentEditorReview, ApprovalOverrideDisplay, BehaviorFileInfo } from "./agentManagementData";
 
-interface SelectOption {
-  value: string;
-  label: string;
-}
-
 /** 行为文件描述（固定 3 个 Agent 私有文件） */
 const BEHAVIOR_FILE_META: Record<string, { title: string; description: string }> = {
   "IDENTITY.md": { title: "身份补充", description: "Agent 的名称和角色定位。" },
@@ -26,7 +21,6 @@ interface AgentEditorSectionProps {
   draft: AgentEditorDraft;
   review: AgentEditorReview | null;
   busy: boolean;
-  projectOptions: SelectOption[];
   modelAliasOptions: string[];
   behaviorFiles: BehaviorFileInfo[];
   approvalOverrides: ApprovalOverrideDisplay[];
@@ -61,7 +55,6 @@ export default function AgentEditorSection({
   draft,
   review,
   busy,
-  projectOptions,
   modelAliasOptions,
   behaviorFiles,
   approvalOverrides,
@@ -140,22 +133,6 @@ export default function AgentEditorSection({
             onChange={(event) => onChangeDraft("name", event.target.value)}
           />
           <small>用户在列表里会直接看到这个名字。</small>
-        </label>
-
-        <label className="wb-field">
-          <span>所属项目</span>
-          <select
-            value={draft.projectId}
-            disabled={projectOptions.length <= 1}
-            onChange={(event) => onChangeDraft("projectId", event.target.value)}
-          >
-            {projectOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <small>这里决定的是这个 Agent 属于哪个项目的默认定义；已存在会话不会因此改绑。</small>
         </label>
 
       </div>

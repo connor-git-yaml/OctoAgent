@@ -714,16 +714,11 @@ describe("AgentCenter", () => {
 
   it("保存新 Agent 时会先 review，再发布为当前项目 Agent", async () => {
     const submitAction = vi.fn(async (actionId: string) => {
-      if (actionId === "worker_profile.review") {
+      if (actionId === "agent.create_worker_with_project") {
         return {
           data: {
-            review: {
-              can_save: true,
-              ready: true,
-              warnings: [],
-              blocking_reasons: [],
-              next_actions: ["可以直接保存。"],
-            },
+            worker_profile_id: "project-home:new-agent",
+            project_id: "project-home:new-agent-project",
           },
         };
       }
@@ -761,13 +756,10 @@ describe("AgentCenter", () => {
 
     await waitFor(() => {
       expect(submitAction).toHaveBeenCalledWith(
-        "worker_profile.review",
+        "agent.create_worker_with_project",
         expect.objectContaining({
-          draft: expect.objectContaining({
-            name: "资料整理助手",
-            scope: "project",
-            project_id: "project-home",
-          }),
+          worker_name: "资料整理助手",
+          project_name: "资料整理助手",
         })
       );
     });
@@ -778,7 +770,7 @@ describe("AgentCenter", () => {
         expect.objectContaining({
           publish: true,
           set_as_default: false,
-          change_summary: "通过 Agents 页面更新 Agent",
+          change_summary: "创建 Agent 后同步配置",
         })
       );
     });
@@ -1015,7 +1007,7 @@ describe("AgentCenter", () => {
     ).toBeInTheDocument();
   });
 
-  it("当默认仍是内置模板时，会引导建立项目自己的主 Agent", async () => {
+  it("主 Agent 默认显示为可编辑状态", async () => {
     const submitAction = vi.fn(async (actionId: string) => {
       if (actionId === "worker_profile.review") {
         return {
@@ -1025,7 +1017,7 @@ describe("AgentCenter", () => {
               ready: true,
               warnings: [],
               blocking_reasons: [],
-              next_actions: ["可以建立主 Agent。"],
+              next_actions: ["可以直接保存。"],
             },
           },
         };
@@ -1066,12 +1058,11 @@ describe("AgentCenter", () => {
     );
 
     // 主 Agent 卡片的状态 pill 在 isMainAgent 时总是显示 "主 Agent"
-    // 此时 status 为 needs_setup，按钮文案为 "建立主 Agent"
     expect(await screen.findByText("主 Agent")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "建立主 Agent" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "编辑" }).length).toBeGreaterThan(0);
 
-    // 点击「建立主 Agent」按钮进入编辑器
-    await userEvent.click((await screen.findAllByRole("button", { name: "建立主 Agent" }))[0]);
+    // 点击「编辑」按钮进入编辑器
+    await userEvent.click((await screen.findAllByRole("button", { name: "编辑" }))[0]);
     const nameInput = await screen.findByLabelText(/名称/);
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "家庭主 Agent");

@@ -11,7 +11,6 @@ import {
   buildBlankAgentEditorDraft,
   buildCapabilityProviderEntries,
   buildModelAliasOptions,
-  buildProjectOptions,
   deriveAgentManagementView,
   formatTokenLabel,
   parseAgentReview,
@@ -249,10 +248,6 @@ export default function AgentCenter() {
     () => buildModelAliasOptions(snapshot!),
     [snapshot!.resources.config.generated_at]
   );
-  const projectOptions = useMemo(() => {
-    const all = buildProjectOptions(snapshot!.resources.project_selector);
-    return all.filter((option) => option.value === agentView.currentProjectId);
-  }, [agentView.currentProjectId, snapshot!.resources.project_selector.generated_at]);
   // 全局管理视图——行为文件区展示所有 agent profile，不按当前项目过滤
   const behaviorProfiles = useMemo(
     () => agentProfilesDocument.profiles,
@@ -564,6 +559,42 @@ export default function AgentCenter() {
     }
 
     const payload = buildAgentPayload(editorState.draft, capabilityProviderEntries);
+    if (!editorState.draft.profileId && editorState.mode !== "main") {
+      setReview(null);
+      const result = await submitAction("agent.create_worker_with_project", {
+        worker_name: editorState.draft.name,
+        project_name: editorState.draft.name,
+        model_alias: editorState.draft.modelAlias,
+        tool_profile: editorState.draft.toolProfile,
+        permission_preset: editorState.draft.permissionPreset,
+        role_card: editorState.draft.roleCard,
+      });
+      if (!result) {
+        return;
+      }
+      const createdProfileId = String(result.data?.worker_profile_id ?? "");
+      const createdProjectId = String(result.data?.project_id ?? "");
+      if (createdProfileId && createdProjectId) {
+        const postCreatePayload = buildAgentPayload(
+          {
+            ...editorState.draft,
+            profileId: createdProfileId,
+            projectId: createdProjectId,
+          },
+          capabilityProviderEntries
+        );
+        await submitAction("worker_profile.apply", {
+          draft: postCreatePayload,
+          publish: true,
+          set_as_default: false,
+          change_summary: "创建 Agent 后同步配置",
+        });
+      }
+      closeComposer();
+      setFlashMessage(`已创建「${editorState.draft.name}」，并生成项目与会话。`);
+      return;
+    }
+
     const reviewResult = await submitAction("worker_profile.review", { draft: payload });
     const parsedReview = parseAgentReview(reviewResult?.data.review);
     setReview(parsedReview);
@@ -620,7 +651,9 @@ export default function AgentCenter() {
   }
 
   const busySaving =
-    busyActionId === "worker_profile.review" || busyActionId === "worker_profile.apply";
+    busyActionId === "worker_profile.review" ||
+    busyActionId === "worker_profile.apply" ||
+    busyActionId === "agent.create_worker_with_project";
 
   return (
     <div className="wb-page wb-agent-management-page">
@@ -640,11 +673,7 @@ export default function AgentCenter() {
         {behaviorProfiles.length === 0 || selectedBehaviorProfile === null ? (
           <div className="wb-empty-state">
             <strong>暂无行为文件</strong>
-            <div className="wb-inline-actions">
-              <button type="button" className="wb-button wb-button-primary" onClick={openMainEditor}>
-                建立主 Agent
-              </button>
-            </div>
+            <small>系统会在 Agent 创建后自动生成对应的行为文件。</small>
           </div>
         ) : (
           <>
@@ -691,7 +720,7 @@ export default function AgentCenter() {
           {renderAgentCard(agentView.mainAgent, {
             onEdit: openMainEditor,
             onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
-            primaryActionLabel: agentView.mainAgent.status === "ready" ? "编辑" : "建立主 Agent",
+            primaryActionLabel: "编辑",
             busyActionId,
             activeFilePath: viewingFilePath,
           })}
@@ -750,7 +779,6 @@ export default function AgentCenter() {
                 draft={editorState.draft}
                 review={review}
                 busy={busySaving}
-                projectOptions={projectOptions}
                 modelAliasOptions={modelAliasOptions}
                 behaviorFiles={editorState.behaviorFiles}
                 approvalOverrides={approvalOverrides}
