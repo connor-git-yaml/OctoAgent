@@ -4096,7 +4096,7 @@ class ControlPlaneService:
                 reason for reason in review.blocking_reasons
                 if not (
                     reason.startswith("secret_missing:")
-                    and reason.split(":", 1)[1] in pending_env_names
+                    and pending_env_names  # 有待写入密钥时跳过所有 secret_missing blocking
                 )
             ]
             if effective_blocking:
