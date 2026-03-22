@@ -2280,20 +2280,21 @@ export default function ChatWorkbench() {
             ) : null}
             {legacyResetCallout}
 
-            {shouldShowApprovalBanner ? (
-              <>
+            {shouldShowApprovalBanner && activeApprovalItem ? (() => {
+              const item = activeApprovalItem;
+              return <>
                 <InlineCallout
                   title={
                     activeApprovalRemainingSeconds != null
-                      ? `等待你批准 ${activeApprovalItem.metadata.tool_name || activeApprovalItem.title} · ${formatCountdown(activeApprovalRemainingSeconds)} 后超时`
+                      ? `等待你批准 ${item.metadata.tool_name || item.title} · ${formatCountdown(activeApprovalRemainingSeconds)} 后超时`
                       : "这轮正在等你确认"
                   }
                   tone="error"
                   actions={
                     <div className="wb-inline-actions wb-inline-actions-wrap">
-                    {activeApprovalItem.quick_actions.map((action) => (
+                    {item.quick_actions.map((action) => (
                       <button
-                        key={`${activeApprovalItem.item_id}-${action.kind}`}
+                        key={`${item.item_id}-${action.kind}`}
                         type="button"
                         className={
                           action.style === "primary"
@@ -2302,9 +2303,9 @@ export default function ChatWorkbench() {
                         }
                         disabled={
                           !action.enabled ||
-                          busyActionId === mapOperatorQuickAction(activeApprovalItem, action.kind)?.actionId
+                          busyActionId === mapOperatorQuickAction(item, action.kind)?.actionId
                         }
-                        onClick={() => void handleOperatorAction(activeApprovalItem, action.kind)}
+                        onClick={() => void handleOperatorAction(item, action.kind)}
                       >
                         {action.label}
                       </button>
@@ -2313,10 +2314,10 @@ export default function ChatWorkbench() {
                   }
                 >
                   <>
-                    <span className="wb-chat-approval-banner-line">{activeApprovalItem.summary}</span>
-                    {activeApprovalItem.metadata.tool_args_summary ? (
+                    <span className="wb-chat-approval-banner-line">{item.summary}</span>
+                    {item.metadata.tool_args_summary ? (
                       <span className="wb-chat-approval-banner-line">
-                        <code>{activeApprovalItem.metadata.tool_args_summary}</code>
+                        <code>{item.metadata.tool_args_summary}</code>
                       </span>
                     ) : null}
                   </>
@@ -2325,8 +2326,8 @@ export default function ChatWorkbench() {
                   也可以直接输入 <code>/approve</code>、<code>/approve always</code> 或{" "}
                   <code>/deny</code>。
                 </p>
-              </>
-            ) : null}
+              </>;
+            })() : null}
 
             {chatActionNotice ? (
               <InlineCallout
