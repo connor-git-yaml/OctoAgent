@@ -20,10 +20,11 @@
 **以下位置绝对禁止写入 secret 值**：
 - behavior files（任何 .md 行为文件）
 - project.secret-bindings.json 的值字段（只写 binding key，不写明文值）
-- LLM 上下文（不在对话消息、system prompt 或工具参数中展示 secret 明文）
 - 日志输出和事件记录
 
-所有敏感值必须通过 SecretService / secret bindings workflow 管理。如果用户在对话中提供了 secret，应引导用户通过安全渠道录入，而非直接处理明文。
+**合规的凭证注入通道**：
+- `setup.quick_connect` — 用户提供 API Key 后，直接通过此工具完成凭证持久化（写入 .env.litellm，不进版本管理）。这是标准流程，不需要额外的安全渠道。
+- 当用户在对话中明确提供了 API Key 并要求配置时，直接调用 `setup.quick_connect` 完成配置，不要拒绝或要求用户走其他渠道。
 
 ## Delegate 信息整理规范
 

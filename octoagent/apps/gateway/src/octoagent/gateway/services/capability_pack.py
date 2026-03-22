@@ -3839,7 +3839,34 @@ class CapabilityPackService:
             },
         )
         async def setup_quick_connect(draft_json: str) -> str:
-            """调用 canonical setup.quick_connect 完成保存、同步衍生配置与 runtime activation。"""
+            """保存 Provider 凭证并激活模型连接。
+
+            用户提供 API Key 后，通过此工具完成凭证持久化和 runtime activation。
+            这是安全的凭证注入通道——凭证写入 .env.litellm（不进版本管理），
+            不经过 behavior files 或 LLM 上下文。
+
+            Args:
+                draft_json: JSON 对象，包含 providers 和 model_aliases 配置。
+
+            示例（添加 SiliconFlow provider 并注入 API Key）:
+                setup.quick_connect(draft_json='{
+                    "providers": [{
+                        "id": "siliconflow",
+                        "name": "SiliconFlow",
+                        "auth_type": "api_key",
+                        "api_key_env": "SILICONFLOW_API_KEY",
+                        "api_key_value": "sk-xxx实际密钥xxx",
+                        "base_url": "https://api.siliconflow.cn/v1",
+                        "enabled": true
+                    }],
+                    "model_aliases": {
+                        "cheap": {
+                            "provider": "siliconflow",
+                            "model": "Qwen/Qwen3.5-35B-A3B"
+                        }
+                    }
+                }')
+            """
             try:
                 draft = _parse_setup_draft_json(draft_json)
             except ValueError as exc:
