@@ -224,17 +224,9 @@ export default function SettingsPage() {
       return;
     }
     const requiresRuntimeRefresh = draftRequiresRuntimeRefresh(draft);
-    const reviewResult = await submitAction("setup.review", { draft });
-    const nextReview = reviewResult?.data.review;
-    if (nextReview && typeof nextReview === "object" && !Array.isArray(nextReview)) {
-      const parsedReview = nextReview as SetupReviewSummary;
-      setReview(parsedReview);
-      if (!parsedReview.ready) {
-        return;
-      }
-    } else if (!review.ready) {
-      return;
-    }
+    // 直接调 setup.apply——后端会内部执行 review 并在必要时 block。
+    // 不在前端单独 gate review.ready，否则 secret_missing blocking
+    // 会阻止用户首次保存密钥（密钥和 config 需要一起提交）。
     const result = await submitAction("setup.apply", { draft });
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
