@@ -13,6 +13,7 @@ import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -71,6 +72,7 @@ class TaskRunner:
         worker_runtime_config: WorkerRuntimeConfig | None = None,
         docker_available_checker=None,
         delegation_plane=None,
+        project_root: Path | None = None,
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -97,6 +99,7 @@ class TaskRunner:
             docker_available_checker=docker_available_checker,
             cancellation_registry=self._cancellation_registry,
             execution_console=self._execution_console,
+            project_root=project_root,
         )
         if delegation_plane is not None:
             delegation_plane.bind_dispatch_scheduler(self.schedule_dispatch_envelope)

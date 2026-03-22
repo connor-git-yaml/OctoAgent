@@ -580,6 +580,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         approval_manager=app.state.approval_manager,
         completion_notifier=telegram_service.notify_task_result,
         delegation_plane=app.state.delegation_plane_service,
+        project_root=project_root,
     )
     app.state.capability_pack_service.bind_task_runner(app.state.task_runner)
     await app.state.capability_pack_service.refresh()
