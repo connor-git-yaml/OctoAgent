@@ -263,8 +263,6 @@ class MemoryMaintenanceCommandKind(StrEnum):
     """Maintenance 命令类型。"""
 
     FLUSH = "flush"
-    CONSOLIDATE = "consolidate"
-    COMPACT = "compact"
     REINDEX = "reindex"
     REPLAY = "replay"
     SYNC_RESUME = "sync_resume"

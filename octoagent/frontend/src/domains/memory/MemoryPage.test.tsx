@@ -152,25 +152,23 @@ function buildMemorySnapshot(): any {
             retrieval_backend: "sqlite-metadata",
           },
           {
-            record_id: "record-internal",
+            record_id: "record-fact",
             layer: "sor",
             project_id: "project-default",
             workspace_id: "workspace-default",
             scope_id: "scope-contact",
             partition: "work",
-            subject_key: "worker_tool:bash:artifact-7",
-            summary:
-              "tool_name: bash\noutput_summary: rg -n MemoryPage\nartifact_ref: artifact-7\ntask_id: task-123",
+            subject_key: "user.name",
+            summary: "用户名叫 Connor，是一名全栈工程师。",
             status: "current",
             version: 1,
             created_at: "2026-03-09T10:15:00Z",
             updated_at: "2026-03-09T10:16:00Z",
-            evidence_refs: [{ type: "artifact", id: "artifact-7" }],
+            evidence_refs: [{ type: "agent_session", id: "session-123" }],
             derived_refs: [],
             proposal_refs: [],
             metadata: {
-              source: "agent_context.worker_tool_writeback",
-              tool_name: "bash",
+              source: "session_memory_extractor",
             },
             requires_vault_authorization: false,
             retrieval_backend: "sqlite-metadata",
@@ -464,9 +462,8 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    // 3 条可见记忆（Alice + Bob + 派生，internal 被过滤）
-    expect(await screen.findByRole("heading", { name: "3 条记忆" })).toBeInTheDocument();
-    expect(screen.queryByText(/worker_tool:bash:artifact-7/)).not.toBeInTheDocument();
+    // 4 条可见记忆（Alice + Bob + Connor fact + 派生）
+    expect(await screen.findByRole("heading", { name: "4 条记忆" })).toBeInTheDocument();
 
     // 点击派生记录卡片弹出 modal
     const derivedCard = screen.getByText("Alice 协作偏好").closest("article") as HTMLElement;
@@ -673,7 +670,7 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "2 条记忆" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "3 条记忆" })).toBeInTheDocument();
     expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
   });
 });

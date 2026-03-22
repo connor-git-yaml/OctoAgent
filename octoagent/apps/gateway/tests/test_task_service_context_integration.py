@@ -1780,7 +1780,11 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     await store_group.conn.close()
 
 
-async def test_task_service_worker_tool_writeback_commits_sor_and_surfaces_runtime_memory_hints(
+# Feature 067: test_task_service_worker_tool_writeback_commits_sor... 已删除
+# 旧的 _record_private_tool_evidence_writeback 已被 SessionMemoryExtractor 替代
+
+
+async def test_task_service_prompt_context_only_exposes_sanitized_control_metadata(
     tmp_path: Path,
 ) -> None:
     store_group = await create_store_group(

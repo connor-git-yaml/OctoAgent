@@ -78,13 +78,7 @@ const PLACEHOLDER_SUMMARY_PATTERNS = [
   /\bmemory updated\b/i,
   /\bsensitive memory\b/i,
   /\bhealth note updated\b/i,
-  /\bworker tool evidence writeback\b/i,
 ];
-
-const INTERNAL_RECORD_SOURCES = new Set([
-  "agent_context.worker_tool_writeback",
-  "context_compaction",
-]);
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -95,11 +89,6 @@ function truncateValue(value: string, limit = 160): string {
     return value;
   }
   return `${value.slice(0, limit - 1)}…`;
-}
-
-function readRecordSource(record: MemoryRecordProjection): string {
-  const value = record.metadata.source;
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function formatDerivedTypeLabel(value: unknown): string {
@@ -150,16 +139,11 @@ function isTechnicalSummary(summary: string): boolean {
     normalized.includes("response_artifact_ref:") ||
     normalized.includes("task_id:") ||
     normalized.startsWith("add:worker_tool:") ||
-    normalized.startsWith("update:worker_tool:") ||
-    normalized.includes("worker tool evidence writeback")
+    normalized.startsWith("update:worker_tool:")
   );
 }
 
 function shouldHideRecord(record: MemoryRecordProjection): boolean {
-  const source = readRecordSource(record);
-  if (INTERNAL_RECORD_SOURCES.has(source)) {
-    return true;
-  }
   if (isTechnicalSubjectKey(record.subject_key)) {
     return true;
   }
