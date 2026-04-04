@@ -3,10 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
   attachExecutionInput,
-  fetchApprovals,
-  fetchTaskDetail,
-  fetchTaskExecutionSession,
 } from "../api/client";
+import { TERMINAL_TASK_STATUSES } from "../domains/chat/constants";
 import { MessageBubble } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
@@ -33,7 +31,6 @@ import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } fro
 import {
   ensureArray,
   isAgentDirectExecution,
-  readExecutionSessionDocument,
   readSummaryString,
   resolveProjectName,
   resolveRestorableTaskIds,
@@ -48,14 +45,10 @@ import { useTaskLiveState } from "../hooks/useTaskLiveState";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
-  ApprovalListItem,
-  ExecutionSessionDocument,
   OperatorActionKind,
   OperatorInboxItem,
-  TaskDetailResponse,
 } from "../types";
 
-const TERMINAL_TASK_STATUSES = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"]);
 const CHAT_SLASH_COMMANDS = [
   {
     value: "/approve",
@@ -170,15 +163,17 @@ export default function ChatWorkbench() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const snapshotResourceRefs = useMemo(() => {
+    const res = snapshot?.resources;
+    if (!res) return [];
+    return [res.sessions, res.delegation, res.context_continuity];
+  }, [snapshot?.resources]);
+
   const { taskDetail, executionSession, pendingApprovals, refreshNow: refreshTaskLiveState } = useTaskLiveState({
     taskId,
     shouldPoll: streaming,
     approvalSignal,
-    snapshotResources: snapshot?.resources ? {
-      sessions: snapshot.resources.sessions,
-      delegation: snapshot.resources.delegation,
-      context_continuity: snapshot.resources.context_continuity,
-    } : null,
+    snapshotResourceRefs,
     refreshResources,
   });
   const [chatActionNotice, setChatActionNotice] = useState<{
@@ -251,7 +246,6 @@ export default function ChatWorkbench() {
     "";
   const normalizedTaskStatus = String(taskDetail?.task?.status ?? activeSession?.status ?? "").trim().toUpperCase();
   const hasLoadedTaskStatus = normalizedTaskStatus.length > 0;
-  // shouldPollLiveState 已移入 useTaskLiveState hook 内部判断
 
   const relatedWorks = sortWorksByUpdate(
     delegationWorks.filter((item) => {
@@ -584,11 +578,6 @@ export default function ChatWorkbench() {
     }
   }, [error, freshTurnStartedAt, latestRuntimeEvidenceMs]);
 
-  // taskDetail / executionSession / pendingApprovals 的加载、轮询、审批刷新
-  // 已统一由 useTaskLiveState hook 管理
-
-  // 轮询 + SSE 审批刷新逻辑已由 useTaskLiveState hook 管理
-
   useEffect(() => {
     setChatActionNotice(null);
   }, [taskId]);
@@ -702,30 +691,14 @@ export default function ChatWorkbench() {
       return null;
     }
 
-    let nextExecutionSession = executionSession;
-    let nextTaskDetail = taskDetail;
-    let nextApprovals = pendingApprovals;
+    // D1 fix: 通过 hook 的 refreshNow 获取最新数据（同时更新 state，无重复 fetch）
+    const fresh = await refreshTaskLiveState();
+    const nextExecutionSession = fresh.executionSession;
+    const nextTaskDetail = fresh.taskDetail;
+    const nextApprovals = fresh.pendingApprovals;
 
-    // 直接 fetch 最新数据（不走 hook 因为需要立即判断结果）
-    const [sessionResult, detailResult, approvalsResult] = await Promise.allSettled([
-      fetchTaskExecutionSession(taskId),
-      fetchTaskDetail(taskId),
-      fetchApprovals(),
-    ]);
-    // 同时触发 hook 下一轮刷新
-    refreshTaskLiveState();
-
-    if (sessionResult.status === "fulfilled") {
-      nextExecutionSession = readExecutionSessionDocument(sessionResult.value);
-    }
-    if (detailResult.status === "fulfilled") {
-      nextTaskDetail = detailResult.value;
-    }
-    if (approvalsResult.status === "fulfilled") {
-      nextApprovals = approvalsResult.value.approvals.filter((item) => item.task_id === taskId);
-      if (nextApprovals.length > 0) {
-        return buildSyntheticApprovalItem(nextApprovals[0]!);
-      }
+    if (nextApprovals.length > 0) {
+      return buildSyntheticApprovalItem(nextApprovals[0]!);
     }
 
     if (nextExecutionSession?.pending_approval_id) {
