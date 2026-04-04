@@ -181,20 +181,20 @@ from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr, ValidationError
 from ulid import ULID
 
-from .agent_context import build_projected_session_id, build_scope_aware_session_id
-from .agent_decision import build_behavior_system_summary
-from .connection_metadata import (
+from ..agent_context import build_projected_session_id, build_scope_aware_session_id
+from ..agent_decision import build_behavior_system_summary
+from ..connection_metadata import (
     merge_control_metadata,
     resolve_explicit_delegation_target_profile_id,
     resolve_explicit_session_owner_profile_id,
     resolve_turn_executor_kind,
 )
-from .mcp_registry import McpServerConfig
-from .startup_bootstrap import (
+from ..mcp_registry import McpServerConfig
+from ..startup_bootstrap import (
     ensure_butler_runtime_and_session,
     ensure_default_project_agent_profile,
 )
-from .task_service import TaskService
+from ..task_service import TaskService
 
 _AUDIT_TASK_ID = "ops-control-plane"
 _AUDIT_TRACE_ID = "trace-ops-control-plane"
