@@ -285,7 +285,26 @@ class AutomationDomainService(DomainServiceBase):
             raise ControlPlaneActionError(
                 "AUTOMATION_RECURSIVE_ACTION", "automation job 不能直接调度 automation.*"
             )
-        # NOTE: action_id 存在性校验由 coordinator 层在组装路由后执行
+        # action_id 存在性校验：汇总所有 domain service 的 action_routes + coordinator inline
+        known_action_ids: set[str] = set()
+        for svc in self._ctx.service_registry.values():
+            known_action_ids.update(svc.action_routes().keys())
+        # coordinator 的 inline actions（未归属到任何 domain service 的简单处理器）
+        known_action_ids.update({
+            "wizard.refresh", "wizard.restart", "diagnostics.refresh",
+            "capability.refresh", "work.refresh",
+            "backup.create", "restore.plan",
+            "update.dry_run", "update.apply",
+            "runtime.restart", "runtime.verify",
+            "operator.approval.resolve", "operator.alert.ack",
+            "operator.task.retry", "operator.task.cancel",
+            "channel.pairing.approve", "channel.pairing.reject",
+        })
+        if action_id not in known_action_ids:
+            raise ControlPlaneActionError(
+                "AUTOMATION_ACTION_INVALID",
+                f"目标动作不存在: {action_id}",
+            )
         try:
             schedule_kind = AutomationScheduleKind(schedule_kind_raw)
         except ValueError as exc:

@@ -30,17 +30,14 @@ from octoagent.core.models import (
     UpdateTriggerSource,
 )
 from octoagent.provider.auth.credentials import ApiKeyCredential
-from octoagent.provider.auth.environment import detect_environment
+import octoagent.gateway.services.control_plane as _cp_pkg  # detect_environment 通过 package 引用
 from octoagent.provider.auth.oauth_flows import run_auth_code_pkce_flow
 from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.litellm_generator import generate_litellm_config
-from octoagent.provider.dx.runtime_activation import (
-    RuntimeActivationError,
-    RuntimeActivationService,
-)
+import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from pydantic import SecretStr
 
 from ..mcp_registry import McpServerConfig
@@ -409,7 +406,7 @@ class McpDomainService(DomainServiceBase):
         if provider_config is None:
             raise self._action_error("OAUTH_PROVIDER_UNAVAILABLE", "未找到 OpenAI OAuth 配置")
 
-        environment = detect_environment()
+        environment = _cp_pkg.detect_environment()
         if environment.use_manual_mode:
             raise self._action_error(
                 "OAUTH_BROWSER_UNAVAILABLE",
@@ -550,10 +547,10 @@ class McpDomainService(DomainServiceBase):
         raise_on_failure: bool,
     ) -> dict[str, Any]:
         """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
-        activation_service = RuntimeActivationService(self._ctx.project_root)
+        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
         try:
             activation = await activation_service.start_proxy()
-        except RuntimeActivationError as exc:
+        except _cp_pkg.RuntimeActivationError as exc:
             if raise_on_failure:
                 raise self._action_error(
                     failure_code,

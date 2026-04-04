@@ -57,10 +57,7 @@ from octoagent.provider.dx.litellm_generator import (
     check_litellm_sync_status,
     generate_litellm_config,
 )
-from octoagent.provider.dx.runtime_activation import (
-    RuntimeActivationError,
-    RuntimeActivationService,
-)
+import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr, ValidationError
 
@@ -2251,10 +2248,10 @@ class SetupDomainService(DomainServiceBase):
         raise_on_failure: bool,
     ) -> dict[str, Any]:
         """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
-        activation_service = RuntimeActivationService(self._ctx.project_root)
+        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
         try:
             activation = await activation_service.start_proxy()
-        except RuntimeActivationError as exc:
+        except _cp_pkg.RuntimeActivationError as exc:
             if raise_on_failure:
                 raise self._action_error(
                     failure_code,
