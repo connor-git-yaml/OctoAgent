@@ -253,7 +253,16 @@ class LiteLLMClient:
         duration_ms: int,
     ) -> ModelCallResult:
         """将 LiteLLM completion 响应转换为统一 ModelCallResult。"""
-        content = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        content = msg.content or ""
+        # Qwen3 等 thinking 模型：content 为空时从 reasoning_content 提取
+        if not content:
+            rc = getattr(msg, "reasoning_content", None)
+            if not rc:
+                psf = getattr(msg, "provider_specific_fields", None) or {}
+                rc = psf.get("reasoning_content") if isinstance(psf, dict) else None
+            if rc:
+                content = str(rc)
         cost_usd, cost_unavailable = CostTracker.calculate_cost(response)
         token_usage = CostTracker.parse_usage(response)
         model_name, provider = CostTracker.extract_model_info(response)

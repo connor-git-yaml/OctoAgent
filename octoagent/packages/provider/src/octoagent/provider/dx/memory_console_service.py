@@ -1308,6 +1308,24 @@ class MemoryConsoleService:
                 )
         else:
             selected_scope_ids = sorted(scope_bindings.keys())
+        # 当 project 级别没有 memory_scope binding 时，直接查 DB 里所有存在数据的 scope
+        if not selected_scope_ids:
+            try:
+                store = self._stores.memory_store if hasattr(self._stores, "memory_store") else None
+                if store is None:
+                    from octoagent.memory.store.memory_store import SqliteMemoryStore
+                    store = SqliteMemoryStore(self._stores.conn)
+                all_scopes = await store.list_scope_ids()
+                if all_scopes:
+                    selected_scope_ids = sorted(all_scopes)
+                    for sid in all_scopes:
+                        scope_bindings[sid] = _BoundScope(
+                            scope_id=sid,
+                            workspace_id=None,
+                            binding_type=ProjectBindingType.MEMORY_SCOPE,
+                        )
+            except Exception:
+                pass
         if not selected_scope_ids:
             blocking_issues.append("当前 project/workspace 没有可用的 memory scope 绑定。")
         return _MemoryContext(

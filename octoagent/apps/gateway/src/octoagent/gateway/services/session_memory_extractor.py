@@ -540,9 +540,19 @@ class SessionMemoryExtractor:
         for item in items:
             try:
                 # 将 partition 字符串映射为 MemoryPartition 枚举
-                _SAFE_PARTITIONS = {"work", "core", "profile", "chat", "personal"}
-                safe_partition = item.partition if item.partition in _SAFE_PARTITIONS else "work"
-                partition = MemoryPartition(safe_partition)
+                # 注意：必须与 MemoryPartition 枚举值严格对齐
+                _PARTITION_MAP = {
+                    "work": MemoryPartition.WORK,
+                    "core": MemoryPartition.CORE,
+                    "profile": MemoryPartition.PROFILE,
+                    "chat": MemoryPartition.CHAT,
+                    "health": MemoryPartition.HEALTH,
+                    "solution": MemoryPartition.SOLUTION,
+                    # LLM 常见输出但不在枚举中的值，映射到最近似的分区
+                    "personal": MemoryPartition.PROFILE,
+                    "finance": MemoryPartition.FINANCE,
+                }
+                partition = _PARTITION_MAP.get(item.partition, MemoryPartition.WORK)
 
                 # 将 action 字符串映射为 WriteAction 枚举
                 action_map = {
@@ -667,7 +677,7 @@ class SessionMemoryExtractor:
                         if namespace.memory_scope_ids:
                             return namespace.memory_scope_ids[0]
 
-        # 降级: 尝试通过 project_id 查找 namespace
+        # 降级 1: 尝试通过 project_id 查找 namespace
         if agent_session.project_id:
             namespaces = await self._agent_context_store.list_memory_namespaces(
                 project_id=agent_session.project_id,
@@ -676,5 +686,23 @@ class SessionMemoryExtractor:
             for ns in namespaces:
                 if ns.memory_scope_ids:
                     return ns.memory_scope_ids[0]
+
+        # 降级 2: 扫描所有 project_shared namespace（新 project 可能还没创建 namespace）
+        try:
+            all_namespaces = await self._agent_context_store.list_memory_namespaces(
+                kind=MemoryNamespaceKind.PROJECT_SHARED,
+            )
+            for ns in all_namespaces:
+                for scope_id in ns.memory_scope_ids:
+                    if "/runtime:" in scope_id:
+                        return scope_id
+                if ns.memory_scope_ids:
+                    return ns.memory_scope_ids[0]
+        except Exception:
+            pass
+
+        # 降级 3: 合成一个基于 project_id 的 scope_id
+        if agent_session.project_id:
+            return f"memory/auto/{agent_session.project_id}"
 
         return None

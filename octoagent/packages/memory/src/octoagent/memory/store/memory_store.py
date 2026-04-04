@@ -180,6 +180,20 @@ class SqliteMemoryStore:
             return None
         return self._row_to_fragment(row)
 
+    async def list_scope_ids(self) -> list[str]:
+        """查询 DB 中所有存在数据的 scope_id（去重合并 fragments + sor）。"""
+        rows = await self._fetchall(
+            """
+            SELECT DISTINCT scope_id FROM (
+                SELECT scope_id FROM memory_fragments
+                UNION
+                SELECT scope_id FROM memory_sor
+            ) ORDER BY scope_id
+            """,
+            (),
+        )
+        return [row[0] for row in rows]
+
     async def list_fragments(
         self,
         scope_id: str,
