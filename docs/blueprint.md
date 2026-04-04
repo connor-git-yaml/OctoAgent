@@ -3124,6 +3124,97 @@ M5 说明：
 
 ---
 
+## 14.5 已知短板与改善方向（2026-04 审计）
+
+> 基于 Claude Code / OpenClaw / Agent Zero 源码横向对比（见 `docs/design/`），
+> 以下是当前主线代码最急需改善的五个短板，按严重程度排序。
+
+### 🔴 短板 1：Context 管理缺乏自适应压缩
+
+**现状问题**：
+- `_SESSION_TRANSCRIPT_LIMIT = 20` 硬编码（`agent_context.py:128`），长对话关键历史被丢弃
+- `ContextCompactionConfig` 包含 14 个参数但 `_fit_prompt_budget()` 未充分利用
+- 压缩触发条件迟缓（`min_turns_to_compact = 4`）
+- 无 Microcompact（增量合并短消息）机制
+
+**对标差距**：
+- Claude Code 用简单公式 `contextWindow - 13K` 做阈值，三级渐进（Micro → Auto → Memory）
+- Agent Zero 用三级压缩（Topic 65% → Bulk 合并 → 丢弃），目标比 0.8
+- OctoAgent 理论有三层压缩，但实际 Rolling Summary 质量和触发时机均不及前两者
+
+**改善方向**：
+- 去除硬编码 20 轮限制，改为基于 Token 的动态窗口
+- 实现 Microcompact（合并相邻短消息降低消息数）
+- 借鉴 Claude Code 的会话内存提取（长期记忆沉淀到 Memory）
+- 简化压缩配置：用单一阈值公式替代 14 参数
+
+### 🔴 短板 2：工具执行无并发能力
+
+**现状问题**：
+- `process_task_with_llm()` 和 `ToolBroker.execute()` 均为单工具顺序执行
+- 无 `StreamingToolExecutor`，多工具场景存在 N 倍延迟
+- 单工具无独立超时，只有 Worker 级 7200s 全局超时（`worker_runtime.py:80`）
+- 工具执行无流式返回能力
+
+**对标差距**：
+- Claude Code 的 `StreamingToolExecutor` 支持并发执行 + 流式进度回调
+- Agent Zero 的代码执行工具有独立的 `first_output_timeout`(30s) / `between_output_timeout`(15s) / `max_exec_timeout`(180s) 三级超时
+
+**改善方向**：
+- 在 SkillRunner 循环中添加 `asyncio.gather()` 并发工具调用
+- 为每个工具增加独立超时配置
+- 实现工具执行的流式中间结果推送
+
+### 🟠 短板 3：权限模型缺少自动分类器
+
+**现状问题**：
+- 仅二层决策：PolicyGate（HIGH_RISK）→ ToolProfile（minimal/standard/privileged）
+- 无命令级危险性自动分析（如 `ls` vs `rm -rf`）
+- 所有非预设工具都需要明确授权或审批，UX 摩擦高
+
+**对标差距**：
+- Claude Code 四层决策（alwaysAllow → alwaysDeny → autoClassify → ask）+ `bashClassifier` 自动分析
+- OpenClaw Tool Profile + 行为指导（TOOLS.md）双层
+
+**改善方向**：
+- 实现 `CommandSafetyClassifier`（分析 terminal.exec 命令危险性）
+- 高置信度安全命令自动允许，降低用户打扰频率
+- 补全 glob/regex 模式匹配规则
+
+### 🟠 短板 4：Behavior 缓存无热更新
+
+**现状问题**：
+- `_behavior_pack_cache`（`agent_decision.py:45`）进程级全局字典，无 TTL
+- 编辑 behavior 文件后必须手动 `invalidate_behavior_pack_cache()` 或重启进程
+- `_BEHAVIOR_SIZE_WARNING_THRESHOLD = 15000` 仅告警无强制限制
+
+**对标差距**：
+- Claude Code 每次直接读文件，无缓存陈旧问题
+- Agent Zero 通过 Extension 系统动态加载
+
+**改善方向**：
+- 为 BehaviorPack 缓存增加文件 mtime 校验（脏检查）
+- 或设置 TTL 过期（如 60s），平衡性能和实时性
+- behavior.write_file 工具写入后自动 invalidate
+
+### 🟠 短板 5：Memory 系统过度工程化
+
+**现状问题**：
+- SoR 三步协议（propose → validate → commit）+ 20+ 枚举类型
+- 向量检索能力强但无 recall 准确率统计
+- 多 scope recall 串行执行，无异步批量查询
+
+**对标差距**：
+- Claude Code auto memory 简单直接：识别 → 保存到文件 → 索引
+- Agent Zero 向量分区（main/fragments/solutions）+ 自动提取
+
+**改善方向**：
+- 简化写入路径（低风险场景可跳过 validate）
+- 添加 recall 准确率埋点（用于评估向量模型选型）
+- 多 scope 查询改为 `asyncio.gather()` 并发
+
+---
+
 ## 15. 风险清单与缓解（Risks & Mitigations）
 
 > 每条风险附带检测指标与触发阈值，确保可操作化。
