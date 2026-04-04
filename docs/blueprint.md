@@ -3213,6 +3213,69 @@ M5 说明：
 - 添加 recall 准确率埋点（用于评估向量模型选型）
 - 多 scope 查询改为 `asyncio.gather()` 并发
 
+## 14.6 重构中发现的架构问题（2026-04-04 实测审计）
+
+> 基于 workspace 移除、Butler 统一、Policy 对齐、LiteLLM 集成等大规模重构中的实际问题排查，
+> 以下是当前代码库中已确认影响用户体验的架构缺陷。
+
+### 🔴 问题 1：Bootstrap 每个新对话都重走
+
+**现状**：每创建一个 project 就认为 bootstrap 未完成（`bootstrap_pending`），导致 USER.md 等共享行为文件不注入上下文。用户在默认 project 完成的 bootstrap 对新 project 无效。
+
+**影响**：新对话中 Agent 不知道用户的名字、位置等已录入的偏好。
+
+**根因**：bootstrap 状态存储在 `behavior/.onboarding-state.json`（全局），但 `_is_bootstrap_pending` 判断走的是 per-project/per-session 路径。
+
+**改善方向**：Bootstrap 完成状态改为 per-agent-profile 全局，一次完成所有对话共享。
+
+### 🔴 问题 2：`control_plane.py` 过于庞大（9000+ 行）
+
+**现状**：单文件承担 snapshot 构建、action routing、session 管理、behavior 管理、setup 流程、memory 代理、MCP 管理、worker profile 管理。
+
+**影响**：每次改动风险高，Agent 子任务修改容易产生冲突，review 困难。
+
+**改善方向**：拆分为独立 service（`SessionService`、`SetupService`、`BehaviorService`、`McpService`、`WorkerProfileService`）。
+
+### 🔴 问题 3：LLM 双路径 History 格式不统一
+
+**现状**：`main`（GPT 5.4）走 Responses API 直连 Codex Backend（`function_call`/`function_call_output` 格式），`cheap`（Qwen）走 Chat Completions API 经 LiteLLM Proxy（`tool_calls`/`tool` 格式）。两条路径的 history 追加、压缩、tool_call 回填逻辑完全分叉。
+
+**影响**：修一个路径另一个可能有不同的 bug（如 Responses API call_id 不匹配 vs Chat Completions system message 合并）。
+
+**改善方向**：在 SkillRunner 层统一为一种内部 history 格式，发送前按 API 类型转换。
+
+### 🟠 问题 4：源码目录在 Agent 可访问范围内
+
+**现状**：`~/.octoagent/app/octoagent/` 是系统源码但在 `instance_root` 下，LLM 的 `filesystem.read_text` 和 `terminal.exec` 能读到源码。
+
+**影响**：LLM 反复读源码理解内部实现（如 `mcp_registry.py`），而不是直接使用 `mcp.install` 工具。浪费大量 token 和时间。
+
+**改善方向**：filesystem 工具排除 `app/` 目录，或将 Agent 的工作目录限定在 `~/.octoagent/projects/{project}/`，与 Agent Zero 的 `work_dir` 隔离策略对齐。
+
+### 🟠 问题 5：工具数量过多（56 个）未按场景裁剪
+
+**现状**：所有 56 个工具都注入给所有 Agent，包括 MCP 管理工具、系统诊断工具等。
+
+**影响**：小模型（Qwen 35B）在 56 个工具面前 function calling 不稳定，有时只输出文本"让我搜索一下"但不实际调用。
+
+**改善方向**：按 Agent profile、task 类型或对话阶段动态裁剪工具集。参考 Claude Code 的 Core + Deferred 分层。
+
+### 🟠 问题 6：Memory Recall 与主对话共享模型别名
+
+**现状**：Memory Recall Plan 用主对话的 `model_alias`（如 `cheap`），导致 recall plan 也走 Qwen。
+
+**影响**：recall plan 只需简单 JSON 输出，用大模型浪费，用小模型可能格式不稳定。
+
+**改善方向**：recall plan 固定用快速便宜的模型（如 `cheap`），主对话用 `main`。或单独配置 `recall_model_alias`。
+
+### 🟡 问题 7：数据模型残留大量 deprecated 字段
+
+**现状**：`workspace_id`、`active_workspace_id`、`workspace_slug` 等字段虽标记 DEPRECATED 但仍占位。
+
+**影响**：增加认知负担，JSON 序列化多余字段，新开发者困惑。
+
+**改善方向**：下一个版本周期执行正式的数据迁移，删除 `workspaces` 表和所有 deprecated 字段。
+
 ---
 
 ## 15. 风险清单与缓解（Risks & Mitigations）
