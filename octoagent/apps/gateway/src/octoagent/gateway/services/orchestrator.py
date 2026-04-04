@@ -77,7 +77,8 @@ from octoagent.provider import ModelCallResult, TokenUsage
 from ulid import ULID
 
 from .agent_context import (
-    _SESSION_TRANSCRIPT_LIMIT,
+    _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
+    _dynamic_transcript_limit,
     AgentContextService,
     build_agent_runtime_id,
     build_agent_session_id,
@@ -1869,7 +1870,7 @@ class OrchestratorService:
                     "task_id": str(item.get("task_id", "")).strip(),
                 }
             )
-        return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+        return normalized[-_dynamic_transcript_limit():]
 
     async def _persist_butler_session_transcript(
         self,
@@ -1879,7 +1880,7 @@ class OrchestratorService:
         latest_model_summary: str,
         latest_model_preview: str,
     ) -> None:
-        normalized = transcript_entries[-_SESSION_TRANSCRIPT_LIMIT:]
+        normalized = transcript_entries[-_dynamic_transcript_limit():]
         metadata = {
             **session.metadata,
             "recent_transcript": normalized,
@@ -1950,7 +1951,7 @@ class OrchestratorService:
                     }
                 )
         return (
-            transcript_entries[-_SESSION_TRANSCRIPT_LIMIT:],
+            transcript_entries[-_dynamic_transcript_limit():],
             recent_user_messages,
             latest_model_summary,
             latest_model_preview,

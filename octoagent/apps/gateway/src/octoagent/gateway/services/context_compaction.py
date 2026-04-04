@@ -507,10 +507,23 @@ class ContextCompactionService:
     ) -> CompiledTaskContext:
         """三层压缩核心逻辑：Recent + Compressed + Archive。"""
 
-        # 计算各层预算
-        recent_budget = max(1, math.floor(effective_budget * self._config.recent_ratio))
-        compressed_budget = max(1, math.floor(effective_budget * self._config.compressed_ratio))
-        archive_budget = max(1, math.floor(effective_budget * self._config.archive_ratio))
+        # 自适应层预算：根据对话长度动态分配（替代固定 50/30/20 比例）
+        total_turns = len(turns)
+        if total_turns <= 6:
+            # 短对话：全部当 recent，不压缩
+            recent_budget = effective_budget
+            compressed_budget = 0
+            archive_budget = 0
+        elif total_turns <= 20:
+            # 中等对话：recent 70%, archive 30%
+            recent_budget = max(1, math.floor(effective_budget * 0.70))
+            compressed_budget = 0
+            archive_budget = max(1, effective_budget - recent_budget)
+        else:
+            # 长对话：使用配置比例（默认 50/30/20）
+            recent_budget = max(1, math.floor(effective_budget * self._config.recent_ratio))
+            compressed_budget = max(1, math.floor(effective_budget * self._config.compressed_ratio))
+            archive_budget = max(1, math.floor(effective_budget * self._config.archive_ratio))
 
         # --- Recent 层：保留最近 N 轮原文 ---
         recent_keep = min(len(turns), max(1, self._config.recent_turns * 2))

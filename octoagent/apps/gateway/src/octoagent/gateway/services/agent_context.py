@@ -126,7 +126,22 @@ _WEEKDAY_NAMES_EN = {
     6: "Sunday",
 }
 
-_SESSION_TRANSCRIPT_LIMIT = 20
+_SESSION_TRANSCRIPT_LIMIT_DEFAULT = 20  # 兼容回退值
+_SESSION_TRANSCRIPT_LIMIT_MAX = 80  # 绝对上限
+_SESSION_TRANSCRIPT_LIMIT_MIN = 4   # 绝对下限
+
+
+def _dynamic_transcript_limit(conversation_budget_tokens: int | None = None) -> int:
+    """根据对话 token 预算动态计算 transcript 保留条数。
+
+    每条 entry 平均约 200-400 token（含工具调用约 300）。
+    短对话全保留，长对话按预算扩展到最多 80 条。
+    """
+    if conversation_budget_tokens is None or conversation_budget_tokens <= 0:
+        return _SESSION_TRANSCRIPT_LIMIT_DEFAULT
+    estimated_per_entry = 300
+    limit = conversation_budget_tokens // estimated_per_entry
+    return max(_SESSION_TRANSCRIPT_LIMIT_MIN, min(limit, _SESSION_TRANSCRIPT_LIMIT_MAX))
 
 
 def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, Any]:
@@ -1412,7 +1427,7 @@ class AgentContextService:
     def _normalize_session_transcript_entries(
         raw_entries: Any,
         *,
-        limit: int | None = _SESSION_TRANSCRIPT_LIMIT,
+        limit: int | None = _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
     ) -> list[dict[str, str]]:
         if not isinstance(raw_entries, list):
             return []
@@ -1469,7 +1484,7 @@ class AgentContextService:
         self,
         *,
         agent_session_id: str,
-        limit: int = _SESSION_TRANSCRIPT_LIMIT * 4,
+        limit: int = _SESSION_TRANSCRIPT_LIMIT_DEFAULT * 4,
     ) -> list[dict[str, str]]:
         if not agent_session_id.strip():
             return []
@@ -1489,7 +1504,7 @@ class AgentContextService:
         *,
         agent_session: AgentSession | None = None,
         agent_session_id: str = "",
-        turn_limit: int = _SESSION_TRANSCRIPT_LIMIT * 8,
+        turn_limit: int = _SESSION_TRANSCRIPT_LIMIT_DEFAULT * 8,
     ) -> SessionReplayProjection:
         resolved_session = agent_session
         resolved_session_id = (
@@ -1504,7 +1519,7 @@ class AgentContextService:
 
         turns = await self._stores.agent_context_store.list_agent_session_turns(
             agent_session_id=resolved_session_id,
-            limit=max(turn_limit, _SESSION_TRANSCRIPT_LIMIT * 2),
+            limit=max(turn_limit, _SESSION_TRANSCRIPT_LIMIT_DEFAULT * 2),
         )
         if not turns:
             transcript_entries = self._agent_session_transcript_entries(resolved_session)
@@ -1750,6 +1765,7 @@ class AgentContextService:
         task_id: str,
         latest_user_text: str,
         model_response: str,
+        conversation_budget_tokens: int | None = None,
     ) -> list[dict[str, str]]:
         normalized = cls._normalize_session_transcript_entries(existing_entries)
         user_entry = {
@@ -1763,7 +1779,7 @@ class AgentContextService:
             "task_id": task_id,
         }
         if normalized[-2:] == [user_entry, assistant_entry]:
-            return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+            return normalized[-_dynamic_transcript_limit(conversation_budget_tokens):]
         if normalized and normalized[-1] == user_entry:
             normalized = normalized[:-1]
         if (
@@ -1775,7 +1791,7 @@ class AgentContextService:
         ):
             normalized = normalized[:-2]
         normalized.extend([user_entry, assistant_entry])
-        return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
+        return normalized[-_dynamic_transcript_limit(conversation_budget_tokens):]
 
     @classmethod
     def _replace_session_transcript_entries_from_messages(
@@ -1784,6 +1800,7 @@ class AgentContextService:
         messages: list[dict[str, str]],
         task_id: str,
         existing_entries: Any,
+        conversation_budget_tokens: int | None = None,
     ) -> list[dict[str, str]]:
         normalized = cls._normalize_session_transcript_entries(existing_entries)
         replaced = [
@@ -1796,9 +1813,10 @@ class AgentContextService:
             if (role := str(item.get("role", "")).strip()) in {"user", "assistant"}
             and (content := str(item.get("content", "")).strip())
         ]
+        effective_limit = _dynamic_transcript_limit(conversation_budget_tokens)
         if not replaced:
-            return normalized[-_SESSION_TRANSCRIPT_LIMIT:]
-        return replaced[-_SESSION_TRANSCRIPT_LIMIT:]
+            return normalized[-effective_limit:]
+        return replaced[-effective_limit:]
 
     async def record_compaction_context(
         self,
@@ -3854,180 +3872,139 @@ class AgentContextService:
         role_card: str = "",
         pipeline_catalog_content: str = "",
     ) -> tuple[list[dict[str, str]], str, list[MemoryRecallHit], list[str], int, int]:
-        summary_limits = [0]
-        if recent_summary:
-            summary_limits = list(
-                dict.fromkeys(
-                    [
-                        len(recent_summary),
-                        min(len(recent_summary), 1200),
-                        min(len(recent_summary), 800),
-                        min(len(recent_summary), 400),
-                        0,
-                    ]
-                )
-            )
-        memory_limits = list(
-            dict.fromkeys([len(memory_hits), min(len(memory_hits), 2), 1 if memory_hits else 0, 0])
-        )
-        include_runtime_options = [True, False]
+        """优先级裁剪：先构建完整 prompt，超预算时按优先级从低到高逐步裁剪。
 
-        # Feature 060 Phase 3: 当有三层压缩的 Compressed 层时，SessionReplay 收窄
-        # 不再回放当前 session 内的中期历史（已由 Compressed 层覆盖）
+        最多调用 _build_system_blocks 约 10 次（1 次完整 + 最多 9 步裁剪），
+        替代旧版 240 种组合暴力搜索。
+        """
+        max_tokens = self._budget_config.max_input_tokens
+
+        # Feature 060 Phase 3: 有 Compressed 层时收窄 replay
         has_compressed_layers = compiled.compaction_version == "v2" and any(
             layer.get("layer_id") == "compressed" and layer.get("entry_count", 0) > 0
             for layer in compiled.layers
         )
 
-        if has_compressed_layers:
-            # 收窄选项：只保留 session summary，不回放 dialogue
-            replay_options = [
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=0,
-                    tool_limit=0,
-                    include_summary=True,
-                    include_reply_preview=False,
-                ),
-                None,
-            ]
-        else:
-            replay_options = [
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=None,
-                    tool_limit=None,
-                    include_summary=True,
-                    include_reply_preview=True,
-                ),
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=8,
-                    tool_limit=6,
-                    include_summary=True,
-                    include_reply_preview=True,
-                ),
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=6,
-                    tool_limit=4,
-                    include_summary=True,
-                    include_reply_preview=True,
-                ),
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=4,
-                    tool_limit=3,
-                    include_summary=True,
-                    include_reply_preview=False,
-                ),
-                self._trim_session_replay_projection(
-                    session_replay,
-                    dialogue_limit=3,
-                    tool_limit=2,
-                    include_summary=False,
-                    include_reply_preview=False,
-                ),
-                None,
-            ]
-
-        best_result: tuple[
-            list[dict[str, str]],
-            str,
-            list[MemoryRecallHit],
-            list[str],
-            int,
-            int,
-        ] | None = None
-        best_tokens: int | None = None
-
-        for include_runtime_context in include_runtime_options:
-            for trimmed_replay in replay_options:
-                for memory_limit in memory_limits:
-                    trimmed_hits = memory_hits[:memory_limit]
-                    for summary_limit in summary_limits:
-                        trimmed_summary = (
-                            truncate_chars(recent_summary, summary_limit)
-                            if summary_limit > 0
-                            else ""
-                        )
-                        blocks, block_reasons = self._build_system_blocks(
-                            project=project,
-                            workspace=workspace,
-                            task=task,
-                            current_user_text=compiled.latest_user_text or task.title,
-                            agent_profile=agent_profile,
-                            owner_profile=owner_profile,
-                            owner_overlay=owner_overlay,
-                            bootstrap=bootstrap,
-                            recent_summary=trimmed_summary,
-                            session_replay=trimmed_replay,
-                            memory_hits=trimmed_hits,
-                            memory_scope_ids=memory_scope_ids,
-                            memory_prefetch_mode=memory_prefetch_mode,
-                            worker_capability=worker_capability,
-                            dispatch_metadata=dispatch_metadata,
-                            runtime_context=runtime_context,
-                            include_runtime_context=include_runtime_context,
-                            loaded_skills_content=loaded_skills_content,
-                            skill_injection_budget=skill_injection_budget,
-                            progress_notes=progress_notes,
-                            deferred_tools_text=deferred_tools_text,
-                            role_card=role_card,
-                            pipeline_catalog_content=pipeline_catalog_content,
-                        )
-                        system_tokens = estimate_messages_tokens(blocks)
-                        delivery_tokens = estimate_messages_tokens([*blocks, *compiled.messages])
-                        if best_tokens is None or delivery_tokens < best_tokens:
-                            best_result = (
-                                blocks,
-                                trimmed_summary,
-                                trimmed_hits,
-                                list(block_reasons),
-                                system_tokens,
-                                delivery_tokens,
-                            )
-                            best_tokens = delivery_tokens
-                        if delivery_tokens <= self._budget_config.max_input_tokens:
-                            reasons: list[str] = []
-                            if (
-                                trimmed_summary != recent_summary
-                                or len(trimmed_hits) != len(memory_hits)
-                                or trimmed_replay != session_replay
-                                or not include_runtime_context
-                            ):
-                                reasons.append("context_budget_trimmed")
-                            reasons.extend(block_reasons)
-                            return (
-                                blocks,
-                                trimmed_summary,
-                                trimmed_hits,
-                                list(dict.fromkeys(reasons)),
-                                system_tokens,
-                                delivery_tokens,
-                            )
-
-        if best_result is None:
-            return [], "", [], ["context_budget_trimmed"], 0, compiled.delivery_tokens
-
-        blocks, trimmed_summary, trimmed_hits, block_reasons, system_tokens, delivery_tokens = (
-            best_result
+        # 可变状态：每步裁剪修改这些值
+        cur_summary = recent_summary
+        cur_hits = list(memory_hits)
+        cur_include_runtime = True
+        cur_progress_notes = progress_notes
+        cur_pipeline_catalog = pipeline_catalog_content
+        cur_deferred_tools = deferred_tools_text
+        cur_replay = (
+            self._trim_session_replay_projection(
+                session_replay, dialogue_limit=0, tool_limit=0,
+                include_summary=True, include_reply_preview=False,
+            ) if has_compressed_layers
+            else self._trim_session_replay_projection(
+                session_replay, dialogue_limit=None, tool_limit=None,
+                include_summary=True, include_reply_preview=True,
+            )
         )
-        return (
-            blocks,
-            trimmed_summary,
-            trimmed_hits,
-            list(
-                dict.fromkeys(
-                    [
-                        *block_reasons,
-                        "context_budget_trimmed",
-                        "context_budget_exceeded",
-                    ]
+
+        def _build_and_measure() -> tuple[list[dict[str, str]], list[str], int, int]:
+            blocks, reasons = self._build_system_blocks(
+                project=project, workspace=workspace, task=task,
+                current_user_text=compiled.latest_user_text or task.title,
+                agent_profile=agent_profile, owner_profile=owner_profile,
+                owner_overlay=owner_overlay, bootstrap=bootstrap,
+                recent_summary=cur_summary, session_replay=cur_replay,
+                memory_hits=cur_hits, memory_scope_ids=memory_scope_ids,
+                memory_prefetch_mode=memory_prefetch_mode,
+                worker_capability=worker_capability,
+                dispatch_metadata=dispatch_metadata,
+                runtime_context=runtime_context,
+                include_runtime_context=cur_include_runtime,
+                loaded_skills_content=loaded_skills_content,
+                skill_injection_budget=skill_injection_budget,
+                progress_notes=cur_progress_notes,
+                deferred_tools_text=cur_deferred_tools,
+                role_card=role_card,
+                pipeline_catalog_content=cur_pipeline_catalog,
+            )
+            sys_tok = estimate_messages_tokens(blocks)
+            total_tok = estimate_messages_tokens([*blocks, *compiled.messages])
+            return blocks, reasons, sys_tok, total_tok
+
+        # Step 0: 构建完整版本
+        blocks, block_reasons, system_tokens, delivery_tokens = _build_and_measure()
+        if delivery_tokens <= max_tokens:
+            return blocks, cur_summary, cur_hits, list(block_reasons), system_tokens, delivery_tokens
+
+        # 优先级裁剪步骤（低优先级先砍）
+        trim_applied = False
+
+        def _try_trim() -> bool:
+            nonlocal blocks, block_reasons, system_tokens, delivery_tokens, trim_applied
+            blocks, block_reasons, system_tokens, delivery_tokens = _build_and_measure()
+            trim_applied = True
+            return delivery_tokens <= max_tokens
+
+        # 1. 去掉 pipeline catalog
+        if cur_pipeline_catalog:
+            cur_pipeline_catalog = ""
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 2. 去掉 progress notes
+        if cur_progress_notes:
+            cur_progress_notes = None
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 3. 去掉 deferred tools
+        if cur_deferred_tools:
+            cur_deferred_tools = ""
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 4. 缩减 replay: dialogue_limit 8→4→0
+        if not has_compressed_layers:
+            for dlimit, tlimit in [(8, 6), (4, 3), (0, 0)]:
+                cur_replay = self._trim_session_replay_projection(
+                    session_replay, dialogue_limit=dlimit, tool_limit=tlimit,
+                    include_summary=dlimit > 0, include_reply_preview=False,
                 )
-            ),
-            system_tokens,
-            delivery_tokens,
+                if _try_trim():
+                    return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 5. 缩减 memory hits: →2→0
+        if len(cur_hits) > 2:
+            cur_hits = memory_hits[:2]
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+        if cur_hits:
+            cur_hits = []
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 6. 缩减 summary: →800 chars→0
+        if cur_summary and len(cur_summary) > 800:
+            cur_summary = truncate_chars(recent_summary, 800)
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+        if cur_summary:
+            cur_summary = ""
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 7. 去掉 replay 完全
+        cur_replay = None
+        if _try_trim():
+            return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 8. 去掉 runtime hints
+        if cur_include_runtime:
+            cur_include_runtime = False
+            if _try_trim():
+                return blocks, cur_summary, cur_hits, list(dict.fromkeys([*block_reasons, "context_budget_trimmed"])), system_tokens, delivery_tokens
+
+        # 所有裁剪都做了还是超预算
+        return (
+            blocks, cur_summary, cur_hits,
+            list(dict.fromkeys([*block_reasons, "context_budget_trimmed", "context_budget_exceeded"])),
+            system_tokens, delivery_tokens,
         )
 
     def _build_source_refs(
