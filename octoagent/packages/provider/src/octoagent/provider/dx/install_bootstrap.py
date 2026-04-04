@@ -81,7 +81,16 @@ def _build_runtime_descriptor(
             "/bin/bash",
             "-lc",
             "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && "
-            "if [ -n \"$GIT_ROOT\" ]; then git -C \"$GIT_ROOT\" pull --ff-only origin master; fi && "
+            "if [ -n \"$GIT_ROOT\" ]; then "
+            "  git -C \"$GIT_ROOT\" fetch origin master && "
+            "  if git -C \"$GIT_ROOT\" diff --quiet 2>/dev/null; then "
+            "    git -C \"$GIT_ROOT\" merge --ff-only origin/master; "
+            "  else "
+            "    echo 'Local changes detected, resetting to origin/master...' && "
+            "    git -C \"$GIT_ROOT\" checkout -- . && "
+            "    git -C \"$GIT_ROOT\" merge --ff-only origin/master; "
+            "  fi; "
+            "fi && "
             "uv sync",
         ],
         frontend_build_command=[
