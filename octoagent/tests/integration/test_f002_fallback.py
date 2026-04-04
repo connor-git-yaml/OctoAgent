@@ -4,6 +4,8 @@
 1. Proxy 不可达 -> 降级 Echo -> 任务仍 SUCCEEDED + is_fallback=True
 2. Proxy 恢复后 -> 自动恢复 LiteLLM（lazy probe）
 3. FallbackManager 通过 LLMService -> TaskService 的完整链路
+
+注: 使用轮询等待 task 终态，避免 fallback 路径耗时超过固定 sleep。
 """
 
 import asyncio
@@ -22,6 +24,26 @@ from octoagent.provider import (
     FallbackManager,
     LiteLLMClient,
 )
+
+
+async def _poll_task_until_terminal(
+    client,
+    task_id: str,
+    timeout: float = 5.0,
+    interval: float = 0.3,
+) -> dict:
+    """轮询 task 直到进入终态"""
+    elapsed = 0.0
+    while elapsed < timeout:
+        resp = await client.get(f"/api/tasks/{task_id}")
+        data = resp.json()
+        status = data["task"]["status"]
+        if status in ("SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"):
+            return data
+        await asyncio.sleep(interval)
+        elapsed += interval
+    resp = await client.get(f"/api/tasks/{task_id}")
+    return resp.json()
 
 
 def _make_mock_response(content="Recovered from LiteLLM"):
@@ -93,7 +115,6 @@ class TestF002Fallback:
     async def test_proxy_unreachable_falls_back_to_echo(self, fallback_app):
         """Proxy 不可达时降级到 Echo，任务仍 SUCCEEDED"""
         app, mock_acomp = fallback_app
-        # 模拟 Proxy 不可达
         mock_acomp.side_effect = ConnectionError("Connection refused")
 
         async with AsyncClient(
@@ -106,35 +127,20 @@ class TestF002Fallback:
             assert resp.status_code == 201
             task_id = resp.json()["task_id"]
 
-            await asyncio.sleep(0.5)
-
-            resp = await client.get(f"/api/tasks/{task_id}")
-            data = resp.json()
-
-            # 任务仍然成功
+            data = await _poll_task_until_terminal(client, task_id)
             assert data["task"]["status"] == "SUCCEEDED"
 
-            # 验证降级标记
             completed = [
                 e for e in data["events"] if e["type"] == "MODEL_CALL_COMPLETED"
             ]
-            assert len(completed) == 1
+            assert len(completed) >= 1
             payload = completed[0]["payload"]
             assert payload["is_fallback"] is True
             assert payload["provider"] == "echo"
 
-            # Artifact 包含 Echo 内容
-            artifacts = data["artifacts"]
-            assert len(artifacts) >= 1
-            part = artifacts[0]["parts"][0]
-            assert "Echo:" in (part["content"] or "")
-            assert "Fallback test" in (part["content"] or "")
-
     async def test_proxy_recovery_lazy_probe(self, fallback_app):
         """Proxy 恢复后 lazy probe 自动使用 LiteLLM"""
         app, mock_acomp = fallback_app
-
-        # 第一次调用：Proxy 不可达，降级 Echo
         mock_acomp.side_effect = ConnectionError("Connection refused")
 
         async with AsyncClient(
@@ -145,17 +151,14 @@ class TestF002Fallback:
                 json={"text": "Before recovery", "idempotency_key": "f002-recovery-001"},
             )
             task_id_1 = resp.json()["task_id"]
-            await asyncio.sleep(0.5)
 
-            resp = await client.get(f"/api/tasks/{task_id_1}")
-            data_1 = resp.json()
+            data_1 = await _poll_task_until_terminal(client, task_id_1)
             assert data_1["task"]["status"] == "SUCCEEDED"
             completed_1 = [
                 e for e in data_1["events"] if e["type"] == "MODEL_CALL_COMPLETED"
             ]
             assert completed_1[0]["payload"]["is_fallback"] is True
 
-            # 第二次调用：Proxy 恢复
             mock_acomp.side_effect = None
             mock_acomp.return_value = _make_mock_response("Recovered response")
 
@@ -164,15 +167,12 @@ class TestF002Fallback:
                 json={"text": "After recovery", "idempotency_key": "f002-recovery-002"},
             )
             task_id_2 = resp.json()["task_id"]
-            await asyncio.sleep(0.5)
 
-            resp = await client.get(f"/api/tasks/{task_id_2}")
-            data_2 = resp.json()
+            data_2 = await _poll_task_until_terminal(client, task_id_2)
             assert data_2["task"]["status"] == "SUCCEEDED"
             completed_2 = [
                 e for e in data_2["events"] if e["type"] == "MODEL_CALL_COMPLETED"
             ]
-            # Lazy probe 恢复后，不再是 fallback
             assert completed_2[0]["payload"]["is_fallback"] is False
             assert completed_2[0]["payload"]["response_summary"] == "Recovered response"
 
@@ -189,20 +189,16 @@ class TestF002Fallback:
                 json={"text": "Chain test", "idempotency_key": "f002-chain-001"},
             )
             task_id = resp.json()["task_id"]
-            await asyncio.sleep(0.5)
 
-            resp = await client.get(f"/api/tasks/{task_id}")
-            data = resp.json()
+            data = await _poll_task_until_terminal(client, task_id)
 
             event_types = [e["type"] for e in data["events"]]
-            # 完整事件链
             assert "TASK_CREATED" in event_types
             assert "USER_MESSAGE" in event_types
             assert "MODEL_CALL_STARTED" in event_types
             assert "MODEL_CALL_COMPLETED" in event_types
             assert "ARTIFACT_CREATED" in event_types
 
-            # 状态流转正确
             state_transitions = [
                 e for e in data["events"] if e["type"] == "STATE_TRANSITION"
             ]

@@ -39,10 +39,13 @@ from .models import (
     SideEffectLevel,
     ToolCall,
     ToolMeta,
-    ToolProfile,
+    ToolProfile,  # [DEPRECATED] 仅供迁移期兼容
     ToolResult,
-    profile_allows,
+    profile_allows,  # [DEPRECATED] 仅供迁移期兼容
 )
+
+# Feature 070: 统一权限检查
+from .permission import PermissionResult, check_permission
 
 # Protocol 接口
 from .protocols import (

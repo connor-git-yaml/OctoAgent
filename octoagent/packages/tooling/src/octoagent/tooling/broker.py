@@ -1,8 +1,8 @@
-"""ToolBroker 实现 -- Feature 004 Tool Contract + ToolBroker
+"""ToolBroker 实现 -- Feature 004 Tool Contract + Feature 070 简化重构
 
-对齐 spec FR-006/007/008/009/010/010a/012/013, contracts/tooling-api.md §2。
-Protocol-based Mediator + Hook Chain 架构。
 工具注册、发现、执行的中央中介者。
+权限检查通过 check_permission() 内联执行（Feature 070），不再走 Hook Chain。
+Hook Chain 仅保留用于非权限类扩展（如 LargeOutputHandler）。
 """
 
 from __future__ import annotations
@@ -33,9 +33,12 @@ from .models import (
     RegisterToolResult,
     RegistryDiagnostic,
     ToolMeta,
-    ToolProfile,
     ToolResult,
-    profile_allows,
+)
+from .permission import (
+    ApprovalManagerProtocol,
+    ApprovalOverrideCacheProtocol,
+    check_permission,
 )
 from .protocols import AfterHook, ArtifactStoreProtocol, BeforeHook, EventStoreProtocol
 from .sanitizer import sanitize_for_event
@@ -46,8 +49,9 @@ logger = structlog.get_logger(__name__)
 class ToolBroker:
     """ToolBroker -- 工具注册、发现、执行的中央中介者
 
-    实现 ToolBrokerProtocol。所有工具调用必须经过 Broker，
-    确保 hook 链路完整执行（FR-010）。
+    实现 ToolBrokerProtocol。所有工具调用必须经过 Broker。
+    权限检查通过 check_permission() 内联执行（Feature 070）。
+    Hook Chain 仅保留用于非权限类扩展（如 LargeOutputHandler）。
 
     注册表为进程内存态，进程重启后需重新注册。
     历史工具调用事件通过 EventStore 持久化不丢失。
@@ -57,22 +61,29 @@ class ToolBroker:
         self,
         event_store: EventStoreProtocol,
         artifact_store: ArtifactStoreProtocol | None = None,
+        override_cache: ApprovalOverrideCacheProtocol | None = None,
+        approval_manager: ApprovalManagerProtocol | None = None,
     ) -> None:
         """初始化 ToolBroker
 
         Args:
             event_store: EventStore 实例（用于事件持久化）
             artifact_store: ArtifactStore 实例（可选，用于大输出存储）
+            override_cache: always 覆盖缓存（Feature 070，可选）
+            approval_manager: 审批管理器（Feature 070，可选）
         """
         # 注册表：tool_name -> (ToolMeta, handler)
         self._registry: dict[str, tuple[ToolMeta, Callable[..., Any]]] = {}
-        # Hook 列表
+        # Hook 列表（Feature 070: 仅保留非权限类 hook）
         self._before_hooks: list[BeforeHook] = []
         self._after_hooks: list[AfterHook] = []
         self._diagnostics: list[RegistryDiagnostic] = []
         # 外部依赖
         self._event_store = event_store
         self._artifact_store = artifact_store
+        # Feature 070: 权限依赖
+        self._override_cache = override_cache
+        self._approval_manager = approval_manager
 
     # ============================================================
     # 注册与发现（Phase 4: US2）
@@ -101,7 +112,6 @@ class ToolBroker:
             "tool_registered",
             tool_name=tool_meta.name,
             side_effect_level=tool_meta.side_effect_level,
-            tool_profile=tool_meta.tool_profile,
             tool_group=tool_meta.tool_group,
         )
 
@@ -151,13 +161,11 @@ class ToolBroker:
 
     async def discover(
         self,
-        profile: ToolProfile | None = None,
         group: str | None = None,
     ) -> list[ToolMeta]:
-        """发现可用工具（FR-007/008）
+        """发现可用工具
 
         Args:
-            profile: 按 Profile 过滤（含该级别及以下）
             group: 按逻辑分组过滤
 
         Returns:
@@ -165,10 +173,6 @@ class ToolBroker:
         """
         results: list[ToolMeta] = []
         for meta, _ in self._registry.values():
-            # Profile 层级过滤
-            if profile is not None and not profile_allows(meta.tool_profile, profile):
-                continue
-            # Group 过滤
             if group is not None and meta.tool_group != group:
                 continue
             results.append(meta)
@@ -246,16 +250,17 @@ class ToolBroker:
         args: dict[str, Any],
         context: ExecutionContext,
     ) -> ToolResult:
-        """执行工具调用（FR-010/012/013 + Feature 061）
+        """执行工具调用（Feature 070 简化重构）
 
         完整执行链路：
         1. 查找工具
         2. 生成 TOOL_CALL_STARTED 事件
-        3. 执行 before hook 链（含 PresetBeforeHook 权限检查）
-        4. 执行工具（含超时 + sync->async 包装）
-        5. 执行 after hook 链
-        6. 生成 COMPLETED/FAILED 事件
-        7. 返回 ToolResult
+        3. 权限检查（check_permission 内联）
+        4. 执行 before hook 链（仅非权限类 hook）
+        5. 执行工具（含超时 + sync->async 包装）
+        6. 执行 after hook 链
+        7. 生成 COMPLETED/FAILED 事件
+        8. 返回 ToolResult
 
         Args:
             tool_name: 目标工具名称
@@ -280,10 +285,6 @@ class ToolBroker:
 
         meta, handler = entry
 
-        # Feature 061: 权限检查完全由 Hook Chain 驱动
-        # （PresetBeforeHook + ApprovalOverrideHook）
-        # 不再硬编码 profile_allows() 和 FR-010a 强制拒绝。
-
         # 步骤 2: 生成 TOOL_CALL_STARTED 事件
         started_ok = await self._emit_started_event(
             tool_name=tool_name, meta=meta, args=args, context=context
@@ -298,13 +299,37 @@ class ToolBroker:
                 tool_name=tool_name,
             )
 
-        # 步骤 3: 执行 before hook 链（含 PresetBeforeHook 权限检查）
+        # 步骤 3: Feature 070 — 权限检查（替代三套 Hook）
+        perm = await check_permission(
+            tool_meta=meta,
+            args=args,
+            ctx=context,
+            override_cache=self._override_cache,
+            approval_manager=self._approval_manager,
+        )
+        if not perm.allowed:
+            duration = time.monotonic() - start_time
+            await self._emit_failed_event(
+                tool_name=tool_name,
+                context=context,
+                duration=duration,
+                error_type="permission_denied",
+                error_message=f"权限拒绝: {perm.reason}",
+            )
+            return ToolResult(
+                output="",
+                is_error=True,
+                error=f"权限拒绝: {perm.reason}",
+                duration=duration,
+                tool_name=tool_name,
+            )
+
+        # 步骤 4: 执行 before hook 链（仅非权限类 hook，如参数变换等）
         current_args = dict(args)
         for hook in self._before_hooks:
             try:
                 hook_result = await hook.before_execute(meta, current_args, context)
                 if not hook_result.proceed:
-                    # Hook 拒绝执行
                     duration = time.monotonic() - start_time
                     reason = hook_result.rejection_reason or f"Rejected by hook '{hook.name}'"
                     await self._emit_failed_event(
@@ -321,12 +346,10 @@ class ToolBroker:
                         duration=duration,
                         tool_name=tool_name,
                     )
-                # 应用修改后的参数
                 if hook_result.modified_args is not None:
                     current_args = hook_result.modified_args
             except Exception as e:
                 if hook.fail_mode == FailMode.CLOSED:
-                    # fail-closed: 拒绝执行
                     duration = time.monotonic() - start_time
                     error_msg = f"Before hook '{hook.name}' failed (fail_mode=closed): {e}"
                     await self._emit_failed_event(
@@ -344,14 +367,13 @@ class ToolBroker:
                         tool_name=tool_name,
                     )
                 else:
-                    # fail-open: 记录警告并继续
                     logger.warning(
                         "before_hook_failed_open",
                         hook_name=hook.name,
                         error=str(e),
                     )
 
-        # 步骤 4: 执行工具
+        # 步骤 5: 执行工具
         try:
             raw_output = await self._invoke_handler(handler, current_args, meta.timeout_seconds)
             output_str = str(raw_output) if raw_output is not None else ""

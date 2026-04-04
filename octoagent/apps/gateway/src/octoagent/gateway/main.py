@@ -403,24 +403,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.telegram_service = telegram_service
     app.state.telegram_state_store = telegram_state_store
 
-    # Feature 006: 初始化 PolicyEngine
-    from octoagent.policy.policy_engine import PolicyEngine
+    # Feature 070: ApprovalManager + Override 持久化（不再使用 PolicyEngine）
+    from octoagent.policy import ApprovalManager
+    from octoagent.policy.approval_override_store import (
+        ApprovalOverrideCache,
+        ApprovalOverrideRepository,
+    )
 
     sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
     approval_broadcaster = CompositeApprovalBroadcaster(
         sse_broadcaster,
         TelegramApprovalBroadcaster(telegram_service),
-    )
-    default_project = await _resolve_policy_project_for_startup(store_group, project_root)
-    policy_engine = PolicyEngine(
-        profile=_resolve_policy_profile_from_project(default_project),
-        event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
-        sse_broadcaster=approval_broadcaster,
-    )
-    # Feature 061 T-016: 创建 ApprovalOverride 持久化 + 缓存
-    from octoagent.policy.approval_override_store import (
-        ApprovalOverrideCache,
-        ApprovalOverrideRepository,
     )
 
     approval_override_cache = ApprovalOverrideCache()
@@ -429,22 +422,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         cache=approval_override_cache,
         event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
     )
-    # 注入到 ApprovalManager（PolicyEngine 内部创建的实例）
-    policy_engine.approval_manager._override_repo = approval_override_repo
-    policy_engine.approval_manager._override_cache = approval_override_cache
+
+    approval_manager = ApprovalManager(
+        event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+        sse_broadcaster=approval_broadcaster,
+    )
+    approval_manager._override_repo = approval_override_repo
+    approval_manager._override_cache = approval_override_cache
+    await approval_manager.recover_from_store()
+
     app.state.approval_override_repo = approval_override_repo
     app.state.approval_override_cache = approval_override_cache
+    app.state.approval_manager = approval_manager
 
-    await policy_engine.startup()
-    app.state.policy_engine = policy_engine
-    app.state.approval_manager = policy_engine.approval_manager
+    # Feature 070: ToolBroker 直接接收权限依赖，不再注册权限 Hook
     from octoagent.tooling import LargeOutputHandler, ToolBroker
 
     tool_broker = ToolBroker(
         event_store=store_group.event_store,
         artifact_store=store_group.artifact_store,
+        override_cache=approval_override_cache,
+        approval_manager=approval_manager,
     )
-    tool_broker.add_hook(policy_engine.hook)
     tool_broker.add_hook(
         LargeOutputHandler(
             artifact_store=store_group.artifact_store,
@@ -744,7 +743,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ),
         capability_pack_service=app.state.capability_pack_service,
         delegation_plane_service=app.state.delegation_plane_service,
-        policy_engine=app.state.policy_engine,
+        policy_engine=None,  # Feature 070: PolicyEngine 已移除，后续清理
     )
     app.state.automation_scheduler = AutomationSchedulerService(
         control_plane_service=app.state.control_plane_service,

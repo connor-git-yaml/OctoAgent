@@ -521,10 +521,13 @@ class SkillRunner:
         execution_context: SkillExecutionContext,
         call: ToolCallSpec,
     ) -> ToolFeedbackMessage:
-        """执行单个工具调用的完整流程：hook → execute → ask bridge → feedback → hook。"""
+        """执行单个工具调用：hook → execute → feedback → hook。
+
+        Feature 070: 审批在 ToolBroker.execute() 内通过 check_permission() 完成，
+        不再需要 ask bridge 桥接。
+        """
         await self._call_hook("before_tool_execute", call.tool_name, call.arguments)
 
-        # Feature 061: 将 permission_preset 从 SkillExecutionContext 传递到 ExecutionContext
         try:
             _preset = PermissionPreset(execution_context.permission_preset)
         except ValueError:
@@ -543,74 +546,12 @@ class SkillRunner:
             call.tool_name, call.arguments, tool_context
         )
 
-        # Feature 061 T-014: "ask:" 前缀信号桥接
-        tool_result = await self._handle_ask_bridge(
-            tool_result, call, tool_context
-        )
-
         feedback = self._build_tool_feedback(
             call.tool_name, tool_result, manifest.context_budget,
             tool_call_id=call.tool_call_id,
         )
         await self._call_hook("after_tool_execute", feedback)
         return feedback
-
-    async def _handle_ask_bridge(
-        self,
-        tool_result: Any,
-        call: ToolCallSpec,
-        tool_context: ExecutionContext,
-    ) -> Any:
-        """Feature 061 T-014: 识别 ask: 前缀，桥接到 ApprovalManager
-
-        当 ToolBroker 返回 is_error=True 且 error 以 "ask:" 开头时，
-        桥接到 ApprovalManager 审批流：
-        - approve/always → 重新执行工具调用
-        - deny/timeout → 返回拒绝信息给 LLM
-        """
-        if not tool_result.is_error:
-            return tool_result
-        error_msg = str(tool_result.error or "")
-        if not error_msg.startswith("ask:"):
-            return tool_result
-        if self._approval_bridge is None:
-            # 无审批桥接，原样返回 ask 错误
-            return tool_result
-
-        try:
-            decision = await self._approval_bridge.handle_ask(
-                tool_name=call.tool_name,
-                ask_reason=error_msg,
-                agent_runtime_id=tool_context.agent_runtime_id,
-                task_id=tool_context.task_id,
-            )
-        except Exception:
-            logger.warning(
-                "ask_bridge_failed",
-                tool_name=call.tool_name,
-                exc_info=True,
-            )
-            return tool_result
-
-        if decision in ("approve", "always"):
-            # 审批通过 → 重新执行工具调用
-            logger.info(
-                "ask_bridge_approved",
-                tool_name=call.tool_name,
-                decision=decision,
-            )
-            retried = await self._tool_broker.execute(
-                call.tool_name, call.arguments, tool_context
-            )
-            return retried
-
-        # deny / timeout → 将拒绝信息返回给 LLM
-        logger.info(
-            "ask_bridge_denied",
-            tool_name=call.tool_name,
-            decision=decision,
-        )
-        return tool_result
 
     @staticmethod
     def _build_tool_feedback(

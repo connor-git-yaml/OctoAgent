@@ -68,7 +68,7 @@ from octoagent.tooling import (
     reflect_tool_schema,
     tool_contract,
 )
-from octoagent.tooling.hooks import ApprovalOverrideHook, PresetBeforeHook
+# Feature 070: 权限 Hook 已移除，权限检查内联到 ToolBroker.execute()
 from octoagent.tooling.models import CoreToolSet, DeferredToolEntry, ToolTier
 
 from .tool_search_tool import create_tool_search_handler
@@ -382,20 +382,7 @@ class CapabilityPackService:
             return
         # Feature 057: 首次启动时扫描 SKILL.md 文件系统
         self._skill_discovery.scan()
-        # Feature 061: 注册权限检查 Hooks 到 ToolBroker
-        event_store = getattr(self._stores, "event_store", None)
-        self._tool_broker.add_hook(
-            ApprovalOverrideHook(
-                cache=self._approval_override_cache,
-                event_store=event_store,
-            )
-        )
-        self._tool_broker.add_hook(
-            PresetBeforeHook(
-                event_store=event_store,
-                override_cache=self._approval_override_cache,
-            )
-        )
+        # Feature 070: 权限检查已内联到 ToolBroker.execute()，不再注册权限 Hook
         await self._register_builtin_tools()
         if self._mcp_registry is not None:
             await self._mcp_registry.startup()
@@ -1184,7 +1171,7 @@ class CapabilityPackService:
 
             路径安全策略与 Policy Engine 双维度模型对齐：
             - allow_outside=True（读操作）：允许任意路径，
-              安全由 PresetBeforeHook + PolicyCheckHook 保障
+              安全由 ToolBroker 内联权限检查保障
             - allow_outside=False（写操作）：限制在 instance root 内，
               防止误写系统文件
             """

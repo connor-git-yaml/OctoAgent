@@ -1,26 +1,17 @@
-"""OctoAgent Policy Engine -- 策略管道 + 审批管理 + Two-Phase Gate
+"""OctoAgent Policy -- 审批管理 + Override 持久化
 
-Feature 006: Policy Engine + Approvals + Chat UI
-提供多层策略评估管道、Two-Phase Approval 流程、PolicyCheckHook 适配器。
+Feature 070: PolicyEngine / PolicyCheckHook / Pipeline / Evaluators 已删除。
+权限检查统一由 tooling.permission.check_permission() 完成。
+本包仅保留 ApprovalManager + ApprovalOverrideStore + 数据模型。
 """
 
 from __future__ import annotations
 
-# ApprovalManager
 from .approval_manager import ApprovalManager
-
-# Feature 061: ApprovalOverride 持久化 + 缓存
 from .approval_override_store import ApprovalOverrideCache, ApprovalOverrideRepository
-
-# 评估器
-from .evaluators.global_rule import global_rule
-from .evaluators.profile_filter import profile_filter
-
-# 枚举
 from .models import (
     DEFAULT_PROFILE,
     PERMISSIVE_PROFILE,
-    POLICY_ACTION_SEVERITY,
     STRICT_PROFILE,
     ApprovalDecision,
     ApprovalExpiredEventPayload,
@@ -43,37 +34,20 @@ from .models import (
     PolicyDecision,
     PolicyDecisionEventPayload,
     PolicyProfile,
-    PolicyStep,
     SSEApprovalEvent,
 )
-
-# Pipeline
-from .pipeline import evaluate_pipeline
-
-# PolicyCheckHook
-from .policy_check_hook import PolicyCheckHook
-
-# PolicyEngine 门面类
-from .policy_engine import PolicyEngine
 
 __all__ = [
     # 枚举
     "PolicyAction",
     "ApprovalDecision",
     "ApprovalStatus",
-    "POLICY_ACTION_SEVERITY",
-    # 策略管道模型
-    "PolicyDecision",
-    "PolicyStep",
-    "PolicyProfile",
-    "DEFAULT_PROFILE",
-    "STRICT_PROFILE",
-    "PERMISSIVE_PROFILE",
     # 审批模型
     "ApprovalRequest",
     "ApprovalRecord",
     "ApprovalResolveRequest",
     "ApprovalListItem",
+    "PolicyDecision",
     # 事件 Payload
     "PolicyDecisionEventPayload",
     "ApprovalRequestedEventPayload",
@@ -87,21 +61,12 @@ __all__ = [
     "ApprovalResolveResponse",
     "ChatSendRequest",
     "ChatSendResponse",
-    # Pipeline
-    "evaluate_pipeline",
-    # 评估器
-    "profile_filter",
-    "global_rule",
     # ApprovalManager
     "ApprovalManager",
-    # Feature 061: ApprovalOverride
+    # Override
     "ApprovalOverride",
     "ApprovalOverrideListResponse",
     "ApprovalOverrideDeleteResponse",
     "ApprovalOverrideRepository",
     "ApprovalOverrideCache",
-    # PolicyCheckHook
-    "PolicyCheckHook",
-    # PolicyEngine 门面类
-    "PolicyEngine",
 ]

@@ -4,6 +4,8 @@ Mock litellm.acompletion() 验证全链路调用：
 1. LiteLLMClient -> FallbackManager -> LLMService -> TaskService
 2. ModelCallResult 字段完整（provider/cost/token_usage）
 3. 事件链正确（包含 Feature 002 新字段）
+
+注: 使用轮询等待 task 终态，避免 fallback 路径耗时超过固定 sleep。
 """
 
 import asyncio
@@ -22,6 +24,34 @@ from octoagent.provider import (
     FallbackManager,
     LiteLLMClient,
 )
+
+
+async def _poll_task_until_terminal(
+    client,
+    task_id: str,
+    timeout: float = 5.0,
+    interval: float = 0.3,
+) -> dict:
+    """轮询 task 直到进入终态"""
+    elapsed = 0.0
+    while elapsed < timeout:
+        resp = await client.get(f"/api/tasks/{task_id}")
+        data = resp.json()
+        status = data["task"]["status"]
+        if status in ("SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"):
+            return data
+        await asyncio.sleep(interval)
+        elapsed += interval
+    resp = await client.get(f"/api/tasks/{task_id}")
+    return resp.json()
+
+
+def _find_artifact_by_name(artifacts: list, name: str) -> dict | None:
+    """按名称查找 artifact"""
+    for a in artifacts:
+        if a["name"] == name:
+            return a
+    return None
 
 
 def _make_mock_response(content="Hello from LiteLLM", model="gpt-4o"):
@@ -114,7 +144,7 @@ class TestF002LiteLLMMode:
         task_id = resp.json()["task_id"]
 
         # 等待后台处理
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
         resp = await client.get(f"/api/tasks/{task_id}")
         assert resp.status_code == 200
@@ -141,7 +171,7 @@ class TestF002LiteLLMMode:
         )
         task_id = resp.json()["task_id"]
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
         resp = await client.get(f"/api/tasks/{task_id}")
         data = resp.json()
@@ -170,13 +200,12 @@ class TestF002LiteLLMMode:
         )
         task_id = resp.json()["task_id"]
 
-        await asyncio.sleep(0.5)
+        data = await _poll_task_until_terminal(client, task_id)
 
-        resp = await client.get(f"/api/tasks/{task_id}")
-        data = resp.json()
-
-        artifacts = data["artifacts"]
-        assert len(artifacts) >= 1
-        assert artifacts[0]["name"] == "llm-response"
-        part = artifacts[0]["parts"][0]
+        art = _find_artifact_by_name(data["artifacts"], "llm-response")
+        assert art is not None, (
+            f"未找到 'llm-response' artifact，"
+            f"可用: {[a['name'] for a in data['artifacts']]}"
+        )
+        part = art["parts"][0]
         assert part["content"] == "Hello from LiteLLM"
