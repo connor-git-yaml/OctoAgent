@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "profile_id": "builtin:engine-default",
+      "label": "Qwen3-Embedding-0.6B（内建默认）",
+      "target": "engine-default",
+      "source_kind": "builtin",
+      "model_alias": "",
+      "is_builtin": true,
+      "is_available": true,
+      "summary": "当前优先使用内建 Qwen3-Embedding-0.6B；若本机运行时暂不可用，会自动回退到双语 hash embedding。",
+      "warnings": []
+    }
+  ],
+  "generations": [
+    {
+      "generation_id": "gen-memory-01KNC7QEN4D7RA1966VWEEZ42N",
+      "corpus_kind": "memory",
+      "profile_id": "builtin:engine-default",
+      "profile_target": "engine-default",
+      "label": "Memory · Qwen3-Embedding-0.6B（内建默认）",
+      "status": "active",
+      "is_active": true,
+      "build_job_id": "",
+      "previous_generation_id": "",
+      "created_at": "2026-04-04T12:33:16.964118Z",
+      "updated_at": "2026-04-04T12:33:16.964118Z",
+      "activated_at": "2026-04-04T12:33:16.964118Z",
+      "completed_at": "2026-04-04T12:33:16.964118Z",
+      "rollback_deadline": null,
+      "warnings": [],
+      "metadata": {
+        "projection_store": "shared-retrieval-platform"
+      }
+    }
+  ],
+  "build_jobs": [],
+  "cancelled_targets": {}
+}

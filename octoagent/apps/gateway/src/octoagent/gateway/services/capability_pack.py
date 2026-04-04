@@ -883,9 +883,6 @@ class CapabilityPackService:
             "{{project_id}}": project.project_id if project is not None else "",
             "{{project_slug}}": project.slug if project is not None else "default",
             "{{project_name}}": project.name if project is not None else "Default Project",
-            "{{workspace_id}}": "",
-            "{{workspace_slug}}": "",
-            "{{workspace_root}}": "",
             "{{current_datetime_local}}": ambient_runtime["current_datetime_local"],
             "{{current_date_local}}": ambient_runtime["current_date_local"],
             "{{current_time_local}}": ambient_runtime["current_time_local"],
@@ -4083,8 +4080,6 @@ class CapabilityPackService:
                 content=(
                     "你当前运行在 OctoAgent 内建 capability pack。\n"
                     "Project: {{project_name}} ({{project_slug}} / {{project_id}})\n"
-                    "Workspace: {{workspace_slug}} ({{workspace_id}})\n"
-                    "Workspace Root: {{workspace_root}}\n"
                     "Current Datetime Local: {{current_datetime_local}}\n"
                     "Current Weekday Local: {{current_weekday_local}}\n"
                     "Owner Timezone: {{owner_timezone}} (UTC {{owner_utc_offset}})\n"

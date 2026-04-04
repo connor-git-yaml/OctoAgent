@@ -50,7 +50,7 @@ async def ensure_startup_records(
     if project is None:
         return
 
-    workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+    workspace = None  # workspace 概念已废弃
 
     owner_profile = await _ensure_owner_profile(store_group)
     agent_profile = await _ensure_agent_profile(store_group, project)

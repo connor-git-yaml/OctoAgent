@@ -40,9 +40,9 @@ from octoagent.core.models import (
 # ---------------------------------------------------------------------------
 # Feature 063 T2.4: Session 级 BehaviorPack 缓存
 # ---------------------------------------------------------------------------
-# 缓存键 = (profile_id, project_slug, project_root_str, load_profile_value, workspace_root_str)
+# 缓存键 = (profile_id, project_slug, project_root_str, load_profile_value)
 # 写入行为文件后通过 invalidate_behavior_pack_cache() 清除。
-_behavior_pack_cache: dict[tuple[str, str, str, str, str], BehaviorPack] = {}
+_behavior_pack_cache: dict[tuple[str, str, str, str], BehaviorPack] = {}
 
 
 def invalidate_behavior_pack_cache(

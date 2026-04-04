@@ -1929,7 +1929,6 @@ async def test_bootstrap_shared_template_no_redundant_fields(
 
         # 核心元信息仍存在
         assert "Project:" in shared.content
-        assert "Workspace:" in shared.content
         assert "Current Datetime Local:" in shared.content
         assert "Worker Type:" in shared.content
         assert "ToolBroker / Policy / audit" in shared.content

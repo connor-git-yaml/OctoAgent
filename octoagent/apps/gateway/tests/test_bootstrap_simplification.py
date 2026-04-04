@@ -131,7 +131,6 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             # 内容包含核心元信息
             content = rendered[0]["content"]
             assert "Project: Default Project" in content
-            assert "Workspace:" in content  # workspace 概念已废弃，值为空
             assert f"Worker Type: {wtype}" in content
     finally:
         await task_runner.shutdown()
