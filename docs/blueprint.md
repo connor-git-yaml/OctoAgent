@@ -3148,7 +3148,7 @@ M5 说明：
 - 借鉴 Claude Code 的会话内存提取（长期记忆沉淀到 Memory）
 - 简化压缩配置：用单一阈值公式替代 14 参数
 
-### 🔴 短板 2：工具执行无并发能力
+### ✅ 短板 2：工具执行无并发能力（已修复 2026-04-04，Feature 070）
 
 **现状问题**：
 - `process_task_with_llm()` 和 `ToolBroker.execute()` 均为单工具顺序执行
@@ -3165,7 +3165,7 @@ M5 说明：
 - 为每个工具增加独立超时配置
 - 实现工具执行的流式中间结果推送
 
-### 🟠 短板 3：权限模型缺少自动分类器
+### ✅ 短板 3：权限模型缺少自动分类器（已修复 2026-04-04，Feature 070）
 
 **现状问题**：
 - 仅二层决策：PolicyGate（HIGH_RISK）→ ToolProfile（minimal/standard/privileged）
@@ -3222,7 +3222,7 @@ M5 说明：
 
 **已修复**：`agent_context.py` 中新 project 创建 `BootstrapSession` 时会检查全局 `OnboardingState`，已完成过则直接标记 `COMPLETED`；已有 session 如果全局 onboarding 完成但 session 仍 PENDING，自动升级。此外 behavior 加载路径（`project_root` 传递链 + `render_behavior_system_block` 的 `build_behavior_layers` 修复）也已在 2026-04-04 修复。
 
-### 🔴 问题 2：`control_plane.py` 过于庞大（9000+ 行）
+### ✅ 问题 2：`control_plane.py` 过于庞大（9000+ 行）（已修复 2026-04-04，拆分为 11 个独立模块）
 
 **现状**：单文件承担 snapshot 构建、action routing、session 管理、behavior 管理、setup 流程、memory 代理、MCP 管理、worker profile 管理。
 
@@ -3230,7 +3230,7 @@ M5 说明：
 
 **改善方向**：拆分为独立 service（`SessionService`、`SetupService`、`BehaviorService`、`McpService`、`WorkerProfileService`）。
 
-### ✅ 问题 3：LLM 双路径 History 格式不统一（已修复 2026-04-04）
+### ✅ 问题 3：LLM 双路径 History 格式不统一（已修复 2026-04-04，统一为 Chat Completions 格式）
 
 **已修复**：`litellm_client.py` 内部 history 统一为 Chat Completions 标准格式（`tool_calls`/`tool` role）。Responses API 发送前由 `_history_to_responses_input()` 转换。assistant tool_calls 追加和 tool result 回填各从 3 条分支合并为 1 条。
 
@@ -3242,7 +3242,7 @@ M5 说明：
 
 **改善方向**：filesystem 工具排除 `app/` 目录，或将 Agent 的工作目录限定在 `~/.octoagent/projects/{project}/`，与 Agent Zero 的 `work_dir` 隔离策略对齐。
 
-### 🟠 问题 5：工具数量过多（56 个）未按场景裁剪
+### ✅ 问题 5：工具数量过多（56 个）未按场景裁剪（已修复 2026-04-04，Feature 072）
 
 **现状**：所有 56 个工具都注入给所有 Agent，包括 MCP 管理工具、系统诊断工具等。
 
