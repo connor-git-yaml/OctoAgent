@@ -1408,21 +1408,29 @@ class CapabilityPackService:
                 raise RuntimeError(f"path is not a directory: {target}")
             entries = []
             bounded_limit = max(1, min(max_entries, 200))
+            is_inside_workspace = target == workspace_root or target.is_relative_to(workspace_root)
             for item in sorted(target.iterdir(), key=lambda current: (not current.is_dir(), current.name))[
                 :bounded_limit
             ]:
-                relative = "." if item == workspace_root else str(item.relative_to(workspace_root))
+                if is_inside_workspace:
+                    display_path = "." if item == workspace_root else str(item.relative_to(workspace_root))
+                else:
+                    display_path = str(item)
                 entries.append(
                     {
                         "name": item.name,
-                        "path": relative,
+                        "path": display_path,
                         "kind": "directory" if item.is_dir() else "file",
                     }
                 )
+            if is_inside_workspace:
+                display_target = "." if target == workspace_root else str(target.relative_to(workspace_root))
+            else:
+                display_target = str(target)
             return json.dumps(
                 {
                     "workspace_root": str(workspace_root),
-                    "path": "." if target == workspace_root else str(target.relative_to(workspace_root)),
+                    "path": display_target,
                     "entries": entries,
                 },
                 ensure_ascii=False,
