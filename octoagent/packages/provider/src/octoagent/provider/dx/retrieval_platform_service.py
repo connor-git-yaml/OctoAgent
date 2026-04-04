@@ -17,7 +17,6 @@ from octoagent.core.models import (
     ProjectBindingType,
     RetrievalCorpusState,
     RetrievalPlatformDocument,
-    Workspace,
 )
 from octoagent.memory import (
     MemoryBackendStatus,
@@ -78,16 +77,13 @@ class RetrievalPlatformService:
         self,
         *,
         active_project_id: str = "",
-        active_workspace_id: str = "",
         backend_status: MemoryBackendStatus | None = None,
     ) -> RetrievalPlatformDocument:
         selection = await self._resolve_selection(
             project_id=active_project_id,
-            workspace_id=active_workspace_id,
         )
         runtime_profile = await self._resolve_runtime_profile(
             project=selection.project,
-            workspace=selection.workspace,
             backend_status=backend_status,
         )
         snapshot = self._sync_snapshot(
@@ -104,9 +100,7 @@ class RetrievalPlatformService:
         warnings = list(dict.fromkeys(runtime_profile.warnings + self._collect_snapshot_warnings(snapshot)))
         return RetrievalPlatformDocument(
             active_project_id=selection.project.project_id if selection.project is not None else "",
-            active_workspace_id=(
-                selection.workspace.workspace_id if selection.workspace is not None else ""
-            ),
+            active_workspace_id="",
             profiles=sorted(snapshot.profiles, key=lambda item: (not item.is_builtin, item.label)),
             corpora=corpora,
             generations=sorted(
@@ -141,12 +135,10 @@ class RetrievalPlatformService:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None = None,
         backend_status: MemoryBackendStatus | None = None,
     ) -> tuple[str, str]:
         runtime_profile = await self._resolve_runtime_profile(
             project=project,
-            workspace=workspace,
             backend_status=backend_status,
         )
         snapshot = self._sync_snapshot(
@@ -168,12 +160,10 @@ class RetrievalPlatformService:
         actor_id: str,
         actor_label: str,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> RetrievalPlatformDocument:
-        selection = await self._resolve_selection(project_id=project_id, workspace_id=workspace_id)
+        selection = await self._resolve_selection(project_id=project_id)
         runtime_profile = await self._resolve_runtime_profile(
             project=selection.project,
-            workspace=selection.workspace,
         )
         snapshot = self._sync_snapshot(
             self._store.load(),
@@ -205,7 +195,6 @@ class RetrievalPlatformService:
             self._store.save(snapshot)
             return await self.get_document(
                 active_project_id=selection.project.project_id if selection.project else "",
-                active_workspace_id=selection.workspace.workspace_id if selection.workspace else "",
             )
 
         job = self._find_job(snapshot, generation.build_job_id)
@@ -221,14 +210,12 @@ class RetrievalPlatformService:
         job.can_cancel = True
         estimated_items = await self._estimate_memory_projection_items(
             project=selection.project,
-            workspace=selection.workspace,
         )
         if estimated_items > 0:
             job.total_items = estimated_items
 
         memory_service = await self._memory_service_for_scope(
             project=selection.project,
-            workspace=selection.workspace,
         )
         run = await memory_service.run_memory_maintenance(
             MemoryMaintenanceCommand(
@@ -294,7 +281,7 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-            active_workspace_id=selection.workspace.workspace_id if selection.workspace else "",
+
         )
 
     async def cancel_generation(
@@ -302,12 +289,10 @@ class RetrievalPlatformService:
         *,
         generation_id: str,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> RetrievalPlatformDocument:
-        selection = await self._resolve_selection(project_id=project_id, workspace_id=workspace_id)
+        selection = await self._resolve_selection(project_id=project_id)
         runtime_profile = await self._resolve_runtime_profile(
             project=selection.project,
-            workspace=selection.workspace,
         )
         snapshot = self._sync_snapshot(
             self._store.load(),
@@ -345,7 +330,7 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-            active_workspace_id=selection.workspace.workspace_id if selection.workspace else "",
+
         )
 
     async def cutover_generation(
@@ -353,12 +338,10 @@ class RetrievalPlatformService:
         *,
         generation_id: str,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> RetrievalPlatformDocument:
-        selection = await self._resolve_selection(project_id=project_id, workspace_id=workspace_id)
+        selection = await self._resolve_selection(project_id=project_id)
         runtime_profile = await self._resolve_runtime_profile(
             project=selection.project,
-            workspace=selection.workspace,
         )
         snapshot = self._sync_snapshot(
             self._store.load(),
@@ -398,7 +381,7 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-            active_workspace_id=selection.workspace.workspace_id if selection.workspace else "",
+
         )
 
     async def rollback_generation(
@@ -406,12 +389,10 @@ class RetrievalPlatformService:
         *,
         generation_id: str,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> RetrievalPlatformDocument:
-        selection = await self._resolve_selection(project_id=project_id, workspace_id=workspace_id)
+        selection = await self._resolve_selection(project_id=project_id)
         runtime_profile = await self._resolve_runtime_profile(
             project=selection.project,
-            workspace=selection.workspace,
         )
         snapshot = self._sync_snapshot(
             self._store.load(),
@@ -457,21 +438,19 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-            active_workspace_id=selection.workspace.workspace_id if selection.workspace else "",
+
         )
 
     async def _resolve_runtime_profile(
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None,
         backend_status: MemoryBackendStatus | None = None,
     ) -> _RuntimeProfileContext:
         resolved_backend_status = backend_status
         if resolved_backend_status is None:
             memory_service = await self._memory_service_for_scope(
                 project=project,
-                workspace=workspace,
             )
             resolved_backend_status = await memory_service.get_backend_status()
         config = load_config(self._project_root)
@@ -503,10 +482,8 @@ class RetrievalPlatformService:
         self,
         *,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> _SelectionContext:
         resolved_project = None
-        resolved_workspace = None
         resolved_project_id = project_id.strip()
         if not resolved_project_id:
             selector_state = await self._stores.project_store.get_selector_state("web")
@@ -516,17 +493,12 @@ class RetrievalPlatformService:
             resolved_project = await self._stores.project_store.get_project(resolved_project_id)
         if resolved_project is None:
             resolved_project = await self._stores.project_store.get_default_project()
-        if resolved_project is not None:
-            resolved_workspace = await self._stores.project_store.get_primary_workspace(
-                resolved_project.project_id
-            )
-        return _SelectionContext(project=resolved_project, workspace=resolved_workspace)
+        return _SelectionContext(project=resolved_project)
 
     async def _estimate_memory_projection_items(
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None,
     ) -> int:
         if project is None:
             return 0
@@ -536,11 +508,6 @@ class RetrievalPlatformService:
                 str(binding.binding_value or binding.binding_key).strip()
                 for binding in bindings
                 if binding.binding_type in _MEMORY_BINDING_TYPES
-                and (
-                    workspace is None
-                    or not binding.workspace_id
-                    or binding.workspace_id == workspace.workspace_id
-                )
                 and str(binding.binding_value or binding.binding_key).strip()
             }
         )
@@ -994,13 +961,12 @@ class RetrievalPlatformService:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None,
     ) -> MemoryService:
         if project is None:
             return MemoryService(self._stores.conn, store=self._memory_store)
         backend = await self._backend_resolver.resolve_backend(
             project=project,
-            workspace=workspace,
+            workspace=None,
         )
         return MemoryService(
             self._stores.conn,
@@ -1025,7 +991,5 @@ class _SelectionContext:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None,
     ) -> None:
         self.project = project
-        self.workspace = workspace

@@ -17,7 +17,7 @@ console = create_console()
 
 @click.group("project")
 def project_group() -> None:
-    """Project / Workspace 主路径。"""
+    """Project 主路径。"""
 
 
 @project_group.command("create")
@@ -216,11 +216,6 @@ def _run_async(fn) -> None:
 def _render_inspect_summary(summary: ProjectInspectSummary):
     lines = [
         f"project={summary.slug} ({summary.project_id})",
-        (
-            "workspace="
-            f"{summary.primary_workspace_slug or '-'} "
-            f"({summary.primary_workspace_id or '-'})"
-        ),
         f"readiness={summary.readiness}",
         f"binding_summary={summary.binding_summary or {}}",
         f"secret_runtime={summary.secret_runtime_summary}",

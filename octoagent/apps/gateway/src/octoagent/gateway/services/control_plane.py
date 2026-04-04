@@ -909,7 +909,7 @@ class ControlPlaneService:
         (
             state,
             selected_project,
-            _selected_workspace,
+            _,
             fallback_reason,
         ) = await self._resolve_selection()
         projects = await self._stores.project_store.list_projects()
@@ -2682,10 +2682,7 @@ class ControlPlaneService:
             label="Project Scope",
             status="ready" if selected_project is not None else "blocked",
             summary=(
-                (
-                    f"{selected_project.name} / "
-                    f"{self._workspace_summary_label(None)}"
-                )
+                selected_project.name
                 if selected_project is not None
                 else "当前还没有可用 project。"
             ),
@@ -3252,7 +3249,6 @@ class ControlPlaneService:
         project_selector = await self.get_project_selector()
         memory_backend = await self._memory_console_service.get_backend_status(
             project_id=selected_project.project_id if selected_project is not None else "",
-            workspace_id=None,
         )
 
         subsystems.append(
@@ -3392,7 +3388,6 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         partition: str | None = None,
         layer: str | None = None,
@@ -3409,27 +3404,22 @@ class ControlPlaneService:
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = None
         resolved_project = (
             await self._stores.project_store.get_project(resolved_project_id)
             if resolved_project_id
             else selected_project
         )
-        resolved_workspace = None
         backend_status = await self._memory_console_service.get_backend_status(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
         )
         active_embedding_target, requested_embedding_target = (
             await self._retrieval_platform_service.get_memory_embedding_targets(
                 project=resolved_project,
-                workspace=resolved_workspace,
                 backend_status=backend_status,
             )
         )
         document = await self._memory_console_service.get_memory_console(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
             scope_id=scope_id,
             partition=self._parse_memory_partition(partition),
             layer=self._parse_memory_layer(layer),
@@ -3459,20 +3449,16 @@ class ControlPlaneService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,  # deprecated, ignored
     ) -> RetrievalPlatformDocument:
         _, selected_project, _, fallback_reason = await self._resolve_selection()
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = ""
         backend_status = await self._memory_console_service.get_backend_status(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id or None,
         )
         document = await self._retrieval_platform_service.get_document(
             active_project_id=resolved_project_id,
-            active_workspace_id=resolved_workspace_id,
             backend_status=backend_status,
         )
         if fallback_reason:
@@ -3494,7 +3480,6 @@ class ControlPlaneService:
         )
         return await self._import_workbench_service.get_workbench(
             project_id=resolved_project_id,
-            workspace_id=None,
         )
 
     async def get_import_source(self, source_id: str) -> ImportSourceDocument:
@@ -3518,7 +3503,6 @@ class ControlPlaneService:
         return await self._memory_console_service.get_memory_subject_history(
             subject_key=subject_key,
             project_id=resolved_project_id,
-            workspace_id=None,
             scope_id=scope_id,
         )
 
@@ -3536,11 +3520,9 @@ class ControlPlaneService:
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = None
         proposal_status = ProposalStatus(status) if status else None
         return await self._memory_console_service.get_proposal_audit(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
             scope_id=scope_id,
             status=proposal_status,
             source=source,
@@ -4782,7 +4764,6 @@ class ControlPlaneService:
         project_id, workspace_id = await self._resolve_memory_action_context(request)
         document = await self.get_memory_console(
             project_id=project_id or None,
-            workspace_id=workspace_id,
             scope_id=self._param_str(request.params, "scope_id") or None,
             partition=self._param_str(request.params, "partition") or None,
             layer=self._param_str(request.params, "layer") or None,
@@ -4891,7 +4872,6 @@ class ControlPlaneService:
         run = await self._memory_console_service.run_maintenance(
             kind=kind,
             project_id=project_id or "",
-            workspace_id=workspace_id,
             scope_id=self._param_str(request.params, "scope_id"),
             partition=partition,
             reason=self._param_str(request.params, "reason"),
@@ -4930,7 +4910,6 @@ class ControlPlaneService:
         try:
             result = await self._memory_console_service.run_consolidate(
                 project_id=project_id or "",
-                workspace_id=workspace_id,
             )
         except MemoryConsoleError as exc:
             return self._failed_result(
@@ -4960,9 +4939,7 @@ class ControlPlaneService:
         try:
             context = await self._memory_console_service._resolve_context(
                 active_project_id=project_id or "",
-                active_workspace_id=workspace_id or "",
                 project_id=project_id or "",
-                workspace_id=workspace_id or "",
             )
             if not context.selected_scope_ids:
                 return self._completed_result(
@@ -5102,9 +5079,7 @@ class ControlPlaneService:
         memory_service = await self._memory_console_service._memory_service_for_context(
             await self._memory_console_service._resolve_context(
                 active_project_id=project_id or "",
-                active_workspace_id=workspace_id or "",
                 project_id=project_id or "",
-                workspace_id=workspace_id or "",
                 scope_id=scope_id,
             )
         )
@@ -5302,7 +5277,6 @@ class ControlPlaneService:
         project_id, workspace_id = await self._resolve_memory_action_context(request)
         result = await self._memory_console_service.browse_memory(
             project_id=project_id or "",
-            workspace_id=workspace_id,
             scope_id=self._param_str(request.params, "scope_id") or "",
             prefix=self._param_str(request.params, "prefix"),
             partition=self._param_str(request.params, "partition"),
@@ -5327,7 +5301,6 @@ class ControlPlaneService:
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         memory_state = next(
             (
@@ -5368,7 +5341,6 @@ class ControlPlaneService:
         await self._retrieval_platform_service.cancel_generation(
             generation_id=generation_id,
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         return self._completed_result(
             request=request,
@@ -5395,7 +5367,6 @@ class ControlPlaneService:
         await self._retrieval_platform_service.cutover_generation(
             generation_id=generation_id,
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         return self._completed_result(
             request=request,
@@ -5422,7 +5393,6 @@ class ControlPlaneService:
         await self._retrieval_platform_service.rollback_generation(
             generation_id=generation_id,
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         return self._completed_result(
             request=request,
@@ -5444,9 +5414,7 @@ class ControlPlaneService:
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
             active_project_id=project_id,
-            active_workspace_id=workspace_id or "",
             project_id=project_id,
-            workspace_id=workspace_id or "",
             scope_id=self._param_str(request.params, "scope_id") or None,
             partition=self._param_str(request.params, "partition"),
             subject_key=self._param_str(request.params, "subject_key") or None,
@@ -5544,9 +5512,7 @@ class ControlPlaneService:
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
             active_project_id=project_id,
-            active_workspace_id=workspace_id or "",
             project_id=project_id,
-            workspace_id=workspace_id or "",
             scope_id=self._param_str(request.params, "scope_id") or None,
             partition=self._param_str(request.params, "partition"),
             subject_key=self._param_str(request.params, "subject_key") or None,
@@ -5579,9 +5545,7 @@ class ControlPlaneService:
         project_id, workspace_id = await self._resolve_memory_action_context(request)
         code, payload, decision = await self._memory_console_service.inspect_export(
             active_project_id=project_id,
-            active_workspace_id=workspace_id or "",
             project_id=project_id,
-            workspace_id=workspace_id or "",
             scope_ids=scope_ids or None,
             include_history=self._param_bool(request.params, "include_history"),
             include_vault_refs=self._param_bool(request.params, "include_vault_refs"),
@@ -5613,9 +5577,7 @@ class ControlPlaneService:
         code, payload, decision = await self._memory_console_service.verify_restore(
             actor_id=request.actor.actor_id,
             active_project_id=project_id,
-            active_workspace_id=self._param_str(request.params, "workspace_id"),
             project_id=project_id,
-            workspace_id=self._param_str(request.params, "workspace_id"),
             snapshot_ref=snapshot_ref,
             target_scope_mode=self._param_str(
                 request.params,
@@ -8829,7 +8791,7 @@ class ControlPlaneService:
         )
         await self._stores.conn.commit()
 
-    async def _resolve_selection(self) -> tuple[ControlPlaneState, Any | None, Any | None, str]:
+    async def _resolve_selection(self) -> tuple[ControlPlaneState, Any | None, None, str]:
         state = self._state_store.load()
         fallback_reason = ""
         selector = await self._stores.project_store.get_selector_state("web")
@@ -10447,12 +10409,6 @@ class ControlPlaneService:
         ):
             merged.setdefault("project_id", selected_project.project_id)
         return merged
-
-    @staticmethod
-    def _workspace_summary_label(workspace: Any | None) -> str:
-        if workspace is None:
-            return "default workspace"
-        return str(getattr(workspace, "name", "") or "default workspace")
 
     def _build_setup_review_summary(
         self,

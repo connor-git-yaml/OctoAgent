@@ -1176,26 +1176,16 @@ class DelegationPlaneService:
 
     async def _resolve_project_context(self, request: OrchestratorRequest):
         project = None
-        workspace = None
         project_id = str(request.metadata.get("project_id", "")).strip()
-        workspace_id = str(request.metadata.get("workspace_id", "")).strip()
         if project_id:
             project = await self._stores.project_store.get_project(project_id)
-        if workspace_id:
-            workspace = await self._stores.project_store.get_workspace(workspace_id)
         if project is None:
             selector = await self._stores.project_store.get_selector_state("web")
             if selector is not None:
                 project = await self._stores.project_store.get_project(selector.active_project_id)
-                if selector.active_workspace_id:
-                    workspace = await self._stores.project_store.get_workspace(
-                        selector.active_workspace_id
-                    )
         if project is None:
             project = await self._stores.project_store.get_default_project()
-        if project is not None and workspace is None:
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
-        return project, workspace
+        return project, None
 
     async def _resolve_task_context_refs(self, task_id: str) -> tuple[str, str]:
         task = await self._stores.task_store.get_task(task_id)
@@ -1233,30 +1223,16 @@ class DelegationPlaneService:
         return "", ""
 
     async def _resolve_task_scope_context(self, task):
-        workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-        project = (
-            await self._stores.project_store.get_project(workspace.project_id)
-            if workspace is not None
-            else None
-        )
-        selector = await self._stores.project_store.get_selector_state(
-            task.requester.channel or "web"
-        )
-        if project is None and selector is not None:
-            project = await self._stores.project_store.get_project(selector.active_project_id)
+        project = await self._stores.project_store.resolve_project_for_scope(task.scope_id)
+        if project is None:
+            selector = await self._stores.project_store.get_selector_state(
+                task.requester.channel or "web"
+            )
+            if selector is not None:
+                project = await self._stores.project_store.get_project(selector.active_project_id)
         if project is None:
             project = await self._stores.project_store.get_default_project()
-        if project is None:
-            return None, None
-        if workspace is None and selector is not None and selector.active_workspace_id:
-            candidate = await self._stores.project_store.get_workspace(
-                selector.active_workspace_id
-            )
-            if candidate is not None and candidate.project_id == project.project_id:
-                workspace = candidate
-        if workspace is None or workspace.project_id != project.project_id:
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
-        return project, workspace
+        return project, None
 
     async def _record_event(
         self,

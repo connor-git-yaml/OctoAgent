@@ -2890,7 +2890,6 @@ class CapabilityPackService:
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=None,
                 scope_id=scope_id or None,
             )
             return json.dumps(document.model_dump(mode="json"), ensure_ascii=False)
@@ -2923,7 +2922,6 @@ class CapabilityPackService:
             )
             result = await self._memory_console_service.browse_memory(
                 project_id=project.project_id if project is not None else "",
-                workspace_id=None,
                 scope_id=scope_id or "",
                 prefix=prefix,
                 partition=partition,
@@ -2972,7 +2970,6 @@ class CapabilityPackService:
             )
             document = await self._memory_console_service.get_memory_console(
                 project_id=project.project_id if project is not None else "",
-                workspace_id=None,
                 scope_id=scope_id or None,
                 partition=MemoryPartition(partition) if partition else None,
                 layer=MemoryLayer(layer) if layer else None,
@@ -3012,7 +3009,6 @@ class CapabilityPackService:
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
                 project_id=project.project_id if project is not None else "",
-                workspace_id=None,
                 scope_id=scope_id or None,
             )
             citations = []
@@ -4608,22 +4604,15 @@ class CapabilityPackService:
         project_id: str = "",
     ):
         project = None
-        workspace = None
         if project_id:
             project = await self._stores.project_store.get_project(project_id)
         if project is None:
             selector = await self._stores.project_store.get_selector_state("web")
             if selector is not None:
                 project = await self._stores.project_store.get_project(selector.active_project_id)
-                if selector.active_workspace_id:
-                    workspace = await self._stores.project_store.get_workspace(
-                        selector.active_workspace_id
-                    )
         if project is None:
             project = await self._stores.project_store.get_default_project()
-        if project is not None and workspace is None:
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
-        return project, workspace
+        return project, None
 
     def _resolve_tool_availability(
         self,
@@ -4873,6 +4862,18 @@ class CapabilityPackService:
         )
 
     @staticmethod
+    def _truncate_text_static(value: str, *, limit: int = 100_000) -> str:
+        text = value.strip()
+        if len(text) <= limit:
+            return text
+        omitted = len(text) - limit
+        return (
+            f"{text[:limit].rstrip()}\n\n"
+            f"\u26a0\ufe0f [内容已截断：原文 {len(text)} 字符，已显示前 {limit} 字符，"
+            f"省略 {omitted} 字符。如需完整内容请增大 max_chars 参数。]"
+        )
+
+    @staticmethod
     def _browser_session_payload(
         session: _BrowserSessionState,
         *,
@@ -4893,7 +4894,7 @@ class CapabilityPackService:
             "content_type": session.content_type,
             "title": session.title,
             "body_length": session.body_length,
-            "text_preview": _truncate_text(session.text_content, limit=effective_chars),
+            "text_preview": CapabilityPackService._truncate_text_static(session.text_content, limit=effective_chars),
             "links": [
                 {"ref": item.ref, "text": item.text, "url": item.url}
                 for item in session.links[:effective_links]

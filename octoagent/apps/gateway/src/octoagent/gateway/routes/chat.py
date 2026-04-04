@@ -93,9 +93,9 @@ async def _resolve_chat_scope_snapshot(
     body: ChatSendRequest,
     request: Request,
     store_group,
-) -> tuple[str, str, str, str]:
+) -> tuple[str, str, str]:
+    """解析聊天请求的 scope 快照，返回 (new_conversation_token, project_id, agent_profile_id)。"""
     project_id = str(body.project_id or "").strip()
-    workspace_id = str(body.workspace_id or "").strip()
     new_conversation_token = str(body.new_conversation_token or "").strip()
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
 
@@ -103,7 +103,6 @@ async def _resolve_chat_scope_snapshot(
     state = cp_store.load()
     if new_conversation_token and new_conversation_token == state.new_conversation_token:
         project_id = state.new_conversation_project_id.strip() or project_id
-        workspace_id = state.new_conversation_workspace_id.strip() or workspace_id
         requested_agent_profile_id = (
             requested_agent_profile_id or state.new_conversation_agent_profile_id.strip()
         )
@@ -120,34 +119,13 @@ async def _resolve_chat_scope_snapshot(
         )
     elif not body.task_id:
         project_id = project_id or state.selected_project_id.strip()
-        workspace_id = workspace_id or state.selected_workspace_id.strip()
 
     project = await store_group.project_store.get_project(project_id) if project_id else None
-    workspace = (
-        await store_group.project_store.get_workspace(workspace_id) if workspace_id else None
-    )
-    if workspace is not None and project is None:
-        project = await store_group.project_store.get_project(workspace.project_id)
-    if project is None and workspace is None:
-        return new_conversation_token, "", "", requested_agent_profile_id
     if project is None:
-        raise _chat_send_failure(
-            status_code=400,
-            code="CHAT_SCOPE_INVALID",
-            message="指定的 project/workspace 无法解析到有效 project。",
-        )
-    if workspace is not None and workspace.project_id != project.project_id:
-        raise _chat_send_failure(
-            status_code=400,
-            code="CHAT_SCOPE_INVALID",
-            message="workspace 不属于指定 project。",
-        )
-    if workspace is None:
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
+        return new_conversation_token, "", requested_agent_profile_id
     return (
         new_conversation_token,
         project.project_id,
-        "",
         requested_agent_profile_id,
     )
 
@@ -156,14 +134,14 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
     task = await store_group.task_store.get_task(task_id)
     anchored_owner_profile_id = ""
     if task is not None:
-        workspace = await store_group.project_store.resolve_workspace_for_scope(task.scope_id)
+        project = await store_group.project_store.resolve_project_for_scope(task.scope_id)
+        resolved_project_id = project.project_id if project is not None else None
         session_candidates = await store_group.agent_context_store.list_agent_sessions(
             legacy_session_id=task.thread_id,
-            project_id=workspace.project_id if workspace is not None else None,
-            workspace_id=None,
+            project_id=resolved_project_id,
             limit=8,
         )
-        if not session_candidates and workspace is not None:
+        if not session_candidates and resolved_project_id:
             session_candidates = await store_group.agent_context_store.list_agent_sessions(
                 legacy_session_id=task.thread_id,
                 limit=8,
@@ -242,19 +220,16 @@ def _build_project_scoped_chat_scope_id(
     return f"project:{project_id}:chat:{channel}:{thread_id}"
 
 
-def _parse_projected_session_ref(session_id: str) -> tuple[str, str, str]:
+def _parse_projected_session_ref(session_id: str) -> tuple[str, str]:
     thread_id = ""
     project_id = ""
-    workspace_id = ""
     for segment in str(session_id or "").split("|"):
         normalized = segment.strip()
         if normalized.startswith("thread:") and not thread_id:
             thread_id = normalized.removeprefix("thread:").strip()
         elif normalized.startswith("project:") and not project_id:
             project_id = normalized.removeprefix("project:").strip()
-        elif normalized.startswith("workspace:") and not workspace_id:
-            workspace_id = normalized.removeprefix("workspace:").strip()
-    return thread_id, project_id, workspace_id
+    return thread_id, project_id
 
 
 async def _resolve_session_owner_profile_id_from_session_ref(
@@ -263,27 +238,21 @@ async def _resolve_session_owner_profile_id_from_session_ref(
     session_id: str,
     thread_id: str,
     project_id: str,
-    workspace_id: str,
 ) -> str:
     resolved_thread_id = str(thread_id or "").strip()
     resolved_project_id = str(project_id or "").strip()
-    resolved_workspace_id = str(workspace_id or "").strip()
     if not resolved_thread_id:
-        resolved_thread_id, parsed_project_id, parsed_workspace_id = _parse_projected_session_ref(
-            session_id
-        )
+        resolved_thread_id, parsed_project_id = _parse_projected_session_ref(session_id)
         resolved_project_id = resolved_project_id or parsed_project_id
-        resolved_workspace_id = resolved_workspace_id or parsed_workspace_id
     if not resolved_thread_id:
         return ""
 
     session_candidates = await store_group.agent_context_store.list_agent_sessions(
         legacy_session_id=resolved_thread_id,
         project_id=resolved_project_id or None,
-        workspace_id=resolved_workspace_id or None,
         limit=8,
     )
-    if not session_candidates and (resolved_project_id or resolved_workspace_id):
+    if not session_candidates and resolved_project_id:
         session_candidates = await store_group.agent_context_store.list_agent_sessions(
             legacy_session_id=resolved_thread_id,
             limit=8,
@@ -313,13 +282,11 @@ async def send_chat_message(
     chat_control_metadata: dict[str, Any] = {}
     requested_session_id = str(body.session_id or "").strip()
     requested_thread_id = str(body.thread_id or "").strip()
-    parsed_thread_id, parsed_project_id, parsed_workspace_id = _parse_projected_session_ref(
-        requested_session_id
-    )
+    parsed_thread_id, parsed_project_id = _parse_projected_session_ref(requested_session_id)
     if not requested_thread_id:
         requested_thread_id = parsed_thread_id
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
-    new_conversation_token, project_id, workspace_id, requested_agent_profile_id = (
+    new_conversation_token, project_id, requested_agent_profile_id = (
         await _resolve_chat_scope_snapshot(
             body,
             request,
@@ -327,7 +294,6 @@ async def send_chat_message(
         )
     )
     project_id = project_id or parsed_project_id
-    workspace_id = workspace_id or parsed_workspace_id
     if body.task_id and not requested_agent_profile_id:
         requested_agent_profile_id = await _resolve_session_owner_profile_id(
             store_group, body.task_id
@@ -338,7 +304,6 @@ async def send_chat_message(
             session_id=requested_session_id,
             thread_id=requested_thread_id,
             project_id=project_id,
-            workspace_id=workspace_id,
         )
     requested_model_alias = await _resolve_profile_model_alias(
         store_group,
@@ -357,8 +322,6 @@ async def send_chat_message(
         chat_control_metadata["thread_id"] = requested_thread_id
     if project_id:
         chat_control_metadata["project_id"] = project_id
-    if workspace_id:
-        chat_control_metadata["workspace_id"] = workspace_id
 
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
@@ -413,7 +376,6 @@ async def send_chat_message(
                     scope_id=effective_scope_id,
                     thread_id=effective_thread_id,
                     project_id=project_id,
-                    workspace_id=workspace_id,
                     session_owner_profile_id=requested_agent_profile_id,
                     turn_executor_kind=owner_turn_executor_kind,
                     agent_profile_id=requested_agent_profile_id,
@@ -456,7 +418,7 @@ async def send_chat_message(
                 control_metadata=chat_control_metadata,
             )
             dispatch_metadata = dict(chat_control_metadata)
-            if project_id or workspace_id:
+            if project_id:
                 dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
                     RuntimeControlContext(
                         task_id=task_id,
@@ -464,7 +426,6 @@ async def send_chat_message(
                         thread_id=existing_task.thread_id,
                         scope_id=existing_task.scope_id,
                         project_id=project_id,
-                        workspace_id=workspace_id,
                         session_owner_profile_id=requested_agent_profile_id,
                         turn_executor_kind=owner_turn_executor_kind,
                         agent_profile_id=requested_agent_profile_id,
@@ -491,19 +452,9 @@ async def send_chat_message(
                 task_id=task_id,
             ) from exc
 
-    # selected_project_id 不再跟随每次聊天同步——project 上下文属于 session 自身，
-    # 不是全局状态。Task/SSE 路由已去掉 project scope guard，不再依赖全局 selected_project_id。
-
-    # 构造 stream URL（携带 workspace_id 供 SSE scope guard 直接校验，
-    # 作为控制面板状态的补充保障）
-    stream_params: dict[str, str] = {}
-    if after_event_id:
-        stream_params["after_event_id"] = after_event_id
-    if workspace_id:
-        stream_params["workspace_id"] = workspace_id
     stream_url = f"/api/stream/task/{task_id}"
-    if stream_params:
-        stream_url = f"{stream_url}?{urlencode(stream_params)}"
+    if after_event_id:
+        stream_url = f"{stream_url}?{urlencode({'after_event_id': after_event_id})}"
 
     return ChatSendResponse(
         task_id=task_id,

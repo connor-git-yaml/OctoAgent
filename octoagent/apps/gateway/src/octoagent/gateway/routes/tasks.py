@@ -70,9 +70,8 @@ class CheckpointListResponse(BaseModel):
 
 
 async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> str:
-    workspace = await store_group.project_store.resolve_workspace_for_scope(task.scope_id)
-    project_id = workspace.project_id if workspace is not None else None
-    workspace_id = workspace.workspace_id if workspace is not None else None
+    project = await store_group.project_store.resolve_project_for_scope(task.scope_id)
+    project_id = project.project_id if project is not None else None
 
     related_sessions = []
     seen_agent_session_ids: set[str] = set()
@@ -87,7 +86,7 @@ async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> st
 
     session_states = await store_group.agent_context_store.list_session_contexts(
         project_id=project_id,
-        workspace_id=workspace_id,
+        workspace_id=None,
     )
     for item in session_states:
         if str(item.thread_id).strip() != str(task.thread_id).strip():
@@ -105,7 +104,7 @@ async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> st
         candidates = await store_group.agent_context_store.list_agent_sessions(
             legacy_session_id=legacy_session_id,
             project_id=project_id,
-            workspace_id=workspace_id,
+            workspace_id=None,
             limit=200,
         )
         for item in candidates:

@@ -118,13 +118,12 @@ async def get_control_diagnostics(control_plane=Depends(get_control_plane_servic
 @router.get("/api/control/resources/retrieval-platform")
 async def get_control_retrieval_platform(
     project_id: str | None = Query(default=None),
-    workspace_id: str | None = Query(default=None, deprecated=True),
+    workspace_id: str | None = Query(default=None, deprecated=True),  # noqa: ARG001
     control_plane=Depends(get_control_plane_service),
 ):
     return (
         await control_plane.get_retrieval_platform_document(
             project_id=project_id,
-            workspace_id=workspace_id,
         )
     ).model_dump(mode="json", by_alias=True)
 
@@ -132,7 +131,7 @@ async def get_control_retrieval_platform(
 @router.get("/api/control/resources/memory")
 async def get_control_memory(
     project_id: str | None = Query(default=None),
-    workspace_id: str | None = Query(default=None, deprecated=True),
+    workspace_id: str | None = Query(default=None, deprecated=True),  # noqa: ARG001
     scope_id: str | None = Query(default=None),
     partition: str | None = Query(default=None),
     layer: str | None = Query(default=None),
@@ -149,7 +148,6 @@ async def get_control_memory(
     return (
         await control_plane.get_memory_console(
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
             partition=partition,
             layer=layer,

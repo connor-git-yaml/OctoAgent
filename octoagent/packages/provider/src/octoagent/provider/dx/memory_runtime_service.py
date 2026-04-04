@@ -81,7 +81,6 @@ class MemoryRuntimeService:
         active_embedding_target, requested_embedding_target = (
             await self._retrieval_platform_service.get_memory_embedding_targets(
                 project=project,
-                workspace=workspace,
                 backend_status=resolved_backend_status,
             )
         )

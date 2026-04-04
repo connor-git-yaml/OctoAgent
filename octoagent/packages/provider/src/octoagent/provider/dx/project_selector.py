@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from octoagent.core.behavior_workspace import materialize_project_behavior_files
-from octoagent.core.models import Project, ProjectSecretBinding, ProjectSelectorState, Workspace
+from octoagent.core.models import Project, ProjectSecretBinding, ProjectSelectorState
 from octoagent.core.store import StoreGroup, create_store_group
 from pydantic import BaseModel, Field
 from ulid import ULID
@@ -137,7 +137,7 @@ class ProjectSelectorService:
     async def inspect_project(self, ref: str | None = None) -> ProjectInspectSummary:
         await self._ensure_migration_ready()
         async with self._store_group_scope() as store_group:
-            project, workspace = await self._resolve_current_project(store_group, ref)
+            project = await self._resolve_current_project(store_group, ref)
             selector = await self._build_selector_document(store_group=store_group)
             bindings = await store_group.project_store.list_secret_bindings(project.project_id)
             binding_summary = self._summarize_binding_status(bindings)
@@ -153,8 +153,8 @@ class ProjectSelectorService:
             slug=project.slug,
                 name=project.name,
                 description=project.description,
-                primary_workspace_id=workspace.workspace_id if workspace else None,
-                primary_workspace_slug=workspace.slug if workspace else None,
+                primary_workspace_id=None,
+                primary_workspace_slug=None,
                 readiness=readiness,
                 warnings=warnings,
                 binding_summary=binding_summary,
@@ -171,7 +171,7 @@ class ProjectSelectorService:
     ) -> Project:
         await self._ensure_migration_ready()
         async with self._store_group_scope() as store_group:
-            project, _ = await self._resolve_current_project(store_group, ref)
+            project = await self._resolve_current_project(store_group, ref)
             updated = project.model_copy(
                 update={
                     "name": name.strip() if name is not None else project.name,
@@ -185,15 +185,17 @@ class ProjectSelectorService:
             await store_group.conn.commit()
             return updated
 
-    async def get_active_project(self) -> tuple[Project, Workspace | None]:
+    async def get_active_project(self) -> tuple[Project, None]:
         await self._ensure_migration_ready()
         async with self._store_group_scope() as store_group:
-            return await self._resolve_current_project(store_group, None)
+            project = await self._resolve_current_project(store_group, None)
+            return project, None
 
-    async def resolve_project(self, ref: str | None) -> tuple[Project, Workspace | None]:
+    async def resolve_project(self, ref: str | None) -> tuple[Project, None]:
         await self._ensure_migration_ready()
         async with self._store_group_scope() as store_group:
-            return await self._resolve_current_project(store_group, ref)
+            project = await self._resolve_current_project(store_group, ref)
+            return project, None
 
     async def load_selector_document(self) -> ProjectSelectorDocument:
         await self._ensure_migration_ready()
@@ -208,28 +210,21 @@ class ProjectSelectorService:
         self,
         store_group: StoreGroup,
         ref: str | None,
-    ) -> tuple[Project, Workspace | None]:
+    ) -> Project:
         if ref:
             project = await store_group.project_store.resolve_project(ref)
             if project is None:
                 raise ProjectSelectorError(f"未找到 project: {ref}")
-            workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-            return project, workspace
+            return project
 
         selector = await store_group.project_store.get_selector_state(self._surface)
         project: Project | None = None
-        workspace: Workspace | None = None
         if selector is not None:
             project = await store_group.project_store.get_project(selector.active_project_id)
-            if selector.active_workspace_id:
-                workspace = await store_group.project_store.get_workspace(
-                    selector.active_workspace_id
-                )
         if project is None:
             project = await store_group.project_store.get_default_project()
             if project is None:
                 raise ProjectSelectorError("当前没有可用 project，请先运行 octo project create。")
-            workspace = await store_group.project_store.get_primary_workspace(project.project_id)
             await self._save_selector_state(
                 store_group=store_group,
                 project=project,
@@ -237,9 +232,7 @@ class ProjectSelectorService:
                 warnings=self._build_project_warnings(project),
             )
             await store_group.conn.commit()
-        elif workspace is None:
-            workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        return project, workspace
+        return project
 
     async def _build_selector_document(
         self,
@@ -249,25 +242,16 @@ class ProjectSelectorService:
         projects = await store_group.project_store.list_projects()
         selector = await store_group.project_store.get_selector_state(self._surface)
         current_project: Project | None = None
-        current_workspace: Workspace | None = None
         if selector is not None:
             current_project = await store_group.project_store.get_project(
                 selector.active_project_id
             )
-            if selector.active_workspace_id:
-                current_workspace = await store_group.project_store.get_workspace(
-                    selector.active_workspace_id
-                )
         if current_project is None and projects:
             current_project = next((item for item in projects if item.is_default), projects[0])
-            current_workspace = await store_group.project_store.get_primary_workspace(
-                current_project.project_id
-            )
 
         candidates: list[ProjectCandidate] = []
         warnings: list[str] = []
         for project in projects:
-            workspace = await store_group.project_store.get_primary_workspace(project.project_id)
             project_warnings = self._build_project_warnings(project)
             readiness = "ready" if not project_warnings else "warning"
             candidates.append(
@@ -276,7 +260,7 @@ class ProjectSelectorService:
                     slug=project.slug,
                     name=project.name,
                     is_default=project.is_default,
-                    workspace_id=workspace.workspace_id if workspace else None,
+                    workspace_id=None,
                     readiness=readiness,
                     warnings=project_warnings,
                 )
@@ -292,7 +276,7 @@ class ProjectSelectorService:
                     slug=current_project.slug,
                     name=current_project.name,
                     is_default=current_project.is_default,
-                    workspace_id=current_workspace.workspace_id if current_workspace else None,
+                    workspace_id=None,
                     readiness=readiness,
                     warnings=warnings,
                 )

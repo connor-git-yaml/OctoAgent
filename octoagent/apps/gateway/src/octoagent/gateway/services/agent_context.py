@@ -2398,7 +2398,7 @@ class AgentContextService:
         *,
         task: Task,
         surface: str,
-    ) -> tuple[Project | None, Workspace | None]:
+    ) -> tuple[Project | None, None]:
         return await self._resolve_project_scope(task=task, surface=surface)
 
     async def get_memory_service(
@@ -2562,42 +2562,17 @@ class AgentContextService:
         task: Task,
         surface: str,
         project_id: str = "",
-    ) -> tuple[Project | None, Workspace | None]:
+    ) -> tuple[Project | None, None]:
         project = await self._stores.project_store.get_project(project_id) if project_id else None
-        workspace: Workspace | None = None
-        if workspace is not None and project is None and workspace.project_id:
-            project = await self._stores.project_store.get_project(workspace.project_id)
-        if (
-            workspace is not None
-            and project is not None
-            and workspace.project_id != project.project_id
-        ):
-            workspace = None
         if project is None:
             # 优先用 project: 前缀解析，兼容 workspace: 前缀旧数据
             project = await self._stores.project_store.resolve_project_for_scope(task.scope_id)
-            if project is None:
-                workspace = await self._stores.project_store.resolve_workspace_for_scope(task.scope_id)
-                project = (
-                    await self._stores.project_store.get_project(workspace.project_id)
-                    if workspace is not None
-                    else None
-                )
         selector = await self._stores.project_store.get_selector_state(surface)
         if project is None and selector is not None:
             project = await self._stores.project_store.get_project(selector.active_project_id)
         if project is None:
             project = await self._stores.project_store.get_default_project()
-        if project is None:
-            return None, None
-
-        if workspace is None and selector is not None and selector.active_workspace_id:
-            candidate = await self._stores.project_store.get_workspace(selector.active_workspace_id)
-            if candidate is not None and candidate.project_id == project.project_id:
-                workspace = candidate
-        if workspace is None or workspace.project_id != project.project_id:
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
-        return project, workspace
+        return project, None
 
     async def _resolve_agent_profile(
         self,

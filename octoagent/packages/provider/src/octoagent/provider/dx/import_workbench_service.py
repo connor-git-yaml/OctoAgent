@@ -15,7 +15,6 @@ from octoagent.core.models import (
     Project,
     ProjectBinding,
     ProjectBindingType,
-    Workspace,
 )
 from octoagent.core.store import StoreGroup, create_store_group
 from octoagent.memory import (
@@ -99,19 +98,18 @@ class ImportWorkbenchService:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> ImportWorkbenchDocument:
-        project, workspace = await self._resolve_selection(project_id, workspace_id)
+        project = await self._resolve_selection(project_id)
         sources = self._source_store.list_sources(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace else None,
+            workspace_id=None,
         )
         recent_runs = self._source_store.list_runs(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace else None,
+            workspace_id=None,
             limit=12,
         )
-        resume_entries = self._build_resume_entries(project, workspace, recent_runs)
+        resume_entries = self._build_resume_entries(project, recent_runs)
         warning_count = sum(len(item.warnings) for item in sources) + sum(
             len(item.warnings) for item in recent_runs
         )
@@ -120,7 +118,7 @@ class ImportWorkbenchService:
         )
         return ImportWorkbenchDocument(
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id if workspace else "",
+            active_workspace_id="",
             summary=ImportWorkbenchSummary(
                 source_count=len(sources),
                 recent_run_count=len(recent_runs),
@@ -175,9 +173,8 @@ class ImportWorkbenchService:
         media_root: str | None = None,
         format_hint: str | None = None,
         project_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> ImportSourceDocument:
-        project, workspace = await self._resolve_selection(project_id, workspace_id)
+        project = await self._resolve_selection(project_id)
         adapter = self._require_adapter(source_type)
         input_ref = ImportInputRef(
             source_type=ImportSourceType(source_type),
@@ -189,19 +186,19 @@ class ImportWorkbenchService:
         source_id = self._build_source_id(detected.source_type, input_ref.input_path)
         latest_mapping = self._mapping_store.get_latest(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace else "",
+            workspace_id="",
             source_id=source_id,
         )
         latest_runs = self._source_store.list_runs(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace else None,
+            workspace_id=None,
             source_id=source_id,
             limit=1,
         )
         document = ImportSourceDocument(
             resource_id=f"import-source:{source_id}",
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id if workspace else "",
+            active_workspace_id="",
             source_id=source_id,
             source_type=detected.source_type,
             input_ref=detected.input_ref,
@@ -244,17 +241,14 @@ class ImportWorkbenchService:
         attachment_policy: str = "artifact-first",
         memu_policy: str = "best-effort",
         project_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> ImportMappingProfile:
         source = await self.get_source(source_id)
-        project, workspace = await self._resolve_selection(
+        project = await self._resolve_selection(
             project_id or source.active_project_id,
-            workspace_id or source.active_workspace_id,
         )
         profile = self._build_mapping_profile(
             source=source,
             project=project,
-            workspace=workspace,
             conversation_mappings=conversation_mappings,
             sender_mappings=sender_mappings,
             attachment_policy=attachment_policy,
@@ -265,7 +259,6 @@ class ImportWorkbenchService:
                 await self._ensure_scope_binding(
                     store_group=store_group,
                     project=project,
-                    workspace=workspace,
                     scope_id=mapping.scope_id,
                 )
             await store_group.conn.commit()
@@ -483,18 +476,17 @@ class ImportWorkbenchService:
     async def _resolve_selection(
         self,
         project_id: str | None,
-        workspace_id: str | None = None,
-    ) -> tuple[Project, Workspace | None]:
+    ) -> Project:
         selector = ProjectSelectorService(
             self._root,
             surface=self._surface,
             store_group=self._store_group,
         )
         if project_id:
-            project, workspace = await selector.resolve_project(project_id)
+            project, _ = await selector.resolve_project(project_id)
         else:
-            project, workspace = await selector.get_active_project()
-        return project, workspace
+            project, _ = await selector.get_active_project()
+        return project
 
     def _resolve_mapping(
         self,
@@ -532,7 +524,6 @@ class ImportWorkbenchService:
         *,
         source: ImportSourceDocument,
         project: Project,
-        workspace: Workspace,
         conversation_mappings: list[dict[str, Any]] | None,
         sender_mappings: list[dict[str, Any]] | None,
         attachment_policy: str,
@@ -545,7 +536,7 @@ class ImportWorkbenchService:
                     {
                         **item,
                         "project_id": item.get("project_id") or project.project_id,
-                        "workspace_id": item.get("workspace_id") or workspace.workspace_id if workspace else "",
+                        "workspace_id": item.get("workspace_id") or "",
                         "partition": item.get("partition") or "chat",
                     }
                 )
@@ -557,7 +548,7 @@ class ImportWorkbenchService:
                     conversation_key=item.conversation_key,
                     conversation_label=item.label,
                     project_id=project.project_id,
-                    workspace_id=workspace.workspace_id if workspace else "",
+                    workspace_id="",
                     scope_id=self._default_scope_id(source.source_type, item.conversation_key),
                     partition="chat",
                 )
@@ -578,7 +569,7 @@ class ImportWorkbenchService:
             seen_keys.add(mapping.conversation_key)
             if (
                 mapping.project_id != project.project_id
-                or mapping.workspace_id != workspace.workspace_id if workspace else ""
+                or mapping.workspace_id != ""
             ):
                 raise ImportWorkbenchError(
                     "IMPORT_MAPPING_INVALID",
@@ -591,7 +582,7 @@ class ImportWorkbenchService:
             source_id=source.source_id,
             source_type=source.source_type,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id if workspace else "",
+            workspace_id="",
             conversation_mappings=normalized_mappings,
             sender_mappings=sender_items,  # type: ignore[arg-type]
             attachment_policy=attachment_policy,
@@ -676,7 +667,6 @@ class ImportWorkbenchService:
         *,
         store_group: StoreGroup,
         project: Project,
-        workspace: Workspace,
         scope_id: str,
     ) -> None:
         existing = await store_group.project_store.get_binding(
@@ -690,7 +680,7 @@ class ImportWorkbenchService:
             ProjectBinding(
                 binding_id=f"binding-import-scope-{str(ULID())}",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id if workspace else "",
+                workspace_id="",
                 binding_type=ProjectBindingType.IMPORT_SCOPE,
                 binding_key=scope_id,
                 binding_value=scope_id,
@@ -907,7 +897,6 @@ class ImportWorkbenchService:
     def _build_resume_entries(
         self,
         project: Project,
-        workspace: Workspace | None,
         recent_runs: list[ImportRunDocument],
     ) -> list[ImportResumeEntry]:
         by_source: dict[str, ImportRunDocument] = {}
@@ -936,7 +925,7 @@ class ImportWorkbenchService:
                     source_id=source_id,
                     source_type=run.source_type,
                     project_id=project.project_id,
-                    workspace_id=workspace.workspace_id if workspace else "",
+                    workspace_id="",
                     scope_id=scope_id,
                     last_cursor=last_cursor,
                     last_batch_id=last_batch_id,
