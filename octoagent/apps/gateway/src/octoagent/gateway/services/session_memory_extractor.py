@@ -309,6 +309,9 @@ class SessionMemoryExtractor:
                     },
                 ],
                 model_alias=self._model_alias,
+                # 关闭 thinking 模式——Qwen3 等模型开启 thinking 时 content 为空，
+                # JSON 输出会跑到 reasoning_content 里导致提取失败
+                extra_body={"enable_thinking": False},
             )
         except Exception as exc:
             log.warning(
@@ -324,16 +327,28 @@ class SessionMemoryExtractor:
             result.new_cursor_seq = max_turn_seq
             return result
 
-        # 提取文本内容
+        # 提取文本内容（兼容 thinking 模型——content 可能为空，JSON 在 reasoning_content 里）
         raw_text = ""
         if isinstance(llm_response, str):
             raw_text = llm_response
         elif hasattr(llm_response, "content"):
             raw_text = str(llm_response.content) if llm_response.content else ""
+            # Qwen3 等 thinking 模型：content 为空时尝试从 reasoning_content 提取
+            if not raw_text and hasattr(llm_response, "reasoning_content"):
+                raw_text = str(llm_response.reasoning_content) if llm_response.reasoning_content else ""
         elif hasattr(llm_response, "choices"):
             choices = llm_response.choices
             if choices and hasattr(choices[0], "message"):
-                raw_text = str(choices[0].message.content or "")
+                msg = choices[0].message
+                raw_text = str(msg.content or "")
+                # 同上：thinking 模型 fallback
+                if not raw_text and hasattr(msg, "reasoning_content"):
+                    raw_text = str(msg.reasoning_content or "")
+                if not raw_text:
+                    # provider_specific_fields fallback
+                    psf = getattr(msg, "provider_specific_fields", None) or {}
+                    if isinstance(psf, dict):
+                        raw_text = str(psf.get("reasoning_content", "") or "")
 
         # 8. 解析输出
         items = self._parse_extraction_output(raw_text)

@@ -249,6 +249,7 @@ class LLMService:
         metadata: dict[str, Any] | None = None,
         worker_capability: str | None = None,
         tool_profile: str | None = None,
+        **kwargs: Any,
     ) -> ModelCallResult:
         """调用 LLM
 
@@ -286,10 +287,11 @@ class LLMService:
         if skill_result is not None:
             return skill_result
 
-        # 通过 FallbackManager 调用
+        # 通过 FallbackManager 调用（kwargs 透传 extra_body 等参数）
         return await self._fallback_manager.call_with_fallback(
             messages=messages,
             model_alias=resolved_alias,
+            **kwargs,
         )
 
     async def _try_call_with_tools(
