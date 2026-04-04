@@ -177,6 +177,38 @@ class LiteLLMSkillClient:
         return f"{base}/v1/responses"
 
     @staticmethod
+    def _merge_system_messages_to_front(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """将分散的 system 消息合并到开头。
+
+        部分模型（Qwen、Gemma 等）要求 system 消息只能出现在对话最前面。
+        """
+        if not messages:
+            return messages
+        first_non_system = next(
+            (i for i, m in enumerate(messages) if m.get("role") != "system"),
+            len(messages),
+        )
+        has_system_after = any(
+            m.get("role") == "system" for m in messages[first_non_system:]
+        )
+        if not has_system_after:
+            return messages
+        system_parts: list[str] = []
+        non_system: list[dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = str(msg.get("content", "")).strip()
+                if content:
+                    system_parts.append(content)
+            else:
+                non_system.append(msg)
+        if not system_parts:
+            return messages
+        return [{"role": "system", "content": "\n\n".join(system_parts)}, *non_system]
+
+    @staticmethod
     def _normalize_history_messages(
         messages: list[dict[str, str]],
     ) -> list[dict[str, str]]:
@@ -724,6 +756,10 @@ class LiteLLMSkillClient:
             tools_count=len(tools),
             responses_api=use_responses_api,
         )
+
+        # 非 OpenAI 模型（Qwen 等）要求 system 消息在开头，
+        # 合并分散的 system 消息到第一条
+        history = self._merge_system_messages_to_front(history)
 
         if use_responses_api:
             content, tool_calls, metadata = await self._call_proxy_responses(
