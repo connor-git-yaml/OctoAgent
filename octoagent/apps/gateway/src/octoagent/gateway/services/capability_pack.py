@@ -1145,69 +1145,63 @@ class CapabilityPackService:
         async def _resolve_instance_root(
             *,
             project_id: str = "",
-        ) -> Path:
-            """返回当前 project 的隔离目录作为 Agent 工具的可见范围。
+        ) -> tuple[Path, str]:
+            """返回 (project 隔离目录, project_slug)。
 
-            Agent 的 filesystem/terminal 工具以此为根目录，只能看到
-            projects/{slug}/ 下的 workspace/data/behavior/notes/artifacts，
-            无法访问系统源码（app/）或全局数据（data/sqlite/）。
+            Agent 的 filesystem/terminal 工具以 project 目录为根。
+            当无活跃 project 时 fallback 到 projects/_default/（而非整个 instance root）。
             """
             project, _workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
             )
-            if project is not None and project.slug:
-                agent_root = project_root_dir(self._project_root, project.slug)
-                agent_root.mkdir(parents=True, exist_ok=True)
-                return agent_root.resolve()
-            return self._project_root.resolve()
+            slug = (project.slug if project is not None and project.slug else "")
+            if slug:
+                agent_root = project_root_dir(self._project_root, slug)
+            else:
+                # 无活跃 project → 使用 _default 沙箱，不暴露整个 instance root
+                agent_root = self._project_root / "projects" / "_default"
+                slug = "_default"
+            agent_root.mkdir(parents=True, exist_ok=True)
+            return agent_root.resolve(), slug
 
-        def _resolve_instance_path(
+        def _resolve_and_check_path(
             instance_root: Path,
             raw_path: str,
-            *,
-            allow_outside: bool = False,
+            global_instance_root: Path,
+            current_project_slug: str,
         ) -> Path:
-            """解析路径，支持 instance root 内外访问。
+            """解析路径并执行 PathAccessPolicy 检查。
 
-            路径安全策略与 Policy Engine 双维度模型对齐：
-            - allow_outside=True（读操作）：允许任意路径，
-              安全由 ToolBroker 内联权限检查保障
-            - allow_outside=False（写操作）：限制在 instance root 内，
-              防止误写系统文件
+            所有 filesystem 工具统一使用此函数。
+            白名单内自动放行，黑名单内直接拒绝，灰名单交给 permission check。
             """
-            normalized = raw_path.strip()
-            candidate = (
-                Path(normalized)
-                if normalized
-                else instance_root
+            from octoagent.tooling.path_policy import (
+                PathVerdict,
+                check_path_access,
             )
-            # 展开 ~ 前缀
+
+            normalized = raw_path.strip()
+            candidate = Path(normalized) if normalized else instance_root
             if str(candidate).startswith("~"):
                 candidate = candidate.expanduser()
             if not candidate.is_absolute():
                 candidate = instance_root / candidate
             resolved = candidate.resolve()
-            if resolved != instance_root and not resolved.is_relative_to(instance_root):
-                if allow_outside:
-                    # 排除系统源码目录，防止 Agent 浪费 token 读内部实现
-                    app_dir = (self._project_root / "app").resolve()
-                    if resolved == app_dir or resolved.is_relative_to(app_dir):
-                        raise RuntimeError(
-                            f"path points to system source code ({resolved}). "
-                            f"Agent 不应读取系统源码，请使用对应的工具完成任务。"
-                        )
-                    return resolved
+
+            # 路径访问策略检查（对 global instance root 执行）
+            result = check_path_access(resolved, global_instance_root, current_project_slug)
+
+            if result.verdict == PathVerdict.DENY:
                 raise RuntimeError(
-                    f"path escapes instance root ({instance_root}). "
-                    f"写操作仅允许 instance root 内路径。"
+                    f"访问被拒绝: {result.reason}。"
+                    f"该路径包含系统内部文件，Agent 不可访问。"
                 )
-            # instance root 内部也排除 app/ 目录
-            app_dir = (self._project_root / "app").resolve()
-            if resolved == app_dir or resolved.is_relative_to(app_dir):
-                raise RuntimeError(
-                    f"path points to system source code ({resolved}). "
-                    f"Agent 不应读取系统源码，请使用对应的工具完成任务。"
-                )
+
+            if result.verdict == PathVerdict.NEEDS_APPROVAL:
+                # 灰名单路径（instance root 外）— 仍然允许访问，
+                # 但 permission.py 会把 SideEffectLevel 升级为 IRREVERSIBLE 触发审批
+                pass
+
             return resolved
 
         def _truncate_text(value: str, *, limit: int = 100_000) -> str:
@@ -1385,10 +1379,12 @@ class CapabilityPackService:
             path: str = ".",
             max_entries: int = 50,
         ) -> str:
-            """列出目录内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
+            """列出目录内容。默认列出当前 project workspace。"""
 
-            instance_root = await _resolve_instance_root()
-            target = _resolve_instance_path(instance_root, path, allow_outside=True)
+            instance_root, project_slug = await _resolve_instance_root()
+            target = _resolve_and_check_path(
+                instance_root, path, self._project_root.resolve(), project_slug,
+            )
             if not target.exists():
                 raise RuntimeError(f"path not found: {target}")
             if not target.is_dir():
@@ -1439,10 +1435,12 @@ class CapabilityPackService:
             path: str,
             max_chars: int = 100_000,
         ) -> str:
-            """读取文本文件内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
+            """读取文本文件内容。受路径访问策略保护。"""
 
-            instance_root = await _resolve_instance_root()
-            target = _resolve_instance_path(instance_root, path, allow_outside=True)
+            instance_root, project_slug = await _resolve_instance_root()
+            target = _resolve_and_check_path(
+                instance_root, path, self._project_root.resolve(), project_slug,
+            )
             if not target.exists():
                 # 返回结构化的 "不存在" 响应，而非抛异常，让 Agent 更容易处理
                 return json.dumps(
@@ -1480,10 +1478,12 @@ class CapabilityPackService:
             content: str,
             create_dirs: bool = True,
         ) -> str:
-            """在 workspace 内创建或覆盖文本文件。自动创建中间目录。"""
+            """在当前 project 内创建或覆盖文本文件。受路径访问策略保护。"""
 
-            instance_root = await _resolve_instance_root()
-            target = _resolve_instance_path(instance_root, path)
+            instance_root, project_slug = await _resolve_instance_root()
+            target = _resolve_and_check_path(
+                instance_root, path, self._project_root.resolve(), project_slug,
+            )
             if target.is_dir():
                 raise RuntimeError(f"path is a directory, not a file: {target}")
             if create_dirs:
@@ -1521,10 +1521,12 @@ class CapabilityPackService:
             timeout_seconds: float = 300.0,
             max_output_chars: int = 200_000,
         ) -> str:
-            """在当前 workspace 内执行受治理终端命令。"""
+            """在当前 project 内执行受治理终端命令。cwd 受路径访问策略保护。"""
 
-            instance_root = await _resolve_instance_root()
-            working_dir = _resolve_instance_path(instance_root, cwd)
+            instance_root, project_slug = await _resolve_instance_root()
+            working_dir = _resolve_and_check_path(
+                instance_root, cwd, self._project_root.resolve(), project_slug,
+            )
             if not working_dir.exists() or not working_dir.is_dir():
                 raise RuntimeError(f"cwd is not a directory: {working_dir}")
             # 超时上限 600s（对齐 MCP 安装等长命令场景）
