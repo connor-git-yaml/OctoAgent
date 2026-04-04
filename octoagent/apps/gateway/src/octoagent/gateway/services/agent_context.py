@@ -15,6 +15,7 @@ import structlog
 from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.behavior_workspace import (
     build_behavior_bootstrap_template_ids,
+    load_onboarding_state,
     resolve_behavior_workspace,
 )
 from octoagent.core.models import (
@@ -2898,6 +2899,22 @@ class AgentContextService:
             workspace_id=workspace_id,
         )
         if existing is not None:
+            # 同步 OnboardingState → BootstrapSession 状态
+            # 如果全局 onboarding 已完成但 session 仍 PENDING，自动升级
+            onboarding = load_onboarding_state(self._project_root)
+            if (
+                onboarding.is_completed()
+                and existing.status is BootstrapSessionStatus.PENDING
+            ):
+                existing = existing.model_copy(
+                    update={
+                        "status": BootstrapSessionStatus.COMPLETED,
+                        "blocking_reason": "",
+                        "updated_at": datetime.now(tz=UTC),
+                    }
+                )
+                await self._stores.agent_context_store.save_bootstrap_session(existing)
+
             needs_update = (
                 existing.steps != bootstrap_steps
                 or existing.current_step == "owner_basics"
@@ -2926,6 +2943,17 @@ class AgentContextService:
                 )
                 await self._stores.agent_context_store.save_bootstrap_session(existing)
             return existing
+        # 检查全局 OnboardingState——如果已完成过（任何 project），新 project 直接 COMPLETED
+        onboarding = load_onboarding_state(self._project_root)
+        if onboarding.is_completed():
+            initial_status = BootstrapSessionStatus.COMPLETED
+            initial_step = bootstrap_steps[-1] if bootstrap_steps else ""
+            blocking = ""
+        else:
+            initial_status = BootstrapSessionStatus.PENDING
+            initial_step = bootstrap_steps[0]
+            blocking = "bootstrap 尚未完成，将以 safe default 继续回答。"
+
         session = BootstrapSession(
             bootstrap_id=f"bootstrap-{project_id or 'default'}",
             project_id=project_id,
@@ -2933,12 +2961,12 @@ class AgentContextService:
             owner_profile_id=owner_profile.owner_profile_id,
             owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
             agent_profile_id=agent_profile.profile_id,
-            status=BootstrapSessionStatus.PENDING,
-            current_step=bootstrap_steps[0],
+            status=initial_status,
+            current_step=initial_step,
             steps=bootstrap_steps,
             answers={},
             surface=surface,
-            blocking_reason="bootstrap 尚未完成，将以 safe default 继续回答。",
+            blocking_reason=blocking,
             metadata=bootstrap_metadata,
         )
         await self._stores.agent_context_store.save_bootstrap_session(session)
