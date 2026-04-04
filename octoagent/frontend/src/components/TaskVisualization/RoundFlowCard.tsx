@@ -117,6 +117,21 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
         <span className="tv-round-message">
           {round.triggerMessage || "（无消息内容）"}
         </span>
+        <button
+          className="tv-debug-btn"
+          title="复制 Debug Info"
+          onClick={(e) => {
+            e.stopPropagation();
+            const info = [
+              `Task ID: ${round.taskId}`,
+              `User Message ID: ${round.triggerEventId}`,
+              `User Message: ${round.triggerMessage}`,
+            ].join("\n");
+            void navigator.clipboard.writeText(info);
+          }}
+        >
+          Debug
+        </button>
         <span className="tv-round-time">
           {formatTime(round.startTime)}
           {round.endTime &&

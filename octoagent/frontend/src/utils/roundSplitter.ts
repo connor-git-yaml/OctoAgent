@@ -48,6 +48,8 @@ export interface Round {
   id: string;
   index: number;
   triggerMessage: string;
+  triggerEventId: string;
+  taskId: string;
   nodes: FlowNode[];
   startTime: string;
   endTime?: string;
@@ -245,6 +247,8 @@ function buildRound(
     id: trigger.event_id,
     index,
     triggerMessage: message,
+    triggerEventId: trigger.event_id,
+    taskId: "",
     nodes,
     startTime: trigger.ts,
     endTime: events[events.length - 1]?.ts,

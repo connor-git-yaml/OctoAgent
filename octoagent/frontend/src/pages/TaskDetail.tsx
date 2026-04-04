@@ -315,7 +315,7 @@ export default function TaskDetail() {
           {rounds.map((round) => (
             <RoundFlowCard
               key={round.id}
-              round={round}
+              round={{ ...round, taskId: task.task_id }}
               onNodeClick={setSelectedNode}
             />
           ))}

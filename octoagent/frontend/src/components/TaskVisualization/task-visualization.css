@@ -572,6 +572,22 @@
   white-space: nowrap;
 }
 
+.tv-debug-btn {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--cp-border);
+  border-radius: 4px;
+  background: var(--cp-surface);
+  color: var(--cp-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tv-round-header:hover .tv-debug-btn { opacity: 1; }
+.tv-debug-btn:hover { background: var(--cp-soft); color: var(--cp-ink); }
+.tv-debug-btn:active { background: var(--cp-primary); color: #fff; }
+
 .tv-round-time {
   font-size: 11px;
   color: var(--cp-muted);
