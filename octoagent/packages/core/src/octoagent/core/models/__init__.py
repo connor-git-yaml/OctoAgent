@@ -208,7 +208,6 @@ from .control_plane import (
     WorkerProfileStaticConfig,
     WorkerProfileViewItem,
     WorkProjectionItem,
-    WorkspaceOption,
 )
 from .delegation import (
     DelegationEnvelope,
@@ -327,8 +326,6 @@ from .project import (
     SecretBindingStatus,
     SecretRefSourceType,
     SecretTargetKind,
-    Workspace,
-    WorkspaceKind,
 )
 from .task import RequesterInfo, Task, TaskPointers
 from .update import (
@@ -595,7 +592,6 @@ __all__ = [
     "ConfigFieldHint",
     "ConfigSchemaDocument",
     "ProjectOption",
-    "WorkspaceOption",
     "ProjectSelectorDocument",
     "SessionProjectionItem",
     "SessionProjectionDocument",
@@ -671,11 +667,9 @@ __all__ = [
     "ControlPlaneState",
     # Project / Workspace
     "ProjectStatus",
-    "WorkspaceKind",
     "ProjectBindingType",
     "ProjectMigrationStatus",
     "Project",
-    "Workspace",
     "ProjectBinding",
     "ProjectSecretBinding",
     "ProjectSelectorState",

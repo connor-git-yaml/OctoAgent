@@ -6,7 +6,9 @@ import structlog
 from pathlib import Path
 from typing import Any
 
-from octoagent.core.models import MemoryRetrievalProfile, Project, Workspace
+from typing import Any
+
+from octoagent.core.models import MemoryRetrievalProfile, Project
 from octoagent.memory import MemoryBackendStatus, MemoryPartition, MemoryService, SorRecord, SqliteMemoryStore
 
 _log = structlog.get_logger()
@@ -45,7 +47,7 @@ class MemoryRuntimeService:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None = None,
+        workspace: Any | None = None,
     ) -> MemoryService:
         if project is None:
             return MemoryService(
@@ -68,7 +70,7 @@ class MemoryRuntimeService:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None = None,
+        workspace: Any | None = None,
         backend_status: MemoryBackendStatus | None = None,
     ) -> MemoryRetrievalProfile:
         resolved_backend_status = backend_status

@@ -37,7 +37,7 @@ from octoagent.policy.models import (
     PolicyStep,
     SSEApprovalEvent,
 )
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel
 
 # ============================================================
 # T004: PolicyAction 严格度排序
@@ -196,7 +196,6 @@ class TestPolicyProfile:
         assert DEFAULT_PROFILE.none_action == PolicyAction.ALLOW
         assert DEFAULT_PROFILE.reversible_action == PolicyAction.ALLOW
         assert DEFAULT_PROFILE.irreversible_action == PolicyAction.ASK
-        assert DEFAULT_PROFILE.allowed_tool_profile == ToolProfile.STANDARD
         assert DEFAULT_PROFILE.approval_timeout_seconds == 600.0
 
     def test_strict_profile(self) -> None:
@@ -204,7 +203,6 @@ class TestPolicyProfile:
         assert STRICT_PROFILE.name == "strict"
         assert STRICT_PROFILE.reversible_action == PolicyAction.ASK
         assert STRICT_PROFILE.irreversible_action == PolicyAction.ASK
-        assert STRICT_PROFILE.allowed_tool_profile == ToolProfile.MINIMAL
 
     def test_permissive_profile(self) -> None:
         """PERMISSIVE_PROFILE 预期值"""
@@ -212,7 +210,6 @@ class TestPolicyProfile:
         assert PERMISSIVE_PROFILE.none_action == PolicyAction.ALLOW
         assert PERMISSIVE_PROFILE.reversible_action == PolicyAction.ALLOW
         assert PERMISSIVE_PROFILE.irreversible_action == PolicyAction.ALLOW
-        assert PERMISSIVE_PROFILE.allowed_tool_profile == ToolProfile.PRIVILEGED
 
     def test_custom_profile(self) -> None:
         """自定义 Profile"""

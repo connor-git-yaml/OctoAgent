@@ -15,6 +15,11 @@ from typing import Any
 import aiosqlite
 from dotenv import dotenv_values
 from octoagent.core.config import get_artifacts_dir, get_db_path
+from enum import StrEnum
+from typing import Any as _Any
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
 from octoagent.core.models import (
     Project,
     ProjectBinding,
@@ -24,9 +29,29 @@ from octoagent.core.models import (
     ProjectMigrationStatus,
     ProjectMigrationSummary,
     ProjectMigrationValidation,
-    Workspace,
-    WorkspaceKind,
 )
+
+
+# DEPRECATED: workspace 概念已废弃，本地保留仅供历史迁移工具使用
+class WorkspaceKind(StrEnum):
+    PRIMARY = "primary"
+    CHAT = "chat"
+    OPS = "ops"
+    LEGACY = "legacy"
+
+
+class Workspace(_BaseModel):
+    """迁移工具本地使用的 Workspace 兼容类（workspace 概念已废弃）。"""
+
+    workspace_id: str = _Field(min_length=1)
+    project_id: str = _Field(min_length=1)
+    slug: str = _Field(min_length=1)
+    name: str = _Field(min_length=1)
+    kind: WorkspaceKind = WorkspaceKind.PRIMARY
+    root_path: str = ""
+    created_at: _Any = None
+    updated_at: _Any = None
+    metadata: dict[str, _Any] = _Field(default_factory=dict)
 from octoagent.core.store import StoreGroup, create_store_group
 from ulid import ULID
 

@@ -20,7 +20,6 @@ from ulid import ULID
 from octoagent.tooling.decorators import tool_contract
 from octoagent.tooling.models import (
     SideEffectLevel,
-    ToolProfile,
     ToolSearchResult,
     ToolTier,
 )
@@ -77,7 +76,6 @@ def create_tool_search_handler(
     @tool_contract(
         name="tool_search",
         side_effect_level=SideEffectLevel.NONE,
-        tool_profile=ToolProfile.MINIMAL,
         tool_group="system",
         tier=ToolTier.CORE,
         tags=["system", "search", "tool", "discovery"],

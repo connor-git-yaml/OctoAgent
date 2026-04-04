@@ -49,7 +49,6 @@ class RuntimeControlContext(BaseModel):
     thread_id: str = Field(default="", description="线程 ID")
     session_id: str = Field(default="", description="冻结后的 durable session ID")
     project_id: str = Field(default="", description="冻结后的 project ID")
-    workspace_id: str = Field(default="", description="冻结后的 workspace ID")
     hop_count: int = Field(default=0, ge=0, description="当前 hop")
     max_hops: int = Field(default=3, ge=1, description="最大 hop")
     worker_capability: str = Field(default="", description="当前 worker capability")

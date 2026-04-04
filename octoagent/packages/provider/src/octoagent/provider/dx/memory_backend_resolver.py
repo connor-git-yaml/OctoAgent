@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from octoagent.core.models import (
     Project,
-    Workspace,
 )
 from octoagent.memory import (
     MemoryBackend,
@@ -39,7 +39,7 @@ class MemoryBackendResolver:
         self,
         *,
         project: Project,
-        workspace: Workspace | None = None,
+        workspace: Any | None = None,
     ) -> MemoryBackend:
         """返回内建 MemU backend（LanceDB 混合检索 + Qwen3-Embedding-0.6B）。
 
@@ -69,7 +69,7 @@ class MemoryBackendResolver:
         self,
         *,
         project: Project,
-        workspace: Workspace | None = None,
+        workspace: Any | None = None,
     ) -> MemoryBackendStatus:
         """返回内建 MemU 模式的健康状态。"""
         binding_ref = self._binding_ref(
@@ -89,7 +89,6 @@ class MemoryBackendResolver:
     def _binding_ref(
         *,
         project: Project,
-        workspace: Workspace | None,
+        workspace: Any | None,
     ) -> str:
-        workspace_part = workspace.workspace_id if workspace is not None else "project"
-        return f"{project.project_id}/{workspace_part}/local"
+        return f"{project.project_id}/project/local"

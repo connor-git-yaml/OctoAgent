@@ -61,7 +61,6 @@ async def setup_full_session(store: SqliteAgentContextStore):
     runtime = AgentRuntime(
         agent_runtime_id="rt-int-001",
         project_id="proj-int-001",
-        workspace_id="ws-int-001",
         name="Integration Test Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -71,14 +70,12 @@ async def setup_full_session(store: SqliteAgentContextStore):
         agent_runtime_id="rt-int-001",
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="proj-int-001",
-        workspace_id="ws-int-001",
     )
     await store.save_agent_session(session)
 
     ns = MemoryNamespace(
         namespace_id="ns-int-proj-001",
         project_id="proj-int-001",
-        workspace_id="ws-int-001",
         agent_runtime_id="rt-int-001",
         kind=MemoryNamespaceKind.PROJECT_SHARED,
         memory_scope_ids=["proj-int-001/default"],

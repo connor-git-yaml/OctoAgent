@@ -86,7 +86,6 @@ async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> st
 
     session_states = await store_group.agent_context_store.list_session_contexts(
         project_id=project_id,
-        workspace_id=None,
     )
     for item in session_states:
         if str(item.thread_id).strip() != str(task.thread_id).strip():
@@ -104,7 +103,6 @@ async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> st
         candidates = await store_group.agent_context_store.list_agent_sessions(
             legacy_session_id=legacy_session_id,
             project_id=project_id,
-            workspace_id=None,
             limit=200,
         )
         for item in candidates:

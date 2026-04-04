@@ -520,8 +520,6 @@ def render_behavior_system_block(
                 f"project_workspace_root: {path_manifest.get('project_workspace_root') or 'N/A'}",
                 "project_workspace_root_source: "
                 f"{path_manifest.get('project_workspace_root_source') or 'N/A'}",
-                f"workspace_id: {path_manifest.get('workspace_id') or 'N/A'}",
-                f"workspace_slug: {path_manifest.get('workspace_slug') or 'N/A'}",
                 f"project_data_root: {path_manifest.get('project_data_root') or 'N/A'}",
                 f"project_notes_root: {path_manifest.get('project_notes_root') or 'N/A'}",
                 f"project_artifacts_root: {path_manifest.get('project_artifacts_root') or 'N/A'}",

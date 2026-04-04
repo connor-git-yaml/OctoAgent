@@ -16,7 +16,6 @@ from .models import (
     RegisterToolResult,
     RegistryDiagnostic,
     ToolMeta,
-    ToolProfile,
     ToolResult,
 )
 
@@ -203,14 +202,11 @@ class ToolBrokerProtocol(Protocol):
 
     async def discover(
         self,
-        profile: ToolProfile | None = None,
         group: str | None = None,
     ) -> list[ToolMeta]:
         """发现可用工具
 
         Args:
-            profile: [DEPRECATED] 按 Profile 过滤（Feature 061 后权限由 Preset 驱动，
-                     此参数仅保留向后兼容，将在后续版本移除）
             group: 按逻辑分组过滤
 
         Returns:

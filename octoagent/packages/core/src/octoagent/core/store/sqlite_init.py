@@ -171,27 +171,11 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 """
 
-_WORKSPACES_DDL = """
-CREATE TABLE IF NOT EXISTS workspaces (
-    workspace_id TEXT PRIMARY KEY,
-    project_id   TEXT NOT NULL,
-    slug         TEXT NOT NULL,
-    name         TEXT NOT NULL,
-    kind         TEXT NOT NULL DEFAULT 'primary',
-    root_path    TEXT NOT NULL DEFAULT '',
-    metadata     TEXT NOT NULL DEFAULT '{}',
-    created_at   TEXT NOT NULL,
-    updated_at   TEXT NOT NULL,
-
-    FOREIGN KEY (project_id) REFERENCES projects(project_id)
-);
-"""
 
 _PROJECT_BINDINGS_DDL = """
 CREATE TABLE IF NOT EXISTS project_bindings (
     binding_id        TEXT PRIMARY KEY,
     project_id        TEXT NOT NULL,
-    workspace_id      TEXT,
     binding_type      TEXT NOT NULL,
     binding_key       TEXT NOT NULL,
     binding_value     TEXT NOT NULL DEFAULT '',
@@ -209,7 +193,6 @@ _PROJECT_SECRET_BINDINGS_DDL = """
 CREATE TABLE IF NOT EXISTS project_secret_bindings (
     binding_id         TEXT PRIMARY KEY,
     project_id         TEXT NOT NULL,
-    workspace_id       TEXT,
     target_kind        TEXT NOT NULL,
     target_key         TEXT NOT NULL,
     env_name           TEXT NOT NULL,
@@ -234,7 +217,6 @@ CREATE TABLE IF NOT EXISTS project_selector_state (
     selector_id         TEXT PRIMARY KEY,
     surface             TEXT NOT NULL UNIQUE,
     active_project_id   TEXT NOT NULL,
-    active_workspace_id TEXT,
     source              TEXT NOT NULL DEFAULT '',
     warnings            TEXT NOT NULL DEFAULT '[]',
     updated_at          TEXT NOT NULL,
@@ -272,7 +254,6 @@ CREATE TABLE IF NOT EXISTS works (
     selected_worker_type    TEXT NOT NULL DEFAULT 'general',
     route_reason            TEXT NOT NULL DEFAULT '',
     project_id              TEXT NOT NULL DEFAULT '',
-    workspace_id            TEXT NOT NULL DEFAULT '',
     session_owner_profile_id TEXT NOT NULL DEFAULT '',
     inherited_context_owner_profile_id TEXT NOT NULL DEFAULT '',
     delegation_target_profile_id TEXT NOT NULL DEFAULT '',
@@ -381,7 +362,6 @@ CREATE TABLE IF NOT EXISTS owner_profile_overlays (
     owner_profile_id                 TEXT NOT NULL,
     scope                            TEXT NOT NULL DEFAULT 'project',
     project_id                       TEXT NOT NULL DEFAULT '',
-    workspace_id                     TEXT NOT NULL DEFAULT '',
     assistant_identity_overrides     TEXT NOT NULL DEFAULT '{}',
     working_style_override           TEXT NOT NULL DEFAULT '',
     interaction_preferences_override TEXT NOT NULL DEFAULT '[]',
@@ -401,7 +381,6 @@ _BOOTSTRAP_SESSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS bootstrap_sessions (
     bootstrap_id             TEXT PRIMARY KEY,
     project_id               TEXT NOT NULL DEFAULT '',
-    workspace_id             TEXT NOT NULL DEFAULT '',
     owner_profile_id         TEXT NOT NULL DEFAULT '',
     owner_overlay_id         TEXT NOT NULL DEFAULT '',
     agent_profile_id         TEXT NOT NULL DEFAULT '',
@@ -424,7 +403,6 @@ _AGENT_RUNTIMES_DDL = """
 CREATE TABLE IF NOT EXISTS agent_runtimes (
     agent_runtime_id   TEXT PRIMARY KEY,
     project_id         TEXT NOT NULL DEFAULT '',
-    workspace_id       TEXT NOT NULL DEFAULT '',
     agent_profile_id   TEXT NOT NULL DEFAULT '',
     worker_profile_id  TEXT NOT NULL DEFAULT '',
     role               TEXT NOT NULL DEFAULT 'butler',
@@ -447,7 +425,6 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     kind                     TEXT NOT NULL DEFAULT 'butler_main',
     status                   TEXT NOT NULL DEFAULT 'active',
     project_id               TEXT NOT NULL DEFAULT '',
-    workspace_id             TEXT NOT NULL DEFAULT '',
     surface                  TEXT NOT NULL DEFAULT 'chat',
     thread_id                TEXT NOT NULL DEFAULT '',
     legacy_session_id        TEXT NOT NULL DEFAULT '',
@@ -495,7 +472,6 @@ CREATE TABLE IF NOT EXISTS a2a_conversations (
     task_id                  TEXT NOT NULL DEFAULT '',
     work_id                  TEXT NOT NULL DEFAULT '',
     project_id               TEXT NOT NULL DEFAULT '',
-    workspace_id             TEXT NOT NULL DEFAULT '',
     source_agent_runtime_id  TEXT NOT NULL DEFAULT '',
     source_agent_session_id  TEXT NOT NULL DEFAULT '',
     target_agent_runtime_id  TEXT NOT NULL DEFAULT '',
@@ -526,7 +502,6 @@ CREATE TABLE IF NOT EXISTS a2a_messages (
     task_id                  TEXT NOT NULL DEFAULT '',
     work_id                  TEXT NOT NULL DEFAULT '',
     project_id               TEXT NOT NULL DEFAULT '',
-    workspace_id             TEXT NOT NULL DEFAULT '',
     source_agent_runtime_id  TEXT NOT NULL DEFAULT '',
     source_agent_session_id  TEXT NOT NULL DEFAULT '',
     target_agent_runtime_id  TEXT NOT NULL DEFAULT '',
@@ -552,7 +527,6 @@ _MEMORY_NAMESPACES_DDL = """
 CREATE TABLE IF NOT EXISTS memory_namespaces (
     namespace_id       TEXT PRIMARY KEY,
     project_id         TEXT NOT NULL DEFAULT '',
-    workspace_id       TEXT NOT NULL DEFAULT '',
     agent_runtime_id   TEXT NOT NULL DEFAULT '',
     kind               TEXT NOT NULL DEFAULT 'project_shared',
     name               TEXT NOT NULL DEFAULT '',
@@ -574,7 +548,6 @@ CREATE TABLE IF NOT EXISTS session_context_states (
     agent_session_id      TEXT NOT NULL DEFAULT '',
     thread_id             TEXT NOT NULL DEFAULT '',
     project_id            TEXT NOT NULL DEFAULT '',
-    workspace_id          TEXT NOT NULL DEFAULT '',
     task_ids              TEXT NOT NULL DEFAULT '[]',
     recent_turn_refs      TEXT NOT NULL DEFAULT '[]',
     recent_artifact_refs  TEXT NOT NULL DEFAULT '[]',
@@ -594,7 +567,6 @@ CREATE TABLE IF NOT EXISTS context_frames (
     agent_runtime_id       TEXT NOT NULL DEFAULT '',
     agent_session_id       TEXT NOT NULL DEFAULT '',
     project_id             TEXT NOT NULL DEFAULT '',
-    workspace_id           TEXT NOT NULL DEFAULT '',
     agent_profile_id       TEXT NOT NULL DEFAULT '',
     owner_profile_id       TEXT NOT NULL DEFAULT '',
     owner_overlay_id       TEXT NOT NULL DEFAULT '',
@@ -621,7 +593,6 @@ CREATE TABLE IF NOT EXISTS recall_frames (
     context_frame_id     TEXT NOT NULL DEFAULT '',
     task_id              TEXT NOT NULL DEFAULT '',
     project_id           TEXT NOT NULL DEFAULT '',
-    workspace_id         TEXT NOT NULL DEFAULT '',
     query                TEXT NOT NULL DEFAULT '',
     recent_summary       TEXT NOT NULL DEFAULT '',
     memory_namespace_ids TEXT NOT NULL DEFAULT '[]',
@@ -708,20 +679,8 @@ _PROJECT_INDEXES = [
         "ON projects(is_default) WHERE is_default = 1;"
     ),
     (
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_project_slug "
-        "ON workspaces(project_id, slug);"
-    ),
-    (
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_primary_per_project "
-        "ON workspaces(project_id) WHERE kind = 'primary';"
-    ),
-    (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_bindings_project_type_key "
         "ON project_bindings(project_id, binding_type, binding_key);"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_project_bindings_workspace "
-        "ON project_bindings(workspace_id);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_project_bindings_run_id "
@@ -843,11 +802,11 @@ _AGENT_CONTEXT_INDEXES = [
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_owner_profile_overlays_scope "
-        "ON owner_profile_overlays(scope, project_id, workspace_id, updated_at DESC);"
+        "ON owner_profile_overlays(scope, project_id, updated_at DESC);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_bootstrap_sessions_scope "
-        "ON bootstrap_sessions(project_id, workspace_id, updated_at DESC);"
+        "ON bootstrap_sessions(project_id, updated_at DESC);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_session_context_states_thread "
@@ -1087,7 +1046,6 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_CHECKPOINTS_DDL)
     await conn.execute(_SIDE_EFFECT_LEDGER_DDL)
     await conn.execute(_PROJECTS_DDL)
-    await conn.execute(_WORKSPACES_DDL)
     await conn.execute(_PROJECT_BINDINGS_DDL)
     await conn.execute(_PROJECT_SECRET_BINDINGS_DDL)
     await conn.execute(_PROJECT_SELECTOR_STATE_DDL)

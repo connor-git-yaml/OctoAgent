@@ -11,7 +11,6 @@ from enum import StrEnum
 from typing import Any
 
 from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
-from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel, Field
 
 _MAX_STEPS_HARD_CEILING = 500  # 降级重试 clamp 上限
@@ -342,7 +341,6 @@ class SkillManifestModel(BaseModel):
     model_alias: str = Field(default="main", min_length=1)
     permission_mode: SkillPermissionMode = Field(default=SkillPermissionMode.RESTRICT)
     tools_allowed: list[str] = Field(default_factory=list)
-    tool_profile: ToolProfile = Field(default=ToolProfile.STANDARD)
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     loop_guard: LoopGuardPolicy = Field(default_factory=LoopGuardPolicy)
     context_budget: ContextBudgetPolicy = Field(default_factory=ContextBudgetPolicy)

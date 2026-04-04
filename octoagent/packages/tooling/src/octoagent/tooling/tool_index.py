@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from octoagent.core.models import DynamicToolSelection, ToolIndexHit, ToolIndexQuery
 from ulid import ULID
 
-from .models import ToolMeta, ToolProfile, ToolSearchHit, ToolSearchResult, ToolTier, profile_allows
+from .models import ToolMeta, ToolSearchHit, ToolSearchResult, ToolTier
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+")
 _EMBED_DIM = 96
@@ -96,7 +96,6 @@ class InMemoryToolIndexBackend(ToolIndexBackend):
                     match_reason=_match_reason(record.meta, matched_filters),
                     matched_filters=matched_filters,
                     tool_group=record.meta.tool_group,
-                    tool_profile=record.meta.tool_profile,
                     metadata={
                         "tags": list(record.meta.tags),
                         "worker_types": list(record.meta.worker_types),
@@ -135,11 +134,6 @@ def _matched_filters(meta: ToolMeta, request: ToolIndexQuery) -> list[str] | Non
         if meta.worker_types and request.worker_type not in meta.worker_types:
             return None
         matched.append("worker_type")
-    if request.tool_profile:
-        requested_profile = ToolProfile(str(request.tool_profile))
-        if not profile_allows(meta.tool_profile, requested_profile):
-            return None
-        matched.append("tool_profile")
     if request.tags:
         if not set(request.tags).intersection(meta.tags):
             return None

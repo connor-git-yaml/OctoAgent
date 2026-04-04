@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel
 from pydantic import BaseModel, Field
 
 # ============================================================
@@ -149,12 +149,6 @@ class PolicyProfile(BaseModel):
         description="side_effect_level=irreversible 的默认决策",
     )
 
-    # === ToolProfile 级别限制 ===
-    allowed_tool_profile: ToolProfile = Field(
-        default=ToolProfile.STANDARD,
-        description="当前 Profile 允许的最高工具级别",
-    )
-
     # === 超时配置 ===
     approval_timeout_seconds: float = Field(
         default=600.0,
@@ -169,7 +163,6 @@ DEFAULT_PROFILE = PolicyProfile(
     none_action=PolicyAction.ALLOW,
     reversible_action=PolicyAction.ALLOW,
     irreversible_action=PolicyAction.ASK,
-    allowed_tool_profile=ToolProfile.STANDARD,
     approval_timeout_seconds=600.0,
 )
 
@@ -179,7 +172,6 @@ STRICT_PROFILE = PolicyProfile(
     none_action=PolicyAction.ALLOW,
     reversible_action=PolicyAction.ASK,
     irreversible_action=PolicyAction.ASK,
-    allowed_tool_profile=ToolProfile.MINIMAL,
     approval_timeout_seconds=600.0,
 )
 
@@ -189,7 +181,6 @@ PERMISSIVE_PROFILE = PolicyProfile(
     none_action=PolicyAction.ALLOW,
     reversible_action=PolicyAction.ALLOW,
     irreversible_action=PolicyAction.ALLOW,
-    allowed_tool_profile=ToolProfile.PRIVILEGED,
     approval_timeout_seconds=600.0,
 )
 

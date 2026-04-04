@@ -68,7 +68,6 @@ class Work(BaseModel):
     selected_worker_type: str = "general"
     route_reason: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
     session_owner_profile_id: str = Field(default="")
     inherited_context_owner_profile_id: str = Field(default="")
     delegation_target_profile_id: str = Field(default="")
@@ -106,7 +105,6 @@ class DelegationEnvelope(BaseModel):
     bootstrap_context: list[dict[str, Any]] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
     timeout_seconds: float | None = Field(default=None, ge=0.0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

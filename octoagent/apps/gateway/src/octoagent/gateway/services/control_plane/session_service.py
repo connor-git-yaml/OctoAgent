@@ -145,7 +145,6 @@ class SessionDomainService(DomainServiceBase):
             focused_thread_id=focused_thread_id,
             new_conversation_token=state.new_conversation_token,
             new_conversation_project_id=state.new_conversation_project_id,
-            new_conversation_workspace_id="",
             new_conversation_agent_profile_id=state.new_conversation_agent_profile_id,
             sessions=session_items,
             summary=session_summary,
@@ -196,11 +195,9 @@ class SessionDomainService(DomainServiceBase):
         if selected_project is not None:
             session = await self._stores.agent_context_store.get_latest_bootstrap_session(
                 project_id=selected_project.project_id,
-                workspace_id="",
             )
         return BootstrapSessionDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
-            active_workspace_id="",
             session=session.model_dump(mode="json") if session is not None else {},
             resumable=bool(session is not None and session.status.value != "completed"),
             warnings=[] if session is not None else ["当前 project 没有 bootstrap session。"],
@@ -213,14 +210,11 @@ class SessionDomainService(DomainServiceBase):
     async def get_context_continuity_document(self) -> ContextContinuityDocument:
         _, selected_project, _, _ = await self._resolve_selection()
         active_project_id = selected_project.project_id if selected_project is not None else ""
-        active_workspace_id = ""
         sessions = await self._stores.agent_context_store.list_session_contexts(
             project_id=active_project_id or None,
-            workspace_id=active_workspace_id or None,
         )
         frames = await self._stores.agent_context_store.list_context_frames(
             project_id=active_project_id or None,
-            workspace_id=active_workspace_id or None,
             limit=20,
         )
         agent_runtimes = await self._stores.agent_context_store.list_agent_runtimes(
@@ -228,7 +222,6 @@ class SessionDomainService(DomainServiceBase):
         )
         agent_sessions = await self._stores.agent_context_store.list_agent_sessions(
             project_id=active_project_id or None,
-            workspace_id=active_workspace_id or None,
             limit=20,
         )
         memory_namespaces = await self._stores.agent_context_store.list_memory_namespaces(
@@ -236,12 +229,10 @@ class SessionDomainService(DomainServiceBase):
         )
         recall_frames = await self._stores.agent_context_store.list_recall_frames(
             project_id=active_project_id or None,
-            workspace_id=active_workspace_id or None,
             limit=20,
         )
         a2a_conversations = await self._stores.a2a_store.list_conversations(
             project_id=active_project_id or None,
-            workspace_id=active_workspace_id or None,
             limit=20,
         )
         a2a_messages = []
@@ -259,7 +250,6 @@ class SessionDomainService(DomainServiceBase):
                 agent_session_id=item.agent_session_id,
                 thread_id=item.thread_id,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 rolling_summary=item.rolling_summary,
                 last_context_frame_id=item.last_context_frame_id,
                 last_recall_frame_id=item.last_recall_frame_id,
@@ -275,7 +265,6 @@ class SessionDomainService(DomainServiceBase):
                 agent_runtime_id=item.agent_runtime_id,
                 agent_session_id=item.agent_session_id,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 agent_profile_id=item.agent_profile_id,
                 recall_frame_id=item.recall_frame_id or "",
                 memory_namespace_ids=list(item.memory_namespace_ids),
@@ -295,7 +284,6 @@ class SessionDomainService(DomainServiceBase):
                 agent_runtime_id=item.agent_runtime_id,
                 role=item.role.value,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 agent_profile_id=item.agent_profile_id,
                 worker_profile_id=item.worker_profile_id,
                 name=item.name,
@@ -313,7 +301,6 @@ class SessionDomainService(DomainServiceBase):
                 kind=item.kind.value,
                 status=item.status.value,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 thread_id=item.thread_id,
                 legacy_session_id=item.legacy_session_id,
                 work_id=item.work_id,
@@ -328,7 +315,6 @@ class SessionDomainService(DomainServiceBase):
                 namespace_id=item.namespace_id,
                 kind=item.kind.value,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 agent_runtime_id=item.agent_runtime_id,
                 name=item.name,
                 description=item.description,
@@ -345,7 +331,6 @@ class SessionDomainService(DomainServiceBase):
                 context_frame_id=item.context_frame_id,
                 task_id=item.task_id,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 query=item.query,
                 recent_summary=item.recent_summary,
                 memory_namespace_ids=list(item.memory_namespace_ids),
@@ -361,7 +346,6 @@ class SessionDomainService(DomainServiceBase):
                 task_id=item.task_id,
                 work_id=item.work_id,
                 project_id=item.project_id,
-                workspace_id=item.workspace_id,
                 source_agent_runtime_id=item.source_agent_runtime_id,
                 source_agent_session_id=item.source_agent_session_id,
                 target_agent_runtime_id=item.target_agent_runtime_id,
@@ -413,7 +397,6 @@ class SessionDomainService(DomainServiceBase):
         ]
         return ContextContinuityDocument(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             sessions=session_items,
             frames=frame_items,
             agent_runtimes=runtime_items,
@@ -483,7 +466,6 @@ class SessionDomainService(DomainServiceBase):
                 thread_id=(session_state.thread_id if session_state is not None else "")
                 or latest.thread_id,
                 project_id=project.project_id,
-                workspace_id="",
                 session_state=session_state,
             )
             session_alias = self._resolve_projected_session_alias(related_agent_sessions)
@@ -568,7 +550,6 @@ class SessionDomainService(DomainServiceBase):
                     channel=latest.requester.channel,
                     requester_id=latest.requester.sender_id,
                     project_id=project.project_id,
-                    workspace_id="",
                     agent_profile_id=session_agent_profile_id,
                     session_owner_profile_id=session_owner_profile_id,
                     session_owner_name=session_owner_name,
@@ -639,7 +620,6 @@ class SessionDomainService(DomainServiceBase):
                     channel="web" if agent_sess.surface in ("chat", "web", "") else agent_sess.surface,
                     requester_id="",
                     project_id=agent_sess.project_id,
-                    workspace_id="",
                     agent_profile_id=agent_profile_id,
                     session_owner_profile_id=agent_profile_id,
                     session_owner_name=owner_name,
@@ -1080,7 +1060,6 @@ class SessionDomainService(DomainServiceBase):
         session_id: str,
         thread_id: str,
         project_id: str,
-        workspace_id: str,
         session_state: SessionContextState | None = None,
     ) -> list[AgentSession]:
         related_sessions: list[AgentSession] = []
@@ -1106,7 +1085,6 @@ class SessionDomainService(DomainServiceBase):
             candidates = await self._stores.agent_context_store.list_agent_sessions(
                 legacy_session_id=normalized,
                 project_id=project_id or None,
-                workspace_id=workspace_id or None,
                 limit=200,
             )
             for item in candidates:
@@ -1173,7 +1151,6 @@ class SessionDomainService(DomainServiceBase):
                 "focused_thread_id": session.thread_id,
                 "new_conversation_token": "",
                 "new_conversation_project_id": "",
-                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": "",
                 "updated_at": datetime.now(tz=UTC),
             }
@@ -1187,7 +1164,6 @@ class SessionDomainService(DomainServiceBase):
                 "session_id": session.session_id,
                 "thread_id": session.thread_id,
                 "project_id": session.project_id,
-                "workspace_id": session.workspace_id,
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[
@@ -1262,7 +1238,6 @@ class SessionDomainService(DomainServiceBase):
                 "new_conversation_project_id": (
                     selected_project.project_id if selected_project is not None else ""
                 ),
-                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": requested_agent_profile_id,
                 "updated_at": datetime.now(tz=UTC),
             }
@@ -1281,7 +1256,6 @@ class SessionDomainService(DomainServiceBase):
             data={
                 "new_conversation_token": token,
                 "project_id": selected_project.project_id if selected_project is not None else "",
-                "workspace_id": "",
                 "agent_profile_id": requested_agent_profile_id,
                 "previous_session_id": target.session_id if target is not None else "",
                 "previous_thread_id": target.thread_id if target is not None else "",
@@ -1364,7 +1338,6 @@ class SessionDomainService(DomainServiceBase):
                         "agent_session_id": existing_session.agent_session_id,
                         "thread_id": session_anchor,
                         "project_id": existing_project.project_id,
-                        "workspace_id": "",
                         "agent_profile_id": existing_owner_profile_id or worker_profile_id,
                     },
                     resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
@@ -1414,7 +1387,6 @@ class SessionDomainService(DomainServiceBase):
         new_runtime = AgentRuntime(
             agent_runtime_id=f"runtime-{str(ULID())}",
             project_id=project_id,
-            workspace_id="",
             worker_profile_id=worker_profile_id,
             role=AgentRuntimeRole.WORKER,
             name=matched_profile.name,
@@ -1441,7 +1413,6 @@ class SessionDomainService(DomainServiceBase):
             agent_session_id=session_id,
             agent_runtime_id=agent_runtime_id,
             project_id=project_id,
-            workspace_id="",
             kind=AgentSessionKind.DIRECT_WORKER,
             status=AgentSessionStatus.ACTIVE,
             surface="web",
@@ -1459,7 +1430,6 @@ class SessionDomainService(DomainServiceBase):
                 "focused_thread_id": thread_id_seed,
                 "new_conversation_token": token,
                 "new_conversation_project_id": project_id,
-                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": worker_profile_id,
                 "selected_project_id": project_id,
                 "selected_workspace_id": "",
@@ -1482,7 +1452,6 @@ class SessionDomainService(DomainServiceBase):
                 "agent_session_id": session_id,
                 "thread_id": thread_id_seed,
                 "project_id": project_id,
-                "workspace_id": "",
                 "new_conversation_token": token,
                 "agent_profile_id": worker_profile_id,
             },
@@ -1503,7 +1472,6 @@ class SessionDomainService(DomainServiceBase):
         if session_state is None and session.thread_id:
             session_states = await self._stores.agent_context_store.list_session_contexts(
                 project_id=session.project_id or None,
-                workspace_id=session.workspace_id or None,
             )
             session_state = next(
                 (item for item in session_states if item.thread_id == session.thread_id),
@@ -1529,7 +1497,6 @@ class SessionDomainService(DomainServiceBase):
             session_id=session.session_id,
             thread_id=session.thread_id,
             project_id=session.project_id,
-            workspace_id=session.workspace_id,
             session_state=session_state,
         )
         reset_agent_sessions = 0
@@ -1568,7 +1535,6 @@ class SessionDomainService(DomainServiceBase):
                 "focused_thread_id": "",
                 "new_conversation_token": token,
                 "new_conversation_project_id": session.project_id,
-                "new_conversation_workspace_id": "",
                 "new_conversation_agent_profile_id": "",
                 "selected_project_id": session.project_id or current_state.selected_project_id,
                 "selected_workspace_id": "",
@@ -1597,7 +1563,6 @@ class SessionDomainService(DomainServiceBase):
                 "reset_agent_session_count": reset_agent_sessions,
                 "new_conversation_token": token,
                 "project_id": session.project_id,
-                "workspace_id": session.workspace_id,
             },
             resource_refs=[self._resource_ref("session_projection", "sessions:overview")],
             target_refs=[
@@ -1644,7 +1609,6 @@ class SessionDomainService(DomainServiceBase):
             session_id=session.session_id,
             thread_id=session.thread_id,
             project_id=session.project_id,
-            workspace_id=session.workspace_id,
             session_state=session_state,
         )
         agent_session_ids = [s.agent_session_id for s in related_sessions]
@@ -1725,7 +1689,6 @@ class SessionDomainService(DomainServiceBase):
         if session_state is None and session.thread_id:
             session_states = await self._stores.agent_context_store.list_session_contexts(
                 project_id=session.project_id or None,
-                workspace_id=session.workspace_id or None,
             )
             session_state = next(
                 (item for item in session_states if item.thread_id == session.thread_id),
@@ -1736,7 +1699,6 @@ class SessionDomainService(DomainServiceBase):
             session_id=session.session_id,
             thread_id=session.thread_id,
             project_id=session.project_id,
-            workspace_id=session.workspace_id,
             session_state=session_state,
         )
         if not related_sessions:

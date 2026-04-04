@@ -147,8 +147,6 @@ class ProjectPathManifest(BaseModel):
     project_behavior_root: str = Field(default="")
     project_workspace_root: str = Field(default="")
     project_workspace_root_source: str = Field(default="")
-    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
-    workspace_slug: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     project_data_root: str = Field(default="")
     project_notes_root: str = Field(default="")
     project_artifacts_root: str = Field(default="")

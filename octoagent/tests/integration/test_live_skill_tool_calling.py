@@ -24,7 +24,7 @@ from octoagent.skills.models import SkillExecutionContext, SkillRunStatus
 from octoagent.skills.runner import SkillRunner
 from octoagent.tooling.broker import ToolBroker
 from octoagent.tooling.decorators import tool_contract
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel
 from octoagent.tooling.schema import reflect_tool_schema
 from pydantic import BaseModel
 
@@ -74,7 +74,6 @@ requires_proxy = pytest.mark.skipif(
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="math",
 )
 async def add_numbers(a: int, b: int) -> str:
@@ -89,7 +88,6 @@ async def add_numbers(a: int, b: int) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="math",
 )
 async def multiply_numbers(a: int, b: int) -> str:

@@ -31,7 +31,6 @@ from octoagent.core.models import (
     BootstrapSessionStatus,
     OwnerProfile,
     Project,
-    Workspace,
 )
 from octoagent.core.store import StoreGroup
 
@@ -50,17 +49,15 @@ async def ensure_startup_records(
     if project is None:
         return
 
-    workspace = None  # workspace 概念已废弃
-
     owner_profile = await _ensure_owner_profile(store_group)
     agent_profile = await _ensure_agent_profile(store_group, project)
-    await _ensure_bootstrap_session(store_group, project, workspace, owner_profile, agent_profile)
+    await _ensure_bootstrap_session(store_group, project, owner_profile, agent_profile)
 
     # 回填 default project 的 primary_agent_id（如果尚未设置）
     await _backfill_primary_agent_id(store_group, project)
 
     # 确保 Butler 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
-    await ensure_butler_runtime_and_session(store_group, project, workspace, agent_profile)
+    await ensure_butler_runtime_and_session(store_group, project, agent_profile)
 
     await store_group.conn.commit()
 
@@ -189,17 +186,14 @@ async def _ensure_agent_profile(
 async def _ensure_bootstrap_session(
     store_group: StoreGroup,
     project: Project,
-    workspace: Workspace | None,
     owner_profile: OwnerProfile,
     agent_profile: AgentProfile,
 ) -> BootstrapSession:
     """确保默认 bootstrap session 存在。"""
     project_id = project.project_id
-    workspace_id = ""
 
     existing = await store_group.agent_context_store.get_latest_bootstrap_session(
         project_id=project_id,
-        workspace_id="",
     )
     if existing is not None:
         return existing
@@ -267,7 +261,6 @@ async def _ensure_bootstrap_session(
     session = BootstrapSession(
         bootstrap_id=f"bootstrap-{project_id}",
         project_id=project_id,
-        workspace_id=workspace_id,
         owner_profile_id=owner_profile.owner_profile_id,
         owner_overlay_id="",
         agent_profile_id=agent_profile.profile_id,
@@ -313,15 +306,12 @@ async def _backfill_primary_agent_id(
 async def ensure_butler_runtime_and_session(
     store_group: StoreGroup,
     project: Project,
-    workspace: Workspace | None,
     agent_profile: AgentProfile,
 ) -> None:
     """确保 Butler 在 project-default 上有 AgentRuntime + AgentSession。
 
     多 Session 侧边栏需要 agent_sessions 行才能展示会话列表。
     """
-    workspace_id = ""
-
     # 查找或创建 Butler Runtime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
         role=AgentRuntimeRole.MAIN,
@@ -334,7 +324,6 @@ async def ensure_butler_runtime_and_session(
         butler_runtime = AgentRuntime(
             agent_runtime_id=runtime_id,
             project_id=project.project_id,
-            workspace_id=workspace_id,
             agent_profile_id=agent_profile.profile_id,
             role=AgentRuntimeRole.MAIN,
             name=agent_profile.name,
@@ -362,7 +351,6 @@ async def ensure_butler_runtime_and_session(
             kind=AgentSessionKind.MAIN_BOOTSTRAP,
             status=AgentSessionStatus.ACTIVE,
             project_id=project.project_id,
-            workspace_id=workspace_id,
             surface="web",
             thread_id=session_id,
             legacy_session_id=session_id,

@@ -31,7 +31,7 @@ from octoagent.skills import (
 )
 from octoagent.skills.limits import get_global_defaults, merge_usage_limits
 from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
-from octoagent.tooling.models import ToolProfile, ToolSearchResult
+from octoagent.tooling.models import ToolSearchResult
 
 from .tool_promotion import ToolPromotionService
 from pydantic import BaseModel, Field
@@ -343,11 +343,6 @@ class LLMService:
         if not prompt:
             return None
 
-        try:
-            profile = ToolProfile(str(tool_profile).strip().lower() or ToolProfile.STANDARD)
-        except ValueError:
-            profile = ToolProfile.STANDARD
-
         worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
         single_loop_executor = self._metadata_flag(metadata, "single_loop_executor")
         base_description = self._build_skill_description(
@@ -377,7 +372,6 @@ class LLMService:
             description=base_description,
             permission_mode=SkillPermissionMode.INHERIT,
             tools_allowed=selected_tools,
-            tool_profile=profile,
         )
         # --- Feature 062: 资源限制合并 (T2.10) ---
         base_limits = get_global_defaults()
@@ -522,7 +516,6 @@ class LLMService:
                         description=manifest.load_description() or "",
                         permission_mode=manifest.permission_mode,
                         tools_allowed=list(manifest.tools_allowed),
-                        tool_profile=manifest.tool_profile,
                     )
                     try:
                         retry_result = await self._skill_runner.run(

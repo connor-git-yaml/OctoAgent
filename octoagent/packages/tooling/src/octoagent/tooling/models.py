@@ -1,7 +1,7 @@
 """数据模型与枚举 -- Feature 004 Tool Contract + ToolBroker
 
 对齐 data-model.md 定义。包含：
-- 枚举：SideEffectLevel、ToolProfile、HookType、FailMode
+- 枚举：SideEffectLevel、HookType、FailMode
 - Feature 061 新增枚举：PermissionPreset、PresetDecision、ToolTier
 - 数据模型：ToolMeta、ToolResult、ToolCall、ExecutionContext、BeforeHookResult、CheckResult
 - Feature 061 新增模型：PresetCheckResult、DeferredToolEntry、CoreToolSet 等
@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import warnings
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -32,86 +31,21 @@ class SideEffectLevel(StrEnum):
     IRREVERSIBLE = "irreversible"  # 不可逆操作
 
 
-class ToolProfile(StrEnum):
-    """[DEPRECATED] 工具权限 Profile — 已被 PermissionPreset 取代
-
-    Feature 061: 保留此枚举仅供迁移期兼容，后续版本将删除。
-    请使用 PermissionPreset 和 preset_decision() 替代。
-
-    过滤规则（FR-007）：
-    - minimal 查询 -> 仅返回 minimal 工具
-    - standard 查询 -> 返回 minimal + standard 工具
-    - privileged 查询 -> 返回所有工具
-
-    枚举值已锁定（FR-025a）。
-    """
-
-    MINIMAL = "minimal"  # 最小权限集（只读工具）
-    STANDARD = "standard"  # 标准权限（读写工具）
-    PRIVILEGED = "privileged"  # 特权操作（exec, docker, 外部 API）
-
-
-# ToolProfile 层级比较映射
-PROFILE_LEVELS: dict[ToolProfile, int] = {
-    ToolProfile.MINIMAL: 0,
-    ToolProfile.STANDARD: 1,
-    ToolProfile.PRIVILEGED: 2,
-}
-
-
-def profile_allows(tool_profile: ToolProfile, context_profile: ToolProfile) -> bool:
-    """[DEPRECATED] 检查 context profile 是否允许访问 tool profile
-
-    Feature 061: 此函数已废弃，内部委托到 preset_decision()。
-    请直接使用 preset_decision() 替代。
-
-    Args:
-        tool_profile: 工具声明的 profile 级别
-        context_profile: 当前执行上下文的 profile 级别
-
-    Returns:
-        True 如果 preset_decision 返回 ALLOW
-    """
-    warnings.warn(
-        "profile_allows() 已废弃，请使用 preset_decision() 替代",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    # Feature 061 T-044: 内部委托到 preset_decision()
-    # 将 ToolProfile 映射为 PermissionPreset，将 tool_profile 映射为 SideEffectLevel 近似
-    # context_profile 映射为 Preset，tool_profile 按层级映射为副作用等级
-    context_preset = TOOL_PROFILE_TO_PRESET.get(context_profile, PermissionPreset.MINIMAL)
-    # tool_profile 层级映射: minimal→NONE, standard→REVERSIBLE, privileged→IRREVERSIBLE
-    _PROFILE_TO_SIDE_EFFECT: dict[ToolProfile, SideEffectLevel] = {
-        ToolProfile.MINIMAL: SideEffectLevel.NONE,
-        ToolProfile.STANDARD: SideEffectLevel.REVERSIBLE,
-        ToolProfile.PRIVILEGED: SideEffectLevel.IRREVERSIBLE,
-    }
-    tool_side_effect = _PROFILE_TO_SIDE_EFFECT.get(tool_profile, SideEffectLevel.IRREVERSIBLE)
-    decision = preset_decision(context_preset, tool_side_effect)
-    return decision == PresetDecision.ALLOW
-
-
 # ============================================================
-# Feature 061: 权限 Preset 枚举 + 策略矩阵
+# 权限 Preset 枚举 + 策略矩阵
 # ============================================================
 
 
 class PermissionPreset(StrEnum):
-    """Agent 实例级权限 Preset — 取代 ToolProfile
+    """Agent 实例级权限 Preset
 
     决定工具调用时的默认 allow/ask 策略。
-    基于工具的 SideEffectLevel 做出决策，不再基于工具的 ToolProfile。
+    基于工具的 SideEffectLevel 做出决策。
 
     分配规则:
-    - Butler: 默认 FULL (FR-004)
-    - Worker: 创建时指定，默认 NORMAL (FR-005)
-    - Subagent: 继承其所属 Worker 的 Preset (FR-006)
-
-    迁移映射:
-    - ToolProfile.MINIMAL → PermissionPreset.MINIMAL
-    - ToolProfile.STANDARD → PermissionPreset.NORMAL
-    - ToolProfile.PRIVILEGED → PermissionPreset.FULL
+    - Butler: 默认 FULL
+    - Worker: 创建时指定，默认 NORMAL
+    - Subagent: 继承其所属 Worker 的 Preset
     """
 
     MINIMAL = "minimal"   # 保守：仅 none=allow，其余 ask
@@ -178,32 +112,6 @@ def preset_decision(
     return PRESET_POLICY[preset][side_effect]
 
 
-# ============================================================
-# Feature 061: ToolProfile → PermissionPreset 兼容映射
-# ============================================================
-
-
-TOOL_PROFILE_TO_PRESET: dict[ToolProfile, PermissionPreset] = {
-    ToolProfile.MINIMAL: PermissionPreset.MINIMAL,
-    ToolProfile.STANDARD: PermissionPreset.NORMAL,
-    ToolProfile.PRIVILEGED: PermissionPreset.FULL,
-}
-
-
-def migrate_tool_profile_to_preset(profile_value: str) -> PermissionPreset:
-    """将旧 ToolProfile 值映射为 PermissionPreset
-
-    Args:
-        profile_value: ToolProfile 枚举值字符串（minimal/standard/privileged）
-
-    Returns:
-        对应的 PermissionPreset；未知值回退到 MINIMAL
-    """
-    try:
-        profile = ToolProfile(profile_value.strip().lower())
-        return TOOL_PROFILE_TO_PRESET[profile]
-    except (ValueError, KeyError):
-        return PermissionPreset.MINIMAL  # 安全默认值
 
 
 class HookType(StrEnum):
@@ -241,7 +149,6 @@ class ToolMeta(BaseModel):
     description: str = Field(description="工具描述（来自函数 docstring）")
     parameters_json_schema: dict[str, Any] = Field(description="参数 JSON Schema（自动反射生成）")
     side_effect_level: SideEffectLevel = Field(description="副作用等级（必须声明，无默认值）")
-    tool_profile: ToolProfile = Field(description="权限 Profile 级别")
     tool_group: str = Field(description="逻辑分组（如 'system', 'filesystem', 'network'）")
 
     # 可选字段
@@ -350,11 +257,6 @@ class ExecutionContext(BaseModel):
     agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
     agent_session_id: str = Field(default="", description="当前 agent session ID")
     work_id: str = Field(default="", description="当前 work ID")
-    profile: ToolProfile = Field(
-        default=ToolProfile.MINIMAL,
-        description="[DEPRECATED] 使用 permission_preset 替代",
-    )
-    # Feature 061: Agent 实例级权限 Preset
     permission_preset: PermissionPreset = Field(
         default=PermissionPreset.MINIMAL,
         description="当前 Agent 的权限 Preset（决定工具调用的 allow/ask 策略）",

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from octoagent.core.models import Project, ProjectBinding, ProjectBindingType, Workspace
+from octoagent.core.models import Project, ProjectBinding, ProjectBindingType
 from octoagent.core.store import create_store_group
 from octoagent.memory import (
     EvidenceRef,
@@ -33,28 +33,19 @@ async def _create_project(
     project_id: str,
     workspace_id: str,
     scope_id: str | None = None,
-) -> tuple[Project, Workspace]:
+) -> tuple[Project, str]:
     project = Project(
         project_id=project_id,
         slug=project_id.replace("project-", ""),
         name=project_id,
         is_default=project_id == "project-default",
     )
-    workspace = Workspace(
-        workspace_id=workspace_id,
-        project_id=project_id,
-        slug=workspace_id.replace("workspace-", ""),
-        name=workspace_id,
-        root_path=f"/tmp/{workspace_id}",
-    )
     await store_group.project_store.create_project(project)
-    await store_group.project_store.create_workspace(workspace)
     if scope_id:
         await store_group.project_store.create_binding(
             ProjectBinding(
                 binding_id=str(ULID()),
                 project_id=project_id,
-                workspace_id=workspace_id,
                 binding_type=ProjectBindingType.MEMORY_SCOPE,
                 binding_key=scope_id,
                 binding_value=scope_id,
@@ -63,7 +54,7 @@ async def _create_project(
             )
         )
     await store_group.conn.commit()
-    return project, workspace
+    return project, workspace_id
 
 
 async def _seed_bound_memory(
@@ -127,7 +118,7 @@ async def test_explicit_grant_id_must_belong_to_actor(tmp_path: Path) -> None:
         memory = MemoryService(store_group.conn, store=SqliteMemoryStore(store_group.conn))
         request = await memory.create_vault_access_request(
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace,
             scope_id="memory/project-alpha",
             partition=MemoryPartition.HEALTH,
             subject_key="profile.user.health.note",
@@ -148,9 +139,9 @@ async def test_explicit_grant_id_must_belong_to_actor(tmp_path: Path) -> None:
             actor_id="user:intruder",
             actor_label="Intruder",
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id,
+            active_workspace_id=workspace,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace,
             scope_id="memory/project-alpha",
             partition="health",
             subject_key="profile.user.health.note",
@@ -185,13 +176,13 @@ async def test_empty_scope_binding_does_not_leak_proposals(tmp_path: Path) -> No
         service = MemoryConsoleService(tmp_path, store_group=store_group)
         proposal_audit = await service.get_proposal_audit(
             active_project_id=empty_project.project_id,
-            active_workspace_id=empty_workspace.workspace_id,
+            active_workspace_id=empty_workspace,
             project_id=empty_project.project_id,
-            workspace_id=empty_workspace.workspace_id,
+            workspace_id=empty_workspace,
         )
         overview = await service.get_memory_console(
             project_id=empty_project.project_id,
-            workspace_id=empty_workspace.workspace_id,
+            workspace_id=empty_workspace,
         )
 
         assert proposal_audit.items == []
@@ -217,9 +208,9 @@ async def test_export_inspect_rejects_unbound_scope_ids(tmp_path: Path) -> None:
         service = MemoryConsoleService(tmp_path, store_group=store_group)
         code, payload, decision = await service.inspect_export(
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id,
+            active_workspace_id=workspace,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace,
             scope_ids=["memory/project-alpha", "memory/orphan-scope"],
             include_vault_refs=True,
         )
@@ -266,9 +257,9 @@ async def test_restore_verify_uses_snapshot_scope_ids_for_conflicts(tmp_path: Pa
         code, payload, decision = await service.verify_restore(
             actor_id="user:web",
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id,
+            active_workspace_id=workspace,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace,
             snapshot_ref=str(snapshot_path),
         )
 
@@ -295,9 +286,9 @@ async def test_proposal_audit_filters_by_source(tmp_path: Path) -> None:
         service = MemoryConsoleService(tmp_path, store_group=store_group)
         audit = await service.get_proposal_audit(
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id,
+            active_workspace_id=workspace,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace,
             source="import",
         )
 

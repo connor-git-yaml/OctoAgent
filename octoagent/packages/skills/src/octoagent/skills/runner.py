@@ -540,7 +540,6 @@ class SkillRunner:
             agent_runtime_id=execution_context.agent_runtime_id,
             agent_session_id=execution_context.agent_session_id,
             work_id=execution_context.work_id,
-            profile=manifest.tool_profile,
             permission_preset=_preset,
         )
         tool_result = await self._tool_broker.execute(

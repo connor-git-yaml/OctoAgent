@@ -69,7 +69,6 @@ def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
         description=description,
         parameters_json_schema=dict(fs.json_schema),
         side_effect_level=tool_meta_dict["side_effect_level"],
-        tool_profile=tool_meta_dict["tool_profile"],
         tool_group=tool_meta_dict["tool_group"],
         version=tool_meta_dict["version"],
         timeout_seconds=tool_meta_dict["timeout_seconds"],

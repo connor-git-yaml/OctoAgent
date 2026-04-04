@@ -149,13 +149,7 @@ class TaskService:
         trace_id = f"trace-{task_id}"
         input_metadata = normalize_input_metadata(message.metadata)
         control_metadata = normalize_control_metadata(message.control_metadata)
-        workspace_id = str(control_metadata.get("workspace_id", "")).strip()
-        derived_scope_id = (
-            f"workspace:{workspace_id}:chat:{message.channel}:{message.thread_id}"
-            if workspace_id
-            else ""
-        )
-        scope_id = message.scope_id or derived_scope_id or f"chat:{message.channel}:{message.thread_id}"
+        scope_id = message.scope_id or f"chat:{message.channel}:{message.thread_id}"
 
         # 先构建 Task 与初始事件，后续单事务提交（避免 task 与 events 分离落盘）
         task = Task(
@@ -2367,6 +2361,8 @@ class TaskService:
             "llm_processing_failed",
             task_id=task_id,
             error_type=type(error).__name__,
+            error_message=str(error),
+            exc_info=True,
         )
         # 保留错误类型和消息（供内部 freshness/orchestrator 判断），
         # 但脱敏可能泄露的凭证（api_key、token 等）。

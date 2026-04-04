@@ -63,8 +63,6 @@ from octoagent.tooling import (
     SideEffectLevel,
     ToolBroker,
     ToolIndex,
-    ToolProfile,
-    profile_allows,
     reflect_tool_schema,
     tool_contract,
 )
@@ -146,6 +144,16 @@ _MEMORY_BINDING_TYPES = {
     ProjectBindingType.MEMORY_SCOPE,
     ProjectBindingType.IMPORT_SCOPE,
 }
+
+# ToolProfile 等级映射（minimal < standard < privileged）
+_PROFILE_LEVELS: dict[str, int] = {"minimal": 0, "standard": 1, "privileged": 2}
+
+
+def _profile_allows(tool_profile: str, context_profile: str) -> bool:
+    """检查工具的 profile 是否在 context_profile 允许范围内。"""
+    tool_level = _PROFILE_LEVELS.get(str(tool_profile).strip().lower(), 1)
+    ctx_level = _PROFILE_LEVELS.get(str(context_profile).strip().lower(), 1)
+    return tool_level <= ctx_level
 
 
 def _normalize_browser_text(value: str) -> str:
@@ -713,7 +721,7 @@ class CapabilityPackService:
                 warnings.append("profile_first_tool_missing_from_pack")
                 continue
             tool_profile = self._coerce_tool_profile(bundled.tool_profile)
-            if not profile_allows(tool_profile, context_profile):
+            if not _profile_allows(tool_profile, context_profile):
                 blocked_tools.append(
                     ToolAvailabilityExplanation(
                         tool_name=tool_name,
@@ -723,7 +731,7 @@ class CapabilityPackService:
                         tool_profile=bundled.tool_profile,
                         reason_code="tool_profile_not_allowed",
                         summary=(
-                            f"当前 Root Agent 允许的 tool_profile={context_profile.value}，"
+                            f"当前 Root Agent 允许的 tool_profile={context_profile}，"
                             f"不足以挂载 {bundled.tool_profile} 工具。"
                         ),
                         recommended_action="提升 Root Agent 的 tool_profile，或移除该工具依赖。",
@@ -790,7 +798,7 @@ class CapabilityPackService:
                 bundled = tool_by_name.get(tool_name)
                 if bundled is None:
                     continue
-                if not profile_allows(self._coerce_tool_profile(bundled.tool_profile), context_profile):
+                if not _profile_allows(self._coerce_tool_profile(bundled.tool_profile), context_profile):
                     continue
                 if bundled.availability not in {
                     BuiltinToolAvailabilityStatus.AVAILABLE,
@@ -833,7 +841,7 @@ class CapabilityPackService:
             update={
                 "limit": max(6, min(12, request.limit)),
                 "worker_type": binding.worker_type,
-                "tool_profile": context_profile.value,
+                "tool_profile": context_profile,
                 "tool_groups": [],
             }
         )
@@ -1148,7 +1156,6 @@ class CapabilityPackService:
             *,
             task: Any | None,
             project: Any,
-            workspace: Any,
             explicit_scope_id: str = "",
         ) -> list[str]:
             scope_ids: list[str] = []
@@ -1161,11 +1168,6 @@ class CapabilityPackService:
                 bindings = await store_group.project_store.list_bindings(project.project_id)
                 for binding in bindings:
                     if binding.binding_type not in _MEMORY_BINDING_TYPES:
-                        continue
-                    if workspace is not None and binding.workspace_id not in {
-                        None,
-                        workspace.workspace_id,
-                    }:
                         continue
                     if binding.binding_key:
                         scope_ids.append(binding.binding_key)
@@ -1313,7 +1315,6 @@ class CapabilityPackService:
         @tool_contract(
             name="project.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="project",
             tags=["project", "workspace", "context"],
             manifest_ref="builtin://project.inspect",
@@ -1335,7 +1336,6 @@ class CapabilityPackService:
         @tool_contract(
             name="task.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["task", "session", "status"],
             manifest_ref="builtin://task.inspect",
@@ -1371,7 +1371,6 @@ class CapabilityPackService:
         @tool_contract(
             name="artifact.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="artifact",
             tags=["artifact", "history", "output"],
             manifest_ref="builtin://artifact.list",
@@ -1395,7 +1394,6 @@ class CapabilityPackService:
         @tool_contract(
             name="filesystem.list_dir",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="filesystem",
             tags=["filesystem", "directory", "list"],
             manifest_ref="builtin://filesystem.list_dir",
@@ -1451,7 +1449,6 @@ class CapabilityPackService:
         @tool_contract(
             name="filesystem.read_text",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="filesystem",
             tags=["filesystem", "file", "read"],
             manifest_ref="builtin://filesystem.read_text",
@@ -1493,7 +1490,6 @@ class CapabilityPackService:
         @tool_contract(
             name="filesystem.write_text",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="filesystem",
             tags=["filesystem", "file", "write"],
             manifest_ref="builtin://filesystem.write_text",
@@ -1535,7 +1531,6 @@ class CapabilityPackService:
             # 也被审批拦截。真正高危操作由 Policy Profile 的 irreversible
             # 规则或 Skill 层的 Side-effect Two-Phase 保护。
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="terminal",
             tags=["terminal", "command", "exec"],
             manifest_ref="builtin://terminal.exec",
@@ -1611,7 +1606,6 @@ class CapabilityPackService:
         @tool_contract(
             name="runtime.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["runtime", "diagnostics", "health"],
             manifest_ref="builtin://runtime.inspect",
@@ -1641,7 +1635,6 @@ class CapabilityPackService:
         @tool_contract(
             name="runtime.now",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["runtime", "time", "clock"],
             manifest_ref="builtin://runtime.now",
@@ -1686,7 +1679,6 @@ class CapabilityPackService:
         @tool_contract(
             name="work.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["work", "delegation", "ownership"],
             manifest_ref="builtin://work.inspect",
@@ -1719,7 +1711,6 @@ class CapabilityPackService:
         @tool_contract(
             name="agents.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["agents", "workers", "profiles"],
             manifest_ref="builtin://agents.list",
@@ -1745,7 +1736,6 @@ class CapabilityPackService:
         @tool_contract(
             name="sessions.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["sessions", "threads", "tasks"],
             manifest_ref="builtin://sessions.list",
@@ -1779,7 +1769,6 @@ class CapabilityPackService:
         @tool_contract(
             name="session.status",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="session",
             tags=["session", "status", "execution"],
             manifest_ref="builtin://session.status",
@@ -1812,7 +1801,6 @@ class CapabilityPackService:
         @tool_contract(
             name="subagents.spawn",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "child_task", "delegation"],
             manifest_ref="builtin://subagents.spawn",
@@ -1843,7 +1831,6 @@ class CapabilityPackService:
         @tool_contract(
             name="subagents.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["subagent", "list", "delegation"],
             manifest_ref="builtin://subagents.list",
@@ -1897,7 +1884,6 @@ class CapabilityPackService:
         @tool_contract(
             name="subagents.kill",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "cancel", "kill"],
             manifest_ref="builtin://subagents.kill",
@@ -1939,7 +1925,6 @@ class CapabilityPackService:
         @tool_contract(
             name="subagents.steer",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["subagent", "steer", "input"],
             manifest_ref="builtin://subagents.steer",
@@ -1988,7 +1973,6 @@ class CapabilityPackService:
         @tool_contract(
             name="workers.review",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="supervision",
             tags=["worker", "review", "governance"],
             manifest_ref="builtin://workers.review",
@@ -2010,7 +1994,6 @@ class CapabilityPackService:
         @tool_contract(
             name="work.split",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "split", "child_work"],
             manifest_ref="builtin://work.split",
@@ -2052,7 +2035,6 @@ class CapabilityPackService:
         @tool_contract(
             name="work.merge",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "merge", "child_work"],
             manifest_ref="builtin://work.merge",
@@ -2090,7 +2072,6 @@ class CapabilityPackService:
         @tool_contract(
             name="work.delete",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="delegation",
             tags=["work", "delete", "archive"],
             manifest_ref="builtin://work.delete",
@@ -2133,7 +2114,6 @@ class CapabilityPackService:
         @tool_contract(
             name="web.fetch",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="network",
             tags=["web", "http", "fetch"],
             manifest_ref="builtin://web.fetch",
@@ -2171,7 +2151,6 @@ class CapabilityPackService:
         @tool_contract(
             name="web.search",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="network",
             tags=["web", "search", "http"],
             manifest_ref="builtin://web.search",
@@ -2197,7 +2176,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.open",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "open", "url"],
             manifest_ref="builtin://browser.open",
@@ -2219,7 +2197,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.status",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="browser",
             tags=["browser", "status", "session"],
             manifest_ref="builtin://browser.status",
@@ -2248,7 +2225,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.navigate",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "navigate", "url"],
             manifest_ref="builtin://browser.navigate",
@@ -2270,7 +2246,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.snapshot",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="browser",
             tags=["browser", "snapshot", "dom"],
             manifest_ref="builtin://browser.snapshot",
@@ -2296,7 +2271,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.act",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "act", "click"],
             manifest_ref="builtin://browser.act",
@@ -2335,7 +2309,6 @@ class CapabilityPackService:
         @tool_contract(
             name="browser.close",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="browser",
             tags=["browser", "close", "session"],
             manifest_ref="builtin://browser.close",
@@ -2360,7 +2333,6 @@ class CapabilityPackService:
         @tool_contract(
             name="gateway.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["gateway", "inspect", "metrics"],
             manifest_ref="builtin://gateway.inspect",
@@ -2396,7 +2368,6 @@ class CapabilityPackService:
         @tool_contract(
             name="cron.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="automation",
             tags=["cron", "automation", "scheduler"],
             manifest_ref="builtin://cron.list",
@@ -2417,7 +2388,6 @@ class CapabilityPackService:
         @tool_contract(
             name="nodes.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="runtime",
             tags=["nodes", "runtime", "host"],
             manifest_ref="builtin://nodes.list",
@@ -2447,7 +2417,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.servers.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "servers", "discovery"],
             manifest_ref="builtin://mcp.servers.list",
@@ -2475,7 +2444,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.tools.list",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "tools", "discovery"],
             manifest_ref="builtin://mcp.tools.list",
@@ -2504,7 +2472,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.tools.refresh",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "tools", "refresh"],
             manifest_ref="builtin://mcp.tools.refresh",
@@ -2534,7 +2501,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.install",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="mcp",
             tags=["mcp", "install"],
             manifest_ref="builtin://mcp.install",
@@ -2707,7 +2673,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.install_status",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="mcp",
             tags=["mcp", "install", "status"],
             manifest_ref="builtin://mcp.install_status",
@@ -2759,7 +2724,6 @@ class CapabilityPackService:
         @tool_contract(
             name="mcp.uninstall",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="mcp",
             tags=["mcp", "uninstall"],
             manifest_ref="builtin://mcp.uninstall",
@@ -2796,7 +2760,6 @@ class CapabilityPackService:
         @tool_contract(
             name="pdf.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="document",
             tags=["pdf", "document", "inspect"],
             manifest_ref="builtin://pdf.inspect",
@@ -2814,7 +2777,6 @@ class CapabilityPackService:
         @tool_contract(
             name="image.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="media",
             tags=["image", "media", "inspect"],
             manifest_ref="builtin://image.inspect",
@@ -2832,7 +2794,6 @@ class CapabilityPackService:
         @tool_contract(
             name="tts.speak",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="media",
             tags=["tts", "speech", "audio"],
             manifest_ref="builtin://tts.speak",
@@ -2863,7 +2824,6 @@ class CapabilityPackService:
         @tool_contract(
             name="canvas.write",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="canvas",
             tags=["canvas", "artifact", "write"],
             manifest_ref="builtin://canvas.write",
@@ -2897,7 +2857,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.read",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "subject", "history"],
             manifest_ref="builtin://memory.read",
@@ -2926,7 +2885,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.browse",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "browse", "directory"],
             manifest_ref="builtin://memory.browse",
@@ -2963,7 +2921,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.search",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "search", "records"],
             manifest_ref="builtin://memory.search",
@@ -3016,7 +2973,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.citations",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "citations", "evidence"],
             manifest_ref="builtin://memory.citations",
@@ -3057,7 +3013,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.recall",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "recall", "context"],
             manifest_ref="builtin://memory.recall",
@@ -3100,7 +3055,6 @@ class CapabilityPackService:
             scope_ids = await _resolve_memory_scope_ids(
                 task=task,
                 project=project,
-                workspace=workspace,
                 explicit_scope_id=scope_id,
             )
             if not scope_ids:
@@ -3143,7 +3097,6 @@ class CapabilityPackService:
         @tool_contract(
             name="memory.write",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="memory",
             tags=["memory", "write", "persist"],
             manifest_ref="builtin://memory.write",
@@ -3204,7 +3157,6 @@ class CapabilityPackService:
                 scope_ids = await _resolve_memory_scope_ids(
                     task=task,
                     project=project,
-                    workspace=workspace,
                     explicit_scope_id=scope_id,
                 )
             except Exception as exc:
@@ -3383,7 +3335,6 @@ class CapabilityPackService:
         @tool_contract(
             name="behavior.write_file",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="behavior",
             tags=["behavior", "file", "write", "context"],
             manifest_ref="builtin://behavior.write_file",
@@ -3550,7 +3501,6 @@ class CapabilityPackService:
         @tool_contract(
             name="config.inspect",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="config",
             tags=["config", "provider", "model", "inspect"],
             manifest_ref="builtin://config.inspect",
@@ -3581,7 +3531,6 @@ class CapabilityPackService:
         @tool_contract(
             name="config.add_provider",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="config",
             tags=["config", "provider", "add"],
             manifest_ref="builtin://config.add_provider",
@@ -3677,7 +3626,6 @@ class CapabilityPackService:
         @tool_contract(
             name="config.set_model_alias",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="config",
             tags=["config", "model", "alias", "set"],
             manifest_ref="builtin://config.set_model_alias",
@@ -3745,7 +3693,6 @@ class CapabilityPackService:
         @tool_contract(
             name="config.sync",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="config",
             tags=["config", "sync", "litellm"],
             manifest_ref="builtin://config.sync",
@@ -3794,7 +3741,6 @@ class CapabilityPackService:
         @tool_contract(
             name="setup.review",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="setup",
             tags=["setup", "review", "config"],
             manifest_ref="builtin://setup.review",
@@ -3838,7 +3784,6 @@ class CapabilityPackService:
         @tool_contract(
             name="setup.quick_connect",
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="setup",
             tags=["setup", "quick_connect", "activation"],
             manifest_ref="builtin://setup.quick_connect",
@@ -3916,7 +3861,6 @@ class CapabilityPackService:
         @tool_contract(
             name="skills",
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="skills",
             tags=["skills", "discovery", "knowledge"],
             manifest_ref="builtin://skills",
@@ -4139,11 +4083,11 @@ class CapabilityPackService:
         return None
 
     @staticmethod
-    def _coerce_tool_profile(value: str) -> ToolProfile:
-        try:
-            return ToolProfile(value.strip().lower())
-        except Exception:
-            return ToolProfile.STANDARD
+    def _coerce_tool_profile(value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized in {"minimal", "standard", "privileged"}:
+            return normalized
+        return "standard"
 
     @staticmethod
     def _dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -4211,7 +4155,7 @@ class CapabilityPackService:
     @staticmethod
     def _effective_tool_profile_for_objective(*, objective: str) -> str:
         del objective
-        return ToolProfile.STANDARD.value
+        return "standard"
 
     def _build_worker_assignment(
         self,
@@ -4219,7 +4163,7 @@ class CapabilityPackService:
         *,
         index: int,
     ) -> _WorkerPlanAssignment:
-        tool_profile = ToolProfile.STANDARD.value
+        tool_profile = "standard"
         return _WorkerPlanAssignment(
             objective=objective,
             worker_type="general",
@@ -4481,7 +4425,7 @@ class CapabilityPackService:
         if mount_policy == "auto_all":
             return True
         if mount_policy == "auto_readonly":
-            return normalized_profile == ToolProfile.MINIMAL.value
+            return normalized_profile == "minimal"
         return False
 
     async def _filter_pack_for_scope(

@@ -18,7 +18,6 @@ from .exceptions import (
     SchemaReflectionError,
     ToolExecutionError,
     ToolNotFoundError,
-    ToolProfileViolationError,
     ToolRegistrationError,
 )
 
@@ -39,9 +38,7 @@ from .models import (
     SideEffectLevel,
     ToolCall,
     ToolMeta,
-    ToolProfile,  # [DEPRECATED] 仅供迁移期兼容
     ToolResult,
-    profile_allows,  # [DEPRECATED] 仅供迁移期兼容
 )
 
 # Feature 070: 统一权限检查
@@ -72,7 +69,6 @@ __all__ = [
     "RegisterToolResult",
     "RegistryDiagnostic",
     "SideEffectLevel",
-    "ToolProfile",
     # 数据模型
     "BeforeHookResult",
     "CheckResult",
@@ -80,8 +76,6 @@ __all__ = [
     "ToolCall",
     "ToolMeta",
     "ToolResult",
-    # 辅助函数
-    "profile_allows",
     # Protocol
     "AfterHook",
     "ArtifactStoreProtocol",
@@ -109,6 +103,5 @@ __all__ = [
     "SchemaReflectionError",
     "ToolExecutionError",
     "ToolNotFoundError",
-    "ToolProfileViolationError",
     "ToolRegistrationError",
 ]

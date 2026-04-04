@@ -112,7 +112,6 @@ async def _resolve_chat_scope_snapshot(
                 update={
                     "new_conversation_token": "",
                     "new_conversation_project_id": "",
-                    "new_conversation_workspace_id": "",
                     "new_conversation_agent_profile_id": "",
                 }
             )

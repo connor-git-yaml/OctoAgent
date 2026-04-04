@@ -17,7 +17,6 @@ from octoagent.core.models import (
     ProjectBinding,
     ProjectBindingType,
     SessionContextState,
-    Workspace,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -77,20 +76,11 @@ async def _seed_project(
         is_default=is_default,
         default_agent_profile_id=agent_profile_id,
     )
-    workspace = Workspace(
-        workspace_id=workspace_id,
-        project_id=project_id,
-        slug="primary",
-        name=f"{slug.title()} Workspace",
-        root_path=f"/tmp/{slug}",
-    )
     await store_group.project_store.save_project(project)
-    await store_group.project_store.create_workspace(workspace)
     await store_group.project_store.create_binding(
         ProjectBinding(
             binding_id=f"binding-scope-{slug}",
             project_id=project_id,
-            workspace_id=workspace_id,
             binding_type=ProjectBindingType.SCOPE,
             binding_key=scope_id,
             binding_value=scope_id,
@@ -102,7 +92,6 @@ async def _seed_project(
         ProjectBinding(
             binding_id=f"binding-memory-{slug}",
             project_id=project_id,
-            workspace_id=workspace_id,
             binding_type=ProjectBindingType.MEMORY_SCOPE,
             binding_key=memory_scope_id,
             binding_value=memory_scope_id,
@@ -140,7 +129,6 @@ async def _seed_project(
         BootstrapSession(
             bootstrap_id=bootstrap_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             owner_profile_id="owner-profile-default",
             owner_overlay_id=owner_overlay_id,
             agent_profile_id=agent_profile_id,
@@ -154,7 +142,6 @@ async def _seed_project(
             session_id=session_id or scope_id.split(":")[-1],
             thread_id=session_thread_id or scope_id.split(":")[-1],
             project_id=project_id,
-            workspace_id=workspace_id,
             task_ids=["legacy-task"],
             recent_turn_refs=["legacy-task"],
             rolling_summary=rolling_summary,
@@ -247,7 +234,6 @@ async def test_f033_context_survives_restart(
         build_scope_aware_session_id(
             task,
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
         )
     )
     assert session_state is not None
@@ -363,14 +349,12 @@ async def test_f033_project_context_does_not_leak_across_projects(
         build_scope_aware_session_id(
             task_alpha_model,
             project_id="project-alpha",
-            workspace_id="workspace-alpha",
         )
     )
     beta_state = await store_group.agent_context_store.get_session_context(
         build_scope_aware_session_id(
             task_beta_model,
             project_id="project-beta",
-            workspace_id="workspace-beta",
         )
     )
     assert alpha_state is not None

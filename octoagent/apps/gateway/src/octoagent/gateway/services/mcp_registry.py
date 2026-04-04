@@ -15,7 +15,7 @@ from mcp import ClientSession
 from mcp import types as mcp_types
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from octoagent.core.models import BuiltinToolAvailabilityStatus
-from octoagent.tooling import SideEffectLevel, ToolBroker, ToolMeta, ToolProfile
+from octoagent.tooling import SideEffectLevel, ToolBroker, ToolMeta
 from pydantic import BaseModel, Field
 
 _DEFAULT_MCP_CONFIG_PATH = Path("data/ops/mcp-servers.json")
@@ -403,15 +403,6 @@ class McpRegistryService:
             return SideEffectLevel.IRREVERSIBLE
         return SideEffectLevel.REVERSIBLE
 
-    @classmethod
-    def _tool_profile(cls, tool: mcp_types.Tool) -> ToolProfile:
-        side_effect = cls._side_effect_level(tool)
-        if side_effect == SideEffectLevel.NONE:
-            return ToolProfile.MINIMAL
-        if side_effect == SideEffectLevel.IRREVERSIBLE:
-            return ToolProfile.PRIVILEGED
-        return ToolProfile.STANDARD
-
     def _build_tool_meta(
         self,
         *,
@@ -424,7 +415,6 @@ class McpRegistryService:
             description=tool.description or f"MCP proxy tool for {config.name}/{tool.name}",
             parameters_json_schema=self._normalize_json_schema(tool.inputSchema),
             side_effect_level=self._side_effect_level(tool),
-            tool_profile=self._tool_profile(tool),
             tool_group="mcp",
             tags=["mcp", config.name, tool.name],
             worker_types=["ops", "research", "dev", "general"],

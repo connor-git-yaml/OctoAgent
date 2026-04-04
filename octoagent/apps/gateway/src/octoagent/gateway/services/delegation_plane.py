@@ -179,7 +179,6 @@ class DelegationPlaneService:
             selected_worker_type=requested_worker_type or "general",
             route_reason=initial_route_reason,
             project_id=project.project_id if project is not None else "",
-            workspace_id="",
             session_owner_profile_id=session_owner_profile_id,
             inherited_context_owner_profile_id=inherited_agent_profile_id,
             delegation_target_profile_id=requested_worker_profile_id,
@@ -232,7 +231,6 @@ class DelegationPlaneService:
                 "user_text": request.user_text,
                 "requested_capability": request.worker_capability,
                 "project_id": work.project_id,
-                "workspace_id": work.workspace_id,
                 "trace_id": request.trace_id,
                 "contract_version": request.contract_version,
                 "hop_count": request.hop_count,
@@ -675,7 +673,6 @@ class DelegationPlaneService:
                 trace_id=str(state.get("trace_id", f"trace-{work.task_id}")),
                 contract_version=str(state.get("contract_version", "1.0")),
                 project_id=work.project_id,
-                workspace_id="",
                 hop_count=max(int(state.get("hop_count", 0)) + 1, 0),
                 max_hops=max(int(state.get("max_hops", 3)), 1),
                 worker_capability=str(
@@ -804,7 +801,6 @@ class DelegationPlaneService:
         state.setdefault("user_text", work.title)
         state.setdefault("requested_capability", work.requested_capability)
         state.setdefault("project_id", work.project_id)
-        state.setdefault("workspace_id", work.workspace_id)
         state.setdefault("trace_id", f"trace-{work.task_id}")
         state.setdefault("contract_version", "1.0")
         state.setdefault("hop_count", 0)
@@ -851,7 +847,6 @@ class DelegationPlaneService:
                 project_id=project_id,
             ),
             project_id=project_id,
-            workspace_id="",
             hop_count=request.hop_count + 1,
             max_hops=request.max_hops,
             worker_capability=worker_capability,
@@ -994,7 +989,6 @@ class DelegationPlaneService:
                 worker_type=worker_type,
                 tool_profile=str(state.get("tool_profile", "")),
                 project_id=str(state.get("project_id", "")),
-                workspace_id=str(state.get("workspace_id", "")),
             ),
             worker_type=worker_type,
             requested_profile_id=requested_profile_id,

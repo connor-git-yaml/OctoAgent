@@ -299,18 +299,17 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO owner_profile_overlays (
-                owner_overlay_id, owner_profile_id, scope, project_id, workspace_id,
+                owner_overlay_id, owner_profile_id, scope, project_id,
                 assistant_identity_overrides, working_style_override,
                 interaction_preferences_override, boundary_notes_override,
                 bootstrap_template_ids, main_session_only_overrides, metadata,
                 version, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(owner_overlay_id) DO UPDATE SET
                 owner_profile_id = excluded.owner_profile_id,
                 scope = excluded.scope,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 assistant_identity_overrides = excluded.assistant_identity_overrides,
                 working_style_override = excluded.working_style_override,
                 interaction_preferences_override = excluded.interaction_preferences_override,
@@ -326,7 +325,6 @@ class SqliteAgentContextStore:
                 overlay.owner_profile_id,
                 overlay.scope.value,
                 overlay.project_id,
-                overlay.workspace_id,
                 self._dump(overlay.assistant_identity_overrides),
                 overlay.working_style_override,
                 self._dump(overlay.interaction_preferences_override),
@@ -352,20 +350,7 @@ class SqliteAgentContextStore:
         self,
         *,
         project_id: str,
-        workspace_id: str = "",
     ) -> OwnerProfileOverlay | None:
-        if workspace_id:
-            row = await self._fetchone(
-                """
-                SELECT * FROM owner_profile_overlays
-                WHERE workspace_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (workspace_id,),
-            )
-            if row is not None:
-                return self._row_to_owner_overlay(row)
         row = await self._fetchone(
             """
             SELECT * FROM owner_profile_overlays
@@ -402,15 +387,14 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO bootstrap_sessions (
-                bootstrap_id, project_id, workspace_id, owner_profile_id,
+                bootstrap_id, project_id, owner_profile_id,
                 owner_overlay_id, agent_profile_id, status, current_step, steps,
                 answers, generated_profile_ids, generated_owner_revision,
                 blocking_reason, surface, metadata, created_at, updated_at, completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(bootstrap_id) DO UPDATE SET
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 owner_profile_id = excluded.owner_profile_id,
                 owner_overlay_id = excluded.owner_overlay_id,
                 agent_profile_id = excluded.agent_profile_id,
@@ -429,7 +413,6 @@ class SqliteAgentContextStore:
             (
                 session.bootstrap_id,
                 session.project_id,
-                session.workspace_id,
                 session.owner_profile_id,
                 session.owner_overlay_id,
                 session.agent_profile_id,
@@ -453,15 +436,14 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO agent_runtimes (
-                agent_runtime_id, project_id, workspace_id, agent_profile_id,
+                agent_runtime_id, project_id, agent_profile_id,
                 worker_profile_id, role, name, persona_summary, status,
                 permission_preset, role_card,
                 metadata, created_at, updated_at, archived_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_runtime_id) DO UPDATE SET
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 agent_profile_id = excluded.agent_profile_id,
                 worker_profile_id = excluded.worker_profile_id,
                 role = excluded.role,
@@ -477,7 +459,6 @@ class SqliteAgentContextStore:
             (
                 runtime.agent_runtime_id,
                 runtime.project_id,
-                runtime.workspace_id,
                 runtime.agent_profile_id,
                 runtime.worker_profile_id,
                 runtime.role.value,
@@ -552,19 +533,18 @@ class SqliteAgentContextStore:
             """
             INSERT INTO agent_sessions (
                 agent_session_id, agent_runtime_id, kind, status, project_id,
-                workspace_id, surface, thread_id, legacy_session_id, alias,
+                surface, thread_id, legacy_session_id, alias,
                 parent_agent_session_id, work_id, a2a_conversation_id,
                 last_context_frame_id, last_recall_frame_id, recent_transcript,
                 rolling_summary, metadata, created_at, updated_at, closed_at,
                 parent_worker_runtime_id, memory_cursor_seq
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
                 status = excluded.status,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 surface = excluded.surface,
                 thread_id = excluded.thread_id,
                 legacy_session_id = excluded.legacy_session_id,
@@ -588,7 +568,6 @@ class SqliteAgentContextStore:
                 session.kind.value,
                 session.status.value,
                 session.project_id,
-                session.workspace_id,
                 session.surface,
                 session.thread_id,
                 session.legacy_session_id,
@@ -623,7 +602,6 @@ class SqliteAgentContextStore:
         agent_runtime_id: str | None = None,
         legacy_session_id: str | None = None,
         project_id: str | None = None,
-        workspace_id: str | None = None,
         kind: AgentSessionKind | None = None,
         limit: int = 20,
     ) -> list[AgentSession]:
@@ -638,9 +616,6 @@ class SqliteAgentContextStore:
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
-        if workspace_id:
-            clauses.append("workspace_id = ?")
-            args.append(workspace_id)
         if kind is not None:
             clauses.append("kind = ?")
             args.append(kind.value)
@@ -857,14 +832,13 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO memory_namespaces (
-                namespace_id, project_id, workspace_id, agent_runtime_id,
+                namespace_id, project_id, agent_runtime_id,
                 kind, name, description, memory_scope_ids, metadata,
                 created_at, updated_at, archived_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(namespace_id) DO UPDATE SET
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 agent_runtime_id = excluded.agent_runtime_id,
                 kind = excluded.kind,
                 name = excluded.name,
@@ -877,7 +851,6 @@ class SqliteAgentContextStore:
             (
                 namespace.namespace_id,
                 namespace.project_id,
-                namespace.workspace_id,
                 namespace.agent_runtime_id,
                 namespace.kind.value,
                 namespace.name,
@@ -938,9 +911,7 @@ class SqliteAgentContextStore:
         self,
         *,
         project_id: str,
-        workspace_id: str = "",  # DEPRECATED: workspace 概念已废弃，保留参数用于兼容旧数据 fallback
     ) -> BootstrapSession | None:
-        # 优先按 project_id 查询
         if project_id:
             row = await self._fetchone(
                 """
@@ -950,19 +921,6 @@ class SqliteAgentContextStore:
                 LIMIT 1
                 """,
                 (project_id,),
-            )
-            if row is not None:
-                return self._row_to_bootstrap_session(row)
-        # fallback：用 workspace_id 兼容旧数据
-        if workspace_id:
-            row = await self._fetchone(
-                """
-                SELECT * FROM bootstrap_sessions
-                WHERE workspace_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (workspace_id,),
             )
             if row is not None:
                 return self._row_to_bootstrap_session(row)
@@ -994,17 +952,16 @@ class SqliteAgentContextStore:
             """
             INSERT INTO session_context_states (
                 session_id, agent_runtime_id, agent_session_id, thread_id,
-                project_id, workspace_id, task_ids,
+                project_id, task_ids,
                 recent_turn_refs, recent_artifact_refs, rolling_summary,
                 summary_artifact_id, last_context_frame_id, last_recall_frame_id, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 agent_session_id = excluded.agent_session_id,
                 thread_id = excluded.thread_id,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 task_ids = excluded.task_ids,
                 recent_turn_refs = excluded.recent_turn_refs,
                 recent_artifact_refs = excluded.recent_artifact_refs,
@@ -1020,7 +977,6 @@ class SqliteAgentContextStore:
                 state.agent_session_id,
                 state.thread_id,
                 state.project_id,
-                state.workspace_id,
                 self._dump(state.task_ids),
                 self._dump(state.recent_turn_refs),
                 self._dump(state.recent_artifact_refs),
@@ -1050,16 +1006,12 @@ class SqliteAgentContextStore:
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,
     ) -> list[SessionContextState]:
         clauses: list[str] = []
         args: list[object] = []
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
-        if workspace_id:
-            clauses.append("workspace_id = ?")
-            args.append(workspace_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
@@ -1075,19 +1027,18 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO context_frames (
-                context_frame_id, task_id, session_id, project_id, workspace_id,
+                context_frame_id, task_id, session_id, project_id,
                 agent_runtime_id, agent_session_id,
                 agent_profile_id, owner_profile_id, owner_overlay_id,
                 owner_profile_revision, bootstrap_session_id, recall_frame_id,
                 system_blocks, recent_summary, memory_namespace_ids, memory_hits,
                 delegation_context, budget, degraded_reason, source_refs, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(context_frame_id) DO UPDATE SET
                 task_id = excluded.task_id,
                 session_id = excluded.session_id,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 agent_runtime_id = excluded.agent_runtime_id,
                 agent_session_id = excluded.agent_session_id,
                 agent_profile_id = excluded.agent_profile_id,
@@ -1110,7 +1061,6 @@ class SqliteAgentContextStore:
                 frame.task_id,
                 frame.session_id,
                 frame.project_id,
-                frame.workspace_id,
                 frame.agent_runtime_id,
                 frame.agent_session_id,
                 frame.agent_profile_id,
@@ -1137,18 +1087,17 @@ class SqliteAgentContextStore:
             """
             INSERT INTO recall_frames (
                 recall_frame_id, agent_runtime_id, agent_session_id,
-                context_frame_id, task_id, project_id, workspace_id, query,
+                context_frame_id, task_id, project_id, query,
                 recent_summary, memory_namespace_ids, memory_hits, source_refs,
                 budget, degraded_reason, metadata, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(recall_frame_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 agent_session_id = excluded.agent_session_id,
                 context_frame_id = excluded.context_frame_id,
                 task_id = excluded.task_id,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 query = excluded.query,
                 recent_summary = excluded.recent_summary,
                 memory_namespace_ids = excluded.memory_namespace_ids,
@@ -1166,7 +1115,6 @@ class SqliteAgentContextStore:
                 frame.context_frame_id,
                 frame.task_id,
                 frame.project_id,
-                frame.workspace_id,
                 frame.query,
                 frame.recent_summary,
                 self._dump(frame.memory_namespace_ids),
@@ -1200,7 +1148,6 @@ class SqliteAgentContextStore:
         session_id: str | None = None,
         task_id: str | None = None,
         project_id: str | None = None,
-        workspace_id: str | None = None,
         limit: int = 20,
     ) -> list[ContextFrame]:
         clauses: list[str] = []
@@ -1214,9 +1161,6 @@ class SqliteAgentContextStore:
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
-        if workspace_id:
-            clauses.append("workspace_id = ?")
-            args.append(workspace_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
@@ -1236,7 +1180,6 @@ class SqliteAgentContextStore:
         context_frame_id: str | None = None,
         task_id: str | None = None,
         project_id: str | None = None,
-        workspace_id: str | None = None,
         limit: int = 20,
     ) -> list[RecallFrame]:
         clauses: list[str] = []
@@ -1253,9 +1196,6 @@ class SqliteAgentContextStore:
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
-        if workspace_id:
-            clauses.append("workspace_id = ?")
-            args.append(workspace_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
@@ -1355,7 +1295,6 @@ class SqliteAgentContextStore:
         return AgentRuntime(
             agent_runtime_id=row["agent_runtime_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             agent_profile_id=row["agent_profile_id"],
             worker_profile_id=row["worker_profile_id"],
             role=AgentRuntimeRole(row["role"]),
@@ -1380,7 +1319,6 @@ class SqliteAgentContextStore:
             kind=AgentSessionKind(row["kind"]),
             status=AgentSessionStatus(row["status"]),
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             surface=row["surface"],
             thread_id=row["thread_id"],
             legacy_session_id=row["legacy_session_id"],
@@ -1438,7 +1376,6 @@ class SqliteAgentContextStore:
         return MemoryNamespace(
             namespace_id=row["namespace_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             agent_runtime_id=row["agent_runtime_id"],
             kind=MemoryNamespaceKind(row["kind"]),
             name=row["name"],
@@ -1477,7 +1414,6 @@ class SqliteAgentContextStore:
             owner_profile_id=row["owner_profile_id"],
             scope=row["scope"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             assistant_identity_overrides=cls._load(
                 row["assistant_identity_overrides"], {}
             ),
@@ -1501,7 +1437,6 @@ class SqliteAgentContextStore:
         return BootstrapSession(
             bootstrap_id=row["bootstrap_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             owner_profile_id=row["owner_profile_id"],
             owner_overlay_id=row["owner_overlay_id"],
             agent_profile_id=row["agent_profile_id"],
@@ -1531,7 +1466,6 @@ class SqliteAgentContextStore:
             agent_session_id=row["agent_session_id"],
             thread_id=row["thread_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             task_ids=cls._load(row["task_ids"], []),
             recent_turn_refs=cls._load(row["recent_turn_refs"], []),
             recent_artifact_refs=cls._load(row["recent_artifact_refs"], []),
@@ -1551,7 +1485,6 @@ class SqliteAgentContextStore:
             agent_runtime_id=row["agent_runtime_id"],
             agent_session_id=row["agent_session_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             agent_profile_id=row["agent_profile_id"],
             owner_profile_id=row["owner_profile_id"],
             owner_overlay_id=row["owner_overlay_id"],
@@ -1578,7 +1511,6 @@ class SqliteAgentContextStore:
             context_frame_id=row["context_frame_id"],
             task_id=row["task_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             query=row["query"],
             recent_summary=row["recent_summary"],
             memory_namespace_ids=cls._load(row["memory_namespace_ids"], []),

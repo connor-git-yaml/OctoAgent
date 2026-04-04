@@ -16,8 +16,6 @@ from ..models.project import (
     ProjectSecretBinding,
     ProjectSelectorState,
     SecretTargetKind,
-    Workspace,
-    WorkspaceKind,
 )
 
 
@@ -146,84 +144,6 @@ class SqliteProjectStore:
             (agent_runtime_id, datetime.now(tz=UTC).isoformat(), project_id),
         )
 
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def create_workspace(self, workspace: Workspace) -> tuple[Workspace, bool]:
-        await self._conn.execute(
-            """
-            INSERT OR IGNORE INTO workspaces (
-                workspace_id, project_id, slug, name, kind, root_path,
-                metadata, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                workspace.workspace_id,
-                workspace.project_id,
-                workspace.slug,
-                workspace.name,
-                workspace.kind.value,
-                workspace.root_path,
-                json.dumps(workspace.metadata, ensure_ascii=False),
-                workspace.created_at.isoformat(),
-                workspace.updated_at.isoformat(),
-            ),
-        )
-        created = await self._get_changes()
-        if created:
-            return workspace, True
-        existing = await self.get_workspace(workspace.workspace_id)
-        if existing is not None:
-            return existing, False
-        existing = await self.get_workspace_by_slug(workspace.project_id, workspace.slug)
-        if existing is not None:
-            return existing, False
-        raise RuntimeError(f"workspace 创建失败且无法回读: {workspace.workspace_id}")
-
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def get_workspace(self, workspace_id: str) -> Workspace | None:
-        cursor = await self._conn.execute(
-            "SELECT * FROM workspaces WHERE workspace_id = ?",
-            (workspace_id,),
-        )
-        row = await cursor.fetchone()
-        return self._row_to_workspace(row) if row is not None else None
-
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def get_workspace_by_slug(
-        self,
-        project_id: str,
-        slug: str,
-    ) -> Workspace | None:
-        cursor = await self._conn.execute(
-            "SELECT * FROM workspaces WHERE project_id = ? AND slug = ?",
-            (project_id, slug),
-        )
-        row = await cursor.fetchone()
-        return self._row_to_workspace(row) if row is not None else None
-
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def get_primary_workspace(self, project_id: str) -> Workspace | None:
-        cursor = await self._conn.execute(
-            """
-            SELECT * FROM workspaces
-            WHERE project_id = ? AND kind = ?
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (project_id, WorkspaceKind.PRIMARY.value),
-        )
-        row = await cursor.fetchone()
-        return self._row_to_workspace(row) if row is not None else None
-
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def list_workspaces(self, project_id: str) -> list[Workspace]:
-        cursor = await self._conn.execute(
-            "SELECT * FROM workspaces WHERE project_id = ? ORDER BY created_at ASC",
-            (project_id,),
-        )
-        rows = await cursor.fetchall()
-        return [self._row_to_workspace(row) for row in rows]
-
     async def resolve_project(self, ref: str) -> Project | None:
         project = await self.get_project(ref)
         if project is not None:
@@ -250,15 +170,14 @@ class SqliteProjectStore:
         await self._conn.execute(
             """
             INSERT OR IGNORE INTO project_bindings (
-                binding_id, project_id, workspace_id, binding_type, binding_key,
+                binding_id, project_id, binding_type, binding_key,
                 binding_value, source, metadata, migration_run_id, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 binding.binding_id,
                 binding.project_id,
-                binding.workspace_id,
                 binding.binding_type.value,
                 binding.binding_key,
                 binding.binding_value,
@@ -345,14 +264,13 @@ class SqliteProjectStore:
         await self._conn.execute(
             """
             INSERT INTO project_secret_bindings (
-                binding_id, project_id, workspace_id, target_kind, target_key,
+                binding_id, project_id, target_kind, target_key,
                 env_name, ref_source_type, ref_locator, display_name, redaction_label,
                 status, last_audited_at, last_applied_at, last_reloaded_at,
                 metadata, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id, target_kind, target_key) DO UPDATE SET
-                workspace_id = excluded.workspace_id,
                 env_name = excluded.env_name,
                 ref_source_type = excluded.ref_source_type,
                 ref_locator = excluded.ref_locator,
@@ -368,7 +286,6 @@ class SqliteProjectStore:
             (
                 binding.binding_id,
                 binding.project_id,
-                binding.workspace_id,
                 binding.target_kind.value,
                 binding.target_key,
                 binding.env_name,
@@ -430,13 +347,12 @@ class SqliteProjectStore:
         await self._conn.execute(
             """
             INSERT INTO project_selector_state (
-                selector_id, surface, active_project_id, active_workspace_id,
+                selector_id, surface, active_project_id,
                 source, warnings, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(surface) DO UPDATE SET
                 active_project_id = excluded.active_project_id,
-                active_workspace_id = excluded.active_workspace_id,
                 source = excluded.source,
                 warnings = excluded.warnings,
                 updated_at = excluded.updated_at
@@ -445,7 +361,6 @@ class SqliteProjectStore:
                 state.selector_id,
                 state.surface,
                 state.active_project_id,
-                state.active_workspace_id,
                 state.source,
                 json.dumps(state.warnings, ensure_ascii=False),
                 state.updated_at.isoformat(),
@@ -550,16 +465,6 @@ class SqliteProjectStore:
             (run_id, *binding_ids),
         )
 
-    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
-    async def delete_workspaces(self, workspace_ids: list[str]) -> None:
-        if not workspace_ids:
-            return
-        placeholders = ",".join("?" for _ in workspace_ids)
-        await self._conn.execute(
-            f"DELETE FROM workspaces WHERE workspace_id IN ({placeholders})",
-            tuple(workspace_ids),
-        )
-
     async def delete_projects(self, project_ids: list[str]) -> None:
         if not project_ids:
             return
@@ -574,13 +479,11 @@ class SqliteProjectStore:
         if run is None:
             return
         await self.delete_bindings_for_run(run.run_id, run.rollback_plan.delete_binding_ids)
-        await self.delete_workspaces(run.rollback_plan.delete_workspace_ids)
         await self.delete_projects(run.rollback_plan.delete_project_ids)
 
     async def resolve_project_for_scope(self, scope_id: str) -> Project | None:
         """通过 scope_id 解析到 Project。
 
-        - scope_id 以 ``workspace:`` 开头时，提取 workspace_id 再查 workspaces 表找到 project_id
         - scope_id 以 ``project:`` 开头时，直接提取 project_id
         - 其他情况返回 None
         """
@@ -593,64 +496,7 @@ class SqliteProjectStore:
                 return await self.get_project(project_id)
             return None
 
-        if scope_id.startswith("workspace:"):
-            workspace_id = scope_id.split(":", 2)[1].strip()
-            if workspace_id:
-                workspace = await self.get_workspace(workspace_id)
-                if workspace is not None:
-                    return await self.get_project(workspace.project_id)
-            return None
-
         return None
-
-    # DEPRECATED: workspace 概念已废弃，请使用 resolve_project_for_scope
-    async def resolve_workspace_for_scope(
-        self,
-        scope_id: str,
-        *,
-        binding_types: tuple[ProjectBindingType, ...] = (
-            ProjectBindingType.SCOPE,
-            ProjectBindingType.MEMORY_SCOPE,
-            ProjectBindingType.IMPORT_SCOPE,
-        ),
-    ) -> Workspace | None:
-        default_project = await self.get_default_project()
-        if scope_id:
-            if scope_id.startswith("workspace:"):
-                workspace_id = scope_id.split(":", 2)[1].strip()
-                if workspace_id:
-                    direct_workspace = await self.get_workspace(workspace_id)
-                    if direct_workspace is not None:
-                        return direct_workspace
-            placeholders = ",".join("?" for _ in binding_types)
-            values: list[str] = [binding_type.value for binding_type in binding_types]
-            values.append(scope_id)
-            default_project_id = default_project.project_id if default_project is not None else ""
-            values.append(default_project_id)
-            cursor = await self._conn.execute(
-                f"""
-                SELECT w.*
-                FROM project_bindings pb
-                JOIN workspaces w ON w.workspace_id = pb.workspace_id
-                WHERE pb.binding_type IN ({placeholders})
-                  AND pb.binding_key = ?
-                ORDER BY
-                  CASE
-                    WHEN pb.project_id = ? THEN 0
-                    ELSE 1
-                  END,
-                  pb.created_at ASC
-                LIMIT 1
-                """,
-                tuple(values),
-            )
-            row = await cursor.fetchone()
-            if row is not None:
-                return self._row_to_workspace(row)
-
-        if default_project is None:
-            return None
-        return await self.get_primary_workspace(default_project.project_id)
 
     async def _get_changes(self) -> int:
         cursor = await self._conn.execute("SELECT changes()")
@@ -674,33 +520,18 @@ class SqliteProjectStore:
         )
 
     @staticmethod
-    def _row_to_workspace(row: aiosqlite.Row) -> Workspace:
-        return Workspace(
-            workspace_id=row[0],
-            project_id=row[1],
-            slug=row[2],
-            name=row[3],
-            kind=row[4],
-            root_path=row[5],
-            metadata=json.loads(row[6]),
-            created_at=datetime.fromisoformat(row[7]),
-            updated_at=datetime.fromisoformat(row[8]),
-        )
-
-    @staticmethod
     def _row_to_binding(row: aiosqlite.Row) -> ProjectBinding:
         return ProjectBinding(
             binding_id=row[0],
             project_id=row[1],
-            workspace_id=row[2],
-            binding_type=row[3],
-            binding_key=row[4],
-            binding_value=row[5],
-            source=row[6],
-            metadata=json.loads(row[7]),
-            migration_run_id=row[8],
-            created_at=datetime.fromisoformat(row[9]),
-            updated_at=datetime.fromisoformat(row[10]),
+            binding_type=row[2],
+            binding_key=row[3],
+            binding_value=row[4],
+            source=row[5],
+            metadata=json.loads(row[6]),
+            migration_run_id=row[7],
+            created_at=datetime.fromisoformat(row[8]),
+            updated_at=datetime.fromisoformat(row[9]),
         )
 
     @staticmethod
@@ -722,21 +553,20 @@ class SqliteProjectStore:
         return ProjectSecretBinding(
             binding_id=row[0],
             project_id=row[1],
-            workspace_id=row[2],
-            target_kind=row[3],
-            target_key=row[4],
-            env_name=row[5],
-            ref_source_type=row[6],
-            ref_locator=json.loads(row[7]),
-            display_name=row[8],
-            redaction_label=row[9],
-            status=row[10],
-            last_audited_at=datetime.fromisoformat(row[11]) if row[11] else None,
-            last_applied_at=datetime.fromisoformat(row[12]) if row[12] else None,
-            last_reloaded_at=datetime.fromisoformat(row[13]) if row[13] else None,
-            metadata=json.loads(row[14]),
-            created_at=datetime.fromisoformat(row[15]),
-            updated_at=datetime.fromisoformat(row[16]),
+            target_kind=row[2],
+            target_key=row[3],
+            env_name=row[4],
+            ref_source_type=row[5],
+            ref_locator=json.loads(row[6]),
+            display_name=row[7],
+            redaction_label=row[8],
+            status=row[9],
+            last_audited_at=datetime.fromisoformat(row[10]) if row[10] else None,
+            last_applied_at=datetime.fromisoformat(row[11]) if row[11] else None,
+            last_reloaded_at=datetime.fromisoformat(row[12]) if row[12] else None,
+            metadata=json.loads(row[13]),
+            created_at=datetime.fromisoformat(row[14]),
+            updated_at=datetime.fromisoformat(row[15]),
         )
 
     @staticmethod
@@ -745,8 +575,7 @@ class SqliteProjectStore:
             selector_id=row[0],
             surface=row[1],
             active_project_id=row[2],
-            active_workspace_id=row[3],
-            source=row[4],
-            warnings=json.loads(row[5]),
-            updated_at=datetime.fromisoformat(row[6]),
+            source=row[3],
+            warnings=json.loads(row[4]),
+            updated_at=datetime.fromisoformat(row[5]),
         )

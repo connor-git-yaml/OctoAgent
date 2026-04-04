@@ -7,12 +7,11 @@
 from __future__ import annotations
 
 from octoagent.tooling.decorators import tool_contract
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel
 
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
 )
 async def echo(text: str) -> str:

@@ -22,12 +22,6 @@ class ToolExecutionError(Exception):
     pass
 
 
-class ToolProfileViolationError(Exception):
-    """工具权限 Profile 违规"""
-
-    pass
-
-
 class PolicyCheckpointMissingError(Exception):
     """irreversible 工具缺少 PolicyCheckpoint hook（FR-010a）"""
 

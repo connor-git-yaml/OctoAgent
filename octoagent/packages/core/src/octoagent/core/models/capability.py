@@ -108,7 +108,6 @@ class ToolIndexQuery(BaseModel):
     tool_profile: str = Field(default="")
     tags: list[str] = Field(default_factory=list)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
 
 
 class ToolIndexHit(BaseModel):

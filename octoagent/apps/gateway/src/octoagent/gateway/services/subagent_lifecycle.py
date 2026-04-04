@@ -98,7 +98,6 @@ class SubagentSpawnContext:
 
     parent_task_id: str = ""
     project_id: str = ""  # 从 parent_runtime 推导，调用方可不填
-    workspace_id: str = ""  # 从 parent_runtime 推导，调用方可不填
     model_client: Any = None  # StructuredModelClientProtocol 或兼容 Protocol
     tool_broker: Any = None  # ToolBrokerProtocol
     event_store: Any = None  # EventStoreProtocol
@@ -320,7 +319,6 @@ class SubagentExecutor:
                     task_id=self._child_task.task_id,
                     work_id="",
                     project_id=self._child_task.scope_id,
-                    workspace_id="",
                     source_agent_runtime_id=self._context.agent_runtime_id,
                     source_agent_session_id=self._context.agent_session_id,
                     target_agent_runtime_id="",
@@ -500,7 +498,6 @@ async def spawn_subagent(
     runtime = AgentRuntime(
         agent_runtime_id=runtime_id,
         project_id=parent_runtime.project_id,
-        workspace_id="",
         agent_profile_id=parent_runtime.agent_profile_id,
         worker_profile_id=parent_runtime.worker_profile_id,
         role=AgentRuntimeRole.WORKER,
@@ -526,7 +523,6 @@ async def spawn_subagent(
         kind=AgentSessionKind.SUBAGENT_INTERNAL,
         status=AgentSessionStatus.ACTIVE,
         project_id=parent_runtime.project_id,
-        workspace_id="",
         parent_worker_runtime_id=parent_worker_runtime_id,
         created_at=now,
         updated_at=now,
@@ -647,7 +643,6 @@ async def _create_subagent_executor(
         task_id=child_task_id,
         work_id="",
         project_id=parent_runtime.project_id,
-        workspace_id="",
         source_agent_runtime_id=parent_runtime.agent_runtime_id,
         source_agent_session_id="",
         target_agent_runtime_id=runtime.agent_runtime_id,
@@ -676,7 +671,6 @@ async def _create_subagent_executor(
             task_id=child_task_id,
             work_id="",
             project_id=parent_runtime.project_id,
-            workspace_id="",
             source_agent_runtime_id=parent_runtime.agent_runtime_id,
             source_agent_session_id="",
             target_agent_runtime_id=runtime.agent_runtime_id,
