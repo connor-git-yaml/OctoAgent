@@ -196,35 +196,11 @@ class SkillRunner:
                 await self._backoff(manifest)
                 continue
 
-            try:
-                validated_output = manifest.output_model.model_validate(raw_output.model_dump())
-                output = SkillOutputEnvelope.model_validate(validated_output.model_dump())
-            except ValidationError as exc:
-                retry_failures += 1
-                feedback.append(
-                    ToolFeedbackMessage(
-                        tool_name="_validation",
-                        is_error=True,
-                        output="",
-                        error=f"输出校验失败: {exc.errors()}",
-                        duration_ms=0,
-                    )
-                )
-                if retry_failures > manifest.retry_policy.max_attempts:
-                    result = await self._fail_result(
-                        manifest=manifest,
-                        execution_context=execution_context,
-                        start_time=start_time,
-                        attempts=attempts,
-                        steps=steps,
-                        category=ErrorCategory.VALIDATION_ERROR,
-                        error=SkillValidationError("输出模型校验连续失败"),
-                    )
-                    await self._call_hook("skill_end", manifest, execution_context, result)
-                    self._try_clear_history(history_key)
-                    return result
-                await self._backoff(manifest)
-                continue
+            # raw_output 已经是 SkillOutputEnvelope，直接使用
+            # 之前通过 manifest.output_model.model_validate 做额外转换，
+            # 但这会在 Qwen 等模型的 tool_call 格式不同时导致 ValidationError，
+            # 静默丢弃 tool_calls 进入 retry 循环。
+            output = raw_output
 
             await self._call_hook("after_llm_call", manifest, output)
 
