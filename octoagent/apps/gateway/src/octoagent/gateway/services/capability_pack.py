@@ -677,7 +677,7 @@ class CapabilityPackService:
         desired_tools = self._dedupe_preserve_order(
             [
                 *binding.selected_tools,
-                *self._profile_first_core_tool_names(),
+                *self._profile_first_candidate_tool_names(),
                 *[
                     tool.tool_name
                     for tool in pack.tools
@@ -688,7 +688,13 @@ class CapabilityPackService:
         mounted_tools: list[ToolAvailabilityExplanation] = []
         blocked_tools: list[ToolAvailabilityExplanation] = []
         mounted_names: list[str] = []
+        deferred_entries: list[DeferredToolEntry] = []
         warnings: list[str] = []
+
+        # Feature 072: 用 CoreToolSet 区分 mount/defer
+        # Promoted 工具（tool_search 提升的）在后续 _get_tool_schemas 层面注入，
+        # 此处仅基于 CoreToolSet 做静态分流。
+        core_set = CoreToolSet.default()
 
         for tool_name in desired_tools:
             bundled = tool_by_name.get(tool_name)
@@ -744,27 +750,39 @@ class CapabilityPackService:
                 )
                 warnings.append("profile_first_tool_unavailable")
                 continue
-            mounted_names.append(tool_name)
-            mounted_tools.append(
-                ToolAvailabilityExplanation(
-                    tool_name=tool_name,
-                    status=(
-                        "degraded"
-                        if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
-                        else "mounted"
-                    ),
-                    source_kind=source_kind,
-                    tool_group=bundled.tool_group,
-                    tool_profile=bundled.tool_profile,
-                    reason_code=bundled.availability_reason,
-                    summary=bundled.description or bundled.label or tool_name,
-                    recommended_action=bundled.install_hint,
-                    metadata={
-                        "entrypoints": list(bundled.entrypoints),
-                        "runtime_kinds": [item.value for item in bundled.runtime_kinds],
-                    },
+
+            # Feature 072: Core 工具 mount 完整 schema，其余 defer
+            if core_set.is_core(tool_name):
+                mounted_names.append(tool_name)
+                mounted_tools.append(
+                    ToolAvailabilityExplanation(
+                        tool_name=tool_name,
+                        status=(
+                            "degraded"
+                            if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
+                            else "mounted"
+                        ),
+                        source_kind=source_kind,
+                        tool_group=bundled.tool_group,
+                        tool_profile=bundled.tool_profile,
+                        reason_code=bundled.availability_reason,
+                        summary=bundled.description or bundled.label or tool_name,
+                        recommended_action=bundled.install_hint,
+                        metadata={
+                            "entrypoints": list(bundled.entrypoints),
+                            "runtime_kinds": [item.value for item in bundled.runtime_kinds],
+                        },
+                    )
                 )
-            )
+            else:
+                # Deferred: 只保留名称和描述
+                deferred_entries.append(
+                    DeferredToolEntry(
+                        name=tool_name,
+                        one_line_desc=(bundled.description or bundled.label or tool_name)[:80],
+                        tool_group=bundled.tool_group,
+                    )
+                )
 
         if not mounted_names:
             warnings.append("profile_first_empty_fallback_to_static_toolset")
@@ -779,27 +797,37 @@ class CapabilityPackService:
                     BuiltinToolAvailabilityStatus.DEGRADED,
                 }:
                     continue
-                mounted_names.append(tool_name)
-                mounted_tools.append(
-                    ToolAvailabilityExplanation(
-                        tool_name=tool_name,
-                        status=(
-                            "degraded"
-                            if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
-                            else "mounted"
-                        ),
-                        source_kind="fallback_toolset",
-                        tool_group=bundled.tool_group,
-                        tool_profile=bundled.tool_profile,
-                        reason_code=bundled.availability_reason,
-                        summary=bundled.description or bundled.label or tool_name,
-                        recommended_action=bundled.install_hint,
-                        metadata={
-                            "entrypoints": list(bundled.entrypoints),
-                            "runtime_kinds": [item.value for item in bundled.runtime_kinds],
-                        },
+                # Feature 072: fallback 也按 Core/Deferred 分流
+                if core_set.is_core(tool_name):
+                    mounted_names.append(tool_name)
+                    mounted_tools.append(
+                        ToolAvailabilityExplanation(
+                            tool_name=tool_name,
+                            status=(
+                                "degraded"
+                                if bundled.availability == BuiltinToolAvailabilityStatus.DEGRADED
+                                else "mounted"
+                            ),
+                            source_kind="fallback_toolset",
+                            tool_group=bundled.tool_group,
+                            tool_profile=bundled.tool_profile,
+                            reason_code=bundled.availability_reason,
+                            summary=bundled.description or bundled.label or tool_name,
+                            recommended_action=bundled.install_hint,
+                            metadata={
+                                "entrypoints": list(bundled.entrypoints),
+                                "runtime_kinds": [item.value for item in bundled.runtime_kinds],
+                            },
+                        )
                     )
-                )
+                else:
+                    deferred_entries.append(
+                        DeferredToolEntry(
+                            name=tool_name,
+                            one_line_desc=(bundled.description or bundled.label or tool_name)[:80],
+                            tool_group=bundled.tool_group,
+                        )
+                    )
 
         discovery_request = request.model_copy(
             update={
@@ -847,6 +875,7 @@ class CapabilityPackService:
             ),
             mounted_tools=mounted_tools,
             blocked_tools=blocked_tools,
+            deferred_tool_entries=[e.model_dump() for e in deferred_entries],
         )
 
     async def render_bootstrap_context(
@@ -4129,7 +4158,7 @@ class CapabilityPackService:
         return result
 
     @staticmethod
-    def _profile_first_core_tool_names() -> list[str]:
+    def _profile_first_candidate_tool_names() -> list[str]:
         return [
             "project.inspect",
             "task.inspect",
@@ -4163,7 +4192,7 @@ class CapabilityPackService:
     ) -> str:
         if tool_name in binding.selected_tools:
             return "profile_selected"
-        if tool_name in cls._profile_first_core_tool_names():
+        if tool_name in cls._profile_first_candidate_tool_names():
             return "profile_first_core"
         return "default_tool_group"
 

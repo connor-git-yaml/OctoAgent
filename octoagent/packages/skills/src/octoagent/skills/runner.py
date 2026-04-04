@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -60,13 +61,15 @@ class SkillRunner:
         event_store: EventStoreProtocol | None = None,
         hooks: list[SkillRunnerHook] | None = None,
         approval_bridge: ApprovalBridgeProtocol | None = None,
+        on_tool_search_result: Callable[[str, str, str], Awaitable[None]] | None = None,
     ) -> None:
         self._model_client = model_client
         self._tool_broker = tool_broker
         self._event_store = event_store
         self._hooks = hooks or [NoopSkillRunnerHook()]
-        # Feature 061: ask 信号桥接
         self._approval_bridge = approval_bridge
+        # Feature 072: tool_search 结果回调（用于提升 deferred 工具）
+        self._on_tool_search_result = on_tool_search_result
 
     async def run(
         self,
@@ -550,6 +553,22 @@ class SkillRunner:
             call.tool_name, tool_result, manifest.context_budget,
             tool_call_id=call.tool_call_id,
         )
+
+        # Feature 072: tool_search 结果触发工具提升
+        if (
+            call.tool_name == "tool_search"
+            and not feedback.is_error
+            and self._on_tool_search_result is not None
+        ):
+            try:
+                await self._on_tool_search_result(
+                    feedback.output,
+                    execution_context.task_id or "",
+                    execution_context.trace_id or "",
+                )
+            except Exception:
+                logger.warning("tool_search_promotion_failed", exc_info=True)
+
         await self._call_hook("after_tool_execute", feedback)
         return feedback
 

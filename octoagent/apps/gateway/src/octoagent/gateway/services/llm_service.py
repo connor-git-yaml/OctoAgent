@@ -356,8 +356,19 @@ class LLMService:
             single_loop_executor=single_loop_executor,
             prompt=prompt,
         )
-        # Feature 060: Skill 内容已迁移到 _build_system_blocks() 的 LoadedSkills 系统块
-        # 不再在此处追加，避免双重注入。_build_loaded_skills_context() 保留供外部获取文本。
+        # Feature 072: 注入 deferred 工具列表到 system prompt
+        tool_selection_data = metadata.get("tool_selection", {})
+        deferred_entries_raw = tool_selection_data.get("deferred_tool_entries", [])
+        if deferred_entries_raw:
+            from octoagent.tooling.models import DeferredToolEntry, format_deferred_tools_list
+            deferred_entries = [
+                DeferredToolEntry(**e) if isinstance(e, dict) else e
+                for e in deferred_entries_raw
+            ]
+            deferred_text = format_deferred_tools_list(deferred_entries)
+            if deferred_text:
+                base_description = f"{base_description}\n\n{deferred_text}"
+
         manifest = SkillManifest(
             skill_id=f"chat.{worker_type}.inline",
             input_model=_GenericSkillInput,

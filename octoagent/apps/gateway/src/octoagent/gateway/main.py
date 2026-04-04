@@ -596,6 +596,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         app.state.approval_bridge = approval_bridge
 
+        # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
+        _llm_service_ref: list[Any] = []  # mutable container for late binding
+
+        async def _on_tool_search_result(
+            result_json: str, task_id: str = "", trace_id: str = "",
+        ) -> None:
+            if _llm_service_ref:
+                await _llm_service_ref[0].process_tool_search_results(
+                    result_json, task_id=task_id, trace_id=trace_id,
+                )
+
         skill_runner = SkillRunner(
             model_client=LiteLLMSkillClient(
                 proxy_url=provider_config.proxy_base_url,
@@ -609,6 +620,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             event_store=store_group.event_store,
             hooks=[AgentSessionTurnHook(store_group)],
             approval_bridge=approval_bridge,
+            on_tool_search_result=_on_tool_search_result,
         )
         app.state.llm_service = LLMService(
             fallback_manager=fallback_manager,
@@ -616,6 +628,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             skill_runner=skill_runner,
             skill_discovery=app.state.skill_discovery,
         )
+        _llm_service_ref.append(app.state.llm_service)
         AgentContextService.set_llm_service(app.state.llm_service)
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,

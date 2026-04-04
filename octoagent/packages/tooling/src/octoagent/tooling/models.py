@@ -441,18 +441,21 @@ class CoreToolSet(BaseModel):
 
     @classmethod
     def default(cls) -> CoreToolSet:
-        """默认 Core Tools 清单（约 10 个高频工具）"""
+        """默认 Core Tools 清单 — 始终以完整 schema 注入 LLM。
+
+        选择标准：日常对话高频使用的工具。
+        其余工具通过 tool_search 按需加载。
+        """
         return cls(tool_names=[
-            "tool_search",
-            "project.inspect",
-            "filesystem.list_dir",
-            "filesystem.read_text",
-            "filesystem.write_text",
-            "terminal.exec",
-            "memory.recall",
-            "memory.search",
-            "skills",
-            "subagents.spawn",
+            "tool_search",          # 入口：搜索和激活 deferred 工具
+            "filesystem.list_dir",  # 文件浏览
+            "filesystem.read_text", # 文件读取
+            "filesystem.write_text",# 文件写入
+            "terminal.exec",       # 命令执行
+            "memory.recall",       # 记忆检索
+            "web.search",          # 联网搜索
+            "web.fetch",           # 网页读取
+            "skills",              # 技能调用
         ])
 
     def is_core(self, tool_name: str) -> bool:

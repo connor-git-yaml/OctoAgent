@@ -166,4 +166,6 @@ class DynamicToolSelection(BaseModel):
     effective_tool_universe: EffectiveToolUniverse | None = None
     mounted_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
     blocked_tools: list[ToolAvailabilityExplanation] = Field(default_factory=list)
+    # Feature 072: Deferred 工具精简列表（名称+描述），用于 system prompt 注入
+    deferred_tool_entries: list[dict[str, str]] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utc_now)
