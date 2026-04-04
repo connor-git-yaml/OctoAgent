@@ -156,7 +156,7 @@ def _make_tool_meta(
 
 
 def _build_test_tool_metas() -> list[ToolMeta]:
-    """构建完整的测试用工具列表（10 个 Core + 多个 Deferred）"""
+    """构建完整的测试用工具列表（Core + 多个 Deferred）"""
     # Core 工具
     core_names = CoreToolSet.default().tool_names
     core_metas = [
@@ -170,8 +170,6 @@ def _build_test_tool_metas() -> list[ToolMeta]:
         _make_tool_meta("docker.stop", "停止 Docker 容器", tool_group="docker",
                         side_effect_level=SideEffectLevel.REVERSIBLE),
         _make_tool_meta("docker.logs", "查看容器日志", tool_group="docker"),
-        _make_tool_meta("web.search", "搜索互联网", tool_group="web"),
-        _make_tool_meta("web.fetch", "获取网页内容", tool_group="web"),
         _make_tool_meta("browser.snapshot", "浏览器截图", tool_group="browser"),
         _make_tool_meta("browser.status", "浏览器状态", tool_group="browser"),
         _make_tool_meta("ssh.exec", "远程命令执行", tool_group="ssh",

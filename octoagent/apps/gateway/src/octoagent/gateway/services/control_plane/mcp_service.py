@@ -30,14 +30,12 @@ from octoagent.core.models import (
     UpdateTriggerSource,
 )
 from octoagent.provider.auth.credentials import ApiKeyCredential
-import octoagent.gateway.services.control_plane as _cp_pkg  # detect_environment 通过 package 引用
-from octoagent.provider.auth.oauth_flows import run_auth_code_pkce_flow
+import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.config_wizard import load_config
 from octoagent.provider.dx.litellm_generator import generate_litellm_config
-import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from pydantic import SecretStr
 
 from ..mcp_registry import McpServerConfig
@@ -413,7 +411,7 @@ class McpDomainService(DomainServiceBase):
                 "当前环境无法直接打开浏览器，请先在本地桌面环境完成 OpenAI OAuth。",
             )
 
-        credential = await run_auth_code_pkce_flow(
+        credential = await _cp_pkg.run_auth_code_pkce_flow(
             config=provider_config,
             registry=registry,
             env=environment,
@@ -632,7 +630,6 @@ class McpDomainService(DomainServiceBase):
         mapping = {
             ControlPlaneSurface.WEB: UpdateTriggerSource.WEB,
             ControlPlaneSurface.CLI: UpdateTriggerSource.CLI,
-            ControlPlaneSurface.TELEGRAM: UpdateTriggerSource.TELEGRAM,
         }
         return mapping.get(surface, UpdateTriggerSource.SYSTEM)
 

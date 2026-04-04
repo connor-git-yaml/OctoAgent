@@ -12,6 +12,7 @@ import asyncio  # noqa: F401 — 测试通过 control_plane_module.asyncio 引�
 
 from octoagent.core.models.update import UpdateTriggerSource  # noqa: F401
 from octoagent.provider.auth.environment import detect_environment  # noqa: F401
+from octoagent.provider.auth.oauth_flows import run_auth_code_pkce_flow  # noqa: F401
 from octoagent.provider.dx.runtime_activation import (  # noqa: F401
     RuntimeActivationError,
     RuntimeActivationService,

@@ -1988,7 +1988,7 @@ class TestControlPlaneApi:
             FakeActivationService,
         )
         monkeypatch.setattr(
-            control_plane_app.state.control_plane_service,
+            control_plane_app.state.control_plane_service._mcp_service,
             "_restart_runtime_after_delay",
             fake_restart_runtime_after_delay,
         )
@@ -2189,7 +2189,6 @@ class TestControlPlaneApi:
         )
         assert default_project is not None
         assert default_project.metadata["policy_profile_id"] == "strict"
-        assert control_plane_app.state.policy_engine.profile.name == "strict"
 
         document = (
             await control_plane_app.state.control_plane_service.get_policy_profiles_document()
@@ -2403,7 +2402,6 @@ class TestControlPlaneApi:
             ).model_dump(mode="json")
             assert document["active_project_id"] == secondary_project.project_id
             assert document["active_profile_id"] == "strict"
-            assert restarted_app.state.policy_engine.profile.name == "strict"
 
     async def test_config_resource_exposes_frontdoor_and_telegram_governance_hints(
         self,

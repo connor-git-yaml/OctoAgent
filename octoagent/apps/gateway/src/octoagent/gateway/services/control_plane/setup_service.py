@@ -2333,7 +2333,6 @@ class SetupDomainService(DomainServiceBase):
         mapping = {
             ControlPlaneSurface.WEB: UpdateTriggerSource.WEB,
             ControlPlaneSurface.CLI: UpdateTriggerSource.CLI,
-            ControlPlaneSurface.TELEGRAM: UpdateTriggerSource.TELEGRAM,
         }
         return mapping.get(surface, UpdateTriggerSource.SYSTEM)
 

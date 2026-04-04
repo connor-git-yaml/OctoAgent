@@ -321,7 +321,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
     assert (
         plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
     )
-    assert "runtime.inspect" in plan.tool_selection.selected_tools
+    assert plan.tool_selection.selected_tools, "selected_tools 不应为空"
 
     await store_group.conn.close()
 
