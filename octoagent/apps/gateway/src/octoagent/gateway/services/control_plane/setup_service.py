@@ -46,7 +46,7 @@ from octoagent.core.models import (
     SkillGovernanceItem,
     UpdateTriggerSource,
 )
-from octoagent.policy import DEFAULT_PROFILE, PolicyProfile
+from octoagent.policy import DEFAULT_PROFILE
 from octoagent.provider.auth.credentials import ApiKeyCredential
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
@@ -79,21 +79,49 @@ class SetupDomainService(DomainServiceBase):
         ctx: ControlPlaneContext,
         *,
         proxy_manager: Any | None = None,
+        telegram_state_store: Any | None = None,
+        update_status_store: Any | None = None,
     ) -> None:
         super().__init__(ctx)
         self._proxy_manager = proxy_manager
+        self._telegram_state_store = telegram_state_store
+        self._update_status_store = update_status_store
+
+    # ══════════════════════════════════════════════════════════════
+    #  Action / Document Routes
+    # ══════════════════════════════════════════════════════════════
+
+    def action_routes(self) -> dict[str, Any]:
+        return {
+            "project.select": self._handle_project_select,
+            "setup.review": self._handle_setup_review,
+            "setup.apply": self._handle_setup_apply,
+            "setup.quick_connect": self._handle_setup_quick_connect,
+            "skills.selection.save": self._handle_skills_selection_save,
+            "config.apply": self._handle_config_apply,
+        }
+
+    def document_routes(self) -> dict[str, Any]:
+        return {
+            "config_schema": self.get_config_schema,
+            "project_selector": self.get_project_selector,
+            "setup_governance": self.get_setup_governance_document,
+            "skill_governance": self.get_skill_governance_document,
+            "capability_pack": self.get_capability_pack_document,
+            "diagnostics_summary": self.get_diagnostics_summary,
+        }
 
     # ══════════════════════════════════════════════════════════════
     #  Resource Producers
     # ══════════════════════════════════════════════════════════════
 
     async def get_config_schema(self) -> ConfigSchemaDocument:
-        config = load_config(self.ctx.project_root)
+        config = load_config(self._ctx.project_root)
         if config is None:
             config = OctoAgentConfig(updated_at=date.today().isoformat())
         schema = OctoAgentConfig.model_json_schema()
         ui_hints = self._build_config_ui_hints()
-        sync_ok, diffs = check_litellm_sync_status(config, self.ctx.project_root)
+        sync_ok, diffs = check_litellm_sync_status(config, self._ctx.project_root)
         bridge_refs = await self._collect_bridge_refs()
         return ConfigSchemaDocument(
             schema=schema,
@@ -125,8 +153,8 @@ class SetupDomainService(DomainServiceBase):
             selected_project,
             _,
             fallback_reason,
-        ) = await self.ctx.resolve_selection()
-        projects = await self.ctx.stores.project_store.list_projects()
+        ) = await self._resolve_selection()
+        projects = await self._stores.project_store.list_projects()
         available_projects: list[ProjectOption] = []
         for project in projects:
             available_projects.append(
@@ -147,8 +175,8 @@ class SetupDomainService(DomainServiceBase):
         return ProjectSelectorDocument(
             current_project_id=selected_project.project_id if selected_project else "",
             current_workspace_id="",
-            default_project_id=(await self.ctx.stores.project_store.get_default_project()).project_id
-            if await self.ctx.stores.project_store.get_default_project()
+            default_project_id=(await self._stores.project_store.get_default_project()).project_id
+            if await self._stores.project_store.get_default_project()
             else "",
             fallback_reason=fallback_reason,
             switch_allowed=switch_allowed,
@@ -184,8 +212,8 @@ class SetupDomainService(DomainServiceBase):
         draft_selection: Mapping[str, Any] | None = None,
     ) -> SkillGovernanceDocument:
         if selected_project is None:
-            _, selected_project, _, _ = await self.ctx.resolve_selection()
-        if self.ctx.capability_pack_service is None:
+            _, selected_project, _, _ = await self._resolve_selection()
+        if self._ctx.capability_pack_service is None:
             capability_pack = CapabilityPackDocument(
                 selected_project_id=(
                     selected_project.project_id if selected_project is not None else ""
@@ -194,21 +222,21 @@ class SetupDomainService(DomainServiceBase):
             )
         else:
             capability_pack = CapabilityPackDocument(
-                pack=await self.ctx.capability_pack_service.get_pack(),
+                pack=await self._ctx.capability_pack_service.get_pack(),
                 selected_project_id=(
                     selected_project.project_id if selected_project is not None else ""
                 ),
                 selected_workspace_id="",
             )
         capability_snapshot = (
-            self.ctx.capability_pack_service.capability_snapshot()
-            if self.ctx.capability_pack_service is not None
+            self._ctx.capability_pack_service.capability_snapshot()
+            if self._ctx.capability_pack_service is not None
             else {}
         )
         items: list[SkillGovernanceItem] = []
         # Feature 057: 从 SkillDiscovery 获取 Skill 列表
-        if self.ctx.capability_pack_service is not None:
-            for entry in self.ctx.capability_pack_service.skill_discovery.list_items():
+        if self._ctx.capability_pack_service is not None:
+            for entry in self._ctx.capability_pack_service.skill_discovery.list_items():
                 items.append(
                     SkillGovernanceItem(
                         item_id=f"skill:{entry.name}",
@@ -232,8 +260,8 @@ class SetupDomainService(DomainServiceBase):
         mcp_configs: dict[str, Any] = {}
         mcp_registry = (
             None
-            if self.ctx.capability_pack_service is None
-            else self.ctx.capability_pack_service.mcp_registry
+            if self._ctx.capability_pack_service is None
+            else self._ctx.capability_pack_service.mcp_registry
         )
         if mcp_registry is not None:
             mcp_configs = {item.name: item for item in mcp_registry.list_configs()}
@@ -328,14 +356,14 @@ class SetupDomainService(DomainServiceBase):
         )
 
     async def get_setup_governance_document(self) -> SetupGovernanceDocument:
-        _, selected_project, _, fallback_reason = await self.ctx.resolve_selection()
+        _, selected_project, _, fallback_reason = await self._resolve_selection()
         project_selector = await self.get_project_selector()
         config = await self.get_config_schema()
         diagnostics = await self.get_diagnostics_summary()
-        agent_profiles = await self.ctx.host.get_agent_profiles_document()
-        owner_profile = await self.ctx.host.get_owner_profile_document()
+        agent_profiles = await self._get_service("agent").get_agent_profiles_document()
+        owner_profile = await self._get_service("agent").get_owner_profile_document()
         capability_pack = await self.get_capability_pack_document()
-        policy_profiles = await self.ctx.host.get_policy_profiles_document()
+        policy_profiles = await self._get_service("agent").get_policy_profiles_document()
         skill_governance = await self.get_skill_governance_document()
         secret_audit = await self._safe_secret_audit(
             selected_project.project_id if selected_project else None
@@ -479,8 +507,8 @@ class SetupDomainService(DomainServiceBase):
             ],
             details={
                 "capability_summary": (
-                    self.ctx.capability_pack_service.capability_snapshot()
-                    if self.ctx.capability_pack_service is not None
+                    self._ctx.capability_pack_service.capability_snapshot()
+                    if self._ctx.capability_pack_service is not None
                     else {}
                 ),
                 "skill_summary": dict(skill_governance.summary),
@@ -544,7 +572,7 @@ class SetupDomainService(DomainServiceBase):
 
     async def get_capability_pack_document(self) -> CapabilityPackDocument:
         # 能力包全局加载，不按项目过滤
-        if self.ctx.capability_pack_service is None:
+        if self._ctx.capability_pack_service is None:
             return CapabilityPackDocument(
                 selected_project_id="",
                 selected_workspace_id="",
@@ -554,7 +582,7 @@ class SetupDomainService(DomainServiceBase):
                 ),
                 warnings=["capability pack service unavailable"],
             )
-        pack = await self.ctx.capability_pack_service.get_pack(
+        pack = await self._ctx.capability_pack_service.get_pack(
             project_id="",
         )
         return CapabilityPackDocument(
@@ -581,17 +609,17 @@ class SetupDomainService(DomainServiceBase):
         update_summary = self._load_update_summary()
         recovery_summary = (
             BackupService(
-                self.ctx.project_root,
-                store_group=self.ctx.stores,
+                self._ctx.project_root,
+                store_group=self._stores,
             )
             .get_recovery_summary()
             .model_dump(mode="json")
         )
         channel_summary = self._build_channel_summary()
-        wizard = await self.ctx.host.get_wizard_session()
-        _, selected_project, _, _ = await self.ctx.resolve_selection()
+        wizard = await self._get_wizard_session()
+        _, selected_project, _, _ = await self._resolve_selection()
         project_selector = await self.get_project_selector()
-        memory_backend = await self.ctx.memory_console_service.get_backend_status(
+        memory_backend = await self._ctx.memory_console_service.get_backend_status(
             project_id=selected_project.project_id if selected_project is not None else "",
         )
 
@@ -599,7 +627,7 @@ class SetupDomainService(DomainServiceBase):
             DiagnosticsSubsystemStatus(
                 subsystem_id="runtime",
                 label="Runtime",
-                status="ok" if self.ctx.task_runner is not None else "unavailable",
+                status="ok" if self._ctx.task_runner is not None else "unavailable",
                 summary="TaskRunner / Execution runtime",
                 detail_ref="/health",
             )
@@ -732,29 +760,29 @@ class SetupDomainService(DomainServiceBase):
     #  Action Handlers
     # ══════════════════════════════════════════════════════════════
 
-    async def handle_project_select(
+    async def _handle_project_select(
         self, request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         project_id = str(request.params.get("project_id", "")).strip()
         if not project_id:
             raise self._action_error("PROJECT_ID_REQUIRED", "project_id 不能为空")
-        project = await self.ctx.stores.project_store.get_project(project_id)
+        project = await self._stores.project_store.get_project(project_id)
         if project is None:
             raise self._action_error("PROJECT_NOT_FOUND", "目标 project 不存在")
 
-        state = self.ctx.state_store.load().model_copy(
+        state = self._ctx.state_store.load().model_copy(
             update={
                 "selected_project_id": project_id,
                 "updated_at": datetime.now(tz=UTC),
             }
         )
-        self.ctx.state_store.save(state)
-        await self.ctx.host._sync_web_project_selector_state(
+        self._ctx.state_store.save(state)
+        await self._sync_web_project_selector_state(
             project=project,
             source="control_plane_action",
         )
-        await self.ctx.host._sync_policy_engine_for_project(project)
-        await self.ctx.stores.conn.commit()
+        await self._sync_policy_engine_for_project(project)
+        await self._stores.conn.commit()
         return self._completed_result(
             request=request,
             code="PROJECT_SELECTED",
@@ -771,10 +799,10 @@ class SetupDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_setup_review(
+    async def _handle_setup_review(
         self, request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        current_config = load_config(self.ctx.project_root)
+        current_config = load_config(self._ctx.project_root)
         if current_config is None:
             current_config = OctoAgentConfig(updated_at=date.today().isoformat())
         draft = request.params.get("draft", {})
@@ -795,7 +823,7 @@ class SetupDomainService(DomainServiceBase):
             candidate_config = current_config
             validation_errors.append(str(exc))
 
-        _, selected_project, _, _ = await self.ctx.resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         draft_skill_selection = (
             draft.get("skill_selection")
             if isinstance(draft.get("skill_selection"), Mapping)
@@ -810,7 +838,7 @@ class SetupDomainService(DomainServiceBase):
                 )
             except Exception as exc:
                 validation_errors.append(str(exc))
-        agent_profiles = await self.ctx.host.get_agent_profiles_document()
+        agent_profiles = await self._get_service("agent").get_agent_profiles_document()
         active_agent_profile = self._resolve_active_agent_profile_payload(
             agent_profiles=agent_profiles,
             selected_project=selected_project,
@@ -856,7 +884,7 @@ class SetupDomainService(DomainServiceBase):
             resource_refs=[self._resource_ref("setup_governance", "setup:governance")],
         )
 
-    async def handle_setup_apply(
+    async def _handle_setup_apply(
         self, request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         draft = request.params.get("draft", {})
@@ -865,7 +893,7 @@ class SetupDomainService(DomainServiceBase):
         if not isinstance(draft, dict):
             raise self._action_error("SETUP_DRAFT_REQUIRED", "draft 必须是对象")
 
-        _, selected_project, _, _ = await self.ctx.resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         skill_selection = draft.get("skill_selection")
         normalized_skill_selection: dict[str, Any] | None = None
         if isinstance(skill_selection, Mapping):
@@ -874,7 +902,7 @@ class SetupDomainService(DomainServiceBase):
                 selected_project=selected_project,
             )
 
-        review_result = await self.handle_setup_review(
+        review_result = await self._handle_setup_review(
             request.model_copy(update={"action_id": "setup.review"})
         )
         review = SetupReviewSummary.model_validate(review_result.data.get("review", {}))
@@ -901,7 +929,7 @@ class SetupDomainService(DomainServiceBase):
                     f"配置检查未通过，当前不能保存：{blocking}",
                 )
 
-        current_config = load_config(self.ctx.project_root)
+        current_config = load_config(self._ctx.project_root)
         if current_config is None:
             current_config = OctoAgentConfig(updated_at=date.today().isoformat())
         config_patch = draft.get("config", {})
@@ -918,7 +946,7 @@ class SetupDomainService(DomainServiceBase):
         agent_request_payload: dict[str, Any] | None = None
         agent_profile_patch = draft.get("agent_profile", {})
         if isinstance(agent_profile_patch, dict) and agent_profile_patch:
-            agent_profiles = await self.ctx.host.get_agent_profiles_document()
+            agent_profiles = await self._get_service("agent").get_agent_profiles_document()
             active_agent_profile = self._resolve_active_agent_profile_payload(
                 agent_profiles=agent_profiles,
                 selected_project=selected_project,
@@ -942,8 +970,8 @@ class SetupDomainService(DomainServiceBase):
                 raise self._action_error("AGENT_PROFILE_NAME_REQUIRED", "name 不能为空")
             agent_request_payload = merged_agent_profile
 
-        save_config(config, self.ctx.project_root)
-        litellm_path = generate_litellm_config(config, self.ctx.project_root)
+        save_config(config, self._ctx.project_root)
+        litellm_path = generate_litellm_config(config, self._ctx.project_root)
 
         resource_refs = [
             self._resource_ref("config_schema", "config:octoagent"),
@@ -969,7 +997,7 @@ class SetupDomainService(DomainServiceBase):
                 data["saved_secrets"] = secret_result
 
         if policy_profile_id:
-            policy_result = await self.ctx.host._handle_policy_profile_select(
+            policy_result = await self._get_service("agent")._handle_policy_profile_select(
                 request.model_copy(
                     update={
                         "action_id": "policy_profile.select",
@@ -981,7 +1009,7 @@ class SetupDomainService(DomainServiceBase):
             resource_refs.extend(policy_result.resource_refs)
 
         if agent_request_payload is not None:
-            agent_result = await self.ctx.host._handle_agent_profile_save(
+            agent_result = await self._get_service("agent")._handle_agent_profile_save(
                 request.model_copy(
                     update={
                         "action_id": "agent_profile.save",
@@ -993,7 +1021,7 @@ class SetupDomainService(DomainServiceBase):
             resource_refs.extend(agent_result.resource_refs)
 
         if normalized_skill_selection is not None:
-            skill_result = await self.handle_skills_selection_save(
+            skill_result = await self._handle_skills_selection_save(
                 request.model_copy(
                     update={
                         "action_id": "skills.selection.save",
@@ -1023,11 +1051,11 @@ class SetupDomainService(DomainServiceBase):
             resource_refs=self._dedupe_resource_refs(resource_refs),
         )
 
-    async def handle_setup_quick_connect(
+    async def _handle_setup_quick_connect(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        apply_result = await self.handle_setup_apply(
+        apply_result = await self._handle_setup_apply(
             request.model_copy(update={"action_id": "setup.apply"})
         )
         activation_data = await self._activate_runtime_after_config_change(
@@ -1048,7 +1076,7 @@ class SetupDomainService(DomainServiceBase):
                     error=str(exc),
                 )
 
-        review_result = await self.handle_setup_review(
+        review_result = await self._handle_setup_review(
             request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})
         )
         refreshed_review = review_result.data.get("review", {})
@@ -1073,7 +1101,7 @@ class SetupDomainService(DomainServiceBase):
             ),
         )
 
-    async def handle_skills_selection_save(
+    async def _handle_skills_selection_save(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -1086,7 +1114,7 @@ class SetupDomainService(DomainServiceBase):
                 "selection 必须是对象",
             )
 
-        _, selected_project, _, _ = await self.ctx.resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         if selected_project is None:
             raise self._action_error("PROJECT_REQUIRED", "当前没有可用 project")
 
@@ -1097,7 +1125,7 @@ class SetupDomainService(DomainServiceBase):
 
         metadata = dict(selected_project.metadata)
         metadata["skill_selection"] = normalized
-        await self.ctx.stores.project_store.save_project(
+        await self._stores.project_store.save_project(
             selected_project.model_copy(
                 update={
                     "metadata": metadata,
@@ -1105,7 +1133,7 @@ class SetupDomainService(DomainServiceBase):
                 }
             )
         )
-        await self.ctx.stores.conn.commit()
+        await self._stores.conn.commit()
 
         refreshed = await self.get_skill_governance_document(
             selected_project=selected_project.model_copy(update={"metadata": metadata}),
@@ -1133,7 +1161,7 @@ class SetupDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_config_apply(
+    async def _handle_config_apply(
         self, request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         payload = request.params.get("config")
@@ -1142,8 +1170,8 @@ class SetupDomainService(DomainServiceBase):
         normalized = dict(payload)
         normalized.setdefault("updated_at", date.today().isoformat())
         config = OctoAgentConfig.model_validate(normalized)
-        save_config(config, self.ctx.project_root)
-        litellm_path = generate_litellm_config(config, self.ctx.project_root)
+        save_config(config, self._ctx.project_root)
+        litellm_path = generate_litellm_config(config, self._ctx.project_root)
         return self._completed_result(
             request=request,
             code="CONFIG_APPLIED",
@@ -1327,8 +1355,8 @@ class SetupDomainService(DomainServiceBase):
             if config.runtime.master_key_env == "LITELLM_MASTER_KEY":
                 litellm_updates.setdefault("LITELLM_PROXY_KEY", master_key)
 
-        self._write_env_values(self.ctx.project_root / ".env.litellm", litellm_updates)
-        self._write_env_values(self.ctx.project_root / ".env", runtime_updates)
+        self._write_env_values(self._ctx.project_root / ".env.litellm", litellm_updates)
+        self._write_env_values(self._ctx.project_root / ".env", runtime_updates)
 
         store = self._credential_store()
         saved_profiles: list[str] = []
@@ -1964,34 +1992,7 @@ class SetupDomainService(DomainServiceBase):
             secret_binding_risks=secret_binding_risks,
         )
 
-    # ── policy / agent profile helpers ───────────────────────────
-
-    def _policy_profile_by_id(self, profile_id: str) -> PolicyProfile | None:
-        catalog = {item_id: profile for item_id, _, profile, _, _ in self.ctx.host._policy_catalog()}
-        return catalog.get(str(profile_id).strip().lower())
-
-    def _resolve_effective_policy_profile(
-        self,
-        project: Any | None,
-    ) -> tuple[str, PolicyProfile]:
-        if project is not None:
-            metadata = getattr(project, "metadata", {}) or {}
-            stored_profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
-            stored_profile = self._policy_profile_by_id(stored_profile_id)
-            if stored_profile is not None:
-                return stored_profile_id, stored_profile
-        if self.ctx.policy_engine is not None:
-            runtime_profile = self.ctx.policy_engine.profile
-            runtime_profile_id = str(runtime_profile.name).strip().lower() or "default"
-            mapped = self._policy_profile_by_id(runtime_profile_id)
-            if mapped is not None:
-                return runtime_profile_id, mapped
-        return "default", DEFAULT_PROFILE
-
-    @staticmethod
-    def _tool_profile_allowed(required: str, allowed: str) -> bool:
-        ranking = {"minimal": 0, "standard": 1, "privileged": 2}
-        return ranking.get(required, 1) <= ranking.get(allowed, 1)
+    # ── agent profile helpers ──────────────────────────────────
 
     def _resolve_active_agent_profile_payload(
         self,
@@ -2032,7 +2033,7 @@ class SetupDomainService(DomainServiceBase):
     # ── env / credential / runtime helpers ───────────────────────
 
     def _credential_store(self) -> CredentialStore:
-        return CredentialStore(store_path=self.ctx.project_root / "auth-profiles.json")
+        return CredentialStore(store_path=self._ctx.project_root / "auth-profiles.json")
 
     def _env_file_values(self, path: Path) -> dict[str, str]:
         if not path.exists():
@@ -2082,8 +2083,8 @@ class SetupDomainService(DomainServiceBase):
     async def _safe_secret_audit(self, project_ref: str | None) -> Any | None:
         try:
             return await SecretService(
-                self.ctx.project_root,
-                store_group=self.ctx.stores,
+                self._ctx.project_root,
+                store_group=self._stores,
             ).audit(project_ref=project_ref)
         except Exception:
             return None
@@ -2182,8 +2183,8 @@ class SetupDomainService(DomainServiceBase):
         providers = [
             item for item in config_value.get("providers", []) if isinstance(item, dict)
         ]
-        env_litellm = self._env_file_values(self.ctx.project_root / ".env.litellm")
-        env_runtime = self._env_file_values(self.ctx.project_root / ".env")
+        env_litellm = self._env_file_values(self._ctx.project_root / ".env.litellm")
+        env_runtime = self._env_file_values(self._ctx.project_root / ".env")
         profiles = self._credential_store().list_profiles()
         oauth_profile = next(
             (profile for profile in profiles if profile.provider == "openai-codex"),
@@ -2223,7 +2224,21 @@ class SetupDomainService(DomainServiceBase):
         }
 
     async def _collect_bridge_refs(self) -> list[dict[str, Any]]:
-        return await self.ctx.host._collect_bridge_refs()
+        from octoagent.core.models import ProjectBindingType
+
+        project = await self._stores.project_store.get_default_project()
+        if project is None:
+            return []
+        bindings = await self._stores.project_store.list_bindings(project.project_id)
+        results: list[dict[str, Any]] = []
+        for binding in bindings:
+            if binding.binding_type not in {
+                ProjectBindingType.ENV_REF,
+                ProjectBindingType.ENV_FILE,
+            }:
+                continue
+            results.append(binding.model_dump(mode="json"))
+        return results
 
     # ── runtime activation ───────────────────────────────────────
 
@@ -2236,7 +2251,7 @@ class SetupDomainService(DomainServiceBase):
         raise_on_failure: bool,
     ) -> dict[str, Any]:
         """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
-        activation_service = RuntimeActivationService(self.ctx.project_root)
+        activation_service = RuntimeActivationService(self._ctx.project_root)
         try:
             activation = await activation_service.start_proxy()
         except RuntimeActivationError as exc:
@@ -2246,7 +2261,7 @@ class SetupDomainService(DomainServiceBase):
                     f"{failure_prefix}：{exc}",
                 ) from exc
             return {
-                "project_root": str(self.ctx.project_root),
+                "project_root": str(self._ctx.project_root),
                 "source_root": "",
                 "compose_file": "",
                 "proxy_url": "",
@@ -2269,7 +2284,7 @@ class SetupDomainService(DomainServiceBase):
             "activation_succeeded": True,
         }
 
-        update_service = self.ctx.update_service
+        update_service = self._ctx.update_service
         if activation.managed_runtime and update_service is not None:
             if request.surface == ControlPlaneSurface.CLI:
                 await update_service.restart(
@@ -2303,7 +2318,7 @@ class SetupDomainService(DomainServiceBase):
         delay_seconds: float,
         trigger_source: UpdateTriggerSource,
     ) -> None:
-        update_service = self.ctx.update_service
+        update_service = self._ctx.update_service
         if update_service is None:
             return
         await asyncio.sleep(delay_seconds)
@@ -2325,16 +2340,100 @@ class SetupDomainService(DomainServiceBase):
         }
         return mapping.get(surface, UpdateTriggerSource.SYSTEM)
 
+    # ── wizard session ────────────────────────────────────────────
+
+    async def _get_wizard_session(self) -> Any:
+        from octoagent.core.models import (
+            WizardSessionDocument,
+            WizardStepDocument,
+        )
+        from octoagent.provider.dx.onboarding_service import OnboardingService
+
+        onboarding = OnboardingService(self._ctx.project_root)
+        session, _, notes = onboarding.load_or_create_session()
+        current_step = session.current_step.value
+        steps = [
+            WizardStepDocument(
+                step_id=step.value,
+                label=step.value.replace("_", " "),
+                status=state.status.value,
+                summary=state.summary,
+                actions=[action.model_dump(mode="json") for action in state.actions],
+                detail_ref=state.detail_ref,
+            )
+            for step, state in session.steps.items()
+        ]
+        status = "ready" if session.summary.overall_status.value == "READY" else "action_required"
+        warnings = list(notes)
+        degraded = ControlPlaneDegradedState(
+            is_degraded=status != "ready",
+            reasons=list(notes),
+        )
+        return WizardSessionDocument(
+            current_step=current_step,
+            steps=steps,
+            summary=session.summary.model_dump(mode="json"),
+            next_actions=[
+                action.model_dump(mode="json") for action in session.summary.next_actions
+            ],
+            resumable=True,
+            blocking_reason=session.summary.headline,
+            status=status,
+            warnings=warnings,
+            degraded=degraded,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="wizard.refresh",
+                    label="刷新引导状态",
+                    action_id="wizard.refresh",
+                ),
+                ControlPlaneCapability(
+                    capability_id="wizard.restart",
+                    label="重新开始引导",
+                    action_id="wizard.restart",
+                ),
+            ],
+        )
+
     # ── diagnostics helpers ──────────────────────────────────────
 
     def _load_runtime_snapshot(self) -> dict[str, Any]:
-        return self.ctx.host._load_runtime_snapshot()
+        if self._update_status_store is None:
+            return {}
+        loader = getattr(self._update_status_store, "load_runtime_state", None)
+        if not callable(loader):
+            return {}
+        runtime_state = loader()
+        if runtime_state is None:
+            return {}
+        return runtime_state.model_dump(mode="json")
 
     def _load_update_summary(self) -> dict[str, Any]:
-        return self.ctx.host._load_update_summary()
+        if self._update_status_store is None:
+            return {}
+        loader = getattr(self._update_status_store, "load_summary", None)
+        if not callable(loader):
+            return {}
+        summary = loader()
+        if summary is None:
+            return {}
+        return summary.model_dump(mode="json")
 
     def _build_channel_summary(self) -> dict[str, Any]:
-        return self.ctx.host._build_channel_summary()
+        cfg = load_config(self._ctx.project_root)
+        telegram_cfg = getattr(getattr(cfg, "channels", None), "telegram", None) if cfg else None
+        pending_pairings = (
+            len(self._telegram_state_store.list_pending_pairings())
+            if self._telegram_state_store is not None
+            else 0
+        )
+        return {
+            "telegram": {
+                "enabled": telegram_cfg.enabled if telegram_cfg else False,
+                "mode": telegram_cfg.mode if telegram_cfg else "",
+                "pending_pairings": pending_pairings,
+            }
+        }
 
     # ── merge / dedupe helpers ───────────────────────────────────
 

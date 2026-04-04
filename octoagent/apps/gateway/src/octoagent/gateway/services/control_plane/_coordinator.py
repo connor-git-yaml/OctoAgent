@@ -57,8 +57,15 @@ from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext
 
+from .agent_service import AgentProfileDomainService
+from .automation_service import AutomationDomainService
+from .import_service import ImportDomainService
+from .mcp_service import McpDomainService
+from .memory_service import MemoryDomainService
 from .session_service import SessionDomainService
+from .setup_service import SetupDomainService
 from .work_service import WorkDomainService
+from .worker_service import WorkerProfileDomainService
 
 _AUDIT_TASK_ID = "ops-control-plane"
 _AUDIT_TRACE_ID = "trace-ops-control-plane"
@@ -127,16 +134,51 @@ class ControlPlaneCoordinator:
         # 实例化 domain services
         self._session_service = SessionDomainService(self._ctx)
         self._work_service = WorkDomainService(self._ctx)
+        self._agent_service = AgentProfileDomainService(self._ctx)
+        self._automation_service = AutomationDomainService(self._ctx)
+        self._import_service = ImportDomainService(self._ctx)
+        self._mcp_service = McpDomainService(self._ctx)
+        self._memory_service = MemoryDomainService(self._ctx)
+        self._setup_service = SetupDomainService(
+            self._ctx,
+            telegram_state_store=telegram_state_store,
+            update_status_store=update_status_store,
+        )
+        self._worker_service = WorkerProfileDomainService(self._ctx)
+
+        # 注册 service_registry 供跨 service 调用
+        self._ctx.service_registry = {
+            "agent": self._agent_service,
+            "automation": self._automation_service,
+            "import": self._import_service,
+            "mcp": self._mcp_service,
+            "memory": self._memory_service,
+            "session": self._session_service,
+            "setup": self._setup_service,
+            "work": self._work_service,
+            "worker": self._worker_service,
+        }
 
         # 汇总 action 路由
+        all_services = [
+            self._session_service,
+            self._work_service,
+            self._agent_service,
+            self._automation_service,
+            self._import_service,
+            self._mcp_service,
+            self._memory_service,
+            self._setup_service,
+            self._worker_service,
+        ]
         self._action_dispatch: dict[str, Any] = {}
-        self._action_dispatch.update(self._session_service.action_routes())
-        self._action_dispatch.update(self._work_service.action_routes())
+        for svc in all_services:
+            self._action_dispatch.update(svc.action_routes())
 
         # 汇总 document 路由
         self._document_dispatch: dict[str, Any] = {}
-        self._document_dispatch.update(self._session_service.document_routes())
-        self._document_dispatch.update(self._work_service.document_routes())
+        for svc in all_services:
+            self._document_dispatch.update(svc.document_routes())
 
     # ------------------------------------------------------------------
     # 属性和延迟绑定
@@ -151,9 +193,12 @@ class ControlPlaneCoordinator:
 
     def bind_proxy_manager(self, proxy_manager: Any | None) -> None:
         self._proxy_manager = proxy_manager
+        self._setup_service._proxy_manager = proxy_manager
+        self._mcp_service._proxy_manager = proxy_manager
 
     def bind_mcp_installer(self, installer: Any) -> None:
         self._mcp_installer = installer
+        self._mcp_service._mcp_installer = installer
 
     # ------------------------------------------------------------------
     # 启动初始化

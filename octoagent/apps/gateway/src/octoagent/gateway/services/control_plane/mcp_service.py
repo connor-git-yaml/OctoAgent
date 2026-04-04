@@ -63,14 +63,31 @@ class McpDomainService(DomainServiceBase):
         self._mcp_installer = mcp_installer
         self._proxy_manager = proxy_manager
 
+    # ── action / document routes ─────────────────────────────────
+
+    def action_routes(self) -> dict[str, Any]:
+        return {
+            "mcp_provider.install": self._handle_mcp_provider_install,
+            "mcp_provider.install_status": self._handle_mcp_provider_install_status,
+            "mcp_provider.uninstall": self._handle_mcp_provider_uninstall,
+            "mcp_provider.save": self._handle_mcp_provider_save,
+            "mcp_provider.delete": self._handle_mcp_provider_delete,
+            "provider.oauth.openai_codex": self._handle_provider_oauth_openai_codex,
+        }
+
+    def document_routes(self) -> dict[str, Any]:
+        return {
+            "mcp_provider_catalog": self.get_mcp_provider_catalog_document,
+        }
+
     # ── resource producers ──────────────────────────────────────
 
     async def get_mcp_provider_catalog_document(self) -> McpProviderCatalogDocument:
-        _, selected_project, _, _ = await self.ctx.resolve_selection()
+        _, selected_project, _, _ = await self._resolve_selection()
         mcp_registry = (
             None
-            if self.ctx.capability_pack_service is None
-            else self.ctx.capability_pack_service.mcp_registry
+            if self._ctx.capability_pack_service is None
+            else self._ctx.capability_pack_service.mcp_registry
         )
         if mcp_registry is None:
             return McpProviderCatalogDocument(
@@ -179,7 +196,7 @@ class McpDomainService(DomainServiceBase):
 
     # ── action handlers ─────────────────────────────────────────
 
-    async def handle_mcp_provider_install(
+    async def _handle_mcp_provider_install(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -229,7 +246,7 @@ class McpDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_mcp_provider_install_status(
+    async def _handle_mcp_provider_install_status(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -258,7 +275,7 @@ class McpDomainService(DomainServiceBase):
             },
         )
 
-    async def handle_mcp_provider_uninstall(
+    async def _handle_mcp_provider_uninstall(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -290,13 +307,13 @@ class McpDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_mcp_provider_save(
+    async def _handle_mcp_provider_save(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         if (
-            self.ctx.capability_pack_service is None
-            or self.ctx.capability_pack_service.mcp_registry is None
+            self._ctx.capability_pack_service is None
+            or self._ctx.capability_pack_service.mcp_registry is None
         ):
             raise self._action_error("MCP_REGISTRY_UNAVAILABLE", "MCP registry 未绑定")
         raw = request.params.get("provider")
@@ -331,8 +348,8 @@ class McpDomainService(DomainServiceBase):
                 "mount_policy": mount_policy,
             }
         )
-        self.ctx.capability_pack_service.mcp_registry.save_config(config)
-        await self.ctx.capability_pack_service.refresh()
+        self._ctx.capability_pack_service.mcp_registry.save_config(config)
+        await self._ctx.capability_pack_service.refresh()
         document = await self.get_mcp_provider_catalog_document()
         return self._completed_result(
             request=request,
@@ -349,22 +366,22 @@ class McpDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_mcp_provider_delete(
+    async def _handle_mcp_provider_delete(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         if (
-            self.ctx.capability_pack_service is None
-            or self.ctx.capability_pack_service.mcp_registry is None
+            self._ctx.capability_pack_service is None
+            or self._ctx.capability_pack_service.mcp_registry is None
         ):
             raise self._action_error("MCP_REGISTRY_UNAVAILABLE", "MCP registry 未绑定")
         provider_id = self._normalize_provider_id(self._param_str(request.params, "provider_id"))
         if not provider_id:
             raise self._action_error("MCP_PROVIDER_ID_REQUIRED", "provider_id 不能为空")
-        removed = self.ctx.capability_pack_service.mcp_registry.delete_config(provider_id)
+        removed = self._ctx.capability_pack_service.mcp_registry.delete_config(provider_id)
         if not removed:
             raise self._action_error("MCP_PROVIDER_NOT_FOUND", "MCP provider 不存在")
-        await self.ctx.capability_pack_service.refresh()
+        await self._ctx.capability_pack_service.refresh()
         return self._completed_result(
             request=request,
             code="MCP_PROVIDER_DELETED",
@@ -377,7 +394,7 @@ class McpDomainService(DomainServiceBase):
             ],
         )
 
-    async def handle_provider_oauth_openai_codex(
+    async def _handle_provider_oauth_openai_codex(
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
@@ -423,7 +440,7 @@ class McpDomainService(DomainServiceBase):
         )
         store.set_profile(profile)
         self._write_env_values(
-            self.ctx.project_root / ".env.litellm",
+            self._ctx.project_root / ".env.litellm",
             {
                 env_name: credential.access_token.get_secret_value(),
             },
@@ -431,8 +448,8 @@ class McpDomainService(DomainServiceBase):
 
         # OAuth 成功后自动同步 litellm-config.yaml
         try:
-            config = load_config(self.ctx.project_root)
-            generate_litellm_config(config, self.ctx.project_root)
+            config = load_config(self._ctx.project_root)
+            generate_litellm_config(config, self._ctx.project_root)
             log.info("oauth_litellm_config_synced")
         except Exception as exc:
             log.warning("oauth_litellm_config_sync_failed", error=str(exc))
@@ -486,12 +503,12 @@ class McpDomainService(DomainServiceBase):
         这里直接委托回 ctx.host（原 ControlPlaneService），
         因为 skill governance 生成逻辑横跨 capability pack / policy 等多个子系统。
         """
-        return await self.ctx.host.get_skill_governance_document(
+        return await self._get_service("setup").get_skill_governance_document(
             selected_project=selected_project,
         )
 
     def _credential_store(self) -> CredentialStore:
-        return CredentialStore(store_path=self.ctx.project_root / "auth-profiles.json")
+        return CredentialStore(store_path=self._ctx.project_root / "auth-profiles.json")
 
     def _write_env_values(self, path: Path, updates: Mapping[str, str]) -> None:
         normalized = {
@@ -533,7 +550,7 @@ class McpDomainService(DomainServiceBase):
         raise_on_failure: bool,
     ) -> dict[str, Any]:
         """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
-        activation_service = RuntimeActivationService(self.ctx.project_root)
+        activation_service = RuntimeActivationService(self._ctx.project_root)
         try:
             activation = await activation_service.start_proxy()
         except RuntimeActivationError as exc:
@@ -543,7 +560,7 @@ class McpDomainService(DomainServiceBase):
                     f"{failure_prefix}：{exc}",
                 ) from exc
             return {
-                "project_root": str(self.ctx.project_root),
+                "project_root": str(self._ctx.project_root),
                 "source_root": "",
                 "compose_file": "",
                 "proxy_url": "",
@@ -566,7 +583,7 @@ class McpDomainService(DomainServiceBase):
             "activation_succeeded": True,
         }
 
-        update_service = self.ctx.update_service
+        update_service = self._ctx.update_service
         if activation.managed_runtime and update_service is not None:
             if request.surface == ControlPlaneSurface.CLI:
                 await update_service.restart(
@@ -600,7 +617,7 @@ class McpDomainService(DomainServiceBase):
         delay_seconds: float,
         trigger_source: UpdateTriggerSource,
     ) -> None:
-        update_service = self.ctx.update_service
+        update_service = self._ctx.update_service
         if update_service is None:
             return
         await asyncio.sleep(delay_seconds)

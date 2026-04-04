@@ -39,6 +39,8 @@ class ControlPlaneContext:
 
     封装原 ControlPlaneService.__init__ 中持有的各项依赖，
     domain service 通过 ctx 访问而不是各自持有重复引用。
+
+    service_registry: 延迟注册的 domain service 引用，用于跨 service 调用。
     """
 
     def __init__(
@@ -75,6 +77,8 @@ class ControlPlaneContext:
         self.policy_engine = policy_engine
         self.update_service = update_service
         self.automation_store = automation_store
+        # 跨 service 调用注册表（coordinator 构建后注入）
+        self.service_registry: dict[str, Any] = {}
 
 
 class DomainServiceBase:
@@ -90,6 +94,13 @@ class DomainServiceBase:
     def __init__(self, ctx: ControlPlaneContext) -> None:
         self._ctx = ctx
         self._stores = ctx.store_group
+
+    def _get_service(self, name: str) -> Any:
+        """从 service_registry 获取其他 domain service 实例。"""
+        svc = self._ctx.service_registry.get(name)
+        if svc is None:
+            raise RuntimeError(f"service '{name}' 未在 service_registry 中注册")
+        return svc
 
     def action_routes(self) -> dict[str, Any]:
         """子类实现：返回 {action_id: handler} 映射。"""
@@ -230,6 +241,113 @@ class DomainServiceBase:
             resource_id=resource_id,
             schema_version=1,
         )
+
+    # ------------------------------------------------------------------
+    # 异常构建
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _action_error(code: str, message: str) -> ControlPlaneActionError:
+        """快捷构建 ControlPlaneActionError（供 raise self._action_error(…) 使用）。"""
+        return ControlPlaneActionError(code, message)
+
+    # ------------------------------------------------------------------
+    # 数据规范化工具
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_text_list(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raw = str(value).strip()
+        if not raw:
+            return []
+        if "\n" in raw:
+            return [item.strip() for item in raw.splitlines() if item.strip()]
+        if "," in raw:
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        return [raw] if raw else []
+
+    @staticmethod
+    def _normalize_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
+
+    # ------------------------------------------------------------------
+    # Policy 共享查询（agent / setup / worker 都需要）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _policy_catalog() -> list[tuple[str, str, Any, str, list[str]]]:
+        """返回 (profile_id, label, PolicyProfile, risk_level, recommended_for)。"""
+        from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE
+
+        return [
+            ("strict", "谨慎", STRICT_PROFILE, "warning", ["首次使用", "公网暴露", "高风险项目"]),
+            ("default", "平衡", DEFAULT_PROFILE, "info", ["本地开发", "可信内网", "默认推荐"]),
+            ("permissive", "自主", PERMISSIVE_PROFILE, "high", ["完全受信任环境", "高级用户"]),
+        ]
+
+    def _policy_profile_by_id(self, profile_id: str) -> Any | None:
+        catalog = {
+            item_id: profile
+            for item_id, _, profile, _, _ in self._policy_catalog()
+        }
+        return catalog.get(str(profile_id).strip().lower())
+
+    def _resolve_effective_policy_profile(
+        self,
+        project: Any | None,
+    ) -> tuple[str, Any]:
+        from octoagent.policy import DEFAULT_PROFILE
+
+        if project is not None:
+            metadata = getattr(project, "metadata", {}) or {}
+            stored_profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
+            stored_profile = self._policy_profile_by_id(stored_profile_id)
+            if stored_profile is not None:
+                return stored_profile_id, stored_profile
+        if self._ctx.policy_engine is not None:
+            runtime_profile = self._ctx.policy_engine.profile
+            runtime_profile_id = str(runtime_profile.name).strip().lower() or "default"
+            mapped = self._policy_profile_by_id(runtime_profile_id)
+            if mapped is not None:
+                return runtime_profile_id, mapped
+        return "default", DEFAULT_PROFILE
+
+    @staticmethod
+    def _tool_profile_allowed(required: str, allowed: str) -> bool:
+        ranking = {"minimal": 0, "standard": 1, "privileged": 2}
+        return ranking.get(required, 1) <= ranking.get(allowed, 1)
+
+    @staticmethod
+    def _describe_policy_approval(profile: Any) -> str:
+        """生成 policy profile 的审批策略描述。"""
+        reversible = getattr(profile, "reversible_action", None)
+        irreversible = getattr(profile, "irreversible_action", None)
+        if reversible is not None and irreversible is not None:
+            rev_val = reversible.value if hasattr(reversible, "value") else str(reversible)
+            irr_val = irreversible.value if hasattr(irreversible, "value") else str(irreversible)
+            if rev_val == "ask" and irr_val == "ask":
+                return "可逆 / 不可逆操作都需要确认"
+            if irr_val == "ask":
+                return "仅不可逆操作需要确认"
+        return "默认直接执行"
+
+    async def _sync_policy_engine_for_project(self, project: Any) -> None:
+        """同步 policy engine 的 runtime profile 到项目配置。"""
+        if self._ctx.policy_engine is None:
+            return
+        metadata = getattr(project, "metadata", {}) or {}
+        profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
+        if not profile_id:
+            return
+        profile = self._policy_profile_by_id(profile_id)
+        if profile is not None:
+            self._ctx.policy_engine.profile = profile
 
     # ------------------------------------------------------------------
     # 共享查询

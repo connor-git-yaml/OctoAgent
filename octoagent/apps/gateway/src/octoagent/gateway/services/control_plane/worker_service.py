@@ -56,7 +56,6 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkerProfileViewItem,
 )
-from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE, PolicyProfile
 from octoagent.provider.dx.config_wizard import load_config
 from ulid import ULID
 
@@ -1290,46 +1289,6 @@ class WorkerProfileDomainService(DomainServiceBase):
         )
 
     # ══════════════════════════════════════════════════════════════
-    #  Policy Helpers（本地副本，agent_service 各自独立）
-    # ══════════════════════════════════════════════════════════════
-
-    def _policy_catalog(
-        self,
-    ) -> list[tuple[str, str, PolicyProfile, str, list[str]]]:
-        return [
-            ("strict", "谨慎", STRICT_PROFILE, "warning", ["首次使用", "公网暴露", "高风险项目"]),
-            ("default", "平衡", DEFAULT_PROFILE, "info", ["本地开发", "可信内网", "默认推荐"]),
-            ("permissive", "自主", PERMISSIVE_PROFILE, "high", ["完全受信任环境", "高级用户"]),
-        ]
-
-    def _policy_profile_by_id(self, profile_id: str) -> PolicyProfile | None:
-        catalog = {item_id: profile for item_id, _, profile, _, _ in self._policy_catalog()}
-        return catalog.get(str(profile_id).strip().lower())
-
-    def _resolve_effective_policy_profile(
-        self,
-        project: Any | None,
-    ) -> tuple[str, PolicyProfile]:
-        if project is not None:
-            metadata = getattr(project, "metadata", {}) or {}
-            stored_profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
-            stored_profile = self._policy_profile_by_id(stored_profile_id)
-            if stored_profile is not None:
-                return stored_profile_id, stored_profile
-        if self._ctx.policy_engine is not None:
-            runtime_profile = self._ctx.policy_engine.profile
-            runtime_profile_id = str(runtime_profile.name).strip().lower() or "default"
-            mapped = self._policy_profile_by_id(runtime_profile_id)
-            if mapped is not None:
-                return runtime_profile_id, mapped
-        return "default", DEFAULT_PROFILE
-
-    @staticmethod
-    def _tool_profile_allowed(required: str, allowed: str) -> bool:
-        ranking = {"minimal": 0, "standard": 1, "privileged": 2}
-        return ranking.get(required, 1) <= ranking.get(allowed, 1)
-
-    # ══════════════════════════════════════════════════════════════
     #  Model Alias Helpers
     # ══════════════════════════════════════════════════════════════
 
@@ -1634,17 +1593,6 @@ class WorkerProfileDomainService(DomainServiceBase):
         ]
 
     @staticmethod
-    def _normalize_text_list(value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        raw = str(value).strip()
-        if not raw:
-            return []
-        return [item.strip() for item in raw.splitlines() if item.strip()]
-
-    @staticmethod
     def _normalize_string_list(value: Any) -> list[str]:
         if value is None:
             return []
@@ -1654,12 +1602,6 @@ class WorkerProfileDomainService(DomainServiceBase):
         if not raw:
             return []
         return [item.strip() for item in raw.split(",") if item.strip()]
-
-    @staticmethod
-    def _normalize_dict(value: Any) -> dict[str, Any]:
-        if isinstance(value, dict):
-            return dict(value)
-        return {}
 
     @staticmethod
     def _slugify_worker_profile_token(value: str) -> str:

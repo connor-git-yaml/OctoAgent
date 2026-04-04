@@ -45,16 +45,12 @@ from octoagent.core.models import (
     PolicyProfileItem,
     PolicyProfilesDocument,
     Project,
-    Task,
-    TaskPointers,
-    TaskStatus,
     WorkerProfile,
     WorkerProfileOriginKind,
     WorkerProfileStatus,
 )
 from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
-from octoagent.core.models.task import RequesterInfo
-from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE, PolicyProfile
+
 from octoagent.provider.dx.config_wizard import load_config
 from ulid import ULID
 
@@ -62,9 +58,6 @@ from ..agent_decision import build_behavior_system_summary
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
 
 log = structlog.get_logger()
-
-_POLICY_TASK_ID = "system"
-_POLICY_TRACE_ID = "trace-policy-engine"
 
 
 class AgentProfileDomainService(DomainServiceBase):
@@ -82,8 +75,8 @@ class AgentProfileDomainService(DomainServiceBase):
             "agent_profile.save": self._handle_agent_profile_save,
             "agent_profile.update_resource_limits": self._handle_update_resource_limits,
             "policy_profile.select": self._handle_policy_profile_select,
-            "agent.list_models": self._handle_agent_list_models,
-            "agent.list_archetypes": self._handle_agent_list_archetypes,
+            "agent.list_available_models": self._handle_agent_list_models,
+            "agent.list_worker_archetypes": self._handle_agent_list_archetypes,
             "agent.list_tool_profiles": self._handle_agent_list_tool_profiles,
             "agent.create_worker_with_project": self._handle_agent_create_worker_with_project,
         }
@@ -750,85 +743,6 @@ class AgentProfileDomainService(DomainServiceBase):
                 self._resource_ref("session_projection", "sessions:overview"),
             ],
         )
-
-    # ══════════════════════════════════════════════════════════════
-    #  Policy Helpers
-    # ══════════════════════════════════════════════════════════════
-
-    def _policy_catalog(
-        self,
-    ) -> list[tuple[str, str, PolicyProfile, str, list[str]]]:
-        return [
-            ("strict", "谨慎", STRICT_PROFILE, "warning", ["首次使用", "公网暴露", "高风险项目"]),
-            ("default", "平衡", DEFAULT_PROFILE, "info", ["本地开发", "可信内网", "默认推荐"]),
-            ("permissive", "自主", PERMISSIVE_PROFILE, "high", ["完全受信任环境", "高级用户"]),
-        ]
-
-    def _policy_profile_by_id(self, profile_id: str) -> PolicyProfile | None:
-        catalog = {item_id: profile for item_id, _, profile, _, _ in self._policy_catalog()}
-        return catalog.get(str(profile_id).strip().lower())
-
-    def _resolve_effective_policy_profile(
-        self,
-        project: Any | None,
-    ) -> tuple[str, PolicyProfile]:
-        if project is not None:
-            metadata = getattr(project, "metadata", {}) or {}
-            stored_profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
-            stored_profile = self._policy_profile_by_id(stored_profile_id)
-            if stored_profile is not None:
-                return stored_profile_id, stored_profile
-        if self._ctx.policy_engine is not None:
-            runtime_profile = self._ctx.policy_engine.profile
-            runtime_profile_id = str(runtime_profile.name).strip().lower() or "default"
-            mapped = self._policy_profile_by_id(runtime_profile_id)
-            if mapped is not None:
-                return runtime_profile_id, mapped
-        return "default", DEFAULT_PROFILE
-
-    async def _sync_policy_engine_for_project(self, project: Any | None) -> None:
-        if self._ctx.policy_engine is None:
-            return
-        _, profile = self._resolve_effective_policy_profile(project)
-        current_name = str(self._ctx.policy_engine.profile.name).strip().lower()
-        if current_name == profile.name:
-            return
-        await self._ensure_policy_system_task()
-        await self._ctx.policy_engine.update_profile(profile)
-
-    async def _ensure_policy_system_task(self) -> None:
-        existing = await self._stores.task_store.get_task(_POLICY_TASK_ID)
-        if existing is not None:
-            return
-        now = datetime.now(tz=UTC)
-        await self._stores.task_store.create_task(
-            Task(
-                task_id=_POLICY_TASK_ID,
-                created_at=now,
-                updated_at=now,
-                status=TaskStatus.RUNNING,
-                title="Policy Engine Runtime",
-                thread_id="ops:policy-engine",
-                scope_id="ops:policy-engine",
-                requester=RequesterInfo(channel="system", sender_id="system:policy-engine"),
-                pointers=TaskPointers(),
-                trace_id=_POLICY_TRACE_ID,
-            )
-        )
-        await self._stores.conn.commit()
-
-    @staticmethod
-    def _describe_policy_approval(profile: PolicyProfile) -> str:
-        if profile.reversible_action.value == "ask" and profile.irreversible_action.value == "ask":
-            return "可逆 / 不可逆操作都需要确认"
-        if profile.irreversible_action.value == "ask":
-            return "仅不可逆操作需要确认"
-        return "默认直接执行"
-
-    @staticmethod
-    def _tool_profile_allowed(required: str, allowed: str) -> bool:
-        ranking = {"minimal": 0, "standard": 1, "privileged": 2}
-        return ranking.get(required, 1) <= ranking.get(allowed, 1)
 
     # ══════════════════════════════════════════════════════════════
     #  Agent Profile Helpers
