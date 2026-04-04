@@ -157,6 +157,16 @@ octoagent/
 | Web UI        | React + Vite                          | 从 M0 起一步到位，避免迁移债务；SSE 原生 EventSource 对接 Gateway                                                              |
 | 可观测        | Logfire + structlog + Event Store     | Pydantic 团队出品，自动 instrument Pydantic AI/FastAPI；structlog 结构化日志；Event Store 已有 metrics 数据源，无需 Prometheus |
 
+## 设计文档索引
+
+| 文档 | 路径 | 说明 |
+|------|------|------|
+| 工程蓝图 | `docs/blueprint.md` | 所有设计决策的权威来源 |
+| OctoAgent 架构分析 | `docs/design/octoagent-architecture.md` | 主线代码深度逆向分析 + 四系统横向对比 |
+| Claude Code 架构分析 | `docs/design/claude-code-architecture.md` | Anthropic 官方 CLI 源码分析 |
+| OpenClaw 架构分析 | `docs/design/openclaw-architecture.md` | 多渠道 AI 服务架构分析 |
+| Agent Zero 架构分析 | `docs/design/agent-zero-architecture.md` | 自主 Agent 框架架构分析 |
+
 ## 项目级 Skills（Codex + Claude 通用）
 
 - `milestone-blueprint-split-sync`  

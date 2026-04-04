@@ -733,3 +733,47 @@ async def call_with_fallback(self, messages, model_alias):
 9. **Worker 取消信号依赖 0.1s 轮询**（`worker_runtime.py:807`）：`asyncio.wait_for(asyncio.shield(backend_task), timeout=0.1)` — 最坏情况下取消响应延迟 100ms
 
 10. **AgentContextService._shared_llm_service 类变量注入**（`agent_context.py:509`）：通过 `set_llm_service()` 类方法注入，隐式全局状态，测试时需要注意隔离
+
+## 9. 四系统横向对比
+
+> 完整的对照系统分析见 `docs/design/` 下的对应文档。
+
+### 架构定位
+
+| 维度 | OctoAgent | Claude Code | OpenClaw | Agent Zero |
+|------|-----------|-------------|----------|-----------|
+| **定位** | 个人 AI OS | CLI 开发工具 | 多渠道 AI 服务 | 自主 Agent 框架 |
+| **语言** | Python 3.12 | TypeScript (Bun) | TypeScript (Node) | Python 3.12 |
+| **编排** | Orchestrator + Worker 委派 | 单 Agent 循环 + 子 Agent | Channel → Agent 直连 | 递归嵌套 monologue |
+| **状态** | Event Sourcing + SQLite WAL | Zustand + 磁盘 | JSON + SQLite | 全内存 |
+| **模型** | LiteLLM Proxy（多厂商） | Anthropic SDK 直连 | Anthropic SDK 直连 | LiteLLM（多厂商） |
+
+### 核心机制对比
+
+| 机制 | OctoAgent | Claude Code | OpenClaw | Agent Zero |
+|------|-----------|-------------|----------|-----------|
+| **权限** | PolicyEngine 双维度 | 四层决策 + 自动分类器 | Tool Profile + /approve | 无审批 |
+| **Context 压缩** | Rolling Summary | 三级渐进（Micro/Auto/Memory） | Compaction（保留 40%） | 三级渐进（65%/合并/丢弃） |
+| **Memory** | SoR 三步 + 向量检索 | MEMORY.md + auto memory | MEMORY.md + sqlite-vec | FAISS 向量 + 分区 |
+| **工具执行** | ToolBroker + Policy Hook | StreamingToolExecutor 并发 | Pi Agent ReAct 循环 | LLM JSON → DirtyJson |
+| **MCP** | 基础 stdio | 成熟多传输（5 种） | Per-session 生命周期 | 无 |
+| **多 Agent** | Delegation Plane + Worker | AgentTool 子 Agent | Sub-agent + ACP | Subordinate 递归 |
+| **行为系统** | 四层 BehaviorScope | CLAUDE.md 三级加载 | Bootstrap 文件注入 | Extension + 模板 |
+
+### OctoAgent 相对各系统的借鉴方向
+
+**从 Claude Code 借鉴**：
+- AutoCompact 简单阈值公式（`contextWindow - 13K`），替代复杂的 budget planner
+- StreamingToolExecutor 并发执行模式
+- 七种 Hook 点（pre/post_tool_call, session_start 等）
+- CLAUDE.md 嵌套发现机制
+
+**从 OpenClaw 借鉴**：
+- Heartbeat 定时自省（主动维护 Memory）
+- 成熟的 MCP 生命周期管理
+- Block Chunking 流式输出
+
+**从 Agent Zero 借鉴**：
+- Extension 系统（19+ 扩展点，优先级排序）
+- Utility Model 概念（低成本模型处理辅助任务）
+- 配置继承机制（Agent 层级配置合并）
