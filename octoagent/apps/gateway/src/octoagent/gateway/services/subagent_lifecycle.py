@@ -56,7 +56,6 @@ from ulid import ULID
 
 if TYPE_CHECKING:
     from octoagent.skills.protocols import (
-        ApprovalBridgeProtocol,
         StructuredModelClientProtocol,
     )
 
@@ -104,7 +103,7 @@ class SubagentSpawnContext:
     tool_broker: Any = None  # ToolBrokerProtocol
     event_store: Any = None  # EventStoreProtocol
     parent_manifest: Any = None  # SkillManifest
-    approval_bridge: Any | None = None
+    on_tool_search_result: Any | None = None
     result_callback: SubagentResultCallback | None = None
 
 
@@ -567,7 +566,7 @@ async def spawn_subagent(
             tool_broker=ctx.tool_broker,
             event_store=ctx.event_store,
             parent_manifest=ctx.parent_manifest,
-            approval_bridge=ctx.approval_bridge,
+            on_tool_search_result=ctx.on_tool_search_result,
             result_callback=ctx.result_callback,
         )
         return runtime, session, executor
@@ -589,7 +588,7 @@ async def _create_subagent_executor(
     tool_broker: ToolBrokerProtocol,
     event_store: EventStoreProtocol,
     parent_manifest: SkillManifest,
-    approval_bridge: ApprovalBridgeProtocol | None,
+    on_tool_search_result: Any | None,
     result_callback: SubagentResultCallback | None,
 ) -> SubagentExecutor:
     """内部辅助：创建 Child Task + A2AConversation + SubagentExecutor。"""
@@ -743,7 +742,7 @@ async def _create_subagent_executor(
         model_client=model_client,
         tool_broker=tool_broker,
         event_store=event_store,
-        approval_bridge=approval_bridge,
+        on_tool_search_result=on_tool_search_result,
     )
 
     # 8. 创建 SubagentExecutor

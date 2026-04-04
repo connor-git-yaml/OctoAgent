@@ -46,32 +46,6 @@ class SkillRunnerProtocol(Protocol):
         """执行 Skill。"""
 
 
-class ApprovalBridgeProtocol(Protocol):
-    """Feature 061: ask 信号桥接协议
-
-    当 ToolBroker 返回 "ask:" 前缀错误时，
-    调用此协议桥接到 ApprovalManager 审批流。
-    """
-
-    async def handle_ask(
-        self,
-        *,
-        tool_name: str,
-        ask_reason: str,
-        agent_runtime_id: str,
-        task_id: str,
-    ) -> str:
-        """处理 ask 信号，返回审批决策
-
-        Returns:
-            "approve": 本次允许（重新执行工具）
-            "always": 永久允许（写入 override + 重新执行）
-            "deny": 拒绝
-            "timeout": 超时（等价于 deny）
-        """
-        ...
-
-
 class SkillRegistryProtocol(Protocol):
     """Registry 协议。"""
 

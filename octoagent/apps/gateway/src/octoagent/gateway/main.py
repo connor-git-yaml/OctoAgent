@@ -237,42 +237,6 @@ def _build_update_service(project_root: Path, *, status_store: Any | None = None
         return UpdateService(project_root)
 
 
-def _resolve_policy_profile_from_project(project: Any | None) -> Any | None:
-    """从 Project metadata 解析预设 policy profile。"""
-    if project is None:
-        return None
-    metadata = getattr(project, "metadata", {}) or {}
-    profile_id = str(metadata.get("policy_profile_id", "")).strip().lower()
-    if not profile_id:
-        return None
-    from octoagent.policy import DEFAULT_PROFILE, PERMISSIVE_PROFILE, STRICT_PROFILE
-
-    catalog = {
-        "strict": STRICT_PROFILE,
-        "default": DEFAULT_PROFILE,
-        "permissive": PERMISSIVE_PROFILE,
-    }
-    return catalog.get(profile_id)
-
-
-async def _resolve_policy_project_for_startup(store_group, project_root: Path) -> Any | None:
-    """启动时优先对齐当前 control plane 已选中的 project。"""
-    from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
-
-    state = ControlPlaneStateStore(project_root).load()
-    selector = await store_group.project_store.get_selector_state("web")
-
-    if state.selected_project_id:
-        project = await store_group.project_store.get_project(state.selected_project_id)
-        if project is not None:
-            return project
-    if selector is not None and selector.active_project_id:
-        project = await store_group.project_store.get_project(selector.active_project_id)
-        if project is not None:
-            return project
-    return await store_group.project_store.get_default_project()
-
-
 def _create_runtime_state_snapshot(
     project_root: Path,
     *,
@@ -588,16 +552,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.capability_pack_service.startup()
     if provider_config.llm_mode == "litellm":
         # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
-        from .services.approval_bridge import ApprovalBridge
-
-        approval_bridge = ApprovalBridge(
-            approval_manager=app.state.approval_manager,
-            sse_hub=app.state.sse_hub,
-        )
-        app.state.approval_bridge = approval_bridge
-
         # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
-        _llm_service_ref: list[Any] = []  # mutable container for late binding
+        _llm_service_ref: list[Any] = []
 
         async def _on_tool_search_result(
             result_json: str, task_id: str = "", trace_id: str = "",
@@ -619,7 +575,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             tool_broker=tool_broker,
             event_store=store_group.event_store,
             hooks=[AgentSessionTurnHook(store_group)],
-            approval_bridge=approval_bridge,
             on_tool_search_result=_on_tool_search_result,
         )
         app.state.llm_service = LLMService(
@@ -756,7 +711,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ),
         capability_pack_service=app.state.capability_pack_service,
         delegation_plane_service=app.state.delegation_plane_service,
-        policy_engine=None,  # Feature 070: PolicyEngine 已移除，后续清理
+        policy_engine=None,
     )
     app.state.automation_scheduler = AutomationSchedulerService(
         control_plane_service=app.state.control_plane_service,

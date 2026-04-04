@@ -45,7 +45,6 @@ from .pipeline_registry import PipelineRegistry
 from .pipeline_tool import GraphPipelineTool
 from .registry_base import AssetSource, BaseFilesystemRegistry
 from .protocols import (
-    ApprovalBridgeProtocol,
     SkillRegistryProtocol,
     SkillRunnerProtocol,
     StructuredModelClientProtocol,
@@ -85,7 +84,6 @@ __all__ = [
     "StructuredModelClientProtocol",
     "SkillRunnerProtocol",
     "SkillRegistryProtocol",
-    "ApprovalBridgeProtocol",
     "RegisteredSkill",
     "SkillRegistry",
     "SkillRunner",

@@ -41,7 +41,7 @@ from .models import (
     resolve_effective_tool_allowlist,
 )
 from .litellm_client import LLMCallError
-from .protocols import ApprovalBridgeProtocol, StructuredModelClientProtocol
+from .protocols import StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
 
@@ -60,14 +60,12 @@ class SkillRunner:
         tool_broker: ToolBrokerProtocol,
         event_store: EventStoreProtocol | None = None,
         hooks: list[SkillRunnerHook] | None = None,
-        approval_bridge: ApprovalBridgeProtocol | None = None,
         on_tool_search_result: Callable[[str, str, str], Awaitable[None]] | None = None,
     ) -> None:
         self._model_client = model_client
         self._tool_broker = tool_broker
         self._event_store = event_store
         self._hooks = hooks or [NoopSkillRunnerHook()]
-        self._approval_bridge = approval_bridge
         # Feature 072: tool_search 结果回调（用于提升 deferred 工具）
         self._on_tool_search_result = on_tool_search_result
 
