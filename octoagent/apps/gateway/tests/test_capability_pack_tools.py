@@ -489,7 +489,6 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="research",
             project_id="project-default",
-            workspace_id="",
             surface="web",
         )
         joined = "\n".join(item["content"] for item in rendered)
@@ -524,7 +523,6 @@ async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="research",
             project_id="project-default",
-            workspace_id="",
             surface="web",
         )
         joined = "\n".join(item["content"] for item in rendered)
@@ -1971,7 +1969,6 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
-                workspace_id="",
                 surface="web",
             )
             assert len(rendered) == 1  # 只有 shared
@@ -2042,7 +2039,6 @@ async def test_bootstrap_token_budget_within_limit(
         rendered = await capability_pack.render_bootstrap_context(
             worker_type="general",
             project_id="project-default",
-            workspace_id="",
             surface="web",
         )
 

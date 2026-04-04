@@ -57,7 +57,6 @@ async def _build_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="",
             source="test",
         )
     )
@@ -136,7 +135,7 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
             ),
             thread_id="thread-context",
             project_id="project-default",
-            workspace_id="",
+            
             task_ids=[task_id],
             last_context_frame_id="context-frame-1",
         )
@@ -150,7 +149,7 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
                 project_id="project-default",
             ),
             project_id="project-default",
-            workspace_id="",
+            
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
         )
@@ -287,7 +286,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
 
     base_pack = await delegation_plane._capability_pack.get_pack(
         project_id="project-default",
-        workspace_id="",
+        
     )
     # Feature 057: 验证 disabled skill 从 pack 的 skills 列表中被过滤
     assert "coding-agent" not in {item.skill_id for item in base_pack.skills}
@@ -439,7 +438,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             session_id=alpha_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            workspace_id="",
+            
             task_ids=[alpha_task_id],
             last_context_frame_id="context-frame-alpha",
         )
@@ -449,7 +448,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             session_id=beta_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            workspace_id="",
+            
             task_ids=[beta_task_id],
             last_context_frame_id="context-frame-beta",
         )
@@ -460,7 +459,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=alpha_task_id,
             session_id=alpha_session_id,
             project_id="project-default",
-            workspace_id="",
+            
             agent_profile_id="agent-profile-alpha",
             owner_profile_id="owner-profile-default",
         )
@@ -471,7 +470,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=beta_task_id,
             session_id=beta_session_id,
             project_id="project-default",
-            workspace_id="",
+            
             agent_profile_id="agent-profile-beta",
             owner_profile_id="owner-profile-default",
         )

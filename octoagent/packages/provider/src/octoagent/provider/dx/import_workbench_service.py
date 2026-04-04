@@ -483,8 +483,8 @@ class ImportWorkbenchService:
     async def _resolve_selection(
         self,
         project_id: str | None,
-        workspace_id: str | None,
-    ) -> tuple[Project, Workspace]:
+        workspace_id: str | None = None,
+    ) -> tuple[Project, Workspace | None]:
         selector = ProjectSelectorService(
             self._root,
             surface=self._surface,
@@ -494,22 +494,6 @@ class ImportWorkbenchService:
             project, workspace = await selector.resolve_project(project_id)
         else:
             project, workspace = await selector.get_active_project()
-        if workspace is None:
-            raise ImportWorkbenchError("WORKSPACE_NOT_FOUND", "当前 project 缺少可用 workspace。")
-        if workspace_id and workspace.workspace_id != workspace_id:
-            async with self._store_group_scope() as store_group:
-                target = await store_group.project_store.get_workspace(workspace_id)
-            if target is None:
-                raise ImportWorkbenchError(
-                    "WORKSPACE_NOT_FOUND",
-                    f"未找到 workspace: {workspace_id}",
-                )
-            if target.project_id != project.project_id:
-                raise ImportWorkbenchError(
-                    "WORKSPACE_PROJECT_MISMATCH",
-                    "workspace 不属于当前 project。",
-                )
-            workspace = target
         return project, workspace
 
     def _resolve_mapping(
@@ -561,7 +545,7 @@ class ImportWorkbenchService:
                     {
                         **item,
                         "project_id": item.get("project_id") or project.project_id,
-                        "workspace_id": item.get("workspace_id") or workspace.workspace_id,
+                        "workspace_id": item.get("workspace_id") or workspace.workspace_id if workspace else "",
                         "partition": item.get("partition") or "chat",
                     }
                 )
@@ -573,7 +557,7 @@ class ImportWorkbenchService:
                     conversation_key=item.conversation_key,
                     conversation_label=item.label,
                     project_id=project.project_id,
-                    workspace_id=workspace.workspace_id,
+                    workspace_id=workspace.workspace_id if workspace else "",
                     scope_id=self._default_scope_id(source.source_type, item.conversation_key),
                     partition="chat",
                 )
@@ -594,7 +578,7 @@ class ImportWorkbenchService:
             seen_keys.add(mapping.conversation_key)
             if (
                 mapping.project_id != project.project_id
-                or mapping.workspace_id != workspace.workspace_id
+                or mapping.workspace_id != workspace.workspace_id if workspace else ""
             ):
                 raise ImportWorkbenchError(
                     "IMPORT_MAPPING_INVALID",
@@ -607,7 +591,7 @@ class ImportWorkbenchService:
             source_id=source.source_id,
             source_type=source.source_type,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id=workspace.workspace_id if workspace else "",
             conversation_mappings=normalized_mappings,
             sender_mappings=sender_items,  # type: ignore[arg-type]
             attachment_policy=attachment_policy,
@@ -706,7 +690,7 @@ class ImportWorkbenchService:
             ProjectBinding(
                 binding_id=f"binding-import-scope-{str(ULID())}",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id=workspace.workspace_id if workspace else "",
                 binding_type=ProjectBindingType.IMPORT_SCOPE,
                 binding_key=scope_id,
                 binding_value=scope_id,

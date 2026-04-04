@@ -96,17 +96,7 @@ class ProjectSelectorService:
                 created_at=now,
                 updated_at=now,
             )
-            workspace = Workspace(
-                workspace_id=f"workspace-{suffix}-primary-{str(ULID())[-6:].lower()}",
-                project_id=project.project_id,
-                slug="primary",
-                name=f"{project.name} Primary",
-                root_path=str(self._root),
-                created_at=now,
-                updated_at=now,
-            )
             await store_group.project_store.create_project(project)
-            await store_group.project_store.create_workspace(workspace)
 
             # 为新项目创建 project-shared 行为文件和基础设施
             materialize_project_behavior_files(
@@ -120,7 +110,6 @@ class ProjectSelectorService:
                 await self._save_selector_state(
                     store_group=store_group,
                     project=project,
-                    workspace=workspace,
                     source="project_create",
                     warnings=[],
                 )
@@ -135,12 +124,10 @@ class ProjectSelectorService:
             project = await store_group.project_store.resolve_project(ref)
             if project is None:
                 raise ProjectSelectorError(f"未找到 project: {ref}")
-            workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-            warnings = self._build_project_warnings(project, workspace)
+            warnings = self._build_project_warnings(project)
             await self._save_selector_state(
                 store_group=store_group,
                 project=project,
-                workspace=workspace,
                 source="project_select",
                 warnings=warnings,
             )
@@ -158,7 +145,7 @@ class ProjectSelectorService:
                 project.project_id,
                 bindings,
             )
-            warnings = self._build_project_warnings(project, workspace)
+            warnings = self._build_project_warnings(project)
             warnings.extend(secret_runtime_summary.get("warnings", []))
             readiness = "ready" if not warnings else "action_required"
         return ProjectInspectSummary(
@@ -246,9 +233,8 @@ class ProjectSelectorService:
             await self._save_selector_state(
                 store_group=store_group,
                 project=project,
-                workspace=workspace,
                 source="default_fallback",
-                warnings=self._build_project_warnings(project, workspace),
+                warnings=self._build_project_warnings(project),
             )
             await store_group.conn.commit()
         elif workspace is None:
@@ -282,7 +268,7 @@ class ProjectSelectorService:
         warnings: list[str] = []
         for project in projects:
             workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-            project_warnings = self._build_project_warnings(project, workspace)
+            project_warnings = self._build_project_warnings(project)
             readiness = "ready" if not project_warnings else "warning"
             candidates.append(
                 ProjectCandidate(
@@ -323,7 +309,6 @@ class ProjectSelectorService:
         *,
         store_group: StoreGroup,
         project: Project,
-        workspace: Workspace | None,
         source: str,
         warnings: list[str],
     ) -> None:
@@ -331,7 +316,7 @@ class ProjectSelectorService:
             selector_id=f"selector-{self._surface}",
             surface=self._surface,
             active_project_id=project.project_id,
-            active_workspace_id=workspace.workspace_id if workspace else None,
+            active_workspace_id=None,
             source=source,
             warnings=warnings,
             updated_at=_utc_now(),
@@ -395,11 +380,8 @@ class ProjectSelectorService:
     @staticmethod
     def _build_project_warnings(
         project: Project,
-        workspace: Workspace | None,
     ) -> list[str]:
         warnings: list[str] = []
-        if not workspace:
-            warnings.append("当前 project 缺少 primary workspace。")
         if project.status != "active":
             warnings.append(f"当前 project 状态不是 active: {project.status.value}")
         return warnings

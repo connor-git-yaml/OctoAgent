@@ -155,7 +155,6 @@ class DelegationPlaneService:
             request=request,
             task=task,
             project_id=project.project_id if project is not None else "",
-            workspace_id="",
             work_id=work_id,
             parent_work_id=str(request.metadata.get("parent_work_id", "")),
             pipeline_run_id="",
@@ -828,7 +827,6 @@ class DelegationPlaneService:
         request: OrchestratorRequest,
         task,
         project_id: str,
-        workspace_id: str,
         work_id: str,
         parent_work_id: str,
         pipeline_run_id: str,
@@ -974,7 +972,6 @@ class DelegationPlaneService:
         bootstrap = await self._capability_pack.render_bootstrap_context(
             worker_type=worker_type,
             project_id=str(state.get("project_id", "")),
-            workspace_id=str(state.get("workspace_id", "")),
             surface=str(runtime_context.get("surface", state.get("surface", "chat"))),
         )
         return PipelineNodeOutcome(
@@ -1219,7 +1216,6 @@ class DelegationPlaneService:
                 legacy_state,
                 task=task,
                 project_id=project.project_id if project is not None else "",
-                workspace_id="",
             ):
                 session_state = legacy_state
         if session_state is not None and session_state.last_context_frame_id:

@@ -150,10 +150,11 @@ class ProjectOption(BaseModel):
     name: str = Field(min_length=1)
     is_default: bool = False
     status: str = Field(default="active")
-    workspace_ids: list[str] = Field(default_factory=list)
+    workspace_ids: list[str] = Field(default_factory=list)  # DEPRECATED: workspace 概念已废弃
     warnings: list[str] = Field(default_factory=list)
 
 
+# DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
 class WorkspaceOption(BaseModel):
     workspace_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
@@ -172,7 +173,7 @@ class ProjectSelectorDocument(ControlPlaneDocument):
     fallback_reason: str = Field(default="")
     switch_allowed: bool = False
     available_projects: list[ProjectOption] = Field(default_factory=list)
-    available_workspaces: list[WorkspaceOption] = Field(default_factory=list)
+    available_workspaces: list[WorkspaceOption] = Field(default_factory=list)  # DEPRECATED: workspace 概念已废弃
 
 
 class SessionProjectionItem(BaseModel):
@@ -187,7 +188,7 @@ class SessionProjectionItem(BaseModel):
     channel: str = Field(default="")
     requester_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     session_owner_profile_id: str = Field(default="")
     session_owner_name: str = Field(default="")
@@ -359,7 +360,7 @@ class ContextSessionItem(BaseModel):
     agent_session_id: str = Field(default="")
     thread_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     rolling_summary: str = Field(default="")
     last_context_frame_id: str = Field(default="")
     last_recall_frame_id: str = Field(default="")
@@ -373,7 +374,7 @@ class ContextFrameItem(BaseModel):
     agent_runtime_id: str = Field(default="")
     agent_session_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     recall_frame_id: str = Field(default="")
     memory_namespace_ids: list[str] = Field(default_factory=list)
@@ -391,7 +392,7 @@ class AgentRuntimeItem(BaseModel):
     agent_runtime_id: str = Field(min_length=1)
     role: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     worker_profile_id: str = Field(default="")
     name: str = Field(default="")
@@ -407,7 +408,7 @@ class AgentSessionContinuityItem(BaseModel):
     kind: str = Field(default="")
     status: str = Field(default="active")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     thread_id: str = Field(default="")
     legacy_session_id: str = Field(default="")
     work_id: str = Field(default="")
@@ -420,7 +421,7 @@ class MemoryNamespaceItem(BaseModel):
     namespace_id: str = Field(min_length=1)
     kind: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_runtime_id: str = Field(default="")
     name: str = Field(default="")
     description: str = Field(default="")
@@ -435,7 +436,7 @@ class RecallFrameItem(BaseModel):
     context_frame_id: str = Field(default="")
     task_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     query: str = Field(default="")
     recent_summary: str = Field(default="")
     memory_namespace_ids: list[str] = Field(default_factory=list)
@@ -449,7 +450,7 @@ class A2AConversationItem(BaseModel):
     task_id: str = Field(default="")
     work_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     source_agent_runtime_id: str = Field(default="")
     source_agent_session_id: str = Field(default="")
     target_agent_runtime_id: str = Field(default="")
@@ -683,7 +684,7 @@ class WorkProjectionItem(BaseModel):
     pipeline_run_id: str = Field(default="")
     runtime_id: str = Field(default="")
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     session_owner_profile_id: str = Field(default="")
     turn_executor_kind: str = Field(default="")
@@ -754,7 +755,7 @@ class AutomationJob(BaseModel):
     action_id: str = Field(min_length=1)
     params: dict[str, Any] = Field(default_factory=dict)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     agent_profile_id: str = Field(default="")
     context_frame_id: str = Field(default="")
     schedule_kind: AutomationScheduleKind = AutomationScheduleKind.INTERVAL
@@ -824,7 +825,7 @@ class DiagnosticsSummaryDocument(ControlPlaneDocument):
 
 class MemoryConsoleFilter(BaseModel):
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     scope_id: str = Field(default="")
     partition: str = Field(default="")
     layer: str = Field(default="")
@@ -843,7 +844,7 @@ class MemoryRecordProjection(BaseModel):
     record_id: str = Field(min_length=1)
     layer: str = Field(min_length=1)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     scope_id: str = Field(min_length=1)
     partition: str = Field(min_length=1)
     subject_key: str = Field(default="")
@@ -1077,7 +1078,7 @@ class MemoryProposalAuditDocument(ControlPlaneDocument):
 class VaultAccessRequestItem(BaseModel):
     request_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     scope_id: str = Field(min_length=1)
     partition: str = Field(default="")
     subject_key: str = Field(default="")
@@ -1096,7 +1097,7 @@ class VaultAccessGrantItem(BaseModel):
     grant_id: str = Field(min_length=1)
     request_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     scope_id: str = Field(min_length=1)
     partition: str = Field(default="")
     subject_key: str = Field(default="")
@@ -1112,7 +1113,7 @@ class VaultAccessGrantItem(BaseModel):
 class VaultRetrievalAuditItem(BaseModel):
     retrieval_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str = Field(default="")
+    workspace_id: str = Field(default="")  # DEPRECATED: workspace 概念已废弃
     scope_id: str = Field(min_length=1)
     partition: str = Field(default="")
     subject_key: str = Field(default="")

@@ -71,6 +71,7 @@ interface UseChatStreamOptions {
 
 export interface ChatSessionScopeSnapshot {
   activeProjectId?: string | null;
+  /** @deprecated workspace 概念已移除，保留字段仅为兼容 */
   activeWorkspaceId?: string | null;
   newConversationToken?: string | null;
   newConversationProjectId?: string | null;

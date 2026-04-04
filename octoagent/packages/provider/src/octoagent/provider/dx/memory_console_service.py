@@ -143,9 +143,7 @@ class MemoryConsoleService:
         """返回底层 memory backend 状态。"""
         context = await self._resolve_context(
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         memory = await self._memory_service_for_context(context)
         return await memory.get_backend_status()
@@ -169,9 +167,8 @@ class MemoryConsoleService:
     ) -> MemoryConsoleDocument:
         return await self.get_overview(
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
+            active_workspace_id="",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
             scope_id=scope_id or "",
             partition=partition.value if partition else "",
             layer=layer.value if layer else "",
@@ -196,9 +193,7 @@ class MemoryConsoleService:
         return await self.get_subject_history(
             subject_key=subject_key,
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
             scope_id=scope_id or "",
         )
 
@@ -219,9 +214,7 @@ class MemoryConsoleService:
 
         context = await self._resolve_context(
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
             scope_id=scope_id or "",
         )
         if context.blocking_issues:
@@ -293,9 +286,7 @@ class MemoryConsoleService:
 
         context = await self._resolve_context(
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
             scope_id=scope_id,
         )
         memory = await self._memory_service_for_context(context)
@@ -342,9 +333,7 @@ class MemoryConsoleService:
         # 1. 解析 context 和 scope
         context = await self._resolve_context(
             active_project_id=project_id or "",
-            active_workspace_id=workspace_id or "",
             project_id=project_id or "",
-            workspace_id=workspace_id or "",
         )
         if not context.selected_scope_ids:
             return {"consolidated_count": 0, "skipped_count": 0, "errors": [], "message": "没有可用的 scope"}
@@ -393,9 +382,7 @@ class MemoryConsoleService:
     ) -> MemoryConsoleDocument:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         memory = await self._memory_service_for_context(context)
@@ -607,9 +594,7 @@ class MemoryConsoleService:
     ) -> MemorySubjectHistoryDocument:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         memory = await self._memory_service_for_context(context)
@@ -678,9 +663,7 @@ class MemoryConsoleService:
     ) -> MemoryProposalAuditDocument:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         memory = await self._memory_service_for_context(context)
@@ -749,9 +732,7 @@ class MemoryConsoleService:
     ) -> VaultAuthorizationDocument:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         memory = await self._memory_service_for_context(context)
@@ -836,9 +817,7 @@ class MemoryConsoleService:
             )
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         decision = self._decide_project_scope_action(
@@ -878,9 +857,7 @@ class MemoryConsoleService:
             )
         context = await self._resolve_context(
             active_project_id=request.project_id,
-            active_workspace_id=request.workspace_id or "",
             project_id=request.project_id,
-            workspace_id=request.workspace_id or "",
             scope_id=request.scope_id,
         )
         permission = self._decide_operator_only(
@@ -937,9 +914,7 @@ class MemoryConsoleService:
             )
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
         )
         decision = self._decide_project_scope_action(
@@ -1059,9 +1034,7 @@ class MemoryConsoleService:
     ) -> tuple[str, dict[str, Any], MemoryPermissionDecision]:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         decision = self._decide_project_scope_action(
             action_id="memory.export.inspect",
@@ -1150,9 +1123,7 @@ class MemoryConsoleService:
     ) -> tuple[str, dict[str, Any], MemoryPermissionDecision]:
         context = await self._resolve_context(
             active_project_id=active_project_id,
-            active_workspace_id=active_workspace_id,
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         permission = self._decide_operator_only(
             action_id="memory.restore.verify",
@@ -1257,7 +1228,7 @@ class MemoryConsoleService:
         self,
         *,
         active_project_id: str,
-        active_workspace_id: str,
+        active_workspace_id: str = "",
         project_id: str = "",
         workspace_id: str = "",
         scope_id: str = "",
@@ -1270,14 +1241,7 @@ class MemoryConsoleService:
         )
         if project is None:
             raise RuntimeError("当前没有可用 project。")
-        workspace_ref = workspace_id or active_workspace_id
-        workspace = (
-            await self._stores.project_store.get_workspace(workspace_ref)
-            if workspace_ref
-            else await self._stores.project_store.get_primary_workspace(project.project_id)
-        )
-        if workspace is not None and workspace.project_id != project.project_id:
-            workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
+        workspace = await self._stores.project_store.get_primary_workspace(project.project_id)
 
         bindings = await self._stores.project_store.list_bindings(project.project_id)
         scope_bindings: dict[str, _BoundScope] = {}

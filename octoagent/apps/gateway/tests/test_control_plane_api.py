@@ -47,8 +47,6 @@ from octoagent.core.models import (
     WorkerProfileRevision,
     WorkerProfileStatus,
     WorkKind,
-    Workspace,
-    WorkspaceKind,
     WorkStatus,
 )
 from octoagent.gateway.services.agent_context import (
@@ -148,13 +146,11 @@ async def _create_project_with_scope_binding(
         slug=slug,
         set_active=False,
     )
-    workspace = await app.state.store_group.project_store.get_primary_workspace(project.project_id)
-    assert workspace is not None
     await app.state.store_group.project_store.create_binding(
         ProjectBinding(
             binding_id=str(ULID()),
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             binding_type=ProjectBindingType.SCOPE,
             binding_key=scope_id,
             binding_value=scope_id,
@@ -163,7 +159,7 @@ async def _create_project_with_scope_binding(
         )
     )
     await app.state.store_group.conn.commit()
-    return project, workspace
+    return project
 
 
 def _write_wechat_export(path: Path, media_root: Path) -> None:
@@ -202,14 +198,12 @@ async def _seed_memory(app) -> dict[str, str]:
     store_group = app.state.store_group
     project = await store_group.project_store.get_default_project()
     assert project is not None
-    workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-    assert workspace is not None
     scope_id = "memory/project-alpha"
     await store_group.project_store.create_binding(
         ProjectBinding(
             binding_id=str(ULID()),
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             binding_type=ProjectBindingType.MEMORY_SCOPE,
             binding_key=scope_id,
             binding_value=scope_id,
@@ -274,7 +268,7 @@ async def _seed_memory(app) -> dict[str, str]:
     )
     return {
         "project_id": project.project_id,
-        "workspace_id": workspace.workspace_id,
+        "workspace_id": "",
         "scope_id": scope_id,
         "subject_key": "profile.user.health.note",
         "vault_id": vault_commit.vault_id,
@@ -285,8 +279,6 @@ async def _seed_context_resources(app) -> None:
     store_group = app.state.store_group
     project = await store_group.project_store.get_default_project()
     assert project is not None
-    workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-    assert workspace is not None
     tasks = await store_group.task_store.list_tasks()
     seeded_task_id = (
         tasks[0].task_id
@@ -301,7 +293,7 @@ async def _seed_context_resources(app) -> None:
     runtime = AgentRuntime(
         agent_runtime_id="runtime-butler-default",
         project_id=project.project_id,
-        workspace_id=workspace.workspace_id,
+        workspace_id="",
         agent_profile_id="agent-profile-default",
         role=AgentRuntimeRole.MAIN,
         name="Default Agent",
@@ -312,7 +304,7 @@ async def _seed_context_resources(app) -> None:
         agent_runtime_id=runtime.agent_runtime_id,
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id=project.project_id,
-        workspace_id=workspace.workspace_id,
+        workspace_id="",
         surface="web",
         thread_id="thread-control-context",
         legacy_session_id="thread-control-context",
@@ -322,7 +314,7 @@ async def _seed_context_resources(app) -> None:
     project_namespace = MemoryNamespace(
         namespace_id="memory-namespace-project-default",
         project_id=project.project_id,
-        workspace_id=workspace.workspace_id,
+        workspace_id="",
         agent_runtime_id=runtime.agent_runtime_id,
         kind=MemoryNamespaceKind.PROJECT_SHARED,
         name="Project Shared",
@@ -332,7 +324,7 @@ async def _seed_context_resources(app) -> None:
     private_namespace = MemoryNamespace(
         namespace_id="memory-namespace-butler-default",
         project_id=project.project_id,
-        workspace_id=workspace.workspace_id,
+        workspace_id="",
         agent_runtime_id=runtime.agent_runtime_id,
         kind=MemoryNamespaceKind.AGENT_PRIVATE,
         name="Agent Private",
@@ -384,7 +376,7 @@ async def _seed_context_resources(app) -> None:
         BootstrapSession(
             bootstrap_id="bootstrap-default",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             owner_profile_id="owner-profile-default",
             owner_overlay_id="owner-overlay-default",
             agent_profile_id="agent-profile-default",
@@ -423,7 +415,7 @@ async def _seed_context_resources(app) -> None:
             agent_session_id=agent_session.agent_session_id,
             thread_id="thread-control-context",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             task_ids=[seeded_task_id],
             rolling_summary="控制面可以直接看到 recent summary。",
             last_context_frame_id="context-frame-default",
@@ -438,7 +430,7 @@ async def _seed_context_resources(app) -> None:
             context_frame_id="context-frame-default",
             task_id=seeded_task_id,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             query="project alpha next step",
             recent_summary="控制面可以直接看到 recent summary。",
             memory_namespace_ids=[
@@ -477,7 +469,7 @@ async def _seed_context_resources(app) -> None:
             agent_runtime_id=runtime.agent_runtime_id,
             agent_session_id=agent_session.agent_session_id,
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
             owner_overlay_id="owner-overlay-default",
@@ -539,7 +531,7 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             source_agent_runtime_id=runtime.agent_runtime_id,
             source_agent_session_id=agent_session.agent_session_id,
             target_agent_runtime_id="runtime-worker-research-default",
@@ -564,7 +556,7 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             source_agent_runtime_id=runtime.agent_runtime_id,
             source_agent_session_id=agent_session.agent_session_id,
             target_agent_runtime_id="runtime-worker-research-default",
@@ -589,7 +581,7 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-            workspace_id=workspace.workspace_id,
+            workspace_id="",
             source_agent_runtime_id="runtime-worker-research-default",
             source_agent_session_id="agent-session-worker-research-default",
             target_agent_runtime_id=runtime.agent_runtime_id,
@@ -761,7 +753,7 @@ class TestControlPlaneApi:
         )
         frame = payload["resources"]["context_continuity"]["frames"][0]
         assert frame["project_id"]
-        assert frame["workspace_id"]
+        # workspace 概念已废弃，workspace_id 为空
         assert frame["agent_runtime_id"] == "runtime-butler-default"
         assert frame["agent_session_id"] # 动态生成 ID
         assert frame["recall_frame_id"] == "recall-frame-default"
@@ -845,8 +837,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
 
         task_id = await _create_task(
             control_plane_app,
@@ -866,7 +856,7 @@ class TestControlPlaneApi:
                 route_reason="delegation_strategy=butler_owned_freshness",
                 owner_id="butler.main",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 selected_tools=[],
                 metadata={
                     "delegation_strategy": "butler_owned_freshness",
@@ -1531,10 +1521,6 @@ class TestControlPlaneApi:
             await control_plane_app.state.store_group.project_store.get_default_project()
         )
         assert default_project is not None
-        workspace = await control_plane_app.state.store_group.project_store.get_primary_workspace(
-            default_project.project_id
-        )
-        assert workspace is not None
 
         selection = await control_plane_app.state.capability_pack_service.select_tools(
             ToolIndexQuery(
@@ -1542,7 +1528,7 @@ class TestControlPlaneApi:
                 limit=5,
                 worker_type="ops",
                 project_id=default_project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
             ),
             worker_type="ops",
         )
@@ -1615,18 +1601,12 @@ class TestControlPlaneApi:
             await control_plane_app.state.store_group.project_store.get_default_project()
         )
         assert default_project is not None
-        workspace = await control_plane_app.state.store_group.project_store.get_primary_workspace(
-            default_project.project_id
-        )
-        assert workspace is not None
 
         base_pack = await control_plane_app.state.capability_pack_service.get_pack(
             project_id=default_project.project_id,
-            workspace_id=workspace.workspace_id,
         )
         overridden_pack = await control_plane_app.state.capability_pack_service.get_pack(
             project_id=default_project.project_id,
-            workspace_id=workspace.workspace_id,
             profile_id=profile_id,
         )
 
@@ -3228,7 +3208,7 @@ class TestControlPlaneApi:
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
-        beta_project, _ = await _create_project_with_scope_binding(
+        beta_project = await _create_project_with_scope_binding(
             control_plane_app,
             name="Beta",
             slug="beta",
@@ -3349,13 +3329,11 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
         await store_group.project_store.create_binding(
             ProjectBinding(
                 binding_id=str(ULID()),
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 binding_type=ProjectBindingType.SCOPE,
                 binding_key="scope-control-alt",
                 binding_value="scope-control-alt",
@@ -3461,15 +3439,13 @@ class TestControlPlaneApi:
         )
         task = await control_plane_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
-        workspace = (
-            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
-                task.scope_id
-            )
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
         )
-        assert workspace is not None
+        assert default_project is not None
         session_id = build_scope_aware_session_id(
             task,
-            project_id=workspace.project_id,
+            project_id=default_project.project_id,
         )
 
         focus_resp = await control_plane_client.post(
@@ -3511,7 +3487,7 @@ class TestControlPlaneApi:
         assert new_result["data"]["previous_session_id"] == session_id
         assert new_result["data"]["previous_task_id"] == task_id
         assert new_result["data"]["new_conversation_token"]
-        assert new_result["data"]["project_id"] == workspace.project_id
+        assert new_result["data"]["project_id"] == default_project.project_id
         assert new_result["data"]["workspace_id"] == ""
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
@@ -3520,7 +3496,7 @@ class TestControlPlaneApi:
         assert payload["focused_session_id"] == ""
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
-        assert payload["new_conversation_project_id"] == workspace.project_id
+        assert payload["new_conversation_project_id"] == default_project.project_id
         assert payload["new_conversation_workspace_id"] == ""
         assert payload["new_conversation_agent_profile_id"] == ""
 
@@ -3689,8 +3665,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
         existing_session = await store_group.agent_context_store.get_active_session_for_project(
             project.project_id,
             kind=AgentSessionKind.MAIN_BOOTSTRAP,
@@ -4005,8 +3979,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
 
         worker_profile_id = "worker-profile-finance-delegated"
         await store_group.agent_context_store.save_worker_profile(
@@ -4026,7 +3998,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="请交给金融研究员处理",
             thread_id=thread_id,
-            scope_id=f"project:{workspace.project_id}:chat:web:{thread_id}",
+            scope_id=f"project:{project.project_id}:chat:web:{thread_id}",
         )
         task_service = TaskService(store_group, control_plane_app.state.sse_hub)
         await task_service.append_user_message(
@@ -4047,7 +4019,7 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-delegated-main",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Delegated Main Runtime",
@@ -4059,7 +4031,7 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-delegated-main",
                 kind=AgentSessionKind.DIRECT_WORKER,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 thread_id=thread_id,
                 legacy_session_id=thread_id,
             )
@@ -4071,7 +4043,7 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-delegated-main",
                 thread_id=thread_id,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 task_ids=[task_id],
             )
         )
@@ -4085,7 +4057,7 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="finance",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 session_owner_profile_id="agent-profile-default",
                 delegation_target_profile_id=worker_profile_id,
                 turn_executor_kind="worker",
@@ -4117,8 +4089,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
 
         worker_profile_id = "worker-profile-legacy-finance"
         await store_group.agent_context_store.save_worker_profile(
@@ -4138,7 +4108,7 @@ class TestControlPlaneApi:
             control_plane_app,
             text="legacy polluted session",
             thread_id=thread_id,
-            scope_id=f"project:{workspace.project_id}:chat:web:{thread_id}",
+            scope_id=f"project:{project.project_id}:chat:web:{thread_id}",
         )
         task_service = TaskService(store_group, control_plane_app.state.sse_hub)
         await task_service.append_user_message(
@@ -4156,7 +4126,7 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-legacy-polluted",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Legacy Polluted Runtime",
@@ -4168,7 +4138,7 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-legacy-polluted",
                 kind=AgentSessionKind.DIRECT_WORKER,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 thread_id=thread_id,
                 legacy_session_id=thread_id,
             )
@@ -4180,7 +4150,7 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-legacy-polluted",
                 thread_id=thread_id,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 task_ids=[task_id],
             )
         )
@@ -4214,15 +4184,13 @@ class TestControlPlaneApi:
         )
         task = await control_plane_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
-        workspace = (
-            await control_plane_app.state.store_group.project_store.resolve_workspace_for_scope(
-                task.scope_id
-            )
+        default_project = (
+            await control_plane_app.state.store_group.project_store.get_default_project()
         )
-        assert workspace is not None
+        assert default_project is not None
         session_id = build_scope_aware_session_id(
             task,
-            project_id=workspace.project_id,
+            project_id=default_project.project_id,
         )
 
         focus_resp = await control_plane_client.post(
@@ -4290,8 +4258,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
         task_id = await _create_task(
             control_plane_app,
             text="legacy continuity reset",
@@ -4302,7 +4268,7 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-reset-legacy",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Reset Legacy Runtime",
@@ -4314,7 +4280,7 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-reset-legacy",
                 kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 thread_id="thread-reset-legacy",
                 legacy_session_id="thread-reset-legacy",
                 recent_transcript=[
@@ -4366,7 +4332,7 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-reset-legacy",
                 thread_id="thread-reset-legacy",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 task_ids=[task_id],
                 recent_turn_refs=[task_id],
                 recent_artifact_refs=["artifact-reset-legacy"],
@@ -4517,7 +4483,7 @@ class TestControlPlaneApi:
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
-        beta_project, _ = await _create_project_with_scope_binding(
+        beta_project = await _create_project_with_scope_binding(
             control_plane_app,
             name="Beta Tasks",
             slug="beta-tasks",
@@ -4639,12 +4605,6 @@ class TestControlPlaneApi:
             await control_plane_app.state.store_group.project_store.get_default_project()
         )
         assert default_project is not None
-        default_workspace = (
-            await control_plane_app.state.store_group.project_store.get_primary_workspace(
-                default_project.project_id
-            )
-        )
-        assert default_workspace is not None
 
         create_resp = await control_plane_client.post(
             "/api/control/actions",
@@ -5110,8 +5070,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
 
         profile = WorkerProfile(
             profile_id="worker-profile-runtime-alpha",
@@ -5192,7 +5150,7 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.SUBAGENT,
                 selected_worker_type="research",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 requested_worker_profile_id=profile.profile_id,
                 requested_worker_profile_version=1,
                 effective_worker_snapshot_id="worker-snapshot:worker-profile-runtime-alpha:1",
@@ -5237,20 +5195,7 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        primary_workspace = await store_group.project_store.get_primary_workspace(
-            project.project_id
-        )
-        assert primary_workspace is not None
-
-        secondary_workspace = Workspace(
-            workspace_id="workspace-root-agent-ops",
-            project_id=project.project_id,
-            slug="root-agent-ops",
-            name="Root Agent Ops",
-            kind=WorkspaceKind.OPS,
-            root_path="/tmp/root-agent-ops",
-        )
-        await store_group.project_store.create_workspace(secondary_workspace)
+        # workspace 概念已废弃，不再创建 workspace
 
         profile = WorkerProfile(
             profile_id="worker-profile-root-agent-project",
@@ -5307,7 +5252,7 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="ops",
                 project_id=project.project_id,
-                workspace_id=primary_workspace.workspace_id,
+                workspace_id="",
                 requested_worker_profile_id=profile.profile_id,
                 requested_worker_profile_version=1,
                 effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
@@ -5352,7 +5297,7 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.ACP_RUNTIME,
                 selected_worker_type="ops",
                 project_id=project.project_id,
-                workspace_id=secondary_workspace.workspace_id,
+                workspace_id="",
                 requested_worker_profile_id=profile.profile_id,
                 requested_worker_profile_version=1,
                 effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
@@ -5435,8 +5380,6 @@ class TestControlPlaneApi:
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
-        assert workspace is not None
 
         profile = WorkerProfile(
             profile_id="worker-profile-owner-self-dashboard",
@@ -5472,7 +5415,7 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="general",
                 project_id=project.project_id,
-                workspace_id=workspace.workspace_id,
+                workspace_id="",
                 session_owner_profile_id=profile.profile_id,
                 delegation_target_profile_id="",
                 turn_executor_kind="worker",

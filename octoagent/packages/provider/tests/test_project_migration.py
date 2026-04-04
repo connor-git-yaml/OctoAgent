@@ -278,11 +278,7 @@ async def test_migration_apply_creates_default_project_for_empty_instance(tmp_pa
     try:
         default_project = await store_group.project_store.get_default_project()
         assert default_project is not None
-        primary_workspace = await store_group.project_store.get_primary_workspace(
-            default_project.project_id
-        )
-        assert primary_workspace is not None
-        assert primary_workspace.root_path == str(tmp_path.resolve())
+        # workspace 概念已废弃，不再验证 primary workspace
     finally:
         await store_group.conn.close()
 

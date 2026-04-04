@@ -485,18 +485,16 @@ class CapabilityPackService:
         self,
         *,
         project_id: str = "",
-        workspace_id: str = "",
         profile_id: str = "",
     ) -> BundledCapabilityPack:
         await self.startup()
         if self._pack is None:
             self._pack = await self.refresh()
-        if not project_id and not workspace_id and not profile_id:
+        if not project_id and not profile_id:
             return self._pack
         return await self._filter_pack_for_scope(
             self._pack,
             project_id=project_id,
-            workspace_id=workspace_id,
             profile_id=profile_id,
         )
 
@@ -658,7 +656,6 @@ class CapabilityPackService:
         )
         pack = await self.get_pack(
             project_id=effective_request.project_id,
-            workspace_id=effective_request.workspace_id,
         )
         fallback = self._resolve_fallback_toolset_from_pack(pack, worker_type)
         raw_selection = await self._tool_index.select_tools(
@@ -685,7 +682,6 @@ class CapabilityPackService:
         )
         pack = await self.get_pack(
             project_id=request.project_id,
-            workspace_id=request.workspace_id,
             profile_id=binding.profile_id,
         )
         effective_tool_profile = request.tool_profile or binding.tool_profile
@@ -871,13 +867,11 @@ class CapabilityPackService:
         *,
         worker_type: str = "general",
         project_id: str = "",
-        workspace_id: str = "",
         surface: str = "",
     ) -> list[dict[str, Any]]:
         await self.startup()
         project, workspace = await self._resolve_project_context(
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         owner_profile = await self._resolve_owner_profile()
         worker_profile = self.get_worker_profile(worker_type)
@@ -1114,13 +1108,11 @@ class CapabilityPackService:
         async def _resolve_runtime_project_context(
             *,
             project_id: str = "",
-            workspace_id: str = "",
         ) -> tuple[Any, Any, Any | None]:
             task = None
-            if project_id.strip() or workspace_id.strip():
+            if project_id.strip():
                 project, workspace = await self._resolve_project_context(
                     project_id=project_id.strip(),
-                    workspace_id=workspace_id.strip(),
                 )
                 return project, workspace, task
             try:
@@ -1136,7 +1128,6 @@ class CapabilityPackService:
                     return project, workspace, task
             project, workspace = await self._resolve_project_context(
                 project_id="",
-                workspace_id="",
             )
             return project, workspace, task
 
@@ -1167,10 +1158,9 @@ class CapabilityPackService:
                         scope_ids.append(binding.binding_key)
             return list(dict.fromkeys(item for item in scope_ids if item))
 
-        async def _resolve_workspace_root(
+        async def _resolve_instance_root(
             *,
             project_id: str = "",
-            workspace_id: str = "",
         ) -> Path:
             """返回当前 project 的隔离目录作为 Agent 工具的可见范围。
 
@@ -1180,7 +1170,6 @@ class CapabilityPackService:
             """
             project, _workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             if project is not None and project.slug:
                 agent_root = project_root_dir(self._project_root, project.slug)
@@ -1188,38 +1177,38 @@ class CapabilityPackService:
                 return agent_root.resolve()
             return self._project_root.resolve()
 
-        def _resolve_workspace_path(
-            workspace_root: Path,
+        def _resolve_instance_path(
+            instance_root: Path,
             raw_path: str,
             *,
-            allow_outside_workspace: bool = False,
+            allow_outside: bool = False,
         ) -> Path:
-            """解析路径，支持 workspace 内外访问。
+            """解析路径，支持 instance root 内外访问。
 
             路径安全策略与 Policy Engine 双维度模型对齐：
-            - allow_outside_workspace=True（读操作）：允许任意路径，
+            - allow_outside=True（读操作）：允许任意路径，
               安全由 PresetBeforeHook + PolicyCheckHook 保障
-            - allow_outside_workspace=False（写操作）：限制在 workspace 内，
+            - allow_outside=False（写操作）：限制在 instance root 内，
               防止误写系统文件
             """
             normalized = raw_path.strip()
             candidate = (
                 Path(normalized)
                 if normalized
-                else workspace_root
+                else instance_root
             )
             # 展开 ~ 前缀
             if str(candidate).startswith("~"):
                 candidate = candidate.expanduser()
             if not candidate.is_absolute():
-                candidate = workspace_root / candidate
+                candidate = instance_root / candidate
             resolved = candidate.resolve()
-            if resolved != workspace_root and not resolved.is_relative_to(workspace_root):
-                if allow_outside_workspace:
+            if resolved != instance_root and not resolved.is_relative_to(instance_root):
+                if allow_outside:
                     return resolved
                 raise RuntimeError(
-                    f"path escapes workspace root ({workspace_root}). "
-                    f"写操作仅允许 workspace 内路径。"
+                    f"path escapes instance root ({instance_root}). "
+                    f"写操作仅允许 instance root 内路径。"
                 )
             return resolved
 
@@ -1400,20 +1389,20 @@ class CapabilityPackService:
         ) -> str:
             """列出目录内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
-            workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path, allow_outside_workspace=True)
+            instance_root = await _resolve_instance_root()
+            target = _resolve_instance_path(instance_root, path, allow_outside=True)
             if not target.exists():
                 raise RuntimeError(f"path not found: {target}")
             if not target.is_dir():
                 raise RuntimeError(f"path is not a directory: {target}")
             entries = []
             bounded_limit = max(1, min(max_entries, 200))
-            is_inside_workspace = target == workspace_root or target.is_relative_to(workspace_root)
+            is_inside_workspace = target == instance_root or target.is_relative_to(instance_root)
             for item in sorted(target.iterdir(), key=lambda current: (not current.is_dir(), current.name))[
                 :bounded_limit
             ]:
                 if is_inside_workspace:
-                    display_path = "." if item == workspace_root else str(item.relative_to(workspace_root))
+                    display_path = "." if item == instance_root else str(item.relative_to(instance_root))
                 else:
                     display_path = str(item)
                 entries.append(
@@ -1424,12 +1413,12 @@ class CapabilityPackService:
                     }
                 )
             if is_inside_workspace:
-                display_target = "." if target == workspace_root else str(target.relative_to(workspace_root))
+                display_target = "." if target == instance_root else str(target.relative_to(instance_root))
             else:
                 display_target = str(target)
             return json.dumps(
                 {
-                    "workspace_root": str(workspace_root),
+                    "workspace_root": str(instance_root),
                     "path": display_target,
                     "entries": entries,
                 },
@@ -1454,8 +1443,8 @@ class CapabilityPackService:
         ) -> str:
             """读取文本文件内容。支持 workspace 内路径和用户 HOME 目录下的路径。"""
 
-            workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path, allow_outside_workspace=True)
+            instance_root = await _resolve_instance_root()
+            target = _resolve_instance_path(instance_root, path, allow_outside=True)
             if not target.exists():
                 # 返回结构化的 "不存在" 响应，而非抛异常，让 Agent 更容易处理
                 return json.dumps(
@@ -1469,8 +1458,8 @@ class CapabilityPackService:
             bounded_limit = max(200, min(max_chars, 500_000))
             return json.dumps(
                 {
-                    "workspace_root": str(workspace_root),
-                    "path": str(target.relative_to(workspace_root)),
+                    "workspace_root": str(instance_root),
+                    "path": str(target.relative_to(instance_root)),
                     "content": _truncate_text(content, limit=bounded_limit),
                 },
                 ensure_ascii=False,
@@ -1495,17 +1484,17 @@ class CapabilityPackService:
         ) -> str:
             """在 workspace 内创建或覆盖文本文件。自动创建中间目录。"""
 
-            workspace_root = await _resolve_workspace_root()
-            target = _resolve_workspace_path(workspace_root, path)
+            instance_root = await _resolve_instance_root()
+            target = _resolve_instance_path(instance_root, path)
             if target.is_dir():
                 raise RuntimeError(f"path is a directory, not a file: {target}")
             if create_dirs:
                 target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-            relative = str(target.relative_to(workspace_root))
+            relative = str(target.relative_to(instance_root))
             return json.dumps(
                 {
-                    "workspace_root": str(workspace_root),
+                    "workspace_root": str(instance_root),
                     "path": relative,
                     "bytes_written": len(content.encode("utf-8")),
                     "created_dirs": create_dirs and not target.parent.exists(),
@@ -1536,8 +1525,8 @@ class CapabilityPackService:
         ) -> str:
             """在当前 workspace 内执行受治理终端命令。"""
 
-            workspace_root = await _resolve_workspace_root()
-            working_dir = _resolve_workspace_path(workspace_root, cwd)
+            instance_root = await _resolve_instance_root()
+            working_dir = _resolve_instance_path(instance_root, cwd)
             if not working_dir.exists() or not working_dir.is_dir():
                 raise RuntimeError(f"cwd is not a directory: {working_dir}")
             # 超时上限 600s（对齐 MCP 安装等长命令场景）
@@ -1545,8 +1534,8 @@ class CapabilityPackService:
             # 工具层不做低阈值截断——由 LargeOutputHandler 按上下文比例统一管理
             bounded_limit = max(200, min(max_output_chars, 500_000))
             try:
-                cwd_label = "." if working_dir == workspace_root else str(
-                    working_dir.relative_to(workspace_root)
+                cwd_label = "." if working_dir == instance_root else str(
+                    working_dir.relative_to(instance_root)
                 )
             except ValueError:
                 cwd_label = str(working_dir)
@@ -1578,7 +1567,7 @@ class CapabilityPackService:
             stdout_text = (stdout_bytes or b"").decode("utf-8", errors="replace")
             stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace")
             payload = {
-                "workspace_root": str(workspace_root),
+                "workspace_root": str(instance_root),
                 "cwd": cwd_label,
                 "command": command,
                 "returncode": proc.returncode,
@@ -2892,13 +2881,11 @@ class CapabilityPackService:
             subject_key: str,
             scope_id: str = "",
             project_id: str = "",
-            workspace_id: str = "",
         ) -> str:
             """读取指定 subject 的 current/history。"""
 
             project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
@@ -2928,13 +2915,11 @@ class CapabilityPackService:
             offset: int = 0,
             limit: int = 20,
             project_id: str = "",
-            workspace_id: str = "",
         ) -> str:
             """按 subject_key 前缀、partition、scope 等维度浏览记忆目录，获取分组统计和概览。"""
 
             project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             result = await self._memory_console_service.browse_memory(
                 project_id=project.project_id if project is not None else "",
@@ -2966,7 +2951,6 @@ class CapabilityPackService:
             partition: str = "",
             layer: str = "",
             project_id: str = "",
-            workspace_id: str = "",
             limit: int = 10,
             derived_type: str = "",
             status: str = "",
@@ -2985,7 +2969,6 @@ class CapabilityPackService:
 
             project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             document = await self._memory_console_service.get_memory_console(
                 project_id=project.project_id if project is not None else "",
@@ -3020,13 +3003,11 @@ class CapabilityPackService:
             subject_key: str,
             scope_id: str = "",
             project_id: str = "",
-            workspace_id: str = "",
         ) -> str:
             """读取 subject 的证据链引用。"""
 
             project, workspace, _task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             document = await self._memory_console_service.get_memory_subject_history(
                 subject_key=subject_key,
@@ -3064,7 +3045,6 @@ class CapabilityPackService:
             query: str,
             scope_id: str = "",
             project_id: str = "",
-            workspace_id: str = "",
             limit: int = 4,
             allow_vault: bool = False,
             post_filter_mode: MemoryRecallPostFilterMode = (
@@ -3081,7 +3061,6 @@ class CapabilityPackService:
 
             project, workspace, task = await _resolve_runtime_project_context(
                 project_id=project_id,
-                workspace_id=workspace_id,
             )
             memory_service = await self._memory_runtime_service.memory_service_for_scope(
                 project=project,
@@ -3155,7 +3134,6 @@ class CapabilityPackService:
             evidence_refs: list[dict[str, str]] | None = None,
             scope_id: str = "",
             project_id: str = "",
-            workspace_id: str = "",
         ) -> str:
             """将重要信息持久化为长期记忆（SoR 记录）。
 
@@ -3169,7 +3147,6 @@ class CapabilityPackService:
                 evidence_refs: 证据引用列表 [{"ref_id": "...", "ref_type": "message"}]
                 scope_id: 可选，指定 scope
                 project_id: 可选，指定 project
-                workspace_id: 可选，指定 workspace
             """
             # 1. 参数校验
             subject_key = subject_key.strip()
@@ -3198,7 +3175,6 @@ class CapabilityPackService:
             try:
                 project, workspace, task = await _resolve_runtime_project_context(
                     project_id=project_id,
-                    workspace_id=workspace_id,
                 )
                 scope_ids = await _resolve_memory_scope_ids(
                     task=task,
@@ -4340,13 +4316,11 @@ class CapabilityPackService:
         self,
         *,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> tuple[set[str], set[str]]:
-        if not project_id and not workspace_id:
+        if not project_id:
             return set(), set()
         project, _workspace = await self._resolve_project_context(
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         if project is None:
             return set(), set()
@@ -4492,7 +4466,6 @@ class CapabilityPackService:
         pack: BundledCapabilityPack,
         *,
         project_id: str = "",
-        workspace_id: str = "",
         profile_id: str = "",
     ) -> BundledCapabilityPack:
         (
@@ -4500,7 +4473,6 @@ class CapabilityPackService:
             project_disabled_item_ids,
         ) = await self._resolve_scope_skill_selection(
             project_id=project_id,
-            workspace_id=workspace_id,
         )
         (
             profile_selected_item_ids,
@@ -4634,16 +4606,11 @@ class CapabilityPackService:
         self,
         *,
         project_id: str = "",
-        workspace_id: str = "",
     ):
         project = None
         workspace = None
         if project_id:
             project = await self._stores.project_store.get_project(project_id)
-        if workspace_id:
-            workspace = await self._stores.project_store.get_workspace(workspace_id)
-            if workspace is not None and project is None:
-                project = await self._stores.project_store.get_project(workspace.project_id)
         if project is None:
             selector = await self._stores.project_store.get_selector_state("web")
             if selector is not None:

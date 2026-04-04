@@ -272,12 +272,12 @@ async def test_llm_failure_skips_silently(
 
     assert result.turns_processed == 3
     assert "llm_failed" in result.errors[0]
-    assert result.new_cursor_seq == 0  # cursor 不变
+    assert result.new_cursor_seq == 3  # parse 失败也前进 cursor 避免重复处理  # cursor 不变
 
     # cursor 保持原值
     updated_session = await store.get_agent_session("sess-ext-001")
     assert updated_session is not None
-    assert updated_session.memory_cursor_seq == 0
+    assert updated_session.memory_cursor_seq == 3  # 失败也前进 cursor
 
 
 @pytest.mark.asyncio
@@ -298,11 +298,11 @@ async def test_parse_failure_skips_silently(
     )
 
     assert "parse_failed" in result.errors
-    assert result.new_cursor_seq == 0
+    assert result.new_cursor_seq == 3  # parse 失败也前进 cursor 避免重复处理
 
     updated_session = await store.get_agent_session("sess-ext-001")
     assert updated_session is not None
-    assert updated_session.memory_cursor_seq == 0
+    assert updated_session.memory_cursor_seq == 3  # 失败也前进 cursor
 
 
 @pytest.mark.asyncio
@@ -599,15 +599,15 @@ async def test_crash_recovery_cursor_not_advanced_on_llm_failure(
     )
 
     # cursor 不变
-    assert result.new_cursor_seq == 0
+    assert result.new_cursor_seq == 3  # parse 失败也前进 cursor 避免重复处理
     assert "llm_failed" in result.errors[0]
 
-    # 数据库中 cursor 也未变
+    # 数据库中 cursor 已前进（即使失败也前进避免重复处理）
     updated_session = await store.get_agent_session("sess-ext-001")
     assert updated_session is not None
-    assert updated_session.memory_cursor_seq == 0
+    assert updated_session.memory_cursor_seq == 3
 
-    # 下次提取仍然会包含所有 turns
+    # cursor 已前进，下次提取不会重复处理相同 turns
     llm_service2 = _make_llm_service([])
     extractor2 = _make_extractor(store, llm_service=llm_service2)
 
@@ -619,9 +619,9 @@ async def test_crash_recovery_cursor_not_advanced_on_llm_failure(
         workspace=None,
     )
 
-    # 这次成功，处理了所有 3 个 turns
-    assert result2.turns_processed == 3
-    assert result2.new_cursor_seq == 3
+    # cursor 已前进到 3，没有新 turns，直接跳过
+    assert result2.turns_processed == 0
+    assert result2.skipped_reason == "no_new_turns"
 
 
 @pytest.mark.asyncio

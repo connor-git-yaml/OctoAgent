@@ -2298,7 +2298,6 @@ class OrchestratorService:
             agent_runtime_id=source_agent_runtime_id,
             role=AgentRuntimeRole.BUTLER,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_profile_id=source_agent_profile_id,
             worker_profile_id="",
             worker_capability="",
@@ -2318,7 +2317,6 @@ class OrchestratorService:
             agent_runtime=source_runtime,
             kind=AgentSessionKind.BUTLER_MAIN,
             project_id=project_id,
-            workspace_id=workspace_id,
             surface=(
                 runtime_context.surface
                 if runtime_context is not None and runtime_context.surface
@@ -2335,7 +2333,6 @@ class OrchestratorService:
             agent_runtime_id=str(envelope.metadata.get("target_agent_runtime_id", "")),
             role=AgentRuntimeRole.WORKER,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_profile_id=source_agent_profile_id,
             worker_profile_id=requested_worker_profile_id,
             worker_capability=worker_capability_hint,
@@ -2350,7 +2347,6 @@ class OrchestratorService:
             agent_runtime=target_runtime,
             kind=AgentSessionKind.WORKER_INTERNAL,
             project_id=project_id,
-            workspace_id=workspace_id,
             surface=(
                 runtime_context.surface
                 if runtime_context is not None and runtime_context.surface
@@ -2991,7 +2987,6 @@ class OrchestratorService:
         agent_runtime_id: str,
         role: AgentRuntimeRole,
         project_id: str,
-        workspace_id: str,
         agent_profile_id: str,
         worker_profile_id: str,
         worker_capability: str,
@@ -3057,7 +3052,6 @@ class OrchestratorService:
         agent_runtime: AgentRuntime,
         kind: AgentSessionKind,
         project_id: str,
-        workspace_id: str = "",
         surface: str,
         thread_id: str,
         legacy_session_id: str,

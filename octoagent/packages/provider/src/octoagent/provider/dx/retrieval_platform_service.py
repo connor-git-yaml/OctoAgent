@@ -502,25 +502,21 @@ class RetrievalPlatformService:
     async def _resolve_selection(
         self,
         *,
-        project_id: str,
-        workspace_id: str,
+        project_id: str = "",
+        workspace_id: str = "",
     ) -> _SelectionContext:
         resolved_project = None
         resolved_workspace = None
         resolved_project_id = project_id.strip()
-        resolved_workspace_id = workspace_id.strip()
         if not resolved_project_id:
             selector_state = await self._stores.project_store.get_selector_state("web")
             if selector_state is not None:
                 resolved_project_id = selector_state.active_project_id
-                resolved_workspace_id = resolved_workspace_id or selector_state.active_workspace_id or ""
         if resolved_project_id:
             resolved_project = await self._stores.project_store.get_project(resolved_project_id)
         if resolved_project is None:
             resolved_project = await self._stores.project_store.get_default_project()
-        if resolved_project is not None and resolved_workspace_id:
-            resolved_workspace = await self._stores.project_store.get_workspace(resolved_workspace_id)
-        if resolved_project is not None and resolved_workspace is None:
+        if resolved_project is not None:
             resolved_workspace = await self._stores.project_store.get_primary_workspace(
                 resolved_project.project_id
             )

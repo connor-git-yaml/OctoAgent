@@ -1062,10 +1062,7 @@ def resolve_behavior_workspace(
     agent_profile: AgentProfile,
     project_name: str = "",
     project_slug: str = "",
-    workspace_id: str = "",
-    workspace_slug: str = "",
     project_runtime_root: Path | str | None = None,
-    workspace_root_path: Path | str | None = None,
     load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
     data_root_path: Path | str | None = None,
     notes_root_path: Path | str | None = None,
@@ -1089,11 +1086,7 @@ def resolve_behavior_workspace(
     )
     project_behavior_root = behavior_project_dir(root, normalized_project_slug)
     project_agent_root = behavior_project_agent_dir(root, normalized_project_slug, agent_slug)
-    workspace_dir = (
-        Path(workspace_root_path).resolve()
-        if workspace_root_path is not None and str(workspace_root_path).strip()
-        else project_workspace_dir(root, normalized_project_slug)
-    )
+    workspace_dir = project_workspace_dir(root, normalized_project_slug)
     data_dir = (
         Path(data_root_path).resolve()
         if data_root_path is not None and str(data_root_path).strip()
@@ -1120,11 +1113,7 @@ def resolve_behavior_workspace(
         if project_runtime_root is not None and str(project_runtime_root).strip()
         else "project_centered_default"
     )
-    workspace_root_source = (
-        "workspace.root_path"
-        if workspace_root_path is not None and str(workspace_root_path).strip()
-        else "project_centered_default"
-    )
+    workspace_root_source = "project_centered_default"
 
     defaults = {
         item.file_id: item
@@ -1304,8 +1293,8 @@ def resolve_behavior_workspace(
         project_behavior_root=str(project_behavior_root),
         project_workspace_root=str(workspace_dir),
         project_workspace_root_source=workspace_root_source,
-        workspace_id=workspace_id,
-        workspace_slug=workspace_slug,
+        workspace_id="",
+        workspace_slug="",
         project_data_root=str(data_dir),
         project_notes_root=str(notes_dir),
         project_artifacts_root=str(artifacts_dir),
@@ -1371,8 +1360,6 @@ def resolve_behavior_workspace(
         metadata={
             "project_slug": normalized_project_slug,
             "agent_slug": agent_slug,
-            "workspace_id": workspace_id,
-            "workspace_slug": workspace_slug,
             "workspace_root_source": workspace_root_source,
         },
     )

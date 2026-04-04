@@ -146,6 +146,7 @@ class SqliteProjectStore:
             (agent_runtime_id, datetime.now(tz=UTC).isoformat(), project_id),
         )
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def create_workspace(self, workspace: Workspace) -> tuple[Workspace, bool]:
         await self._conn.execute(
             """
@@ -178,6 +179,7 @@ class SqliteProjectStore:
             return existing, False
         raise RuntimeError(f"workspace 创建失败且无法回读: {workspace.workspace_id}")
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def get_workspace(self, workspace_id: str) -> Workspace | None:
         cursor = await self._conn.execute(
             "SELECT * FROM workspaces WHERE workspace_id = ?",
@@ -186,6 +188,7 @@ class SqliteProjectStore:
         row = await cursor.fetchone()
         return self._row_to_workspace(row) if row is not None else None
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def get_workspace_by_slug(
         self,
         project_id: str,
@@ -198,6 +201,7 @@ class SqliteProjectStore:
         row = await cursor.fetchone()
         return self._row_to_workspace(row) if row is not None else None
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def get_primary_workspace(self, project_id: str) -> Workspace | None:
         cursor = await self._conn.execute(
             """
@@ -211,6 +215,7 @@ class SqliteProjectStore:
         row = await cursor.fetchone()
         return self._row_to_workspace(row) if row is not None else None
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def list_workspaces(self, project_id: str) -> list[Workspace]:
         cursor = await self._conn.execute(
             "SELECT * FROM workspaces WHERE project_id = ? ORDER BY created_at ASC",
@@ -545,6 +550,7 @@ class SqliteProjectStore:
             (run_id, *binding_ids),
         )
 
+    # DEPRECATED: workspace 概念已废弃，保留仅为向后兼容
     async def delete_workspaces(self, workspace_ids: list[str]) -> None:
         if not workspace_ids:
             return

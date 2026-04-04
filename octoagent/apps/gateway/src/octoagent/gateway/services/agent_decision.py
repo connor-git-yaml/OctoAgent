@@ -89,22 +89,15 @@ def resolve_behavior_pack(
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
-    workspace_id: str = "",
-    workspace_slug: str = "",
-    workspace_root_path: Path | str | None = None,
     load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> BehaviorPack:
     # Feature 063 T2.4: 缓存命中检查
     resolved_root = str((project_root or Path.cwd()).resolve())
-    resolved_workspace = (
-        str(Path(workspace_root_path).resolve()) if workspace_root_path else ""
-    )
     cache_key = (
         agent_profile.profile_id,
         project_slug,
         resolved_root,
         load_profile.value,
-        resolved_workspace,
     )
     cached = _behavior_pack_cache.get(cache_key)
     if cached is not None:
@@ -116,9 +109,6 @@ def resolve_behavior_pack(
         project_name=project_name,
         project_slug=project_slug,
         project_root=project_root or Path.cwd(),
-        workspace_id=workspace_id,
-        workspace_slug=workspace_slug,
-        workspace_root_path=workspace_root_path,
         load_profile=load_profile,
     )
     if filesystem_pack is not None:
@@ -382,18 +372,12 @@ def build_behavior_system_summary(
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
-    workspace_id: str = "",
-    workspace_slug: str = "",
-    workspace_root_path: Path | str | None = None,
 ) -> dict[str, Any]:
     pack = resolve_behavior_pack(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
         project_root=project_root,
-        workspace_id=workspace_id,
-        workspace_slug=workspace_slug,
-        workspace_root_path=workspace_root_path,
     )
     slice_envelope = build_behavior_slice_envelope(pack)
     path_manifest = dict(pack.metadata.get("path_manifest", {}))
@@ -464,9 +448,6 @@ def render_behavior_system_block(
     project_name: str = "",
     project_slug: str = "",
     project_root: Path | None = None,
-    workspace_id: str = "",
-    workspace_slug: str = "",
-    workspace_root_path: Path | str | None = None,
     load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> str:
     pack = resolve_behavior_pack(
@@ -474,9 +455,6 @@ def render_behavior_system_block(
         project_name=project_name,
         project_slug=project_slug,
         project_root=project_root,
-        workspace_id=workspace_id,
-        workspace_slug=workspace_slug,
-        workspace_root_path=workspace_root_path,
         load_profile=load_profile,
     )
     effective_layers = (
@@ -900,9 +878,6 @@ def _resolve_filesystem_behavior_pack(
     project_name: str,
     project_slug: str,
     project_root: Path | None,
-    workspace_id: str = "",
-    workspace_slug: str = "",
-    workspace_root_path: Path | str | None = None,
     load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> BehaviorPack | None:
     if project_root is None:
@@ -913,10 +888,6 @@ def _resolve_filesystem_behavior_pack(
         agent_profile=agent_profile,
         project_name=project_name,
         project_slug=project_slug,
-        workspace_id=workspace_id,
-        workspace_slug=workspace_slug,
-        project_runtime_root=workspace_root_path,
-        workspace_root_path=workspace_root_path,
         load_profile=load_profile,
     )
 

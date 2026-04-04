@@ -1546,9 +1546,6 @@ class ControlPlaneService:
                     project_name=selected_project.name if selected_project is not None else "",
                     project_slug=selected_project.slug if selected_project is not None else "",
                     project_root=self._project_root,
-                    workspace_id="",
-                    workspace_slug="",
-                    workspace_root_path="",
                 ),
                 metadata=dict(profile.metadata),
                 resource_limits=dict(profile.resource_limits),
@@ -1645,9 +1642,6 @@ class ControlPlaneService:
                 project_name=_bs_project_name,
                 project_slug=_bs_project_slug,
                 project_root=self._project_root,
-                workspace_id=_bs_workspace_id,
-                workspace_slug=_bs_workspace_slug,
-                workspace_root_path=_bs_workspace_root,
             )
 
             items.append(
@@ -1735,9 +1729,6 @@ class ControlPlaneService:
                 project_name=_bs_project_name,
                 project_slug=_bs_project_slug,
                 project_root=self._project_root,
-                workspace_id=_bs_workspace_id,
-                workspace_slug=_bs_workspace_slug,
-                workspace_root_path=_bs_workspace_root,
             )
 
             items.append(
@@ -2399,7 +2390,6 @@ class ControlPlaneService:
         config_value: dict[str, Any] | None = None,
         policy_profile_id: str | None = None,
         selected_project: Any | None = None,
-        selected_workspace: Any | None = None,
         draft_selection: Mapping[str, Any] | None = None,
     ) -> SkillGovernanceDocument:
         if selected_project is None:
@@ -2680,7 +2670,6 @@ class ControlPlaneService:
             config=config.current_value,
             config_warnings=config.warnings,
             selected_project=selected_project,
-            selected_workspace=None,
             diagnostics=diagnostics,
             active_agent_profile=active_agent_profile,
             policy_profile_id=policy_profiles.active_profile_id,
@@ -2942,7 +2931,6 @@ class ControlPlaneService:
             )
         pack = await self._capability_pack_service.get_pack(
             project_id="",
-            workspace_id="",
         )
         return CapabilityPackDocument(
             pack=pack,
@@ -3953,7 +3941,6 @@ class ControlPlaneService:
         state = self._state_store.load().model_copy(
             update={
                 "selected_project_id": project_id,
-                "selected_workspace_id": "",
                 "updated_at": datetime.now(tz=UTC),
             }
         )
@@ -4014,7 +4001,6 @@ class ControlPlaneService:
                 normalized_skill_selection = await self._normalize_skill_selection_for_scope(
                     draft_skill_selection,
                     selected_project=selected_project,
-                    selected_workspace=None,
                 )
             except ControlPlaneActionError as exc:
                 validation_errors.append(str(exc))
@@ -4039,7 +4025,6 @@ class ControlPlaneService:
             config_value=candidate_config_payload,
             policy_profile_id=policy_profile_id,
             selected_project=selected_project,
-            selected_workspace=None,
             draft_selection=normalized_skill_selection,
         )
         diagnostics = await self.get_diagnostics_summary()
@@ -4050,7 +4035,6 @@ class ControlPlaneService:
             config=candidate_config_payload,
             config_warnings=[],
             selected_project=selected_project,
-            selected_workspace=None,
             diagnostics=diagnostics,
             active_agent_profile=active_agent_profile,
             policy_profile_id=policy_profile_id,
@@ -4080,7 +4064,6 @@ class ControlPlaneService:
             normalized_skill_selection = await self._normalize_skill_selection_for_scope(
                 skill_selection,
                 selected_project=selected_project,
-                selected_workspace=None,
             )
 
         review_result = await self._handle_setup_review(
@@ -4411,13 +4394,11 @@ class ControlPlaneService:
         selection: Mapping[str, Any],
         *,
         selected_project: Any | None,
-        selected_workspace: Any | None,
     ) -> dict[str, Any]:
         if selected_project is None:
             raise ControlPlaneActionError("PROJECT_REQUIRED", "当前没有可用 project")
         document = await self.get_skill_governance_document(
             selected_project=selected_project,
-            selected_workspace=None,
         )
         allowed_item_ids = {item.item_id for item in document.items}
         return self._normalize_skill_selection_payload(
@@ -4445,7 +4426,6 @@ class ControlPlaneService:
         normalized = await self._normalize_skill_selection_for_scope(
             raw_selection,
             selected_project=selected_project,
-            selected_workspace=None,
         )
 
         metadata = dict(selected_project.metadata)
@@ -4462,7 +4442,6 @@ class ControlPlaneService:
 
         refreshed = await self.get_skill_governance_document(
             selected_project=selected_project.model_copy(update={"metadata": metadata}),
-            selected_workspace=None,
         )
         return self._completed_result(
             request=request,
@@ -7554,7 +7533,6 @@ class ControlPlaneService:
             existing=existing,
             source_profile=source_profile,
             selected_project=selected_project,
-            selected_workspace=None,
             origin_kind=(
                 WorkerProfileOriginKind.CLONED if mode == "clone" else None
             ),
@@ -7604,7 +7582,6 @@ class ControlPlaneService:
             raw=raw,
             mode="create",
             selected_project=selected_project,
-            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.CUSTOM,
         )
         if not bool(review.get("can_save")):
@@ -7670,7 +7647,6 @@ class ControlPlaneService:
             mode="update",
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=None,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "Root Agent 草稿不能保存。"
@@ -7731,7 +7707,6 @@ class ControlPlaneService:
             mode="clone",
             source_profile=source_profile,
             selected_project=selected_project,
-            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.CLONED,
         )
         if not bool(review.get("can_save")):
@@ -7840,7 +7815,6 @@ class ControlPlaneService:
             mode=mode,
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=None,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "Root Agent 草稿不能保存。"
@@ -7940,7 +7914,6 @@ class ControlPlaneService:
             mode="publish",
             existing=existing,
             selected_project=selected_project,
-            selected_workspace=None,
         )
         if not bool(review.get("ready")):
             blocking = "；".join(review.get("blocking_reasons", [])) or "当前 review 未通过。"
@@ -8155,7 +8128,6 @@ class ControlPlaneService:
             raw=raw,
             mode="extract",
             selected_project=selected_project,
-            selected_workspace=None,
             origin_kind=WorkerProfileOriginKind.EXTRACTED,
         )
         if not bool(review.get("can_save")):
@@ -8878,7 +8850,6 @@ class ControlPlaneService:
                 state.model_copy(
                     update={
                         "selected_project_id": project.project_id,
-                        "selected_workspace_id": "",
                         "updated_at": datetime.now(tz=UTC),
                     }
                 )
@@ -8901,7 +8872,6 @@ class ControlPlaneService:
         item_project_id: str | None,
         item_workspace_id: str | None,
         selected_project: Any | None,
-        selected_workspace: Any | None,
     ) -> bool:
         if selected_project is None:
             return not item_project_id
@@ -9878,7 +9848,6 @@ class ControlPlaneService:
         existing: WorkerProfile | None = None,
         source_profile: WorkerProfile | None = None,
         selected_project: Any | None,
-        selected_workspace: Any | None,
         origin_kind: WorkerProfileOriginKind | None = None,
     ) -> dict[str, Any]:
         capability_pack = await self.get_capability_pack_document()
@@ -10491,7 +10460,6 @@ class ControlPlaneService:
         config: dict[str, Any],
         config_warnings: list[str],
         selected_project: Any | None,
-        selected_workspace: Any | None,
         diagnostics: DiagnosticsSummaryDocument,
         active_agent_profile: dict[str, Any],
         policy_profile_id: str,

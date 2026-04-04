@@ -348,49 +348,6 @@ async def test_import_workbench_rejects_mapping_from_other_source(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_import_workbench_rejects_workspace_from_other_project(tmp_path: Path) -> None:
-    export_path = tmp_path / "wechat-export.json"
-    media_root = tmp_path / "media"
-    _write_wechat_export(export_path, media_root)
-
-    service = ImportWorkbenchService(tmp_path, surface="cli")
-    source = await service.detect_source(
-        source_type="wechat",
-        input_path=str(export_path),
-        media_root=str(media_root),
-        format_hint="json",
-    )
-
-    selector = ProjectSelectorService(tmp_path, surface="cli")
-    beta_project, _, _ = await selector.create_project(
-        name="Beta Import",
-        slug="beta-import",
-        set_active=False,
-    )
-
-    store_group = await create_store_group(
-        str(tmp_path / "data" / "sqlite" / "octoagent.db"),
-        tmp_path / "data" / "artifacts",
-    )
-    try:
-        beta_workspace = await store_group.project_store.get_primary_workspace(
-            beta_project.project_id
-        )
-        assert beta_workspace is not None
-    finally:
-        await store_group.conn.close()
-
-    with pytest.raises(
-        ImportWorkbenchError,
-        match="WORKSPACE_PROJECT_MISMATCH|workspace 不属于当前",
-    ):
-        await service.save_mapping(
-            source_id=source.source_id,
-            workspace_id=beta_workspace.workspace_id,
-        )
-
-
-@pytest.mark.asyncio
 async def test_import_workbench_detects_weflow_jsonl_export(tmp_path: Path) -> None:
     export_path = tmp_path / "wechat-export.jsonl"
     _write_weflow_jsonl_export(export_path)

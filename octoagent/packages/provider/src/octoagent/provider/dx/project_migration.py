@@ -236,12 +236,6 @@ class ProjectWorkspaceMigrationService:
                     _, created = await store_group.project_store.create_project(draft.project)
                     if created:
                         created_project_ids.append(draft.project.project_id)
-                if not draft.primary_workspace_exists:
-                    _, created = await store_group.project_store.create_workspace(
-                        draft.workspace
-                    )
-                    if created:
-                        created_workspace_ids.append(draft.workspace.workspace_id)
                 for binding in draft.bindings_to_create:
                     stored_binding, created = await store_group.project_store.create_binding(
                         binding

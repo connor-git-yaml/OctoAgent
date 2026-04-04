@@ -55,7 +55,7 @@ class ImportResumeEntry(BaseModel):
     source_id: str = Field(min_length=1)
     source_type: ImportSourceType
     project_id: str = Field(min_length=1)
-    workspace_id: str = Field(min_length=1)
+    workspace_id: str = Field(default="")
     scope_id: str = Field(default="")
     last_cursor: str = Field(default="")
     last_batch_id: str = Field(default="")

@@ -118,7 +118,6 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             rendered = await capability_pack.render_bootstrap_context(
                 worker_type=wtype,
                 project_id="project-default",
-                workspace_id="",
                 surface="web",
             )
 

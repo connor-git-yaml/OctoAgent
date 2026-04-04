@@ -407,7 +407,6 @@ def build_memory_namespace_id(
     *,
     kind: MemoryNamespaceKind,
     project_id: str,
-    workspace_id: str = "",
     agent_runtime_id: str = "",
 ) -> str:
     parts = [f"memory_namespace:{kind.value}", f"project:{project_id or 'default'}"]
@@ -441,7 +440,6 @@ def session_state_matches_scope(
     *,
     task: Task,
     project_id: str = "",
-    workspace_id: str = "",
 ) -> bool:
     thread_id = legacy_session_id_for_task(task)
     if thread_id and state.thread_id and state.thread_id != thread_id:
@@ -1038,7 +1036,6 @@ class AgentContextService:
             task=task,
             surface=request.surface,
             project_id=request.project_id,
-            workspace_id="",
         )
         agent_profile, degraded_reasons = await self._resolve_agent_profile(
             project=project,
@@ -1067,25 +1064,21 @@ class AgentContextService:
         agent_runtime = await self._ensure_agent_runtime(
             request=request,
             project=project,
-            workspace=workspace,
             agent_profile=agent_profile,
         )
         agent_session = await self._ensure_agent_session(
             request=request,
             task=task,
             project=project,
-            workspace=workspace,
             agent_runtime=agent_runtime,
             session_state=session_state,
         )
         project_memory_scope_ids = await self._resolve_project_memory_scope_ids(
             task=task,
             project=project,
-            workspace=workspace,
         )
         memory_namespaces = await self._ensure_memory_namespaces(
             project=project,
-            workspace=workspace,
             agent_runtime=agent_runtime,
             agent_session=agent_session,
             project_memory_scope_ids=project_memory_scope_ids,
@@ -1168,7 +1161,6 @@ class AgentContextService:
                 task=task,
                 surface=task.requester.channel,
                 project_id=frame.project_id if frame is not None else "",
-                workspace_id="",
             )
             state = await self._load_session_context(
                 task=task,
@@ -2029,13 +2021,11 @@ class AgentContextService:
         *,
         kind: MemoryNamespaceKind,
         project_id: str,
-        workspace_id: str = "",
         agent_runtime_id: str = "",
     ) -> str:
         return build_memory_namespace_id(
             kind=kind,
             project_id=project_id,
-            workspace_id="",
             agent_runtime_id=agent_runtime_id,
         )
 
@@ -2044,7 +2034,6 @@ class AgentContextService:
         *,
         request: ContextResolveRequest,
         project: Project | None,
-        workspace: Workspace | None,
         agent_profile: AgentProfile,
     ) -> AgentRuntime:
         role = self._resolve_agent_runtime_role(request)
@@ -2144,7 +2133,6 @@ class AgentContextService:
         request: ContextResolveRequest,
         task: Task,
         project: Project | None,
-        workspace: Workspace | None,
         agent_runtime: AgentRuntime,
         session_state: SessionContextState,
     ) -> AgentSession:
@@ -2262,7 +2250,6 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Workspace | None,
         agent_runtime: AgentRuntime,
         agent_session: AgentSession,
         project_memory_scope_ids: list[str],
@@ -2278,7 +2265,6 @@ class AgentContextService:
             project_namespace_id = self._build_memory_namespace_id(
                 kind=MemoryNamespaceKind.PROJECT_SHARED,
                 project_id=project_id,
-                workspace_id=workspace_id,
                 agent_runtime_id=agent_runtime.agent_runtime_id,
             )
             project_existing = await self._stores.agent_context_store.get_memory_namespace(
@@ -2325,7 +2311,6 @@ class AgentContextService:
         private_namespace_id = self._build_memory_namespace_id(
             kind=private_kind,
             project_id=project_id,
-            workspace_id=workspace_id,
             agent_runtime_id=agent_runtime.agent_runtime_id,
         )
         private_existing = await self._stores.agent_context_store.get_memory_namespace(
@@ -2559,12 +2544,9 @@ class AgentContextService:
         task: Task,
         surface: str,
         project_id: str = "",
-        workspace_id: str = "",
     ) -> tuple[Project | None, Workspace | None]:
         project = await self._stores.project_store.get_project(project_id) if project_id else None
-        workspace = (
-            await self._stores.project_store.get_workspace(workspace_id) if workspace_id else None
-        )
+        workspace: Workspace | None = None
         if workspace is not None and project is None and workspace.project_id:
             project = await self._stores.project_store.get_project(workspace.project_id)
         if (
@@ -3022,7 +3004,6 @@ class AgentContextService:
                 hinted_state,
                 task=task,
                 project_id=project_id,
-                workspace_id=workspace_id,
             ):
                 return hinted_state
 
@@ -3042,7 +3023,6 @@ class AgentContextService:
             legacy_state,
             task=task,
             project_id=project_id,
-            workspace_id=workspace_id,
         ):
             return None
 
@@ -3362,7 +3342,6 @@ class AgentContextService:
         *,
         task: Task,
         project: Project | None,
-        workspace: Workspace | None,
     ) -> list[str]:
         if project is None:
             return [task.scope_id] if task.scope_id else []
@@ -3525,9 +3504,6 @@ class AgentContextService:
                     project_name=project.name if project is not None else "",
                     project_slug=project.slug if project is not None else "",
                     project_root=self._project_root,
-                    workspace_id="",
-                    workspace_slug="",
-                    workspace_root_path="",
                     # Feature 063 T2.7: 根据 Agent 角色选择 load_profile
                     load_profile=effective_load_profile,
                 ),
@@ -3545,9 +3521,6 @@ class AgentContextService:
                         agent_profile=agent_profile,
                         project_name=project.name if project is not None else "",
                         project_slug=project.slug if project is not None else "",
-                        workspace_id="",
-                        workspace_slug="",
-                        workspace_root_path="",
                         # Feature 063: 透传 load_profile
                         load_profile=effective_load_profile,
                     ),
