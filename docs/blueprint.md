@@ -3129,7 +3129,7 @@ M5 说明：
 > 基于 Claude Code / OpenClaw / Agent Zero 源码横向对比（见 `docs/design/`），
 > 以下是当前主线代码最急需改善的五个短板，按严重程度排序。
 
-### 🔴 短板 1：Context 管理缺乏自适应压缩
+### ✅ 短板 1：Context 管理缺乏自适应压缩（已修复 2026-04-04）
 
 **现状问题**：
 - `_SESSION_TRANSCRIPT_LIMIT = 20` 硬编码（`agent_context.py:128`），长对话关键历史被丢弃
@@ -3181,7 +3181,7 @@ M5 说明：
 - 高置信度安全命令自动允许，降低用户打扰频率
 - 补全 glob/regex 模式匹配规则
 
-### 🟠 短板 4：Behavior 缓存无热更新
+### ✅ 短板 4：Behavior 缓存无热更新（已修复 2026-04-04）
 
 **现状问题**：
 - `_behavior_pack_cache`（`agent_decision.py:45`）进程级全局字典，无 TTL
@@ -3218,15 +3218,9 @@ M5 说明：
 > 基于 workspace 移除、Butler 统一、Policy 对齐、LiteLLM 集成等大规模重构中的实际问题排查，
 > 以下是当前代码库中已确认影响用户体验的架构缺陷。
 
-### 🔴 问题 1：Bootstrap 每个新对话都重走
+### ✅ 问题 1：Bootstrap 每个新对话都重走（已修复）
 
-**现状**：每创建一个 project 就认为 bootstrap 未完成（`bootstrap_pending`），导致 USER.md 等共享行为文件不注入上下文。用户在默认 project 完成的 bootstrap 对新 project 无效。
-
-**影响**：新对话中 Agent 不知道用户的名字、位置等已录入的偏好。
-
-**根因**：bootstrap 状态存储在 `behavior/.onboarding-state.json`（全局），但 `_is_bootstrap_pending` 判断走的是 per-project/per-session 路径。
-
-**改善方向**：Bootstrap 完成状态改为 per-agent-profile 全局，一次完成所有对话共享。
+**已修复**：`agent_context.py` 中新 project 创建 `BootstrapSession` 时会检查全局 `OnboardingState`，已完成过则直接标记 `COMPLETED`；已有 session 如果全局 onboarding 完成但 session 仍 PENDING，自动升级。此外 behavior 加载路径（`project_root` 传递链 + `render_behavior_system_block` 的 `build_behavior_layers` 修复）也已在 2026-04-04 修复。
 
 ### 🔴 问题 2：`control_plane.py` 过于庞大（9000+ 行）
 
@@ -3244,7 +3238,7 @@ M5 说明：
 
 **改善方向**：在 SkillRunner 层统一为一种内部 history 格式，发送前按 API 类型转换。
 
-### 🟠 问题 4：源码目录在 Agent 可访问范围内
+### ✅ 问题 4：源码目录在 Agent 可访问范围内（已修复 2026-04-04）
 
 **现状**：`~/.octoagent/app/octoagent/` 是系统源码但在 `instance_root` 下，LLM 的 `filesystem.read_text` 和 `terminal.exec` 能读到源码。
 
