@@ -541,6 +541,22 @@ class ContextCompactor:
                     to_remove.extend(turn_indices)
                     break  # 一次只丢弃一整轮
 
+        # 确保 function_call 和 function_call_output 成对删除/保留，
+        # 避免孤立的 function_call_output 导致 Responses API 报
+        # "No tool call found for function call output"
+        call_id_index: dict[str, list[int]] = {}
+        for i, msg in enumerate(history):
+            msg_type = str(msg.get("type", ""))
+            if msg_type in ("function_call", "function_call_output"):
+                cid = str(msg.get("call_id", ""))
+                call_id_index.setdefault(cid, []).append(i)
+        to_remove_set = set(to_remove)
+        for cid, indices in call_id_index.items():
+            # 如果配对中的任何一个被删除，就把整对都删除
+            if any(i in to_remove_set for i in indices) and not all(i in to_remove_set for i in indices):
+                to_remove_set.update(indices)
+        to_remove = list(to_remove_set)
+
         # 反向删除以保持索引正确
         for i in sorted(to_remove, reverse=True):
             history.pop(i)

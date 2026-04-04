@@ -259,23 +259,38 @@ class LiteLLMSkillClient:
 
     @staticmethod
     def _build_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # 先收集所有 function_call 的 call_id，用于验证 output 的有效性
+        known_call_ids: set[str] = set()
+        for message in history:
+            if str(message.get("type", "")) == "function_call":
+                cid = str(message.get("call_id", "")).strip()
+                if cid:
+                    known_call_ids.add(cid)
+
         items: list[dict[str, Any]] = []
         for message in history:
             message_type = str(message.get("type", "")).strip()
             if message_type == "function_call_output":
+                call_id = str(message.get("call_id", "")).strip()
+                # 跳过无效或孤立的 function_call_output
+                if not call_id or call_id not in known_call_ids:
+                    continue
                 items.append(
                     {
                         "type": "function_call_output",
-                        "call_id": str(message.get("call_id", "")),
+                        "call_id": call_id,
                         "output": str(message.get("output", "")),
                     }
                 )
                 continue
             if message_type == "function_call":
+                call_id = str(message.get("call_id", "")).strip()
+                if not call_id:
+                    continue  # 跳过无 ID 的 function_call
                 items.append(
                     {
                         "type": "function_call",
-                        "call_id": str(message.get("call_id", "")),
+                        "call_id": call_id,
                         "name": str(message.get("name", "")),
                         "arguments": str(message.get("arguments", "")),
                     }
