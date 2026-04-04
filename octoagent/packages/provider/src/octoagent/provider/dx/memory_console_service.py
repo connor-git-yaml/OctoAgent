@@ -1327,7 +1327,7 @@ class MemoryConsoleService:
             except Exception:
                 pass
         if not selected_scope_ids:
-            blocking_issues.append("当前 project/workspace 没有可用的 memory scope 绑定。")
+            blocking_issues.append("还没有记忆数据。去 Chat 对话后，系统会自动提取并存储记忆。")
         return _MemoryContext(
             project=project,
             workspace=workspace,
