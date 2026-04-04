@@ -33,9 +33,13 @@ from octoagent.provider.dx.llm_common import LlmServiceProtocol, parse_llm_json_
 
 log = structlog.get_logger()
 
+# 单次提取最多处理的 turn 数量（防止大量积压 turns 超出 LLM context window）
+_MAX_TURNS_PER_EXTRACTION = 50
+
 # Session kinds 白名单 -- 仅这些 kind 触发记忆提取
 _EXTRACTABLE_SESSION_KINDS = frozenset({
     AgentSessionKind.MAIN_BOOTSTRAP,
+    AgentSessionKind.BUTLER_MAIN,  # 历史兼容
     AgentSessionKind.WORKER_INTERNAL,
     AgentSessionKind.DIRECT_WORKER,
 })
@@ -240,11 +244,11 @@ class SessionMemoryExtractor:
         session_id = agent_session.agent_session_id
         cursor_before = agent_session.memory_cursor_seq
 
-        # 4. 查询新增 turns
-        new_turns = await self._agent_context_store.list_turns_after_seq(
+        # 4. 查询新增 turns（截断到最大限制，避免超出 LLM context window）
+        all_new_turns = await self._agent_context_store.list_turns_after_seq(
             session_id, after_seq=cursor_before
         )
-        if not new_turns:
+        if not all_new_turns:
             result.skipped_reason = "no_new_turns"
             log.debug(
                 "session_memory_extraction_skipped",
@@ -252,6 +256,16 @@ class SessionMemoryExtractor:
                 reason=result.skipped_reason,
             )
             return result
+
+        # 截断：只取最近 N 个 turn，剩余的下次再处理
+        new_turns = all_new_turns[-_MAX_TURNS_PER_EXTRACTION:]
+        if len(all_new_turns) > _MAX_TURNS_PER_EXTRACTION:
+            log.info(
+                "session_memory_extraction_truncated",
+                session_id=session_id,
+                total_pending=len(all_new_turns),
+                processing=len(new_turns),
+            )
 
         # 5. 推导 scope_id
         scope_id = await self._resolve_scope_id(
@@ -305,6 +319,9 @@ class SessionMemoryExtractor:
                 error=str(exc),
             )
             result.errors.append(f"llm_failed: {type(exc).__name__}: {exc}")
+            # LLM 失败也推进 cursor，防止同一批 turns 反复重试导致永久卡住
+            await self._agent_context_store.update_memory_cursor(session_id, max_turn_seq)
+            result.new_cursor_seq = max_turn_seq
             return result
 
         # 提取文本内容
@@ -328,6 +345,9 @@ class SessionMemoryExtractor:
                 response_preview=raw_text[:200] if raw_text else "(empty)",
             )
             result.errors.append("parse_failed")
+            # parse 失败也推进 cursor，防止永久卡住
+            await self._agent_context_store.update_memory_cursor(session_id, max_turn_seq)
+            result.new_cursor_seq = max_turn_seq
             return result
 
         # 空结果 -- LLM 判断无值得记忆的内容
