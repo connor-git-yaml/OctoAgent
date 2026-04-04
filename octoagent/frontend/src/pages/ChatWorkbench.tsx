@@ -44,6 +44,7 @@ import {
 } from "../domains/chat/session";
 import { useChatStream } from "../hooks/useChatStream";
 import { readStoredTaskId } from "../hooks/chatStreamHelpers";
+import { useTaskLiveState } from "../hooks/useTaskLiveState";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
@@ -169,9 +170,17 @@ export default function ChatWorkbench() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const [taskDetail, setTaskDetail] = useState<TaskDetailResponse | null>(null);
-  const [executionSession, setExecutionSession] = useState<ExecutionSessionDocument | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalListItem[]>([]);
+  const { taskDetail, executionSession, pendingApprovals, refreshNow: refreshTaskLiveState } = useTaskLiveState({
+    taskId,
+    shouldPoll: streaming,
+    approvalSignal,
+    snapshotResources: snapshot?.resources ? {
+      sessions: snapshot.resources.sessions,
+      delegation: snapshot.resources.delegation,
+      context_continuity: snapshot.resources.context_continuity,
+    } : null,
+    refreshResources,
+  });
   const [chatActionNotice, setChatActionNotice] = useState<{
     tone: "info" | "success" | "error";
     title: string;
@@ -242,13 +251,7 @@ export default function ChatWorkbench() {
     "";
   const normalizedTaskStatus = String(taskDetail?.task?.status ?? activeSession?.status ?? "").trim().toUpperCase();
   const hasLoadedTaskStatus = normalizedTaskStatus.length > 0;
-  const shouldPollLiveState =
-    Boolean(taskId) &&
-    (streaming ||
-      (hasLoadedTaskStatus &&
-        !TERMINAL_TASK_STATUSES.has(normalizedTaskStatus) &&
-        (hasInternalCollaboration ||
-          ["QUEUED", "RUNNING", "WAITING_APPROVAL", "WAITING_INPUT"].includes(normalizedTaskStatus))));
+  // shouldPollLiveState 已移入 useTaskLiveState hook 内部判断
 
   const relatedWorks = sortWorksByUpdate(
     delegationWorks.filter((item) => {
@@ -581,148 +584,10 @@ export default function ChatWorkbench() {
     }
   }, [error, freshTurnStartedAt, latestRuntimeEvidenceMs]);
 
-  useEffect(() => {
-    let cancelled = false;
+  // taskDetail / executionSession / pendingApprovals 的加载、轮询、审批刷新
+  // 已统一由 useTaskLiveState hook 管理
 
-    async function loadDetail() {
-      if (!taskId) {
-        setTaskDetail(null);
-        setExecutionSession(null);
-        setPendingApprovals([]);
-        return;
-      }
-      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
-        fetchTaskDetail(taskId),
-        fetchTaskExecutionSession(taskId),
-        fetchApprovals(),
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setTaskDetail(detailResult.status === "fulfilled" ? detailResult.value : null);
-      setExecutionSession(
-        sessionResult.status === "fulfilled"
-          ? readExecutionSessionDocument(sessionResult.value)
-          : null
-      );
-      setPendingApprovals(
-        approvalsResult.status === "fulfilled"
-          ? approvalsResult.value.approvals.filter((item) => item.task_id === taskId)
-          : []
-      );
-    }
-
-    void loadDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId]);
-
-  // 用 ref 持有最新 snapshot 资源引用，避免将频繁变化的值放入 useEffect 依赖
-  // 导致 setInterval 被反复重建，产生请求风暴
-  const snapshotResourcesRef = useRef(snapshot!.resources);
-  snapshotResourcesRef.current = snapshot!.resources;
-  const refreshResourcesRef = useRef(refreshResources);
-  refreshResourcesRef.current = refreshResources;
-
-  useEffect(() => {
-    if (!taskId) {
-      return;
-    }
-    let cancelled = false;
-    const currentTaskId = taskId;
-
-    async function refreshLiveState() {
-      const res = snapshotResourcesRef.current;
-      const resources = [
-        {
-          resource_type: res.sessions.resource_type,
-          resource_id: res.sessions.resource_id,
-          schema_version: res.sessions.schema_version,
-        },
-        {
-          resource_type: res.delegation.resource_type,
-          resource_id: res.delegation.resource_id,
-          schema_version: res.delegation.schema_version,
-        },
-        {
-          resource_type: res.context_continuity.resource_type,
-          resource_id: res.context_continuity.resource_id,
-          schema_version: res.context_continuity.schema_version,
-        },
-      ];
-
-      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
-        fetchTaskDetail(currentTaskId),
-        fetchTaskExecutionSession(currentTaskId),
-        fetchApprovals(),
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setTaskDetail(detailResult.status === "fulfilled" ? detailResult.value : null);
-      setExecutionSession(
-        sessionResult.status === "fulfilled"
-          ? readExecutionSessionDocument(sessionResult.value)
-          : null
-      );
-      setPendingApprovals(
-        approvalsResult.status === "fulfilled"
-          ? approvalsResult.value.approvals.filter((item) => item.task_id === currentTaskId)
-          : []
-      );
-      if (cancelled) {
-        return;
-      }
-      await refreshResourcesRef.current(resources);
-    }
-
-    void refreshLiveState();
-    if (!shouldPollLiveState) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshLiveState();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [taskId, shouldPollLiveState]);
-
-  // SSE 审批事件触发立即刷新（不等 3s 轮询）
-  useEffect(() => {
-    if (approvalSignal === 0 || !taskId) {
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const [detailResult, sessionResult, approvalsResult] = await Promise.allSettled([
-        fetchTaskDetail(taskId),
-        fetchTaskExecutionSession(taskId),
-        fetchApprovals(),
-      ]);
-      if (cancelled) {
-        return;
-      }
-      if (detailResult.status === "fulfilled") {
-        setTaskDetail(detailResult.value);
-      }
-      if (sessionResult.status === "fulfilled") {
-        setExecutionSession(readExecutionSessionDocument(sessionResult.value));
-      }
-      if (approvalsResult.status === "fulfilled") {
-        setPendingApprovals(
-          approvalsResult.value.approvals.filter((item) => item.task_id === taskId)
-        );
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [approvalSignal, taskId]);
+  // 轮询 + SSE 审批刷新逻辑已由 useTaskLiveState hook 管理
 
   useEffect(() => {
     setChatActionNotice(null);
@@ -805,7 +670,7 @@ export default function ChatWorkbench() {
         approval_id: executionSession?.pending_approval_id ?? undefined,
         actor: "user:web",
       });
-      setExecutionSession(readExecutionSessionDocument(response));
+      refreshTaskLiveState();
       setChatActionNotice({
         tone: "success",
         title: "已经把你的补充发给当前执行流程",
@@ -841,23 +706,23 @@ export default function ChatWorkbench() {
     let nextTaskDetail = taskDetail;
     let nextApprovals = pendingApprovals;
 
+    // 直接 fetch 最新数据（不走 hook 因为需要立即判断结果）
     const [sessionResult, detailResult, approvalsResult] = await Promise.allSettled([
       fetchTaskExecutionSession(taskId),
       fetchTaskDetail(taskId),
       fetchApprovals(),
     ]);
+    // 同时触发 hook 下一轮刷新
+    refreshTaskLiveState();
 
     if (sessionResult.status === "fulfilled") {
       nextExecutionSession = readExecutionSessionDocument(sessionResult.value);
-      setExecutionSession(nextExecutionSession);
     }
     if (detailResult.status === "fulfilled") {
       nextTaskDetail = detailResult.value;
-      setTaskDetail(nextTaskDetail);
     }
     if (approvalsResult.status === "fulfilled") {
       nextApprovals = approvalsResult.value.approvals.filter((item) => item.task_id === taskId);
-      setPendingApprovals(nextApprovals);
       if (nextApprovals.length > 0) {
         return buildSyntheticApprovalItem(nextApprovals[0]!);
       }
@@ -1001,9 +866,8 @@ export default function ChatWorkbench() {
       return;
     }
     setFreshTurnStartedAt(Date.now());
-    setTaskDetail(null);
-    setExecutionSession(null);
-    setPendingApprovals([]);
+    // taskDetail/executionSession/pendingApprovals 的重置由
+    // useTaskLiveState 在 taskId 变化时自动处理
     setChatActionNotice(null);
     await sendMessage(text, {
       agentProfileId: currentSessionOwnerProfileId || undefined,
