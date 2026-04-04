@@ -37,7 +37,7 @@ class TestUsageLimits:
         assert limits.max_tool_calls is None  # 不限工具调用
         assert limits.max_budget_usd is None
         assert limits.max_duration_seconds == 7200.0  # 统一 2 小时
-        assert limits.repeat_signature_threshold == 10
+        assert limits.repeat_signature_threshold == 100
 
     def test_custom_values(self) -> None:
         limits = UsageLimits(
@@ -84,7 +84,7 @@ class TestLoopGuardPolicyConversion:
         policy = LoopGuardPolicy()
         limits = policy.to_usage_limits()
         assert limits.max_steps == 30
-        assert limits.repeat_signature_threshold == 10
+        assert limits.repeat_signature_threshold == 100
 
 
 # ═══════════════════════════════════════

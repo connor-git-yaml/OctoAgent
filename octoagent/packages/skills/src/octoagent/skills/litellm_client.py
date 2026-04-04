@@ -225,14 +225,15 @@ class LiteLLMSkillClient:
         manifest: SkillManifest,
         execution_context: SkillExecutionContext,
         prompt: str,
-        use_responses_api: bool,
     ) -> list[dict[str, str]]:
+        """统一构建初始 history（始终为 Chat Completions 格式）。
+
+        Responses API 路径的 system message 在发送前由
+        _build_responses_instructions() 提取为 instructions 参数。
+        """
         history = cls._normalize_history_messages(execution_context.conversation_messages)
         if not history and prompt.strip():
             history = [{"role": "user", "content": prompt.strip()}]
-        if use_responses_api:
-            return history
-
         system_msg = manifest.load_description() or "You are a helpful assistant."
         return [{"role": "system", "content": system_msg}, *history]
 
@@ -258,60 +259,83 @@ class LiteLLMSkillClient:
         return "\n\n".join(part for part in instruction_parts if part)
 
     @staticmethod
-    def _build_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # 先收集所有 function_call 的 call_id，用于验证 output 的有效性
-        known_call_ids: set[str] = set()
-        for message in history:
-            if str(message.get("type", "")) == "function_call":
-                cid = str(message.get("call_id", "")).strip()
-                if cid:
-                    known_call_ids.add(cid)
+    def _history_to_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """将统一的 Chat Completions 格式 history 转换为 Responses API input。
 
+        内部 history 统一存 Chat Completions 格式，只在发送 Responses API 时转换。
+        转换规则：
+        - system → 跳过（已由 instructions 处理）
+        - user → {role: "user", content: [{type: "input_text", text}]}
+        - assistant (无 tool_calls) → {role: "assistant", content: [{type: "output_text", text}]}
+        - assistant (有 tool_calls) → 多个 {type: "function_call", call_id, name, arguments}
+        - tool → {type: "function_call_output", call_id, output}
+        """
         items: list[dict[str, Any]] = []
         for message in history:
-            message_type = str(message.get("type", "")).strip()
-            if message_type == "function_call_output":
-                call_id = str(message.get("call_id", "")).strip()
-                # 跳过无效或孤立的 function_call_output
-                if not call_id or call_id not in known_call_ids:
-                    continue
-                items.append(
-                    {
+            role = str(message.get("role", "")).strip()
+
+            if role == "system":
+                continue
+
+            if role == "tool":
+                call_id = str(message.get("tool_call_id", "")).strip()
+                if call_id:
+                    items.append({
                         "type": "function_call_output",
                         "call_id": call_id,
-                        "output": str(message.get("output", "")),
-                    }
-                )
+                        "output": str(message.get("content", "")),
+                    })
                 continue
+
+            if role == "assistant":
+                tc_list = message.get("tool_calls")
+                if tc_list and isinstance(tc_list, list):
+                    # assistant 有 tool_calls → 转为 function_call items
+                    for tc in tc_list:
+                        fn = tc.get("function", {})
+                        call_id = str(tc.get("id", "")).strip()
+                        if call_id:
+                            items.append({
+                                "type": "function_call",
+                                "call_id": call_id,
+                                "name": str(fn.get("name", "")),
+                                "arguments": str(fn.get("arguments", "")),
+                            })
+                else:
+                    # 纯文本 assistant 回复
+                    items.append({
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": str(message.get("content", ""))}],
+                    })
+                continue
+
+            if role == "user":
+                items.append({
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": str(message.get("content", ""))}],
+                })
+                continue
+
+            # 兼容旧格式：type-based messages（不应再出现）
+            message_type = str(message.get("type", "")).strip()
             if message_type == "function_call":
                 call_id = str(message.get("call_id", "")).strip()
-                if not call_id:
-                    continue  # 跳过无 ID 的 function_call
-                items.append(
-                    {
+                if call_id:
+                    items.append({
                         "type": "function_call",
                         "call_id": call_id,
                         "name": str(message.get("name", "")),
                         "arguments": str(message.get("arguments", "")),
-                    }
-                )
-                continue
+                    })
+            elif message_type == "function_call_output":
+                call_id = str(message.get("call_id", "")).strip()
+                if call_id:
+                    items.append({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": str(message.get("output", "")),
+                    })
 
-            role = str(message.get("role", "user")).strip() or "user"
-            if role == "system":
-                continue
-            content_type = "output_text" if role == "assistant" else "input_text"
-            items.append(
-                {
-                    "role": role,
-                    "content": [
-                        {
-                            "type": content_type,
-                            "text": str(message.get("content", "")),
-                        }
-                    ],
-                }
-            )
         return items
 
     async def _call_proxy_responses(
@@ -330,7 +354,7 @@ class LiteLLMSkillClient:
         body: dict[str, Any] = {
             "model": wire_model,
             "instructions": self._build_responses_instructions(manifest, history),
-            "input": self._build_responses_input(history),
+            "input": self._history_to_responses_input(history),
             "store": False,
             "stream": True,
         }
@@ -660,7 +684,6 @@ class LiteLLMSkillClient:
                 manifest=manifest,
                 execution_context=execution_context,
                 prompt=prompt,
-                use_responses_api=use_responses_api,
             )
             self._histories[key] = history
 
@@ -674,38 +697,14 @@ class LiteLLMSkillClient:
         if step > 1 and feedback:
             has_standard_ids = any(fb.tool_call_id for fb in feedback)
 
-            if has_standard_ids and not use_responses_api:
-                # Chat Completions 标准回填：tool role message
+            if has_standard_ids:
+                # 统一使用 Chat Completions 格式回填（Responses API 在发送前转换）
                 for fb in feedback:
-                    if fb.tool_call_id:
-                        history.append({
-                            "role": "tool",
-                            "tool_call_id": fb.tool_call_id,
-                            "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                        })
-                    else:
-                        # 混合场景下无 ID 的 feedback 用自然语言
-                        history.append({
-                            "role": "tool",
-                            "tool_call_id": f"fallback_{fb.tool_name}",
-                            "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                        })
-            elif has_standard_ids and use_responses_api:
-                # Responses API 标准回填：function_call_output
-                for fb in feedback:
-                    call_id = fb.tool_call_id
-                    if call_id:
-                        history.append({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                        })
-                    else:
-                        history.append({
-                            "type": "function_call_output",
-                            "call_id": f"fallback_{fb.tool_name}",
-                            "output": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                        })
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": fb.tool_call_id or f"fallback_{fb.tool_name}",
+                        "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                    })
             else:
                 # 向后兼容：自然语言回填（无 tool_call_id 时）
                 results = []
@@ -804,13 +803,13 @@ class LiteLLMSkillClient:
                 body["tool_choice"] = "auto"
             content, tool_calls, metadata = await self._call_proxy(body)
 
-        # 追加 assistant 消息到历史
+        # 追加 assistant 消息到历史（统一使用 Chat Completions 格式）
         if tool_calls:
-            # 检测是否有标准 tool_call ID（用于决定回填格式）
             has_ids = any(tc.get("id") for tc in tool_calls)
 
-            if has_ids and not use_responses_api:
-                # Chat Completions: 追加标准 assistant tool_calls message
+            if has_ids:
+                # 统一格式：Chat Completions assistant tool_calls message
+                # Responses API 在发送前由 _history_to_responses_input() 转换
                 history.append({
                     "role": "assistant",
                     "content": content or None,
@@ -826,17 +825,8 @@ class LiteLLMSkillClient:
                         for tc in tool_calls
                     ],
                 })
-            elif has_ids and use_responses_api:
-                # Responses API: 追加 function_call items
-                for tc in tool_calls:
-                    history.append({
-                        "type": "function_call",
-                        "call_id": tc["id"],
-                        "name": _to_fn_name(tc["tool_name"]),
-                        "arguments": json.dumps(tc["arguments"]),
-                    })
             else:
-                # 向后兼容：自然语言摘要
+                # 向后兼容：无 tool_call_id 的自然语言摘要
                 tc_summary = ", ".join(
                     f"{tc['tool_name']}({tc['arguments']})" for tc in tool_calls
                 )
