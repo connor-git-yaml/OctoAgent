@@ -180,20 +180,12 @@ class LiteLLMSkillClient:
     def _merge_system_messages_to_front(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """将分散的 system 消息合并到开头。
+        """将所有 system 消息合并为一条放在开头。
 
-        部分模型（Qwen、Gemma 等）要求 system 消息只能出现在对话最前面。
+        部分模型（Qwen、Gemma 等）只接受恰好一个 system 消息且必须在最前面。
+        多个连续的 system 消息也会被拒绝。
         """
         if not messages:
-            return messages
-        first_non_system = next(
-            (i for i, m in enumerate(messages) if m.get("role") != "system"),
-            len(messages),
-        )
-        has_system_after = any(
-            m.get("role") == "system" for m in messages[first_non_system:]
-        )
-        if not has_system_after:
             return messages
         system_parts: list[str] = []
         non_system: list[dict[str, Any]] = []
@@ -205,6 +197,9 @@ class LiteLLMSkillClient:
             else:
                 non_system.append(msg)
         if not system_parts:
+            return messages
+        # 已经只有一个 system 且在开头——不需要变
+        if len(system_parts) == 1 and messages[0].get("role") == "system":
             return messages
         return [{"role": "system", "content": "\n\n".join(system_parts)}, *non_system]
 
