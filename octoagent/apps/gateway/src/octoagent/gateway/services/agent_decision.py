@@ -38,11 +38,42 @@ from octoagent.core.models import (
 )
 
 # ---------------------------------------------------------------------------
-# Feature 063 T2.4: Session 级 BehaviorPack 缓存
+# Feature 063 T2.4: Session 级 BehaviorPack 缓存 + mtime 脏检查热更新
 # ---------------------------------------------------------------------------
-# 缓存键 = (profile_id, project_slug, project_root_str, load_profile_value)
-# 写入行为文件后通过 invalidate_behavior_pack_cache() 清除。
-_behavior_pack_cache: dict[tuple[str, str, str, str], BehaviorPack] = {}
+# 缓存值 = (BehaviorPack, source_paths, cached_mtime_ns)
+# source_paths: 构成该 pack 的磁盘文件路径列表
+# cached_mtime_ns: 缓存时所有源文件的最大 mtime（纳秒）
+# 命中时通过 _check_behavior_mtime() 校验文件是否被修改。
+_behavior_pack_cache: dict[
+    tuple[str, str, str, str],
+    tuple[BehaviorPack, list[Path], int],
+] = {}
+
+
+def _collect_behavior_source_paths(pack: BehaviorPack, project_root: Path) -> list[Path]:
+    """从 BehaviorPack.files 中收集实际磁盘路径。"""
+    paths: list[Path] = []
+    for f in pack.files:
+        hint = f.path_hint.strip()
+        if hint:
+            p = Path(hint) if Path(hint).is_absolute() else project_root / hint
+            if p.exists():
+                paths.append(p.resolve())
+    return paths
+
+
+def _max_mtime_ns(paths: list[Path]) -> int:
+    """返回路径列表中最大的 mtime（纳秒精度），空列表返回 0。"""
+    if not paths:
+        return 0
+    return max((p.stat().st_mtime_ns for p in paths if p.exists()), default=0)
+
+
+def _check_behavior_mtime(source_paths: list[Path], cached_mtime_ns: int) -> bool:
+    """检查缓存是否仍然有效（文件未被修改）。"""
+    if not source_paths:
+        return True  # 无磁盘文件（来自 metadata/default templates），总是有效
+    return _max_mtime_ns(source_paths) <= cached_mtime_ns
 
 
 def invalidate_behavior_pack_cache(
@@ -91,7 +122,7 @@ def resolve_behavior_pack(
     project_root: Path | None = None,
     load_profile: BehaviorLoadProfile = BehaviorLoadProfile.FULL,
 ) -> BehaviorPack:
-    # Feature 063 T2.4: 缓存命中检查
+    # Feature 063 T2.4: 缓存命中检查 + mtime 脏检查热更新
     resolved_root = str((project_root or Path.cwd()).resolve())
     cache_key = (
         agent_profile.profile_id,
@@ -99,9 +130,13 @@ def resolve_behavior_pack(
         resolved_root,
         load_profile.value,
     )
-    cached = _behavior_pack_cache.get(cache_key)
-    if cached is not None:
-        return cached
+    cached_entry = _behavior_pack_cache.get(cache_key)
+    if cached_entry is not None:
+        cached_pack, source_paths, cached_mtime_ns = cached_entry
+        if _check_behavior_mtime(source_paths, cached_mtime_ns):
+            return cached_pack
+        # 文件已修改，清除旧缓存重新加载
+        del _behavior_pack_cache[cache_key]
 
     metadata = dict(agent_profile.metadata)
     filesystem_pack = _resolve_filesystem_behavior_pack(
@@ -112,7 +147,8 @@ def resolve_behavior_pack(
         load_profile=load_profile,
     )
     if filesystem_pack is not None:
-        _behavior_pack_cache[cache_key] = filesystem_pack
+        fs_paths = _collect_behavior_source_paths(filesystem_pack, project_root or Path.cwd())
+        _behavior_pack_cache[cache_key] = (filesystem_pack, fs_paths, _max_mtime_ns(fs_paths))
         return filesystem_pack
 
     raw_pack = metadata.get("behavior_pack")
@@ -127,7 +163,7 @@ def resolve_behavior_pack(
                         or ["agent_profile.metadata:behavior_pack"],
                     }
                 )
-            _behavior_pack_cache[cache_key] = pack
+            _behavior_pack_cache[cache_key] = (pack, [], 0)  # metadata 来源无磁盘文件
             return pack
         except Exception:
             pass
@@ -163,7 +199,7 @@ def resolve_behavior_pack(
             "file_budgets": dict(BEHAVIOR_FILE_BUDGETS),
         },
     )
-    _behavior_pack_cache[cache_key] = result
+    _behavior_pack_cache[cache_key] = (result, [], 0)  # default templates 无磁盘文件
     return result
 
 

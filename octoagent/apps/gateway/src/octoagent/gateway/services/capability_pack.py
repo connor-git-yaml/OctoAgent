@@ -1189,10 +1189,24 @@ class CapabilityPackService:
             resolved = candidate.resolve()
             if resolved != instance_root and not resolved.is_relative_to(instance_root):
                 if allow_outside:
+                    # 排除系统源码目录，防止 Agent 浪费 token 读内部实现
+                    app_dir = (self._project_root / "app").resolve()
+                    if resolved == app_dir or resolved.is_relative_to(app_dir):
+                        raise RuntimeError(
+                            f"path points to system source code ({resolved}). "
+                            f"Agent 不应读取系统源码，请使用对应的工具完成任务。"
+                        )
                     return resolved
                 raise RuntimeError(
                     f"path escapes instance root ({instance_root}). "
                     f"写操作仅允许 instance root 内路径。"
+                )
+            # instance root 内部也排除 app/ 目录
+            app_dir = (self._project_root / "app").resolve()
+            if resolved == app_dir or resolved.is_relative_to(app_dir):
+                raise RuntimeError(
+                    f"path points to system source code ({resolved}). "
+                    f"Agent 不应读取系统源码，请使用对应的工具完成任务。"
                 )
             return resolved
 
