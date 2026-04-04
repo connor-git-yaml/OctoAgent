@@ -89,6 +89,9 @@ async def test_runner_tool_call_success(
 
 
 async def test_runner_output_validation_retry(execution_context, tool_broker, event_store) -> None:
+    """output_model 验证已在 runner 中跳过（避免 Qwen tool_call 格式差异导致
+    静默丢弃 tool_calls），因此 content="bad" 不再触发 VALIDATION_ERROR，
+    直接返回 SUCCEEDED。"""
     manifest = SkillManifest(
         skill_id="demo.strict",
         version="0.1.0",
@@ -107,8 +110,8 @@ async def test_runner_output_validation_retry(execution_context, tool_broker, ev
         prompt="prompt",
     )
 
-    assert result.status == SkillRunStatus.FAILED
-    assert result.error_category == ErrorCategory.VALIDATION_ERROR
+    # output_model validation 已跳过，runner 直接返回 complete=True 的结果
+    assert result.status == SkillRunStatus.SUCCEEDED
 
 
 async def test_runner_model_failure_retry_to_fail(
@@ -275,7 +278,7 @@ async def test_runner_loop_detected(
         complete=False,
         tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "x"}}],
     )
-    client = QueueModelClient([repeated] * 12)
+    client = QueueModelClient([repeated] * 102)
     runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
 
     result = await runner.run(
