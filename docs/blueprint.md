@@ -3230,13 +3230,9 @@ M5 说明：
 
 **改善方向**：拆分为独立 service（`SessionService`、`SetupService`、`BehaviorService`、`McpService`、`WorkerProfileService`）。
 
-### 🔴 问题 3：LLM 双路径 History 格式不统一
+### ✅ 问题 3：LLM 双路径 History 格式不统一（已修复 2026-04-04）
 
-**现状**：`main`（GPT 5.4）走 Responses API 直连 Codex Backend（`function_call`/`function_call_output` 格式），`cheap`（Qwen）走 Chat Completions API 经 LiteLLM Proxy（`tool_calls`/`tool` 格式）。两条路径的 history 追加、压缩、tool_call 回填逻辑完全分叉。
-
-**影响**：修一个路径另一个可能有不同的 bug（如 Responses API call_id 不匹配 vs Chat Completions system message 合并）。
-
-**改善方向**：在 SkillRunner 层统一为一种内部 history 格式，发送前按 API 类型转换。
+**已修复**：`litellm_client.py` 内部 history 统一为 Chat Completions 标准格式（`tool_calls`/`tool` role）。Responses API 发送前由 `_history_to_responses_input()` 转换。assistant tool_calls 追加和 tool result 回填各从 3 条分支合并为 1 条。
 
 ### ✅ 问题 4：源码目录在 Agent 可访问范围内（已修复 2026-04-04）
 
