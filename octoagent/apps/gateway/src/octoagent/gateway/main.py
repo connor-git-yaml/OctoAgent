@@ -136,6 +136,32 @@ def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> 
     return int(cfg.channels.telegram.polling_timeout_seconds)
 
 
+def _ensure_litellm_master_key_env(project_root: Path) -> None:
+    """确保 LITELLM_MASTER_KEY 环境变量已设置。
+
+    从 litellm-config-resolved.yaml 的 general_settings.master_key 读取，
+    注入到当前进程环境变量。load_provider_config() 依赖这个变量获取
+    proxy_api_key，否则内部 chat completions 调用（如 Memory 提取）会 401。
+    """
+    if os.environ.get("LITELLM_MASTER_KEY"):
+        return  # 已设置，无需重复
+
+    try:
+        import yaml
+
+        config_path = project_root / "data" / "ops" / "litellm-config-resolved.yaml"
+        if not config_path.exists():
+            return
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        master_key = (cfg or {}).get("general_settings", {}).get("master_key", "")
+        if master_key:
+            os.environ["LITELLM_MASTER_KEY"] = master_key
+            log.info("litellm_master_key_injected_from_config")
+    except Exception:
+        pass  # 非关键路径，降级处理
+
+
 def _resolve_stream_model_aliases(project_root: Path) -> set[str]:
     """解析需要走流式聚合的 model aliases。"""
     return resolve_codex_backend_aliases(project_root)
@@ -430,6 +456,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tool_broker = tool_broker
 
     # LLM 服务初始化（根据配置选择模式）
+    # 确保 LITELLM_MASTER_KEY 环境变量已设置——load_provider_config 依赖它
+    # 来获取 proxy_api_key，否则内部 chat completions 调用会 401
+    _ensure_litellm_master_key_env(project_root)
     provider_config = load_provider_config()
     app.state.provider_config = provider_config
 
