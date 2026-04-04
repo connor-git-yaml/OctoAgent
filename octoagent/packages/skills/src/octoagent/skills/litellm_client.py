@@ -508,6 +508,17 @@ class LiteLLMSkillClient:
         tool_calls 格式: [{"id": str, "tool_name": str, "arguments": dict}]
         metadata 包含 token_usage / cost_usd / model_name 等（如可用）。
         """
+        # 安全网：发送前再次合并 system 消息（防止上游遗漏）
+        sent_messages = body.get("messages", [])
+        merged = self._merge_system_messages_to_front(sent_messages)
+        if merged is not sent_messages:
+            log.warning(
+                "call_proxy_system_merged_at_send",
+                model=body.get("model"),
+                original_count=len(sent_messages),
+                merged_count=len(merged),
+            )
+            body = {**body, "messages": merged}
         content_parts: list[str] = []
         # 按 index 合并流式 tool_call 片段
         tc_raw: dict[int, dict[str, Any]] = {}
@@ -759,7 +770,16 @@ class LiteLLMSkillClient:
 
         # 非 OpenAI 模型（Qwen 等）要求 system 消息在开头，
         # 合并分散的 system 消息到第一条
+        pre_merge_roles = [m.get("role", "?") for m in history]
         history = self._merge_system_messages_to_front(history)
+        post_merge_roles = [m.get("role", "?") for m in history]
+        if pre_merge_roles != post_merge_roles:
+            log.info(
+                "system_messages_merged",
+                pre_roles=pre_merge_roles[:20],
+                post_roles=post_merge_roles[:20],
+                step=step,
+            )
 
         if use_responses_api:
             content, tool_calls, metadata = await self._call_proxy_responses(
