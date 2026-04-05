@@ -33,7 +33,6 @@ async def _setup_services(tmp_path: Path):
     from octoagent.core.models import (
         Project,
         ProjectSelectorState,
-        Workspace,
     )
 
     store_group = await create_store_group(
@@ -48,21 +47,12 @@ async def _setup_services(tmp_path: Path):
             is_default=True,
         )
     )
-    await store_group.project_store.create_workspace(
-        Workspace(
-            workspace_id="workspace-default",
-            project_id="project-default",
-            slug="primary",
-            name="Primary",
-            root_path=str(tmp_path),
-        )
-    )
     await store_group.project_store.save_selector_state(
         ProjectSelectorState(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="",
+
             source="tests",
         )
     )
@@ -151,7 +141,7 @@ async def test_role_card_present_on_agent_runtime(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-rolecard",
             project_id="project-default",
-            workspace_id="",
+
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Test Worker",
@@ -184,7 +174,7 @@ async def test_role_card_empty_by_default(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-empty-rolecard",
             project_id="project-default",
-            workspace_id="",
+
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Plain Worker",

@@ -142,7 +142,6 @@ async def test_consolidate_action_calls_consolidate_all_pending():
 
     result = await memory_console_service.run_consolidate(
         project_id="",
-        workspace_id=None,
     )
 
     assert result["consolidated_count"] == 5

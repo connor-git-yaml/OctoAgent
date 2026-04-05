@@ -9,7 +9,7 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.provider import AliasRegistry, ModelCallResult, TokenUsage
 from octoagent.skills import SkillOutputEnvelope, SkillRunResult, SkillRunStatus, SkillRunner
 from octoagent.skills.litellm_client import LiteLLMSkillClient
-from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
+from octoagent.tooling.models import SideEffectLevel, ToolMeta
 
 
 class _FakeFallbackManager:
@@ -106,7 +106,6 @@ class _ToolSchemaBroker:
                     "properties": {"project_id": {"type": "string"}},
                 },
                 side_effect_level=SideEffectLevel.NONE,
-                tool_profile=ToolProfile.MINIMAL,
                 tool_group="project",
             )
         ]

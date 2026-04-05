@@ -63,7 +63,7 @@ async def setup_session(store: SqliteAgentContextStore):
     runtime = AgentRuntime(
         agent_runtime_id="rt-ext-001",
         project_id="proj-001",
-        workspace_id="",
+
         name="Extractor Test Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -73,7 +73,7 @@ async def setup_session(store: SqliteAgentContextStore):
         agent_runtime_id="rt-ext-001",
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="proj-001",
-        workspace_id="",
+
     )
     await store.save_agent_session(session)
 
@@ -81,7 +81,7 @@ async def setup_session(store: SqliteAgentContextStore):
     ns = MemoryNamespace(
         namespace_id="ns-proj-001",
         project_id="proj-001",
-        workspace_id="",
+
         agent_runtime_id="rt-ext-001",
         kind=MemoryNamespaceKind.PROJECT_SHARED,
         memory_scope_ids=["proj-001/default"],
@@ -355,7 +355,7 @@ async def test_subagent_session_skipped(
     runtime = AgentRuntime(
         agent_runtime_id="rt-sub-001",
         project_id="proj-001",
-        workspace_id="",
+
         name="Subagent Runtime",
     )
     await store.save_agent_runtime(runtime)
@@ -365,7 +365,7 @@ async def test_subagent_session_skipped(
         agent_runtime_id="rt-sub-001",
         kind=AgentSessionKind.SUBAGENT_INTERNAL,
         project_id="proj-001",
-        workspace_id="",
+
     )
     await store.save_agent_session(session)
 

@@ -105,7 +105,7 @@ async def parent_runtime(store_group: StoreGroup) -> AgentRuntime:
     runtime = AgentRuntime(
         agent_runtime_id="worker-parent-001",
         project_id="project-001",
-        workspace_id="",
+
         agent_profile_id="profile-001",
         worker_profile_id="worker-profile-001",
         role=AgentRuntimeRole.WORKER,
@@ -544,7 +544,7 @@ class TestSubagentExecutorLifecycle:
         parent_rt = AgentRuntime(
             agent_runtime_id="worker-life-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -560,7 +560,7 @@ class TestSubagentExecutorLifecycle:
         sub_rt = AgentRuntime(
             agent_runtime_id="subagent-life-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -578,7 +578,7 @@ class TestSubagentExecutorLifecycle:
             kind=AgentSessionKind.SUBAGENT_INTERNAL,
             status=AgentSessionStatus.ACTIVE,
             project_id="proj-1",
-            workspace_id="",
+    
             parent_worker_runtime_id="worker-life-001",
             created_at=now,
             updated_at=now,
@@ -678,7 +678,7 @@ class TestSubagentExecutorLifecycle:
         parent_rt = AgentRuntime(
             agent_runtime_id="worker-cancel-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -693,7 +693,7 @@ class TestSubagentExecutorLifecycle:
         sub_rt = AgentRuntime(
             agent_runtime_id="subagent-cancel-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -711,7 +711,7 @@ class TestSubagentExecutorLifecycle:
             kind=AgentSessionKind.SUBAGENT_INTERNAL,
             status=AgentSessionStatus.ACTIVE,
             project_id="proj-1",
-            workspace_id="",
+    
             parent_worker_runtime_id="worker-cancel-001",
             created_at=now,
             updated_at=now,
@@ -811,7 +811,7 @@ class TestSubagentExecutorLifecycle:
         parent_rt = AgentRuntime(
             agent_runtime_id="worker-fail-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -826,7 +826,7 @@ class TestSubagentExecutorLifecycle:
         sub_rt = AgentRuntime(
             agent_runtime_id="subagent-fail-001",
             project_id="proj-1",
-            workspace_id="",
+    
             agent_profile_id="ap-1",
             worker_profile_id="wp-1",
             role=AgentRuntimeRole.WORKER,
@@ -844,7 +844,7 @@ class TestSubagentExecutorLifecycle:
             kind=AgentSessionKind.SUBAGENT_INTERNAL,
             status=AgentSessionStatus.ACTIVE,
             project_id="proj-1",
-            workspace_id="",
+    
             parent_worker_runtime_id="worker-fail-001",
             created_at=now,
             updated_at=now,

@@ -21,7 +21,6 @@ from octoagent.core.models import (
     OwnerProfile,
     Project,
     ProjectSelectorState,
-    Workspace,
 )
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.capability_pack import CapabilityPackService
@@ -105,21 +104,12 @@ async def _build_runtime_services(tmp_path: Path):
             is_default=True,
         )
     )
-    await store_group.project_store.create_workspace(
-        Workspace(
-            workspace_id="workspace-default",
-            project_id="project-default",
-            slug="primary",
-            name="Primary",
-            root_path=str(tmp_path),
-        )
-    )
     await store_group.project_store.save_selector_state(
         ProjectSelectorState(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="",
+
             source="tests",
         )
     )
@@ -549,21 +539,12 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
             is_default=True,
         )
     )
-    await store_group.project_store.create_workspace(
-        Workspace(
-            workspace_id="workspace-default",
-            project_id="project-default",
-            slug="primary",
-            name="Primary",
-            root_path=str(tmp_path),
-        )
-    )
     await store_group.project_store.save_selector_state(
         ProjectSelectorState(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="",
+
             source="tests",
         )
     )
@@ -1635,7 +1616,6 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
         assert len(child_works) == 1
         child = child_works[0]
         assert child.project_id == "project-default"
-        assert child.workspace_id == ""
         assert child.metadata["requested_tool_profile"] == "standard"
         assert child.metadata["requested_worker_type"] == "research"
     finally:

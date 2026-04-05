@@ -1451,7 +1451,7 @@ class WorkerProfileDomainService(DomainServiceBase):
                 latest.project_id if latest is not None else fallback_project_id
             ),
             active_workspace_id=(
-                latest.workspace_id if latest is not None else fallback_workspace_id
+                ""
             ),
             active_work_count=len(active_works),
             running_work_count=len(

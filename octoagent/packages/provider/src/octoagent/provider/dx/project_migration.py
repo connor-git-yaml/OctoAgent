@@ -531,17 +531,7 @@ class ProjectWorkspaceMigrationService:
                 f"default project 数量非法: 预期 1，实际 {default_count}"
             )
 
-        if project.project_id:
-            workspaces = await store_group.project_store.list_workspaces(project.project_id)
-            primary_count = sum(1 for item in workspaces if item.kind == WorkspaceKind.PRIMARY)
-            if workspace_will_exist and not any(
-                item.workspace_id == workspace.workspace_id for item in workspaces
-            ):
-                primary_count += 1 if workspace.kind == WorkspaceKind.PRIMARY else 0
-            if primary_count != 1:
-                validation.blocking_issues.append(
-                    f"primary workspace 数量非法: 预期 1，实际 {primary_count}"
-                )
+        # NOTE: workspace 概念已废弃，跳过 workspace 校验
 
         expected_keys = {
             (binding_type.value, binding_key)

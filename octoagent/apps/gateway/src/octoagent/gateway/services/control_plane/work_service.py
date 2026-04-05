@@ -206,7 +206,7 @@ class WorkDomainService(DomainServiceBase):
                 pipeline_run_id=work.pipeline_run_id,
                 runtime_id=work.runtime_id,
                 project_id=work.project_id,
-                workspace_id=work.workspace_id,
+                workspace_id="",
                 agent_profile_id=work.agent_profile_id,
                 session_owner_profile_id=work.session_owner_profile_id,
                 turn_executor_kind=work.turn_executor_kind.value,

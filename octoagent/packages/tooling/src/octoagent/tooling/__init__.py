@@ -38,6 +38,7 @@ from .models import (
     SideEffectLevel,
     ToolCall,
     ToolMeta,
+    ToolProfile,
     ToolResult,
 )
 

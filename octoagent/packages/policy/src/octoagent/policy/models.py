@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from octoagent.tooling.models import SideEffectLevel
+from octoagent.tooling.models import SideEffectLevel, ToolProfile
 from pydantic import BaseModel, Field
 
 # ============================================================
@@ -147,6 +147,12 @@ class PolicyProfile(BaseModel):
     irreversible_action: PolicyAction = Field(
         default=PolicyAction.ASK,
         description="side_effect_level=irreversible 的默认决策",
+    )
+
+    # DEPRECATED: 兼容字段，等待 gateway 层完成清理后移除
+    allowed_tool_profile: ToolProfile = Field(
+        default=ToolProfile.STANDARD,
+        description="DEPRECATED: 允许的工具权限等级上限",
     )
 
     # === 超时配置 ===

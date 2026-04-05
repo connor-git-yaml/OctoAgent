@@ -17,7 +17,6 @@ from octoagent.core.models import (
     WorkerProfile,
     WorkerProfileOriginKind,
     WorkerProfileStatus,
-    Workspace,
     WorkStatus,
     TurnExecutorKind,
 )
@@ -41,15 +40,6 @@ async def _build_services(tmp_path: Path):
             slug="default",
             name="Default Project",
             is_default=True,
-        )
-    )
-    await store_group.project_store.create_workspace(
-        Workspace(
-            workspace_id="workspace-default",
-            project_id="project-default",
-            slug="primary",
-            name="Primary",
-            root_path=str(tmp_path),
         )
     )
     await store_group.project_store.save_selector_state(
@@ -110,7 +100,6 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     assert stored is not None
     assert stored.pipeline_run_id
     assert stored.project_id == "project-default"
-    assert stored.workspace_id == ""
 
     await store_group.conn.close()
 
@@ -184,7 +173,6 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     assert plan.dispatch_envelope.runtime_context.delegation_target_profile_id == ""
     assert plan.dispatch_envelope.runtime_context.context_frame_id == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context.project_id == "project-default"
-    assert plan.dispatch_envelope.runtime_context.workspace_id == ""
     assert "runtime_context_json" in plan.dispatch_envelope.metadata
     assert (
         plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"

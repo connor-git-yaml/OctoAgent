@@ -68,7 +68,7 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         session_id="thread-alpha",
         thread_id="thread-alpha",
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+
         task_ids=["task-1"],
         recent_turn_refs=["task-1"],
         recent_artifact_refs=["artifact-1"],
@@ -80,7 +80,7 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         task_id="task-1",
         session_id="thread-alpha",
         project_id="project-alpha",
-        workspace_id="workspace-alpha",
+
         agent_profile_id=agent_profile.profile_id,
         owner_profile_id=owner_profile.owner_profile_id,
         owner_overlay_id=owner_overlay.owner_overlay_id,

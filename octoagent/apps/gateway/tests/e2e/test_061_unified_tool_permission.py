@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import pytest
@@ -26,12 +25,9 @@ from octoagent.tooling.models import (
     PresetDecision,
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolPromotionState,
     ToolTier,
-    migrate_tool_profile_to_preset,
     preset_decision,
-    profile_allows,
 )
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.tool_promotion import ToolPromotionService
@@ -137,7 +133,6 @@ class TestFullE2EToolTierPartition:
             description="test",
             parameters_json_schema={},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.STANDARD,
             tool_group="test",
         )
         assert meta.tier == ToolTier.DEFERRED
@@ -250,46 +245,6 @@ class TestFullE2EEventGeneration:
         assert event_store.events[0].payload["tool_name"] == "docker.run"
         assert event_store.events[1].type == "TOOL_DEMOTED"
         assert event_store.events[1].payload["tool_name"] == "docker.run"
-
-
-class TestFullE2EToolProfileCompat:
-    """跨 Phase 场景: ToolProfile → PermissionPreset 兼容"""
-
-    def test_migrate_known_profiles(self) -> None:
-        """已知 ToolProfile 值正确映射"""
-        assert migrate_tool_profile_to_preset("minimal") == PermissionPreset.MINIMAL
-        assert migrate_tool_profile_to_preset("standard") == PermissionPreset.NORMAL
-        assert migrate_tool_profile_to_preset("privileged") == PermissionPreset.FULL
-
-    def test_migrate_unknown_fallback(self) -> None:
-        """未知值回退到 MINIMAL"""
-        assert migrate_tool_profile_to_preset("unknown") == PermissionPreset.MINIMAL
-        assert migrate_tool_profile_to_preset("") == PermissionPreset.MINIMAL
-
-    def test_profile_allows_deprecation_warning(self) -> None:
-        """profile_allows() 调用产生 DeprecationWarning"""
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            profile_allows(ToolProfile.MINIMAL, ToolProfile.STANDARD)
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "preset_decision" in str(w[0].message)
-
-    def test_profile_allows_backward_compatible(self) -> None:
-        """profile_allows() 结果与旧逻辑兼容"""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            # context >= tool → True
-            assert profile_allows(ToolProfile.MINIMAL, ToolProfile.MINIMAL) is True
-            assert profile_allows(ToolProfile.MINIMAL, ToolProfile.STANDARD) is True
-            assert profile_allows(ToolProfile.MINIMAL, ToolProfile.PRIVILEGED) is True
-            assert profile_allows(ToolProfile.STANDARD, ToolProfile.STANDARD) is True
-            assert profile_allows(ToolProfile.STANDARD, ToolProfile.PRIVILEGED) is True
-            assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.PRIVILEGED) is True
-            # context < tool → False
-            assert profile_allows(ToolProfile.STANDARD, ToolProfile.MINIMAL) is False
-            assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.MINIMAL) is False
-            assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.STANDARD) is False
 
 
 class TestFullE2EPromotionState:

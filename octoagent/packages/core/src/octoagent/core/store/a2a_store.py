@@ -30,7 +30,7 @@ class SqliteA2AStore:
         await self._conn.execute(
             """
             INSERT INTO a2a_conversations (
-                a2a_conversation_id, task_id, work_id, project_id, workspace_id,
+                a2a_conversation_id, task_id, work_id, project_id,
                 source_agent_runtime_id, source_agent_session_id,
                 target_agent_runtime_id, target_agent_session_id,
                 source_agent, target_agent, context_frame_id,
@@ -38,12 +38,11 @@ class SqliteA2AStore:
                 status, message_count, trace_id, metadata,
                 created_at, updated_at, completed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(a2a_conversation_id) DO UPDATE SET
                 task_id = excluded.task_id,
                 work_id = excluded.work_id,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 source_agent_runtime_id = excluded.source_agent_runtime_id,
                 source_agent_session_id = excluded.source_agent_session_id,
                 target_agent_runtime_id = excluded.target_agent_runtime_id,
@@ -66,7 +65,6 @@ class SqliteA2AStore:
                 conversation.task_id,
                 conversation.work_id,
                 conversation.project_id,
-                "",  # DEPRECATED: workspace_id 不再写入实际值
                 conversation.source_agent_runtime_id,
                 conversation.source_agent_session_id,
                 conversation.target_agent_runtime_id,
@@ -115,7 +113,6 @@ class SqliteA2AStore:
         task_id: str | None = None,
         work_id: str | None = None,
         project_id: str | None = None,
-        workspace_id: str | None = None,
         source_agent_runtime_id: str | None = None,
         target_agent_runtime_id: str | None = None,
         limit: int | None = 20,
@@ -131,9 +128,6 @@ class SqliteA2AStore:
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
-        if workspace_id:
-            clauses.append("workspace_id = ?")
-            args.append(workspace_id)
         if source_agent_runtime_id:
             clauses.append("source_agent_runtime_id = ?")
             args.append(source_agent_runtime_id)
@@ -174,19 +168,18 @@ class SqliteA2AStore:
             """
             INSERT INTO a2a_messages (
                 a2a_message_id, a2a_conversation_id, message_seq, task_id, work_id,
-                project_id, workspace_id, source_agent_runtime_id, source_agent_session_id,
+                project_id, source_agent_runtime_id, source_agent_session_id,
                 target_agent_runtime_id, target_agent_session_id, direction,
                 message_type, protocol_message_id, from_agent, to_agent,
                 idempotency_key, payload, trace, metadata, raw_message, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(a2a_message_id) DO UPDATE SET
                 a2a_conversation_id = excluded.a2a_conversation_id,
                 message_seq = excluded.message_seq,
                 task_id = excluded.task_id,
                 work_id = excluded.work_id,
                 project_id = excluded.project_id,
-                workspace_id = excluded.workspace_id,
                 source_agent_runtime_id = excluded.source_agent_runtime_id,
                 source_agent_session_id = excluded.source_agent_session_id,
                 target_agent_runtime_id = excluded.target_agent_runtime_id,
@@ -210,7 +203,6 @@ class SqliteA2AStore:
                 message.task_id,
                 message.work_id,
                 message.project_id,
-                "",  # DEPRECATED: workspace_id 不再写入实际值
                 message.source_agent_runtime_id,
                 message.source_agent_session_id,
                 message.target_agent_runtime_id,
@@ -309,7 +301,7 @@ class SqliteA2AStore:
             task_id=str(row["task_id"]),
             work_id=str(row["work_id"]),
             project_id=str(row["project_id"]),
-            workspace_id=str(row["workspace_id"]),
+            workspace_id="",
             source_agent_runtime_id=str(row["source_agent_runtime_id"]),
             source_agent_session_id=str(row["source_agent_session_id"]),
             target_agent_runtime_id=str(row["target_agent_runtime_id"]),
@@ -341,7 +333,7 @@ class SqliteA2AStore:
             task_id=str(row["task_id"]),
             work_id=str(row["work_id"]),
             project_id=str(row["project_id"]),
-            workspace_id=str(row["workspace_id"]),
+            workspace_id="",
             source_agent_runtime_id=str(row["source_agent_runtime_id"]),
             source_agent_session_id=str(row["source_agent_session_id"]),
             target_agent_runtime_id=str(row["target_agent_runtime_id"]),

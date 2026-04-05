@@ -25,7 +25,6 @@ from octoagent.tooling.models import (
     DeferredToolEntry,
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolSearchHit,
     ToolSearchResult,
     ToolTier,
@@ -149,7 +148,6 @@ def _make_tool_meta(
         description=description or f"{name} 工具描述 — 提供 {name.split('.')[0]} 相关操作能力",
         parameters_json_schema=_make_realistic_schema(name),
         side_effect_level=side_effect_level,
-        tool_profile=ToolProfile.STANDARD,
         tool_group=tool_group or name.split(".")[0],
         tier=tier,
     )

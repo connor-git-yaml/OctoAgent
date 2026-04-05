@@ -28,7 +28,6 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkerExecutionStatus,
     WorkerResult,
-    Workspace,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -217,21 +216,12 @@ async def _build_freshness_context(
             is_default=True,
         )
     )
-    await store_group.project_store.create_workspace(
-        Workspace(
-            workspace_id="workspace-default",
-            project_id="project-default",
-            slug="primary",
-            name="Primary",
-            root_path=str(tmp_path),
-        )
-    )
     await store_group.project_store.save_selector_state(
         ProjectSelectorState(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-            active_workspace_id="",
+
             source="tests",
         )
     )
@@ -474,7 +464,7 @@ class TestOrchestrator:
                 trace_id=f"trace-{task_id}",
                 session_id="session-a2a",
                 project_id="project-default",
-                workspace_id="",
+
                 tool_profile="minimal",
                 work_id="work-a2a",
             ),
@@ -485,7 +475,7 @@ class TestOrchestrator:
                     trace_id=f"trace-{task_id}",
                     session_id="session-a2a",
                     project_id="project-default",
-                    workspace_id="",
+    
                     tool_profile="minimal",
                     work_id="work-a2a",
                 ).model_dump_json(),

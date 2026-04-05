@@ -337,8 +337,6 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
     try:
         projects = await store_group.project_store.list_projects()
         assert len(projects) == 1
-        workspaces = await store_group.project_store.list_workspaces(projects[0].project_id)
-        assert len(workspaces) == 1
     finally:
         await store_group.conn.close()
 

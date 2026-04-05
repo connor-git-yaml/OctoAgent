@@ -114,6 +114,24 @@ def preset_decision(
 
 
 
+class ToolProfile(StrEnum):
+    """工具权限等级（DEPRECATED: 兼容字段，等待 gateway 层完成清理后移除）。"""
+
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    PRIVILEGED = "privileged"
+
+
+def migrate_tool_profile_to_preset(profile: str) -> "PermissionPreset":
+    """DEPRECATED: ToolProfile -> PermissionPreset 兼容映射。"""
+    _MAP = {
+        "minimal": PermissionPreset.MINIMAL,
+        "standard": PermissionPreset.NORMAL,
+        "privileged": PermissionPreset.FULL,
+    }
+    return _MAP.get(profile, PermissionPreset.MINIMAL)
+
+
 class HookType(StrEnum):
     """Hook 类型"""
 
@@ -177,6 +195,11 @@ class ToolMeta(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Feature 030: 可检索扩展元数据",
+    )
+    # DEPRECATED: 兼容字段，等待 gateway 层清理
+    tool_profile: ToolProfile = Field(
+        default=ToolProfile.STANDARD,
+        description="DEPRECATED: 工具权限等级，改用 PermissionPreset",
     )
     # Feature 061: 工具层级标记
     tier: ToolTier = Field(

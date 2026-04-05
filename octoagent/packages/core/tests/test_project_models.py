@@ -11,7 +11,6 @@ from octoagent.core.models import (
     ProjectSelectorState,
     SecretRefSourceType,
     SecretTargetKind,
-    Workspace,
 )
 
 
@@ -30,19 +29,17 @@ def test_project_model_roundtrip() -> None:
     assert restored == project
 
 
-def test_workspace_binding_allows_none_workspace_id_for_scope_types() -> None:
-    # DEPRECATED: workspace_id 不再强制要求（workspace 概念已废弃）
+def test_project_binding_scope_type() -> None:
     binding = ProjectBinding(
         binding_id="binding-1",
         project_id="project-default",
-        workspace_id=None,
         binding_type=ProjectBindingType.SCOPE,
         binding_key="ops/default",
         binding_value="ops/default",
         source="tasks",
         migration_run_id="run-1",
     )
-    assert binding.workspace_id is None
+    assert binding.binding_type == ProjectBindingType.SCOPE
 
 
 def test_project_migration_validation_derives_ok_from_missing_items() -> None:
@@ -50,17 +47,6 @@ def test_project_migration_validation_derives_ok_from_missing_items() -> None:
         missing_binding_keys=["scope:ops/default"],
     )
     assert validation.ok is False
-
-
-def test_workspace_model_defaults() -> None:
-    workspace = Workspace(
-        workspace_id="workspace-default-primary",
-        project_id="project-default",
-        slug="primary",
-        name="Primary Workspace",
-        root_path="/tmp/octo",
-    )
-    assert workspace.kind == "primary"
 
 
 def test_project_secret_binding_roundtrip() -> None:
@@ -85,7 +71,6 @@ def test_project_selector_state_roundtrip() -> None:
         selector_id="selector-cli",
         surface="cli",
         active_project_id="project-default",
-        active_workspace_id="workspace-default-primary",
         source="test",
         warnings=["needs reload"],
     )
