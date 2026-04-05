@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from octoagent.core.models import (
+    WORK_TERMINAL_STATUSES,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
@@ -96,14 +97,7 @@ class _ResolvedWorkerBinding:
     profile_name: str
 
 
-_WORK_TERMINAL_VALUES = {
-    WorkStatus.SUCCEEDED.value,
-    WorkStatus.FAILED.value,
-    WorkStatus.CANCELLED.value,
-    WorkStatus.MERGED.value,
-    WorkStatus.TIMED_OUT.value,
-    WorkStatus.DELETED.value,
-}
+_WORK_TERMINAL_VALUES = {s.value for s in WORK_TERMINAL_STATUSES}
 
 
 # ToolProfile 等级映射（minimal < standard < privileged）

@@ -210,12 +210,16 @@ from .control_plane import (
     WorkProjectionItem,
 )
 from .delegation import (
+    VALID_WORK_TRANSITIONS,
+    WORK_TERMINAL_STATUSES,
     DelegationEnvelope,
     DelegationResult,
     DelegationTargetKind,
     Work,
     WorkKind,
     WorkStatus,
+    WorkTransitionError,
+    validate_work_transition,
 )
 from .enums import (
     TERMINAL_STATES,
@@ -492,6 +496,10 @@ __all__ = [
     "ExecutionConsoleSession",
     "ExecutionStreamEvent",
     # Delegation / Work
+    "VALID_WORK_TRANSITIONS",
+    "WORK_TERMINAL_STATUSES",
+    "validate_work_transition",
+    "WorkTransitionError",
     "WorkKind",
     "WorkStatus",
     "DelegationTargetKind",

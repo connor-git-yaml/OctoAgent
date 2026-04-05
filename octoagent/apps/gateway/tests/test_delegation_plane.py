@@ -773,3 +773,51 @@ async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path:
     assert plan.work.metadata["request_context"]["resume_state_snapshot"] == {}
 
     await store_group.conn.close()
+
+
+# ============================================================
+# W4: Work 状态机校验集成测试
+# ============================================================
+
+import pytest  # noqa: E402
+from octoagent.core.models import DelegationResult, WorkTransitionError
+
+
+async def test_mark_dispatched_rejects_terminal_work(tmp_path: Path) -> None:
+    """对已终态的 work 调用 mark_dispatched 应抛出 WorkTransitionError。"""
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(text="test", idempotency_key="trans-test-1")
+    )
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id, trace_id=f"trace-{task_id}",
+            user_text="test", worker_capability="llm_generation", metadata={},
+        )
+    )
+    # 通过 cancel 让 work 进入终态（CREATED → CANCELLED 合法）
+    await delegation_plane.cancel_work(plan.work.work_id, reason="test")
+    # 对已 CANCELLED 的 work 做 mark_dispatched → 应抛出
+    with pytest.raises(WorkTransitionError):
+        await delegation_plane.mark_dispatched(
+            work_id=plan.work.work_id, worker_id="w2", dispatch_id="d2",
+        )
+    await store_group.conn.close()
+
+
+async def test_escalate_rejects_created_work(tmp_path: Path) -> None:
+    """对 CREATED 状态的 work 调用 escalate_work 应抛出 WorkTransitionError。"""
+    store_group, task_service, delegation_plane = await _build_services(tmp_path)
+    task_id, _ = await task_service.create_task(
+        NormalizedMessage(text="test", idempotency_key="trans-test-2")
+    )
+    plan = await delegation_plane.prepare_dispatch(
+        OrchestratorRequest(
+            task_id=task_id, trace_id=f"trace-{task_id}",
+            user_text="test", worker_capability="llm_generation", metadata={},
+        )
+    )
+    # work 目前是 CREATED，不能直接 escalate（需要先 RUNNING）
+    with pytest.raises(WorkTransitionError):
+        await delegation_plane.escalate_work(plan.work.work_id, reason="test")
+    await store_group.conn.close()

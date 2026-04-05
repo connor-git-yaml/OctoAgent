@@ -175,11 +175,13 @@
 
 **改善方向**：连接 WorkerCancellationRegistry 的 cancel_event 到 Graph backend。
 
-#### W4: Work 状态机无形式化约束
+#### ✅ W4: Work 状态机形式化约束（已修复 2026-04-05）
 
-**现状**：`complete_work()` 不校验当前状态是否允许转换到目标状态。
-
-**改善方向**：添加 `_validate_transition(from_status, to_status)` 方法，不合法转换抛异常。
+**已修复**：
+1. `core/models/delegation.py` 新增 `VALID_WORK_TRANSITIONS`（13 状态完整转换表）+ `WORK_TERMINAL_STATUSES` + `validate_work_transition()`
+2. `delegation_plane.py` 的 `_transition_work()` / `complete_work()` / `mark_dispatched()` / `escalate_work()` 全部加入校验，非法转换 raise ValueError
+3. `completed_at` 修复：从硬编码 `{CANCELLED, MERGED, DELETED}` 改为 `WORK_TERMINAL_STATUSES`
+4. 散落的 `_WORK_TERMINAL_STATUSES` 收归 core 统一维护
 
 #### W5: WAITING_INPUT 时 deadline 无限重置
 

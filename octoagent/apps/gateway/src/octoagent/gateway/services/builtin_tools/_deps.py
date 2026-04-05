@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from octoagent.core.behavior_workspace import project_root_dir
-from octoagent.core.models import ProjectBindingType
+from octoagent.core.models import WORK_TERMINAL_STATUSES, ProjectBindingType
 
 from ..execution_context import get_current_execution_context
 from ..task_service import TaskService
@@ -24,11 +24,8 @@ _MEMORY_BINDING_TYPES = {
 }
 
 # Work 终态值集合（delegation/supervision 工具共用）
-# 注意：WorkStatus 是 StrEnum，.value 为小写
-WORK_TERMINAL_VALUES = {
-    "succeeded", "failed", "cancelled", "timed_out",
-    "merged", "deleted",
-}
+# 从 core.WORK_TERMINAL_STATUSES 派生，保持单一事实源
+WORK_TERMINAL_VALUES = {s.value for s in WORK_TERMINAL_STATUSES}
 
 
 @dataclass

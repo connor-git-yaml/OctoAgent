@@ -251,7 +251,7 @@ async def register(broker, deps: ToolDeps) -> None:
         if not children:
             raise RuntimeError("current work has no child works to merge")
         blocking = [
-            item.work_id for item in children if item.status.value not in _WORK_TERMINAL_VALUES
+            item.work_id for item in children if item.status not in WORK_TERMINAL_STATUSES
         ]
         if blocking:
             raise RuntimeError(f"child works still active: {', '.join(blocking)}")
@@ -288,12 +288,12 @@ async def register(broker, deps: ToolDeps) -> None:
         active = [
             item.work_id
             for item in descendants
-            if item.status.value not in _WORK_TERMINAL_VALUES
+            if item.status not in WORK_TERMINAL_STATUSES
         ]
         current = await deps.stores.work_store.get_work(context.work_id)
         if current is None:
             raise RuntimeError("current work no longer exists")
-        if current.status.value not in _WORK_TERMINAL_VALUES:
+        if current.status not in WORK_TERMINAL_STATUSES:
             active.insert(0, current.work_id)
         if active:
             raise RuntimeError(f"work delete requires terminal status: {', '.join(active)}")

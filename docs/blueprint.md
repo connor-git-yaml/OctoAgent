@@ -377,7 +377,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - W1: Worker 工具集膨胀（9 个 → 合并）
 - W2: DockerRuntimeBackend 空壳
 - W3: Graph cancel_signal 未连接
-- W4: Work 状态机无形式化约束
+- ✅ W4: Work 状态机形式化约束（已修复 2026-04-05）
 - W5: WAITING_INPUT deadline 无限重置
 
 **代码架构问题**：

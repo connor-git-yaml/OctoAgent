@@ -14,6 +14,7 @@ from typing import Any
 
 import structlog
 from octoagent.core.models import (
+    WORK_TERMINAL_STATUSES,
     ActionRequestEnvelope,
     ActionResultEnvelope,
     ControlPlaneCapability,
@@ -32,8 +33,6 @@ from octoagent.core.models import (
 from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
-
-_TERMINAL_WORK_STATUSES = {"succeeded", "failed", "cancelled", "merged", "timed_out", "deleted"}
 log = structlog.get_logger()
 
 
@@ -297,7 +296,7 @@ class WorkDomainService(DomainServiceBase):
                         capability_id="work.cancel",
                         label="取消 Work",
                         action_id="work.cancel",
-                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
+                        enabled=work.status not in WORK_TERMINAL_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.retry",
@@ -309,13 +308,13 @@ class WorkDomainService(DomainServiceBase):
                         capability_id="worker.review",
                         label="评审 Worker 方案",
                         action_id="worker.review",
-                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
+                        enabled=work.status not in WORK_TERMINAL_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.split",
                         label="拆分 Work",
                         action_id="work.split",
-                        enabled=work.status.value not in _TERMINAL_WORK_STATUSES,
+                        enabled=work.status not in WORK_TERMINAL_STATUSES,
                     ),
                     ControlPlaneCapability(
                         capability_id="work.merge",
@@ -337,7 +336,7 @@ class WorkDomainService(DomainServiceBase):
                         capability_id="work.delete",
                         label="删除 Work",
                         action_id="work.delete",
-                        enabled=work.status.value in _TERMINAL_WORK_STATUSES
+                        enabled=work.status in WORK_TERMINAL_STATUSES
                         and work.status.value != "deleted",
                     ),
                     ControlPlaneCapability(
@@ -359,7 +358,7 @@ class WorkDomainService(DomainServiceBase):
         children = [item for item in works if item.parent_work_id == work.work_id]
         if not children:
             return False
-        return all(item.status.value in _TERMINAL_WORK_STATUSES for item in children)
+        return all(item.status in WORK_TERMINAL_STATUSES for item in children)
 
     @staticmethod
     def _tool_selection_from_work(work: Work | None) -> DynamicToolSelection | None:
@@ -567,7 +566,7 @@ class WorkDomainService(DomainServiceBase):
         if not child_works:
             raise ControlPlaneActionError("CHILD_WORKS_REQUIRED", "当前 work 尚未拆分 child works")
         blocking = [
-            item.work_id for item in child_works if item.status.value not in _TERMINAL_WORK_STATUSES
+            item.work_id for item in child_works if item.status not in WORK_TERMINAL_STATUSES
         ]
         if blocking:
             raise ControlPlaneActionError(
@@ -599,9 +598,9 @@ class WorkDomainService(DomainServiceBase):
         work = await self._get_work_in_scope(work_id)
         descendants = await self._ctx.delegation_plane_service.list_descendant_works(work_id)
         active = [
-            item.work_id for item in descendants if item.status.value not in _TERMINAL_WORK_STATUSES
+            item.work_id for item in descendants if item.status not in WORK_TERMINAL_STATUSES
         ]
-        if work.status.value not in _TERMINAL_WORK_STATUSES:
+        if work.status not in WORK_TERMINAL_STATUSES:
             active.insert(0, work.work_id)
         if active:
             raise ControlPlaneActionError(

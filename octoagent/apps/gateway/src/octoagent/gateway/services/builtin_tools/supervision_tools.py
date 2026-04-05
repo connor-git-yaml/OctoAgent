@@ -39,7 +39,7 @@ async def register(broker, deps: ToolDeps) -> None:
         _context, descendants = await descendant_works_for_current_context(deps)
         if not include_terminal:
             descendants = [
-                item for item in descendants if item.status.value not in _WORK_TERMINAL_VALUES
+                item for item in descendants if item.status not in WORK_TERMINAL_STATUSES
             ]
         payload = []
         for item in descendants[: max(1, min(limit, 100))]:
@@ -63,7 +63,7 @@ async def register(broker, deps: ToolDeps) -> None:
                     if session is None
                     else session.model_dump(mode="json"),
                     "steerable": bool(session is not None and session.can_attach_input),
-                    "cancellable": item.status.value not in _WORK_TERMINAL_VALUES,
+                    "cancellable": item.status not in WORK_TERMINAL_STATUSES,
                 }
             )
         return json.dumps(

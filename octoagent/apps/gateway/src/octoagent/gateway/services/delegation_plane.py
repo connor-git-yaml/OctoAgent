@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from octoagent.core.models import (
+    WORK_TERMINAL_STATUSES,
     ActorType,
     DelegationResult,
     DelegationTargetKind,
@@ -24,6 +25,8 @@ from octoagent.core.models import (
     WorkKind,
     WorkLifecyclePayload,
     WorkStatus,
+    WorkTransitionError,
+    validate_work_transition,
 )
 from octoagent.core.models.payloads import ToolIndexSelectedPayload
 from octoagent.skills import PipelineNodeOutcome, SkillPipelineEngine
@@ -52,16 +55,6 @@ class DelegationPlan:
     tool_selection: DynamicToolSelection
     dispatch_envelope: DispatchEnvelope | None
     deferred_reason: str = ""
-
-
-_WORK_TERMINAL_STATUSES = {
-    WorkStatus.SUCCEEDED,
-    WorkStatus.FAILED,
-    WorkStatus.CANCELLED,
-    WorkStatus.MERGED,
-    WorkStatus.TIMED_OUT,
-    WorkStatus.DELETED,
-}
 
 
 class DelegationPlaneService:
@@ -426,6 +419,12 @@ class DelegationPlaneService:
             return "", {}
         return request.resume_from_node or "", dict(request.resume_state_snapshot or {})
 
+    @staticmethod
+    def _assert_transition(work: Work, to_status: WorkStatus, context: str = "") -> None:
+        """校验 Work 状态转换合法性，不合法时抛出 WorkTransitionError。"""
+        if not validate_work_transition(work.status, to_status):
+            raise WorkTransitionError(work.work_id, work.status, to_status, context)
+
     async def mark_dispatched(
         self,
         *,
@@ -436,6 +435,7 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
+        self._assert_transition(work, WorkStatus.ASSIGNED, "mark_dispatched")
         updated = work.model_copy(
             update={
                 "status": WorkStatus.ASSIGNED,
@@ -458,6 +458,8 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
+        self._assert_transition(work, result.status, "complete_work")
+        now = datetime.now(tz=UTC)
         updated = work.model_copy(
             update={
                 "status": result.status,
@@ -469,8 +471,8 @@ class DelegationPlaneService:
                     "result_summary": result.summary,
                     **result.metadata,
                 },
-                "updated_at": datetime.now(tz=UTC),
-                "completed_at": datetime.now(tz=UTC),
+                "updated_at": now,
+                "completed_at": now if result.status in WORK_TERMINAL_STATUSES else work.completed_at,
             }
         )
         await self._stores.work_store.save_work(updated)
@@ -493,6 +495,7 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
+        self._assert_transition(work, WorkStatus.ESCALATED, "escalate_work")
         updated = work.model_copy(
             update={
                 "status": WorkStatus.ESCALATED,
@@ -510,6 +513,7 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
+        self._assert_transition(work, WorkStatus.CREATED, "retry_work")
         run = (
             await self._stores.work_store.get_pipeline_run(work.pipeline_run_id)
             if work.pipeline_run_id
@@ -577,6 +581,11 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None or not work.pipeline_run_id:
             return None
+        # pipeline 恢复执行前，先将 work 转回 RUNNING
+        if work.status != WorkStatus.RUNNING:
+            work = await self._transition_work(
+                work.work_id, status=WorkStatus.RUNNING, reason="pipeline_resumed"
+            ) or work
         run = await self._pipeline_engine.resume_run(
             definition=self._build_definition(),
             run_id=work.pipeline_run_id,
@@ -591,6 +600,11 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None or not work.pipeline_run_id:
             return None
+        # pipeline 重试前，先将 work 转回 RUNNING
+        if work.status != WorkStatus.RUNNING:
+            work = await self._transition_work(
+                work.work_id, status=WorkStatus.RUNNING, reason="pipeline_node_retried"
+            ) or work
         run = await self._pipeline_engine.retry_current_node(
             definition=self._build_definition(),
             run_id=work.pipeline_run_id,
@@ -620,10 +634,15 @@ class DelegationPlaneService:
         return await self._pipeline_engine.list_replay_frames(run_id)
 
     async def _sync_work_from_pipeline(self, work: Work, run) -> Work:
+        new_status = self._work_status_from_pipeline(run.status)
+        # 同状态不视为转换（pipeline 状态同步场景）
+        if new_status != work.status:
+            self._assert_transition(work, new_status, f"pipeline sync, run={run.run_id}")
+        now = datetime.now(tz=UTC)
         selection = self._selection_from_run(run)
         updated = work.model_copy(
             update={
-                "status": self._work_status_from_pipeline(run.status),
+                "status": new_status,
                 "route_reason": str(run.state_snapshot.get("route_reason", work.route_reason)),
                 "selected_worker_type": str(
                     run.state_snapshot.get(
@@ -647,10 +666,8 @@ class DelegationPlaneService:
                     "pipeline_status": run.status.value,
                     "pipeline_pause_reason": run.pause_reason,
                 },
-                "updated_at": datetime.now(tz=UTC),
-                "completed_at": (
-                    datetime.now(tz=UTC) if run.status == PipelineRunStatus.SUCCEEDED else None
-                ),
+                "updated_at": now,
+                "completed_at": now if new_status in WORK_TERMINAL_STATUSES else work.completed_at,
             }
         )
         await self._stores.work_store.save_work(updated)
@@ -1137,7 +1154,7 @@ class DelegationPlaneService:
                     work.pipeline_run_id,
                     reason=f"work_cancelled:{reason}",
                 )
-        if work.status in _WORK_TERMINAL_STATUSES:
+        if work.status in WORK_TERMINAL_STATUSES:
             return await self._stores.work_store.get_work(work.work_id)
         return await self._transition_work(work.work_id, status=WorkStatus.CANCELLED, reason=reason)
 
@@ -1151,16 +1168,14 @@ class DelegationPlaneService:
         work = await self._stores.work_store.get_work(work_id)
         if work is None:
             return None
+        self._assert_transition(work, status, reason)
+        now = datetime.now(tz=UTC)
         updated = work.model_copy(
             update={
                 "status": status,
                 "metadata": {**work.metadata, "transition_reason": reason},
-                "updated_at": datetime.now(tz=UTC),
-                "completed_at": (
-                    datetime.now(tz=UTC)
-                    if status in {WorkStatus.CANCELLED, WorkStatus.MERGED, WorkStatus.DELETED}
-                    else work.completed_at
-                ),
+                "updated_at": now,
+                "completed_at": now if status in WORK_TERMINAL_STATUSES else work.completed_at,
             }
         )
         await self._stores.work_store.save_work(updated)
