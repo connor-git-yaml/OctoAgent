@@ -1267,14 +1267,17 @@ WriteProposal:
   confidence: 0.0-1.0
 ```
 
-冻结服务接口（M2 / Feature 020）：
-- `propose_write()`
-- `validate_proposal()`
-- `commit_memory()`
-- `search_memory()`
-- `get_memory()`
-- `before_compaction_flush()`（只生成 flush 草案，不直接改 SoR）
-- `MemoryBackend`（engine protocol）
+服务接口（M2 Feature 020 冻结 → 2026-04-05 架构整治后更新）：
+
+**MemoryService（Facade）**——组合以下子服务，公共方法签名保持向后兼容：
+- `MemoryWriteService`：`propose_write()` / `validate_proposal()` / `commit_memory()` / `fast_commit()`（低风险快速路径）
+- `MemoryRecallService`：`search_memory()` / `recall_memory()`（多 scope 并行 asyncio.gather + hooks pipeline）
+- `VaultAccessService`：vault 授权全生命周期（request / resolve / grant / audit）
+- `MemoryBackendManager`：backend 健康管理（sync / probe / degrade / recover）
+
+快速写入路径（`fast_commit`）：`confidence >= 0.75` + `action == ADD` + 非敏感分区时跳过 validate 查询，减少 1/3 DB 写入。proposal 仍落盘保证审计轨迹。
+
+`MemoryBackend`（engine protocol）：`is_available` / `get_status` / `search` / `sync_batch` / `ingest_batch` / `list_derivations` / `resolve_evidence` / `run_maintenance`
 
 
 #### 8.7.4 语义检索集成（LanceDB）
@@ -1285,14 +1288,17 @@ WriteProposal:
 - Fragments 查询：vector 检索 + 时间范围过滤
 - 写入时：WriteProposal commit 成功后，异步更新 LanceDB embedding
 
-当前 Memory backend（SQLite-only）：
-- SoR 先走 `status=current` 过滤和 `subject_key/content` metadata 查询
-- 检索契约采用 `search_memory()` / `get_memory()` 两段式，避免把长正文直接塞回主上下文
-- governance 由 SQLite + arbitration 控制
+当前 Memory backend（BuiltinMemUBridge，2026-04-05 更新）：
+- 主 backend：BuiltinMemUBridge（LanceDB hybrid search：Qwen3-Embedding-0.6B 向量 + jieba BM25 FTS）
+- 降级路径：Qwen3 embedding 不可用时自动降级到 BM25 FTS-only；LanceDB 不可用时降级到 SQLite 直查
+- 写入管道：SessionMemoryExtractor（Session 驱动，cursor-based 增量提取）→ LLM 结构化输出（enable_thinking=false）→ `fast_commit` / `propose-validate-commit`
+- Recall：多 scope 并行查询（asyncio.gather）+ 5 级 hooks pipeline（keyword overlap → heuristic/model rerank → temporal decay → MMR dedup）
+- 可观测：`memory_recall_completed` 结构化日志（latency_ms / scope_hit_distribution / candidate→delivered 漏斗）
+- governance 由 SQLite + WriteProposal 仲裁控制
 - 多模态记忆、Category、ToM、关系抽取等高级能力只能产出 `Fragments`、派生索引或 `WriteProposal` 草案，不能绕过 SoR / Vault 直接成为权威事实
 - 所有高级记忆结果都必须带 `evidence_refs` / artifact 引用，确保 Memory 浏览与证据追溯可落地
 
-> **历史记录**：2026-03-17 移除了 `MemUBackend`（HTTP/Command bridge）实现。原 Feature 028 中的 MemU 集成已废弃，后续高级检索能力将通过 LanceDB 等嵌入式向量引擎实现，不再依赖外部 bridge 服务。
+> **历史记录**：2026-03-17 移除了 `MemUBackend`（HTTP/Command bridge）实现。2026-04-05 架构整治：MemoryService（2260行）拆分为 4 子服务 + Facade（680行）；MemoryConsoleService（1685行）拆分为 5 模块；models/integration.py 拆分为 7 域文件；SqliteMemoryStore 提取通用 _row_to_model 和 _build_filtered_query helpers；workspace_id 从 memory 包全面移除。
 
 2026-03-13 运行时上下文纠偏（参考 Agent Zero Projects / OpenClaw session-key + compaction）：
 - `Memory` 与 `Recall` 必须分离建模：Memory 回答”长期保留了什么”，Recall 回答”当前问题该取回什么”
@@ -1315,7 +1321,7 @@ WriteProposal:
 - 可选：实体提取与关系索引
 - 可选：在 chat scope 内更新 SoR（群规/约定/项目状态）
 
-说明：上下文压缩 / auto-compaction 不属于 Memory Core 本体；Memory 仅提供 `before_compaction_flush()` 钩子承接 cheap/summarizer 模型产出的摘要与 WriteProposal 草案。
+说明：上下文压缩 / auto-compaction 不属于 Memory Core 本体；Memory 仅提供 `_before_compaction_flush()`（private 方法）钩子承接 cheap/summarizer 模型产出的摘要与 WriteProposal 草案。记忆提取的主入口已由 Feature 067 的 SessionMemoryExtractor 承接，不再依赖 compaction flush 路径。
 
 Feature 034（2026-03-09，M4 hardening）补充约束：
 
@@ -3044,8 +3050,18 @@ $PROJECT_ROOT (~/.octoagent)/
 - 目标：把 Agent Memory 从 `chat import / fragment & SoR 写入 / backend resolve / runtime recall / built-in tool` 收敛为同一条 `project shared + agent private + work evidence` 主链
 - 已完成项：`MemoryService.recall_memory()`、`MemoryRecallHit/Result`、`ContextFrame.memory_recall provenance`、`memory.recall` built-in tool、`ChatImportService` runtime resolver 接线
 - 已完成项：delayed recall durable carrier、`MEMORY_RECALL_*` events/artifacts、Control Plane recall provenance 可视化、内建 `keyword_overlap post-filter + heuristic rerank` hooks
+- 2026-04-05 架构整治新增：多 scope 并行 recall（asyncio.gather）、`memory_recall_completed` 可观测日志、recall hooks 拆为 MemoryRecallService 独立模块
 - 吸收了 Agent Zero 的 project-scoped memory 隔离经验，也吸收 OpenClaw 的 session-key / compaction / recall ordering 思路，但当前实现仍缺 `agent private namespace + worker recall runtime`
 - 038 的完成态定义被上调：backend resolver 必须进入 Butler 与 Worker 的真实运行链，并能按 namespace / agent / session 维度审计 recall 质量与 provenance
+
+### M3 Carry-Forward（Feature 067）：Session-Driven Memory Pipeline
+
+- 目标：替换旧的 per-event compaction-flush fragment 创建，改为 session 级别 LLM 引导的结构化记忆提取
+- 已完成项：`SessionMemoryExtractor`（cursor-based 增量提取、LLM 结构化输出、fast_commit 快速写入、scope 自动注册）
+- 已完成项：LITELLM_MASTER_KEY 自动注入、Qwen3 thinking 模式兼容（enable_thinking=false + _build_result reasoning_content fallback）
+- 已完成项：turn 数量截断（_MAX_TURNS_PER_EXTRACTION=50）、失败时 cursor 推进（防死循环）、partition 映射表（枚举对齐 + personal→PROFILE 别名）
+- 已完成项：Memory Console scope fallback（list_scope_ids 查所有有数据的 scope）、scope 自动注册为 PROJECT_SHARED namespace
+- JSON 解析容错：markdown code block 剥离 + JSON object 拆包 + 正则提取 fallback
 
 ### M4（引导式工作台 / Setup Governance / Runtime Safety / Supervisor）
 
@@ -3180,21 +3196,17 @@ M5 说明：
 - 或设置 TTL 过期（如 60s），平衡性能和实时性
 - behavior.write_file 工具写入后自动 invalidate
 
-### 🟠 短板 5：Memory 系统过度工程化
+### ✅ 短板 5：Memory 系统过度工程化（已修复 2026-04-05）
 
-**现状问题**：
-- SoR 三步协议（propose → validate → commit）+ 20+ 枚举类型
-- 向量检索能力强但无 recall 准确率统计
-- 多 scope recall 串行执行，无异步批量查询
-
-**对标差距**：
-- Claude Code auto memory 简单直接：识别 → 保存到文件 → 索引
-- Agent Zero 向量分区（main/fragments/solutions）+ 自动提取
-
-**改善方向**：
-- 简化写入路径（低风险场景可跳过 validate）
-- 添加 recall 准确率埋点（用于评估向量模型选型）
-- 多 scope 查询改为 `asyncio.gather()` 并发
+**已修复内容**：
+- `fast_commit()` 快速写入路径：低风险场景跳过 validate 查询，减少 1/3 DB 写入（confidence >= 0.75 + ADD + 非敏感分区）
+- `memory_recall_completed` 结构化日志：latency_ms / candidate→delivered 漏斗 / scope_hit_distribution / backend_used
+- 多 scope 查询改为 `asyncio.gather()` 并发，单 scope 失败不影响其他
+- MemoryService God Class（2260 行 25 方法）拆分为 4 子服务 + Facade（680 行）
+- MemoryConsoleService（1685 行）拆分为 5 模块
+- models/integration.py（340 行 19 模型）拆分为 7 域文件
+- 死代码清理：4 个死方法 + VaultAccessDecision 枚举简化为 bool
+- SqliteMemoryStore：通用 _row_to_model + _build_filtered_query helpers 消除样板
 
 ## 14.6 重构中发现的架构问题（2026-04-04 实测审计）
 
@@ -3233,13 +3245,9 @@ M5 说明：
 
 **改善方向**：按 Agent profile、task 类型或对话阶段动态裁剪工具集。参考 Claude Code 的 Core + Deferred 分层。
 
-### 🟠 问题 6：Memory Recall 与主对话共享模型别名
+### ✅ 问题 6：Memory Recall 与主对话共享模型别名（已修复）
 
-**现状**：Memory Recall Plan 用主对话的 `model_alias`（如 `cheap`），导致 recall plan 也走 Qwen。
-
-**影响**：recall plan 只需简单 JSON 输出，用大模型浪费，用小模型可能格式不稳定。
-
-**改善方向**：recall plan 固定用快速便宜的模型（如 `cheap`），主对话用 `main`。或单独配置 `recall_model_alias`。
+**已修复**：Settings 页面已支持独立配置 `记忆加工`（cheap）、`查询扩写`（cheap）、`语义检索`（engine-default）、`结果重排`（rerank），与主对话 `main` 别名完全分离。SessionMemoryExtractor 使用 `resolve_default_model_alias()` 读取配置。
 
 ### ✅ 问题 7：数据模型残留大量 deprecated 字段（已修复 2026-04-05，Feature 073）
 
