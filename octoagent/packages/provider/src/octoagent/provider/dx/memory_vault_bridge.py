@@ -176,9 +176,11 @@ class MemoryVaultBridge:
                 "VAULT_ACCESS_REQUEST_ALREADY_RESOLVED",
                 "Vault 授权申请已经处理过。",
             )
+        from octoagent.memory import VaultAccessDecision
+        decision = VaultAccessDecision.APPROVE if approved else VaultAccessDecision.REJECT
         resolved_request, grant = await self._base._memory.resolve_vault_access_request(
             request_id,
-            approved=approved,
+            decision=decision,
             granted_by_actor_id=actor_id,
             granted_by_actor_label=actor_label or actor_id,
             expires_at=(
