@@ -604,7 +604,6 @@ class AgentContextService:
             delivery_tokens,
         ) = self._fit_prompt_budget(
             project=project,
-            workspace=workspace,
             task=task,
             compiled=compiled,
             agent_profile=agent_profile,
@@ -687,7 +686,6 @@ class AgentContextService:
         memory_namespace_ids = [item.namespace_id for item in memory_namespaces]
         source_refs = self._build_source_refs(
             project=project,
-            workspace=workspace,
             task=task,
             agent_profile=agent_profile,
             owner_profile=owner_profile,
@@ -936,7 +934,6 @@ class AgentContextService:
         return RecallPlanningContext(
             request=resolve_request,
             project=bundle.project,
-            workspace=bundle.workspace,
             agent_profile=bundle.agent_profile,
             agent_runtime=bundle.agent_runtime,
             agent_session=bundle.agent_session,
@@ -1057,11 +1054,9 @@ class AgentContextService:
         owner_overlay = await self._ensure_owner_overlay(
             owner_profile=owner_profile,
             project=project,
-            workspace=workspace,
         )
         bootstrap = await self._ensure_bootstrap_session(
             project=project,
-            workspace=workspace,
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
             agent_profile=agent_profile,
@@ -1070,7 +1065,6 @@ class AgentContextService:
         session_state = await self._ensure_session_context(
             task=task,
             project=project,
-            workspace=workspace,
             session_id_hint=request.session_id or "",
         )
         agent_runtime = await self._ensure_agent_runtime(
@@ -1104,7 +1098,6 @@ class AgentContextService:
             request=request,
             task=task,
             project=project,
-            workspace=workspace,
             agent_profile=agent_profile,
             agent_runtime=agent_runtime,
             agent_session=agent_session,
@@ -1118,7 +1111,6 @@ class AgentContextService:
         return ResolvedContextBundle(
             request=request,
             project=project,
-            workspace=workspace,
             agent_profile=agent_profile,
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
@@ -1177,14 +1169,12 @@ class AgentContextService:
             state = await self._load_session_context(
                 task=task,
                 project=project,
-                workspace=workspace,
                 session_id_hint=frame.session_id if frame is not None else "",
             )
         if state is None:
             state = await self._ensure_session_context(
                 task=task,
                 project=project,
-                workspace=workspace,
                 session_id_hint=frame.session_id if frame is not None else "",
             )
 
@@ -2959,7 +2949,6 @@ class AgentContextService:
         existing = await self._load_session_context(
             task=task,
             project=project,
-            workspace=workspace,
             session_id_hint=session_id_hint,
         )
         if existing is not None:
@@ -3083,12 +3072,10 @@ class AgentContextService:
             await init_memory_db(self._stores.conn)
             memory_service = await self.get_memory_service(
                 project=project,
-                workspace=workspace,
             )
             backend_status = await memory_service.get_backend_status()
             retrieval_profile = await self.get_memory_retrieval_profile(
                 project=project,
-                workspace=workspace,
                 backend_status=backend_status,
             )
             retrieval_profile_payload = retrieval_profile.model_dump(mode="json")

@@ -27,6 +27,8 @@ def tool_contract(
     version: str = "1.0.0",
     timeout_seconds: float | None = None,
     output_truncate_threshold: int | None = None,
+    # DEPRECATED: 兼容参数，Feature 073 清理后忽略
+    tool_profile: Any = None,
 ) -> Any:
     """工具契约声明装饰器 -- 对齐 spec FR-001/002
 

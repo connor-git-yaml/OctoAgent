@@ -380,18 +380,8 @@ class ProjectWorkspaceMigrationService:
             },
         )
 
-        existing_workspace = None
-        if existing_project is not None:
-            existing_workspace = await store_group.project_store.get_primary_workspace(
-                existing_project.project_id
-            )
-            if existing_workspace is None:
-                existing_workspace = await store_group.project_store.get_workspace_by_slug(
-                    existing_project.project_id,
-                    DEFAULT_WORKSPACE_SLUG,
-                )
-
-        workspace = existing_workspace or Workspace(
+        # workspace 概念已废弃，迁移时仍创建 placeholder 保持数据兼容
+        workspace = Workspace(
             workspace_id=DEFAULT_WORKSPACE_ID,
             project_id=project.project_id,
             slug=DEFAULT_WORKSPACE_SLUG,
@@ -417,14 +407,14 @@ class ProjectWorkspaceMigrationService:
 
         summary = ProjectMigrationSummary(
             created_project=existing_project is None,
-            created_workspace=existing_workspace is None,
+            created_workspace=False,  # workspace 概念已废弃
             binding_counts=self._count_bindings(bindings_to_create),
             legacy_counts=discovery.legacy_counts,
         )
         rollback_plan = ProjectMigrationRollbackPlan(
             run_id=run_id,
             delete_binding_ids=[binding.binding_id for binding in bindings_to_create],
-            delete_workspace_ids=[workspace.workspace_id] if existing_workspace is None else [],
+            delete_workspace_ids=[],  # workspace 概念已废弃
             delete_project_ids=[project.project_id] if existing_project is None else [],
             notes=[
                 "仅删除本次 migration 创建的 project/workspace/binding 记录。",
@@ -456,7 +446,7 @@ class ProjectWorkspaceMigrationService:
             workspace=workspace,
             bindings_to_create=bindings_to_create,
             default_project_exists=existing_project is not None,
-            primary_workspace_exists=existing_workspace is not None,
+            primary_workspace_exists=True,  # workspace 概念已废弃
         )
 
     async def _build_bindings_to_create(

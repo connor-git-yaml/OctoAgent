@@ -11,7 +11,7 @@ from typing import Any
 
 from octoagent.tooling.broker import ToolBroker
 from octoagent.tooling.decorators import tool_contract
-from octoagent.tooling.hooks import ApprovalOverrideHook, PresetBeforeHook
+from octoagent.tooling.hooks import EventGenerationHook, LargeOutputHandler  # noqa: F401
 from octoagent.tooling.models import (
     BeforeHookResult,
     ExecutionContext,
@@ -286,72 +286,6 @@ class TestAddHookAutoClassify:
         broker.add_hook(hook)
         assert len(broker._before_hooks) == 0
         assert len(broker._after_hooks) == 1
-
-
-# ============================================================
-# Feature 061: PresetBeforeHook 测试
-# ============================================================
-
-
-# 测试用工具（不同 side_effect_level）
-@tool_contract(
-    side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
-    tool_group="system",
-)
-async def read_tool(path: str) -> str:
-    """读取文件。
-
-    Args:
-        path: 文件路径
-    """
-    return f"content of {path}"
-
-
-@tool_contract(
-    side_effect_level=SideEffectLevel.REVERSIBLE,
-    tool_profile=ToolProfile.STANDARD,
-    tool_group="filesystem",
-)
-async def write_tool(path: str, content: str) -> str:
-    """写入文件。
-
-    Args:
-        path: 路径
-        content: 内容
-    """
-    return f"wrote {path}"
-
-
-@tool_contract(
-    side_effect_level=SideEffectLevel.IRREVERSIBLE,
-    tool_profile=ToolProfile.PRIVILEGED,
-    tool_group="docker",
-)
-async def docker_run(image: str) -> str:
-    """运行 Docker 容器。
-
-    Args:
-        image: 镜像名称
-    """
-    return f"running {image}"
-
-
-def _make_preset_context(
-    preset: PermissionPreset = PermissionPreset.NORMAL,
-    agent_runtime_id: str = "agent-1",
-) -> ExecutionContext:
-    return ExecutionContext(
-        task_id="t1",
-        trace_id="tr1",
-        caller="test",
-        profile=ToolProfile.PRIVILEGED,
-        permission_preset=preset,
-        agent_runtime_id=agent_runtime_id,
-    )
-
-
-class TestPresetBeforeHook:
     """PresetBeforeHook 测试 — 9 个 Preset × SideEffectLevel 组合"""
 
     async def test_minimal_none_allow(

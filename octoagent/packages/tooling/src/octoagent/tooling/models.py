@@ -129,7 +129,32 @@ def migrate_tool_profile_to_preset(profile: str) -> "PermissionPreset":
         "standard": PermissionPreset.NORMAL,
         "privileged": PermissionPreset.FULL,
     }
-    return _MAP.get(profile, PermissionPreset.MINIMAL)
+    return _MAP.get(profile.strip().lower() if profile else "", PermissionPreset.MINIMAL)
+
+
+# DEPRECATED: 层级比较辅助——Feature 073 清理后仅供遗留测试兼容
+PROFILE_LEVELS: dict[ToolProfile, int] = {
+    ToolProfile.MINIMAL: 0,
+    ToolProfile.STANDARD: 1,
+    ToolProfile.PRIVILEGED: 2,
+}
+
+TOOL_PROFILE_TO_PRESET: dict[ToolProfile, PermissionPreset] = {
+    ToolProfile.MINIMAL: PermissionPreset.MINIMAL,
+    ToolProfile.STANDARD: PermissionPreset.NORMAL,
+    ToolProfile.PRIVILEGED: PermissionPreset.FULL,
+}
+
+
+def profile_allows(tool_profile: ToolProfile, context_profile: ToolProfile) -> bool:
+    """DEPRECATED: 使用 preset_decision() 替代。"""
+    import warnings
+    warnings.warn(
+        "profile_allows() 已废弃，请使用 preset_decision() 替代",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return PROFILE_LEVELS[tool_profile] <= PROFILE_LEVELS[context_profile]
 
 
 class HookType(StrEnum):
