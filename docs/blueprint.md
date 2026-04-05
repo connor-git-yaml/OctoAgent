@@ -367,27 +367,15 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | M4 引导式工作台 | 🔄 | Feature 050, 063 待完成 |
 | M5 文件工作台 | ⏳ | 语音/多模态/Companion/通知中心 |
 
-### 待办汇总（§14.5-14.8）
+### 待办汇总
 
-> 详见 [blueprint/architecture-audit.md](blueprint/architecture-audit.md)
+> 已完成项详见 [blueprint/architecture-audit.md](blueprint/architecture-audit.md)
+> 短板 1-5 ✅ | 架构 A1-A7 ✅ | Worker W1/W4 ✅
 
-**已完成（✅）**：短板 1-5 + 架构问题 1-7
-
-**待改善（🟠 Worker/Subagent）**：
-- ✅ W1: Worker 工具精简（work.split 删除 + workers.review→work.plan + spawn 支持批量）
-- W2: DockerRuntimeBackend 空壳
+**剩余待改善（🟠）**：
+- W2: DockerRuntimeBackend 空壳（删除或实现）
 - W3: Graph cancel_signal 未连接
-- ✅ W4: Work 状态机形式化约束（已修复 2026-04-05）
 - W5: WAITING_INPUT deadline 无限重置
-
-**代码架构问题**：
-- ✅ A1: capability_pack.py God Object（5,112→2,052 行，47 工具迁移到 builtin_tools/ 子包）
-- ✅ A2: provider/dx → apps/gateway 反向依赖（已修复，CLI 改为 HTTP 调用 gateway API）
-- ✅ A3: tooling ↔ policy 循环依赖（已修复 2026-04-05）
-- ✅ A4: dx 运行时服务上移到 gateway（27 文件迁移，gateway→dx import 从 72→28）
-- ✅ A5: control_plane models 拆分为 8 领域子模块（已修复 2026-04-05）
-- ✅ A6: Butler 遗留概念清理（已修复 2026-04-05）
-- ✅ A7: 状态枚举整理（WorkerExecutionStatus + SubagentOutcome 消除，统一用 TaskStatus 终态子集）
 
 ---
 
