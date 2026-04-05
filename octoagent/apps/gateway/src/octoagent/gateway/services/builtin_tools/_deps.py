@@ -24,9 +24,10 @@ _MEMORY_BINDING_TYPES = {
 }
 
 # Work 终态值集合（delegation/supervision 工具共用）
+# 注意：WorkStatus 是 StrEnum，.value 为小写
 WORK_TERMINAL_VALUES = {
-    "SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT",
-    "MERGED", "DELETED", "REJECTED",
+    "succeeded", "failed", "cancelled", "timed_out",
+    "merged", "deleted",
 }
 
 

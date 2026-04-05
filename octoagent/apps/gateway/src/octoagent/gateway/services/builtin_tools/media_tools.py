@@ -39,7 +39,7 @@ async def register(broker, deps: ToolDeps) -> None:
     from ..execution_context import get_current_execution_context
     from ..task_service import TaskService
 
-    task_service = TaskService(deps.stores)
+    task_service = TaskService(deps.stores, project_root=deps.project_root)
 
     # 预构建 review_mode 查找表（file_id -> BehaviorReviewMode）
     _behavior_review_modes = get_behavior_file_review_modes(include_advanced=True)

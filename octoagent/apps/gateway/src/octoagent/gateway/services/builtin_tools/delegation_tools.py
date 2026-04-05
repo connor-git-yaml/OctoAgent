@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from octoagent.core.models import WorkStatus
 from octoagent.tooling import SideEffectLevel, tool_contract
 
 from ._deps import (

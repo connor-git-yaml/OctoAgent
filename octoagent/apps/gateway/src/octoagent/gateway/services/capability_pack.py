@@ -105,11 +105,6 @@ _WORK_TERMINAL_VALUES = {
     WorkStatus.DELETED.value,
 }
 
-_MEMORY_BINDING_TYPES = {
-    ProjectBindingType.SCOPE,
-    ProjectBindingType.MEMORY_SCOPE,
-    ProjectBindingType.IMPORT_SCOPE,
-}
 
 # ToolProfile 等级映射（minimal < standard < privileged）
 _PROFILE_LEVELS: dict[str, int] = {"minimal": 0, "standard": 1, "privileged": 2}
@@ -1021,13 +1016,11 @@ class CapabilityPackService:
         await register_all(self._tool_broker, deps)
 
         # tool_search 注册（保留在此处，因为它有独立的工厂函数）
-        from .tool_search_tool import create_tool_search_handler
         event_store = getattr(self._stores, "event_store", None)
         tool_search_handler = create_tool_search_handler(
             tool_index=self._tool_index,
             event_store=event_store,
         )
-        from octoagent.tooling import reflect_tool_schema
         tool_search_meta = reflect_tool_schema(tool_search_handler)
         await self._tool_broker.try_register(tool_search_meta, tool_search_handler)
 
