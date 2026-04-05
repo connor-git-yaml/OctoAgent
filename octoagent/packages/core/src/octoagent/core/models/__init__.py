@@ -261,7 +261,6 @@ from .orchestrator import (
     OrchestratorRequest,
     RuntimeControlContext,
     TurnExecutorKind,
-    WorkerExecutionStatus,
     WorkerResult,
     WorkerRuntimeState,
     WorkerSession,
@@ -578,7 +577,6 @@ __all__ = [
     "DispatchEnvelope",
     "RuntimeControlContext",
     "WorkerResult",
-    "WorkerExecutionStatus",
     "WorkerRuntimeState",
     "WorkerSession",
     # Control Plane

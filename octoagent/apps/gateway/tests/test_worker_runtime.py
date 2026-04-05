@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from octoagent.core.models import DispatchEnvelope, WorkerExecutionStatus
+from octoagent.core.models import DispatchEnvelope, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.execution_console import ExecutionConsoleService
@@ -113,7 +113,7 @@ class TestWorkerRuntime:
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.retryable is False
         assert result.error_type == "WorkerProfileDeniedError"
 
@@ -132,7 +132,7 @@ class TestWorkerRuntime:
             docker_available_checker=lambda: False,
         )
         result = await runtime.run(envelope, worker_id="worker.test")
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.retryable is False
         assert result.error_type == "WorkerBackendUnavailableError"
 
@@ -153,7 +153,7 @@ class TestWorkerRuntime:
             ),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.error_type == "WorkerRuntimeTimeoutError"
 
         task = await service.get_task(envelope.task_id)
@@ -177,7 +177,7 @@ class TestWorkerRuntime:
             cancellation_registry=cancellation_registry,
         )
         result = await runtime.run(envelope, worker_id="worker.test")
-        assert result.status == WorkerExecutionStatus.CANCELLED
+        assert result.status == TaskStatus.CANCELLED
         assert result.retryable is False
 
         task = await service.get_task(envelope.task_id)
@@ -207,7 +207,7 @@ class TestWorkerRuntime:
 
         result = await runtime.run(envelope, worker_id="worker.test")
 
-        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.status == TaskStatus.SUCCEEDED
         assert len(llm_service.calls) == 1
         call = llm_service.calls[0]
         assert call["task_id"] == envelope.task_id
@@ -244,7 +244,7 @@ class TestWorkerRuntime:
 
         result = await runtime.run(envelope, worker_id="worker.graph")
 
-        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.status == TaskStatus.SUCCEEDED
         assert result.backend == "graph"
         assert len(llm_service.calls) == 1
 
@@ -278,7 +278,7 @@ class TestWorkerRuntime:
 
         result = await runtime.run(envelope, worker_id="worker.graph")
 
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.error_type == "WorkerBackendUnavailableError"
         assert (
             result.error_message

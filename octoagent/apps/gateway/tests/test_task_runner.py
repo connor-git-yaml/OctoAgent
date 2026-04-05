@@ -13,7 +13,6 @@ from octoagent.core.models import (
     DispatchEnvelope,
     ExecutionBackend,
     ExecutionSessionState,
-    WorkerExecutionStatus,
     WorkerResult,
 )
 from octoagent.core.models.enums import EventType, TaskStatus
@@ -407,7 +406,7 @@ class TestTaskRunner:
                 dispatch_id="dispatch-deferred",
                 task_id=task_id,
                 worker_id="worker.llm.default",
-                status=WorkerExecutionStatus.FAILED,
+                status=TaskStatus.FAILED,
                 retryable=True,
                 summary="delegation_deferred",
             )
@@ -534,7 +533,7 @@ class TestTaskRunner:
                 dispatch_id=envelope.dispatch_id,
                 task_id=task_id,
                 worker_id="worker.llm.default",
-                status=WorkerExecutionStatus.SUCCEEDED,
+                status=TaskStatus.SUCCEEDED,
                 retryable=False,
                 summary="prepared_dispatch_succeeded",
             )

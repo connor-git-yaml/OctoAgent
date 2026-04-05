@@ -46,7 +46,6 @@ from octoagent.skills.models import (
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.subagent_lifecycle import (
     SubagentExecutor,
-    SubagentOutcome,
     SubagentSpawnContext,
     SubagentSpawnParams,
     kill_subagent,

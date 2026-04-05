@@ -26,7 +26,6 @@ from octoagent.core.models import (
     ResumeFailureType,
     ResumeResult,
     TaskStatus,
-    WorkerExecutionStatus,
 )
 from octoagent.core.store import StoreGroup
 
@@ -48,7 +47,12 @@ _DEFERRED_TASK_STATUSES: dict[TaskStatus, str] = {
     TaskStatus.PAUSED: "PAUSED",
 }
 _DEFERRED_JOB_STATUSES = set(_DEFERRED_TASK_STATUSES.values())
-_TERMINAL_JOB_STATUSES = {"SUCCEEDED", "FAILED", "REJECTED", "CANCELLED"}
+_TERMINAL_JOB_STATUSES = {
+    TaskStatus.SUCCEEDED.value,
+    TaskStatus.FAILED.value,
+    TaskStatus.REJECTED.value,
+    TaskStatus.CANCELLED.value,
+}
 
 
 @dataclass
@@ -561,7 +565,7 @@ class TaskRunner:
         if deferred_job_status is not None:
             await self._stores.task_job_store.mark_deferred(task_id, deferred_job_status)
             return
-        if task.status == TaskStatus.CANCELLED or result.status == WorkerExecutionStatus.CANCELLED:
+        if task.status == TaskStatus.CANCELLED or result.status == TaskStatus.CANCELLED:
             await self._stores.task_job_store.mark_cancelled(task_id)
             await self._notify_completion(task_id)
             return

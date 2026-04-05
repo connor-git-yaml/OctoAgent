@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import DispatchEnvelope, EventType, WorkerExecutionStatus
+from octoagent.core.models import DispatchEnvelope, EventType, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.context_compaction import (
@@ -436,7 +436,7 @@ class TestContextCompaction:
             )
 
             result = await runtime.run(envelope, worker_id="worker.test")
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             # Feature 060: subagent 不触发任何压缩调用（包括 compaction alias）
             assert all(
                 call.get("metadata", {}).get("context_compaction") != "true"

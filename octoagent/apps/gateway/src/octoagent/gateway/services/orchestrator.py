@@ -55,7 +55,6 @@ from octoagent.core.models import (
     TurnExecutorKind,
     Work,
     WorkerDispatchedPayload,
-    WorkerExecutionStatus,
     WorkerResult,
     WorkerReturnedPayload,
     WorkerSession,
@@ -658,7 +657,7 @@ class OrchestratorService:
                 dispatch_id="policy-gate-denied",
                 task_id=task_id,
                 worker_id="orchestrator.policy_gate",
-                status=WorkerExecutionStatus.FAILED,
+                status=TaskStatus.FAILED,
                 retryable=False,
                 summary="dispatch_blocked_by_policy_gate",
                 error_type="PolicyGateDenied",
@@ -738,7 +737,7 @@ class OrchestratorService:
                         dispatch_id=f"delegation-{plan.work.work_id}",
                         task_id=task_id,
                         worker_id="orchestrator.delegation",
-                        status=WorkerExecutionStatus.FAILED,
+                        status=TaskStatus.FAILED,
                         retryable=True,
                         summary=f"delegation_deferred:{plan.pipeline_status.value}",
                         error_type="DelegationDeferred",
@@ -760,7 +759,7 @@ class OrchestratorService:
                 dispatch_id="routing-error",
                 task_id=task_id,
                 worker_id="orchestrator.router",
-                status=WorkerExecutionStatus.FAILED,
+                status=TaskStatus.FAILED,
                 retryable=exc.retryable,
                 summary="dispatch_routing_failed",
                 error_type=type(exc).__name__,
@@ -1652,7 +1651,7 @@ class OrchestratorService:
             dispatch_id=f"graph:{pipeline_id}",
             task_id=request.task_id,
             worker_id="main.graph_pipeline",
-            status=WorkerExecutionStatus.SUCCEEDED,
+            status=TaskStatus.SUCCEEDED,
             retryable=False,
             summary=f"pipeline_started:{pipeline_id}",
             extra_metadata={"pipeline_start_result": result_text[:500]},
@@ -1978,7 +1977,7 @@ class OrchestratorService:
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id="main.agent",
-                status=WorkerExecutionStatus.SUCCEEDED,
+                status=TaskStatus.SUCCEEDED,
                 retryable=False,
                 summary=success_summary,
                 backend="inline",
@@ -1989,7 +1988,7 @@ class OrchestratorService:
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id="main.agent",
-                status=WorkerExecutionStatus.CANCELLED,
+                status=TaskStatus.CANCELLED,
                 retryable=False,
                 summary=f"{dispatch_prefix}_cancelled",
                 backend="inline",
@@ -1999,7 +1998,7 @@ class OrchestratorService:
             dispatch_id=f"{dispatch_prefix}:{request.task_id}",
             task_id=request.task_id,
             worker_id="main.agent",
-            status=WorkerExecutionStatus.FAILED,
+            status=TaskStatus.FAILED,
             retryable=True,
             summary=f"{dispatch_prefix}_terminal:{task_status.value}",
             error_type="AgentInlineExecutionFailed",
@@ -2023,7 +2022,7 @@ class OrchestratorService:
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id=worker_id,
-                status=WorkerExecutionStatus.SUCCEEDED,
+                status=TaskStatus.SUCCEEDED,
                 retryable=False,
                 summary=success_summary,
                 backend="inline",
@@ -2034,7 +2033,7 @@ class OrchestratorService:
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
                 worker_id=worker_id,
-                status=WorkerExecutionStatus.CANCELLED,
+                status=TaskStatus.CANCELLED,
                 retryable=False,
                 summary="owner_self_worker_cancelled",
                 backend="inline",
@@ -2044,7 +2043,7 @@ class OrchestratorService:
             dispatch_id=f"{dispatch_prefix}:{request.task_id}",
             task_id=request.task_id,
             worker_id=worker_id,
-            status=WorkerExecutionStatus.FAILED,
+            status=TaskStatus.FAILED,
             retryable=True,
             summary=f"owner_self_worker_terminal:{task_status.value}",
             error_type="OwnerSelfWorkerExecutionFailed",
@@ -2056,14 +2055,6 @@ class OrchestratorService:
     def _join_route_reason(self, *parts: str) -> str:
         normalized = [part.strip() for part in parts if part and part.strip()]
         return " | ".join(dict.fromkeys(normalized))
-
-    @staticmethod
-    def _worker_status_from_task_status(task_status: TaskStatus) -> WorkerExecutionStatus:
-        mapping = {
-            TaskStatus.SUCCEEDED: WorkerExecutionStatus.SUCCEEDED,
-            TaskStatus.CANCELLED: WorkerExecutionStatus.CANCELLED,
-        }
-        return mapping.get(task_status, WorkerExecutionStatus.FAILED)
 
     @staticmethod
     def _work_status_from_task_status(task_status: TaskStatus) -> WorkStatus:
@@ -2100,7 +2091,7 @@ class OrchestratorService:
                 dispatch_id=envelope.dispatch_id,
                 task_id=envelope.task_id,
                 worker_id="orchestrator.registry",
-                status=WorkerExecutionStatus.FAILED,
+                status=TaskStatus.FAILED,
                 retryable=False,
                 summary=summary,
                 error_type="WorkerNotFound",
@@ -2173,7 +2164,7 @@ class OrchestratorService:
                 dispatch_id=envelope.dispatch_id,
                 task_id=envelope.task_id,
                 worker_id=worker.worker_id,
-                status=WorkerExecutionStatus.FAILED,
+                status=TaskStatus.FAILED,
                 retryable=True,
                 summary="worker_runtime_exception",
                 error_type=type(exc).__name__,
@@ -2194,9 +2185,9 @@ class OrchestratorService:
                     delegation_id=envelope.dispatch_id,
                     work_id=work_id,
                     status={
-                        WorkerExecutionStatus.SUCCEEDED: WorkStatus.SUCCEEDED,
-                        WorkerExecutionStatus.FAILED: WorkStatus.FAILED,
-                        WorkerExecutionStatus.CANCELLED: WorkStatus.CANCELLED,
+                        TaskStatus.SUCCEEDED: WorkStatus.SUCCEEDED,
+                        TaskStatus.FAILED: WorkStatus.FAILED,
+                        TaskStatus.CANCELLED: WorkStatus.CANCELLED,
                     }[result.status],
                     summary=result.summary,
                     retryable=result.retryable,
@@ -2218,19 +2209,19 @@ class OrchestratorService:
                 ),
             )
 
-        if result.status == WorkerExecutionStatus.FAILED:
+        if result.status == TaskStatus.FAILED:
             await self._ensure_task_failed(task_id, trace_id, result.summary)
 
         # Feature 064 P2-B: Worker 完成后的终态通知
         # 注意：_ensure_task_failed 内部已有通知调用，这里处理 SUCCEEDED/CANCELLED 情况
-        if result.status == WorkerExecutionStatus.SUCCEEDED:
+        if result.status == TaskStatus.SUCCEEDED:
             await self._notify_state_change(
                 task_id=task_id,
                 from_status=TaskStatus.RUNNING.value,
                 to_status=TaskStatus.SUCCEEDED.value,
                 reason=result.summary,
             )
-        elif result.status == WorkerExecutionStatus.CANCELLED:
+        elif result.status == TaskStatus.CANCELLED:
             await self._notify_state_change(
                 task_id=task_id,
                 from_status=TaskStatus.RUNNING.value,
@@ -2509,7 +2500,7 @@ class OrchestratorService:
         envelope: DispatchEnvelope,
         result: WorkerResult,
     ) -> A2AConversation:
-        if result.status == WorkerExecutionStatus.SUCCEEDED:
+        if result.status == TaskStatus.SUCCEEDED:
             message = build_result_message(
                 result,
                 context_id=conversation.a2a_conversation_id,
@@ -3093,9 +3084,9 @@ class OrchestratorService:
 
     @staticmethod
     def _a2a_status_from_worker_result(result: WorkerResult) -> A2AConversationStatus:
-        if result.status == WorkerExecutionStatus.SUCCEEDED:
+        if result.status == TaskStatus.SUCCEEDED:
             return A2AConversationStatus.COMPLETED
-        if result.status == WorkerExecutionStatus.CANCELLED:
+        if result.status == TaskStatus.CANCELLED:
             return A2AConversationStatus.CANCELLED
         return A2AConversationStatus.FAILED
 

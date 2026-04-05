@@ -23,10 +23,10 @@ from octoagent.core.models import (
     RiskLevel,
     RuntimeControlContext,
     SessionContextState,
+    TaskStatus,
     WorkerProfile,
     WorkerProfileOriginKind,
     WorkerProfileStatus,
-    WorkerExecutionStatus,
     WorkerResult,
 )
 from octoagent.core.models.message import NormalizedMessage
@@ -263,7 +263,7 @@ class TestOrchestrator:
         assert created is True
 
         result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.status == TaskStatus.SUCCEEDED
         assert result.retryable is False
 
         task = await task_service.get_task(task_id)
@@ -324,7 +324,7 @@ class TestOrchestrator:
                 },
             )
 
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             assert result.worker_id == worker_profile.profile_id
             assert result.summary == "owner_self_worker:general"
             assert len(llm_service.calls) >= 1
@@ -397,7 +397,7 @@ class TestOrchestrator:
                 },
             )
 
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             assert llm_service.context_snapshots
             snapshot = llm_service.context_snapshots[-1]
             assert snapshot["task_id"] == task_id
@@ -430,7 +430,7 @@ class TestOrchestrator:
                     dispatch_id=envelope.dispatch_id,
                     task_id=envelope.task_id,
                     worker_id=self.worker_id,
-                    status=WorkerExecutionStatus.SUCCEEDED,
+                    status=TaskStatus.SUCCEEDED,
                     retryable=False,
                     summary="captured",
                     tool_profile=envelope.tool_profile,
@@ -483,7 +483,7 @@ class TestOrchestrator:
         )
 
         result = await orchestrator.dispatch_prepared(envelope)
-        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.status == TaskStatus.SUCCEEDED
         captured = seen["envelope"]
         conversation = await store_group.a2a_store.get_conversation_for_work("work-a2a")
         assert conversation is not None
@@ -520,7 +520,7 @@ class TestOrchestrator:
             max_hops=3,
             metadata={"parent_task_id": "parent-hop-guard"},
         )
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.retryable is False
         assert result.error_type == "OrchestratorRoutingError"
 
@@ -551,7 +551,7 @@ class TestOrchestrator:
         await store_group.conn.commit()
 
         result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.retryable is False
         assert result.error_type == "PolicyGateDenied"
 
@@ -622,7 +622,7 @@ class TestOrchestrator:
             user_text=msg.text,
             metadata={"approval_id": approval_id},
         )
-        assert result.status == WorkerExecutionStatus.SUCCEEDED
+        assert result.status == TaskStatus.SUCCEEDED
         assert result.retryable is False
         assert approval_manager.consume_allow_once(approval_id) is False
 
@@ -642,7 +642,7 @@ class TestOrchestrator:
             user_text=msg.text,
             worker_capability="capability.not.exists",
         )
-        assert result.status == WorkerExecutionStatus.FAILED
+        assert result.status == TaskStatus.FAILED
         assert result.retryable is False
         assert result.error_type == "WorkerNotFound"
 
@@ -736,7 +736,7 @@ class TestOrchestrator:
             assert created is True
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             # Feature 064 Phase 1: Main Agent Direct Execution 路径处理，
             # worker_id 为 main.agent
             assert result.worker_id == "main.agent"
@@ -759,7 +759,7 @@ class TestOrchestrator:
             assert created is True
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             # Feature 064 Phase 1: Main Agent Direct Execution 路径处理天气查询
             assert result.worker_id == "main.agent"
             assert result.summary != "agent_clarification:weather_location"
@@ -788,7 +788,7 @@ class TestOrchestrator:
             assert created is True
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             # Feature 064 Phase 1: Main Agent Direct Execution 路径处理
             assert result.worker_id == "main.agent"
 
@@ -829,7 +829,7 @@ class TestOrchestrator:
                 user_text=msg.text,
                 metadata={"requested_worker_type": "research"},
             )
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             assert result.worker_id == "worker.llm.default"
 
             assert len(llm_service.calls) == 1
@@ -865,7 +865,7 @@ class TestOrchestrator:
                 user_text=msg.text,
                 metadata={"requested_worker_profile_id": "singleton:research"},
             )
-            assert result.status == WorkerExecutionStatus.SUCCEEDED
+            assert result.status == TaskStatus.SUCCEEDED
             assert result.worker_id == "worker.llm.default"
 
             assert len(llm_service.calls) == 1

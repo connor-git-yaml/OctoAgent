@@ -12,7 +12,6 @@ from octoagent.core.models import (
     DispatchEnvelope,
     PartType,
     TaskStatus,
-    WorkerExecutionStatus,
     WorkerResult,
     WorkerSession,
 )
@@ -287,7 +286,7 @@ class TestAdaptersAndFixtures:
             dispatch_id="dispatch-001",
             task_id="task-001",
             worker_id="worker.ops",
-            status=WorkerExecutionStatus.FAILED,
+            status=TaskStatus.FAILED,
             retryable=True,
             summary="failed",
             error_type="Timeout",

@@ -8,15 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from .enums import RiskLevel
-
-
-class WorkerExecutionStatus(StrEnum):
-    """Worker 执行状态。"""
-
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
+from .enums import RiskLevel, TaskStatus
 
 
 class WorkerRuntimeState(StrEnum):
@@ -159,7 +151,7 @@ class WorkerResult(BaseModel):
     dispatch_id: str = Field(description="派发 ID")
     task_id: str = Field(description="任务 ID")
     worker_id: str = Field(description="worker 标识")
-    status: WorkerExecutionStatus = Field(description="执行状态")
+    status: TaskStatus = Field(description="执行状态")
     retryable: bool = Field(description="失败是否可重试")
     summary: str = Field(description="结果摘要")
     error_type: str | None = Field(default=None, description="错误类型")

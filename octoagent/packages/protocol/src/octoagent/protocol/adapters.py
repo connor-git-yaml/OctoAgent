@@ -9,7 +9,6 @@ from octoagent.core.models import (
     Artifact,
     DispatchEnvelope,
     TaskStatus,
-    WorkerExecutionStatus,
     WorkerResult,
     WorkerSession,
 )
@@ -197,7 +196,7 @@ def build_error_message(
 ) -> A2AMessage:
     error_state = (
         A2ATaskState.CANCELED
-        if result.status == WorkerExecutionStatus.CANCELLED
+        if result.status == TaskStatus.CANCELLED
         else A2ATaskState.FAILED
     )
     return A2AMessage(
@@ -297,10 +296,10 @@ def build_heartbeat_message(
     )
 
 
-def _worker_status_to_a2a_state(status: WorkerExecutionStatus) -> str:
-    if status == WorkerExecutionStatus.SUCCEEDED:
+def _worker_status_to_a2a_state(status: TaskStatus) -> str:
+    if status == TaskStatus.SUCCEEDED:
         return A2ATaskState.COMPLETED
-    if status == WorkerExecutionStatus.CANCELLED:
+    if status == TaskStatus.CANCELLED:
         return A2ATaskState.CANCELED
     return A2ATaskState.FAILED
 

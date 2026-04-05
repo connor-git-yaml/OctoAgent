@@ -10,7 +10,6 @@ Feature 064 P1 扩展:
 
 Feature 064 P3 代码质量优化:
 - SubagentSpawnParams / SubagentSpawnContext 配置对象分层
-- SubagentOutcome StrEnum 替代裸字符串
 - emit_task_event 提取到 core 层
 """
 
@@ -19,7 +18,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
@@ -60,19 +58,6 @@ if TYPE_CHECKING:
     )
 
 log = structlog.get_logger(__name__)
-
-
-# ============================================================
-# SubagentOutcome StrEnum — 替代裸字符串 (Feature 064 P3 优化 2)
-# ============================================================
-
-
-class SubagentOutcome(StrEnum):
-    """Subagent 执行结果状态枚举。"""
-
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
 
 
 # ============================================================
@@ -120,7 +105,7 @@ class SubagentResultCallback(Protocol):
         parent_task_id: str,
         child_task_id: str,
         subagent_name: str,
-        status: SubagentOutcome,
+        status: TaskStatus,
         summary: str,
         artifact_count: int,
     ) -> None: ...
@@ -220,7 +205,7 @@ class SubagentExecutor:
                 await self._send_a2a_result(result, summary)
                 await self._transition_task(TaskStatus.SUCCEEDED)
                 await self._notify_parent(
-                    status=SubagentOutcome.SUCCEEDED,
+                    status=TaskStatus.SUCCEEDED,
                     summary=summary,
                     artifact_count=0,
                 )
@@ -229,7 +214,7 @@ class SubagentExecutor:
                 await self._send_a2a_error(error_msg)
                 await self._transition_task(TaskStatus.FAILED)
                 await self._notify_parent(
-                    status=SubagentOutcome.FAILED,
+                    status=TaskStatus.FAILED,
                     summary=f"Error: {error_msg}",
                     artifact_count=0,
                 )
@@ -238,7 +223,7 @@ class SubagentExecutor:
             await self._send_a2a_cancel_response()
             await self._transition_task(TaskStatus.CANCELLED)
             await self._notify_parent(
-                status=SubagentOutcome.CANCELLED,
+                status=TaskStatus.CANCELLED,
                 summary="Subagent was cancelled",
                 artifact_count=0,
             )
@@ -254,7 +239,7 @@ class SubagentExecutor:
             await self._send_a2a_error(str(exc))
             await self._transition_task(TaskStatus.FAILED)
             await self._notify_parent(
-                status=SubagentOutcome.FAILED,
+                status=TaskStatus.FAILED,
                 summary=f"Unexpected error: {exc}",
                 artifact_count=0,
             )
@@ -423,7 +408,7 @@ class SubagentExecutor:
     async def _notify_parent(
         self,
         *,
-        status: SubagentOutcome,
+        status: TaskStatus,
         summary: str,
         artifact_count: int,
     ) -> None:
