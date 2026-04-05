@@ -146,9 +146,16 @@ class LiteLLMSkillClient:
             log.warning("tool_discovery_failed", exc_info=True)
             return []
         result = []
+        mcp_extra = []
+        filtered_out = []
         for tool_meta in all_tools:
             # MCP 动态工具额外放行（不受静态 tools_allowed 白名单限制）
             is_mcp = getattr(tool_meta, "tool_group", "") == "mcp" and tool_meta.name.startswith("mcp.") and "." in tool_meta.name[4:]
+            if is_mcp and tool_meta.name not in allowed_tool_names:
+                mcp_extra.append(tool_meta.name)
+            if tool_meta.name not in allowed_tool_names and not is_mcp:
+                filtered_out.append(tool_meta.name)
+                continue
             if tool_meta.name in allowed_tool_names or is_mcp:
                 if responses_api:
                     result.append(
@@ -170,6 +177,21 @@ class LiteLLMSkillClient:
                             },
                         }
                     )
+        if mcp_extra:
+            log.info(
+                "mcp_tools_injected",
+                mcp_tools=mcp_extra,
+                total_tools=len(result),
+            )
+        if log.isEnabledFor(10):  # DEBUG
+            log.debug(
+                "tool_schema_resolved",
+                total=len(result),
+                allowed=len(allowed_tool_names),
+                discovered=len(all_tools),
+                filtered_out_count=len(filtered_out),
+                mcp_extra_count=len(mcp_extra),
+            )
         return result
 
     @staticmethod
@@ -729,36 +751,15 @@ class LiteLLMSkillClient:
         history = self._histories[key]
 
         if step > 1 and feedback:
-            has_standard_ids = any(fb.tool_call_id for fb in feedback)
-
-            if has_standard_ids:
-                # 统一使用 Chat Completions 格式回填（Responses API 在发送前转换）
-                for fb in feedback:
-                    history.append({
-                        "role": "tool",
-                        "tool_call_id": fb.tool_call_id or f"fallback_{fb.tool_name}",
-                        "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                    })
-            else:
-                # 向后兼容：自然语言回填（无 tool_call_id 时）
-                results = []
-                for fb in feedback:
-                    if fb.is_error:
-                        results.append(f"- {fb.tool_name}: ERROR: {fb.error}")
-                    else:
-                        results.append(f"- {fb.tool_name}: {fb.output}")
-                history.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Tool execution results:\n"
-                            + "\n".join(results)
-                            + "\n\nBased on these results, either call the next necessary tool "
-                            "immediately or provide the final answer now. "
-                            "Do not reply with plans like '我先查一下' or '我再看看'."
-                        ),
-                    }
-                )
+            # 统一使用 Chat Completions tool role 格式回填
+            # 如果 LLM 没提供 tool_call_id，合成一个（避免降级为自然语言 user message）
+            for fb in feedback:
+                call_id = fb.tool_call_id or f"call_{fb.tool_name}_{step}"
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                })
 
         # ---- Feature 064 P2-A: 上下文压缩 ----
         # 在构建 LLM 请求前检测并压缩对话历史。
