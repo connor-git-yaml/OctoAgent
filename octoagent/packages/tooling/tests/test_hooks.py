@@ -1,8 +1,10 @@
-"""Hook 链测试 -- US5 Hook 扩展机制 + Feature 061
+"""Hook 链测试 -- US5 Hook 扩展机制
 
-验证 before/after hook 优先级排序、拒绝执行、fail_mode 双模式、
+验证 before/after hook 优先级排序��拒绝执行、fail_mode 双模式、
 add_hook 自动分类等。
-Feature 061: PresetBeforeHook / ApprovalOverrideHook 测试。
+
+注：Feature 061 的 PresetBeforeHook / ApprovalOverrideHook 已在 Feature 070 中
+移除（权限检查统一由 ToolBroker 内联 check_permission 完成），对应测试已删除。
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from octoagent.tooling.models import (
     BeforeHookResult,
     ExecutionContext,
     FailMode,
-    PermissionPreset,
     SideEffectLevel,
     ToolMeta,
     ToolProfile,
@@ -35,7 +36,7 @@ from octoagent.tooling.schema import reflect_tool_schema
     tool_group="system",
 )
 async def echo(text: str) -> str:
-    """回显。
+    """���显。
 
     Args:
         text: 输入
@@ -176,7 +177,7 @@ class TestBeforeHookRejection:
     """before hook 拒绝执行测试"""
 
     async def test_rejection_stops_execution(self, mock_event_store) -> None:
-        """before hook 拒绝后工具不执行"""
+        """before hook 拒绝后��具不执行"""
         broker = ToolBroker(event_store=mock_event_store)
         await broker.register(reflect_tool_schema(echo), echo)
 
@@ -204,7 +205,7 @@ class TestBeforeHookFailMode:
         assert "fail_mode=closed" in result.error
 
     async def test_fail_mode_open_continues(self, mock_event_store) -> None:
-        """fail_mode=open: 异常时记录警告并继续"""
+        """fail_mode=open: 异常时记录警告并继���"""
         log: list[str] = []
         broker = ToolBroker(event_store=mock_event_store)
         await broker.register(reflect_tool_schema(echo), echo)
@@ -286,284 +287,3 @@ class TestAddHookAutoClassify:
         broker.add_hook(hook)
         assert len(broker._before_hooks) == 0
         assert len(broker._after_hooks) == 1
-    """PresetBeforeHook 测试 — 9 个 Preset × SideEffectLevel 组合"""
-
-    async def test_minimal_none_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(read_tool)
-        ctx = _make_preset_context(PermissionPreset.MINIMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_minimal_reversible_ask(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(write_tool)
-        ctx = _make_preset_context(PermissionPreset.MINIMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is False
-        assert result.rejection_reason.startswith("ask:")
-
-    async def test_minimal_irreversible_ask(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.MINIMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is False
-        assert "ask:" in result.rejection_reason
-
-    async def test_normal_none_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(read_tool)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_normal_reversible_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(write_tool)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_normal_irreversible_ask(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is False
-        assert "ask:preset_denied:docker_run" in (
-            result.rejection_reason
-        )
-
-    async def test_full_none_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(read_tool)
-        ctx = _make_preset_context(PermissionPreset.FULL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_full_reversible_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(write_tool)
-        ctx = _make_preset_context(PermissionPreset.FULL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_full_irreversible_allow(
-        self, mock_event_store
-    ) -> None:
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.FULL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-
-    async def test_generates_preset_check_event(
-        self, mock_event_store
-    ) -> None:
-        """每次检查生成 PRESET_CHECK 事件"""
-        hook = PresetBeforeHook(event_store=mock_event_store)
-        meta = reflect_tool_schema(read_tool)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        await hook.before_execute(meta, {}, ctx)
-        events = mock_event_store.events
-        assert len(events) == 1
-        assert events[0].type == "PRESET_CHECK"
-
-    async def test_hook_properties(self) -> None:
-        hook = PresetBeforeHook()
-        assert hook.name == "preset_before_hook"
-        assert hook.priority == 20
-        assert hook.fail_mode == FailMode.CLOSED
-
-
-# ============================================================
-# Feature 061: ApprovalOverrideHook 测试
-# ============================================================
-
-
-class MockOverrideCache:
-    """测试用 ApprovalOverrideCache"""
-
-    def __init__(self) -> None:
-        self._data: dict[tuple[str, str], bool] = {}
-
-    def has(
-        self, agent_runtime_id: str, tool_name: str
-    ) -> bool:
-        return self._data.get(
-            (agent_runtime_id, tool_name), False
-        )
-
-    def set(
-        self, agent_runtime_id: str, tool_name: str
-    ) -> None:
-        self._data[(agent_runtime_id, tool_name)] = True
-
-    def remove(
-        self, agent_runtime_id: str, tool_name: str
-    ) -> None:
-        self._data.pop((agent_runtime_id, tool_name), None)
-
-
-class TestApprovalOverrideHook:
-    """ApprovalOverrideHook 测试"""
-
-    async def test_cache_miss_proceeds(
-        self, mock_event_store
-    ) -> None:
-        """缓存未命中 → proceed=True"""
-        cache = MockOverrideCache()
-        hook = ApprovalOverrideHook(
-            cache=cache, event_store=mock_event_store
-        )
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-        assert hook.last_override_hit is False
-
-    async def test_cache_hit_proceeds(
-        self, mock_event_store
-    ) -> None:
-        """缓存命中 always → proceed=True"""
-        cache = MockOverrideCache()
-        cache.set("agent-1", "docker_run")
-        hook = ApprovalOverrideHook(
-            cache=cache, event_store=mock_event_store
-        )
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await hook.before_execute(meta, {}, ctx)
-        assert result.proceed is True
-        assert hook.last_override_hit is True
-
-    async def test_agent_isolation(
-        self, mock_event_store
-    ) -> None:
-        """不同 Agent 实例的 always 互相隔离"""
-        cache = MockOverrideCache()
-        cache.set("agent-A", "docker_run")
-        hook = ApprovalOverrideHook(
-            cache=cache, event_store=mock_event_store
-        )
-        meta = reflect_tool_schema(docker_run)
-        # agent-B 无覆盖
-        ctx = _make_preset_context(
-            PermissionPreset.NORMAL,
-            agent_runtime_id="agent-B",
-        )
-        result = await hook.before_execute(meta, {}, ctx)
-        assert hook.last_override_hit is False
-
-    async def test_generates_override_hit_event(
-        self, mock_event_store
-    ) -> None:
-        """命中时生成 APPROVAL_OVERRIDE_HIT 事件"""
-        cache = MockOverrideCache()
-        cache.set("agent-1", "docker_run")
-        hook = ApprovalOverrideHook(
-            cache=cache, event_store=mock_event_store
-        )
-        meta = reflect_tool_schema(docker_run)
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        await hook.before_execute(meta, {}, ctx)
-        events = mock_event_store.events
-        assert len(events) == 1
-        assert events[0].type == "APPROVAL_OVERRIDE_HIT"
-
-    async def test_hook_properties(self) -> None:
-        cache = MockOverrideCache()
-        hook = ApprovalOverrideHook(cache=cache)
-        assert hook.name == "approval_override_hook"
-        assert hook.priority == 10
-        assert hook.fail_mode == FailMode.OPEN
-
-
-# ============================================================
-# Feature 061: Hook Chain 集成场景
-# ============================================================
-
-
-class TestPresetOverrideHookChain:
-    """ApprovalOverrideHook(10) → PresetBeforeHook(20) 集成场景"""
-
-    async def test_override_hit_skips_preset_check(
-        self, mock_event_store
-    ) -> None:
-        """always 覆盖命中 → PresetBeforeHook 跳过检查"""
-        cache = MockOverrideCache()
-        cache.set("agent-1", "docker_run")
-
-        broker = ToolBroker(event_store=mock_event_store)
-        await broker.register(
-            reflect_tool_schema(docker_run), docker_run
-        )
-
-        # 注册两个 Hook
-        broker.add_hook(
-            ApprovalOverrideHook(
-                cache=cache, event_store=mock_event_store
-            )
-        )
-        broker.add_hook(
-            PresetBeforeHook(
-                event_store=mock_event_store,
-                override_cache=cache,
-            )
-        )
-
-        # NORMAL preset + IRREVERSIBLE 工具 → 正常应该 ask
-        # 但有 always 覆盖 → 应该放行
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await broker.execute(
-            "docker_run", {"image": "ubuntu"}, ctx
-        )
-        assert result.is_error is False
-        assert "running ubuntu" in result.output
-
-    async def test_no_override_triggers_ask(
-        self, mock_event_store
-    ) -> None:
-        """无覆盖 + NORMAL + IRREVERSIBLE → ask"""
-        cache = MockOverrideCache()
-
-        broker = ToolBroker(event_store=mock_event_store)
-        await broker.register(
-            reflect_tool_schema(docker_run), docker_run
-        )
-
-        broker.add_hook(
-            ApprovalOverrideHook(
-                cache=cache, event_store=mock_event_store
-            )
-        )
-        broker.add_hook(
-            PresetBeforeHook(
-                event_store=mock_event_store,
-                override_cache=cache,
-            )
-        )
-
-        ctx = _make_preset_context(PermissionPreset.NORMAL)
-        result = await broker.execute(
-            "docker_run", {"image": "ubuntu"}, ctx
-        )
-        assert result.is_error is True
-        assert result.error.startswith("ask:")

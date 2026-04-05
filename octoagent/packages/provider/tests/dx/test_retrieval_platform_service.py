@@ -10,8 +10,8 @@ from octoagent.core.models import (
     IndexGeneration,
     IndexGenerationStatus,
     Project,
-    Workspace,
 )
+from octoagent.provider.dx.project_migration import Workspace
 from octoagent.core.store import create_store_group
 from octoagent.memory import init_memory_db
 from octoagent.provider.dx.config_schema import (
