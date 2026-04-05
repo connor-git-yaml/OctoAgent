@@ -10,7 +10,6 @@ dependencies = [
     "structlog>=25.1,<26.0",
     "octoagent-core",
     "octoagent-memory",
-    "octoagent-gateway",
     "click>=8.1,<9.0",
     "rich>=13.0,<14.0",
     "questionary>=2.0,<3.0",
@@ -25,7 +24,6 @@ dependencies = [
 [tool.uv.sources]
 octoagent-core = { workspace = true }
 octoagent-memory = { workspace = true }
-octoagent-gateway = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

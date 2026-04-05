@@ -14,11 +14,24 @@ from octoagent.core.models import (
     ControlPlaneSurface,
 )
 from octoagent.core.store import create_store_group
-from octoagent.gateway.services.capability_pack import CapabilityPackService
-from octoagent.gateway.services.control_plane import ControlPlaneService
 from octoagent.memory.store import init_memory_db
 from octoagent.tooling import ToolBroker
 from ulid import ULID
+
+# 延迟导入 gateway 服务——打断 provider ↔ gateway 循环依赖。
+# 这些 import 只在 _open_control_plane() 运行时才需要。
+_CapabilityPackService = None
+_ControlPlaneService = None
+
+
+def _ensure_gateway_imports() -> tuple[type, type]:
+    global _CapabilityPackService, _ControlPlaneService
+    if _CapabilityPackService is None:
+        from octoagent.gateway.services.capability_pack import CapabilityPackService
+        from octoagent.gateway.services.control_plane import ControlPlaneService
+        _CapabilityPackService = CapabilityPackService
+        _ControlPlaneService = ControlPlaneService
+    return _CapabilityPackService, _ControlPlaneService
 
 from .update_service import UpdateService
 from .update_status_store import UpdateStatusStore
@@ -32,24 +45,24 @@ class LocalSetupGovernanceAdapter:
         self._project_root = project_root.resolve()
 
     @asynccontextmanager
-    async def _open_control_plane(self) -> AsyncIterator[ControlPlaneService]:
+    async def _open_control_plane(self) -> AsyncIterator[Any]:
+        CapabilityPackSvc, ControlPlaneSvc = _ensure_gateway_imports()
         db_path = self._project_root / "data" / "sqlite" / "octoagent.db"
         artifacts_dir = self._project_root / "data" / "artifacts"
         store_group = await create_store_group(db_path, artifacts_dir)
-        # CLI setup/review 会读取 memory console；单独走 control-plane 时也要补齐 memory schema。
         await init_memory_db(store_group.conn)
         tool_broker = ToolBroker(
             event_store=store_group.event_store,
             artifact_store=store_group.artifact_store,
         )
-        capability_pack = CapabilityPackService(
+        capability_pack = CapabilityPackSvc(
             project_root=self._project_root,
             store_group=store_group,
             tool_broker=tool_broker,
         )
         await capability_pack.startup()
         await capability_pack.refresh()
-        control_plane = ControlPlaneService(
+        control_plane = ControlPlaneSvc(
             project_root=self._project_root,
             store_group=store_group,
             capability_pack_service=capability_pack,
