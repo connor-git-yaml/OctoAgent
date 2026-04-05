@@ -5262,7 +5262,7 @@ class TestControlPlaneApi:
                             tool_profile="standard",
                             resolution_mode="profile_first_core",
                             selected_tools=["runtime.inspect"],
-                            discovery_entrypoints=["workers.review"],
+                            discovery_entrypoints=["work.plan"],
                         ),
                         mounted_tools=[
                             ToolAvailabilityExplanation(
@@ -5299,7 +5299,7 @@ class TestControlPlaneApi:
                     "tool_selection": DynamicToolSelection(
                         selection_id="selection-failed",
                         query=ToolIndexQuery(query="巡检", limit=6),
-                        selected_tools=["runtime.inspect", "workers.review"],
+                        selected_tools=["runtime.inspect", "work.plan"],
                         warnings=["profile_first_tool_unavailable"],
                         resolution_mode="profile_first_core",
                         effective_tool_universe=EffectiveToolUniverse(
@@ -5308,8 +5308,8 @@ class TestControlPlaneApi:
                             worker_type="ops",
                             tool_profile="standard",
                             resolution_mode="profile_first_core",
-                            selected_tools=["runtime.inspect", "workers.review"],
-                            discovery_entrypoints=["workers.review", "mcp.tools.list"],
+                            selected_tools=["runtime.inspect", "work.plan"],
+                            discovery_entrypoints=["work.plan", "mcp.tools.list"],
                             warnings=["profile_first_tool_unavailable"],
                         ),
                         mounted_tools=[
@@ -5357,7 +5357,7 @@ class TestControlPlaneApi:
             "subagents.spawn"
         )
         assert target["dynamic_context"]["current_discovery_entrypoints"] == [
-            "workers.review",
+            "work.plan",
             "mcp.tools.list",
         ]
 

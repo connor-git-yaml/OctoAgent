@@ -81,47 +81,37 @@ async def register(broker, deps: ToolDeps) -> None:
         target_kind: str = "subagent",
         title: str = "",
     ) -> str:
-        """创建并启动 child task / subagent runtime。支持单个（objective）或批量（objectives）模式。
-        批量模式下 title 参数忽略，每个 child 自动命名。"""
+        """创建并启动 child task / subagent runtime。
 
+        支持两种模式：
+        - 单个：传 objective（可指定 title）
+        - 批量：传 objectives（title 取 objective 前 60 字符）
+        如果同时传 objectives 和 objective，优先使用 objectives。
+        """
         items = coerce_objectives(objectives) if objectives else []
         if not items and objective.strip():
             items = [objective.strip()]
         if not items:
             raise RuntimeError("objective 或 objectives 至少需要提供一个")
 
-        if len(items) == 1:
+        launched = []
+        for i, item in enumerate(items):
+            child_title = title if len(items) == 1 and title else item[:60]
             payload = await launch_child(
                 deps,
-                objective=items[0],
+                objective=item,
                 worker_type=worker_type,
                 target_kind=target_kind,
                 tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                    objective=items[0],
-                ),
-                title=title,
-            )
-            return json.dumps(
-                {"requested": 1, "created": 1, "children": [payload]},
-                ensure_ascii=False,
-            )
-        else:
-            launched = []
-            for item in items:
-                payload = await launch_child(
-                    deps,
                     objective=item,
-                    worker_type=worker_type,
-                    target_kind=target_kind,
-                    tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                        objective=item,
-                    ),
-                )
-                launched.append(payload)
-            return json.dumps(
-                {"requested": len(items), "created": len(launched), "children": launched},
-                ensure_ascii=False,
+                ),
+                title=child_title,
             )
+            launched.append(payload)
+        return json.dumps(
+            {"requested": len(items), "created": len(launched), "children": launched},
+            ensure_ascii=False,
+        )
 
     @tool_contract(
         name="subagents.kill",

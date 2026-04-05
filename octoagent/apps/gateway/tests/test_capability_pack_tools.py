@@ -173,12 +173,12 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "project.inspect",
             "setup.review",
             "setup.quick_connect",
-            "workers.review",
+            "work.plan",
             "subagents.spawn",
             "subagents.list",
             "subagents.kill",
             "subagents.steer",
-            "work.split",
+            "subagents.spawn",
             "work.merge",
             "work.delete",
             "web.fetch",
@@ -1212,7 +1212,7 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
 
         with bind_execution_context(runtime_context):
             split_result = await tool_broker.execute(
-                "work.split",
+                "subagents.spawn",
                 {
                     "objectives": ["先调研当前 API", "再补一组测试"],
                     "worker_type": "research",
@@ -1313,7 +1313,7 @@ async def test_work_split_rejects_worker_to_worker_delegation(
 
         with bind_execution_context(runtime_context):
             result = await tool_broker.execute(
-                "work.split",
+                "subagents.spawn",
                 {
                     "objectives": ["先调研 API", "再补一组测试"],
                     "worker_type": "research",
@@ -1385,7 +1385,7 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
 
         with bind_execution_context(runtime_context):
             result = await tool_broker.execute(
-                "workers.review",
+                "work.plan",
                 {"objective": "先调研 API，再补代码和测试"},
                 broker_context,
             )
