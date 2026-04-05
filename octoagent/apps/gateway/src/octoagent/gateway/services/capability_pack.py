@@ -906,7 +906,7 @@ class CapabilityPackService:
         replacements = {
             "{{project_id}}": project.project_id if project is not None else "",
             "{{project_slug}}": project.slug if project is not None else "default",
-            "{{project_name}}": project.name if project is not None else "Default Project",
+            "{{project_name}}": project.name if project is not None else "OctoAgent",
             "{{current_datetime_local}}": ambient_runtime["current_datetime_local"],
             "{{current_date_local}}": ambient_runtime["current_date_local"],
             "{{current_time_local}}": ambient_runtime["current_time_local"],

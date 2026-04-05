@@ -320,7 +320,7 @@ export default function ChatWorkbench() {
     taskId && suppressHistoricalActivity
       ? [
           {
-            id: "butler-fresh-turn",
+            id: "agent-fresh-turn",
             actor: "主助手",
             stateLabel: "进行中",
             tone: "running",

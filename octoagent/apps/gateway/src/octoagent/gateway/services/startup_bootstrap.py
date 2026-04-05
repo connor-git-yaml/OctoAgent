@@ -56,8 +56,11 @@ async def ensure_startup_records(
     # 回填 default project 的 primary_agent_id（如果尚未设置）
     await _backfill_primary_agent_id(store_group, project)
 
-    # 确保 Butler 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
-    await ensure_butler_runtime_and_session(store_group, project, agent_profile)
+    # 确保主 Agent 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
+    await ensure_main_runtime_and_session(store_group, project, agent_profile)
+
+    # 数据迁移：清理历史遗留的 " Butler" 后缀
+    await _migrate_butler_suffix(store_group, agent_profile)
 
     await store_group.conn.commit()
 
@@ -153,7 +156,7 @@ async def _ensure_agent_profile(
         profile_id=canonical_profile_id,
         scope=AgentProfileScope.PROJECT,
         project_id=project.project_id,
-        name=f"{project.name} Butler",
+        name=project.name,
         persona_summary="",
         instruction_overlays=[
             "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
@@ -303,16 +306,16 @@ async def _backfill_primary_agent_id(
     )
 
 
-async def ensure_butler_runtime_and_session(
+async def ensure_main_runtime_and_session(
     store_group: StoreGroup,
     project: Project,
     agent_profile: AgentProfile,
 ) -> None:
-    """确保 Butler 在 project-default 上有 AgentRuntime + AgentSession。
+    """确保主 Agent 在 project-default 上有 AgentRuntime + AgentSession。
 
     多 Session 侧边栏需要 agent_sessions 行才能展示会话列表。
     """
-    # 查找或创建 Butler Runtime
+    # 查找或创建主 Agent Runtime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
         role=AgentRuntimeRole.MAIN,
         project_id=project.project_id,
@@ -336,7 +339,7 @@ async def ensure_butler_runtime_and_session(
         await store_group.project_store.set_primary_agent(
             project.project_id, butler_runtime.agent_runtime_id
         )
-        log.info("butler_runtime_created", runtime_id=runtime_id, project_id=project.project_id)
+        log.info("main_runtime_created", runtime_id=runtime_id, project_id=project.project_id)
 
     # 查找或创建活跃 AgentSession
     existing_session = await store_group.agent_context_store.get_active_session_for_project(
@@ -356,7 +359,7 @@ async def ensure_butler_runtime_and_session(
             legacy_session_id=session_id,
         )
         await store_group.agent_context_store.save_agent_session(session)
-        log.info("butler_session_created", session_id=session_id, project_id=project.project_id)
+        log.info("main_session_created", session_id=session_id, project_id=project.project_id)
     else:
         needs_backfill = (
             existing_session.surface not in {"web", "chat"}
@@ -405,3 +408,38 @@ async def ensure_default_project_agent_profile(
             )
         return profile
     return None
+
+
+async def _migrate_butler_suffix(
+    store_group: StoreGroup,
+    agent_profile: AgentProfile,
+) -> None:
+    """数据迁移：清理历史遗留的 ' Butler' 后缀。
+
+    旧版本硬编码 f"{project.name} Butler" 作为 Agent Profile 名字。
+    此函数在启动时检查并去除后缀。
+    """
+    if not agent_profile.name.endswith(" Butler"):
+        return
+
+    new_name = agent_profile.name.removesuffix(" Butler")
+    updated = agent_profile.model_copy(update={"name": new_name})
+    await store_group.agent_context_store.save_agent_profile(updated)
+
+    # 同步更新 AgentRuntime.name
+    runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        role=AgentRuntimeRole.MAIN,
+        project_id=agent_profile.project_id,
+    )
+    for rt in runtimes:
+        if rt.name.endswith(" Butler"):
+            await store_group.agent_context_store.save_agent_runtime(
+                rt.model_copy(update={"name": rt.name.removesuffix(" Butler")})
+            )
+
+    log.info(
+        "butler_suffix_migrated",
+        profile_id=agent_profile.profile_id,
+        old_name=agent_profile.name,
+        new_name=new_name,
+    )

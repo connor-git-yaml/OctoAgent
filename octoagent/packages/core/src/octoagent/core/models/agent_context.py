@@ -75,7 +75,7 @@ class ContextRequestKind(StrEnum):
 class AgentRuntimeRole(StrEnum):
     MAIN = "main"
     WORKER = "worker"
-    BUTLER = "butler"  # 历史兼容别名，新代码用 MAIN
+    BUTLER = "butler"  # DEPRECATED: 旧数据兼容，不要在新代码中使用。语义等价于 MAIN。
 
 
 class AgentRuntimeStatus(StrEnum):
@@ -83,12 +83,26 @@ class AgentRuntimeStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+def normalize_runtime_role(value: str) -> AgentRuntimeRole:
+    """旧数据兼容：butler → MAIN。"""
+    if value == "butler":
+        return AgentRuntimeRole.MAIN
+    return AgentRuntimeRole(value)
+
+
 class AgentSessionKind(StrEnum):
     MAIN_BOOTSTRAP = "main_bootstrap"
     WORKER_INTERNAL = "worker_internal"
     DIRECT_WORKER = "direct_worker"
     SUBAGENT_INTERNAL = "subagent_internal"
-    BUTLER_MAIN = "butler_main"  # 历史兼容别名，新代码用 MAIN_BOOTSTRAP
+    BUTLER_MAIN = "butler_main"  # DEPRECATED: 旧数据兼容，不要在新代码中使用。语义等价于 MAIN_BOOTSTRAP。
+
+
+def normalize_session_kind(value: str) -> AgentSessionKind:
+    """旧数据兼容：butler_main → MAIN_BOOTSTRAP。"""
+    if value == "butler_main":
+        return AgentSessionKind.MAIN_BOOTSTRAP
+    return AgentSessionKind(value)
 
 
 class AgentSessionStatus(StrEnum):

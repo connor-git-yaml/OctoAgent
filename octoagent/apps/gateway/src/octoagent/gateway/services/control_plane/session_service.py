@@ -74,7 +74,7 @@ from ..connection_metadata import (
     resolve_turn_executor_kind,
 )
 from ..startup_bootstrap import (
-    ensure_butler_runtime_and_session,
+    ensure_main_runtime_and_session,
     ensure_default_project_agent_profile,
 )
 from ..task_service import TaskService
@@ -1124,7 +1124,7 @@ class SessionDomainService(DomainServiceBase):
         if project.is_default:
             agent_profile = await ensure_default_project_agent_profile(self._stores, project)
             if agent_profile is not None:
-                await ensure_butler_runtime_and_session(
+                await ensure_main_runtime_and_session(
                     self._stores,
                     project,
                     None,
