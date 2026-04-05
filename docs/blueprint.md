@@ -384,7 +384,10 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - ✅ A1: capability_pack.py God Object（5,112→2,052 行，47 工具迁移到 builtin_tools/ 子包）
 - ✅ A2: provider/dx → apps/gateway 反向依赖（已修复，CLI 改为 HTTP 调用 gateway API）
 - ✅ A3: tooling ↔ policy 循环依赖（已修复 2026-04-05）
-- 🟠 A4-A7: dx 定位模糊 / control_plane 模型混合 / Butler 遗留命名 / 状态枚举重叠
+- ✅ A4: dx 运行时服务上移到 gateway（27 文件迁移，gateway→dx import 从 72→28）
+- 🟠 A5: control_plane.py 模型 56 个混在单文件
+- 🟠 A6: Butler 遗留命名在活跃代码中
+- 🟠 A7: 4 个状态枚举语义重叠
 
 ---
 
