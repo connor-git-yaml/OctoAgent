@@ -3378,8 +3378,7 @@
 .wb-message-card.is-user .wb-markdown p,
 .wb-message-card.is-user .wb-markdown ul,
 .wb-message-card.is-user .wb-markdown ol,
-.wb-message-card.is-user .wb-markdown li,
-.wb-message-card.is-user .wb-markdown-paragraph {
+.wb-message-card.is-user .wb-markdown li {
   color: rgba(255, 255, 255, 0.98);
 }
 
@@ -3488,12 +3487,6 @@
   margin: 8px 0;
 }
 
-.wb-markdown-link {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
 
 .wb-message-card.is-user .wb-markdown code {
   background: rgba(255, 255, 255, 0.18);

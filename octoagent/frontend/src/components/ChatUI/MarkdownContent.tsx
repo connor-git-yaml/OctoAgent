@@ -2,14 +2,20 @@ import { memo, useMemo } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 
-// 独立实例：避免污染其他 DOMPurify 使用方
-const purify = DOMPurify(window);
-purify.addHook("afterSanitizeAttributes", (node) => {
-  if (node.tagName === "A") {
-    node.setAttribute("target", "_blank");
-    node.setAttribute("rel", "noopener noreferrer");
+// 懒初始化独立实例（SSR 安全 + 避免全局污染）
+let purify: ReturnType<typeof DOMPurify> | null = null;
+function getPurify() {
+  if (!purify && typeof window !== "undefined") {
+    purify = DOMPurify(window);
+    purify.addHook("afterSanitizeAttributes", (node) => {
+      if (node.tagName === "A") {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    });
   }
-});
+  return purify;
+}
 
 interface MarkdownContentProps {
   content: string;
@@ -26,8 +32,9 @@ export const MarkdownContent = memo(function MarkdownContent({
 }: MarkdownContentProps) {
   const html = useMemo(() => {
     if (!content) return "";
-    const raw = marked.parse(content, { breaks: true, gfm: true, async: false });
-    return purify.sanitize(raw);
+    const raw = marked.parse(content, { breaks: true, gfm: true, async: false }) as string;
+    const p = getPurify();
+    return p ? p.sanitize(raw) : raw;
   }, [content]);
 
   if (!html) return null;

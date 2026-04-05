@@ -7,9 +7,6 @@ import {
 import { TERMINAL_TASK_STATUSES } from "../domains/chat/constants";
 import { MessageBubble, type MessageBubbleActivityItem } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
-
-// 稳定引用：避免每次渲染创建新空数组破坏 MessageBubble 的 memo
-const EMPTY_ACTIVITY: MessageBubbleActivityItem[] = [];
 import {
   buildAgentActivity,
   buildAgentTraceEntries,
@@ -52,6 +49,9 @@ import type {
   OperatorActionKind,
   OperatorInboxItem,
 } from "../types";
+
+// 稳定引用：避免每次渲染创建新空数组破坏 MessageBubble 的 memo
+const EMPTY_ACTIVITY: MessageBubbleActivityItem[] = [];
 
 const CHAT_SLASH_COMMANDS = [
   {
@@ -163,7 +163,7 @@ export default function ChatWorkbench() {
   const [sessionAliasDraft, setSessionAliasDraft] = useState("");
 
   // 智能滚动：用户在底部时自动滚底，浏览历史时不打断
-  const { containerRef: chatScrollRef, endRef: messagesEndAutoRef, showNewMessageHint, dismissHint } =
+  const { containerRef: chatScrollRef, endRef: messagesEndAutoRef, showNewMessageHint, scrollToBottom } =
     useAutoScroll([messages], taskId);
 
   const snapshotResourceRefs = useMemo(() => {
@@ -1081,7 +1081,7 @@ export default function ChatWorkbench() {
               <button
                 type="button"
                 className="wb-chat-new-message-hint"
-                onClick={dismissHint}
+                onClick={scrollToBottom}
               >
                 ↓ 新消息
               </button>

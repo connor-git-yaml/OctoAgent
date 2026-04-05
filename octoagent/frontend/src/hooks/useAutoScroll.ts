@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const NEAR_BOTTOM_THRESHOLD = 150;
+const NEAR_BOTTOM_THRESHOLD = 150; // px — 距底部多少以内视为"在底部附近"
 
 /**
  * 智能滚动 hook — "粘底"逻辑。
@@ -8,12 +8,12 @@ const NEAR_BOTTOM_THRESHOLD = 150;
  * - 用户在底部附近时，新消息自动滚底
  * - 用户主动上滚浏览历史时，不打断
  * - 不在底部时显示"↓ 新消息"提示
- * - 首次进入 / session 切换后直接定位到底部（instant，不从头滑下来）
- *
- * @param deps — 触发滚动检查的依赖（通常是 [messages]）
- * @param resetKey — 变化时重置首屏标记（通常是 sessionId / taskId）
+ * - 首次进入 / session 切换后直接定位到底部（instant）
  */
-export function useAutoScroll(deps: unknown[], resetKey?: unknown) {
+export function useAutoScroll(
+  deps: React.DependencyList,
+  resetKey?: string | null,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
@@ -37,16 +37,16 @@ export function useAutoScroll(deps: unknown[], resetKey?: unknown) {
       const nearBottom =
         el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_THRESHOLD;
       wasNearBottomRef.current = nearBottom;
-      if (nearBottom) {
+      if (nearBottom && showNewMessageHint) {
         setShowNewMessageHint(false);
       }
     };
 
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [showNewMessageHint]);
 
-  // deps 变化时：按粘底状态决定是否滚底（用 rAF 去重防止连续消息卡顿）
+  // deps 变化时：按粘底状态决定是否滚底（rAF 去重防连续消息卡顿）
   useEffect(() => {
     if (!endRef.current) return;
 
@@ -66,6 +66,9 @@ export function useAutoScroll(deps: unknown[], resetKey?: unknown) {
         setShowNewMessageHint(true);
       }
     });
+
+    // 清理：组件卸载时取消未执行的 rAF
+    return () => cancelAnimationFrame(scrollRAFRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
@@ -74,9 +77,5 @@ export function useAutoScroll(deps: unknown[], resetKey?: unknown) {
     setShowNewMessageHint(false);
   }, []);
 
-  const dismissHint = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
-
-  return { containerRef, endRef, scrollToBottom, showNewMessageHint, dismissHint };
+  return { containerRef, endRef, scrollToBottom, showNewMessageHint };
 }
