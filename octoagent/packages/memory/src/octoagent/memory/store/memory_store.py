@@ -876,18 +876,17 @@ class SqliteMemoryStore:
         await self._conn.execute(
             """
             INSERT INTO memory_vault_access_requests (
-                request_id, schema_version, project_id, workspace_id, scope_id,
+                request_id, schema_version, project_id, scope_id,
                 partition, subject_key, reason, requester_actor_id, requester_actor_label,
                 status, decision, requested_at, resolved_at,
                 resolver_actor_id, resolver_actor_label, metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.request_id,
                 record.schema_version,
                 record.project_id,
-                record.workspace_id,
                 record.scope_id,
                 record.partition.value if record.partition else None,
                 record.subject_key,
@@ -918,7 +917,7 @@ class SqliteMemoryStore:
         await self._conn.execute(
             """
             UPDATE memory_vault_access_requests
-            SET schema_version = ?, project_id = ?, workspace_id = ?, scope_id = ?,
+            SET schema_version = ?, project_id = ?, scope_id = ?,
                 partition = ?, subject_key = ?, reason = ?, requester_actor_id = ?,
                 requester_actor_label = ?, status = ?, decision = ?, requested_at = ?,
                 resolved_at = ?, resolver_actor_id = ?, resolver_actor_label = ?,
@@ -928,7 +927,6 @@ class SqliteMemoryStore:
             (
                 record.schema_version,
                 record.project_id,
-                record.workspace_id,
                 record.scope_id,
                 record.partition.value if record.partition else None,
                 record.subject_key,
@@ -950,7 +948,6 @@ class SqliteMemoryStore:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         statuses: list[str] | None = None,
@@ -958,9 +955,6 @@ class SqliteMemoryStore:
     ) -> list[VaultAccessRequestRecord]:
         sql = "SELECT * FROM memory_vault_access_requests WHERE project_id = ?"
         params: list[object] = [project_id]
-        if workspace_id:
-            sql += " AND workspace_id = ?"
-            params.append(workspace_id)
         if scope_ids is not None and len(scope_ids) == 0:
             return []
         if scope_ids:
@@ -984,19 +978,18 @@ class SqliteMemoryStore:
         await self._conn.execute(
             """
             INSERT INTO memory_vault_access_grants (
-                grant_id, schema_version, request_id, project_id, workspace_id,
+                grant_id, schema_version, request_id, project_id,
                 scope_id, partition, subject_key, granted_to_actor_id,
                 granted_to_actor_label, granted_by_actor_id, granted_by_actor_label,
                 granted_at, expires_at, status, metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.grant_id,
                 record.schema_version,
                 record.request_id,
                 record.project_id,
-                record.workspace_id,
                 record.scope_id,
                 record.partition.value if record.partition else None,
                 record.subject_key,
@@ -1025,7 +1018,7 @@ class SqliteMemoryStore:
         await self._conn.execute(
             """
             UPDATE memory_vault_access_grants
-            SET schema_version = ?, request_id = ?, project_id = ?, workspace_id = ?,
+            SET schema_version = ?, request_id = ?, project_id = ?,
                 scope_id = ?, partition = ?, subject_key = ?, granted_to_actor_id = ?,
                 granted_to_actor_label = ?, granted_by_actor_id = ?, granted_by_actor_label = ?,
                 granted_at = ?, expires_at = ?, status = ?, metadata = ?
@@ -1035,7 +1028,6 @@ class SqliteMemoryStore:
                 record.schema_version,
                 record.request_id,
                 record.project_id,
-                record.workspace_id,
                 record.scope_id,
                 record.partition.value if record.partition else None,
                 record.subject_key,
@@ -1055,7 +1047,6 @@ class SqliteMemoryStore:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         actor_id: str | None = None,
@@ -1064,9 +1055,6 @@ class SqliteMemoryStore:
     ) -> list[VaultAccessGrantRecord]:
         sql = "SELECT * FROM memory_vault_access_grants WHERE project_id = ?"
         params: list[object] = [project_id]
-        if workspace_id:
-            sql += " AND workspace_id = ?"
-            params.append(workspace_id)
         if scope_ids is not None and len(scope_ids) == 0:
             return []
         if scope_ids:
@@ -1093,18 +1081,17 @@ class SqliteMemoryStore:
         await self._conn.execute(
             """
             INSERT INTO memory_vault_retrieval_audits (
-                retrieval_id, schema_version, project_id, workspace_id, scope_id, partition,
+                retrieval_id, schema_version, project_id, scope_id, partition,
                 subject_key, query, grant_id, actor_id, actor_label, authorized,
                 reason_code, result_count, retrieved_vault_ids, evidence_refs, created_at,
                 metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.retrieval_id,
                 record.schema_version,
                 record.project_id,
-                record.workspace_id,
                 record.scope_id,
                 record.partition.value if record.partition else None,
                 record.subject_key,
@@ -1126,7 +1113,6 @@ class SqliteMemoryStore:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         actor_id: str | None = None,
@@ -1134,9 +1120,6 @@ class SqliteMemoryStore:
     ) -> list[VaultRetrievalAuditRecord]:
         sql = "SELECT * FROM memory_vault_retrieval_audits WHERE project_id = ?"
         params: list[object] = [project_id]
-        if workspace_id:
-            sql += " AND workspace_id = ?"
-            params.append(workspace_id)
         if scope_ids is not None and len(scope_ids) == 0:
             return []
         if scope_ids:
@@ -1237,7 +1220,6 @@ class SqliteMemoryStore:
             request_id=row["request_id"],
             schema_version=row["schema_version"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             scope_id=row["scope_id"],
             partition=MemoryPartition(row["partition"]) if row["partition"] else None,
             subject_key=row["subject_key"],
@@ -1262,7 +1244,6 @@ class SqliteMemoryStore:
             schema_version=row["schema_version"],
             request_id=row["request_id"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             scope_id=row["scope_id"],
             partition=MemoryPartition(row["partition"]) if row["partition"] else None,
             subject_key=row["subject_key"],
@@ -1284,7 +1265,6 @@ class SqliteMemoryStore:
             retrieval_id=row["retrieval_id"],
             schema_version=row["schema_version"],
             project_id=row["project_id"],
-            workspace_id=row["workspace_id"],
             scope_id=row["scope_id"],
             partition=MemoryPartition(row["partition"]) if row["partition"] else None,
             subject_key=row["subject_key"],

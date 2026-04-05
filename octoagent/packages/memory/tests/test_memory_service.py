@@ -452,7 +452,6 @@ class TestMemoryService:
     async def test_vault_access_request_resolve_and_retrieval_audit(self, memory_service):
         request = await memory_service.create_vault_access_request(
             project_id="project-default",
-            workspace_id="workspace-primary",
             scope_id="memory/project-x",
             partition=MemoryPartition.HEALTH,
             subject_key="profile.user.health.note",
@@ -475,7 +474,6 @@ class TestMemoryService:
         latest_grant = await memory_service.get_latest_valid_vault_grant(
             actor_id="user:web",
             project_id="project-default",
-            workspace_id="workspace-primary",
             scope_id="memory/project-x",
             partition=MemoryPartition.HEALTH,
             subject_key="profile.user.health.note",
@@ -487,7 +485,6 @@ class TestMemoryService:
             actor_id="user:web",
             actor_label="Owner",
             project_id="project-default",
-            workspace_id="workspace-primary",
             scope_id="memory/project-x",
             partition=MemoryPartition.HEALTH,
             subject_key="profile.user.health.note",
@@ -499,7 +496,6 @@ class TestMemoryService:
         assert audit.authorized is True
         audits = await memory_service.list_vault_retrieval_audits(
             project_id="project-default",
-            workspace_id="workspace-primary",
             scope_ids=["memory/project-x"],
         )
         assert audits

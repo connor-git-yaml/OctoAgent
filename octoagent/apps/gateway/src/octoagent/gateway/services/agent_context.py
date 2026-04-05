@@ -2392,11 +2392,9 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
     ) -> MemoryService:
         return await self._memory_runtime.memory_service_for_scope(
             project=project,
-            workspace=workspace,
         )
 
     def get_consolidation_service(self):
@@ -2534,12 +2532,10 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
         backend_status=None,
     ) -> MemoryRetrievalProfile:
         return await self._memory_runtime.retrieval_profile_for_scope(
             project=project,
-            workspace=workspace,
             backend_status=backend_status,
         )
 

@@ -22,6 +22,7 @@ from octoagent.core.models.agent_context import (
 )
 from octoagent.core.store.agent_context_store import SqliteAgentContextStore
 from octoagent.memory import (
+    SENSITIVE_PARTITIONS,
     EvidenceRef,
     MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
@@ -61,7 +62,7 @@ _EXTRACTION_SYSTEM_PROMPT = """\
     "content": "完整陈述句",
     "confidence": 0.8,
     "action": "add|update",
-    "partition": "work|personal|core|chat|profile",
+    "partition": "work|core|profile|chat|health|finance|solution",
     "problem": "（仅 solution）问题描述",
     "solution": "（仅 solution）解决方案",
     "context": "（仅 solution）适用条件",
@@ -283,6 +284,11 @@ class SessionMemoryExtractor:
             return result
 
         result.scope_id = scope_id
+
+        # 合成 scope 自动注册到 namespace，使 UI 可发现
+        if scope_id.startswith("memory/auto/") and agent_session.project_id:
+            await self._ensure_auto_scope_registered(scope_id, agent_session.project_id)
+
         result.turns_processed = len(new_turns)
         max_turn_seq = max(t.turn_seq for t in new_turns)
 
@@ -314,10 +320,11 @@ class SessionMemoryExtractor:
                 extra_body={"enable_thinking": False},
             )
         except Exception as exc:
-            log.warning(
+            log.error(
                 "session_memory_extraction_llm_failed",
                 session_id=session_id,
                 scope_id=scope_id,
+                model_alias=self._model_alias,
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
@@ -579,69 +586,116 @@ class SessionMemoryExtractor:
                 elif item.type == "tom" and item.inference:
                     content = f"推理: {item.inference}\n证据: {', '.join(item.supporting_evidence)}" if item.supporting_evidence else f"推理: {item.inference}"
 
-                # propose
-                proposal = await memory_service.propose_write(
-                    scope_id=scope_id,
-                    partition=partition,
-                    action=write_action,
-                    subject_key=item.subject_key,
-                    content=content,
-                    rationale="session_memory_extraction",
-                    confidence=item.confidence,
-                    evidence_refs=[],
-                    metadata={
-                        "source": "session_memory_extractor",
-                        "extraction_type": item.type,
-                    },
-                )
-
-                # validate
-                validation = await memory_service.validate_proposal(proposal.proposal_id)
-
-                if validation.accepted:
-                    # commit
-                    commit_result = await memory_service.commit_memory(proposal.proposal_id)
+                # 快速路径：低风险自动提取使用 fast_commit
+                if (
+                    write_action == WriteAction.ADD
+                    and item.confidence >= 0.75
+                    and partition not in SENSITIVE_PARTITIONS
+                ):
+                    commit_result = await memory_service.fast_commit(
+                        scope_id=scope_id,
+                        partition=partition,
+                        action=write_action,
+                        subject_key=item.subject_key,
+                        content=content,
+                        confidence=item.confidence,
+                        evidence_refs=[],
+                        metadata={
+                            "source": "session_memory_extractor",
+                            "extraction_type": item.type,
+                        },
+                    )
                     if commit_result.sor_id:
                         committed_sor_ids.append(commit_result.sor_id)
                     counts[item.type] = counts.get(item.type, 0) + 1
                 else:
-                    # ADD 被拒（已存在）时尝试 UPDATE
-                    if write_action == WriteAction.ADD and any(
-                        "已存在" in e or "current" in e for e in validation.errors
-                    ):
-                        try:
-                            update_proposal = await memory_service.propose_write(
-                                scope_id=scope_id,
-                                partition=partition,
-                                action=WriteAction.UPDATE,
-                                subject_key=item.subject_key,
-                                content=content,
-                                rationale="session_memory_extraction (fallback update)",
-                                confidence=item.confidence,
-                                evidence_refs=[],
-                                metadata={
-                                    "source": "session_memory_extractor",
-                                    "extraction_type": item.type,
-                                    "fallback": "add_to_update",
-                                },
-                            )
-                            update_validation = await memory_service.validate_proposal(
-                                update_proposal.proposal_id
-                            )
-                            if update_validation.accepted:
-                                commit_result = await memory_service.commit_memory(
+                    # 完整治理路径
+                    proposal = await memory_service.propose_write(
+                        scope_id=scope_id,
+                        partition=partition,
+                        action=write_action,
+                        subject_key=item.subject_key,
+                        content=content,
+                        rationale="session_memory_extraction",
+                        confidence=item.confidence,
+                        evidence_refs=[],
+                        metadata={
+                            "source": "session_memory_extractor",
+                            "extraction_type": item.type,
+                        },
+                    )
+
+                    # validate
+                    validation = await memory_service.validate_proposal(proposal.proposal_id)
+
+                    if validation.accepted:
+                        # commit
+                        commit_result = await memory_service.commit_memory(proposal.proposal_id)
+                        if commit_result.sor_id:
+                            committed_sor_ids.append(commit_result.sor_id)
+                        counts[item.type] = counts.get(item.type, 0) + 1
+                    else:
+                        # ADD 被拒（已存在）时尝试 UPDATE
+                        if write_action == WriteAction.ADD and any(
+                            "已存在" in e or "current" in e for e in validation.errors
+                        ):
+                            try:
+                                update_proposal = await memory_service.propose_write(
+                                    scope_id=scope_id,
+                                    partition=partition,
+                                    action=WriteAction.UPDATE,
+                                    subject_key=item.subject_key,
+                                    content=content,
+                                    rationale="session_memory_extraction (fallback update)",
+                                    confidence=item.confidence,
+                                    evidence_refs=[],
+                                    metadata={
+                                        "source": "session_memory_extractor",
+                                        "extraction_type": item.type,
+                                        "fallback": "add_to_update",
+                                    },
+                                )
+                                update_validation = await memory_service.validate_proposal(
                                     update_proposal.proposal_id
                                 )
-                                if commit_result.sor_id:
-                                    committed_sor_ids.append(commit_result.sor_id)
-                                counts[item.type] = counts.get(item.type, 0) + 1
-                        except Exception:
-                            pass  # 降级场景，不阻塞其他条目
+                                if update_validation.accepted:
+                                    commit_result = await memory_service.commit_memory(
+                                        update_proposal.proposal_id
+                                    )
+                                    if commit_result.sor_id:
+                                        committed_sor_ids.append(commit_result.sor_id)
+                                    counts[item.type] = counts.get(item.type, 0) + 1
+                            except Exception:
+                                pass  # 降级场景，不阻塞其他条目
 
             except Exception as exc:
                 errors.append(f"commit_failed[{item.subject_key}]: {type(exc).__name__}: {exc}")
 
         return counts.get("fact", 0), counts.get("solution", 0), counts.get("entity", 0), counts.get("tom", 0)
+
+    async def _ensure_auto_scope_registered(
+        self, scope_id: str, project_id: str
+    ) -> None:
+        """确保合成 scope 在 memory_namespaces 中有注册记录，使 UI 能发现它。"""
+        namespace_id = f"memory_namespace:auto|project:{project_id}"
+        try:
+            existing = await self._agent_context_store.get_memory_namespace(namespace_id)
+            if existing is not None:
+                return
+            # 注册新 namespace
+            from octoagent.core.models.agent_context import MemoryNamespace
+
+            ns = MemoryNamespace(
+                namespace_id=namespace_id,
+                project_id=project_id,
+                agent_runtime_id="",
+                kind=MemoryNamespaceKind.PROJECT_SHARED,
+                memory_scope_ids=[scope_id],
+            )
+            await self._agent_context_store.save_memory_namespace(ns)
+            log.info("auto_scope_registered", scope_id=scope_id, project_id=project_id)
+        except Exception as exc:
+            log.debug("auto_scope_registration_failed", error=str(exc))
 
     async def _resolve_scope_id(
         self,

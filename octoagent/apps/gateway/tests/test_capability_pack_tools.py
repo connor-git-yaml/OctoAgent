@@ -825,7 +825,6 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
         workspace = await store_group.project_store.get_primary_workspace(project.project_id)
         memory_service = await capability_pack._memory_runtime_service.memory_service_for_scope(
             project=project,
-            workspace=workspace,
         )
         proposal = await memory_service.propose_write(
             scope_id="chat:web:thread-memory",

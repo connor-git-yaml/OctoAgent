@@ -195,7 +195,6 @@ class MemoryIngestBatch(BaseModel):
     partition: MemoryPartition
     items: list[MemoryIngestItem] = Field(default_factory=list)
     project_id: str = Field(default="")
-    workspace_id: str = Field(default="")
     idempotency_key: str = Field(default="")
     requested_by: str = Field(default="")
 

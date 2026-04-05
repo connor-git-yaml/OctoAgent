@@ -215,14 +215,8 @@ class ChatImportService:
             memory_store=memory_store,
         )
         project = await store_group.project_store.get_default_project()
-        workspace = (
-            await store_group.project_store.get_primary_workspace(project.project_id)
-            if project is not None
-            else None
-        )
         return await runtime.memory_service_for_scope(
             project=project,
-            workspace=workspace,
         )
 
     async def _run_persistent_import(

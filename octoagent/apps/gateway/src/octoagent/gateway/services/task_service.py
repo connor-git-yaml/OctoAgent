@@ -1584,12 +1584,10 @@ class TaskService:
             )
             memory_service = await self._agent_context.get_memory_service(
                 project=project,
-                workspace=workspace,
             )
             backend_status = await memory_service.get_backend_status()
             retrieval_profile = await self._agent_context.get_memory_retrieval_profile(
                 project=project,
-                workspace=workspace,
                 backend_status=backend_status,
             )
             agent_profile = await self._stores.agent_context_store.get_agent_profile(
@@ -1863,7 +1861,6 @@ class TaskService:
                 return ""
             memory_service = await self._agent_context.get_memory_service(
                 project=project,
-                workspace=workspace,
             )
 
             # Feature 067: FlushPromptInjector 调用已废弃 -- 记忆提取统一由 SessionMemoryExtractor 处理

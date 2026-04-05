@@ -3044,12 +3044,10 @@ class CapabilityPackService:
             )
             memory_service = await self._memory_runtime_service.memory_service_for_scope(
                 project=project,
-                workspace=workspace,
             )
             backend_status = await memory_service.get_backend_status()
             retrieval_profile = await self._memory_runtime_service.retrieval_profile_for_scope(
                 project=project,
-                workspace=workspace,
                 backend_status=backend_status,
             )
             scope_ids = await _resolve_memory_scope_ids(
@@ -3177,7 +3175,6 @@ class CapabilityPackService:
             try:
                 memory_service = await self._memory_runtime_service.memory_service_for_scope(
                     project=project,
-                    workspace=workspace,
                 )
             except Exception as exc:
                 return json.dumps(

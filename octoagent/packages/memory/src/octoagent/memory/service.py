@@ -299,6 +299,77 @@ class MemoryService:
             vault_id=vault_id,
         )
 
+    async def fast_commit(
+        self,
+        *,
+        scope_id: str,
+        partition: MemoryPartition,
+        action: WriteAction,
+        subject_key: str,
+        content: str,
+        confidence: float = 0.8,
+        evidence_refs: list[EvidenceRef] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> CommitResult:
+        """快速写入路径——跳过 validate 查询，直接 commit。
+
+        适用条件：confidence >= 0.75、action == ADD、非敏感分区。
+        不满足条件时 fallback 到完整 propose -> validate -> commit。
+        审计轨迹保留：proposal 仍然落盘。
+        """
+        # 确保 evidence_refs 非空——WriteProposal 验证器要求 non-NONE action 必须有 evidence
+        refs = evidence_refs if evidence_refs else [
+            EvidenceRef(ref_id="fast_commit", ref_type="auto", snippet="fast_commit path")
+        ]
+        meta = metadata or {}
+
+        # 条件检查：不满足快速路径条件时走完整流程
+        if (
+            confidence < 0.75
+            or action != WriteAction.ADD
+            or partition in SENSITIVE_PARTITIONS
+        ):
+            proposal = await self.propose_write(
+                scope_id=scope_id,
+                partition=partition,
+                action=action,
+                subject_key=subject_key,
+                content=content,
+                rationale="fast_commit_fallback",
+                confidence=confidence,
+                evidence_refs=refs,
+                metadata=meta,
+            )
+            validation = await self.validate_proposal(proposal.proposal_id)
+            if not validation.accepted:
+                return CommitResult(
+                    proposal_id=proposal.proposal_id,
+                    committed=False,
+                )
+            return await self.commit_memory(proposal.proposal_id)
+
+        # 快速路径：创建 proposal 并直接标记为 VALIDATED
+        proposal_id = str(ULID())
+        proposal = WriteProposal(
+            proposal_id=proposal_id,
+            scope_id=scope_id,
+            partition=partition,
+            action=action,
+            subject_key=subject_key,
+            content=content,
+            rationale="fast_commit",
+            confidence=confidence,
+            evidence_refs=refs,
+            expected_version=None,
+            status=ProposalStatus.VALIDATED,
+            metadata=meta,
+            created_at=datetime.now(UTC),
+        )
+        await self._store.save_proposal(proposal)
+
+        # 直接 commit
+        return await self.commit_memory(proposal_id)
+
     async def record_fragment(
         self,
         fragment: FragmentRecord,
@@ -822,7 +893,6 @@ class MemoryService:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_id: str | None = None,
         partition: MemoryPartition | None = None,
         subject_key: str | None = None,
@@ -837,7 +907,6 @@ class MemoryService:
         request = VaultAccessRequestRecord(
             request_id=str(ULID()),
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id or "",
             partition=partition,
             subject_key=subject_key or "",
@@ -876,7 +945,6 @@ class MemoryService:
                 grant_id=str(ULID()),
                 request_id=request.request_id,
                 project_id=request.project_id,
-                workspace_id=request.workspace_id,
                 scope_id=request.scope_id,
                 partition=request.partition,
                 subject_key=request.subject_key,
@@ -912,7 +980,6 @@ class MemoryService:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         statuses: list[VaultAccessRequestStatus] | None = None,
@@ -922,7 +989,6 @@ class MemoryService:
 
         return await self._store.list_vault_access_requests(
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_ids=scope_ids,
             subject_key=subject_key,
             statuses=[item.value for item in statuses] if statuses else None,
@@ -933,7 +999,6 @@ class MemoryService:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         actor_id: str | None = None,
@@ -944,7 +1009,6 @@ class MemoryService:
 
         return await self._store.list_vault_access_grants(
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_ids=scope_ids,
             subject_key=subject_key,
             actor_id=actor_id,
@@ -956,7 +1020,6 @@ class MemoryService:
         self,
         *,
         project_id: str,
-        workspace_id: str | None = None,
         scope_ids: list[str] | None = None,
         subject_key: str | None = None,
         actor_id: str | None = None,
@@ -966,7 +1029,6 @@ class MemoryService:
 
         return await self._store.list_vault_retrieval_audits(
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_ids=scope_ids,
             subject_key=subject_key,
             actor_id=actor_id,
@@ -983,7 +1045,6 @@ class MemoryService:
         *,
         actor_id: str,
         project_id: str,
-        workspace_id: str | None = None,
         scope_id: str | None = None,
         partition: MemoryPartition | None = None,
         subject_key: str | None = None,
@@ -993,7 +1054,6 @@ class MemoryService:
         now = datetime.now(UTC)
         grants = await self._store.list_vault_access_grants(
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_ids=[scope_id] if scope_id else None,
             subject_key=subject_key,
             actor_id=actor_id,
@@ -1017,7 +1077,6 @@ class MemoryService:
         actor_id: str,
         actor_label: str = "",
         project_id: str,
-        workspace_id: str | None = None,
         scope_id: str | None = None,
         partition: MemoryPartition | None = None,
         subject_key: str | None = None,
@@ -1036,7 +1095,6 @@ class MemoryService:
         audit = VaultRetrievalAuditRecord(
             retrieval_id=str(ULID()),
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id or "",
             partition=partition,
             subject_key=subject_key or "",

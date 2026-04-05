@@ -1,11 +1,9 @@
-"""Project/workspace-aware Memory runtime 解析。"""
+"""Project-aware Memory runtime 解析。"""
 
 from __future__ import annotations
 
 import structlog
 from pathlib import Path
-from typing import Any
-
 from typing import Any
 
 from octoagent.core.models import MemoryRetrievalProfile, Project
@@ -47,7 +45,6 @@ class MemoryRuntimeService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None = None,
     ) -> MemoryService:
         if project is None:
             return MemoryService(
@@ -57,7 +54,6 @@ class MemoryRuntimeService:
             )
         backend = await self._backend_resolver.resolve_backend(
             project=project,
-            workspace=workspace,
         )
         return MemoryService(
             self._stores.conn,
@@ -70,14 +66,12 @@ class MemoryRuntimeService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None = None,
         backend_status: MemoryBackendStatus | None = None,
     ) -> MemoryRetrievalProfile:
         resolved_backend_status = backend_status
         if resolved_backend_status is None:
             memory_service = await self.memory_service_for_scope(
                 project=project,
-                workspace=workspace,
             )
             resolved_backend_status = await memory_service.get_backend_status()
         active_embedding_target, requested_embedding_target = (

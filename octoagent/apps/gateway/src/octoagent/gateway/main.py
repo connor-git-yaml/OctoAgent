@@ -144,13 +144,15 @@ def _ensure_litellm_master_key_env(project_root: Path) -> None:
     proxy_api_key，否则内部 chat completions 调用（如 Memory 提取）会 401。
     """
     if os.environ.get("LITELLM_MASTER_KEY"):
-        return  # 已设置，无需重复
+        # Already set — no action needed
+        return
 
+    config_path = project_root / "data" / "ops" / "litellm-config-resolved.yaml"
     try:
         import yaml
 
-        config_path = project_root / "data" / "ops" / "litellm-config-resolved.yaml"
         if not config_path.exists():
+            log.warning("litellm_master_key_not_found", config_path=str(config_path))
             return
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
@@ -158,8 +160,10 @@ def _ensure_litellm_master_key_env(project_root: Path) -> None:
         if master_key:
             os.environ["LITELLM_MASTER_KEY"] = master_key
             log.info("litellm_master_key_injected_from_config")
+        else:
+            log.warning("litellm_master_key_not_found", config_path=str(config_path))
     except Exception:
-        pass  # 非关键路径，降级处理
+        log.warning("litellm_master_key_not_found", config_path=str(config_path))
 
 
 def _resolve_stream_model_aliases(project_root: Path) -> set[str]:

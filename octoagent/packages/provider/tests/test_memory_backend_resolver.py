@@ -61,20 +61,6 @@ class TestMemoryBackendResolver:
         project, workspace = await _seed_project(provider_store_group)
         resolver = MemoryBackendResolver(tmp_path, store_group=provider_store_group)
 
-        backend = await resolver.resolve_backend(project=project, workspace=workspace)
-
-        assert isinstance(backend, BuiltinMemUBridge)
-        assert backend.backend_id == "memu"
-
-    async def test_resolve_backend_without_workspace(
-        self,
-        provider_store_group,
-        tmp_path: Path,
-    ) -> None:
-        """不传 workspace 也能正常返回 BuiltinMemUBridge。"""
-        project, _ = await _seed_project(provider_store_group)
-        resolver = MemoryBackendResolver(tmp_path, store_group=provider_store_group)
-
         backend = await resolver.resolve_backend(project=project)
 
         assert isinstance(backend, BuiltinMemUBridge)
@@ -89,24 +75,11 @@ class TestMemoryBackendResolver:
         project, workspace = await _seed_project(provider_store_group)
         resolver = MemoryBackendResolver(tmp_path, store_group=provider_store_group)
 
-        status = resolver.resolve_local_status(project=project, workspace=workspace)
+        status = resolver.resolve_local_status(project=project)
 
         assert status.backend_id == "memu"
         assert status.active_backend == "memu"
         assert "内建 Memory Engine" in status.message
-        assert status.project_binding == "project-alpha/workspace-primary/local"
-
-    async def test_resolve_local_status_without_workspace(
-        self,
-        provider_store_group,
-        tmp_path: Path,
-    ) -> None:
-        """不传 workspace 时 binding ref 使用 'project' 占位。"""
-        project, _ = await _seed_project(provider_store_group)
-        resolver = MemoryBackendResolver(tmp_path, store_group=provider_store_group)
-
-        status = resolver.resolve_local_status(project=project)
-
         assert status.project_binding == "project-alpha/project/local"
 
     async def test_constructor_ignores_legacy_kwargs(
@@ -123,6 +96,6 @@ class TestMemoryBackendResolver:
             client_factory=lambda: None,
         )
 
-        backend = await resolver.resolve_backend(project=project, workspace=workspace)
+        backend = await resolver.resolve_backend(project=project)
 
         assert isinstance(backend, BuiltinMemUBridge)

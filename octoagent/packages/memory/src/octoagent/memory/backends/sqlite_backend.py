@@ -185,7 +185,6 @@ class SqliteMemoryBackend(MemoryBackend):
                         "artifact_ref": item.artifact_ref,
                         "content_ref": item.content_ref,
                         "project_id": batch.project_id,
-                        "workspace_id": batch.workspace_id,
                     },
                     evidence_refs=[
                         EvidenceRef(
@@ -550,7 +549,6 @@ class SqliteMemoryBackend(MemoryBackend):
                 "modality": item.modality,
                 "derived_refs": derived_ids,
                 "project_id": batch.project_id,
-                "workspace_id": batch.workspace_id,
                 "candidate_engine": "builtin-memory-engine",
                 "candidate_contract_version": "1.0.0",
                 "candidate_kind": (

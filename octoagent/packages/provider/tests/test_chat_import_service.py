@@ -146,14 +146,13 @@ async def test_chat_import_uses_project_scoped_memory_runtime_service(
     calls: list[dict[str, str]] = []
     original = MemoryRuntimeService.memory_service_for_scope
 
-    async def tracking_memory_service_for_scope(self, *, project, workspace=None):
+    async def tracking_memory_service_for_scope(self, *, project):
         calls.append(
             {
                 "project_id": project.project_id if project is not None else "",
-                "workspace_id": workspace.workspace_id if workspace is not None else "",
             }
         )
-        return await original(self, project=project, workspace=workspace)
+        return await original(self, project=project)
 
     monkeypatch.setattr(
         MemoryRuntimeService,

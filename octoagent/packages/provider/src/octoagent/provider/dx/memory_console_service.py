@@ -66,7 +66,6 @@ _MEMORY_BINDING_TYPES = {
 @dataclass(slots=True)
 class _BoundScope:
     scope_id: str
-    workspace_id: str | None
     binding_type: ProjectBindingType
 
 
@@ -85,7 +84,6 @@ class MemoryPermissionDecision:
     reason_code: str
     message: str
     project_id: str = ""
-    workspace_id: str = ""
     scope_id: str = ""
 
 
@@ -274,7 +272,7 @@ class MemoryConsoleService:
         evidence_refs=None,
         metadata: dict[str, Any] | None = None,
     ) -> MemoryMaintenanceRun:
-        """执行 project/workspace 绑定后的 memory maintenance。"""
+        """执行 project 绑定后的 memory maintenance。"""
 
         context = await self._resolve_context(
             active_project_id=project_id or "",
@@ -384,7 +382,6 @@ class MemoryConsoleService:
         summary = MemoryConsoleSummary(scope_count=len(context.selected_scope_ids))
         for scope in context.selected_scope_ids:
             bound = context.scope_bindings.get(scope)
-            record_workspace_id = bound.workspace_id or ""
             if layer in {"", "fragment"}:
                 fragments = await self._memory_store.list_fragments(
                     scope,
@@ -398,7 +395,7 @@ class MemoryConsoleService:
                         self._fragment_projection(
                             fragment=fragment,
                             project_id=context.project.project_id,
-                            workspace_id=record_workspace_id,
+
                             retrieval_backend=backend_status.active_backend,
                         )
                     )
@@ -428,7 +425,7 @@ class MemoryConsoleService:
                         self._sor_projection(
                             sor=sor,
                             project_id=context.project.project_id,
-                            workspace_id=record_workspace_id,
+
                             retrieval_backend=backend_status.active_backend,
                         )
                     )
@@ -448,7 +445,7 @@ class MemoryConsoleService:
                         self._vault_projection(
                             vault=vault,
                             project_id=context.project.project_id,
-                            workspace_id=record_workspace_id,
+
                             retrieval_backend=backend_status.active_backend,
                         )
                     )
@@ -467,7 +464,7 @@ class MemoryConsoleService:
                         self._derived_projection(
                             derived=derived,
                             project_id=context.project.project_id,
-                            workspace_id=record_workspace_id,
+
                             retrieval_backend=backend_status.active_backend,
                         )
                     )
@@ -519,7 +516,7 @@ class MemoryConsoleService:
             ),
             warnings=warnings,
             active_project_id=context.project.project_id,
-            active_workspace_id="",
+
             backend_id=backend_status.backend_id,
             retrieval_backend=backend_status.active_backend,
             backend_state=backend_status.state.value,
@@ -527,7 +524,7 @@ class MemoryConsoleService:
             retrieval_profile=retrieval_profile,
             filters=MemoryConsoleFilter(
                 project_id=context.project.project_id,
-                workspace_id="",
+
                 scope_id=scope_id,
                 partition=partition,
                 layer=layer,
@@ -590,13 +587,11 @@ class MemoryConsoleService:
         latest_proposal_refs: list[str] = []
         for scope in context.selected_scope_ids:
             bound = context.scope_bindings.get(scope)
-            record_workspace_id = bound.workspace_id or ""
             sor_history = await self._memory_store.list_sor_history(scope, subject_key)
             for sor in sor_history:
                 projection = self._sor_projection(
                     sor=sor,
                     project_id=context.project.project_id,
-                    workspace_id=record_workspace_id,
                     retrieval_backend=backend_status.active_backend,
                 )
                 history.append(projection)
@@ -609,7 +604,7 @@ class MemoryConsoleService:
         return MemorySubjectHistoryDocument(
             resource_id=f"memory-subject:{subject_key}",
             active_project_id=context.project.project_id,
-            active_workspace_id="",
+
             retrieval_backend=backend_status.active_backend,
             backend_state=backend_status.state.value,
             index_health=self._backend_index_health(backend_status),
@@ -682,7 +677,7 @@ class MemoryConsoleService:
             )
         return MemoryProposalAuditDocument(
             active_project_id=context.project.project_id,
-            active_workspace_id="",
+
             retrieval_backend=backend_status.active_backend,
             backend_state=backend_status.state.value,
             summary=summary,
@@ -718,14 +713,14 @@ class MemoryConsoleService:
         backend_status = await memory.get_backend_status()
         requests = await memory.list_vault_access_requests(
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_ids=context.selected_scope_ids,
             subject_key=subject_key or None,
             limit=50,
         )
         grants = await memory.list_vault_access_grants(
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_ids=context.selected_scope_ids,
             subject_key=subject_key or None,
             limit=50,
@@ -733,14 +728,14 @@ class MemoryConsoleService:
         active_grants = [await self._normalize_grant(item) for item in grants]
         retrievals = await memory.list_vault_retrieval_audits(
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_ids=context.selected_scope_ids,
             subject_key=subject_key or None,
             limit=50,
         )
         return VaultAuthorizationDocument(
             active_project_id=context.project.project_id,
-            active_workspace_id="",
+
             retrieval_backend=backend_status.active_backend,
             backend_state=backend_status.state.value,
             active_requests=[self._request_item(item) for item in requests],
@@ -807,7 +802,7 @@ class MemoryConsoleService:
             return None, decision
         request = await self._memory.create_vault_access_request(
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_id=scope_id,
             partition=MemoryPartition(partition) if partition else None,
             subject_key=subject_key or None,
@@ -903,7 +898,7 @@ class MemoryConsoleService:
                 actor_id=actor_id,
                 actor_label=actor_label,
                 project_id=context.project.project_id,
-                workspace_id=None,
+    
                 scope_id=scope_id,
                 partition=MemoryPartition(partition) if partition else None,
                 subject_key=subject_key or None,
@@ -916,7 +911,7 @@ class MemoryConsoleService:
         grant, grant_code, grant_message = await self._resolve_grant_for_retrieval(
             actor_id=actor_id,
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_id=scope_id,
             partition=MemoryPartition(partition) if partition else None,
             subject_key=subject_key or None,
@@ -927,7 +922,7 @@ class MemoryConsoleService:
                 actor_id=actor_id,
                 actor_label=actor_label,
                 project_id=context.project.project_id,
-                workspace_id=None,
+    
                 scope_id=scope_id,
                 partition=MemoryPartition(partition) if partition else None,
                 subject_key=subject_key or None,
@@ -940,7 +935,7 @@ class MemoryConsoleService:
                 reason_code=grant_code,
                 message=grant_message,
                 project_id=context.project.project_id,
-                workspace_id="",
+
                 scope_id=scope_id,
             )
             return grant_code, {}, denied
@@ -978,7 +973,7 @@ class MemoryConsoleService:
             actor_id=actor_id,
             actor_label=actor_label,
             project_id=context.project.project_id,
-            workspace_id=None,
+
             scope_id=scope_id,
             partition=MemoryPartition(partition) if partition else None,
             subject_key=subject_key or None,
@@ -1067,9 +1062,6 @@ class MemoryConsoleService:
             "export_refs": [
                 {
                     "project_id": context.project.project_id,
-                    "workspace_id": context.scope_bindings.get(scope_id).workspace_id
-                    if context.scope_bindings.get(scope_id) is not None
-                    else "",
                     "scope_id": scope_id,
                 }
                 for scope_id in selected_scope_ids
@@ -1161,7 +1153,7 @@ class MemoryConsoleService:
                 continue
             existing = await self._memory.list_vault_access_grants(
                 project_id=context.project.project_id,
-                workspace_id=None,
+    
                 scope_ids=[item_scope_id],
                 subject_key=item_subject or None,
                 actor_id=item_actor_id,
@@ -1218,7 +1210,6 @@ class MemoryConsoleService:
                 continue
             scope_bindings[binding.binding_key] = _BoundScope(
                 scope_id=binding.binding_key,
-                workspace_id=binding.workspace_id,
                 binding_type=binding.binding_type,
             )
         warnings: list[str] = []
@@ -1246,7 +1237,7 @@ class MemoryConsoleService:
                     for sid in all_scopes:
                         scope_bindings[sid] = _BoundScope(
                             scope_id=sid,
-                            workspace_id=None,
+                
                             binding_type=ProjectBindingType.MEMORY_SCOPE,
                         )
             except Exception:
@@ -1264,7 +1255,6 @@ class MemoryConsoleService:
     async def _memory_service_for_context(self, context: _MemoryContext) -> MemoryService:
         backend = await self._backend_resolver.resolve_backend(
             project=context.project,
-            workspace=None,
         )
         return MemoryService(
             self._stores.conn,
@@ -1312,7 +1302,7 @@ class MemoryConsoleService:
                 reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
                 message=f"{action_id} 目标 scope 未绑定到当前 project。",
                 project_id=context.project.project_id,
-                workspace_id="",
+
                 scope_id=required_scope_id,
             )
         if bypass_actor_check:
@@ -1321,7 +1311,7 @@ class MemoryConsoleService:
                 reason_code="MEMORY_PERMISSION_ALLOWED",
                 message="允许访问。",
                 project_id=context.project.project_id,
-                workspace_id="",
+
                 scope_id=required_scope_id or "",
             )
         if not actor_id:
@@ -1336,7 +1326,6 @@ class MemoryConsoleService:
             reason_code="MEMORY_PERMISSION_ALLOWED",
             message="允许访问。",
             project_id=context.project.project_id,
-            workspace_id="",
             scope_id=required_scope_id or "",
         )
 
@@ -1366,7 +1355,7 @@ class MemoryConsoleService:
                 reason_code="MEMORY_PERMISSION_OPERATOR_REQUIRED",
                 message=f"{action_id} 仅允许 owner/operator surface。",
                 project_id=context.project.project_id,
-                workspace_id="",
+
                 scope_id=required_scope_id or "",
             )
         return decision
@@ -1376,7 +1365,6 @@ class MemoryConsoleService:
         *,
         actor_id: str,
         project_id: str,
-        workspace_id: str | None,
         scope_id: str,
         partition: MemoryPartition | None,
         subject_key: str | None,
@@ -1417,7 +1405,6 @@ class MemoryConsoleService:
         grant = await self._memory.get_latest_valid_vault_grant(
             actor_id=actor_id,
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=scope_id,
             partition=partition,
             subject_key=subject_key,
@@ -1425,7 +1412,6 @@ class MemoryConsoleService:
         if grant is None:
             grants = await self._memory.list_vault_access_grants(
                 project_id=project_id,
-                workspace_id=workspace_id,
                 scope_ids=[scope_id],
                 subject_key=subject_key,
                 actor_id=actor_id,
@@ -1459,7 +1445,6 @@ class MemoryConsoleService:
                 f"{', '.join(invalid_scope_ids)}"
             ),
             project_id=context.project.project_id,
-            workspace_id="",
             scope_id=invalid_scope_ids[0],
         )
 
@@ -1480,14 +1465,12 @@ class MemoryConsoleService:
         *,
         fragment,
         project_id: str,
-        workspace_id: str,
         retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=fragment.fragment_id,
             layer="fragment",
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=fragment.scope_id,
             partition=fragment.partition.value,
             summary=fragment.content[:240],
@@ -1502,14 +1485,12 @@ class MemoryConsoleService:
         *,
         derived,
         project_id: str,
-        workspace_id: str,
         retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=derived.derived_id,
             layer="derived",
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=derived.scope_id,
             partition=derived.partition.value,
             subject_key=derived.subject_key,
@@ -1551,14 +1532,12 @@ class MemoryConsoleService:
         *,
         sor,
         project_id: str,
-        workspace_id: str,
         retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=sor.memory_id,
             layer="sor",
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=sor.scope_id,
             partition=sor.partition.value,
             subject_key=sor.subject_key,
@@ -1582,14 +1561,12 @@ class MemoryConsoleService:
         *,
         vault,
         project_id: str,
-        workspace_id: str,
         retrieval_backend: str = "",
     ) -> MemoryRecordProjection:
         return MemoryRecordProjection(
             record_id=vault.vault_id,
             layer="vault",
             project_id=project_id,
-            workspace_id=workspace_id,
             scope_id=vault.scope_id,
             partition=vault.partition.value,
             subject_key=vault.subject_key,
@@ -1605,7 +1582,7 @@ class MemoryConsoleService:
         return VaultAccessRequestItem(
             request_id=item.request_id,
             project_id=item.project_id,
-            workspace_id=item.workspace_id or "",
+
             scope_id=item.scope_id,
             partition=item.partition.value if item.partition else "",
             subject_key=item.subject_key,
@@ -1625,7 +1602,7 @@ class MemoryConsoleService:
             grant_id=item.grant_id,
             request_id=item.request_id,
             project_id=item.project_id,
-            workspace_id=item.workspace_id or "",
+
             scope_id=item.scope_id,
             partition=item.partition.value if item.partition else "",
             subject_key=item.subject_key,
@@ -1642,7 +1619,7 @@ class MemoryConsoleService:
         return VaultRetrievalAuditItem(
             retrieval_id=item.retrieval_id,
             project_id=item.project_id,
-            workspace_id=item.workspace_id or "",
+
             scope_id=item.scope_id,
             partition=item.partition.value if item.partition else "",
             subject_key=item.subject_key,

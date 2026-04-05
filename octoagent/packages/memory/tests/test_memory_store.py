@@ -158,7 +158,6 @@ class TestSqliteMemoryStore:
         request = VaultAccessRequestRecord(
             request_id="01JVREQ_100000000000001",
             project_id="project-default",
-            workspace_id="workspace-primary",
             scope_id="memory/project-x",
             partition=MemoryPartition.HEALTH,
             subject_key="profile.user.health.note",
@@ -177,7 +176,6 @@ class TestSqliteMemoryStore:
             grant_id="01JVGRANT_10000000000001",
             request_id=request.request_id,
             project_id=request.project_id,
-            workspace_id=request.workspace_id,
             scope_id=request.scope_id,
             partition=request.partition,
             subject_key=request.subject_key,
@@ -196,7 +194,6 @@ class TestSqliteMemoryStore:
         audit = VaultRetrievalAuditRecord(
             retrieval_id="01JVRET_100000000000001",
             project_id=request.project_id,
-            workspace_id=request.workspace_id,
             scope_id=request.scope_id,
             partition=request.partition,
             subject_key=request.subject_key,

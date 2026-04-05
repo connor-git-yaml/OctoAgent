@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from octoagent.core.models import (
     Project,
@@ -19,7 +18,7 @@ from .backup_service import resolve_data_dir, resolve_project_root
 
 
 class MemoryBackendResolver:
-    """按 project/workspace 解析 Memory backend（内建 MemU + LanceDB）。"""
+    """按 project 解析 Memory backend（内建 MemU + LanceDB）。"""
 
     def __init__(
         self,
@@ -39,7 +38,6 @@ class MemoryBackendResolver:
         self,
         *,
         project: Project,
-        workspace: Any | None = None,
     ) -> MemoryBackend:
         """返回内建 MemU backend（LanceDB 混合检索 + Qwen3-Embedding-0.6B）。
 
@@ -54,7 +52,7 @@ class MemoryBackendResolver:
         from .builtin_memu_bridge import BuiltinMemUBridge
 
         store = SqliteMemoryStore(self._stores.conn)
-        binding_ref = self._binding_ref(project=project, workspace=workspace)
+        binding_ref = self._binding_ref(project=project)
         lancedb_dir = resolve_data_dir(self._project_root) / "lancedb"
 
         self._cached_bridge = BuiltinMemUBridge(
@@ -69,12 +67,10 @@ class MemoryBackendResolver:
         self,
         *,
         project: Project,
-        workspace: Any | None = None,
     ) -> MemoryBackendStatus:
         """返回内建 MemU 模式的健康状态。"""
         binding_ref = self._binding_ref(
             project=project,
-            workspace=workspace,
         )
         return MemoryBackendStatus(
             backend_id="memu",
@@ -89,6 +85,5 @@ class MemoryBackendResolver:
     def _binding_ref(
         *,
         project: Project,
-        workspace: Any | None,
     ) -> str:
         return f"{project.project_id}/project/local"

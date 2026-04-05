@@ -966,7 +966,6 @@ class RetrievalPlatformService:
             return MemoryService(self._stores.conn, store=self._memory_store)
         backend = await self._backend_resolver.resolve_backend(
             project=project,
-            workspace=None,
         )
         return MemoryService(
             self._stores.conn,

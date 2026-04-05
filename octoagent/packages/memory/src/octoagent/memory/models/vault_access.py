@@ -22,7 +22,6 @@ class VaultAccessRequestRecord(BaseModel):
     schema_version: int = Field(default=1)
     request_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str | None = None
     scope_id: str = Field(min_length=1)
     partition: MemoryPartition | None = None
     subject_key: str = ""
@@ -45,7 +44,6 @@ class VaultAccessGrantRecord(BaseModel):
     grant_id: str = Field(min_length=1)
     request_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str | None = None
     scope_id: str = Field(min_length=1)
     partition: MemoryPartition | None = None
     subject_key: str = ""
@@ -65,7 +63,6 @@ class VaultRetrievalAuditRecord(BaseModel):
     schema_version: int = Field(default=1)
     retrieval_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
-    workspace_id: str | None = None
     scope_id: str = Field(min_length=1)
     partition: MemoryPartition | None = None
     subject_key: str = ""
