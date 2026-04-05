@@ -49,7 +49,7 @@ def test_behavior_ls_and_show_report_effective_sources(tmp_path: Path) -> None:
     assert listed.exit_code == 0
     assert "Behavior Workspace" in listed.output
     assert "filesystem:behavior/system" in listed.output
-    assert "agent_slug=butler" in listed.output
+    assert "agent_slug=main" in listed.output
     assert "system_dir=behavior/system" in listed.output
     assert "workspace_root=" in listed.output
     # Rich 面板在窄终端下会把长路径硬换行，行首尾都带有 │ 边框字符。

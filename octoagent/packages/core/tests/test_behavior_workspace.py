@@ -25,11 +25,11 @@ from octoagent.core.behavior_workspace import (
 from octoagent.core.models.agent_context import AgentProfile
 
 
-def _make_butler_profile() -> AgentProfile:
-    """创建测试用 Butler AgentProfile。"""
+def _make_main_profile() -> AgentProfile:
+    """创建测试用 Main Agent AgentProfile。"""
     return AgentProfile(
-        profile_id="test-butler",
-        name="Butler",
+        profile_id="test-main",
+        name="Main Agent",
     )
 
 
@@ -47,7 +47,7 @@ def _make_worker_profile() -> AgentProfile:
 
 def _setup_skeleton(tmp_path: Path) -> Path:
     """创建 behavior 目录骨架，返回 project_root。"""
-    ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="butler")
+    ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="main")
     return tmp_path
 
 
@@ -171,7 +171,7 @@ class TestBootstrapSkipInjection:
     def test_bootstrap_included_before_completion(self, tmp_path: Path) -> None:
         """未完成时 BOOTSTRAP.md 被包含在 workspace files 中。"""
         _setup_skeleton(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -184,7 +184,7 @@ class TestBootstrapSkipInjection:
         """完成后 BOOTSTRAP.md 不再包含在 workspace files 中。"""
         _setup_skeleton(tmp_path)
         mark_onboarding_completed(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -211,7 +211,7 @@ class TestLegacyCompatibility:
     def test_legacy_with_modified_identity(self, tmp_path: Path) -> None:
         """无 state 文件 + IDENTITY.md 已修改 → 自动标记完成。"""
         # 手动创建目录结构，不创建 state 文件
-        identity_dir = tmp_path / "behavior" / "agents" / "butler"
+        identity_dir = tmp_path / "behavior" / "agents" / "main"
         identity_dir.mkdir(parents=True)
         identity_path = identity_dir / "IDENTITY.md"
         # 写入自定义内容（不含默认标记）
@@ -269,7 +269,7 @@ class TestResolveWithLoadProfile:
 
     def test_full_profile_returns_all_default_files(self, tmp_path: Path) -> None:
         _setup_skeleton(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -290,7 +290,7 @@ class TestResolveWithLoadProfile:
 
     def test_worker_profile_returns_subset(self, tmp_path: Path) -> None:
         _setup_skeleton(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -306,7 +306,7 @@ class TestResolveWithLoadProfile:
 
     def test_minimal_profile_returns_minimal_subset(self, tmp_path: Path) -> None:
         _setup_skeleton(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -322,7 +322,7 @@ class TestResolveWithLoadProfile:
     def test_backward_compat_default_is_full(self, tmp_path: Path) -> None:
         """不传 load_profile 等同 FULL。"""
         _setup_skeleton(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         ws_default = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -343,7 +343,7 @@ class TestResolveWithLoadProfile:
         """FULL profile + onboarding 已完成 → BOOTSTRAP.md 也被跳过。"""
         _setup_skeleton(tmp_path)
         mark_onboarding_completed(tmp_path)
-        profile = _make_butler_profile()
+        profile = _make_main_profile()
 
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
@@ -445,7 +445,7 @@ class TestDefaultTemplateBudgetCompliance:
         )
         budget = BEHAVIOR_FILE_BUDGETS[file_id]
         char_count = len(content)
-        variant = "Worker" if is_worker else "Butler"
+        variant = "Worker" if is_worker else "Main Agent"
         assert char_count <= budget, (
             f"{file_id}({variant}) 超预算: {char_count} > {budget}"
         )
@@ -507,16 +507,16 @@ class TestDefaultTemplateContentDomains:
         assert "价值观" in content or "原则" in content
         assert "边界" in content or "不确定" in content
 
-    def test_identity_butler_content_domains(self) -> None:
-        """Butler 版 IDENTITY.md 包含 agent_name 插值、Butler 角色、proposal 权限。"""
+    def test_identity_main_content_domains(self) -> None:
+        """Main Agent 版 IDENTITY.md 包含 agent_name 插值、主 Agent 角色、proposal 权限。"""
         content = _default_content_for_file(
             file_id="IDENTITY.md",
             is_worker_profile=False,
-            agent_name="TestButler",
+            agent_name="TestMain",
             project_label="default",
         )
-        assert "TestButler" in content
-        assert "默认会话" in content or "Butler" in content
+        assert "TestMain" in content
+        assert "默认会话" in content or "Main Agent" in content
         assert "proposal" in content
 
     def test_identity_worker_content_domains(self) -> None:

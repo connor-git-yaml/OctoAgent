@@ -1,4 +1,4 @@
-"""Feature 049: Butler persona / clarification behavior 领域模型。"""
+"""Feature 049: Agent persona / clarification behavior 领域模型。"""
 
 from __future__ import annotations
 
@@ -61,8 +61,6 @@ class AgentDecisionMode(StrEnum):
     DELEGATE_GRAPH = "delegate_graph"
 
 
-# 历史兼容别名
-ButlerDecisionMode = AgentDecisionMode
 
 
 class RecallPlanMode(StrEnum):
@@ -263,18 +261,12 @@ class AgentDecision(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-ButlerDecision = AgentDecision
-
-
 class AgentLoopPlan(BaseModel):
     """Agent 预路由与 recall 统一规划结果。"""
 
     decision: AgentDecision = Field(default_factory=AgentDecision)
     recall_plan: RecallPlan = Field(default_factory=RecallPlan)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-ButlerLoopPlan = AgentLoopPlan
 
 
 class ClarificationDecision(BaseModel):

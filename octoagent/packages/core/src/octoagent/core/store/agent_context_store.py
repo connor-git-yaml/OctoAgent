@@ -508,18 +508,18 @@ class SqliteAgentContextStore:
         return [self._row_to_agent_runtime(row) for row in rows]
 
     async def save_agent_session(self, session: AgentSession) -> AgentSession:
-        # 防护 partial UNIQUE index: 同一 project 只允许一个 active butler_main session。
-        # 如果要创建新的 active butler_main，先关闭旧的。
+        # 防护 partial UNIQUE index: 同一 project 只允许一个 active main_bootstrap session。
+        # 如果要创建新的 active main_bootstrap，先关闭旧的。
         if (
             session.status.value == "active"
-            and session.kind.value == "butler_main"
+            and session.kind.value == "main_bootstrap"
             and session.project_id
         ):
             await self._conn.execute(
                 """
                 UPDATE agent_sessions
                 SET status = 'closed', closed_at = ?, updated_at = ?
-                WHERE project_id = ? AND status = 'active' AND kind = 'butler_main'
+                WHERE project_id = ? AND status = 'active' AND kind = 'main_bootstrap'
                   AND agent_session_id != ?
                 """,
                 (

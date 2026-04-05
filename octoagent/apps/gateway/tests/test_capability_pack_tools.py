@@ -290,7 +290,7 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             session_id="session-071-setup-quick-connect",
-            worker_id="worker.butler",
+            worker_id="worker.general",
             backend="inline",
             console=task_runner.execution_console,
             runtime_kind="worker",
@@ -298,7 +298,7 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
         broker_context = ExecutionContext(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
-            caller="worker:butler",
+            caller="worker:general",
 
             permission_preset=PermissionPreset.NORMAL,
         )
@@ -407,7 +407,7 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             session_id="session-053-general-tools",
-            worker_id="worker.butler",
+            worker_id="worker.general",
             backend="inline",
             console=task_runner.execution_console,
             work_id=plan.work.work_id,
@@ -417,7 +417,7 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
         broker_context = ExecutionContext(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
-            caller="worker:butler",
+            caller="worker:general",
 
             permission_preset=PermissionPreset.NORMAL,
         )

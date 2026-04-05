@@ -225,7 +225,7 @@ class WorkDomainService(DomainServiceBase):
                 child_work_count=len(child_map.get(work.work_id, [])),
                 merge_ready=self._is_work_merge_ready(work, works),
                 a2a_conversation_id=str(work.metadata.get("a2a_conversation_id", "")),
-                butler_agent_session_id=str(work.metadata.get("source_agent_session_id", "")),
+                main_agent_session_id=str(work.metadata.get("source_agent_session_id", "")),
                 worker_agent_session_id=str(work.metadata.get("target_agent_session_id", "")),
                 a2a_message_count=int(work.metadata.get("a2a_message_count", 0) or 0),
                 runtime_summary={
@@ -238,7 +238,7 @@ class WorkDomainService(DomainServiceBase):
                     "requested_worker_profile_version": work.requested_worker_profile_version,
                     "effective_worker_snapshot_id": work.effective_worker_snapshot_id,
                     "a2a_conversation_id": str(work.metadata.get("a2a_conversation_id", "")),
-                    "butler_agent_session_id": str(
+                    "main_agent_session_id": str(
                         work.metadata.get("source_agent_session_id", "")
                     ),
                     "worker_agent_session_id": str(
@@ -268,8 +268,8 @@ class WorkDomainService(DomainServiceBase):
                     "research_a2a_conversation_id": str(
                         work.metadata.get("research_a2a_conversation_id", "")
                     ),
-                    "research_butler_agent_session_id": str(
-                        work.metadata.get("research_butler_agent_session_id", "")
+                    "research_main_agent_session_id": str(
+                        work.metadata.get("research_main_agent_session_id", "")
                     ),
                     "research_worker_agent_session_id": str(
                         work.metadata.get("research_worker_agent_session_id", "")

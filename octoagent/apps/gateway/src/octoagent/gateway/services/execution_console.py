@@ -97,7 +97,7 @@ class ExecutionConsoleA2ANotifier(Protocol):
         worker_id: str,
         work_id: str = "",
     ) -> None:
-        """记录 worker -> butler 的 WAITING_INPUT update。"""
+        """记录 worker -> main 的 WAITING_INPUT update。"""
 
     async def record_input_attached(
         self,
@@ -110,7 +110,7 @@ class ExecutionConsoleA2ANotifier(Protocol):
         worker_id: str,
         work_id: str = "",
     ) -> None:
-        """记录 butler -> worker 的 resume update。"""
+        """记录 main -> worker 的 resume update。"""
 
 
 class ExecutionConsoleService:

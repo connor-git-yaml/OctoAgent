@@ -37,7 +37,7 @@ class PermissionPreset(StrEnum):
     基于工具的 SideEffectLevel 做出决策。
 
     分配规则:
-    - Butler: 默认 FULL
+    - 主 Agent: 默认 FULL
     - Worker: 创建时指定，默认 NORMAL
     - Subagent: 继承其所属 Worker 的 Preset
     """

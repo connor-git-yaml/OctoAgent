@@ -86,8 +86,8 @@ class TestFullE2EPresetLifecycle:
                 decision = preset_decision(preset, side_effect)
                 assert decision in (PresetDecision.ALLOW, PresetDecision.ASK)
 
-    def test_butler_full_all_allow(self) -> None:
-        """Butler 默认 FULL，所有操作都 allow"""
+    def test_main_agent_full_all_allow(self) -> None:
+        """主 Agent 默认 FULL，所有操作都 allow"""
         for side_effect in SideEffectLevel:
             assert preset_decision(PermissionPreset.FULL, side_effect) == PresetDecision.ALLOW
 

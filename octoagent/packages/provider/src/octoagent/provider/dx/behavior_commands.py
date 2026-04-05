@@ -55,7 +55,7 @@ def behavior_group() -> None:
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )
@@ -126,7 +126,7 @@ def list_behavior(project_ref: str | None, agent_ref: str) -> None:
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )
@@ -193,7 +193,7 @@ def show_behavior(file_id: str, project_ref: str | None, agent_ref: str) -> None
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )
@@ -310,7 +310,7 @@ def init_behavior(
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )
@@ -390,7 +390,7 @@ def edit_behavior(
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )
@@ -481,7 +481,7 @@ def diff_behavior(
 @click.option(
     "--agent",
     "agent_ref",
-    default="butler",
+    default="main",
     show_default=True,
     help="按 agent slug 或显示名指定目标 Agent",
 )

@@ -470,7 +470,7 @@ def build_private_memory_scope_ids(
         MemoryNamespaceKind.WORKER_PRIVATE,
     }:
         return []
-    owner = "worker" if kind is MemoryNamespaceKind.WORKER_PRIVATE else "butler"
+    owner = "worker" if kind is MemoryNamespaceKind.WORKER_PRIVATE else "main"
     scope_ids: list[str] = []
     if agent_session_id:
         scope_ids.append(f"memory/private/{owner}/session:{agent_session_id}")
@@ -2350,12 +2350,12 @@ class AgentContextService:
                     "name": (
                         "Worker Private"
                         if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                        else "Butler Private"
+                        else "Agent Private"
                     ),
                     "description": (
                         "Worker 私有记忆命名空间。"
                         if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                        else "Butler 私有记忆命名空间。"
+                        else "Agent 私有记忆命名空间。"
                     ),
                     "memory_scope_ids": private_scope_ids,
                     "metadata": {
@@ -2375,12 +2375,12 @@ class AgentContextService:
                 name=(
                     "Worker Private"
                     if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                    else "Butler Private"
+                    else "Agent Private"
                 ),
                 description=(
                     "Worker 私有记忆命名空间。"
                     if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                    else "Butler 私有记忆命名空间。"
+                    else "Agent 私有记忆命名空间。"
                 ),
                 memory_scope_ids=private_scope_ids,
                 metadata={
@@ -2634,7 +2634,7 @@ class AgentContextService:
             profile = AgentProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.SYSTEM,
-                name="OctoAgent Butler",
+                name="OctoAgent",
                 persona_summary="",
                 instruction_overlays=[
                     "优先遵守 project/profile/bootstrap 约束，再回答当前用户问题。",
@@ -2655,7 +2655,7 @@ class AgentContextService:
             profile_id=f"agent-profile-{project.project_id}",
             scope=AgentProfileScope.PROJECT,
             project_id=project.project_id,
-            name=f"{project.name} Butler",
+            name=f"{project.name}",
             persona_summary="",
             instruction_overlays=[
                 "默认继承当前 project/workspace 绑定与 owner 偏好。",
@@ -3230,7 +3230,7 @@ class AgentContextService:
                         "agent_led_recall_expected": True,
                         "agent_led_recall_executed": False,
                         "available_tools": ["memory.search", "memory.recall", "memory.read"],
-                        "hint_reason": "butler_agent_led_recall",
+                        "hint_reason": "main_agent_led_recall",
                         "recall_plan_source": (
                             str(recall_plan.metadata.get("plan_source", "")).strip()
                             if recall_plan is not None

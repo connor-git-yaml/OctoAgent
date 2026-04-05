@@ -3,7 +3,7 @@
 Feature 062: 支持多层优先级覆盖的 UsageLimits 合并逻辑。
 合并优先级: SKILL.md > WorkerProfile > AgentProfile > 全局默认（环境变量 > 代码硬编码）
 
-注意: Agent-type 预设矩阵已移除（不再区分 butler/worker/worker_coding 等类型）。
+注意: Agent-type 预设矩阵已移除（不再区分 main/worker/worker_coding 等类型）。
 所有 Agent 共享同一个全局默认配置，通过 Profile 或 SKILL.md 自定义覆盖。
 """
 

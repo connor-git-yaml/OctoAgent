@@ -519,7 +519,7 @@ class ApprovalOverride(BaseModel):
         description="自增主键（SQLite 自动生成）",
     )
     agent_runtime_id: str = Field(
-        description="Agent 实例 ID（如 Butler、Worker）",
+        description="Agent 实例 ID（如 Main Agent、Worker）",
     )
     tool_name: str = Field(
         description="工具名称（如 docker.run）",

@@ -104,7 +104,7 @@ class TestSettingsImmediateEffect:
         context = SkillExecutionContext(
             task_id="task-e2e-1",
             trace_id="trace-e2e-1",
-            caller="butler:general",
+            caller="main:general",
             usage_limits=limits,
         )
 
@@ -141,7 +141,7 @@ class TestSettingsImmediateEffect:
         context = SkillExecutionContext(
             task_id="task-e2e-2",
             trace_id="trace-e2e-2",
-            caller="butler:general",
+            caller="main:general",
             usage_limits=limits,
         )
 
@@ -296,7 +296,7 @@ class TestSettingsFullPipeline:
         context = SkillExecutionContext(
             task_id="task-e2e-ok",
             trace_id="trace-e2e-ok",
-            caller="butler:general",
+            caller="main:general",
             usage_limits=limits,
         )
 

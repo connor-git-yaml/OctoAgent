@@ -546,7 +546,7 @@ class WorkerProfileDomainService(DomainServiceBase):
         if not file_id:
             raise ControlPlaneActionError("MISSING_PARAM", "file_id 不能为空")
 
-        agent_slug = str(request.params.get("agent_slug", "butler")).strip()
+        agent_slug = str(request.params.get("agent_slug", "main")).strip()
         project_slug = str(request.params.get("project_slug", "default")).strip()
 
         try:
@@ -1313,7 +1313,7 @@ class WorkerProfileDomainService(DomainServiceBase):
     @staticmethod
     def _worker_profile_label(worker_type: str) -> str:
         labels = {
-            "general": "Butler Root Agent",
+            "general": "Main Root Agent",
             "ops": "Ops Root Agent",
             "research": "Research Root Agent",
             "dev": "Dev Root Agent",
@@ -1882,7 +1882,7 @@ class WorkerProfileDomainService(DomainServiceBase):
         if not default_tool_groups and not selected_tools:
             warnings.append("当前没有默认工具组和固定工具，运行时会更依赖动态 tool index。")
         if not summary:
-            warnings.append("建议补一段 summary，方便 Butler 和 Control Plane 解释这个 Root Agent。")
+            warnings.append("建议补一段 summary，方便主 Agent 和 Control Plane 解释这个 Root Agent。")
         if selected_project is not None:
             policy_profile_id, policy_profile = self._resolve_effective_policy_profile(
                 selected_project

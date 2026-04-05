@@ -459,7 +459,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert frame.budget["memory_recall"]["hook_trace"] == {}
     assert frame.budget["memory_recall"]["prefetch_mode"] == "agent_led_hint_first"
     assert frame.budget["memory_recall"]["agent_led_recall_expected"] is True
-    assert frame.budget["memory_recall"]["hint_reason"] == "butler_agent_led_recall"
+    assert frame.budget["memory_recall"]["hint_reason"] == "main_agent_led_recall"
     assert frame.budget["memory_recall"]["available_tools"] == [
         "memory.search",
         "memory.recall",
@@ -834,13 +834,13 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
             "precomputed_recall_plan": {
                 "mode": "recall",
                 "query": "Alpha continuity constraints milestone plan",
-                "rationale": "Butler loop 已经判断这轮需要先 recall。",
+                "rationale": "Agent loop 已经判断这轮需要先 recall。",
                 "subject_hint": "alpha-precomputed",
                 "focus_terms": ["Alpha", "continuity"],
                 "allow_vault": False,
                 "limit": 3,
             },
-            "precomputed_recall_plan_source": "butler_loop_plan",
+            "precomputed_recall_plan_source": "agent_loop_plan",
             "precomputed_recall_plan_request_artifact_ref": "artifact-precomputed-request",
             "precomputed_recall_plan_response_artifact_ref": "artifact-precomputed-response",
         },
@@ -860,7 +860,7 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
     assert len(frames) == 1
     frame = frames[0]
     assert frame.budget["memory_recall"]["recall_plan"]["metadata"]["plan_source"] == (
-        "butler_loop_plan"
+        "agent_loop_plan"
     )
 
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
@@ -1123,7 +1123,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
                     subject_key="worker-research-preference",
                     search_query=query,
                     citation=f"memory://{worker_private_scope_ids[0]}/fragment/worker-research-preference",
-                    content_preview="优先先查官网和权威资料，再给 Butler 汇总。",
+                    content_preview="优先先查官网和权威资料，再给主 Agent 汇总。",
                     metadata={"source": "worker-private-test"},
                     created_at=datetime.now(tz=UTC),
                 )
@@ -1165,7 +1165,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
         },
     )
 
@@ -1178,7 +1178,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
             "requested_worker_profile_id": worker_profile.profile_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-1",
         },
     )
@@ -1353,7 +1353,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
                     subject_key="worker-research-preference",
                     search_query=query,
                     citation=f"memory://{worker_private_scope_ids[0]}/fragment/worker-research-preference",
-                    content_preview="优先先查官网和权威资料，再给 Butler 汇总。",
+                    content_preview="优先先查官网和权威资料，再给主 Agent 汇总。",
                     metadata={"source": "worker-planned-test"},
                     created_at=datetime.now(tz=UTC),
                 )
@@ -1403,7 +1403,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
         },
     )
 
@@ -1416,7 +1416,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
             "requested_worker_profile_id": worker_profile.profile_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-2",
         },
     )
@@ -1583,7 +1583,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         metadata={
             "agent_runtime_id": worker_runtime_id,
             "agent_session_id": worker_agent_session_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
         },
     )
 
@@ -1596,7 +1596,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
             "requested_worker_profile_id": worker_profile.profile_id,
-            "parent_agent_session_id": "butler-session-alpha",
+            "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-2",
         },
     )
@@ -1688,7 +1688,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             metadata={
                 "agent_runtime_id": worker_runtime_id,
                 "agent_session_id": agent_session_id,
-                "parent_agent_session_id": "butler-session-alpha",
+                "parent_agent_session_id": "main-session-alpha",
             },
         )
         await service.process_task_with_llm(
@@ -1700,7 +1700,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),
                 "requested_worker_profile_id": worker_profile.profile_id,
-                "parent_agent_session_id": "butler-session-alpha",
+                "parent_agent_session_id": "main-session-alpha",
                 "work_id": work_id,
             },
         )
@@ -1741,7 +1741,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     _second_task_id, second_frame = await run_worker_turn(
         work_id="work-alpha-2",
         agent_session_id=second_agent_session_id,
-        text="继续处理 alpha-official-root 的官网调研，并给 Butler 一个更新。",
+        text="继续处理 alpha-official-root 的官网调研，并给主 Agent 一个更新。",
         idempotency_key="f038-worker-writeback-002",
     )
 
@@ -1880,7 +1880,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
             )
             self.tool_event_ids.append(event.event_id)
             return ModelCallResult(
-                content="已完成官网检索，并整理关键入口给 Butler。",
+                content="已完成官网检索，并整理关键入口给主 Agent。",
                 model_alias=model_alias or "main",
                 model_name="mock-model",
                 provider="mock",
@@ -1928,7 +1928,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
             metadata={
                 "agent_runtime_id": worker_runtime_id,
                 "agent_session_id": agent_session_id,
-                "parent_agent_session_id": "butler-session-alpha",
+                "parent_agent_session_id": "main-session-alpha",
             },
         )
         await service.process_task_with_llm(
@@ -1940,7 +1940,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),
                 "requested_worker_profile_id": worker_profile.profile_id,
-                "parent_agent_session_id": "butler-session-alpha",
+                "parent_agent_session_id": "main-session-alpha",
                 "work_id": work_id,
             },
         )

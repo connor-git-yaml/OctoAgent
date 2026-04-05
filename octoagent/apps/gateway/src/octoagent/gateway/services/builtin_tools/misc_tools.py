@@ -51,8 +51,8 @@ async def register(broker, deps: ToolDeps) -> None:
         runtime_id = getattr(ctx, "agent_runtime_id", "") or ""
         for part in runtime_id.split("|"):
             if part.startswith("worker_profile:"):
-                return part.split(":", 1)[1].strip() or "butler"
-        return "butler"
+                return part.split(":", 1)[1].strip() or "main"
+        return "main"
 
     def _extract_project_slug(ctx: Any) -> str:
         """从执行上下文的 agent_runtime_id 中提取 project slug。"""

@@ -338,7 +338,7 @@ class TestChatSendRoute:
         assert detail.status_code == 200
         assert detail.json()["task"]["alias"] == "深圳"
 
-    async def test_continue_legacy_butler_session_ignores_polluted_worker_owner(
+    async def test_continue_legacy_main_session_ignores_polluted_worker_owner(
         self,
         client: AsyncClient,
         test_app,
@@ -373,7 +373,7 @@ class TestChatSendRoute:
                 sender_id="owner",
                 sender_name="Owner",
                 text="legacy first turn",
-                idempotency_key="legacy-butler-continue",
+                idempotency_key="legacy-main-continue",
             )
         )
         assert created is True
@@ -423,7 +423,7 @@ class TestChatSendRoute:
         resp = await client.post(
             "/api/chat/send",
             json={
-                "message": "继续这条历史 Butler 会话",
+                "message": "继续这条历史主 Agent 会话",
                 "task_id": task_id,
             },
         )

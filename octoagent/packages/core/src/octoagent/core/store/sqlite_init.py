@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
     project_id         TEXT NOT NULL DEFAULT '',
     agent_profile_id   TEXT NOT NULL DEFAULT '',
     worker_profile_id  TEXT NOT NULL DEFAULT '',
-    role               TEXT NOT NULL DEFAULT 'butler',
+    role               TEXT NOT NULL DEFAULT 'main',
     name               TEXT NOT NULL DEFAULT '',
     persona_summary    TEXT NOT NULL DEFAULT '',
     status             TEXT NOT NULL DEFAULT 'active',
@@ -422,7 +422,7 @@ _AGENT_SESSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS agent_sessions (
     agent_session_id         TEXT PRIMARY KEY,
     agent_runtime_id         TEXT NOT NULL,
-    kind                     TEXT NOT NULL DEFAULT 'butler_main',
+    kind                     TEXT NOT NULL DEFAULT 'main_bootstrap',
     status                   TEXT NOT NULL DEFAULT 'active',
     project_id               TEXT NOT NULL DEFAULT '',
     surface                  TEXT NOT NULL DEFAULT 'chat',
@@ -744,7 +744,7 @@ _AGENT_CONTEXT_INDEXES = [
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
         "ON agent_sessions(project_id) "
-        "WHERE status = 'active' AND project_id != '' AND kind = 'butler_main';"
+        "WHERE status = 'active' AND project_id != '' AND kind = 'main_bootstrap';"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_agent_sessions_parent_worker "
@@ -1011,7 +1011,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ADD COLUMN role_card TEXT NOT NULL DEFAULT ''"
         )
 
-    # 修正 agent_sessions 的 UNIQUE 索引：只对 butler_main 生效，
+    # 修正 agent_sessions 的 UNIQUE 索引：只对 main_bootstrap 生效，
     # worker_internal / subagent_internal sessions 不受一个 project 一个 session 的限制。
     if agent_session_columns:
         try:
@@ -1021,7 +1021,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             await conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
                 "ON agent_sessions(project_id) "
-                "WHERE status = 'active' AND project_id != '' AND kind = 'butler_main'"
+                "WHERE status = 'active' AND project_id != '' AND kind = 'main_bootstrap'"
             )
         except Exception:
             pass  # 旧索引可能已被 CREATE TABLE 阶段正确创建

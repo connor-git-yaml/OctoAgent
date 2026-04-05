@@ -75,7 +75,6 @@ class ContextRequestKind(StrEnum):
 class AgentRuntimeRole(StrEnum):
     MAIN = "main"
     WORKER = "worker"
-    BUTLER = "butler"  # DEPRECATED: 旧数据兼容，不要在新代码中使用。语义等价于 MAIN。
 
 
 class AgentRuntimeStatus(StrEnum):
@@ -84,7 +83,7 @@ class AgentRuntimeStatus(StrEnum):
 
 
 def normalize_runtime_role(value: str) -> AgentRuntimeRole:
-    """旧数据兼容：butler → MAIN。"""
+    """旧数据兼容：butler → MAIN。butler 值已通过数据迁移 (_migrate_butler_naming) 清除，此函数保留用于处理极端情况。"""
     if value == "butler":
         return AgentRuntimeRole.MAIN
     return AgentRuntimeRole(value)
@@ -95,11 +94,10 @@ class AgentSessionKind(StrEnum):
     WORKER_INTERNAL = "worker_internal"
     DIRECT_WORKER = "direct_worker"
     SUBAGENT_INTERNAL = "subagent_internal"
-    BUTLER_MAIN = "butler_main"  # DEPRECATED: 旧数据兼容，不要在新代码中使用。语义等价于 MAIN_BOOTSTRAP。
 
 
 def normalize_session_kind(value: str) -> AgentSessionKind:
-    """旧数据兼容：butler_main → MAIN_BOOTSTRAP。"""
+    """旧数据兼容：butler_main → MAIN_BOOTSTRAP。butler_main 值已通过数据迁移 (_migrate_butler_naming) 清除，此函数保留用于处理极端情况。"""
     if value == "butler_main":
         return AgentSessionKind.MAIN_BOOTSTRAP
     return AgentSessionKind(value)
@@ -122,7 +120,6 @@ class MemoryNamespaceKind(StrEnum):
     PROJECT_SHARED = "project_shared"
     AGENT_PRIVATE = "agent_private"
     WORKER_PRIVATE = "worker_private"
-    BUTLER_PRIVATE = "butler_private"  # 历史兼容别名，新代码用 AGENT_PRIVATE
 
 
 class AgentProfile(BaseModel):
@@ -243,7 +240,7 @@ class BootstrapSession(BaseModel):
 
 
 class AgentRuntime(BaseModel):
-    """Butler / Worker 的长期运行体。"""
+    """主 Agent / Worker 的长期运行体。"""
 
     agent_runtime_id: str = Field(min_length=1)
     project_id: str = Field(default="")
@@ -322,7 +319,7 @@ class AgentSessionTurn(BaseModel):
 
 
 class MemoryNamespace(BaseModel):
-    """Project shared / Butler private / Worker private 记忆命名空间。"""
+    """Project shared / Agent private / Worker private 记忆命名空间。"""
 
     namespace_id: str = Field(min_length=1)
     project_id: str = Field(default="")

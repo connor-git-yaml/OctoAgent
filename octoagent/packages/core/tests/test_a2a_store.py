@@ -45,11 +45,11 @@ async def test_a2a_store_roundtrip(tmp_path: Path) -> None:
         work_id="work-weather",
         project_id="project-alpha",
         workspace_id="workspace-alpha",
-        source_agent_runtime_id="runtime-butler-alpha",
-        source_agent_session_id="session-butler-alpha",
+        source_agent_runtime_id="runtime-main-alpha",
+        source_agent_session_id="session-main-alpha",
         target_agent_runtime_id="runtime-worker-research",
         target_agent_session_id="session-worker-research",
-        source_agent="agent://butler.main",
+        source_agent="agent://main.agent",
         target_agent="agent://worker.llm.default",
         context_frame_id="context-frame-alpha",
         request_message_id="message-1",
@@ -159,7 +159,7 @@ async def test_a2a_store_append_message_assigns_unique_seq_under_concurrency(
         a2a_conversation_id="conversation-concurrency",
         task_id="task-concurrency",
         work_id="work-concurrency",
-        source_agent="agent://butler.main",
+        source_agent="agent://main.agent",
         target_agent="agent://worker.test",
     )
     await store_group.a2a_store.save_conversation(conversation)

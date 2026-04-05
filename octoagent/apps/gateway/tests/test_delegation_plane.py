@@ -258,7 +258,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
         profile_id="agent-profile-ops-boundary",
         scope=AgentProfileScope.PROJECT,
         project_id="project-default",
-        name="Ops Butler",
+        name="Ops Agent",
         persona_summary="按受控边界处理运行问题。",
         tool_profile="standard",
         model_alias="main",
@@ -760,7 +760,7 @@ async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path:
                 "parent_task_id": "task-parent-1",
                 "requested_worker_type": "research",
                 "target_kind": "subagent",
-                "spawned_by": "butler_freshness_delegate",
+                "spawned_by": "agent_freshness_delegate",
             },
         )
     )

@@ -62,6 +62,9 @@ async def ensure_startup_records(
     # 数据迁移：清理历史遗留的 " Butler" 后缀
     await _migrate_butler_suffix(store_group, agent_profile)
 
+    # 数据迁移：将 butler → main 命名迁移到新的枚举值
+    await _migrate_butler_naming(store_group.conn)
+
     await store_group.conn.commit()
 
     # agent profile 确定后，用正确的 slug 补齐 agent-private 行为文件
@@ -101,7 +104,7 @@ async def _backfill_permission_preset(
     store_group: StoreGroup,
     profile: AgentProfile,
 ) -> AgentProfile:
-    """已有 Butler profile 若缺少 permission_preset，自动补为 full 并持久化。"""
+    """已有 Agent profile 若缺少 permission_preset，自动补为 full 并持久化。"""
     meta = profile.metadata or {}
     if meta.get("permission_preset"):
         return profile
@@ -283,11 +286,11 @@ async def _backfill_primary_agent_id(
     store_group: StoreGroup,
     project: Project,
 ) -> None:
-    """回填 Project 的 primary_agent_id（Butler AgentRuntime）。"""
+    """回填 Project 的 primary_agent_id（主 AgentRuntime）。"""
     if project.primary_agent_id:
         return
 
-    # 查找该 Project 的 Butler AgentRuntime
+    # 查找该 Project 的主 AgentRuntime
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
         role=AgentRuntimeRole.MAIN,
         project_id=project.project_id,
@@ -295,14 +298,14 @@ async def _backfill_primary_agent_id(
     if not runtimes:
         return
 
-    butler_runtime = runtimes[0]
+    main_runtime = runtimes[0]
     await store_group.project_store.set_primary_agent(
-        project.project_id, butler_runtime.agent_runtime_id
+        project.project_id, main_runtime.agent_runtime_id
     )
     log.info(
         "backfill_primary_agent_id",
         project_id=project.project_id,
-        primary_agent_id=butler_runtime.agent_runtime_id,
+        primary_agent_id=main_runtime.agent_runtime_id,
     )
 
 
@@ -321,10 +324,10 @@ async def ensure_main_runtime_and_session(
         project_id=project.project_id,
     )
     if runtimes:
-        butler_runtime = runtimes[0]
+        main_runtime = runtimes[0]
     else:
         runtime_id = f"runtime-{str(ULID())}"
-        butler_runtime = AgentRuntime(
+        main_runtime = AgentRuntime(
             agent_runtime_id=runtime_id,
             project_id=project.project_id,
             agent_profile_id=agent_profile.profile_id,
@@ -334,10 +337,10 @@ async def ensure_main_runtime_and_session(
             status=AgentRuntimeStatus.ACTIVE,
             permission_preset=resolve_permission_preset(agent_profile),
         )
-        await store_group.agent_context_store.save_agent_runtime(butler_runtime)
+        await store_group.agent_context_store.save_agent_runtime(main_runtime)
         # 同步回填 primary_agent_id
         await store_group.project_store.set_primary_agent(
-            project.project_id, butler_runtime.agent_runtime_id
+            project.project_id, main_runtime.agent_runtime_id
         )
         log.info("main_runtime_created", runtime_id=runtime_id, project_id=project.project_id)
 
@@ -350,7 +353,7 @@ async def ensure_main_runtime_and_session(
         session_id = f"session-{str(ULID())}"
         session = AgentSession(
             agent_session_id=session_id,
-            agent_runtime_id=butler_runtime.agent_runtime_id,
+            agent_runtime_id=main_runtime.agent_runtime_id,
             kind=AgentSessionKind.MAIN_BOOTSTRAP,
             status=AgentSessionStatus.ACTIVE,
             project_id=project.project_id,
@@ -408,6 +411,14 @@ async def ensure_default_project_agent_profile(
             )
         return profile
     return None
+
+
+async def _migrate_butler_naming(conn) -> None:
+    """启动时将 butler → main 命名迁移。"""
+    await conn.execute("UPDATE agent_runtimes SET role = 'main' WHERE role = 'butler'")
+    await conn.execute("UPDATE agent_sessions SET kind = 'main_bootstrap' WHERE kind = 'butler_main'")
+    await conn.execute("UPDATE memory_namespaces SET kind = 'agent_private' WHERE kind = 'butler_private'")
+    await conn.commit()
 
 
 async def _migrate_butler_suffix(

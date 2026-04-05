@@ -139,7 +139,7 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
         str(tmp_path / "artifacts"),
     )
     runtime = AgentRuntime(
-        agent_runtime_id="runtime-butler-alpha",
+        agent_runtime_id="runtime-main-alpha",
         project_id="project-alpha",
         agent_profile_id="agent-profile-alpha",
         role=AgentRuntimeRole.MAIN,
@@ -147,7 +147,7 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
         persona_summary="负责用户主会话与 worker 协调。",
     )
     session = AgentSession(
-        agent_session_id="agent-session-butler-alpha",
+        agent_session_id="agent-session-main-alpha",
         agent_runtime_id=runtime.agent_runtime_id,
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id="project-alpha",
@@ -159,13 +159,13 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
         metadata={"source": "wave1-test"},
     )
     namespace = MemoryNamespace(
-        namespace_id="namespace-butler-alpha",
+        namespace_id="namespace-main-alpha",
         project_id="project-alpha",
         agent_runtime_id=runtime.agent_runtime_id,
         kind=MemoryNamespaceKind.AGENT_PRIVATE,
         name="Agent Private",
         description="Agent 私有长期记忆。",
-        memory_scope_ids=["project-alpha:butler"],
+        memory_scope_ids=["project-alpha:main"],
     )
     recall = RecallFrame(
         recall_frame_id="recall-frame-alpha",
@@ -212,7 +212,7 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
 
     assert stored_namespace is not None
     assert stored_namespace.kind == MemoryNamespaceKind.AGENT_PRIVATE
-    assert stored_namespace.memory_scope_ids == ["project-alpha:butler"]
+    assert stored_namespace.memory_scope_ids == ["project-alpha:main"]
 
     assert stored_recall is not None
     assert stored_recall.memory_namespace_ids == [namespace.namespace_id]

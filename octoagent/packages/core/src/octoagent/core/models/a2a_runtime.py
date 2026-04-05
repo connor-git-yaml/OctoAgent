@@ -1,4 +1,4 @@
-"""Wave 2: Butler / Worker A2A runtime durable models。"""
+"""Wave 2: Main Agent / Worker A2A runtime durable models。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class A2AMessageDirection(StrEnum):
 
 
 class A2AConversation(BaseModel):
-    """ButlerSession -> WorkerSession 的 durable carrier。"""
+    """MainAgentSession -> WorkerSession 的 durable carrier。"""
 
     a2a_conversation_id: str = Field(min_length=1)
     task_id: str = Field(default="")

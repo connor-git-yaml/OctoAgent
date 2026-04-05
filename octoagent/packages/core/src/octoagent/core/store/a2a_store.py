@@ -1,4 +1,4 @@
-"""Wave 2: Butler / Worker A2A runtime SQLite store。"""
+"""Wave 2: Main Agent / Worker A2A runtime SQLite store。"""
 
 from __future__ import annotations
 

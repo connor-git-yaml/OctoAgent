@@ -326,7 +326,7 @@ class TestAdaptersAndFixtures:
             context_id="thread-001",
             trace_id="trace-001",
             from_agent="agent://worker.ops",
-            to_agent="agent://butler.main",
+            to_agent="agent://main.agent",
             state=TaskStatus.WAITING_INPUT,
             summary="input requested",
             requested_input="confirm",

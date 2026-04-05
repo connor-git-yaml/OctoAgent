@@ -1,4 +1,4 @@
-"""Agent 决策与行为辅助模块（原 butler_behavior）。"""
+"""Agent 决策与行为辅助模块。"""
 
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ def build_behavior_layers(files: list[BehaviorPackFile]) -> list[BehaviorLayer]:
 def build_tool_universe_hints(
     selection: DynamicToolSelection | None,
     *,
-    scope: str = "butler_main",
+    scope: str = "main",
     note: str = "",
     tool_profile_fallback: str = "",
 ) -> ToolUniverseHints:
@@ -323,7 +323,7 @@ def build_behavior_slice_envelope(pack: BehaviorPack) -> BehaviorSliceEnvelope:
     shared_ids = [item.file_id for item in shared_files]
     shared_layers = build_behavior_layers(shared_files)
     return BehaviorSliceEnvelope(
-        summary="Worker 仅继承 WORKER profile 定义的行为子集，不继承 Butler 私有偏好全集。",
+        summary="Worker 仅继承 WORKER profile 定义的行为子集，不继承主 Agent 私有偏好全集。",
         shared_file_ids=shared_ids,
         layers=shared_layers,
         metadata={
@@ -681,7 +681,7 @@ def render_runtime_hint_block(*, user_text: str, runtime_hints: RuntimeHintBundl
 def _build_pipeline_context(
     pipeline_items: list[Any] | None,
 ) -> str:
-    """Feature 065 T-029: 构建 Butler system prompt 中的 Pipeline 上下文段落。
+    """Feature 065 T-029: 构建主 Agent system prompt 中的 Pipeline 上下文段落。
 
     当 PipelineRegistry 中有可用 Pipeline 时，注入列表 + trigger_hint + input_schema 摘要。
     列表为空时返回空字符串（FR-065-07 AC-04：不注入空段落）。
@@ -900,7 +900,7 @@ def parse_agent_loop_plan_response(content: str) -> AgentLoopPlan | None:
             decision=decision,
             recall_plan=RecallPlan(),
             metadata={
-                "loop_plan_source": "legacy_butler_decision",
+                "loop_plan_source": "legacy_main_decision",
             },
         )
     return None
@@ -1018,7 +1018,7 @@ def build_runtime_hint_bundle(
 
 # ---------------------------------------------------------------------------
 # Phase 1 (Feature 064): 简单对话识别
-# 仅作为性能优化（跳过 memory recall 等准备步骤），不影响 Butler Execution Loop 的核心执行逻辑。
+# 仅作为性能优化（跳过 memory recall 等准备步骤），不影响主 Agent Execution Loop 的核心执行逻辑。
 # 误判（false negative）不影响正确性——未被识别的请求正常进入完整流程。
 # ---------------------------------------------------------------------------
 
@@ -1053,7 +1053,7 @@ def _is_trivial_direct_answer(user_text: str) -> bool:
     4. 简单元问题（你能做什么）
 
     该函数仅作为性能优化（跳过 memory recall 等准备步骤），
-    不影响 Butler Execution Loop 的核心执行逻辑。
+    不影响主 Agent Execution Loop 的核心执行逻辑。
     误判不影响正确性——未被识别的请求正常进入完整流程。
     """
     normalized = user_text.strip()

@@ -185,7 +185,7 @@ class LLMService:
     向后兼容: 无参构造时自动创建 Echo 模式的 FallbackManager + AliasRegistry。
     """
 
-    supports_butler_decision_phase = True
+    supports_agent_decision_phase = True
     supports_recall_planning_phase = True
     supports_single_loop_executor = True
 
@@ -392,7 +392,7 @@ class LLMService:
             task_id=task_id,
             trace_id=trace_id,
             caller=(
-                f"butler:{worker_type}" if single_loop_executor else f"worker:{worker_type}"
+                f"main:{worker_type}" if single_loop_executor else f"worker:{worker_type}"
             ),
             agent_runtime_id=str(metadata.get("agent_runtime_id", "")).strip(),
             agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
@@ -897,7 +897,7 @@ class LLMService:
                 else ""
             )
             return (
-                "你是 OctoAgent 的主 Butler。"
+                "你是 OctoAgent 的主 Agent。"
                 f"{worker_lens} 当前回合直接挂载以下受治理工具：{tool_list}。"
                 " 你需要在同一轮主执行链里自己决定是否调用工具、如何收集证据、以及何时直接回答。"
                 " 不要先输出一段“计划说明”再等待下轮；"

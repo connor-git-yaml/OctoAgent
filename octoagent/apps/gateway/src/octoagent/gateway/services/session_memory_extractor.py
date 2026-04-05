@@ -51,7 +51,6 @@ _MAX_TURNS_PER_EXTRACTION = 50
 # Session kinds 白名单 -- 仅这些 kind 触发记忆提取
 _EXTRACTABLE_SESSION_KINDS = frozenset({
     AgentSessionKind.MAIN_BOOTSTRAP,
-    AgentSessionKind.BUTLER_MAIN,  # 历史兼容
     AgentSessionKind.WORKER_INTERNAL,
     AgentSessionKind.DIRECT_WORKER,
 })

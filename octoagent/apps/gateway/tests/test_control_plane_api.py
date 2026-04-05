@@ -291,7 +291,7 @@ async def _seed_context_resources(app) -> None:
         )
     )
     runtime = AgentRuntime(
-        agent_runtime_id="runtime-butler-default",
+        agent_runtime_id="runtime-main-default",
         project_id=project.project_id,
 
         agent_profile_id="agent-profile-default",
@@ -300,7 +300,7 @@ async def _seed_context_resources(app) -> None:
         persona_summary="用于 control plane 可视化的默认 runtime。",
     )
     agent_session = AgentSession(
-        agent_session_id="agent-session-butler-default",
+        agent_session_id="agent-session-main-default",
         agent_runtime_id=runtime.agent_runtime_id,
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id=project.project_id,
@@ -322,7 +322,7 @@ async def _seed_context_resources(app) -> None:
         memory_scope_ids=["memory/project-alpha"],
     )
     private_namespace = MemoryNamespace(
-        namespace_id="memory-namespace-butler-default",
+        namespace_id="memory-namespace-main-default",
         project_id=project.project_id,
 
         agent_runtime_id=runtime.agent_runtime_id,
@@ -536,7 +536,7 @@ async def _seed_context_resources(app) -> None:
             source_agent_session_id=agent_session.agent_session_id,
             target_agent_runtime_id="runtime-worker-research-default",
             target_agent_session_id="agent-session-worker-research-default",
-            source_agent="agent://butler.main",
+            source_agent="agent://main.agent",
             target_agent="agent://worker.llm.default",
             context_frame_id="context-frame-default",
             request_message_id="a2a-message-task-default",
@@ -564,7 +564,7 @@ async def _seed_context_resources(app) -> None:
             direction=A2AMessageDirection.OUTBOUND,
             message_type="TASK",
             protocol_message_id="dispatch-weather-default",
-            from_agent="agent://butler.main",
+            from_agent="agent://main.agent",
             to_agent="agent://worker.llm.default",
             idempotency_key=f"{seeded_task_id}:dispatch-weather-default:task",
             payload={"user_text": "深圳今天天气怎么样？"},
@@ -590,7 +590,7 @@ async def _seed_context_resources(app) -> None:
             message_type="RESULT",
             protocol_message_id="dispatch-weather-default-result",
             from_agent="agent://worker.llm.default",
-            to_agent="agent://butler.main",
+            to_agent="agent://main.agent",
             idempotency_key=f"{seeded_task_id}:dispatch-weather-default:result",
             payload={"summary": "深圳晴，21C。"},
             trace={"trace_id": "trace-task-context"},
@@ -731,7 +731,7 @@ class TestControlPlaneApi:
         )
         assert (
             payload["resources"]["context_continuity"]["agent_runtimes"][0]["agent_runtime_id"]
-            == "runtime-butler-default"
+            == "runtime-main-default"
         )
         assert payload["resources"]["context_continuity"]["agent_sessions"][0]["agent_session_id"]  # 非空即可，ID 格式已改为动态生成
         assert {
@@ -754,12 +754,12 @@ class TestControlPlaneApi:
         frame = payload["resources"]["context_continuity"]["frames"][0]
         assert frame["project_id"]
         # workspace 概念已废弃，workspace_id 为空
-        assert frame["agent_runtime_id"] == "runtime-butler-default"
+        assert frame["agent_runtime_id"] == "runtime-main-default"
         assert frame["agent_session_id"] # 动态生成 ID
         assert frame["recall_frame_id"] == "recall-frame-default"
         assert set(frame["memory_namespace_ids"]) == {
             "memory-namespace-project-default",
-            "memory-namespace-butler-default",
+            "memory-namespace-main-default",
         }
         assert frame["memory_hit_count"] == 1
         assert frame["memory_hits"][0]["search_query"] == "project alpha next step"
@@ -812,7 +812,7 @@ class TestControlPlaneApi:
         assert context_resp.status_code == 200
         context_payload = context_resp.json()
         assert context_payload["resource_type"] == "context_continuity"
-        assert context_payload["sessions"][0]["agent_runtime_id"] == "runtime-butler-default"
+        assert context_payload["sessions"][0]["agent_runtime_id"] == "runtime-main-default"
         assert context_payload["sessions"][0]["last_recall_frame_id"] == "recall-frame-default"
         assert context_payload["frames"][0]["memory_recall"]["hit_count"] == 1
         assert context_payload["recall_frames"][0]["agent_session_id"]  # 动态生成 ID
@@ -828,7 +828,7 @@ class TestControlPlaneApi:
         assert worker_profiles_payload["resource_type"] == "worker_profiles"
         assert worker_profiles_payload["profiles"][0]["dynamic_context"]["active_project_id"]
 
-    async def test_snapshot_exposes_butler_owned_freshness_runtime_truth(
+    async def test_snapshot_exposes_main_owned_freshness_runtime_truth(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,
@@ -853,14 +853,14 @@ class TestControlPlaneApi:
                 status=WorkStatus.SUCCEEDED,
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="general",
-                route_reason="delegation_strategy=butler_owned_freshness",
-                owner_id="butler.main",
+                route_reason="delegation_strategy=main_owned_freshness",
+                owner_id="main.agent",
                 project_id=project.project_id,
     
                 selected_tools=[],
                 metadata={
-                    "delegation_strategy": "butler_owned_freshness",
-                    "final_speaker": "butler",
+                    "delegation_strategy": "main_owned_freshness",
+                    "final_speaker": "main",
                     "research_child_task_id": "task-freshness-child",
                     "research_child_thread_id": "thread-freshness-parent:freshness:abc123",
                     "research_child_work_id": "work-freshness-child",
@@ -870,7 +870,7 @@ class TestControlPlaneApi:
                     "research_route_reason": "worker_type=research | fallback=single_worker",
                     "research_tool_profile": "standard",
                     "research_a2a_conversation_id": "a2a-freshness-child",
-                    "research_butler_agent_session_id": "agent-session-butler-default",
+                    "research_main_agent_session_id": "agent-session-main-default",
                     "research_worker_agent_session_id": "agent-session-worker-research-child",
                     "research_a2a_message_count": 2,
                     "research_result_artifact_ref": "artifact-freshness-result",
@@ -890,13 +890,13 @@ class TestControlPlaneApi:
             if item["work_id"] == "work-freshness-parent"
         )
         runtime_summary = work["runtime_summary"]
-        assert runtime_summary["delegation_strategy"] == "butler_owned_freshness"
-        assert runtime_summary["final_speaker"] == "butler"
+        assert runtime_summary["delegation_strategy"] == "main_owned_freshness"
+        assert runtime_summary["final_speaker"] == "main"
         assert runtime_summary["research_child_task_id"] == "task-freshness-child"
         assert runtime_summary["research_tool_profile"] == "standard"
         assert runtime_summary["research_a2a_conversation_id"] == "a2a-freshness-child"
-        assert runtime_summary["research_butler_agent_session_id"] == (
-            "agent-session-butler-default"
+        assert runtime_summary["research_main_agent_session_id"] == (
+            "agent-session-main-default"
         )
         assert runtime_summary["research_worker_agent_session_id"] == (
             "agent-session-worker-research-child"
@@ -3189,7 +3189,7 @@ class TestControlPlaneApi:
         assert all(item["task_id"] != "ops-control-plane" for item in session_items)
         assert all(item["title"] != "Control Plane Audit" for item in session_items)
 
-    async def test_session_projection_includes_default_butler_session_without_task(
+    async def test_session_projection_includes_default_main_session_without_task(
         self,
         control_plane_client: AsyncClient,
         control_plane_app,
@@ -4073,7 +4073,7 @@ class TestControlPlaneApi:
         assert item["compatibility_flags"] == []
         assert item["reset_recommended"] is False
 
-    async def test_legacy_butler_session_with_worker_profile_pollution_is_marked_for_reset(
+    async def test_legacy_main_session_with_worker_profile_pollution_is_marked_for_reset(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,

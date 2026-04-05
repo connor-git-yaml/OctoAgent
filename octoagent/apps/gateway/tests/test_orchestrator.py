@@ -96,9 +96,9 @@ class _FreshnessLLMService:
         if str(metadata.get("selected_worker_type", "")).strip() == "research":
             content = "Research 结论：深圳当前约 21°C，晴，降水概率约 0%。"
         elif "ResearchHandoff:" in joined:
-            content = "Butler 综合答复：深圳今天大致晴，约 21°C，基本不用担心下雨。"
+            content = "Agent 综合答复：深圳今天大致晴，约 21°C，基本不用担心下雨。"
         else:
-            content = "Butler 常规答复。"
+            content = "Agent 常规答复。"
         return ModelCallResult(
             content=content,
             model_alias=model_alias or "main",
@@ -115,7 +115,7 @@ class _FreshnessLLMService:
 
 class _SingleLoopLLMService:
     supports_single_loop_executor = True
-    supports_butler_decision_phase = True
+    supports_agent_decision_phase = True
     supports_recall_planning_phase = True
 
     def __init__(self) -> None:
@@ -273,7 +273,7 @@ class TestOrchestrator:
         events = await store_group.event_store.get_events_for_task(task_id)
         event_types = [event.type for event in events]
         assert "ORCH_DECISION" in event_types
-        # Feature 064 Phase 1: Butler Direct Execution 路径不经过 Worker 派发，
+        # Feature 064 Phase 1: Main Agent Direct Execution 路径不经过 Worker 派发，
         # 因此不产生 A2A/Worker 事件，但保留 MODEL_CALL 和 ARTIFACT 事件。
         assert "MODEL_CALL_STARTED" in event_types
         assert "MODEL_CALL_COMPLETED" in event_types
@@ -511,7 +511,7 @@ class TestOrchestrator:
         assert created is True
 
         # Feature 064 Phase 1: 使用 parent_task_id 标记为子任务，
-        # 绕过 Butler Direct Execution 路径，确保请求走 Worker Dispatch
+        # 绕过 Main Agent Direct Execution 路径，确保请求走 Worker Dispatch
         # 路径以触发 hop guard 检查。
         result = await orchestrator.dispatch(
             task_id=task_id,
@@ -671,7 +671,7 @@ class TestOrchestrator:
             a2a_conversation_id="conv-active",
             task_id=task_id,
             work_id="work-active",
-            source_agent="agent://butler.main",
+            source_agent="agent://main.agent",
             target_agent="agent://worker.active",
             status=A2AConversationStatus.ACTIVE,
         )
@@ -679,7 +679,7 @@ class TestOrchestrator:
             a2a_conversation_id="conv-waiting",
             task_id=task_id,
             work_id="work-waiting",
-            source_agent="agent://butler.main",
+            source_agent="agent://main.agent",
             target_agent="agent://worker.waiting",
             status=A2AConversationStatus.WAITING_INPUT,
         )
@@ -687,7 +687,7 @@ class TestOrchestrator:
             a2a_conversation_id="conv-completed",
             task_id=task_id,
             work_id="work-completed",
-            source_agent="agent://butler.main",
+            source_agent="agent://main.agent",
             target_agent="agent://worker.completed",
             status=A2AConversationStatus.COMPLETED,
         )
@@ -737,10 +737,10 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            # Feature 064 Phase 1: Butler Direct Execution 路径处理，
-            # worker_id 为 butler.main
-            assert result.worker_id == "butler.main"
-            assert result.summary != "butler_clarification:work_priority_context"
+            # Feature 064 Phase 1: Main Agent Direct Execution 路径处理，
+            # worker_id 为 main.agent
+            assert result.worker_id == "main.agent"
+            assert result.summary != "agent_clarification:work_priority_context"
         finally:
             await store_group.conn.close()
 
@@ -760,16 +760,16 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            # Feature 064 Phase 1: Butler Direct Execution 路径处理天气查询
-            assert result.worker_id == "butler.main"
-            assert result.summary != "butler_clarification:weather_location"
+            # Feature 064 Phase 1: Main Agent Direct Execution 路径处理天气查询
+            assert result.worker_id == "main.agent"
+            assert result.summary != "agent_clarification:weather_location"
 
             events = await store_group.event_store.get_events_for_task(task_id)
             assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 1
         finally:
             await store_group.conn.close()
 
-    async def test_single_loop_executor_bypasses_butler_decision_preflight(
+    async def test_single_loop_executor_bypasses_agent_decision_preflight(
         self,
         tmp_path: Path,
     ) -> None:
@@ -789,20 +789,20 @@ class TestOrchestrator:
 
             result = await orchestrator.dispatch(task_id=task_id, user_text=msg.text)
             assert result.status == WorkerExecutionStatus.SUCCEEDED
-            # Feature 064 Phase 1: Butler Direct Execution 路径处理
-            assert result.worker_id == "butler.main"
+            # Feature 064 Phase 1: Main Agent Direct Execution 路径处理
+            assert result.worker_id == "main.agent"
 
             assert len(llm_service.calls) == 1
             metadata = llm_service.calls[0]["metadata"]
             assert isinstance(metadata, dict)
-            # Butler Direct Execution 设置 butler_execution_mode=direct
-            assert metadata.get("butler_execution_mode") == "direct"
+            # Main Agent Direct Execution 设置 agent_execution_mode=direct
+            assert metadata.get("agent_execution_mode") == "direct"
             assert "decision_phase" not in metadata
 
             artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
             artifact_names = {item.name for item in artifacts}
-            assert "butler-decision-request" not in artifact_names
-            assert "butler-decision-response" not in artifact_names
+            assert "agent-decision-request" not in artifact_names
+            assert "agent-decision-response" not in artifact_names
         finally:
             await store_group.conn.close()
 
@@ -837,7 +837,7 @@ class TestOrchestrator:
             assert isinstance(metadata, dict)
             assert metadata["single_loop_executor"] is True
             assert metadata["selected_worker_type"] == "research"
-            assert metadata["single_loop_executor_mode"] == "butler_research"
+            assert metadata["single_loop_executor_mode"] == "main_research"
             assert "decision_phase" not in metadata
         finally:
             await store_group.conn.close()
@@ -875,7 +875,7 @@ class TestOrchestrator:
             assert metadata["selected_worker_type"] == "research"
             assert metadata["requested_worker_type"] == "research"
             assert metadata["requested_worker_profile_id"] == "singleton:research"
-            assert metadata["single_loop_executor_mode"] == "butler_research"
+            assert metadata["single_loop_executor_mode"] == "main_research"
             assert metadata["requested_worker_type_source"] == "delegation_target_profile_id"
             assert "decision_phase" not in metadata
         finally:
@@ -897,14 +897,14 @@ class TestOrchestrator:
 
             await store_group.agent_context_store.save_agent_runtime(
                 AgentRuntime(
-                    agent_runtime_id="runtime-butler",
+                    agent_runtime_id="runtime-main",
                     role=AgentRuntimeRole.MAIN,
                     status=AgentRuntimeStatus.ACTIVE,
                 )
             )
             agent_session = AgentSession(
                 agent_session_id="agent-session-transcript",
-                agent_runtime_id="runtime-butler",
+                agent_runtime_id="runtime-main",
                 kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 metadata={
                     "recent_transcript": [
@@ -935,13 +935,13 @@ class TestOrchestrator:
                     context_frame_id="frame-transcript",
                     task_id=task_id,
                     session_id="session-transcript",
-                    agent_runtime_id="runtime-butler",
+                    agent_runtime_id="runtime-main",
                     agent_session_id=agent_session.agent_session_id,
                 )
             )
             await store_group.conn.commit()
 
-            block = await orchestrator._build_butler_recent_conversation_block(task_id=task_id)
+            block = await orchestrator._build_main_recent_conversation_block(task_id=task_id)
 
             assert "conversation_source: agent_session_transcript" in block
             assert "今天天气怎么样？" in block

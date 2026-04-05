@@ -98,7 +98,7 @@ BOOTSTRAP_COMPLETED_MARKER = "<!-- COMPLETED -->"
 _BEHAVIOR_SIZE_WARNING_THRESHOLD = 15000
 _BEHAVIOR_TEMPLATE_PACKAGE = "octoagent.core.behavior_templates"
 _BEHAVIOR_TEMPLATE_VARIANTS = {
-    ("IDENTITY.md", False): "IDENTITY.butler.md",
+    ("IDENTITY.md", False): "IDENTITY.main.md",
     ("IDENTITY.md", True): "IDENTITY.worker.md",
 }
 
@@ -111,7 +111,7 @@ _BEHAVIOR_TEMPLATE_VARIANTS = {
 class BehaviorLoadProfile(StrEnum):
     """Agent 角色对应的行为文件加载级别。"""
 
-    FULL = "full"  # Butler：全部 9 个文件
+    FULL = "full"  # 主 Agent：全部 9 个文件
     WORKER = "worker"  # Worker：AGENTS + TOOLS + IDENTITY + PROJECT + KNOWLEDGE
     MINIMAL = "minimal"  # Subagent：AGENTS + TOOLS + IDENTITY + USER
 
@@ -242,7 +242,7 @@ def _detect_legacy_onboarding_completion(project_root: Path) -> OnboardingState:
 
     # 指标 1：检查 IDENTITY.md 是否已被修改
     identity_paths = [
-        root / "behavior" / "agents" / "butler" / "IDENTITY.md",
+        root / "behavior" / "agents" / "main" / "IDENTITY.md",
     ]
     identity_modified = False
     for identity_path in identity_paths:
@@ -327,7 +327,7 @@ def truncate_behavior_content(content: str, budget: int) -> str:
 
 def measure_behavior_total_size(
     project_root: Path,
-    agent_slug: str = "butler",
+    agent_slug: str = "main",
 ) -> dict[str, int]:
     """测量所有行为文件的字符总量。
 
@@ -498,7 +498,7 @@ def project_instructions_dir(project_root: Path, project_slug: str) -> Path:
 def ensure_filesystem_skeleton(
     project_root: Path,
     project_slug: str = "default",
-    agent_slug: str = "butler",
+    agent_slug: str = "main",
 ) -> list[str]:
     """在 clean install 后创建 behavior 目录骨架和最小 scaffold 文件。
 
@@ -562,7 +562,7 @@ def ensure_filesystem_skeleton(
             content = _default_content_for_file(
                 file_id=file_id,
                 is_worker_profile=False,
-                agent_name="Butler",
+                agent_name="Main Agent",
                 project_label="当前项目",
             )
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -702,7 +702,7 @@ def materialize_project_behavior_files(
             content = _default_content_for_file(
                 file_id=file_id,
                 is_worker_profile=False,
-                agent_name="Butler",
+                agent_name="Main Agent",
                 project_label=label,
             )
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1621,7 +1621,7 @@ def resolve_write_path_by_file_id(
     project_root: Path,
     file_id: str,
     *,
-    agent_slug: str = "butler",
+    agent_slug: str = "main",
     project_slug: str = "default",
 ) -> Path:
     """根据 file_id 短名自动解析行为文件的磁盘写入路径。
@@ -1708,7 +1708,7 @@ def read_behavior_file_content(
     project_root: Path,
     file_path: str,
     *,
-    agent_slug: str = "butler",
+    agent_slug: str = "main",
     project_slug: str = "default",
 ) -> tuple[str, bool, int]:
     """读取行为文件内容，不存在时 fallback 到默认模板。
@@ -1730,7 +1730,7 @@ def read_behavior_file_content(
         content = _default_content_for_file(
             file_id=file_id,
             is_worker_profile=False,
-            agent_name="Butler",
+            agent_name="Main Agent",
             project_label="当前项目",
         ).strip()
     except ValueError:

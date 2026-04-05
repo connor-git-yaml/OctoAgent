@@ -143,7 +143,7 @@ class _InlineReplyLLMService:
         return ModelCallResult(
             content=self._content,
             model_alias=resolved_alias,
-            model_name="butler-inline",
+            model_name="agent-inline",
             provider=self._provider,
             duration_ms=1,
             token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
@@ -172,7 +172,7 @@ class OrchestratorPolicyDecision:
 
 @dataclass(frozen=True)
 class _RecentWorkerLaneCandidate:
-    """Butler 最近可复用的 specialist worker lane。"""
+    """主 Agent 最近可复用的 specialist worker lane。"""
 
     worker_type: str
     requested_worker_profile_id: str
@@ -838,7 +838,7 @@ class OrchestratorService:
         self,
         request: OrchestratorRequest,
     ) -> OrchestratorRequest:
-        if not self._is_single_loop_butler_eligible(request):
+        if not self._is_single_loop_main_eligible(request):
             return request
         metadata = dict(request.metadata)
         # 如果 capability pack 已刷新（如 MCP 安装完成），需要重新解析工具列表
@@ -875,7 +875,7 @@ class OrchestratorService:
         selected_tools = list(selection.selected_tools) if selection is not None else []
         route_reason = self._join_route_reason(
             request.route_reason,
-            f"single_loop_executor=butler_{worker_type}",
+            f"single_loop_executor=main_{worker_type}",
         )
         if selection is not None:
             route_reason = self._join_route_reason(
@@ -890,7 +890,7 @@ class OrchestratorService:
         updated_metadata = {
             **metadata,
             "single_loop_executor": True,
-            "single_loop_executor_mode": f"butler_{worker_type}",
+            "single_loop_executor_mode": f"main_{worker_type}",
             "selected_worker_type": worker_type,
             "selected_tools": selected_tools,
             "recommended_tools": recommended_tools,
@@ -898,7 +898,7 @@ class OrchestratorService:
             "tool_selection": (
                 selection.model_dump(mode="json") if selection is not None else {}
             ),
-            "butler_execution_mode": "single_loop",
+            "agent_execution_mode": "single_loop",
             "_pack_revision": pack_rev,
         }
         if selection is not None and selection.effective_tool_universe is not None:
@@ -914,7 +914,7 @@ class OrchestratorService:
             }
         )
 
-    def _is_single_loop_butler_eligible(self, request: OrchestratorRequest) -> bool:
+    def _is_single_loop_main_eligible(self, request: OrchestratorRequest) -> bool:
         if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
             return False
         if request.worker_capability not in {"", "llm_generation"}:
@@ -925,7 +925,7 @@ class OrchestratorService:
         if str(metadata.get("spawned_by", "")).strip():
             return False
         # 用户明确指定了非 singleton 的自定义 Worker profile 时，不走 single loop
-        # Butler 路径，让请求走 Delegation Plane 由 Worker 自己的 persona 处理。
+        # 主 Agent 路径，让请求走 Delegation Plane 由 Worker 自己的 persona 处理。
         # singleton:xxx 格式的内置 profile 仍然允许走 single loop。
         requested_profile_id = resolve_delegation_target_profile_id(metadata)
         if requested_profile_id and not requested_profile_id.startswith("singleton:"):
@@ -1079,7 +1079,7 @@ class OrchestratorService:
         )
 
         # Phase 1 (Feature 064): 跳过 model decision preflight
-        # 天气/位置等规则决策保留，其余直接返回 None -> 进入 Butler Direct Execution
+        # 天气/位置等规则决策保留，其余直接返回 None -> 进入主 Agent Direct Execution
         if decision.mode is AgentDecisionMode.DIRECT_ANSWER:
             return None, {}
         return decision, {}
@@ -1091,7 +1091,7 @@ class OrchestratorService:
         gate_decision: OrchestratorPolicyDecision,
         decision: AgentDecision,
     ) -> WorkerResult:
-        route_reason = f"butler_decision:{decision.mode.value}:{decision.category or 'general'}"
+        route_reason = f"agent_decision:{decision.mode.value}:{decision.category or 'general'}"
         await self._write_orch_decision_event(
             request=request,
             route_reason=route_reason,
@@ -1104,8 +1104,8 @@ class OrchestratorService:
         )
         clarification_metadata = {
             **dict(request.metadata),
-            "final_speaker": "butler",
-            "butler_decision_mode": decision.mode.value,
+            "final_speaker": "main",
+            "agent_decision_mode": decision.mode.value,
             "clarification_category": decision.category,
             "clarification_needed": decision.metadata.get(
                 "clarification_needed",
@@ -1118,7 +1118,7 @@ class OrchestratorService:
                 decision.missing_inputs,
                 ensure_ascii=False,
             ),
-            "butler_boundary_note": decision.user_visible_boundary_note,
+            "agent_boundary_note": decision.user_visible_boundary_note,
             **self._build_decision_trace_metadata(decision),
         }
         await task_service.process_task_with_llm(
@@ -1134,15 +1134,15 @@ class OrchestratorService:
         )
         task_after = await self._stores.task_store.get_task(request.task_id)
         summary_prefix = (
-            "butler_best_effort"
+            "agent_best_effort"
             if decision.mode is AgentDecisionMode.BEST_EFFORT_ANSWER
-            else "butler_clarification"
+            else "agent_clarification"
         )
         return self._agent_worker_result(
             request=request,
             task_status=task_after.status if task_after is not None else TaskStatus.FAILED,
             success_summary=f"{summary_prefix}:{decision.category or 'general'}",
-            dispatch_prefix="butler-clarification",
+            dispatch_prefix="agent-clarification",
         )
 
     async def _dispatch_direct_execution(
@@ -1151,9 +1151,9 @@ class OrchestratorService:
         request: OrchestratorRequest,
         gate_decision: OrchestratorPolicyDecision,
     ) -> WorkerResult:
-        """Butler 直接执行路径：使用主 LLM 直接处理用户请求。
+        """主 Agent 直接执行路径：使用主 LLM 直接处理用户请求。
 
-        Phase 1 (Feature 064): 跳过 Butler Decision Preflight，复用
+        Phase 1 (Feature 064): 跳过主 Agent Decision Preflight，复用
         ``TaskService.process_task_with_llm()`` 的 Event Sourcing 链路，
         与 Worker 执行路径保持一致的事件粒度。
 
@@ -1162,13 +1162,13 @@ class OrchestratorService:
             gate_decision: Policy Gate 评估结果。
 
         Returns:
-            WorkerResult: Butler 直接执行的结果，状态映射与 Worker 路径一致。
+            WorkerResult: 主 Agent 直接执行的结果，状态映射与 Worker 路径一致。
         """
         is_trivial = _is_trivial_direct_answer(request.user_text)
         route_reason = (
-            "butler_direct_execution:trivial"
+            "agent_direct_execution:trivial"
             if is_trivial
-            else "butler_direct_execution:standard"
+            else "agent_direct_execution:standard"
         )
 
         # Phase 2 (Feature 064): 解析工具集，注入 tool_selection 到 metadata
@@ -1198,7 +1198,7 @@ class OrchestratorService:
                     warnings=selection.warnings,
                 ).model_dump(mode="json"),
                 trace_id=request.trace_id,
-                idempotency_key=f"butler-direct-tool-index:{selection.selection_id}",
+                idempotency_key=f"agent-direct-tool-index:{selection.selection_id}",
             )
 
         await self._write_orch_decision_event(
@@ -1207,11 +1207,11 @@ class OrchestratorService:
             gate_decision=gate_decision,
         )
 
-        butler_metadata = {
+        agent_metadata = {
             **dict(request.metadata),
-            "final_speaker": "butler",
-            "butler_execution_mode": "direct",
-            "butler_is_trivial": is_trivial,
+            "final_speaker": "main",
+            "agent_execution_mode": "direct",
+            "agent_is_trivial": is_trivial,
             "selected_tools": selected_tools,
             "tool_selection": (
                 selection.model_dump(mode="json") if selection is not None else {}
@@ -1219,7 +1219,7 @@ class OrchestratorService:
         }
         if selection is not None and selection.effective_tool_universe is not None:
             if selection.effective_tool_universe.profile_id:
-                butler_metadata.setdefault(
+                agent_metadata.setdefault(
                     "agent_profile_id",
                     selection.effective_tool_universe.profile_id,
                 )
@@ -1230,7 +1230,7 @@ class OrchestratorService:
             trace_id=request.trace_id,
         )
 
-        # Butler 直接执行：LLMService.call() 内部自动判断
+        # 主 Agent 直接执行：LLMService.call() 内部自动判断
         # 有 tool_selection → _try_call_with_tools() → SkillRunner 多轮循环
         # 无 tool_selection → FallbackManager 单次调用
         await task_service.process_task_with_llm(
@@ -1239,7 +1239,7 @@ class OrchestratorService:
             llm_service=self._llm_service,
             model_alias=request.model_alias or "main",
             execution_context=None,
-            dispatch_metadata=butler_metadata,
+            dispatch_metadata=agent_metadata,
             worker_capability="llm_generation",
             tool_profile="standard",
             runtime_context=request.runtime_context,
@@ -1251,8 +1251,8 @@ class OrchestratorService:
             task_status=(
                 task_after.status if task_after is not None else TaskStatus.FAILED
             ),
-            success_summary=f"butler_direct:{('trivial' if is_trivial else 'standard')}",
-            dispatch_prefix="butler-direct",
+            success_summary=f"agent_direct:{('trivial' if is_trivial else 'standard')}",
+            dispatch_prefix="agent-direct",
         )
 
     async def _dispatch_owner_self_worker_execution(
@@ -1425,8 +1425,8 @@ class OrchestratorService:
         if str(metadata.get("spawned_by", "")).strip():
             return False
         # 如果用户明确指定了非 singleton 的自定义 Worker profile，
-        # 即使 worker_type 是 general，也应该路由到该 Worker 而非被 Butler 拦截。
-        # singleton:xxx 格式的内置 delegation target 仍然走 Butler 决策路径。
+        # 即使 worker_type 是 general，也应该路由到该 Worker 而非被主 Agent 拦截。
+        # singleton:xxx 格式的内置 delegation target 仍然走主 Agent 决策路径。
         requested_profile_id = resolve_delegation_target_profile_id(metadata)
         if requested_profile_id and not requested_profile_id.startswith("singleton:"):
             return False
@@ -1434,11 +1434,11 @@ class OrchestratorService:
         return not requested_worker_type or requested_worker_type == "general"
 
     def _should_direct_execute(self, request: OrchestratorRequest) -> bool:
-        """判断请求是否应走 Butler Direct Execution 路径。
+        """判断请求是否应走主 Agent Direct Execution 路径。
 
-        Phase 1 (Feature 064): Butler 直接执行条件：
+        Phase 1 (Feature 064): 主 Agent 直接执行条件：
         1. LLMService 支持 tool calling（supports_single_loop_executor）
-        2. 请求满足 Butler 决策资格（非子任务、非 spawned 等）
+        2. 请求满足主 Agent 决策资格（非子任务、非 spawned 等）
         """
         if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
             return False
@@ -1491,7 +1491,7 @@ class OrchestratorService:
         *,
         task_id: str,
     ) -> _RecentWorkerLaneCandidate | None:
-        session_state = await self._load_butler_session_state(task_id=task_id)
+        session_state = await self._load_main_session_state(task_id=task_id)
         recent_task_ids: list[str] = []
         if session_state is not None:
             for ref_task_id in [*session_state.recent_turn_refs, task_id]:
@@ -1510,12 +1510,12 @@ class OrchestratorService:
                 requested_profile_id = str(work.requested_worker_profile_id or "").strip()
                 topic = (
                     str(work.metadata.get("delegate_continuity_topic", "")).strip()
-                    or str(work.metadata.get("butler_decision_category", "")).strip()
-                    or str(work.metadata.get("butler_decision_tool_intent", "")).strip()
+                    or str(work.metadata.get("agent_decision_category", "")).strip()
+                    or str(work.metadata.get("agent_decision_tool_intent", "")).strip()
                     or work.title.strip()
                 )
                 summary = (
-                    str(work.metadata.get("butler_delegate_objective", "")).strip()
+                    str(work.metadata.get("agent_delegate_objective", "")).strip()
                     or str(work.metadata.get("result_summary", "")).strip()
                     or work.title.strip()
                 )
@@ -1538,19 +1538,19 @@ class OrchestratorService:
         trace_metadata: dict[str, str] = {}
         decision_source = str(metadata.get("decision_source", "")).strip()
         if decision_source:
-            trace_metadata["butler_decision_source"] = decision_source
+            trace_metadata["agent_decision_source"] = decision_source
         resolution_status = str(metadata.get("decision_model_resolution_status", "")).strip()
         if resolution_status:
-            trace_metadata["butler_decision_model_resolution_status"] = resolution_status
+            trace_metadata["agent_decision_model_resolution_status"] = resolution_status
         fallback_reason = str(metadata.get("decision_fallback_reason", "")).strip()
         if fallback_reason:
-            trace_metadata["butler_decision_fallback_reason"] = fallback_reason
+            trace_metadata["agent_decision_fallback_reason"] = fallback_reason
         request_ref = str(metadata.get("decision_request_artifact_ref", "")).strip()
         if request_ref:
-            trace_metadata["butler_decision_request_artifact_ref"] = request_ref
+            trace_metadata["agent_decision_request_artifact_ref"] = request_ref
         response_ref = str(metadata.get("decision_response_artifact_ref", "")).strip()
         if response_ref:
-            trace_metadata["butler_decision_response_artifact_ref"] = response_ref
+            trace_metadata["agent_decision_response_artifact_ref"] = response_ref
         return trace_metadata
 
     @staticmethod
@@ -1651,7 +1651,7 @@ class OrchestratorService:
         return WorkerResult(
             dispatch_id=f"graph:{pipeline_id}",
             task_id=request.task_id,
-            worker_id="butler.graph_pipeline",
+            worker_id="main.graph_pipeline",
             status=WorkerExecutionStatus.SUCCEEDED,
             retryable=False,
             summary=f"pipeline_started:{pipeline_id}",
@@ -1672,7 +1672,7 @@ class OrchestratorService:
         requested_worker_profile_id: str,
         recent_lane: _RecentWorkerLaneCandidate | None,
     ) -> str:
-        recent_conversation = await self._build_butler_recent_conversation_block(
+        recent_conversation = await self._build_main_recent_conversation_block(
             task_id=request.task_id
         )
         worker_label = worker_type
@@ -1700,7 +1700,7 @@ class OrchestratorService:
         )
         objective = str(decision.delegate_objective).strip() or request.user_text.strip()
         return (
-            f"ButlerDelegation for {worker_label}\n"
+            f"MainAgentDelegation for {worker_label}\n"
             "目标说明：\n"
             f"- objective: {objective}\n"
             f"- rationale: {decision.rationale or 'N/A'}\n"
@@ -1716,26 +1716,26 @@ class OrchestratorService:
             f"- requested_tool_profile: {request.tool_profile or 'standard'}\n"
             f"- selected_tools_json: {allowed_tools}\n"
             "返回契约：\n"
-            "- 先给可直接给 Butler 收口的结论摘要。\n"
+            "- 先给可直接给主 Agent 收口的结论摘要。\n"
             "- 如果调用了外部工具，说明来源、关键参数和限制。\n"
-            "- 如果仍缺关键事实，明确告诉 Butler 还差什么。\n"
+            "- 如果仍缺关键事实，明确告诉主 Agent 还差什么。\n"
             f"{recent_conversation}"
         )
 
-    def _butler_target_kind_for_worker_type(self, worker_type: str) -> str:
+    def _main_target_kind_for_worker_type(self, worker_type: str) -> str:
         del worker_type
         if self._delegation_plane is None:
             return DelegationTargetKind.WORKER.value
         return "subagent"
 
-    async def _build_butler_recent_conversation_block(self, *, task_id: str) -> str:
+    async def _build_main_recent_conversation_block(self, *, task_id: str) -> str:
         recent_user_messages: list[str] = []
         recent_tool_lines: list[str] = []
         session_rolling_summary = ""
         latest_model_summary = ""
         latest_model_preview = ""
-        session_state = await self._load_butler_session_state(task_id=task_id)
-        agent_session = await self._load_butler_agent_session(task_id=task_id)
+        session_state = await self._load_main_session_state(task_id=task_id)
+        agent_session = await self._load_main_agent_session(task_id=task_id)
         recent_task_ids: list[str] = []
         conversation_source = "task_event_fallback"
         if session_state is not None:
@@ -1797,7 +1797,7 @@ class OrchestratorService:
                 latest_model_preview,
             ) = await self._reconstruct_recent_conversation_from_tasks(recent_task_ids)
             if agent_session is not None and reconstructed_transcript:
-                await self._persist_butler_session_transcript(
+                await self._persist_main_session_transcript(
                     session=agent_session,
                     transcript_entries=reconstructed_transcript,
                     latest_model_summary=latest_model_summary,
@@ -1819,7 +1819,7 @@ class OrchestratorService:
             f"latest_model_reply_preview: {latest_model_preview or 'N/A'}"
         )
 
-    async def _load_butler_session_state(
+    async def _load_main_session_state(
         self,
         *,
         task_id: str,
@@ -1835,7 +1835,7 @@ class OrchestratorService:
             return None
         return await self._stores.agent_context_store.get_session_context(session_id)
 
-    async def _load_butler_agent_session(self, *, task_id: str) -> AgentSession | None:
+    async def _load_main_agent_session(self, *, task_id: str) -> AgentSession | None:
         frames = await self._stores.agent_context_store.list_context_frames(
             task_id=task_id,
             limit=1,
@@ -1871,7 +1871,7 @@ class OrchestratorService:
             )
         return normalized[-_dynamic_transcript_limit():]
 
-    async def _persist_butler_session_transcript(
+    async def _persist_main_session_transcript(
         self,
         *,
         session: AgentSession,
@@ -1970,14 +1970,14 @@ class OrchestratorService:
         *,
         request: OrchestratorRequest,
         task_status: TaskStatus,
-        success_summary: str = "butler_inline_completed",
-        dispatch_prefix: str = "butler-inline",
+        success_summary: str = "agent_inline_completed",
+        dispatch_prefix: str = "agent-inline",
     ) -> WorkerResult:
         if task_status == TaskStatus.SUCCEEDED:
             return WorkerResult(
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
-                worker_id="butler.main",
+                worker_id="main.agent",
                 status=WorkerExecutionStatus.SUCCEEDED,
                 retryable=False,
                 summary=success_summary,
@@ -1988,7 +1988,7 @@ class OrchestratorService:
             return WorkerResult(
                 dispatch_id=f"{dispatch_prefix}:{request.task_id}",
                 task_id=request.task_id,
-                worker_id="butler.main",
+                worker_id="main.agent",
                 status=WorkerExecutionStatus.CANCELLED,
                 retryable=False,
                 summary=f"{dispatch_prefix}_cancelled",
@@ -1998,11 +1998,11 @@ class OrchestratorService:
         return WorkerResult(
             dispatch_id=f"{dispatch_prefix}:{request.task_id}",
             task_id=request.task_id,
-            worker_id="butler.main",
+            worker_id="main.agent",
             status=WorkerExecutionStatus.FAILED,
             retryable=True,
             summary=f"{dispatch_prefix}_terminal:{task_status.value}",
-            error_type="ButlerInlineExecutionFailed",
+            error_type="AgentInlineExecutionFailed",
             error_message=f"task status={task_status.value}",
             backend="inline",
             tool_profile="minimal",
@@ -2295,7 +2295,7 @@ class OrchestratorService:
         )
         source_runtime = await self._ensure_a2a_agent_runtime(
             agent_runtime_id=source_agent_runtime_id,
-            role=AgentRuntimeRole.BUTLER,
+            role=AgentRuntimeRole.MAIN,
             project_id=project_id,
             agent_profile_id=source_agent_profile_id,
             worker_profile_id="",
@@ -2314,7 +2314,7 @@ class OrchestratorService:
         source_session = await self._ensure_a2a_agent_session(
             agent_session_id=source_agent_session_id,
             agent_runtime=source_runtime,
-            kind=AgentSessionKind.BUTLER_MAIN,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
             project_id=project_id,
             surface=(
                 runtime_context.surface
@@ -2358,7 +2358,7 @@ class OrchestratorService:
             a2a_conversation_id=conversation_id,
             parent_agent_session_id=source_session.agent_session_id,
         )
-        source_agent_uri = self._agent_uri("butler.main")
+        source_agent_uri = self._agent_uri("main.agent")
         target_agent_uri = self._agent_uri(worker_id or f"worker.{envelope.worker_capability}")
         existing_conversation = await self._stores.a2a_store.get_conversation(conversation_id)
         conversation = (
@@ -3007,8 +3007,8 @@ class OrchestratorService:
             if worker_profile_id
             else None
         )
-        if role is AgentRuntimeRole.BUTLER:
-            name = agent_profile.name if agent_profile is not None else "Butler"
+        if role is AgentRuntimeRole.MAIN:
+            name = agent_profile.name if agent_profile is not None else "Main Agent"
             persona_summary = (
                 agent_profile.persona_summary if agent_profile is not None else "用户主会话协调者。"
             )
@@ -3065,12 +3065,12 @@ class OrchestratorService:
         existing = await self._stores.agent_context_store.get_agent_session(session_id)
         if existing is not None:
             return existing
-        # BUTLER_MAIN session 对 project 唯一：优先复用已有的活跃 session，
+        # MAIN_BOOTSTRAP session 对 project 唯一：优先复用已有的活跃 session，
         # 避免重复创建导致 UNIQUE constraint 冲突
-        if kind is AgentSessionKind.BUTLER_MAIN and project_id:
+        if kind is AgentSessionKind.MAIN_BOOTSTRAP and project_id:
             active_for_project = (
                 await self._stores.agent_context_store.get_active_session_for_project(
-                    project_id, kind=AgentSessionKind.BUTLER_MAIN
+                    project_id, kind=AgentSessionKind.MAIN_BOOTSTRAP
                 )
             )
             if active_for_project is not None:
