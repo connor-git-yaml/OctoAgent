@@ -1,103 +1,52 @@
-"""Feature 027: Memory Console / Vault 授权桥接服务。"""
+"""Feature 027: Memory Console / Vault 授权桥接服务（Facade）。
+
+本模块是 MemoryConsoleService 的外观层，将实际逻辑委托给四个子服务：
+- MemoryConsoleView — 只读查询（overview / subject history / browse / proposal audit）
+- MemoryVaultBridge — Vault 授权（查看 / 申请 / 审批 / 检索）
+- MemoryExportService — 导出/导入（inspect export / verify restore）
+- MemoryMaintenanceBridge — 维护操作（maintenance / consolidate）
+
+共享基础设施（context 解析、权限判定、projection 构造）位于 _memory_console_base.py。
+"""
 
 from __future__ import annotations
 
-import json
-import zipfile
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from octoagent.core.models import (
-    ControlPlaneCapability,
-    ControlPlaneDegradedState,
     MemoryConsoleDocument,
-    MemoryConsoleFilter,
-    MemoryConsoleSummary,
     MemoryProposalAuditDocument,
-    MemoryProposalAuditItem,
-    MemoryProposalSummary,
-    MemoryRecordProjection,
     MemorySubjectHistoryDocument,
-    Project,
-    ProjectBindingType,
-    VaultAccessGrantItem,
-    VaultAccessRequestItem,
     VaultAuthorizationDocument,
-    VaultRetrievalAuditItem,
 )
-import structlog
 from octoagent.memory import (
-    SENSITIVE_PARTITIONS,
-    DerivedMemoryQuery,
-    EvidenceRef,
     MemoryBackendStatus,
     MemoryLayer,
-    MemoryMaintenanceCommand,
     MemoryMaintenanceCommandKind,
     MemoryMaintenanceRun,
     MemoryPartition,
-    MemoryService,
     ProposalStatus,
-    SqliteMemoryStore,
-    VaultAccessDecision,
-    VaultAccessGrantStatus,
-    VaultAccessRequestStatus,
-    WriteAction,
     init_memory_db,
 )
-from ulid import ULID
 
-from .backup_service import resolve_project_root
-from .config_wizard import load_config
-from .memory_backend_resolver import MemoryBackendResolver
-from .memory_retrieval_profile import load_memory_retrieval_profile
-
-_log = structlog.get_logger()
-
-_MEMORY_BINDING_TYPES = {
-    ProjectBindingType.SCOPE,
-    ProjectBindingType.MEMORY_SCOPE,
-    ProjectBindingType.IMPORT_SCOPE,
-}
-
-
-@dataclass(slots=True)
-class _BoundScope:
-    scope_id: str
-    binding_type: ProjectBindingType
-
-
-@dataclass(slots=True)
-class _MemoryContext:
-    project: Project
-    scope_bindings: dict[str, _BoundScope]
-    selected_scope_ids: list[str]
-    warnings: list[str]
-    blocking_issues: list[str]
-
-
-@dataclass(slots=True)
-class MemoryPermissionDecision:
-    allowed: bool
-    reason_code: str
-    message: str
-    project_id: str = ""
-    scope_id: str = ""
-
-
-class MemoryConsoleError(RuntimeError):
-    """Memory Console 结构化错误。"""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
+# 从 base 模块重新导出，保持外部 import 兼容
+from ._memory_console_base import (  # noqa: F401
+    MemoryConsoleBase,
+    MemoryConsoleError,
+    MemoryPermissionDecision,
+)
+from .memory_console_view import MemoryConsoleView
+from .memory_export_service import MemoryExportService
+from .memory_maintenance_bridge import MemoryMaintenanceBridge
+from .memory_vault_bridge import MemoryVaultBridge
 
 
 class MemoryConsoleService:
-    """基于 Project 绑定产出 Memory Console 文档与动作结果。"""
+    """基于 Project 绑定产出 Memory Console 文档与动作结果。
+
+    Facade 层——所有公共方法签名与旧实现完全一致，委托给对应的子服务。
+    """
 
     def __init__(
         self,
@@ -107,28 +56,22 @@ class MemoryConsoleService:
         llm_service=None,
         consolidation_service=None,
     ) -> None:
-        self._project_root = resolve_project_root(project_root).resolve()
-        self._stores = store_group
-        self._memory_store = SqliteMemoryStore(store_group.conn)
-        self._memory = MemoryService(store_group.conn, store=self._memory_store)
-        self._backend_resolver = MemoryBackendResolver(
-            self._project_root,
-            store_group=store_group,
+        self._base = MemoryConsoleBase(project_root, store_group=store_group)
+        self._view = MemoryConsoleView(self._base)
+        self._vault = MemoryVaultBridge(self._base)
+        self._export = MemoryExportService(self._base)
+        self._maintenance = MemoryMaintenanceBridge(
+            self._base,
+            llm_service=llm_service,
+            consolidation_service=consolidation_service,
         )
-        self._llm_service = llm_service
-        # Feature 065: ConsolidationService 注入（可选，为 None 时退化为旧路径报错）
-        if consolidation_service is not None:
-            self._consolidation_service = consolidation_service
-        else:
-            from .consolidation_service import ConsolidationService
-            self._consolidation_service = ConsolidationService(
-                memory_store=self._memory_store,
-                llm_service=llm_service,
-                project_root=self._project_root,
-            )
 
     async def ensure_ready(self) -> None:
-        await init_memory_db(self._stores.conn)
+        await init_memory_db(self._base._stores.conn)
+
+    # ------------------------------------------------------------------
+    # 只读查询（委托 MemoryConsoleView）
+    # ------------------------------------------------------------------
 
     async def get_backend_status(
         self,
@@ -136,11 +79,11 @@ class MemoryConsoleService:
         project_id: str = "",
     ) -> MemoryBackendStatus:
         """返回底层 memory backend 状态。"""
-        context = await self._resolve_context(
+        context = await self._base.resolve_context(
             active_project_id=project_id or "",
             project_id=project_id or "",
         )
-        memory = await self._memory_service_for_context(context)
+        memory = await self._base.memory_service_for_context(context)
         return await memory.get_backend_status()
 
     async def get_memory_console(
@@ -189,167 +132,6 @@ class MemoryConsoleService:
             scope_id=scope_id or "",
         )
 
-    async def browse_memory(
-        self,
-        *,
-        project_id: str = "",
-        scope_id: str = "",
-        prefix: str = "",
-        partition: str = "",
-        group_by: str = "partition",
-        offset: int = 0,
-        limit: int = 20,
-    ) -> dict[str, Any]:
-        """浏览 SoR 记忆目录——返回分组统计和条目摘要。"""
-        from octoagent.memory import BrowseResult
-
-        context = await self._resolve_context(
-            active_project_id=project_id or "",
-            project_id=project_id or "",
-            scope_id=scope_id or "",
-        )
-        if context.blocking_issues:
-            return BrowseResult().model_dump(mode="json")
-
-        # 限制 limit
-        limit = max(1, min(limit, 100))
-
-        # 合并所有 scope 的 browse 结果
-        from octoagent.memory import BrowseGroup
-
-        merged_groups: dict[str, BrowseGroup] = {}
-        total = 0
-        has_more = False
-
-        for sid in context.selected_scope_ids:
-            result = await self._memory_store.browse_sor(
-                sid,
-                prefix=prefix,
-                partition=partition,
-                status="current",
-                group_by=group_by,
-                offset=offset,
-                limit=limit,
-            )
-            total += result.total_count
-            if result.has_more:
-                has_more = True
-            for g in result.groups:
-                if g.key in merged_groups:
-                    existing = merged_groups[g.key]
-                    merged_groups[g.key] = BrowseGroup(
-                        key=g.key,
-                        count=existing.count + g.count,
-                        items=existing.items + g.items,
-                        latest_updated_at=(
-                            max(existing.latest_updated_at, g.latest_updated_at)
-                            if existing.latest_updated_at and g.latest_updated_at
-                            else existing.latest_updated_at or g.latest_updated_at
-                        ),
-                    )
-                else:
-                    merged_groups[g.key] = g
-
-        final = BrowseResult(
-            groups=list(merged_groups.values()),
-            total_count=total,
-            has_more=has_more,
-            offset=offset,
-            limit=limit,
-        )
-        return final.model_dump(mode="json")
-
-    async def run_maintenance(
-        self,
-        *,
-        kind: MemoryMaintenanceCommandKind,
-        project_id: str = "",
-        scope_id: str = "",
-        partition: MemoryPartition | None = None,
-        reason: str = "",
-        summary: str = "",
-        requested_by: str = "",
-        evidence_refs=None,
-        metadata: dict[str, Any] | None = None,
-    ) -> MemoryMaintenanceRun:
-        """执行 project 绑定后的 memory maintenance。"""
-
-        context = await self._resolve_context(
-            active_project_id=project_id or "",
-            project_id=project_id or "",
-            scope_id=scope_id,
-        )
-        memory = await self._memory_service_for_context(context)
-        resolved_scope_id = scope_id or (
-            context.selected_scope_ids[0] if context.selected_scope_ids else ""
-        )
-        return await memory.run_memory_maintenance(
-            MemoryMaintenanceCommand(
-                command_id=str(ULID()),
-                kind=kind,
-                scope_id=resolved_scope_id,
-                partition=partition,
-                reason=reason,
-                requested_by=requested_by,
-                summary=summary,
-                evidence_refs=list(evidence_refs or []),
-                metadata=metadata or {},
-            )
-        )
-
-    # ------------------------------------------------------------------
-    # CONSOLIDATE: 委托 ConsolidationService（Feature 065）
-    # ------------------------------------------------------------------
-
-    async def run_consolidate(
-        self,
-        *,
-        project_id: str = "",
-    ) -> dict[str, Any]:
-        """使用 LLM 将待整理 fragment 整合为 SoR 现行事实。
-
-        委托 ConsolidationService.consolidate_all_pending 执行实际逻辑。
-
-        Returns:
-            包含 consolidated_count, skipped_count, errors 等统计信息的字典。
-        """
-        if self._llm_service is None:
-            raise MemoryConsoleError(
-                "CONSOLIDATE_NO_LLM",
-                "记忆整理需要 LLM 服务，但当前未配置。请在 Settings 中配置模型。",
-            )
-
-        # 1. 解析 context 和 scope
-        context = await self._resolve_context(
-            active_project_id=project_id or "",
-            project_id=project_id or "",
-        )
-        if not context.selected_scope_ids:
-            return {"consolidated_count": 0, "skipped_count": 0, "errors": [], "message": "没有可用的 scope"}
-
-        memory = await self._memory_service_for_context(context)
-
-        # 2. 解析模型别名
-        config = load_config(self._project_root)
-        model_alias = (config.memory.reasoning_model_alias if config else "") or "main"
-
-        # 3. 委托 ConsolidationService 逐 scope 处理
-        result = await self._consolidation_service.consolidate_all_pending(
-            memory=memory,
-            scope_ids=context.selected_scope_ids,
-            model_alias=model_alias,
-        )
-
-        return {
-            "consolidated_count": result.total_consolidated,
-            "skipped_count": result.total_skipped,
-            "errors": result.all_errors,
-            "model_alias": model_alias,
-            "message": f"已整理 {result.total_consolidated} 条事实"
-            if result.total_consolidated
-            else "没有可提取的新事实",
-        }
-
     async def get_overview(
         self,
         *,
@@ -367,203 +149,20 @@ class MemoryConsoleService:
         updated_after: str = "",
         updated_before: str = "",
     ) -> MemoryConsoleDocument:
-        context = await self._resolve_context(
+        return await self._view.get_overview(
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
-        )
-        memory = await self._memory_service_for_context(context)
-        backend_status = await memory.get_backend_status()
-        retrieval_profile = load_memory_retrieval_profile(
-            self._project_root,
-            backend_status=backend_status,
-        )
-        records: list[MemoryRecordProjection] = []
-        summary = MemoryConsoleSummary(scope_count=len(context.selected_scope_ids))
-        for scope in context.selected_scope_ids:
-            bound = context.scope_bindings.get(scope)
-            if layer in {"", "fragment"}:
-                fragments = await self._memory_store.list_fragments(
-                    scope,
-                    query=query or None,
-                    limit=limit,
-                )
-                for fragment in fragments:
-                    if partition and fragment.partition.value != partition:
-                        continue
-                    records.append(
-                        self._fragment_projection(
-                            fragment=fragment,
-                            project_id=context.project.project_id,
-
-                            retrieval_backend=backend_status.active_backend,
-                        )
-                    )
-                    summary.fragment_count += 1
-                    if not fragment.metadata.get("consolidated_at"):
-                        summary.pending_consolidation_count += 1
-            if layer in {"", "sor"}:
-                sor_records = await self._memory_store.search_sor(
-                    scope,
-                    query=query or None,
-                    include_history=include_history,
-                    limit=limit,
-                    partition=partition,
-                    status=status,
-                    derived_type=derived_type,
-                    updated_after=updated_after,
-                    updated_before=updated_before,
-                )
-                for sor in sor_records:
-                    if partition and sor.partition.value != partition:
-                        continue
-                    if sor.status == "current":
-                        summary.sor_current_count += 1
-                    else:
-                        summary.sor_history_count += 1
-                    records.append(
-                        self._sor_projection(
-                            sor=sor,
-                            project_id=context.project.project_id,
-
-                            retrieval_backend=backend_status.active_backend,
-                        )
-                    )
-                # 用独立 COUNT 查询获取准确的用户可读 SoR 数量（不受 limit 截断）
-                summary.sor_readable_count += await self._memory_store.count_sor_readable(scope)
-            if include_vault_refs and layer in {"", "vault"}:
-                vault_records = await self._memory_store.search_vault(
-                    scope,
-                    query=query or None,
-                    limit=limit,
-                )
-                for vault in vault_records:
-                    if partition and vault.partition.value != partition:
-                        continue
-                    summary.vault_ref_count += 1
-                    records.append(
-                        self._vault_projection(
-                            vault=vault,
-                            project_id=context.project.project_id,
-
-                            retrieval_backend=backend_status.active_backend,
-                        )
-                    )
-            if layer in {"", "derived"}:
-                derived_projection = await memory.list_derived_memory(
-                    DerivedMemoryQuery(
-                        scope_id=scope,
-                        partition=MemoryPartition(partition) if partition else None,
-                        limit=limit,
-                    )
-                )
-                for derived in derived_projection.items:
-                    if query and not self._derived_matches_query(derived, query):
-                        continue
-                    records.append(
-                        self._derived_projection(
-                            derived=derived,
-                            project_id=context.project.project_id,
-
-                            retrieval_backend=backend_status.active_backend,
-                        )
-                    )
-
-        proposals = await memory.list_proposals(
-            scope_ids=context.selected_scope_ids,
+            partition=partition,
+            layer=layer,
+            query=query,
+            include_history=include_history,
+            include_vault_refs=include_vault_refs,
             limit=limit,
-        )
-        summary.proposal_count = len(proposals)
-        summary.pending_replay_count = backend_status.pending_replay_count
-        # 从 AutomationScheduler 获取下次 consolidate 执行时间
-        try:
-            consolidate_job = self._stores.automation_store.get_job("system:memory-consolidate")
-            if consolidate_job and consolidate_job.next_run_at:
-                summary.next_consolidation_at = consolidate_job.next_run_at.isoformat()
-        except Exception:
-            pass  # scheduler 不可用时静默
-        records.sort(key=self._projection_sort_key, reverse=True)
-        records = records[:limit]
-        available_partitions = sorted({item.partition for item in records})
-        available_layers = sorted({item.layer for item in records})
-        warnings = list(context.warnings)
-        status = "ready" if not context.blocking_issues else "degraded"
-        if backend_status.state.value != "healthy":
-            warnings.append(
-                backend_status.message
-                or f"memory backend 当前状态为 {backend_status.state.value}"
-            )
-            status = "degraded"
-        warnings.extend(context.blocking_issues)
-        return MemoryConsoleDocument(
+            derived_type=derived_type,
             status=status,
-            degraded=ControlPlaneDegradedState(
-                is_degraded=bool(
-                    context.warnings
-                    or context.blocking_issues
-                    or backend_status.state.value != "healthy"
-                ),
-                reasons=(
-                    context.blocking_issues
-                    or context.warnings
-                    or (
-                        [backend_status.state.value]
-                        if backend_status.state.value != "healthy"
-                        else []
-                    )
-                ),
-                unavailable_sections=[],
-            ),
-            warnings=warnings,
-            active_project_id=context.project.project_id,
-
-            backend_id=backend_status.backend_id,
-            retrieval_backend=backend_status.active_backend,
-            backend_state=backend_status.state.value,
-            index_health=self._backend_index_health(backend_status),
-            retrieval_profile=retrieval_profile,
-            filters=MemoryConsoleFilter(
-                project_id=context.project.project_id,
-
-                scope_id=scope_id,
-                partition=partition,
-                layer=layer,
-                query=query,
-                include_history=include_history,
-                include_vault_refs=include_vault_refs,
-                limit=limit,
-                derived_type=derived_type,
-                status=status,
-                updated_after=updated_after,
-                updated_before=updated_before,
-            ),
-            summary=summary,
-            records=records,
-            available_scopes=context.selected_scope_ids,
-            available_partitions=available_partitions,
-            available_layers=available_layers or ["fragment", "sor", "vault", "derived"],
-            advanced_refs={
-                "backend_diagnostics": "/api/control/resources/diagnostics",
-                "memory_console": "/api/control/resources/memory",
-                "maintenance_actions": "/api/control/actions",
-            },
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="memory.query",
-                    label="查询 Memory",
-                    action_id="memory.query",
-                ),
-                ControlPlaneCapability(
-                    capability_id="memory.export.inspect",
-                    label="检查导出范围",
-                    action_id="memory.export.inspect",
-                ),
-            ],
-            refs={
-                "subject_history": "/api/control/resources/memory-subjects/{subject_key}",
-                "proposal_audit": "/api/control/resources/memory-proposals",
-                "vault_authorization": "/api/control/resources/vault-authorization",
-            },
+            updated_after=updated_after,
+            updated_before=updated_before,
         )
 
     async def get_subject_history(
@@ -574,57 +173,32 @@ class MemoryConsoleService:
         project_id: str = "",
         scope_id: str = "",
     ) -> MemorySubjectHistoryDocument:
-        context = await self._resolve_context(
+        return await self._view.get_subject_history(
+            subject_key=subject_key,
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
         )
-        memory = await self._memory_service_for_context(context)
-        backend_status = await memory.get_backend_status()
-        history: list[MemoryRecordProjection] = []
-        current_record: MemoryRecordProjection | None = None
-        warnings = list(context.warnings)
-        latest_proposal_refs: list[str] = []
-        for scope in context.selected_scope_ids:
-            bound = context.scope_bindings.get(scope)
-            sor_history = await self._memory_store.list_sor_history(scope, subject_key)
-            for sor in sor_history:
-                projection = self._sor_projection(
-                    sor=sor,
-                    project_id=context.project.project_id,
-                    retrieval_backend=backend_status.active_backend,
-                )
-                history.append(projection)
-                if sor.status == "current" and current_record is None:
-                    current_record = projection
-                latest_proposal_refs.extend(projection.proposal_refs)
-        history.sort(key=self._projection_sort_key, reverse=True)
-        if len({item.scope_id for item in history}) > 1:
-            warnings.append("subject_key 命中了多个 scope，已合并显示历史。")
-        return MemorySubjectHistoryDocument(
-            resource_id=f"memory-subject:{subject_key}",
-            active_project_id=context.project.project_id,
 
-            retrieval_backend=backend_status.active_backend,
-            backend_state=backend_status.state.value,
-            index_health=self._backend_index_health(backend_status),
+    async def browse_memory(
+        self,
+        *,
+        project_id: str = "",
+        scope_id: str = "",
+        prefix: str = "",
+        partition: str = "",
+        group_by: str = "partition",
+        offset: int = 0,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return await self._view.browse_memory(
+            project_id=project_id,
             scope_id=scope_id,
-            subject_key=subject_key,
-            current_record=current_record,
-            history=history,
-            latest_proposal_refs=sorted(set(latest_proposal_refs)),
-            warnings=warnings + context.blocking_issues,
-            degraded=ControlPlaneDegradedState(
-                is_degraded=bool(warnings or context.blocking_issues),
-                reasons=warnings + context.blocking_issues,
-            ),
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="memory.subject.inspect",
-                    label="查看 Subject 历史",
-                    action_id="memory.subject.inspect",
-                )
-            ],
+            prefix=prefix,
+            partition=partition,
+            group_by=group_by,
+            offset=offset,
+            limit=limit,
         )
 
     async def get_proposal_audit(
@@ -637,64 +211,18 @@ class MemoryConsoleService:
         source: str | None = None,
         limit: int = 50,
     ) -> MemoryProposalAuditDocument:
-        context = await self._resolve_context(
+        return await self._view.get_proposal_audit(
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
-        )
-        memory = await self._memory_service_for_context(context)
-        backend_status = await memory.get_backend_status()
-        statuses = [status] if status else None
-        proposals = await memory.list_proposals(
-            scope_ids=context.selected_scope_ids,
-            statuses=statuses,
-            source=source or None,
+            status=status,
+            source=source,
             limit=limit,
         )
-        summary = MemoryProposalSummary()
-        items: list[MemoryProposalAuditItem] = []
-        for proposal in proposals:
-            setattr(summary, proposal.status.value, getattr(summary, proposal.status.value) + 1)
-            items.append(
-                MemoryProposalAuditItem(
-                    proposal_id=proposal.proposal_id,
-                    scope_id=proposal.scope_id,
-                    partition=proposal.partition.value,
-                    action=proposal.action.value,
-                    subject_key=proposal.subject_key or "",
-                    status=proposal.status.value,
-                    confidence=proposal.confidence,
-                    rationale=proposal.rationale,
-                    is_sensitive=proposal.is_sensitive,
-                    evidence_refs=[
-                        item.model_dump(mode="json") for item in proposal.evidence_refs
-                    ],
-                    created_at=proposal.created_at,
-                    validated_at=proposal.validated_at,
-                    committed_at=proposal.committed_at,
-                    metadata=proposal.metadata,
-                )
-            )
-        return MemoryProposalAuditDocument(
-            active_project_id=context.project.project_id,
 
-            retrieval_backend=backend_status.active_backend,
-            backend_state=backend_status.state.value,
-            summary=summary,
-            items=items,
-            warnings=context.warnings + context.blocking_issues,
-            degraded=ControlPlaneDegradedState(
-                is_degraded=bool(context.warnings or context.blocking_issues),
-                reasons=context.warnings + context.blocking_issues,
-            ),
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="memory.proposal.inspect",
-                    label="查看 WriteProposal 审计",
-                    action_id="memory.proposal.inspect",
-                )
-            ],
-        )
+    # ------------------------------------------------------------------
+    # Vault 授权（委托 MemoryVaultBridge）
+    # ------------------------------------------------------------------
 
     async def get_vault_authorization(
         self,
@@ -704,69 +232,11 @@ class MemoryConsoleService:
         scope_id: str = "",
         subject_key: str = "",
     ) -> VaultAuthorizationDocument:
-        context = await self._resolve_context(
+        return await self._vault.get_vault_authorization(
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
-        )
-        memory = await self._memory_service_for_context(context)
-        backend_status = await memory.get_backend_status()
-        requests = await memory.list_vault_access_requests(
-            project_id=context.project.project_id,
-
-            scope_ids=context.selected_scope_ids,
-            subject_key=subject_key or None,
-            limit=50,
-        )
-        grants = await memory.list_vault_access_grants(
-            project_id=context.project.project_id,
-
-            scope_ids=context.selected_scope_ids,
-            subject_key=subject_key or None,
-            limit=50,
-        )
-        active_grants = [await self._normalize_grant(item) for item in grants]
-        retrievals = await memory.list_vault_retrieval_audits(
-            project_id=context.project.project_id,
-
-            scope_ids=context.selected_scope_ids,
-            subject_key=subject_key or None,
-            limit=50,
-        )
-        return VaultAuthorizationDocument(
-            active_project_id=context.project.project_id,
-
-            retrieval_backend=backend_status.active_backend,
-            backend_state=backend_status.state.value,
-            active_requests=[self._request_item(item) for item in requests],
-            active_grants=[
-                self._grant_item(item)
-                for item in active_grants
-                if item.status is VaultAccessGrantStatus.ACTIVE
-            ],
-            recent_retrievals=[self._retrieval_item(item) for item in retrievals],
-            warnings=context.warnings + context.blocking_issues,
-            degraded=ControlPlaneDegradedState(
-                is_degraded=bool(context.warnings or context.blocking_issues),
-                reasons=context.warnings + context.blocking_issues,
-            ),
-            capabilities=[
-                ControlPlaneCapability(
-                    capability_id="vault.access.request",
-                    label="申请 Vault 授权",
-                    action_id="vault.access.request",
-                ),
-                ControlPlaneCapability(
-                    capability_id="vault.access.resolve",
-                    label="审批 Vault 授权",
-                    action_id="vault.access.resolve",
-                ),
-                ControlPlaneCapability(
-                    capability_id="vault.retrieve",
-                    label="检索 Vault",
-                    action_id="vault.retrieve",
-                ),
-            ],
+            subject_key=subject_key,
         )
 
     async def request_vault_access(
@@ -781,82 +251,33 @@ class MemoryConsoleService:
         subject_key: str = "",
         reason: str = "",
     ):
-        if not scope_id:
-            return None, MemoryPermissionDecision(
-                allowed=False,
-                reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
-                message="vault.access.request 需要明确 scope_id。",
-            )
-        context = await self._resolve_context(
+        return await self._vault.request_vault_access(
+            actor_id=actor_id,
+            actor_label=actor_label,
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
-        )
-        decision = self._decide_project_scope_action(
-            action_id="vault.access.request",
-            actor_id=actor_id,
-            context=context,
-            required_scope_id=scope_id,
-        )
-        if not decision.allowed:
-            return None, decision
-        request = await self._memory.create_vault_access_request(
-            project_id=context.project.project_id,
-
-            scope_id=scope_id,
-            partition=MemoryPartition(partition) if partition else None,
-            subject_key=subject_key or None,
-            requester_actor_id=actor_id,
-            requester_actor_label=actor_label,
+            partition=partition,
+            subject_key=subject_key,
             reason=reason,
         )
-        return request, decision
 
     async def resolve_vault_access(
         self,
         *,
         actor_id: str,
         request_id: str,
-        decision: VaultAccessDecision,
+        approved: bool,
         actor_label: str = "",
         expires_in_seconds: int = 0,
     ):
-        request = await self._memory_store.get_vault_access_request(request_id)
-        if request is None:
-            raise MemoryConsoleError(
-                "VAULT_ACCESS_REQUEST_NOT_FOUND",
-                "Vault 授权申请不存在。",
-            )
-        context = await self._resolve_context(
-            active_project_id=request.project_id,
-            project_id=request.project_id,
-            scope_id=request.scope_id,
-        )
-        permission = self._decide_operator_only(
-            action_id="vault.access.resolve",
+        return await self._vault.resolve_vault_access(
             actor_id=actor_id,
-            context=context,
-            required_scope_id=request.scope_id,
+            request_id=request_id,
+            approved=approved,
+            actor_label=actor_label,
+            expires_in_seconds=expires_in_seconds,
         )
-        if not permission.allowed:
-            raise MemoryConsoleError("VAULT_ACCESS_RESOLVE_NOT_ALLOWED", permission.message)
-        if request.status is not VaultAccessRequestStatus.PENDING:
-            raise MemoryConsoleError(
-                "VAULT_ACCESS_REQUEST_ALREADY_RESOLVED",
-                "Vault 授权申请已经处理过。",
-            )
-        resolved_request, grant = await self._memory.resolve_vault_access_request(
-            request_id,
-            decision=decision,
-            granted_by_actor_id=actor_id,
-            granted_by_actor_label=actor_label or actor_id,
-            expires_at=(
-                datetime.now(tz=UTC) + timedelta(seconds=expires_in_seconds)
-                if expires_in_seconds > 0
-                else None
-            ),
-        )
-        return resolved_request, grant
 
     async def retrieve_vault(
         self,
@@ -872,124 +293,22 @@ class MemoryConsoleService:
         grant_id: str = "",
         limit: int = 20,
     ) -> tuple[str, dict[str, Any], MemoryPermissionDecision]:
-        if not scope_id:
-            return (
-                "VAULT_AUTHORIZATION_SCOPE_MISMATCH",
-                {},
-                MemoryPermissionDecision(
-                    allowed=False,
-                    reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
-                    message="vault.retrieve 需要明确 scope_id。",
-                ),
-            )
-        context = await self._resolve_context(
+        return await self._vault.retrieve_vault(
+            actor_id=actor_id,
+            actor_label=actor_label,
             active_project_id=active_project_id,
             project_id=project_id,
             scope_id=scope_id,
-        )
-        decision = self._decide_project_scope_action(
-            action_id="vault.retrieve",
-            actor_id=actor_id,
-            context=context,
-            required_scope_id=scope_id,
-        )
-        if not decision.allowed:
-            await self._memory.record_vault_retrieval_audit(
-                actor_id=actor_id,
-                actor_label=actor_label,
-                project_id=context.project.project_id,
-    
-                scope_id=scope_id,
-                partition=MemoryPartition(partition) if partition else None,
-                subject_key=subject_key or None,
-                query=query or None,
-                reason_code=decision.reason_code,
-                authorized=False,
-            )
-            return "VAULT_RETRIEVE_NOT_ALLOWED", {}, decision
-
-        grant, grant_code, grant_message = await self._resolve_grant_for_retrieval(
-            actor_id=actor_id,
-            project_id=context.project.project_id,
-
-            scope_id=scope_id,
-            partition=MemoryPartition(partition) if partition else None,
-            subject_key=subject_key or None,
-            grant_id=grant_id or None,
-        )
-        if grant is None:
-            await self._memory.record_vault_retrieval_audit(
-                actor_id=actor_id,
-                actor_label=actor_label,
-                project_id=context.project.project_id,
-    
-                scope_id=scope_id,
-                partition=MemoryPartition(partition) if partition else None,
-                subject_key=subject_key or None,
-                query=query or None,
-                reason_code=grant_code,
-                authorized=False,
-            )
-            denied = MemoryPermissionDecision(
-                allowed=False,
-                reason_code=grant_code,
-                message=grant_message,
-                project_id=context.project.project_id,
-
-                scope_id=scope_id,
-            )
-            return grant_code, {}, denied
-
-        vault_records = await self._memory_store.search_vault(
-            scope_id,
-            query=query or subject_key or None,
+            partition=partition,
+            subject_key=subject_key,
+            query=query,
+            grant_id=grant_id,
             limit=limit,
         )
-        results = []
-        matched_vault_ids: list[str] = []
-        evidence_refs: list[dict[str, Any]] = []
-        for vault in vault_records:
-            if partition and vault.partition.value != partition:
-                continue
-            if subject_key and vault.subject_key != subject_key:
-                continue
-            matched_vault_ids.append(vault.vault_id)
-            evidence_refs.extend([item.model_dump(mode="json") for item in vault.evidence_refs])
-            results.append(
-                {
-                    "vault_id": vault.vault_id,
-                    "scope_id": vault.scope_id,
-                    "partition": vault.partition.value,
-                    "subject_key": vault.subject_key,
-                    "summary": vault.summary,
-                    "content_ref": vault.content_ref,
-                    "evidence_refs": [
-                        item.model_dump(mode="json") for item in vault.evidence_refs
-                    ],
-                    "metadata": vault.metadata,
-                }
-            )
-        await self._memory.record_vault_retrieval_audit(
-            actor_id=actor_id,
-            actor_label=actor_label,
-            project_id=context.project.project_id,
 
-            scope_id=scope_id,
-            partition=MemoryPartition(partition) if partition else None,
-            subject_key=subject_key or None,
-            query=query or None,
-            grant_id=grant.grant_id,
-            reason_code="MEMORY_PERMISSION_ALLOWED",
-            authorized=True,
-            result_count=len(results),
-            retrieved_vault_ids=matched_vault_ids,
-            evidence_refs=[],
-        )
-        return (
-            "VAULT_RETRIEVE_AUTHORIZED",
-            {"results": results, "grant_id": grant.grant_id},
-            decision,
-        )
+    # ------------------------------------------------------------------
+    # 导出/导入（委托 MemoryExportService）
+    # ------------------------------------------------------------------
 
     async def inspect_export(
         self,
@@ -1000,79 +319,13 @@ class MemoryConsoleService:
         include_history: bool = False,
         include_vault_refs: bool = False,
     ) -> tuple[str, dict[str, Any], MemoryPermissionDecision]:
-        context = await self._resolve_context(
+        return await self._export.inspect_export(
             active_project_id=active_project_id,
             project_id=project_id,
+            scope_ids=scope_ids,
+            include_history=include_history,
+            include_vault_refs=include_vault_refs,
         )
-        decision = self._decide_project_scope_action(
-            action_id="memory.export.inspect",
-            actor_id="system:memory-export",
-            context=context,
-            required_scope_id=(scope_ids or [None])[0],
-            bypass_actor_check=True,
-        )
-        if not decision.allowed:
-            return "MEMORY_EXPORT_INSPECTION_NOT_ALLOWED", {}, decision
-        selected_scope_ids = scope_ids or context.selected_scope_ids
-        scope_decision = self._decide_scope_list_bound(
-            action_id="memory.export.inspect",
-            context=context,
-            scope_ids=selected_scope_ids,
-        )
-        if scope_decision is not None:
-            return "MEMORY_EXPORT_INSPECTION_NOT_ALLOWED", {}, scope_decision
-        counts = {
-            "fragments": 0,
-            "sor_current": 0,
-            "sor_history": 0,
-            "vault_refs": 0,
-            "proposals": 0,
-        }
-        sensitive_partitions: set[str] = set()
-        for scope in selected_scope_ids:
-            fragments = await self._memory_store.list_fragments(scope, limit=200)
-            counts["fragments"] += len(fragments)
-            sor_records = await self._memory_store.search_sor(
-                scope,
-                include_history=include_history,
-                limit=200,
-            )
-            for sor in sor_records:
-                if sor.status == "current":
-                    counts["sor_current"] += 1
-                else:
-                    counts["sor_history"] += 1
-                if sor.partition in SENSITIVE_PARTITIONS:
-                    sensitive_partitions.add(sor.partition.value)
-            if include_vault_refs:
-                vault_records = await self._memory_store.search_vault(scope, limit=200)
-                counts["vault_refs"] += len(vault_records)
-                for vault in vault_records:
-                    if vault.partition in SENSITIVE_PARTITIONS:
-                        sensitive_partitions.add(vault.partition.value)
-        counts["proposals"] = len(
-            await self._memory.list_proposals(scope_ids=selected_scope_ids, limit=200)
-        )
-        payload = {
-            "inspection_id": str(ULID()),
-            "counts": counts,
-            "sensitive_partitions": sorted(sensitive_partitions),
-            "warnings": context.warnings,
-            "blocking_issues": context.blocking_issues,
-            "export_refs": [
-                {
-                    "project_id": context.project.project_id,
-                    "scope_id": scope_id,
-                }
-                for scope_id in selected_scope_ids
-            ],
-        }
-        code = (
-            "MEMORY_EXPORT_INSPECTION_BLOCKED"
-            if payload["blocking_issues"]
-            else "MEMORY_EXPORT_INSPECTION_READY"
-        )
-        return code, payload, decision
 
     async def verify_restore(
         self,
@@ -1084,602 +337,49 @@ class MemoryConsoleService:
         target_scope_mode: str = "current_project",
         scope_ids: list[str] | None = None,
     ) -> tuple[str, dict[str, Any], MemoryPermissionDecision]:
-        context = await self._resolve_context(
+        return await self._export.verify_restore(
+            actor_id=actor_id,
             active_project_id=active_project_id,
             project_id=project_id,
+            snapshot_ref=snapshot_ref,
+            target_scope_mode=target_scope_mode,
+            scope_ids=scope_ids,
         )
-        permission = self._decide_operator_only(
-            action_id="memory.restore.verify",
-            actor_id=actor_id,
-            context=context,
-        )
-        if not permission.allowed:
-            return "MEMORY_RESTORE_VERIFICATION_NOT_ALLOWED", {}, permission
 
-        snapshot_path = Path(snapshot_ref).expanduser()
-        if not snapshot_path.is_absolute():
-            snapshot_path = (self._project_root / snapshot_path).resolve()
-        else:
-            snapshot_path = snapshot_path.resolve()
+    # ------------------------------------------------------------------
+    # 维护操作（委托 MemoryMaintenanceBridge）
+    # ------------------------------------------------------------------
 
-        warnings: list[str] = list(context.warnings)
-        blocking_issues: list[str] = list(context.blocking_issues)
-        schema_ok = False
-        snapshot_payload: dict[str, Any] = {}
-        if not snapshot_path.exists():
-            blocking_issues.append(f"snapshot 不存在: {snapshot_path}")
-        elif snapshot_path.suffix.lower() == ".json":
-            snapshot_payload, schema_ok, parse_warning = self._load_memory_snapshot_json(
-                snapshot_path
-            )
-            if parse_warning:
-                warnings.append(parse_warning)
-        elif snapshot_path.suffix.lower() == ".zip":
-            warnings.append("bundle 校验仅做 manifest/entries 检查，未发现专用 memory snapshot。")
-            schema_ok = self._bundle_contains_memory_refs(snapshot_path)
-            if not schema_ok:
-                blocking_issues.append("bundle 未包含可识别的 memory snapshot/manifest。")
-        else:
-            blocking_issues.append("仅支持 .json 或 .zip 的 memory snapshot/bundle 校验。")
-
-        snapshot_scope_ids = self._snapshot_scope_ids(snapshot_payload)
-        target_scopes = scope_ids or snapshot_scope_ids or context.selected_scope_ids
-        scope_conflicts: list[str] = []
-        if target_scope_mode == "current_project":
-            bound_scope_ids = set(context.scope_bindings.keys())
-            for scope in target_scopes:
-                if scope not in bound_scope_ids:
-                    scope_conflicts.append(f"scope 未绑定到当前 project: {scope}")
-
-        subject_conflicts: list[str] = []
-        grant_conflicts: list[str] = []
-        for item in snapshot_payload.get("records", []):
-            if item.get("layer") != "sor" or item.get("status") != "current":
-                continue
-            item_scope_id = str(item.get("scope_id", ""))
-            item_subject = str(item.get("subject_key", ""))
-            if not item_scope_id or not item_subject:
-                continue
-            current = await self._memory_store.get_current_sor(item_scope_id, item_subject)
-            if current is not None:
-                subject_conflicts.append(
-                    f"{item_scope_id}:{item_subject} 已存在 current version={current.version}"
-                )
-        for item in snapshot_payload.get("grants", []):
-            item_scope_id = str(item.get("scope_id", ""))
-            item_subject = str(item.get("subject_key", ""))
-            item_actor_id = str(item.get("granted_to_actor_id", ""))
-            if not item_scope_id or not item_actor_id:
-                continue
-            existing = await self._memory.list_vault_access_grants(
-                project_id=context.project.project_id,
-    
-                scope_ids=[item_scope_id],
-                subject_key=item_subject or None,
-                actor_id=item_actor_id,
-                statuses=[VaultAccessGrantStatus.ACTIVE],
-                limit=10,
-            )
-            if existing:
-                grant_conflicts.append(
-                    f"{item_actor_id}:{item_scope_id}:{item_subject or '*'} 已存在 active grant"
-                )
-
-        payload = {
-            "verification_id": str(ULID()),
-            "schema_ok": schema_ok,
-            "subject_conflicts": subject_conflicts,
-            "grant_conflicts": grant_conflicts,
-            "scope_conflicts": scope_conflicts,
-            "warnings": warnings,
-            "blocking_issues": blocking_issues,
-        }
-        code = (
-            "MEMORY_RESTORE_VERIFICATION_BLOCKED"
-            if (
-                not schema_ok
-                or subject_conflicts
-                or grant_conflicts
-                or scope_conflicts
-                or blocking_issues
-            )
-            else "MEMORY_RESTORE_VERIFICATION_READY"
-        )
-        return code, payload, permission
-
-    async def _resolve_context(
+    async def run_maintenance(
         self,
         *,
-        active_project_id: str,
+        kind: MemoryMaintenanceCommandKind,
         project_id: str = "",
         scope_id: str = "",
-    ) -> _MemoryContext:
-        project_ref = project_id or active_project_id
-        project = (
-            await self._stores.project_store.get_project(project_ref)
-            if project_ref
-            else await self._stores.project_store.get_default_project()
-        )
-        if project is None:
-            raise RuntimeError("当前没有可用 project。")
-
-        bindings = await self._stores.project_store.list_bindings(project.project_id)
-        scope_bindings: dict[str, _BoundScope] = {}
-        for binding in bindings:
-            if binding.binding_type not in _MEMORY_BINDING_TYPES:
-                continue
-            scope_bindings[binding.binding_key] = _BoundScope(
-                scope_id=binding.binding_key,
-                binding_type=binding.binding_type,
-            )
-        warnings: list[str] = []
-        blocking_issues: list[str] = []
-        if scope_id:
-            if scope_id in scope_bindings:
-                selected_scope_ids = [scope_id]
-            else:
-                selected_scope_ids = [scope_id]
-                warnings.append(
-                    f"scope {scope_id} 未绑定到当前 project，将按 orphan scope 只读显示。"
-                )
-        else:
-            selected_scope_ids = sorted(scope_bindings.keys())
-        # 当 project 级别没有 memory_scope binding 时，直接查 DB 里所有存在数据的 scope
-        if not selected_scope_ids:
-            try:
-                store = self._stores.memory_store if hasattr(self._stores, "memory_store") else None
-                if store is None:
-                    from octoagent.memory.store.memory_store import SqliteMemoryStore
-                    store = SqliteMemoryStore(self._stores.conn)
-                all_scopes = await store.list_scope_ids()
-                if all_scopes:
-                    selected_scope_ids = sorted(all_scopes)
-                    for sid in all_scopes:
-                        scope_bindings[sid] = _BoundScope(
-                            scope_id=sid,
-                
-                            binding_type=ProjectBindingType.MEMORY_SCOPE,
-                        )
-            except Exception:
-                pass
-        if not selected_scope_ids:
-            blocking_issues.append("还没有记忆数据。去 Chat 对话后，系统会自动提取并存储记忆。")
-        return _MemoryContext(
-            project=project,
-            scope_bindings=scope_bindings,
-            selected_scope_ids=selected_scope_ids,
-            warnings=warnings,
-            blocking_issues=blocking_issues,
-        )
-
-    async def _memory_service_for_context(self, context: _MemoryContext) -> MemoryService:
-        backend = await self._backend_resolver.resolve_backend(
-            project=context.project,
-        )
-        return MemoryService(
-            self._stores.conn,
-            store=self._memory_store,
-            backend=backend,
-        )
-
-    @staticmethod
-    def _backend_index_health(backend_status: MemoryBackendStatus) -> dict[str, Any]:
-        index_health = dict(backend_status.index_health)
-        if backend_status.project_binding:
-            index_health.setdefault("project_binding", backend_status.project_binding)
-        if backend_status.last_ingest_at is not None:
-            index_health.setdefault(
-                "last_ingest_at",
-                backend_status.last_ingest_at.isoformat(),
-            )
-        if backend_status.last_maintenance_at is not None:
-            index_health.setdefault(
-                "last_maintenance_at",
-                backend_status.last_maintenance_at.isoformat(),
-            )
-        if backend_status.retry_after is not None:
-            index_health.setdefault("retry_after", backend_status.retry_after.isoformat())
-        return index_health
-
-    def _decide_project_scope_action(
-        self,
-        *,
-        action_id: str,
-        actor_id: str,
-        context: _MemoryContext,
-        required_scope_id: str | None,
-        bypass_actor_check: bool = False,
-    ) -> MemoryPermissionDecision:
-        if not context.project.project_id:
-            return MemoryPermissionDecision(
-                allowed=False,
-                reason_code="MEMORY_PERMISSION_PROJECT_REQUIRED",
-                message="memory 操作需要 project 上下文。",
-            )
-        if required_scope_id and required_scope_id not in context.scope_bindings:
-            return MemoryPermissionDecision(
-                allowed=False,
-                reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
-                message=f"{action_id} 目标 scope 未绑定到当前 project。",
-                project_id=context.project.project_id,
-
-                scope_id=required_scope_id,
-            )
-        if bypass_actor_check:
-            return MemoryPermissionDecision(
-                allowed=True,
-                reason_code="MEMORY_PERMISSION_ALLOWED",
-                message="允许访问。",
-                project_id=context.project.project_id,
-
-                scope_id=required_scope_id or "",
-            )
-        if not actor_id:
-            return MemoryPermissionDecision(
-                allowed=False,
-                reason_code="MEMORY_PERMISSION_OPERATOR_REQUIRED",
-                message="缺少 actor 上下文。",
-                project_id=context.project.project_id,
-            )
-        return MemoryPermissionDecision(
-            allowed=True,
-            reason_code="MEMORY_PERMISSION_ALLOWED",
-            message="允许访问。",
-            project_id=context.project.project_id,
-            scope_id=required_scope_id or "",
-        )
-
-    def _decide_operator_only(
-        self,
-        *,
-        action_id: str,
-        actor_id: str,
-        context: _MemoryContext,
-        required_scope_id: str | None = None,
-    ) -> MemoryPermissionDecision:
-        decision = self._decide_project_scope_action(
-            action_id=action_id,
-            actor_id=actor_id,
-            context=context,
-            required_scope_id=required_scope_id,
-        )
-        if not decision.allowed:
-            return decision
-        if not (
-            actor_id.startswith("user:")
-            or actor_id.startswith("system:")
-            or actor_id.startswith("cli:")
-        ):
-            return MemoryPermissionDecision(
-                allowed=False,
-                reason_code="MEMORY_PERMISSION_OPERATOR_REQUIRED",
-                message=f"{action_id} 仅允许 owner/operator surface。",
-                project_id=context.project.project_id,
-
-                scope_id=required_scope_id or "",
-            )
-        return decision
-
-    async def _resolve_grant_for_retrieval(
-        self,
-        *,
-        actor_id: str,
-        project_id: str,
-        scope_id: str,
-        partition: MemoryPartition | None,
-        subject_key: str | None,
-        grant_id: str | None,
-    ):
-        if grant_id:
-            grant = await self._memory.get_vault_access_grant(grant_id)
-            if grant is None:
-                return None, "VAULT_AUTHORIZATION_REQUIRED", "未找到指定的 Vault grant。"
-            normalized = await self._normalize_grant(grant)
-            if normalized.status is VaultAccessGrantStatus.EXPIRED:
-                return None, "VAULT_AUTHORIZATION_EXPIRED", "Vault grant 已过期。"
-            if normalized.granted_to_actor_id != actor_id:
-                return (
-                    None,
-                    "VAULT_AUTHORIZATION_NOT_ALLOWED",
-                    "指定的 Vault grant 不属于当前 actor。",
-                )
-            if normalized.project_id != project_id or normalized.scope_id != scope_id:
-                return (
-                    None,
-                    "VAULT_AUTHORIZATION_SCOPE_MISMATCH",
-                    "Vault grant 与当前 scope 不匹配。",
-                )
-            if partition is not None and normalized.partition not in {None, partition}:
-                return (
-                    None,
-                    "VAULT_AUTHORIZATION_SCOPE_MISMATCH",
-                    "Vault grant 与当前 partition 不匹配。",
-                )
-            if subject_key and normalized.subject_key not in {"", subject_key}:
-                return (
-                    None,
-                    "VAULT_AUTHORIZATION_SCOPE_MISMATCH",
-                    "Vault grant 与当前 subject 不匹配。",
-                )
-            return normalized, "VAULT_RETRIEVE_AUTHORIZED", ""
-        grant = await self._memory.get_latest_valid_vault_grant(
-            actor_id=actor_id,
+        partition: MemoryPartition | None = None,
+        reason: str = "",
+        summary: str = "",
+        requested_by: str = "",
+        evidence_refs=None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryMaintenanceRun:
+        return await self._maintenance.run_maintenance(
+            kind=kind,
             project_id=project_id,
             scope_id=scope_id,
             partition=partition,
-            subject_key=subject_key,
-        )
-        if grant is None:
-            grants = await self._memory.list_vault_access_grants(
-                project_id=project_id,
-                scope_ids=[scope_id],
-                subject_key=subject_key,
-                actor_id=actor_id,
-                limit=20,
-            )
-            if any(
-                item.expires_at is not None and item.expires_at <= datetime.now(tz=UTC)
-                for item in grants
-            ):
-                return None, "VAULT_AUTHORIZATION_EXPIRED", "Vault grant 已过期。"
-            return None, "VAULT_AUTHORIZATION_REQUIRED", "当前 actor 缺少有效 Vault grant。"
-        return grant, "VAULT_RETRIEVE_AUTHORIZED", ""
-
-    def _decide_scope_list_bound(
-        self,
-        *,
-        action_id: str,
-        context: _MemoryContext,
-        scope_ids: list[str],
-    ) -> MemoryPermissionDecision | None:
-        invalid_scope_ids = [
-            scope_id for scope_id in scope_ids if scope_id not in context.scope_bindings
-        ]
-        if not invalid_scope_ids:
-            return None
-        return MemoryPermissionDecision(
-            allowed=False,
-            reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
-            message=(
-                f"{action_id} 包含未绑定到当前 project 的 scope: "
-                f"{', '.join(invalid_scope_ids)}"
-            ),
-            project_id=context.project.project_id,
-            scope_id=invalid_scope_ids[0],
+            reason=reason,
+            summary=summary,
+            requested_by=requested_by,
+            evidence_refs=evidence_refs,
+            metadata=metadata,
         )
 
-    async def _normalize_grant(self, grant):
-        if (
-            grant.status is VaultAccessGrantStatus.ACTIVE
-            and grant.expires_at is not None
-            and grant.expires_at <= datetime.now(tz=UTC)
-        ):
-            expired = grant.model_copy(update={"status": VaultAccessGrantStatus.EXPIRED})
-            await self._memory_store.replace_vault_access_grant(expired)
-            await self._stores.conn.commit()
-            return expired
-        return grant
-
-    def _fragment_projection(
+    async def run_consolidate(
         self,
         *,
-        fragment,
-        project_id: str,
-        retrieval_backend: str = "",
-    ) -> MemoryRecordProjection:
-        return MemoryRecordProjection(
-            record_id=fragment.fragment_id,
-            layer="fragment",
+        project_id: str = "",
+    ) -> dict[str, Any]:
+        return await self._maintenance.run_consolidate(
             project_id=project_id,
-            scope_id=fragment.scope_id,
-            partition=fragment.partition.value,
-            summary=fragment.content[:240],
-            created_at=fragment.created_at,
-            evidence_refs=[item.model_dump(mode="json") for item in fragment.evidence_refs],
-            metadata=fragment.metadata,
-            retrieval_backend=retrieval_backend,
         )
-
-    def _derived_projection(
-        self,
-        *,
-        derived,
-        project_id: str,
-        retrieval_backend: str = "",
-    ) -> MemoryRecordProjection:
-        return MemoryRecordProjection(
-            record_id=derived.derived_id,
-            layer="derived",
-            project_id=project_id,
-            scope_id=derived.scope_id,
-            partition=derived.partition.value,
-            subject_key=derived.subject_key,
-            summary=derived.summary,
-            status="derived",
-            created_at=derived.created_at,
-            evidence_refs=[
-                {"ref_id": ref_id, "ref_type": "fragment"}
-                for ref_id in derived.source_fragment_refs
-            ]
-            + [
-                {"ref_id": ref_id, "ref_type": "artifact"}
-                for ref_id in derived.source_artifact_refs
-            ],
-            derived_refs=[derived.derived_id],
-            proposal_refs=[derived.proposal_ref] if derived.proposal_ref else [],
-            metadata={
-                "derived_type": derived.derived_type,
-                "confidence": derived.confidence,
-                **derived.payload,
-            },
-            retrieval_backend=retrieval_backend,
-        )
-
-    def _derived_matches_query(self, derived, query: str) -> bool:
-        normalized = query.strip().lower()
-        if not normalized:
-            return True
-        haystacks = [
-            derived.derived_type,
-            derived.subject_key,
-            derived.summary,
-            json.dumps(derived.payload, ensure_ascii=False),
-        ]
-        return any(normalized in str(item).lower() for item in haystacks if item)
-
-    def _sor_projection(
-        self,
-        *,
-        sor,
-        project_id: str,
-        retrieval_backend: str = "",
-    ) -> MemoryRecordProjection:
-        return MemoryRecordProjection(
-            record_id=sor.memory_id,
-            layer="sor",
-            project_id=project_id,
-            scope_id=sor.scope_id,
-            partition=sor.partition.value,
-            subject_key=sor.subject_key,
-            summary=sor.content[:240],
-            status=sor.status.value if hasattr(sor.status, "value") else str(sor.status),
-            version=sor.version,
-            created_at=sor.created_at,
-            updated_at=sor.updated_at,
-            evidence_refs=[item.model_dump(mode="json") for item in sor.evidence_refs],
-            metadata=sor.metadata,
-            proposal_refs=(
-                [str(sor.metadata.get("proposal_id"))]
-                if sor.metadata.get("proposal_id")
-                else []
-            ),
-            retrieval_backend=retrieval_backend,
-        )
-
-    def _vault_projection(
-        self,
-        *,
-        vault,
-        project_id: str,
-        retrieval_backend: str = "",
-    ) -> MemoryRecordProjection:
-        return MemoryRecordProjection(
-            record_id=vault.vault_id,
-            layer="vault",
-            project_id=project_id,
-            scope_id=vault.scope_id,
-            partition=vault.partition.value,
-            subject_key=vault.subject_key,
-            summary=vault.summary,
-            created_at=vault.created_at,
-            evidence_refs=[item.model_dump(mode="json") for item in vault.evidence_refs],
-            metadata=vault.metadata,
-            requires_vault_authorization=True,
-            retrieval_backend=retrieval_backend,
-        )
-
-    def _request_item(self, item) -> VaultAccessRequestItem:
-        return VaultAccessRequestItem(
-            request_id=item.request_id,
-            project_id=item.project_id,
-
-            scope_id=item.scope_id,
-            partition=item.partition.value if item.partition else "",
-            subject_key=item.subject_key,
-            reason=item.reason,
-            requester_actor_id=item.requester_actor_id,
-            requester_actor_label=item.requester_actor_label,
-            status=item.status.value if hasattr(item.status, "value") else str(item.status),
-            decision=item.decision.value if item.decision else "",
-            requested_at=item.requested_at,
-            resolved_at=item.resolved_at,
-            resolver_actor_id=item.resolver_actor_id,
-            resolver_actor_label=item.resolver_actor_label,
-        )
-
-    def _grant_item(self, item) -> VaultAccessGrantItem:
-        return VaultAccessGrantItem(
-            grant_id=item.grant_id,
-            request_id=item.request_id,
-            project_id=item.project_id,
-
-            scope_id=item.scope_id,
-            partition=item.partition.value if item.partition else "",
-            subject_key=item.subject_key,
-            granted_to_actor_id=item.granted_to_actor_id,
-            granted_to_actor_label=item.granted_to_actor_label,
-            granted_by_actor_id=item.granted_by_actor_id,
-            granted_by_actor_label=item.granted_by_actor_label,
-            granted_at=item.granted_at,
-            expires_at=item.expires_at,
-            status=item.status.value if hasattr(item.status, "value") else str(item.status),
-        )
-
-    def _retrieval_item(self, item) -> VaultRetrievalAuditItem:
-        return VaultRetrievalAuditItem(
-            retrieval_id=item.retrieval_id,
-            project_id=item.project_id,
-
-            scope_id=item.scope_id,
-            partition=item.partition.value if item.partition else "",
-            subject_key=item.subject_key,
-            query=item.query,
-            grant_id=item.grant_id,
-            actor_id=item.actor_id,
-            actor_label=item.actor_label,
-            authorized=item.authorized,
-            reason_code=item.reason_code,
-            result_count=item.result_count,
-            retrieved_vault_ids=item.retrieved_vault_ids,
-            evidence_refs=[item_ref.model_dump(mode="json") for item_ref in item.evidence_refs],
-            created_at=item.created_at,
-        )
-
-    def _projection_sort_key(self, item: MemoryRecordProjection) -> datetime:
-        return item.updated_at or item.created_at
-
-    def _load_memory_snapshot_json(self, snapshot_path: Path) -> tuple[dict[str, Any], bool, str]:
-        try:
-            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            return {}, False, f"snapshot 解析失败: {exc}"
-        if not isinstance(payload, dict):
-            return {}, False, "snapshot 顶层必须是 object。"
-        schema_ok = any(key in payload for key in ("records", "manifest", "grants"))
-        if "records" not in payload:
-            payload["records"] = []
-        if "grants" not in payload:
-            payload["grants"] = []
-        return payload, schema_ok, ""
-
-    def _snapshot_scope_ids(self, snapshot_payload: dict[str, Any]) -> list[str]:
-        scope_ids: set[str] = set()
-        raw_scope_ids = snapshot_payload.get("scope_ids")
-        if isinstance(raw_scope_ids, list):
-            scope_ids.update(str(item).strip() for item in raw_scope_ids if str(item).strip())
-        manifest = snapshot_payload.get("manifest")
-        if isinstance(manifest, dict):
-            manifest_scopes = manifest.get("scopes")
-            if isinstance(manifest_scopes, list):
-                scope_ids.update(
-                    str(item).strip() for item in manifest_scopes if str(item).strip()
-                )
-        for collection_key in ("records", "grants"):
-            collection = snapshot_payload.get(collection_key)
-            if not isinstance(collection, list):
-                continue
-            for item in collection:
-                if not isinstance(item, dict):
-                    continue
-                scope_id = str(item.get("scope_id", "")).strip()
-                if scope_id:
-                    scope_ids.add(scope_id)
-        return sorted(scope_ids)
-
-    def _bundle_contains_memory_refs(self, bundle_path: Path) -> bool:
-        try:
-            with zipfile.ZipFile(bundle_path) as archive:
-                names = set(archive.namelist())
-        except Exception:
-            return False
-        return any("memory" in name for name in names)

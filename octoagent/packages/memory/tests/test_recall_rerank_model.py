@@ -100,8 +100,7 @@ def test_hook_options_accept_model_rerank():
 @pytest.mark.asyncio
 async def test_model_rerank_reorders_candidates():
     """rerank_mode=MODEL + reranker 可用时按 scores 重排候选。"""
-    # 导入 MemoryService 并 mock
-    from octoagent.memory.service import MemoryService
+    from octoagent.memory.recall_service import MemoryRecallService
 
     # 构建候选列表（原始顺序: A=0.3, B=0.9, C=0.6）
     candidates = [
@@ -115,10 +114,10 @@ async def test_model_rerank_reorders_candidates():
         rerank_mode=MemoryRecallRerankMode.MODEL,
     )
 
-    # 创建 mock MemoryService 只调用 _apply_recall_hooks
-    svc = MagicMock(spec=MemoryService)
+    # 创建 mock MemoryRecallService 只调用 _apply_recall_hooks
+    svc = MagicMock(spec=MemoryRecallService)
     svc._reranker_service = reranker
-    svc._annotate_recall_candidate = MemoryService._annotate_recall_candidate
+    svc._annotate_recall_candidate = MemoryRecallService._annotate_recall_candidate
     svc._rerank_recall_candidates = MagicMock(side_effect=lambda c: c)
     svc._recall_keyword_overlap = MagicMock(return_value=0)
     svc._recall_subject_match_score = MagicMock(return_value=0.0)
@@ -134,7 +133,7 @@ async def test_model_rerank_reorders_candidates():
     ))
 
     # 直接调用 _apply_recall_hooks（bound method on real class）
-    result_candidates, trace = await MemoryService._apply_recall_hooks(
+    result_candidates, trace = await MemoryRecallService._apply_recall_hooks(
         svc,
         collected=candidates,
         query="测试查询",
@@ -158,7 +157,7 @@ async def test_model_rerank_reorders_candidates():
 @pytest.mark.asyncio
 async def test_model_rerank_degraded_falls_back():
     """rerank_mode=MODEL + reranker 降级时回退到 HEURISTIC。"""
-    from octoagent.memory.service import MemoryService
+    from octoagent.memory.recall_service import MemoryRecallService
 
     candidates = [
         _make_candidate(record_id="A", summary="内容A"),
@@ -170,9 +169,9 @@ async def test_model_rerank_degraded_falls_back():
         rerank_mode=MemoryRecallRerankMode.MODEL,
     )
 
-    svc = MagicMock(spec=MemoryService)
+    svc = MagicMock(spec=MemoryRecallService)
     svc._reranker_service = reranker
-    svc._annotate_recall_candidate = MemoryService._annotate_recall_candidate
+    svc._annotate_recall_candidate = MemoryRecallService._annotate_recall_candidate
     svc._rerank_recall_candidates = MagicMock(side_effect=lambda c: c)
     svc._recall_keyword_overlap = MagicMock(return_value=0)
     svc._recall_subject_match_score = MagicMock(return_value=0.0)
@@ -184,7 +183,7 @@ async def test_model_rerank_degraded_falls_back():
     ))
 
     degraded_reasons: list[str] = []
-    result_candidates, _ = await MemoryService._apply_recall_hooks(
+    result_candidates, _ = await MemoryRecallService._apply_recall_hooks(
         svc,
         collected=candidates,
         query="测试",
@@ -201,7 +200,7 @@ async def test_model_rerank_degraded_falls_back():
 @pytest.mark.asyncio
 async def test_model_rerank_none_service_falls_back():
     """rerank_mode=MODEL + reranker 为 None 时回退到 HEURISTIC。"""
-    from octoagent.memory.service import MemoryService
+    from octoagent.memory.recall_service import MemoryRecallService
 
     candidates = [
         _make_candidate(record_id="A", summary="内容A"),
@@ -212,9 +211,9 @@ async def test_model_rerank_none_service_falls_back():
         rerank_mode=MemoryRecallRerankMode.MODEL,
     )
 
-    svc = MagicMock(spec=MemoryService)
+    svc = MagicMock(spec=MemoryRecallService)
     svc._reranker_service = None  # 无 reranker
-    svc._annotate_recall_candidate = MemoryService._annotate_recall_candidate
+    svc._annotate_recall_candidate = MemoryRecallService._annotate_recall_candidate
     svc._rerank_recall_candidates = MagicMock(side_effect=lambda c: c)
     svc._recall_keyword_overlap = MagicMock(return_value=0)
     svc._recall_subject_match_score = MagicMock(return_value=0.0)
@@ -225,7 +224,7 @@ async def test_model_rerank_none_service_falls_back():
         filtered_count=0, delivered_count=0, fallback_applied=False,
     ))
 
-    result_candidates, _ = await MemoryService._apply_recall_hooks(
+    result_candidates, _ = await MemoryRecallService._apply_recall_hooks(
         svc,
         collected=candidates,
         query="测试",

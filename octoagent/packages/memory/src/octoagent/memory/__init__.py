@@ -86,7 +86,11 @@ from .models import (
     WriteProposal,
     WriteProposalDraft,
 )
+from .backend_manager import MemoryBackendManager
+from .recall_service import MemoryRecallService
 from .service import MemoryService
+from .vault_service import VaultAccessService
+from .write_service import MemoryWriteService
 from .store import (
     MemoryStoreConflictError,
     SqliteMemoryStore,
@@ -136,7 +140,10 @@ __all__ = [
     "MemoryMaintenanceRun",
     "MemoryMaintenanceRunStatus",
     "MemorySearchHit",
+    "MemoryBackendManager",
+    "MemoryRecallService",
     "MemoryService",
+    "MemoryWriteService",
     "MemoryStoreConflictError",
     "MemorySyncBatch",
     "MemorySyncResult",
@@ -145,6 +152,7 @@ __all__ = [
     "SorRecord",
     "VaultAccessGrantRecord",
     "VaultAccessRequestRecord",
+    "VaultAccessService",
     "VaultRetrievalAuditRecord",
     "SqliteMemoryBackend",
     "SqliteMemoryStore",

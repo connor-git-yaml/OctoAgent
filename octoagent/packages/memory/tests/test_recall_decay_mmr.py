@@ -20,7 +20,7 @@ from octoagent.memory.models.integration import (
     MemoryRecallPostFilterMode,
     MemoryRecallRerankMode,
 )
-from octoagent.memory.service import MemoryService
+from octoagent.memory.recall_service import MemoryRecallService
 
 
 # ---------------------------------------------------------------------------
@@ -51,9 +51,9 @@ def _make_candidate(hit: MemorySearchHit, ordinal: int = 0):
     return (0, 0, ordinal, hit)
 
 
-def _make_service() -> MemoryService:
-    """创建最小 MemoryService 实例（仅用于测试纯计算方法）。"""
-    svc = object.__new__(MemoryService)
+def _make_service() -> MemoryRecallService:
+    """创建最小 MemoryRecallService 实例（仅用于测试纯计算方法）。"""
+    svc = object.__new__(MemoryRecallService)
     svc._reranker_service = None
     return svc
 

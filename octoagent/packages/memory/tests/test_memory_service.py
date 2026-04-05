@@ -22,6 +22,7 @@ from octoagent.memory import (
     VaultAccessRequestStatus,
     WriteAction,
 )
+from octoagent.memory.recall_service import MemoryRecallService
 
 
 class TestMemoryService:
@@ -354,7 +355,7 @@ class TestMemoryService:
 
         monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
         monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
-        monkeypatch.setattr(type(memory_service), "_build_recall_hit", fake_build_recall_hit)
+        monkeypatch.setattr(MemoryRecallService, "_build_recall_hit", fake_build_recall_hit)
 
         recall = await memory_service.recall_memory(
             scope_ids=["work/project-x"],
@@ -429,7 +430,7 @@ class TestMemoryService:
 
         monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
         monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
-        monkeypatch.setattr(type(memory_service), "_build_recall_hit", fake_build_recall_hit)
+        monkeypatch.setattr(MemoryRecallService, "_build_recall_hit", fake_build_recall_hit)
 
         recall = await memory_service.recall_memory(
             scope_ids=["work/project-x"],
