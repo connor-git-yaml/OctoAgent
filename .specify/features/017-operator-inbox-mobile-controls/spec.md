@@ -2,7 +2,7 @@
 feature_id: "017"
 title: "Unified Operator Inbox + Mobile Task Controls"
 milestone: "M2"
-status: "Draft"
+status: "implemented"
 created: "2026-03-07"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md M2 / docs/m2-feature-split.md Feature 017"

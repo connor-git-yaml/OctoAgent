@@ -2,7 +2,7 @@
 feature_id: "035"
 title: "Guided User Workbench + Visual Config Center"
 milestone: "M4"
-status: "In Progress"
+status: "implemented"
 created: "2026-03-09"
 updated: "2026-03-10"
 research_mode: "full"

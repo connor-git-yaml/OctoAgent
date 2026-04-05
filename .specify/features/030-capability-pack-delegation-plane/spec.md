@@ -2,7 +2,7 @@
 feature_id: "030"
 title: "Built-in Capability Pack + Delegation Plane + Skill Pipeline"
 milestone: "M3"
-status: "Implementing"
+status: "implemented"
 created: "2026-03-08"
 updated: "2026-03-08"
 research_mode: "full"

@@ -2,7 +2,7 @@
 feature_id: "021"
 title: "Chat Import Core"
 milestone: "M2"
-status: "Draft"
+status: "implemented"
 created: "2026-03-07"
 research_mode: "full"
 blueprint_ref: "docs/blueprint.md §8.7.5 / §11.6 / M2, docs/m2-feature-split.md Feature 021"

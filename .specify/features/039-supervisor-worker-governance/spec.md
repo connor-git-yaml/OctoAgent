@@ -2,7 +2,7 @@
 feature_id: "039"
 title: "Supervisor Worker Governance + Internal A2A Dispatch"
 milestone: "M4"
-status: "Partially Implemented"
+status: "implemented"
 created: "2026-03-10"
 updated: "2026-03-13"
 research_mode: "codebase-scan"

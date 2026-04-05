@@ -381,6 +381,21 @@ $PROJECT_ROOT (~/.octoagent)/
 - [x] Feature 058：MCP Install Lifecycle & Session Pool（MCP server 完整安装生命周期管理：npm/pip 一键安装向导、安装注册表持久化 `mcp-installs.json`、McpSessionPool 持久连接池（auto-reconnect + health check）、McpInstallerService 异步安装任务与子进程 env 隔离、control plane 新增 `mcp_provider.install / install_status / uninstall` 三个 action、前端 McpInstallWizard 五步安装向导；MCP 工具继续走 ToolBroker / Policy / Audit 主链，McpServerConfig 与 McpRegistryService 保持不变仅扩展）
 - [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为"当前项目主 Agent + 已创建 Agent 列表 + 模板创建流"，并将结构化编辑控件替代技术字段编辑主路径）
 - [ ] Feature 063：Behavior File Lifecycle & Smart Loading（Bootstrap 双触发完成检测、BehaviorLoadProfile 差异化加载（FULL/WORKER/MINIMAL）、head/tail 截断策略、session 级缓存、Behavior Compactor LLM 智能合并）
+- [x] Feature 070b：工具系统简化重构（check_permission 单函数替代三套 Hook 体系；PathAccessPolicy 黑名单拦截）
+- [x] Feature 071：Session Owner / Execution Target Separation（session owner / turn executor / delegation target 语义拆分完成）
+- [x] Feature 072b：Core/Deferred 工具分层接通（LLM 首轮 tools schema 从 56 降到 9；tool_search 提升链路连通）
+- [x] Feature 073：Deprecated 残留全面清理（ToolProfile 枚举 + Workspace 概念 + Butler 遗留命名全部清除）
+
+### M4 当前状态（2026-04-06 更新）
+
+**已完成**（约 20 个 Feature）：032-041, 048-049, 051-053, 055, 058, 070b, 071, 072b, 073
+
+**进行中**：
+- 056: clean-install-skeleton-bootstrap
+- 070: direct-agent-chat-closure
+- 071b: align-llm-config-flow
+
+**M4 完成标准**：上述 3 个进行中 Feature 完成后签收。
 
 M4 约束：
 
