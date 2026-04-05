@@ -2056,14 +2056,6 @@ class OrchestratorService:
         normalized = [part.strip() for part in parts if part and part.strip()]
         return " | ".join(dict.fromkeys(normalized))
 
-    @staticmethod
-    def _work_status_from_task_status(task_status: TaskStatus) -> WorkStatus:
-        mapping = {
-            TaskStatus.SUCCEEDED: WorkStatus.SUCCEEDED,
-            TaskStatus.CANCELLED: WorkStatus.CANCELLED,
-        }
-        return mapping.get(task_status, WorkStatus.FAILED)
-
     async def _dispatch_envelope(
         self,
         *,
@@ -2188,7 +2180,7 @@ class OrchestratorService:
                         TaskStatus.SUCCEEDED: WorkStatus.SUCCEEDED,
                         TaskStatus.FAILED: WorkStatus.FAILED,
                         TaskStatus.CANCELLED: WorkStatus.CANCELLED,
-                    }[result.status],
+                    }.get(result.status, WorkStatus.FAILED),
                     summary=result.summary,
                     retryable=result.retryable,
                     runtime_id=result.worker_id,
