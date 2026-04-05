@@ -126,6 +126,35 @@ _WEEKDAY_NAMES_EN = {
     6: "Sunday",
 }
 
+
+@dataclass
+class SystemPromptContext:
+    """_build_system_blocks 的输入上下文。"""
+
+    project: Project | None
+    task: Task
+    current_user_text: str
+    agent_profile: AgentProfile
+    owner_profile: OwnerProfile
+    owner_overlay: OwnerProfileOverlay | None
+    bootstrap: BootstrapSession
+    recent_summary: str
+    session_replay: SessionReplayProjection | None
+    memory_hits: list[MemoryRecallHit]
+    memory_scope_ids: list[str]
+    memory_prefetch_mode: str
+    worker_capability: str | None
+    dispatch_metadata: dict[str, Any]
+    runtime_context: RuntimeControlContext | None
+    include_runtime_context: bool = True
+    loaded_skills_content: str = ""
+    skill_injection_budget: int = 0
+    progress_notes: list[dict] | None = None
+    deferred_tools_text: str = ""
+    role_card: str = ""
+    pipeline_catalog_content: str = ""
+
+
 _SESSION_TRANSCRIPT_LIMIT_DEFAULT = 20  # 兼容回退值
 _SESSION_TRANSCRIPT_LIMIT_MAX = 80  # 绝对上限
 _SESSION_TRANSCRIPT_LIMIT_MIN = 4   # 绝对下限
@@ -3376,30 +3405,17 @@ class AgentContextService:
 
     def _build_system_blocks(
         self,
-        *,
-        project: Project | None,
-        task: Task,
-        current_user_text: str,
-        agent_profile: AgentProfile,
-        owner_profile: OwnerProfile,
-        owner_overlay: OwnerProfileOverlay | None,
-        bootstrap: BootstrapSession,
-        recent_summary: str,
-        session_replay: SessionReplayProjection | None,
-        memory_hits: list[MemoryRecallHit],
-        memory_scope_ids: list[str],
-        memory_prefetch_mode: str,
-        worker_capability: str | None,
-        dispatch_metadata: dict[str, Any],
-        runtime_context: RuntimeControlContext | None,
-        include_runtime_context: bool = True,
-        loaded_skills_content: str = "",
-        skill_injection_budget: int = 0,
-        progress_notes: list[dict] | None = None,
-        deferred_tools_text: str = "",
-        role_card: str = "",
-        pipeline_catalog_content: str = "",
+        ctx: SystemPromptContext,
     ) -> tuple[list[dict[str, str]], list[str]]:
+        _SEP = "\n\n---\n\n"
+        project = ctx.project
+        task = ctx.task
+        agent_profile = ctx.agent_profile
+        owner_profile = ctx.owner_profile
+        bootstrap = ctx.bootstrap
+        dispatch_metadata = ctx.dispatch_metadata
+        runtime_context = ctx.runtime_context
+
         ambient_runtime, ambient_reasons = build_ambient_runtime_facts(
             owner_profile=owner_profile,
             surface=task.requester.channel or "chat",
@@ -3411,9 +3427,9 @@ class AgentContextService:
             if is_worker_profile
             else BehaviorLoadProfile.FULL
         )
-        include_detailed_recall = memory_prefetch_mode == "detailed_prefetch"
+        include_detailed_recall = ctx.memory_prefetch_mode == "detailed_prefetch"
         runtime_hints = build_runtime_hint_bundle(
-            user_text=current_user_text,
+            user_text=ctx.current_user_text,
             surface=task.requester.channel or "chat",
             can_delegate_research=bool(
                 str(dispatch_metadata.get("requested_worker_type", "")).strip().lower()
@@ -3431,123 +3447,124 @@ class AgentContextService:
                 "route_reason": runtime_context.route_reason if runtime_context is not None else "",
             },
         )
-        blocks: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    f"AgentProfile: {agent_profile.name}\n"
-                    "instruction_overlays: "
-                    f"{self._render_list(agent_profile.instruction_overlays, max_chars=240)}"
+
+        # 先解析一次 workspace，避免 resolve_behavior_workspace 双重调用
+        behavior_ws = resolve_behavior_workspace(
+            project_root=self._project_root,
+            agent_profile=agent_profile,
+            project_name=project.name if project is not None else "",
+            project_slug=project.slug if project is not None else "",
+            load_profile=effective_load_profile,
+        )
+
+        # ── Block 1: Core（永远注入）──────────────────────────
+        core_sections: list[str] = [
+            # AgentProfile
+            (
+                f"AgentProfile: {agent_profile.name}\n"
+                "instruction_overlays: "
+                f"{self._render_list(agent_profile.instruction_overlays, max_chars=240)}"
+            ),
+            # OwnerProfile
+            (
+                f"OwnerProfile: {owner_profile.display_name}\n"
+                f"preferred_address: {owner_profile.preferred_address}\n"
+                f"working_style: {truncate_chars(owner_profile.working_style or 'N/A', 320)}\n"
+                "interaction_preferences: "
+                f"{self._render_list(owner_profile.interaction_preferences, max_chars=220)}\n"
+                "boundary_notes: "
+                f"{self._render_list(owner_profile.boundary_notes, max_chars=220)}"
+            ),
+            # AmbientRuntime
+            (
+                "AmbientRuntime:\n"
+                f"current_datetime_local: {ambient_runtime['current_datetime_local']}\n"
+                f"current_date_local: {ambient_runtime['current_date_local']}\n"
+                f"current_time_local: {ambient_runtime['current_time_local']}\n"
+                f"current_weekday_local: {ambient_runtime['current_weekday_local']}\n"
+                f"timezone: {ambient_runtime['timezone']}\n"
+                f"utc_offset: {ambient_runtime['utc_offset']}\n"
+                f"locale: {ambient_runtime['locale']}\n"
+                f"surface: {ambient_runtime['surface']}\n"
+                f"source: {ambient_runtime['source']}"
+            ),
+            # BehaviorSystem
+            render_behavior_system_block(
+                agent_profile=agent_profile,
+                project_name=project.name if project is not None else "",
+                project_slug=project.slug if project is not None else "",
+                project_root=self._project_root,
+                # Feature 063 T2.7: 根据 Agent 角色选择 load_profile
+                load_profile=effective_load_profile,
+            ),
+            # BehaviorToolGuide（使用已解析的 workspace，消除双重调用）
+            build_behavior_tool_guide_block(
+                workspace=behavior_ws,
+                is_bootstrap_pending=(
+                    bootstrap.status is BootstrapSessionStatus.PENDING
                 ),
-            },
-            {
-                "role": "system",
-                "content": (
-                    f"OwnerProfile: {owner_profile.display_name}\n"
-                    f"preferred_address: {owner_profile.preferred_address}\n"
-                    f"working_style: {truncate_chars(owner_profile.working_style or 'N/A', 320)}\n"
-                    "interaction_preferences: "
-                    f"{self._render_list(owner_profile.interaction_preferences, max_chars=220)}\n"
-                    "boundary_notes: "
-                    f"{self._render_list(owner_profile.boundary_notes, max_chars=220)}"
-                ),
-            },
-            {
-                "role": "system",
-                "content": (
-                    "AmbientRuntime:\n"
-                    f"current_datetime_local: {ambient_runtime['current_datetime_local']}\n"
-                    f"current_date_local: {ambient_runtime['current_date_local']}\n"
-                    f"current_time_local: {ambient_runtime['current_time_local']}\n"
-                    f"current_weekday_local: {ambient_runtime['current_weekday_local']}\n"
-                    f"timezone: {ambient_runtime['timezone']}\n"
-                    f"utc_offset: {ambient_runtime['utc_offset']}\n"
-                    f"locale: {ambient_runtime['locale']}\n"
-                    f"surface: {ambient_runtime['surface']}\n"
-                    f"source: {ambient_runtime['source']}"
-                ),
-            },
-            {
-                "role": "system",
-                "content": render_behavior_system_block(
-                    agent_profile=agent_profile,
-                    project_name=project.name if project is not None else "",
-                    project_slug=project.slug if project is not None else "",
-                    project_root=self._project_root,
-                    # Feature 063 T2.7: 根据 Agent 角色选择 load_profile
-                    load_profile=effective_load_profile,
-                ),
-            },
-            # TODO: resolve_behavior_workspace 也在 render_behavior_system_block 内部
-            # 被调用了一次（通过 resolve_behavior_pack），此处第二次调用造成重复
-            # 的文件系统检查（约 108-144 次 exists() 调用）。后续应重构为只解析一次
-            # workspace，同时传递给 render_behavior_system_block 和
-            # build_behavior_tool_guide_block。
-            {
-                "role": "system",
-                "content": build_behavior_tool_guide_block(
-                    workspace=resolve_behavior_workspace(
-                        project_root=self._project_root,
-                        agent_profile=agent_profile,
-                        project_name=project.name if project is not None else "",
-                        project_slug=project.slug if project is not None else "",
-                        # Feature 063: 透传 load_profile
-                        load_profile=effective_load_profile,
-                    ),
-                    is_bootstrap_pending=(
-                        bootstrap.status is BootstrapSessionStatus.PENDING
-                    ),
-                ),
-            },
-            {
-                "role": "system",
-                "content": render_runtime_hint_block(
-                    user_text=current_user_text,
-                    runtime_hints=runtime_hints,
-                ),
-            },
+            ),
+            # RuntimeHints
+            render_runtime_hint_block(
+                user_text=ctx.current_user_text,
+                runtime_hints=runtime_hints,
+            ),
         ]
+
+        # ── Block 2: Context（按需注入）──────────────────────────
+        context_sections: list[str] = []
+
         # Feature 061: Deferred Tools 名称列表注入
-        # 让 LLM 知道有哪些工具可通过 tool_search 搜索后使用
-        if deferred_tools_text:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": deferred_tools_text,
-                }
+        if ctx.deferred_tools_text:
+            context_sections.append(ctx.deferred_tools_text)
+
+        # OwnerOverlay（InstructionOverlays 的一部分，按需注入到 Context）
+        if ctx.owner_overlay is not None:
+            owner_overlay = ctx.owner_overlay
+            ip_override = self._render_list(
+                owner_overlay.interaction_preferences_override,
+                max_chars=220,
             )
-        if owner_overlay is not None:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "OwnerOverlay:\n"
-                        "assistant_identity: "
-                        f"{truncate_chars(str(owner_overlay.assistant_identity_overrides), 240)}\n"
-                        "working_style_override: "
-                        f"{truncate_chars(owner_overlay.working_style_override or 'N/A', 280)}\n"
-                        "interaction_preferences_override: "
-                        f"{
-                            self._render_list(
-                                owner_overlay.interaction_preferences_override,
-                                max_chars=220,
-                            )
-                        }"
-                    ),
-                }
+            context_sections.append(
+                "OwnerOverlay:\n"
+                "assistant_identity: "
+                f"{truncate_chars(str(owner_overlay.assistant_identity_overrides), 240)}\n"
+                "working_style_override: "
+                f"{truncate_chars(owner_overlay.working_style_override or 'N/A', 280)}\n"
+                f"interaction_preferences_override: {ip_override}"
             )
+
+        # ProjectContext
         if project is not None:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"ProjectContext: {project.name} ({project.slug})\n"
-                        f"description: {truncate_chars(project.description or 'N/A', 360)}\n"
-                        f"workspace: default\n"
-                        f"task_scope_id: {task.scope_id or 'N/A'}"
-                    ),
-                }
+            context_sections.append(
+                f"ProjectContext: {project.name} ({project.slug})\n"
+                f"description: {truncate_chars(project.description or 'N/A', 360)}\n"
+                f"workspace: default\n"
+                f"task_scope_id: {task.scope_id or 'N/A'}"
             )
+
+        # RuntimeContext
+        if ctx.include_runtime_context and (
+            ctx.worker_capability or dispatch_metadata or runtime_context is not None
+        ):
+            control_summary = summarize_control_metadata_for_prompt(dispatch_metadata)
+            if runtime_context is not None:
+                runtime_summary = (
+                    f"session_id={runtime_context.session_id or 'N/A'}, "
+                    f"project_id={runtime_context.project_id or 'N/A'}, "
+                    f"work_id={runtime_context.work_id or 'N/A'}, "
+                    f"context_frame_id={runtime_context.context_frame_id or 'N/A'}, "
+                    f"route_reason={runtime_context.route_reason or 'N/A'}"
+                )
+            else:
+                runtime_summary = "N/A"
+            context_sections.append(
+                f"RuntimeContext: worker_capability={ctx.worker_capability or 'main'}\n"
+                f"runtime_snapshot={runtime_summary}\n"
+                f"control_metadata_summary={control_summary}"
+            )
+
+        # Bootstrap
         bootstrap_block_content = (
             f"BootstrapSession: {bootstrap.status.value}\n"
             f"current_step: {bootstrap.current_step}\n"
@@ -3587,70 +3604,57 @@ class AgentContextService:
                 f"剩余步骤: {', '.join(remaining_steps)}\n"
                 f"已完成的回答: {truncate_chars(str(bootstrap.answers or {}), 280)}"
             )
-        blocks.append(
-            {
-                "role": "system",
-                "content": bootstrap_block_content,
-            }
-        )
-        # Feature 061 T-029: 角色卡片注入（替代 WorkerType 多模板的角色引导）
-        # 角色卡片是 Agent 实例级自定义描述（~100-150 tokens），
-        # 从 AgentRuntime.role_card 读取。是引导而非硬约束。
-        if role_card:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": f"RoleCard:\n{role_card}",
-                }
+        context_sections.append(bootstrap_block_content)
+
+        # Feature 061 T-029: 角色卡片注入
+        if ctx.role_card:
+            context_sections.append(f"RoleCard:\n{ctx.role_card}")
+
+        # MemoryRuntime
+        if ctx.memory_scope_ids:
+            context_sections.append(
+                self._render_memory_runtime_block(
+                    memory_scope_ids=ctx.memory_scope_ids,
+                    include_detailed_recall=include_detailed_recall,
+                )
             )
-        if recent_summary:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": f"RecentSummary:\n{recent_summary}",
-                }
+
+        # MemoryRecall
+        if ctx.memory_hits or (ctx.memory_scope_ids and not include_detailed_recall):
+            context_sections.append(
+                self._render_memory_recall_block(
+                    memory_hits=ctx.memory_hits,
+                    memory_scope_ids=ctx.memory_scope_ids,
+                    include_preview=include_detailed_recall,
+                )
             )
-        if session_replay is not None and (
-            session_replay.transcript_entries
-            or session_replay.tool_exchange_lines
-            or session_replay.latest_context_summary
+
+        # ── Block 3: History（按需注入）──────────────────────────
+        history_sections: list[str] = []
+
+        # RecentSummary
+        if ctx.recent_summary:
+            history_sections.append(f"RecentSummary:\n{ctx.recent_summary}")
+
+        # SessionReplay
+        if ctx.session_replay is not None and (
+            ctx.session_replay.transcript_entries
+            or ctx.session_replay.tool_exchange_lines
+            or ctx.session_replay.latest_context_summary
         ):
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": self.render_agent_session_replay_block(session_replay),
-                }
+            history_sections.append(
+                self.render_agent_session_replay_block(ctx.session_replay)
             )
-        if memory_scope_ids:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": self._render_memory_runtime_block(
-                        memory_scope_ids=memory_scope_ids,
-                        include_detailed_recall=include_detailed_recall,
-                    ),
-                }
-            )
-        if memory_hits or (memory_scope_ids and not include_detailed_recall):
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": self._render_memory_recall_block(
-                        memory_hits=memory_hits,
-                        memory_scope_ids=memory_scope_ids,
-                        include_preview=include_detailed_recall,
-                    ),
-                }
-            )
+
         # Feature 060: LoadedSkills 系统块（Skill 内容从 LLMService 迁入预算体系）
-        if loaded_skills_content:
+        if ctx.loaded_skills_content:
             # 按 skill_injection_budget 截断超出部分
-            skill_text = loaded_skills_content
-            if skill_injection_budget > 0:
+            skill_text = ctx.loaded_skills_content
+            if ctx.skill_injection_budget > 0:
                 from .context_compaction import estimate_text_tokens as _est_tokens
 
                 skill_tokens = _est_tokens(skill_text)
-                if skill_tokens > skill_injection_budget:
+                if skill_tokens > ctx.skill_injection_budget:
                     # 按加载顺序保留 Skill，截断超出部分
                     from .llm_service import SKILL_SECTION_SEPARATOR
                     sections = skill_text.split(SKILL_SECTION_SEPARATOR)
@@ -3663,7 +3667,7 @@ class AgentContextService:
                             running_tokens += _est_tokens(section)
                             continue
                         sec_tokens = _est_tokens(section)
-                        if running_tokens + sec_tokens <= skill_injection_budget:
+                        if running_tokens + sec_tokens <= ctx.skill_injection_budget:
                             kept_sections.append(section)
                             running_tokens += sec_tokens
                         else:
@@ -3675,26 +3679,16 @@ class AgentContextService:
                         skill_text = SKILL_SECTION_SEPARATOR.join(kept_sections)
                         skill_text += f"\n\n[已截断 {len(truncated_skills)} 个 Skill: {', '.join(truncated_skills)}]"
                         # block_reasons 会在外层记录
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": skill_text,
-                }
-            )
+            history_sections.append(skill_text)
 
-        # Feature 065: Pipeline 目录系统块（Worker/Subagent 感知 Pipeline 存在）
-        if pipeline_catalog_content:
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": pipeline_catalog_content,
-                }
-            )
+        # Feature 065: Pipeline 目录系统块
+        if ctx.pipeline_catalog_content:
+            history_sections.append(ctx.pipeline_catalog_content)
 
         # Feature 060: ProgressNotes 系统块（Worker 进度笔记）
-        if progress_notes:
+        if ctx.progress_notes:
             notes_text = "## Progress Notes\n\n"
-            for note in progress_notes[-5:]:  # 最近 5 条
+            for note in ctx.progress_notes[-5:]:  # 最近 5 条
                 step_id = note.get("step_id", "unknown")
                 status = note.get("status", "unknown")
                 description = note.get("description", "")
@@ -3702,13 +3696,26 @@ class AgentContextService:
                 next_steps = note.get("next_steps", [])
                 if next_steps:
                     notes_text += f"  Next: {', '.join(next_steps)}\n"
+            history_sections.append(notes_text.rstrip())
+
+        # InstructionOverlays（放在 History 中，属于历史上下文类信息）
+        # 注意：AgentProfile.instruction_overlays 已在 Core block 中作为单行摘要注入，
+        # OwnerOverlay 已在 Context block 中注入，此处无需重复。
+
+        # ── 组装最终 blocks ──────────────────────────
+        blocks: list[dict[str, str]] = [
+            {"role": "system", "content": _SEP.join(core_sections)},
+        ]
+        if context_sections:
             blocks.append(
-                {
-                    "role": "system",
-                    "content": notes_text.rstrip(),
-                }
+                {"role": "system", "content": _SEP.join(context_sections)}
+            )
+        if history_sections:
+            blocks.append(
+                {"role": "system", "content": _SEP.join(history_sections)}
             )
 
+        # ResearchHandoff 使用 assistant role，独立于三大 block
         research_handoff = self._build_research_handoff_block(dispatch_metadata)
         if research_handoff:
             blocks.append(
@@ -3717,30 +3724,7 @@ class AgentContextService:
                     "content": research_handoff,
                 }
             )
-        if include_runtime_context and (
-            worker_capability or dispatch_metadata or runtime_context is not None
-        ):
-            control_summary = summarize_control_metadata_for_prompt(dispatch_metadata)
-            if runtime_context is not None:
-                runtime_summary = (
-                    f"session_id={runtime_context.session_id or 'N/A'}, "
-                    f"project_id={runtime_context.project_id or 'N/A'}, "
-                    f"work_id={runtime_context.work_id or 'N/A'}, "
-                    f"context_frame_id={runtime_context.context_frame_id or 'N/A'}, "
-                    f"route_reason={runtime_context.route_reason or 'N/A'}"
-                )
-            else:
-                runtime_summary = "N/A"
-            blocks.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"RuntimeContext: worker_capability={worker_capability or 'main'}\n"
-                        f"runtime_snapshot={runtime_summary}\n"
-                        f"control_metadata_summary={control_summary}"
-                    ),
-                }
-            )
+
         return blocks, ambient_reasons
 
     def _build_research_handoff_block(self, dispatch_metadata: dict[str, Any]) -> str:
@@ -3854,7 +3838,7 @@ class AgentContextService:
         )
 
         def _build_and_measure() -> tuple[list[dict[str, str]], list[str], int, int]:
-            blocks, reasons = self._build_system_blocks(
+            ctx = SystemPromptContext(
                 project=project, task=task,
                 current_user_text=compiled.latest_user_text or task.title,
                 agent_profile=agent_profile, owner_profile=owner_profile,
@@ -3873,6 +3857,7 @@ class AgentContextService:
                 role_card=role_card,
                 pipeline_catalog_content=cur_pipeline_catalog,
             )
+            blocks, reasons = self._build_system_blocks(ctx)
             sys_tok = estimate_messages_tokens(blocks)
             total_tok = estimate_messages_tokens([*blocks, *compiled.messages])
             return blocks, reasons, sys_tok, total_tok
