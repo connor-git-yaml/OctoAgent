@@ -5,8 +5,11 @@ import {
   attachExecutionInput,
 } from "../api/client";
 import { TERMINAL_TASK_STATUSES } from "../domains/chat/constants";
-import { MessageBubble } from "../components/ChatUI/MessageBubble";
+import { MessageBubble, type MessageBubbleActivityItem } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
+
+// 稳定引用：避免每次渲染创建新空数组破坏 MessageBubble 的 memo
+const EMPTY_ACTIVITY: MessageBubbleActivityItem[] = [];
 import {
   buildAgentActivity,
   buildAgentTraceEntries,
@@ -161,7 +164,7 @@ export default function ChatWorkbench() {
 
   // 智能滚动：用户在底部时自动滚底，浏览历史时不打断
   const { containerRef: chatScrollRef, endRef: messagesEndAutoRef, showNewMessageHint, dismissHint } =
-    useAutoScroll([messages]);
+    useAutoScroll([messages], taskId);
 
   const snapshotResourceRefs = useMemo(() => {
     const res = snapshot?.resources;
@@ -187,7 +190,6 @@ export default function ChatWorkbench() {
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionAliasInputRef = useRef<HTMLInputElement | null>(null);
-  // messagesEndRef 已被 useAutoScroll 的 messagesEndAutoRef 替代
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
@@ -1056,7 +1058,7 @@ export default function ChatWorkbench() {
                   activityItems={
                     message.id === activeStreamingMessageId && shouldShowInlineActivity
                       ? activityItems
-                      : []
+                      : EMPTY_ACTIVITY
                   }
                 />
               ))}
@@ -1073,16 +1075,17 @@ export default function ChatWorkbench() {
                 />
               ) : null}
               <div ref={messagesEndAutoRef} />
-              {showNewMessageHint ? (
-                <button
-                  type="button"
-                  className="wb-chat-new-message-hint"
-                  onClick={dismissHint}
-                >
-                  ↓ 新消息
-                </button>
-              ) : null}
             </div>
+
+            {showNewMessageHint ? (
+              <button
+                type="button"
+                className="wb-chat-new-message-hint"
+                onClick={dismissHint}
+              >
+                ↓ 新消息
+              </button>
+            ) : null}
 
             {error ? (
               <InlineCallout title="刚才没有发送成功" tone="error">

@@ -3136,9 +3136,9 @@
 }
 
 .wb-chat-new-message-hint {
-  position: sticky;
-  bottom: 8px;
+  flex: 0 0 auto;
   align-self: center;
+  margin-top: -20px;
   background: var(--cp-primary);
   color: #fff;
   border: none;
@@ -4233,5 +4233,76 @@
 
   :root:not(.light) .wb-chat-form button[type="submit"] {
     background: var(--cp-primary);
+  }
+
+  /* 全局壳体和面板 */
+  :root:not(.light) .wb-sidebar {
+    background: rgba(30, 30, 30, 0.95);
+  }
+
+  :root:not(.light) .wb-main {
+    background: transparent;
+  }
+
+  :root:not(.light) .wb-card,
+  :root:not(.light) .wb-panel,
+  :root:not(.light) .wb-sidebar-card {
+    background: var(--cp-card);
+  }
+
+  :root:not(.light) .wb-modal-body {
+    background: var(--cp-card-strong);
+  }
+
+  :root:not(.light) .wb-nav-session-item {
+    background: transparent;
+  }
+
+  :root:not(.light) .wb-nav-session-item:hover,
+  :root:not(.light) .wb-nav-session-item.active {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  :root:not(.light) .wb-topbar {
+    background: rgba(30, 30, 30, 0.9);
+    border-color: var(--cp-border);
+  }
+
+  :root:not(.light) .wb-hero {
+    background: transparent;
+  }
+
+  :root:not(.light) .wb-chat-form textarea {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  :root:not(.light) .wb-chat-form textarea::placeholder {
+    color: var(--cp-muted);
+  }
+
+  /* 错误/审批 callout */
+  :root:not(.light) .wb-inline-callout {
+    background: var(--cp-card);
+    border-color: var(--cp-border);
+  }
+
+  /* 表格和 separator */
+  :root:not(.light) hr,
+  :root:not(.light) .wb-separator {
+    border-color: var(--cp-border);
+  }
+
+  /* 活动轨迹展开区域 */
+  :root:not(.light) .wb-message-trace-detail {
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  /* 滚动条 */
+  :root:not(.light) ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  :root:not(.light) ::-webkit-scrollbar-track {
+    background: transparent;
   }
 }

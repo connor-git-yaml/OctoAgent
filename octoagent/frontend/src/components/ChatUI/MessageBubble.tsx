@@ -20,7 +20,7 @@ interface MessageBubbleTraceEntry {
   detailOutput?: string;
 }
 
-interface MessageBubbleActivityItem {
+export interface MessageBubbleActivityItem {
   id: string;
   actor: string;
   stateLabel: string;
