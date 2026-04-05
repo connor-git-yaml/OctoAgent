@@ -5,7 +5,7 @@
  * 对齐 FR-023
  */
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { ChatMessage } from "../../hooks/useChatStream";
 import { HoverReveal } from "../../ui/primitives";
 import { MarkdownContent } from "./MarkdownContent";
@@ -36,7 +36,7 @@ interface MessageBubbleProps {
   activityItems?: MessageBubbleActivityItem[];
 }
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   message,
   loadingLabel = "正在整理回复",
   activityItems = [],
@@ -156,4 +156,4 @@ export function MessageBubble({
       </div>
     </div>
   );
-}
+});

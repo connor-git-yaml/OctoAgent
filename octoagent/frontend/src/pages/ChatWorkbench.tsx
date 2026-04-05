@@ -42,6 +42,7 @@ import {
 import { useChatStream } from "../hooks/useChatStream";
 import { readStoredTaskId } from "../hooks/chatStreamHelpers";
 import { useTaskLiveState } from "../hooks/useTaskLiveState";
+import { useAutoScroll } from "../hooks/useAutoScroll";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
@@ -158,10 +159,9 @@ export default function ChatWorkbench() {
   const [isEditingSessionAlias, setIsEditingSessionAlias] = useState(false);
   const [sessionAliasDraft, setSessionAliasDraft] = useState("");
 
-  // 消息列表变化时自动滚动到底部
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // 智能滚动：用户在底部时自动滚底，浏览历史时不打断
+  const { containerRef: chatScrollRef, endRef: messagesEndAutoRef, showNewMessageHint, dismissHint } =
+    useAutoScroll([messages]);
 
   const snapshotResourceRefs = useMemo(() => {
     const res = snapshot?.resources;
@@ -187,7 +187,7 @@ export default function ChatWorkbench() {
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionAliasInputRef = useRef<HTMLInputElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  // messagesEndRef 已被 useAutoScroll 的 messagesEndAutoRef 替代
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
@@ -1047,7 +1047,7 @@ export default function ChatWorkbench() {
           </div>
         ) : (
           <>
-            <div className="wb-chat-messages">
+            <div className="wb-chat-messages" ref={chatScrollRef}>
               {messages.map((message) => (
                 <MessageBubble
                   key={message.id}
@@ -1072,7 +1072,16 @@ export default function ChatWorkbench() {
                   activityItems={activityItems}
                 />
               ) : null}
-              <div ref={messagesEndRef} />
+              <div ref={messagesEndAutoRef} />
+              {showNewMessageHint ? (
+                <button
+                  type="button"
+                  className="wb-chat-new-message-hint"
+                  onClick={dismissHint}
+                >
+                  ↓ 新消息
+                </button>
+              ) : null}
             </div>
 
             {error ? (
