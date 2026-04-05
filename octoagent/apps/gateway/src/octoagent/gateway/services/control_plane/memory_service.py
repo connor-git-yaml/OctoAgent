@@ -215,7 +215,6 @@ class MemoryDomainService(DomainServiceBase):
         subject_key: str,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
     ) -> MemorySubjectHistoryDocument:
         _, selected_project, _, _ = await self._resolve_selection()
@@ -232,7 +231,6 @@ class MemoryDomainService(DomainServiceBase):
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         status: str | None = None,
         source: str | None = None,
@@ -255,7 +253,6 @@ class MemoryDomainService(DomainServiceBase):
         self,
         *,
         project_id: str | None = None,
-        workspace_id: str | None = None,  # deprecated, ignored
         scope_id: str | None = None,
         subject_key: str | None = None,
     ) -> VaultAuthorizationDocument:
@@ -263,10 +260,8 @@ class MemoryDomainService(DomainServiceBase):
         resolved_project_id = project_id or (
             selected_project.project_id if selected_project is not None else ""
         )
-        resolved_workspace_id = None
         return await self._memory_console_service.get_vault_authorization(
             project_id=resolved_project_id,
-            workspace_id=resolved_workspace_id,
             scope_id=scope_id,
             subject_key=subject_key,
         )
@@ -276,7 +271,7 @@ class MemoryDomainService(DomainServiceBase):
     # ------------------------------------------------------------------
 
     async def _handle_memory_query(self, request: ActionRequestEnvelope) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         document = await self.get_memory_console(
             project_id=project_id or None,
             scope_id=self._param_str(request.params, "scope_id") or None,
@@ -310,11 +305,10 @@ class MemoryDomainService(DomainServiceBase):
         subject_key = self._param_str(request.params, "subject_key")
         if not subject_key:
             raise ControlPlaneActionError("SUBJECT_KEY_REQUIRED", "subject_key 不能为空")
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         document = await self.get_memory_subject_history(
             subject_key,
             project_id=project_id or None,
-            workspace_id=workspace_id,
             scope_id=self._param_str(request.params, "scope_id") or None,
         )
         return self._completed_result(
@@ -345,10 +339,9 @@ class MemoryDomainService(DomainServiceBase):
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         document = await self.get_memory_proposal_audit(
             project_id=project_id or None,
-            workspace_id=workspace_id,
             scope_id=self._param_str(request.params, "scope_id") or None,
             status=self._param_str(request.params, "status") or None,
             source=self._param_str(request.params, "source") or None,
@@ -375,7 +368,7 @@ class MemoryDomainService(DomainServiceBase):
         success_code: str,
         success_message: str,
     ) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         partition_value = self._param_str(request.params, "partition")
         partition = self._parse_memory_partition(partition_value) if partition_value else None
         raw_evidence_refs = request.params.get("evidence_refs", [])
@@ -421,7 +414,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """使用 LLM 将待整理 fragment 整合为 SoR 现行事实。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         try:
             result = await self._memory_console_service.run_consolidate(
                 project_id=project_id or "",
@@ -448,7 +441,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """定期聚合生成用户画像（Feature 065 Phase 3, US-9）。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
 
         # 复用 MemoryConsoleService 内部的 context/memory 解析模式
         try:
@@ -537,7 +530,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """T023: 用户编辑 SoR 记忆——乐观锁 + Proposal 流程 + 审计事件。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         scope_id = self._param_str(request.params, "scope_id")
         subject_key = self._param_str(request.params, "subject_key")
         content = self._param_str(request.params, "content")
@@ -641,7 +634,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """T034: 归档 SoR 记忆。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         scope_id = self._param_str(request.params, "scope_id")
         memory_id = self._param_str(request.params, "memory_id")
         expected_version = self._param_int(request.params, "expected_version", default=0)
@@ -705,7 +698,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """T035: 恢复已归档的 SoR 记忆。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         scope_id = self._param_str(request.params, "scope_id")
         memory_id = self._param_str(request.params, "memory_id")
 
@@ -772,7 +765,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """T062: 前端 Memory UI 的 browse 查询。"""
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         result = await self._memory_console_service.browse_memory(
             project_id=project_id or "",
             scope_id=self._param_str(request.params, "scope_id") or "",
@@ -798,7 +791,7 @@ class MemoryDomainService(DomainServiceBase):
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         document = await self._retrieval_platform_service.start_memory_generation_build(
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
@@ -839,7 +832,7 @@ class MemoryDomainService(DomainServiceBase):
                 "GENERATION_ID_REQUIRED",
                 "generation_id 不能为空",
             )
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         await self._retrieval_platform_service.cancel_generation(
             generation_id=generation_id,
             project_id=project_id or "",
@@ -865,7 +858,7 @@ class MemoryDomainService(DomainServiceBase):
                 "GENERATION_ID_REQUIRED",
                 "generation_id 不能为空",
             )
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         await self._retrieval_platform_service.cutover_generation(
             generation_id=generation_id,
             project_id=project_id or "",
@@ -891,7 +884,7 @@ class MemoryDomainService(DomainServiceBase):
                 "GENERATION_ID_REQUIRED",
                 "generation_id 不能为空",
             )
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         await self._retrieval_platform_service.rollback_generation(
             generation_id=generation_id,
             project_id=project_id or "",
@@ -915,7 +908,7 @@ class MemoryDomainService(DomainServiceBase):
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         vault_request, decision = await self._memory_console_service.request_vault_access(
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
@@ -1013,7 +1006,7 @@ class MemoryDomainService(DomainServiceBase):
         self,
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         code, payload, decision = await self._memory_console_service.retrieve_vault(
             actor_id=request.actor.actor_id,
             actor_label=request.actor.actor_label,
@@ -1052,7 +1045,7 @@ class MemoryDomainService(DomainServiceBase):
         request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         scope_ids = self._param_list(request.params, "scope_ids")
-        project_id, workspace_id = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         code, payload, decision = await self._memory_console_service.inspect_export(
             active_project_id=project_id,
             project_id=project_id,
@@ -1083,7 +1076,7 @@ class MemoryDomainService(DomainServiceBase):
         snapshot_ref = self._param_str(request.params, "snapshot_ref")
         if not snapshot_ref:
             raise ControlPlaneActionError("SNAPSHOT_REF_REQUIRED", "snapshot_ref 不能为空")
-        project_id, _ = await self._resolve_memory_action_context(request)
+        project_id = await self._resolve_memory_action_context(request)
         code, payload, decision = await self._memory_console_service.verify_restore(
             actor_id=request.actor.actor_id,
             active_project_id=project_id,
@@ -1119,14 +1112,13 @@ class MemoryDomainService(DomainServiceBase):
     async def _resolve_memory_action_context(
         self,
         request: ActionRequestEnvelope,
-    ) -> tuple[str, str | None]:
-        """解析 memory action 公共上下文：返回 (project_id, workspace_id)。"""
+    ) -> str:
+        """解析 memory action 公共上下文：返回 project_id。"""
         _, selected_project, _, _ = await self._resolve_selection()
         project_id = self._param_str(request.params, "project_id") or (
             selected_project.project_id if selected_project is not None else ""
         )
-        workspace_id = None
-        return project_id, workspace_id
+        return project_id
 
     def _parse_memory_partition(self, value: str | None) -> MemoryPartition | None:
         if not value:
@@ -1167,7 +1159,6 @@ class MemoryDomainService(DomainServiceBase):
         targets: list[ControlPlaneTargetRef] = []
         for key, target_type in (
             ("project_id", "project"),
-            ("workspace_id", "workspace"),
             ("scope_id", "scope"),
             ("subject_key", "memory_subject"),
         ):

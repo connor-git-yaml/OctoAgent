@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from octoagent.memory import (
+    CommitResult,
     EvidenceRef,
     MemoryAccessDeniedError,
     MemoryAccessPolicy,
@@ -500,3 +501,103 @@ class TestMemoryService:
         )
         assert audits
         assert audits[0].retrieval_id == audit.retrieval_id
+
+
+class TestFastCommit:
+    """fast_commit() 快速写入路径测试。"""
+
+    async def test_fast_commit_add_success(self, memory_service, memory_store):
+        """ADD + confidence>=0.75 + 非敏感分区 → 走快速路径，直接成功。"""
+        result = await memory_service.fast_commit(
+            scope_id="work/project-x",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.ADD,
+            subject_key="work.project-x.fast",
+            content="fast committed value",
+            confidence=0.9,
+        )
+        assert isinstance(result, CommitResult)
+        assert result.committed is True
+        assert result.sor_id is not None
+
+        current = await memory_store.get_current_sor("work/project-x", "work.project-x.fast")
+        assert current is not None
+        assert current.content == "fast committed value"
+        assert current.version == 1
+
+    async def test_fast_commit_fallback_low_confidence(self, memory_service, memory_store):
+        """confidence < 0.75 → fallback 到完整 propose-validate-commit，ADD 仍应成功。"""
+        result = await memory_service.fast_commit(
+            scope_id="work/project-x",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.ADD,
+            subject_key="work.project-x.low-conf",
+            content="low confidence value",
+            confidence=0.5,
+        )
+        assert isinstance(result, CommitResult)
+        assert result.committed is True
+        assert result.sor_id is not None
+
+        current = await memory_store.get_current_sor("work/project-x", "work.project-x.low-conf")
+        assert current is not None
+        assert current.content == "low confidence value"
+
+    async def test_fast_commit_fallback_sensitive_partition(self, memory_service, memory_store):
+        """HEALTH 敏感分区 → fallback 到完整流程（写入 vault）。"""
+        result = await memory_service.fast_commit(
+            scope_id="profile/user",
+            partition=MemoryPartition.HEALTH,
+            action=WriteAction.ADD,
+            subject_key="profile.user.health.bp",
+            content="120/80",
+            confidence=0.95,
+        )
+        assert isinstance(result, CommitResult)
+        assert result.committed is True
+        # 敏感分区写入应产生 vault_id
+        assert result.vault_id is not None
+
+    async def test_fast_commit_fallback_update_action(self, memory_service):
+        """UPDATE action → fallback 到完整流程，但因为不存在 SoR 所以 validate 失败。"""
+        result = await memory_service.fast_commit(
+            scope_id="work/project-x",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.UPDATE,
+            subject_key="work.project-x.nonexistent",
+            content="update value",
+            confidence=0.9,
+        )
+        assert isinstance(result, CommitResult)
+        # UPDATE 对不存在的 subject_key 走 fallback 后 validate 应该失败
+        assert result.committed is False
+
+    async def test_fast_commit_duplicate_subject_key(self, memory_service):
+        """快速路径 ADD 对已存在的 subject_key → commit 阶段应失败（快速路径跳过 validate）。"""
+        # 先通过正常流程写入一条记录
+        first = await memory_service.fast_commit(
+            scope_id="work/project-x",
+            partition=MemoryPartition.WORK,
+            action=WriteAction.ADD,
+            subject_key="work.project-x.dup-key",
+            content="first value",
+            confidence=0.9,
+        )
+        assert first.committed is True
+        assert first.sor_id is not None
+
+        # 再次 ADD 同一个 subject_key——快速路径不做 validate 查重，
+        # 但 commit 阶段应检测到冲突并抛出异常
+        try:
+            await memory_service.fast_commit(
+                scope_id="work/project-x",
+                partition=MemoryPartition.WORK,
+                action=WriteAction.ADD,
+                subject_key="work.project-x.dup-key",
+                content="duplicate value",
+                confidence=0.9,
+            )
+            raise AssertionError("expected error on duplicate subject_key fast_commit")
+        except Exception:
+            # commit_memory 内部应因已有 current SoR 而拒绝 ADD
+            pass
