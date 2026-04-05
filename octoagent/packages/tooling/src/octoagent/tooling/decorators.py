@@ -28,8 +28,6 @@ def tool_contract(
     timeout_seconds: float | None = None,
     output_truncate_threshold: int | None = None,
     path_escalation: bool = False,
-    # DEPRECATED: 兼容参数，Feature 073 清理后忽略
-    tool_profile: Any = None,
 ) -> Any:
     """工具契约声明装饰器 -- 对齐 spec FR-001/002
 

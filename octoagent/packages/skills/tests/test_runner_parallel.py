@@ -30,7 +30,6 @@ from octoagent.skills.runner import SkillRunner
 from octoagent.tooling.models import (
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolResult,
 )
 
@@ -67,7 +66,6 @@ def _make_tool_meta(name: str, side_effect: SideEffectLevel) -> ToolMeta:
         description=f"Test tool {name}",
         parameters_json_schema={"type": "object", "properties": {}},
         side_effect_level=side_effect,
-        tool_profile=ToolProfile.STANDARD,
         tool_group="test",
     )
 

@@ -6,7 +6,7 @@
 
 import pytest
 from octoagent.tooling.decorators import tool_contract
-from octoagent.tooling.models import SideEffectLevel, ToolProfile, ToolTier
+from octoagent.tooling.models import SideEffectLevel, ToolTier
 
 
 class TestToolContractDecorator:
@@ -17,7 +17,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def echo(text: str) -> str:
@@ -34,7 +34,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def my_tool(x: int) -> int:
@@ -47,7 +47,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
             name="custom_echo",
         )
@@ -61,7 +61,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def t(x: str) -> str:
@@ -74,7 +74,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
             version="2.1.0",
         )
@@ -88,7 +88,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
+
             tool_group="filesystem",
             timeout_seconds=30.0,
         )
@@ -102,7 +102,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def t(x: str) -> str:
@@ -115,7 +115,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
             output_truncate_threshold=1000,
         )
@@ -129,7 +129,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.IRREVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
+
             tool_group="filesystem",
         )
         async def delete_file(path: str) -> str:
@@ -145,7 +145,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def echo(text: str) -> str:
@@ -164,7 +164,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         def sync_echo(text: str) -> str:
@@ -179,7 +179,7 @@ class TestToolContractDecorator:
         with pytest.raises(TypeError):
 
             @tool_contract(  # type: ignore[call-arg]
-                tool_profile=ToolProfile.MINIMAL,
+    
                 tool_group="system",
             )
             async def t(x: str) -> str:
@@ -194,7 +194,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def echo(text: str) -> str:
@@ -207,7 +207,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
             tier=ToolTier.CORE,
         )
@@ -221,7 +221,7 @@ class TestToolContractDecorator:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
+
             tool_group="filesystem",
             tier=ToolTier.DEFERRED,
         )

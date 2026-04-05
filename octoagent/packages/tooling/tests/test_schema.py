@@ -14,7 +14,7 @@
 import pytest
 from octoagent.tooling.decorators import tool_contract
 from octoagent.tooling.exceptions import SchemaReflectionError
-from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
+from octoagent.tooling.models import SideEffectLevel, ToolMeta
 from octoagent.tooling.schema import reflect_tool_schema
 from pydantic import BaseModel
 
@@ -25,7 +25,7 @@ class TestBasicTypes:
     def test_str_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def echo(text: str) -> str:
@@ -45,7 +45,7 @@ class TestBasicTypes:
     def test_int_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def add(a: int, b: int) -> int:
@@ -66,7 +66,7 @@ class TestBasicTypes:
     def test_float_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def scale(value: float, factor: float) -> float:
@@ -86,7 +86,7 @@ class TestBasicTypes:
     def test_bool_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def toggle(enabled: bool) -> str:
@@ -107,7 +107,7 @@ class TestComplexTypes:
     def test_optional_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def greet(name: str, title: str | None = None) -> str:
@@ -129,7 +129,7 @@ class TestComplexTypes:
     def test_list_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def summarize(items: list[str]) -> str:
@@ -147,7 +147,7 @@ class TestComplexTypes:
     def test_dict_param(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def process(data: dict[str, int]) -> str:
@@ -175,7 +175,7 @@ class TestComplexTypes:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.REVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
+
             tool_group="filesystem",
         )
         async def write_file(spec: FileSpec) -> str:
@@ -201,7 +201,7 @@ class TestDocstringParsing:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def echo(text: str) -> str:
@@ -220,7 +220,7 @@ class TestDocstringParsing:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def no_doc(x: str) -> str:
@@ -236,7 +236,7 @@ class TestAsyncSyncDetection:
     def test_async_function(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def async_tool(x: str) -> str:
@@ -253,7 +253,7 @@ class TestAsyncSyncDetection:
     def test_sync_function(self) -> None:
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         def sync_tool(x: str) -> str:
@@ -276,7 +276,7 @@ class TestEdgeCases:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         def bad_tool(x):  # noqa: ANN001
@@ -291,7 +291,7 @@ class TestEdgeCases:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
+
             tool_group="system",
         )
         async def status() -> str:
@@ -317,7 +317,7 @@ class TestEdgeCases:
 
         @tool_contract(
             side_effect_level=SideEffectLevel.IRREVERSIBLE,
-            tool_profile=ToolProfile.STANDARD,
+
             tool_group="filesystem",
             version="2.0.0",
             timeout_seconds=30.0,
@@ -334,7 +334,7 @@ class TestEdgeCases:
 
         meta = reflect_tool_schema(write_file)
         assert meta.side_effect_level == SideEffectLevel.IRREVERSIBLE
-        assert meta.tool_profile == ToolProfile.STANDARD
+
         assert meta.tool_group == "filesystem"
         assert meta.version == "2.0.0"
         assert meta.timeout_seconds == 30.0

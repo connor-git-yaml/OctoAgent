@@ -11,16 +11,15 @@ from octoagent.tooling.broker import ToolBroker
 from octoagent.tooling.models import (
     ExecutionContext,
     SideEffectLevel,
-    ToolProfile,
 )
 from octoagent.tooling.schema import reflect_tool_schema
 
 
-def _make_context(profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionContext:
+def _make_context() -> ExecutionContext:
     from octoagent.tooling.models import PermissionPreset
     return ExecutionContext(
         task_id="t1", trace_id="tr1", caller="test",
-        profile=profile, permission_preset=PermissionPreset.FULL,
+        permission_preset=PermissionPreset.FULL,
     )
 
 

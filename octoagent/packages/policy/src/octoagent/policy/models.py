@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from octoagent.tooling.models import SideEffectLevel, ToolProfile
+from octoagent.tooling.models import SideEffectLevel
 from pydantic import BaseModel, Field
 
 # ============================================================
@@ -150,8 +150,8 @@ class PolicyProfile(BaseModel):
     )
 
     # DEPRECATED: 兼容字段，等待 gateway 层完成清理后移除
-    allowed_tool_profile: ToolProfile = Field(
-        default=ToolProfile.STANDARD,
+    allowed_tool_profile: str = Field(
+        default="standard",
         description="DEPRECATED: 允许的工具权限等级上限",
     )
 

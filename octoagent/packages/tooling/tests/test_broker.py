@@ -14,7 +14,6 @@ from octoagent.tooling.exceptions import (
 from octoagent.tooling.models import (
     ExecutionContext,
     SideEffectLevel,
-    ToolProfile,
 )
 from octoagent.tooling.schema import reflect_tool_schema
 
@@ -25,7 +24,6 @@ from octoagent.tooling.schema import reflect_tool_schema
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
 )
 async def echo_tool(text: str) -> str:
@@ -39,7 +37,6 @@ async def echo_tool(text: str) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.REVERSIBLE,
-    tool_profile=ToolProfile.STANDARD,
     tool_group="filesystem",
 )
 async def read_file_tool(path: str) -> str:
@@ -53,7 +50,6 @@ async def read_file_tool(path: str) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.IRREVERSIBLE,
-    tool_profile=ToolProfile.STANDARD,
     tool_group="filesystem",
 )
 async def write_file_tool(path: str, content: str) -> str:
@@ -68,7 +64,6 @@ async def write_file_tool(path: str, content: str) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.PRIVILEGED,
     tool_group="network",
 )
 async def http_get_tool(url: str) -> str:
@@ -235,7 +230,6 @@ class TestBrokerRegistration:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
     timeout_seconds=0.5,
 )
@@ -251,7 +245,6 @@ async def slow_tool(seconds: float) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
 )
 async def error_tool(msg: str) -> str:
@@ -265,7 +258,6 @@ async def error_tool(msg: str) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
 )
 def sync_echo_tool(text: str) -> str:
@@ -285,7 +277,7 @@ def sync_echo_tool(text: str) -> str:
 class TestBrokerExecution:
     """ToolBroker 执行测试"""
 
-    def _make_context(self, profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionContext:
+    def _make_context(self) -> ExecutionContext:
         """创建测试执行上下文"""
         from octoagent.tooling.models import PermissionPreset
         return ExecutionContext(
@@ -295,7 +287,6 @@ class TestBrokerExecution:
             agent_runtime_id="runtime-test-001",
             agent_session_id="session-test-001",
             work_id="work-test-001",
-            profile=profile,
             permission_preset=PermissionPreset.FULL,
         )
 
@@ -401,7 +392,7 @@ class TestBrokerExecution:
             reflect_tool_schema(read_file_tool), read_file_tool
         )
 
-        ctx = self._make_context(profile=ToolProfile.MINIMAL)
+        ctx = self._make_context()
         result = await broker.execute(
             "read_file_tool", {"path": "/tmp/test"}, ctx
         )

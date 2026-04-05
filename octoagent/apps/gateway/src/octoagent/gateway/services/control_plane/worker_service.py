@@ -1887,7 +1887,7 @@ class WorkerProfileDomainService(DomainServiceBase):
             policy_profile_id, policy_profile = self._resolve_effective_policy_profile(
                 selected_project
             )
-            if not self._tool_profile_allowed(tool_profile, policy_profile.allowed_tool_profile.value):
+            if not self._tool_profile_allowed(tool_profile, policy_profile.allowed_tool_profile):
                 warnings.append(
                     "当前 profile 的 tool_profile 高于当前 project policy，运行时可能被降级或要求审批。"
                 )

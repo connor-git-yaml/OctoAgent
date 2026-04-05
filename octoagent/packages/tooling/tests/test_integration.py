@@ -20,7 +20,6 @@ from octoagent.tooling.models import (
     FailMode,
     PermissionPreset,
     SideEffectLevel,
-    ToolProfile,
 )
 from octoagent.tooling.schema import reflect_tool_schema
 
@@ -31,7 +30,7 @@ from octoagent.tooling.schema import reflect_tool_schema
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
+
     tool_group="system",
 )
 async def greet(name: str) -> str:
@@ -45,7 +44,7 @@ async def greet(name: str) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
+
     tool_group="system",
 )
 async def generate_large_output(size: int) -> str:
@@ -59,7 +58,7 @@ async def generate_large_output(size: int) -> str:
 
 @tool_contract(
     side_effect_level=SideEffectLevel.IRREVERSIBLE,
-    tool_profile=ToolProfile.STANDARD,
+
     tool_group="filesystem",
 )
 async def dangerous_op(target: str) -> str:
@@ -76,12 +75,11 @@ async def dangerous_op(target: str) -> str:
 # ============================================================
 
 
-def _make_context(profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionContext:
+def _make_context() -> ExecutionContext:
     return ExecutionContext(
         task_id="integration-t1",
         trace_id="integration-tr1",
         caller="integration_test",
-        profile=profile,
         permission_preset=PermissionPreset.FULL,
     )
 

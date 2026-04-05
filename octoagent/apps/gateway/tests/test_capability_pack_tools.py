@@ -41,7 +41,6 @@ from octoagent.tooling import (
     ExecutionContext,
     FailMode,
     ToolBroker,
-    ToolProfile,
 )
 from octoagent.tooling.models import PermissionPreset
 
@@ -298,7 +297,7 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:butler",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -417,7 +416,7 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:butler",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -598,7 +597,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 task_id=mcp_task_id,
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
-                profile=ToolProfile.MINIMAL,
+    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -609,7 +608,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 task_id=mcp_task_id,
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
-                profile=ToolProfile.STANDARD,
+    
                 permission_preset=PermissionPreset.NORMAL,
             ),
         )
@@ -770,7 +769,7 @@ async def test_web_search_tool_returns_parsed_results(
                 task_id=task_id,
                 trace_id=f"trace-{task_id}",
                 caller="tests",
-                profile=ToolProfile.MINIMAL,
+    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -838,7 +837,7 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
                 task_id=task_id,
                 trace_id=f"trace-{task_id}",
                 caller="tests",
-                profile=ToolProfile.MINIMAL,
+    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -908,7 +907,7 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1034,7 +1033,7 @@ async def test_subagent_management_tools_list_kill_and_steer_descendants(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1204,7 +1203,7 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1305,7 +1304,7 @@ async def test_work_split_rejects_worker_to_worker_delegation(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1377,7 +1376,7 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.MINIMAL,
+
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1452,7 +1451,7 @@ async def test_runtime_now_tool_returns_owner_local_time_payload(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.MINIMAL,
+
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1518,7 +1517,7 @@ async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.MINIMAL,
+
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1583,7 +1582,7 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1668,7 +1667,7 @@ async def test_subagents_spawn_rejects_worker_to_worker_delegation(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1740,7 +1739,7 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1823,7 +1822,7 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-            profile=ToolProfile.STANDARD,
+
             permission_preset=PermissionPreset.NORMAL,
         )
 

@@ -1,17 +1,13 @@
 """数据模型测试 -- Phase 2 Foundational + Feature 061
 
 验证枚举值、ToolMeta 构建/序列化、ToolResult 必含字段、
-ToolProfile 层级比较、CheckResult 默认值等。
+CheckResult 默认值等。
 Feature 061: PermissionPreset / PresetDecision / ToolTier 枚举、
-PRESET_POLICY 矩阵、preset_decision()、兼容映射等。
+PRESET_POLICY 矩阵、preset_decision() 等。
 """
-
-import warnings
 
 from octoagent.tooling.models import (
     PRESET_POLICY,
-    PROFILE_LEVELS,
-    TOOL_PROFILE_TO_PRESET,
     BeforeHookResult,
     CheckResult,
     CoreToolSet,
@@ -27,15 +23,12 @@ from octoagent.tooling.models import (
     SideEffectLevel,
     ToolCall,
     ToolMeta,
-    ToolProfile,
     ToolPromotionState,
     ToolResult,
     ToolSearchHit,
     ToolSearchResult,
     ToolTier,
-    migrate_tool_profile_to_preset,
     preset_decision,
-    profile_allows,
 )
 
 
@@ -51,39 +44,6 @@ class TestSideEffectLevel:
     def test_enum_count(self) -> None:
         """验证仅含 3 个值"""
         assert len(SideEffectLevel) == 3
-
-
-class TestToolProfile:
-    """ToolProfile 枚举测试"""
-
-    def test_values(self) -> None:
-        """验证枚举值与 FR-025a 锁定一致"""
-        assert ToolProfile.MINIMAL == "minimal"
-        assert ToolProfile.STANDARD == "standard"
-        assert ToolProfile.PRIVILEGED == "privileged"
-
-    def test_level_ordering(self) -> None:
-        """验证层级关系：MINIMAL < STANDARD < PRIVILEGED"""
-        assert PROFILE_LEVELS[ToolProfile.MINIMAL] < PROFILE_LEVELS[ToolProfile.STANDARD]
-        assert PROFILE_LEVELS[ToolProfile.STANDARD] < PROFILE_LEVELS[ToolProfile.PRIVILEGED]
-
-    def test_profile_allows_minimal_context(self) -> None:
-        """minimal context 仅允许 minimal 工具"""
-        assert profile_allows(ToolProfile.MINIMAL, ToolProfile.MINIMAL) is True
-        assert profile_allows(ToolProfile.STANDARD, ToolProfile.MINIMAL) is False
-        assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.MINIMAL) is False
-
-    def test_profile_allows_standard_context(self) -> None:
-        """standard context 允许 minimal + standard"""
-        assert profile_allows(ToolProfile.MINIMAL, ToolProfile.STANDARD) is True
-        assert profile_allows(ToolProfile.STANDARD, ToolProfile.STANDARD) is True
-        assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.STANDARD) is False
-
-    def test_profile_allows_privileged_context(self) -> None:
-        """privileged context 允许所有"""
-        assert profile_allows(ToolProfile.MINIMAL, ToolProfile.PRIVILEGED) is True
-        assert profile_allows(ToolProfile.STANDARD, ToolProfile.PRIVILEGED) is True
-        assert profile_allows(ToolProfile.PRIVILEGED, ToolProfile.PRIVILEGED) is True
 
 
 class TestHookType:
@@ -112,13 +72,11 @@ class TestToolMeta:
             description="回显工具",
             parameters_json_schema={"type": "object", "properties": {"text": {"type": "string"}}},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="system",
         )
         assert meta.name == "echo"
         assert meta.description == "回显工具"
         assert meta.side_effect_level == SideEffectLevel.NONE
-        assert meta.tool_profile == ToolProfile.MINIMAL
         assert meta.tool_group == "system"
 
     def test_default_values(self) -> None:
@@ -128,7 +86,6 @@ class TestToolMeta:
             description="test",
             parameters_json_schema={},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="system",
         )
         assert meta.version == "1.0.0"
@@ -143,7 +100,6 @@ class TestToolMeta:
             description="回显工具",
             parameters_json_schema={"type": "object"},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="system",
             version="2.0.0",
             timeout_seconds=10.0,
@@ -220,17 +176,6 @@ class TestExecutionContext:
         assert ctx.task_id == "t1"
         assert ctx.trace_id == "tr1"
         assert ctx.caller == "system"
-
-    def test_custom_profile(self) -> None:
-        ctx = ExecutionContext(
-            task_id="t1",
-            trace_id="tr1",
-            caller="worker-001",
-            profile=ToolProfile.STANDARD,
-        )
-        assert ctx.caller == "worker-001"
-        assert ctx.profile == ToolProfile.STANDARD
-
 
 class TestBeforeHookResult:
     """BeforeHookResult 数据模型测试"""
@@ -401,67 +346,6 @@ class TestPresetPolicy:
         assert preset_decision(
             PermissionPreset.FULL, SideEffectLevel.IRREVERSIBLE
         ) == PresetDecision.ALLOW
-
-
-class TestToolProfileToPresetMapping:
-    """ToolProfile → PermissionPreset 兼容映射测试"""
-
-    def test_mapping_completeness(self) -> None:
-        """映射覆盖所有 ToolProfile 值"""
-        for profile in ToolProfile:
-            assert profile in TOOL_PROFILE_TO_PRESET
-
-    def test_minimal_maps_to_minimal(self) -> None:
-        assert (
-            TOOL_PROFILE_TO_PRESET[ToolProfile.MINIMAL]
-            == PermissionPreset.MINIMAL
-        )
-
-    def test_standard_maps_to_normal(self) -> None:
-        assert (
-            TOOL_PROFILE_TO_PRESET[ToolProfile.STANDARD]
-            == PermissionPreset.NORMAL
-        )
-
-    def test_privileged_maps_to_full(self) -> None:
-        assert (
-            TOOL_PROFILE_TO_PRESET[ToolProfile.PRIVILEGED]
-            == PermissionPreset.FULL
-        )
-
-    def test_migrate_known_values(self) -> None:
-        assert (
-            migrate_tool_profile_to_preset("minimal")
-            == PermissionPreset.MINIMAL
-        )
-        assert (
-            migrate_tool_profile_to_preset("standard")
-            == PermissionPreset.NORMAL
-        )
-        assert (
-            migrate_tool_profile_to_preset("privileged")
-            == PermissionPreset.FULL
-        )
-
-    def test_migrate_case_insensitive(self) -> None:
-        assert (
-            migrate_tool_profile_to_preset("STANDARD")
-            == PermissionPreset.NORMAL
-        )
-        assert (
-            migrate_tool_profile_to_preset(" Standard ")
-            == PermissionPreset.NORMAL
-        )
-
-    def test_migrate_unknown_falls_back_to_minimal(self) -> None:
-        assert (
-            migrate_tool_profile_to_preset("unknown")
-            == PermissionPreset.MINIMAL
-        )
-        assert (
-            migrate_tool_profile_to_preset("")
-            == PermissionPreset.MINIMAL
-        )
 
 
 class TestPresetCheckResult:
@@ -662,7 +546,6 @@ class TestToolMetaWithTier:
             description="test",
             parameters_json_schema={},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="system",
         )
         assert meta.tier == ToolTier.DEFERRED
@@ -673,7 +556,6 @@ class TestToolMetaWithTier:
             description="test",
             parameters_json_schema={},
             side_effect_level=SideEffectLevel.NONE,
-            tool_profile=ToolProfile.MINIMAL,
             tool_group="system",
             tier=ToolTier.CORE,
         )
@@ -695,23 +577,3 @@ class TestExecutionContextWithPreset:
         )
         assert ctx.permission_preset == PermissionPreset.FULL
 
-    def test_profile_still_works(self) -> None:
-        """profile 字段保留兼容"""
-        ctx = ExecutionContext(
-            task_id="t1",
-            trace_id="tr1",
-            profile=ToolProfile.STANDARD,
-        )
-        assert ctx.profile == ToolProfile.STANDARD
-
-
-class TestProfileAllowsDeprecation:
-    """profile_allows() 废弃警告测试"""
-
-    def test_emits_deprecation_warning(self) -> None:
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            profile_allows(ToolProfile.MINIMAL, ToolProfile.MINIMAL)
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "preset_decision" in str(w[0].message)

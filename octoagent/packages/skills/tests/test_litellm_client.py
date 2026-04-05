@@ -13,7 +13,7 @@ from octoagent.skills import (
     ToolFeedbackMessage,
 )
 from octoagent.skills.litellm_client import LiteLLMSkillClient
-from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile
+from octoagent.tooling.models import SideEffectLevel, ToolMeta
 from pydantic import BaseModel, Field
 
 
@@ -38,7 +38,7 @@ class _FakeToolBroker:
                     },
                 },
                 side_effect_level=SideEffectLevel.NONE,
-                tool_profile=ToolProfile.MINIMAL,
+
                 tool_group="project",
             ),
             ToolMeta(
@@ -51,7 +51,7 @@ class _FakeToolBroker:
                     },
                 },
                 side_effect_level=SideEffectLevel.NONE,
-                tool_profile=ToolProfile.MINIMAL,
+
                 tool_group="artifact",
             )
         ]
@@ -228,7 +228,7 @@ async def test_litellm_skill_client_uses_responses_api_and_roundtrips_function_c
         model_alias="main",
         description="你可以调用工具。",
         tools_allowed=["project.inspect"],
-        tool_profile=ToolProfile.MINIMAL,
+
     )
     context = SkillExecutionContext(task_id="task-1", trace_id="trace-1", caller="test")
 
@@ -342,7 +342,7 @@ async def test_litellm_skill_client_merges_system_history_into_responses_instruc
         model_alias="main",
         description="你可以调用工具。",
         tools_allowed=["project.inspect"],
-        tool_profile=ToolProfile.MINIMAL,
+
     )
     context = SkillExecutionContext(
         task_id="task-ctx",
@@ -434,7 +434,7 @@ async def test_litellm_skill_client_inherit_mode_uses_runtime_mounted_tools(
         description="你可以调用工具。",
         permission_mode=SkillPermissionMode.INHERIT,
         tools_allowed=["project.inspect"],
-        tool_profile=ToolProfile.MINIMAL,
+
     )
     context = SkillExecutionContext(
         task_id="task-inherit",

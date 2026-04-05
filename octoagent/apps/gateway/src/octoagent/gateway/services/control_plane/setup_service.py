@@ -1827,7 +1827,7 @@ class SetupDomainService(DomainServiceBase):
             agent_tool_profile = str(active_agent_profile.get("tool_profile", "standard")).strip()
             if not self._tool_profile_allowed(
                 agent_tool_profile,
-                policy_profile.allowed_tool_profile.value,
+                policy_profile.allowed_tool_profile,
             ):
                 agent_autonomy_risks.append(
                     SetupRiskItem(
@@ -1836,7 +1836,7 @@ class SetupDomainService(DomainServiceBase):
                         title="主 Agent 工具级别高于当前安全等级",
                         summary=(
                             f"Agent 要求 {agent_tool_profile}，但当前安全等级只允许 "
-                            f"{policy_profile.allowed_tool_profile.value}。"
+                            f"{policy_profile.allowed_tool_profile}。"
                         ),
                         blocking=False,
                         recommended_action="降低 Agent tool_profile，或显式切换更高安全 preset。",

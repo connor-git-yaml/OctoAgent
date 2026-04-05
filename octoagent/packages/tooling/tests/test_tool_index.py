@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from octoagent.core.models import ToolIndexQuery
-from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolProfile, ToolTier
+from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolTier
 from octoagent.tooling.tool_index import ToolIndex
 
 
@@ -20,7 +20,7 @@ def _tool_meta(
         description=description,
         parameters_json_schema={"type": "object", "properties": {}},
         side_effect_level=SideEffectLevel.NONE,
-        tool_profile=ToolProfile.MINIMAL,
+
         tool_group=tool_group,
         tags=tags,
         worker_types=worker_types,
@@ -117,7 +117,7 @@ async def test_tool_index_standard_profile_can_match_minimal_tools() -> None:
             limit=3,
             worker_type="ops",
             tool_groups=["runtime"],
-            tool_profile=ToolProfile.STANDARD.value,
+            tool_profile="standard",
         ),
         static_fallback=["runtime.inspect"],
     )
@@ -144,7 +144,7 @@ def _deferred_tool(
         description=description,
         parameters_json_schema={"type": "object", "properties": {"x": {"type": "string"}}},
         side_effect_level=SideEffectLevel.NONE,
-        tool_profile=ToolProfile.MINIMAL,
+
         tool_group=tool_group,
         tags=[],
         worker_types=[],

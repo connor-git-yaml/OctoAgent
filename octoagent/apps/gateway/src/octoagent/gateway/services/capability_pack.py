@@ -417,7 +417,7 @@ class CapabilityPackService:
                 label=meta.name.replace(".", " ").title(),
                 description=meta.description,
                 tool_group=meta.tool_group,
-                tool_profile=meta.tool_profile.value,
+                tool_profile="standard",
                 tags=list(meta.tags),
                 manifest_ref=meta.manifest_ref,
                 availability=self._resolve_tool_availability(meta.name),

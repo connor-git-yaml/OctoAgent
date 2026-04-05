@@ -20,7 +20,6 @@ from octoagent.tooling.models import (
     FailMode,
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolResult,
 )
 from octoagent.tooling.schema import reflect_tool_schema
@@ -32,7 +31,6 @@ from octoagent.tooling.schema import reflect_tool_schema
 
 @tool_contract(
     side_effect_level=SideEffectLevel.NONE,
-    tool_profile=ToolProfile.MINIMAL,
     tool_group="system",
 )
 async def echo(text: str) -> str:
@@ -151,7 +149,7 @@ class TrackingAfterHook:
 
 def _make_context() -> ExecutionContext:
     return ExecutionContext(
-        task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+        task_id="t1", trace_id="tr1", caller="test"
     )
 
 

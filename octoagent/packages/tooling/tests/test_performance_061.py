@@ -22,7 +22,6 @@ from octoagent.tooling.models import (
     PresetDecision,
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolPromotionState,
     ToolTier,
     format_deferred_tools_list,
@@ -68,7 +67,6 @@ class TestDeferredTokenReduction:
                     "required": ["input_path"],
                 },
                 side_effect_level=SideEffectLevel.REVERSIBLE,
-                tool_profile=ToolProfile.STANDARD,
                 tool_group="test",
                 tier=ToolTier.DEFERRED,
             ))

@@ -114,49 +114,6 @@ def preset_decision(
 
 
 
-class ToolProfile(StrEnum):
-    """工具权限等级（DEPRECATED: 兼容字段，等待 gateway 层完成清理后移除）。"""
-
-    MINIMAL = "minimal"
-    STANDARD = "standard"
-    PRIVILEGED = "privileged"
-
-
-def migrate_tool_profile_to_preset(profile: str) -> "PermissionPreset":
-    """DEPRECATED: ToolProfile -> PermissionPreset 兼容映射。"""
-    _MAP = {
-        "minimal": PermissionPreset.MINIMAL,
-        "standard": PermissionPreset.NORMAL,
-        "privileged": PermissionPreset.FULL,
-    }
-    return _MAP.get(profile.strip().lower() if profile else "", PermissionPreset.MINIMAL)
-
-
-# DEPRECATED: 层级比较辅助——Feature 073 清理后仅供遗留测试兼容
-PROFILE_LEVELS: dict[ToolProfile, int] = {
-    ToolProfile.MINIMAL: 0,
-    ToolProfile.STANDARD: 1,
-    ToolProfile.PRIVILEGED: 2,
-}
-
-TOOL_PROFILE_TO_PRESET: dict[ToolProfile, PermissionPreset] = {
-    ToolProfile.MINIMAL: PermissionPreset.MINIMAL,
-    ToolProfile.STANDARD: PermissionPreset.NORMAL,
-    ToolProfile.PRIVILEGED: PermissionPreset.FULL,
-}
-
-
-def profile_allows(tool_profile: ToolProfile, context_profile: ToolProfile) -> bool:
-    """DEPRECATED: 使用 preset_decision() 替代。"""
-    import warnings
-    warnings.warn(
-        "profile_allows() 已废弃，请使用 preset_decision() 替代",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return PROFILE_LEVELS[tool_profile] <= PROFILE_LEVELS[context_profile]
-
-
 class HookType(StrEnum):
     """Hook 类型"""
 
@@ -220,11 +177,6 @@ class ToolMeta(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Feature 030: 可检索扩展元数据",
-    )
-    # DEPRECATED: 兼容字段，等待 gateway 层清理
-    tool_profile: ToolProfile = Field(
-        default=ToolProfile.STANDARD,
-        description="DEPRECATED: 工具权限等级，改用 PermissionPreset",
     )
     # Feature 061: 工具层级标记
     tier: ToolTier = Field(
@@ -309,11 +261,6 @@ class ExecutionContext(BaseModel):
     agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
     agent_session_id: str = Field(default="", description="当前 agent session ID")
     work_id: str = Field(default="", description="当前 work ID")
-    # DEPRECATED: 兼容字段
-    profile: ToolProfile = Field(
-        default=ToolProfile.MINIMAL,
-        description="DEPRECATED: 已无实际作用，改用 permission_preset",
-    )
     permission_preset: PermissionPreset = Field(
         default=PermissionPreset.MINIMAL,
         description="当前 Agent 的权限 Preset（决定工具调用的 allow/ask 策略）",

@@ -172,7 +172,7 @@ class AgentProfileDomainService(DomainServiceBase):
                 profile_id=profile_id,
                 label=label,
                 description=profile.description,
-                allowed_tool_profile=profile.allowed_tool_profile.value,
+                allowed_tool_profile=profile.allowed_tool_profile,
                 approval_policy=self._describe_policy_approval(profile),
                 risk_level=risk_level,
                 recommended_for=recommended_for,
@@ -456,7 +456,7 @@ class AgentProfileDomainService(DomainServiceBase):
             message="安全等级已更新。",
             data={
                 "profile_id": profile_id,
-                "allowed_tool_profile": profile.allowed_tool_profile.value,
+                "allowed_tool_profile": profile.allowed_tool_profile,
                 "approval_policy": self._describe_policy_approval(profile),
             },
             resource_refs=[

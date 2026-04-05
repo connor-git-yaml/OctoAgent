@@ -21,7 +21,6 @@ from octoagent.skills.models import (
     ToolCallSpec,
     ToolFeedbackMessage,
 )
-from octoagent.tooling.models import ToolProfile
 from pydantic import BaseModel
 
 
@@ -37,7 +36,7 @@ class _SkillIO(BaseModel):
 
 
 class _FakeToolBroker:
-    async def discover(self, profile=None, group=None):
+    async def discover(self, group=None):
         from octoagent.tooling.models import SideEffectLevel, ToolMeta
 
         return [
@@ -46,7 +45,6 @@ class _FakeToolBroker:
                 description="test",
                 parameters_json_schema={"type": "object", "properties": {}},
                 side_effect_level=SideEffectLevel.NONE,
-                tool_profile=ToolProfile.STANDARD,
                 tool_group="test",
             )
         ]
@@ -60,7 +58,6 @@ def _make_manifest(model_alias: str = "main") -> SkillManifest:
         model_alias=model_alias,
         description="Test skill",
         tools_allowed=["test.tool"],
-        tool_profile=ToolProfile.MINIMAL,
     )
 
 

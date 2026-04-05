@@ -9,7 +9,7 @@ import pytest
 from octoagent.core.models.event import Event
 from octoagent.skills.manifest import SkillManifest
 from octoagent.skills.models import SkillExecutionContext, SkillOutputEnvelope
-from octoagent.tooling.models import ToolMeta, ToolResult, SideEffectLevel, ToolProfile
+from octoagent.tooling.models import ToolMeta, ToolResult, SideEffectLevel
 from pydantic import BaseModel
 
 

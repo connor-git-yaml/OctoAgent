@@ -19,7 +19,6 @@ from octoagent.tooling.models import (
     ExecutionContext,
     SideEffectLevel,
     ToolMeta,
-    ToolProfile,
     ToolResult,
 )
 
@@ -34,7 +33,6 @@ def _make_meta(
         description="test",
         parameters_json_schema={},
         side_effect_level=SideEffectLevel.NONE,
-        tool_profile=ToolProfile.MINIMAL,
         tool_group="system",
         output_truncate_threshold=output_truncate_threshold,
     )
@@ -48,7 +46,6 @@ def _make_context() -> ExecutionContext:
         agent_runtime_id="runtime-test-1",
         agent_session_id="session-test-1",
         work_id="work-test-1",
-        profile=ToolProfile.STANDARD,
     )
 
 

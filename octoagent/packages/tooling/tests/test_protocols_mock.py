@@ -18,7 +18,6 @@ from octoagent.tooling.models import (
     RegisterToolResult,
     RegistryDiagnostic,
     ToolMeta,
-    ToolProfile,
     ToolResult,
 )
 
@@ -39,7 +38,6 @@ class MockToolBroker:
 
     async def discover(
         self,
-        profile: ToolProfile | None = None,
         group: str | None = None,
     ) -> list[ToolMeta]:
         return [meta for meta, _ in self._registry.values()]
@@ -201,7 +199,6 @@ class TestToolBrokerProtocolCompliance:
             description="test tool",
             parameters_json_schema={},
             side_effect_level="none",
-            tool_profile="minimal",
             tool_group="system",
         )
         await broker.register(meta, lambda: None)
@@ -213,7 +210,7 @@ class TestToolBrokerProtocolCompliance:
         """MockToolBroker execute 返回 ToolResult"""
         broker = MockToolBroker()
         ctx = ExecutionContext(
-            task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+            task_id="t1", trace_id="tr1", caller="test"
         )
         result = await broker.execute("any", {}, ctx)
         assert isinstance(result, ToolResult)
@@ -236,11 +233,10 @@ class TestPolicyCheckpointProtocolCompliance:
             description="test",
             parameters_json_schema={},
             side_effect_level="irreversible",
-            tool_profile="standard",
             tool_group="system",
         )
         ctx = ExecutionContext(
-            task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+            task_id="t1", trace_id="tr1", caller="test"
         )
         result = await cp.check(meta, {}, ctx)
         assert isinstance(result, CheckResult)
@@ -265,11 +261,10 @@ class TestBeforeHookProtocolCompliance:
             description="test",
             parameters_json_schema={},
             side_effect_level="none",
-            tool_profile="minimal",
             tool_group="system",
         )
         ctx = ExecutionContext(
-            task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+            task_id="t1", trace_id="tr1", caller="test"
         )
         result = await hook.before_execute(meta, {}, ctx)
         assert isinstance(result, BeforeHookResult)
@@ -294,11 +289,10 @@ class TestAfterHookProtocolCompliance:
             description="test",
             parameters_json_schema={},
             side_effect_level="none",
-            tool_profile="minimal",
             tool_group="system",
         )
         ctx = ExecutionContext(
-            task_id="t1", trace_id="tr1", caller="test", profile=ToolProfile.STANDARD
+            task_id="t1", trace_id="tr1", caller="test"
         )
         input_result = ToolResult(output="hello", duration=0.1)
         result = await hook.after_execute(meta, input_result, ctx)
