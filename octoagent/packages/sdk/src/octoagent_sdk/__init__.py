@@ -19,7 +19,7 @@
     result = await agent.run("搜索 Python 教程")
 """
 
-from ._agent import Agent, AgentResult, AgentChunk
+from ._agent import Agent, AgentResult, AgentChunk, Conversation
 from ._tool import tool
 
-__all__ = ["Agent", "AgentResult", "AgentChunk", "tool"]
+__all__ = ["Agent", "AgentResult", "AgentChunk", "Conversation", "tool"]

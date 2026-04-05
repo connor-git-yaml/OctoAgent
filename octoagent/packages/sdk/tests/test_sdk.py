@@ -279,3 +279,82 @@ async def test_agent_run_with_policy_deny():
 
     assert result.tool_calls_count == 1
     assert "拒绝" in result.text or "denied" in result.text.lower() or result.text
+
+
+# ---------------------------------------------------------------------------
+# Conversation 测试
+# ---------------------------------------------------------------------------
+
+
+def test_conversation_init():
+    agent = Agent(system_prompt="You are helpful")
+    conv = agent.chat()
+    assert len(conv.messages) == 1
+    assert conv.messages[0]["role"] == "system"
+
+
+def test_conversation_custom_system():
+    agent = Agent()
+    conv = agent.chat("翻译助手")
+    assert len(conv.messages) == 1
+    assert conv.messages[0]["content"] == "翻译助手"
+
+
+@pytest.mark.asyncio
+async def test_conversation_send():
+    agent = Agent(model="test")
+    conv = agent.chat("You are helpful")
+
+    mock_response = {
+        "choices": [{
+            "message": {"content": "你好！", "role": "assistant"},
+            "finish_reason": "stop",
+        }],
+        "usage": {"total_tokens": 10},
+    }
+
+    with patch.object(agent, "_call_llm", new_callable=AsyncMock, return_value=mock_response):
+        result = await conv.send("hello")
+
+    assert result.text == "你好！"
+    assert len(conv.messages) == 3
+    assert conv.messages[1]["role"] == "user"
+    assert conv.messages[2]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_conversation_multi_turn():
+    agent = Agent(model="test")
+    conv = agent.chat()
+
+    call_count = 0
+
+    async def mock_llm(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "choices": [{
+                "message": {"content": f"回复{call_count}", "role": "assistant"},
+                "finish_reason": "stop",
+            }],
+            "usage": {"total_tokens": 5},
+        }
+
+    with patch.object(agent, "_call_llm", side_effect=mock_llm):
+        r1 = await conv.send("第一轮")
+        r2 = await conv.send("第二轮")
+
+    assert r1.text == "回复1"
+    assert r2.text == "回复2"
+    assert len(conv.messages) == 4
+
+
+def test_conversation_clear():
+    agent = Agent()
+    conv = agent.chat("system")
+    conv.add_message("user", "hello")
+    conv.add_message("assistant", "hi")
+    assert len(conv.messages) == 3
+    conv.clear()
+    assert len(conv.messages) == 1
+    assert conv.messages[0]["role"] == "system"

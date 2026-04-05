@@ -202,9 +202,34 @@ class Agent:
         )
 
     async def run_stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[AgentChunk]:
-        """流式执行（当前实现为非流式的包装，后续优化为真流式）。"""
-        result = await self.run(prompt, **kwargs)
-        yield AgentChunk(text=result.text, is_final=True)
+        """流式执行 — 逐 token 返回 LLM 输出。
+
+        用法：
+            async for chunk in agent.run_stream("写一首诗"):
+                print(chunk.text, end="", flush=True)
+        """
+        client = self._ensure_client()
+        messages = self._build_initial_messages(prompt)
+        tools_schema = self._build_tools_schema()
+
+        for step in range(self._max_steps):
+            # 流式调用 LLM
+            async for chunk in self._stream_llm(client, messages, tools_schema):
+                if chunk.is_tool_call:
+                    # 工具调用 chunk —— 不 yield，内部处理
+                    continue
+                if chunk.is_final:
+                    yield chunk
+                    return
+                yield chunk
+
+            # 如果上一步结束时有工具调用，执行工具并继续
+            # （简化实现：流式模式下工具调用 fallback 到非流式）
+            result = await self.run(prompt, **kwargs)
+            yield AgentChunk(text=result.text, is_final=True)
+            return
+
+        yield AgentChunk(text="[Agent reached max steps]", is_final=True)
 
     def run_sync(self, prompt: str, **kwargs: Any) -> AgentResult:
         """同步执行（包装异步 run）。"""
@@ -337,3 +362,159 @@ class Agent:
         except Exception as exc:
             log.warning("policy_check_failed", tool=tool_name, error=str(exc))
         return True  # 降级允许
+
+    async def _stream_llm(
+        self,
+        client: Any,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> AsyncIterator[AgentChunk]:
+        """流式调用 LLM（通过 litellm acompletion stream）。"""
+        try:
+            from litellm import acompletion
+        except ImportError:
+            # 无 litellm 时 fallback 到非流式
+            response = await self._call_via_http(client, messages, tools)
+            text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            yield AgentChunk(text=text, is_final=True)
+            return
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+            "stream": True,
+        }
+        if self._api_key:
+            kwargs["api_key"] = self._api_key
+        if self._api_base:
+            kwargs["api_base"] = self._api_base
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        response = await acompletion(**kwargs)
+        async for chunk in response:
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            finish_reason = choices[0].get("finish_reason")
+
+            if delta.get("content"):
+                yield AgentChunk(text=delta["content"])
+
+            if delta.get("tool_calls"):
+                yield AgentChunk(
+                    is_tool_call=True,
+                    tool_name=delta["tool_calls"][0].get("function", {}).get("name", ""),
+                )
+
+            if finish_reason == "stop":
+                yield AgentChunk(is_final=True)
+                return
+
+    # ----- 对话历史 -----
+
+    def chat(self, system_prompt: str = "") -> "Conversation":
+        """创建一个带对话历史的会话。
+
+        用法：
+            conv = agent.chat("你是一个翻译助手")
+            r1 = await conv.send("翻译：Hello World")
+            r2 = await conv.send("再翻译成日语")  # 会记住上下文
+        """
+        return Conversation(self, system_prompt=system_prompt or self._system_prompt)
+
+
+class Conversation:
+    """带对话历史的会话 — 支持多轮对话。"""
+
+    def __init__(self, agent: Agent, system_prompt: str = "") -> None:
+        self._agent = agent
+        self._messages: list[dict[str, Any]] = []
+        if system_prompt:
+            self._messages.append({"role": "system", "content": system_prompt})
+
+    @property
+    def messages(self) -> list[dict[str, Any]]:
+        """当前对话历史（只读副本）。"""
+        return list(self._messages)
+
+    def add_message(self, role: str, content: str) -> None:
+        """手动追加消息到对话历史。"""
+        self._messages.append({"role": role, "content": content})
+
+    async def send(self, prompt: str, **kwargs: Any) -> AgentResult:
+        """发送消息并获取回复（保持对话历史）。"""
+        self._messages.append({"role": "user", "content": prompt})
+
+        start = time.monotonic()
+        client = self._agent._ensure_client()
+        tools_schema = self._agent._build_tools_schema()
+        total_tokens = 0
+        tool_calls_count = 0
+
+        messages = list(self._messages)  # 复制一份供 LLM 调用
+
+        for step in range(self._agent._max_steps):
+            response = await self._agent._call_llm(client, messages, tools_schema)
+            total_tokens += response.get("usage", {}).get("total_tokens", 0)
+
+            choice = response.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            finish_reason = choice.get("finish_reason", "")
+
+            if finish_reason != "tool_calls" or not message.get("tool_calls"):
+                text = message.get("content", "") or ""
+                self._messages.append({"role": "assistant", "content": text})
+                duration_ms = int((time.monotonic() - start) * 1000)
+                return AgentResult(
+                    text=text,
+                    tool_calls_count=tool_calls_count,
+                    total_tokens=total_tokens,
+                    duration_ms=duration_ms,
+                )
+
+            # 工具调用
+            messages.append(message)
+            for tc in message.get("tool_calls", []):
+                tool_calls_count += 1
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                try:
+                    arguments = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                tool_spec = self._agent._tools.get(tool_name)
+                if tool_spec is None:
+                    result_text = f"ERROR: Unknown tool: {tool_name}"
+                else:
+                    try:
+                        result_text = await tool_spec.execute(arguments)
+                    except Exception as exc:
+                        result_text = f"ERROR: {exc}"
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": result_text,
+                })
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        self._messages.append({
+            "role": "assistant",
+            "content": "[max steps reached]",
+        })
+        return AgentResult(
+            text="[max steps reached]",
+            tool_calls_count=tool_calls_count,
+            total_tokens=total_tokens,
+            duration_ms=duration_ms,
+        )
+
+    def clear(self) -> None:
+        """清空对话历史（保留 system prompt）。"""
+        system = [m for m in self._messages if m.get("role") == "system"]
+        self._messages = system
