@@ -80,7 +80,7 @@ octoagent/
 7. **User-in-Control** - 高风险动作必须可审批，任务必须可取消
 8. **Observability is a Feature** - 每个任务必须可查看状态、步骤、消耗、失败原因
 9. **Agent Autonomy** - 禁止用硬编码关键词/规则替代 LLM 决策（如天气检测、请求分类、位置提取）；系统层只负责提供完整工具集和上下文，由 LLM 自主选择工具和决策路径
-10. **Policy-Driven Access** - 工具访问控制统一走 Policy Engine 双维度模型（PolicyAction × ApprovalDecision），工具层不得自行做路径/权限拦截
+10. **Policy-Driven Access** - 工具访问控制统一走 `check_permission()`（PermissionPreset × SideEffectLevel 矩阵 + ApprovalManager 审批），工具层不得自行做路径/权限拦截
 
 ## 里程碑
 
@@ -106,6 +106,13 @@ octoagent/
 - 正式 Feature 制品根目录统一为 `.specify/features/<feature-id>-<feature-slug>/`，包括 `spec.md`、`plan.md`、`tasks.md`、`research/`、`contracts/`、`verification/`
 - 不再新增、保留或依赖顶层 `specs/` 目录；发现历史遗留引用时，应直接改到 `.specify/features/...` 的正式路径
 - 新增或迁移 Feature 文档时，必须先检查 canonical 位置是否正确；不要额外创建顶层占位目录，也不要用整目录软链代替规范位置
+
+### Blueprint 同步规则
+
+- `docs/blueprint.md` 是架构设计的权威文档。**任何影响架构的代码改动完成后，必须同步更新 Blueprint 中的相关描述**
+- 需要同步的改动包括：删除/新增模块或类、权限/安全模型变更、工具系统变更、数据模型字段增删、目录结构变更、里程碑完成状态变更
+- 更新时确保：术语一致（代码中删了的概念不能在 Blueprint 中继续描述为"当前状态"）、示例代码/YAML 与实际字段匹配、已完成的问题标记为 ✅
+- 不需要同步的改动：纯 bug fix、测试修复、日志调整、注释修改等不影响架构描述的变更
 
 ### 代码规范
 
@@ -149,7 +156,7 @@ octoagent/
 | 模型网关      | LiteLLM Proxy                         | 统一 alias 路由，业务代码不写死厂商型号                                                                                        |
 | 执行隔离      | Docker 默认                           | Agent Zero 验证过的方案，安全边界清晰                                                                                          |
 | 事件溯源      | 最小 Event Sourcing                   | append-only events + tasks projection，先保证崩溃不丢                                                                          |
-| 门禁策略      | Safe by default + Policy Profile 可配 | 平衡安全与智能化，减少低风险场景的用户打扰                                                                                     |
+| 门禁策略      | Safe by default + PermissionPreset 可配 | PermissionPreset（MINIMAL/NORMAL/FULL）× SideEffectLevel 矩阵 + ApprovalManager 审批                                          |
 | A2A 兼容      | 内部超集 + A2AStateMapper 双向映射    | 内部保留 WAITING_APPROVAL/PAUSED 等治理状态，对外映射为标准 A2A TaskState                                                      |
 | Task 终态     | SUCCEEDED/FAILED/CANCELLED/REJECTED   | REJECTED 区分策略拒绝与运行时失败                                                                                              |
 | Artifact 模型 | A2A parts 超集 + version/hash/size    | 多 Part 结构对齐 A2A，保留版本化与完整性校验，支持流式追加                                                                     |

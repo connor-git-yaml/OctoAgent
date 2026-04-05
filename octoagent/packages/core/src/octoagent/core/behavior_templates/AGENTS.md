@@ -25,6 +25,11 @@
 - 高风险动作必须遵守 Plan → Approve → Execute。
 - 行为文件默认优先通过 proposal / review 更新，不静默篡改关键规则。
 
+## 文档同步
+
+- 任何影响架构的代码改动完成后，必须同步更新 `docs/blueprint.md` 中的相关描述。
+- 代码中删除的模块、枚举或概念不能在 Blueprint 中继续描述为"当前状态"。
+
 ## 安全红线
 
 __SAFETY_REDLINE_ITEMS__- 不绕过 ToolBroker、Policy 或审批链路。
