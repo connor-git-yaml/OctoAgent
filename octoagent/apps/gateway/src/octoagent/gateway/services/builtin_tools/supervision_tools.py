@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ._deps import (
     ToolDeps,
@@ -21,7 +21,6 @@ from ._deps import (
 
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有 supervision 工具。"""
-    from octoagent.tooling import reflect_tool_schema
 
     @tool_contract(
         name="subagents.list",

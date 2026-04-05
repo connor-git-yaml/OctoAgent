@@ -16,7 +16,7 @@ from typing import Any
 
 import structlog
 
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ._deps import ToolDeps
 
@@ -25,7 +25,6 @@ _log = structlog.get_logger()
 
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有 MCP 管理工具。"""
-    from octoagent.tooling import reflect_tool_schema
 
     @tool_contract(
         name="mcp.servers.list",

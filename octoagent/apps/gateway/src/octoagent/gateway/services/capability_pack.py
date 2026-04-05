@@ -123,6 +123,7 @@ from .builtin_tools._browser_support import (
     _BrowserSnapshot,
     _HtmlSnapshotParser,
 )
+from .builtin_tools._deps import truncate_text as _truncate_text
 
 
 class _ApprovalOverrideMemoryCache:
@@ -1264,18 +1265,6 @@ class CapabilityPackService:
                 "worker runtime cannot delegate to another worker; use a subagent target instead"
             )
 
-    async def _resolve_fallback_toolset(self, worker_type: str = "general") -> list[str]:
-        metas = await self._tool_broker.discover()
-        profile = self.get_worker_profile(worker_type)
-        result: list[str] = []
-        for meta in metas:
-            if meta.tool_group not in profile.default_tool_groups:
-                continue
-            result.append(meta.name)
-        if result:
-            return result
-        return [meta.name for meta in metas][:5]
-
     def _resolve_fallback_toolset_from_pack(
         self,
         pack: BundledCapabilityPack,
@@ -1852,18 +1841,6 @@ class CapabilityPackService:
         )
 
     @staticmethod
-    def _truncate_text_static(value: str, *, limit: int = 100_000) -> str:
-        text = value.strip()
-        if len(text) <= limit:
-            return text
-        omitted = len(text) - limit
-        return (
-            f"{text[:limit].rstrip()}\n\n"
-            f"\u26a0\ufe0f [内容已截断：原文 {len(text)} 字符，已显示前 {limit} 字符，"
-            f"省略 {omitted} 字符。如需完整内容请增大 max_chars 参数。]"
-        )
-
-    @staticmethod
     def _browser_session_payload(
         session: _BrowserSessionState,
         *,
@@ -1884,7 +1861,7 @@ class CapabilityPackService:
             "content_type": session.content_type,
             "title": session.title,
             "body_length": session.body_length,
-            "text_preview": CapabilityPackService._truncate_text_static(session.text_content, limit=effective_chars),
+            "text_preview": _truncate_text(session.text_content, limit=effective_chars),
             "links": [
                 {"ref": item.ref, "text": item.text, "url": item.url}
                 for item in session.links[:effective_links]
@@ -1895,62 +1872,6 @@ class CapabilityPackService:
     @staticmethod
     def _tts_binary() -> str:
         return shutil.which("say") or shutil.which("espeak") or ""
-
-    @staticmethod
-    def _desktop_session_available() -> bool:
-        if platform.system() == "Darwin":
-            return True
-        return any(
-            os.environ.get(name)
-            for name in (
-                "DISPLAY",
-                "WAYLAND_DISPLAY",
-                "SWAYSOCK",
-                "XDG_CURRENT_DESKTOP",
-                "DESKTOP_SESSION",
-            )
-        )
-
-    def _resolve_browser_support(
-        self,
-    ) -> tuple[BuiltinToolAvailabilityStatus, str, str]:
-        try:
-            webbrowser.get()
-            return BuiltinToolAvailabilityStatus.AVAILABLE, "", ""
-        except webbrowser.Error:
-            pass
-
-        if self._desktop_session_available():
-            return (
-                BuiltinToolAvailabilityStatus.INSTALL_REQUIRED,
-                "browser_controller_missing",
-                "配置默认浏览器或设置 BROWSER 环境变量后再使用 browser.*",
-            )
-
-        return (
-            BuiltinToolAvailabilityStatus.DEGRADED,
-            "desktop_session_unavailable",
-            "当前 runtime 没有桌面会话；请在 GUI 环境中运行或设置 BROWSER 环境变量。",
-        )
-
-    def _browser_status_payload(self) -> dict[str, Any]:
-        status, reason, install_hint = self._resolve_browser_support()
-        controller = ""
-        controller_error = ""
-        try:
-            controller = type(webbrowser.get()).__name__
-        except webbrowser.Error as exc:
-            controller_error = str(exc)
-        return {
-            "availability": status.value,
-            "reason": reason,
-            "install_hint": install_hint,
-            "controller": controller,
-            "controller_error": controller_error,
-            "browser_env": os.environ.get("BROWSER", ""),
-            "desktop_session_available": self._desktop_session_available(),
-            "platform": platform.platform(),
-        }
 
     def _tts_command(self, *, text: str, voice: str = "") -> list[str]:
         binary = self._tts_binary()

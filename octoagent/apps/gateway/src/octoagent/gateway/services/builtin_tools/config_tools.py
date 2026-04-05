@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ._deps import ToolDeps
 
@@ -36,7 +36,6 @@ async def register(broker, deps: ToolDeps) -> None:
     """注册所有配置管理工具。"""
     from octoagent.provider.dx.config_wizard import load_config as _load_config
     from octoagent.provider.dx.config_wizard import save_config as _save_config
-    from octoagent.tooling import reflect_tool_schema
 
     @tool_contract(
         name="config.inspect",

@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import json
 
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
+from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps
 
 
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有浏览器工具。"""
-    from octoagent.tooling import reflect_tool_schema
-    from ..execution_context import get_current_execution_context
 
     @tool_contract(
         name="browser.open",

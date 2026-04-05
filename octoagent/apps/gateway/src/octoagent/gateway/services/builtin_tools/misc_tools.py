@@ -25,8 +25,9 @@ from octoagent.core.behavior_workspace import (
     mark_onboarding_completed,
 )
 from octoagent.core.models.behavior import BehaviorReviewMode
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
+from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps, current_parent
 
 _log = structlog.get_logger()
@@ -35,8 +36,6 @@ _log = structlog.get_logger()
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有媒体与行为工具。"""
     from octoagent.skills.tools import SkillsTool as _SkillsTool
-    from octoagent.tooling import reflect_tool_schema
-    from ..execution_context import get_current_execution_context
     from ..task_service import TaskService
 
     task_service = TaskService(deps.stores, project_root=deps.project_root)

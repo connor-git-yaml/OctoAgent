@@ -11,7 +11,7 @@ from . import (
     delegation_tools,
     filesystem_tools,
     mcp_tools,
-    media_tools,
+    misc_tools,
     memory_tools,
     network_tools,
     runtime_tools,
@@ -34,4 +34,4 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await supervision_tools.register(broker, deps)
     await mcp_tools.register(broker, deps)
     await config_tools.register(broker, deps)
-    await media_tools.register(broker, deps)
+    await misc_tools.register(broker, deps)
