@@ -37,7 +37,7 @@ from octoagent.policy.models import (
     PolicyStep,
     SSEApprovalEvent,
 )
-from octoagent.tooling.models import SideEffectLevel
+from octoagent.core.models.enums import SideEffectLevel
 
 # ============================================================
 # T004: PolicyAction 严格度排序

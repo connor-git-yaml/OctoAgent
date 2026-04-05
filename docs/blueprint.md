@@ -3328,11 +3328,14 @@ M5 说明：
 
 **改善方向**：通过 Protocol 接口注入替代直接 import。或将 `dx/` 上移为独立包 `packages/management/`。
 
-### 🔴 A3: tooling ↔ policy 循环依赖
+### ✅ A3: tooling ↔ policy 循环依赖（已修复 2026-04-05）
 
-`permission.py` 延迟 import `policy.models.ApprovalRequest`，`policy.models` import `tooling.models.SideEffectLevel`。
+**已修复**：
+1. `SideEffectLevel` 枚举从 `tooling/models.py` 下沉到 `core/models/enums.py`，tooling 保留 re-export 保证向后兼容
+2. `permission.py` 中 `ApprovalRequest` 构造改为传 dict，由 `ApprovalManager.register()` 入口做 `dict→ApprovalRequest` 转换
+3. policy 包内 import 路径全部改为从 `core.models.enums` 导入 SideEffectLevel
 
-**改善方向**：将 `SideEffectLevel` 下沉到 `core.models`；`permission.py` 依赖 `ApprovalManagerProtocol` 而非具体 `ApprovalRequest` 类。
+**效果**：tooling 包不再有任何指向 policy 的 import（含延迟导入），循环依赖彻底消除。
 
 ### 🟠 A4: provider/dx 定位模糊（72 文件 24K 行）
 

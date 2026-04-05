@@ -20,15 +20,9 @@ from pydantic import BaseModel, Field
 # ============================================================
 
 
-class SideEffectLevel(StrEnum):
-    """工具副作用等级 -- 对齐 spec FR-001, Blueprint §8.5.2
-
-    枚举值已锁定（FR-025a），变更需经 005/006 利益方评审。
-    """
-
-    NONE = "none"  # 纯读取，无副作用
-    REVERSIBLE = "reversible"  # 可回滚的副作用
-    IRREVERSIBLE = "irreversible"  # 不可逆操作
+# SideEffectLevel 已下沉到 core 包（消除 tooling↔policy 循环依赖）。
+# 此处 re-export 保持向后兼容 —— 现有 `from octoagent.tooling.models import SideEffectLevel` 继续工作。
+from octoagent.core.models.enums import SideEffectLevel  # noqa: F401  # re-export
 
 
 # ============================================================

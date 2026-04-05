@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from octoagent.tooling.models import SideEffectLevel
+from octoagent.core.models.enums import SideEffectLevel
 from pydantic import BaseModel, Field
 
 # ============================================================

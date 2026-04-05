@@ -16,9 +16,8 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import aiosqlite
-from octoagent.core.models.enums import ActorType, EventType
+from octoagent.core.models.enums import ActorType, EventType, SideEffectLevel
 from octoagent.core.models.event import Event, EventCausality
-from octoagent.tooling.models import SideEffectLevel
 from ulid import ULID
 
 from .approval_override_store import ApprovalOverrideCache, ApprovalOverrideRepository
@@ -103,11 +102,12 @@ class ApprovalManager:
     # Phase 1: 幂等注册 (FR-007)
     # ============================================================
 
-    async def register(self, request: ApprovalRequest) -> ApprovalRecord:
+    async def register(self, request: ApprovalRequest | dict) -> ApprovalRecord:
         """Phase 1: 幂等注册审批请求
 
         Args:
-            request: 审批请求
+            request: 审批请求（ApprovalRequest 实例或等价 dict）。
+                     dict 输入由 tooling/permission.py 传入以避免循环导入。
 
         Returns:
             ApprovalRecord（新建或已有）
@@ -119,6 +119,8 @@ class ApprovalManager:
             - 推送 SSE 'approval:requested' 事件
             - 启动超时定时器（call_later）
         """
+        if not isinstance(request, ApprovalRequest):
+            request = ApprovalRequest(**request)
         # 幂等: 如果已注册，直接返回已有记录
         if request.approval_id in self._pending:
             logger.debug(

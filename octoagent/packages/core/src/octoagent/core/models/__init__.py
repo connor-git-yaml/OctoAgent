@@ -224,6 +224,7 @@ from .enums import (
     EventType,
     PartType,
     RiskLevel,
+    SideEffectLevel,
     TaskStatus,
     validate_transition,
 )
@@ -355,6 +356,7 @@ __all__ = [
     "EventType",
     "ActorType",
     "RiskLevel",
+    "SideEffectLevel",
     "PartType",
     "ControlPlaneSurface",
     "ControlPlaneSupportStatus",

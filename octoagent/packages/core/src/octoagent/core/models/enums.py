@@ -1,6 +1,6 @@
 """枚举定义 -- 对齐 spec FR-M0-DM-2, FR-M0-DM-3, FR-M0-DM-4
 
-包含 TaskStatus 状态机、EventType、ActorType、RiskLevel、PartType 枚举，
+包含 TaskStatus 状态机、EventType、ActorType、RiskLevel、PartType、SideEffectLevel 枚举，
 以及 VALID_TRANSITIONS 合法流转映射和 TERMINAL_STATES 终态集合。
 """
 
@@ -207,6 +207,18 @@ class RiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+
+
+class SideEffectLevel(StrEnum):
+    """工具副作用等级 -- 对齐 spec FR-001, Blueprint §8.5.2
+
+    枚举值已锁定（FR-025a），变更需经 005/006 利益方评审。
+    跨 tooling/policy/skills 等多个包使用的共享类型。
+    """
+
+    NONE = "none"  # 纯读取，无副作用
+    REVERSIBLE = "reversible"  # 可回滚的副作用
+    IRREVERSIBLE = "irreversible"  # 不可逆操作
 
 
 class PartType(StrEnum):

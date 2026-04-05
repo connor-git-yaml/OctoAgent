@@ -26,7 +26,7 @@ from octoagent.policy.models import (
     ApprovalRequest,
     ApprovalStatus,
 )
-from octoagent.tooling.models import SideEffectLevel
+from octoagent.core.models.enums import SideEffectLevel
 
 _APPROVAL_OVERRIDES_DDL = """
 CREATE TABLE IF NOT EXISTS approval_overrides (
@@ -221,3 +221,65 @@ class TestApprovalManagerAlwaysOverride:
         )
         record2 = await manager.register(req2)
         assert record2.status == ApprovalStatus.APPROVED
+
+
+class TestApprovalManagerDictInput:
+    """验证 register() 接受 dict 输入（消除 tooling→policy 循环依赖）。"""
+
+    async def test_register_with_dict(self, manager) -> None:
+        """dict 输入与 ApprovalRequest 等效。"""
+        request_data = {
+            "approval_id": "appr-dict-1",
+            "task_id": "task-dict",
+            "tool_name": "filesystem.write",
+            "tool_args_summary": "path=/tmp/test.txt",
+            "risk_explanation": "写文件操作需要审批",
+            "policy_label": "permission_check",
+            "side_effect_level": SideEffectLevel.IRREVERSIBLE,
+            "agent_runtime_id": "worker-dict",
+            "expires_at": datetime.now(UTC) + timedelta(seconds=120),
+            "created_at": datetime.now(UTC),
+        }
+        record = await manager.register(request_data)
+        assert record.status == ApprovalStatus.PENDING
+        assert record.request.approval_id == "appr-dict-1"
+
+    async def test_dict_idempotent(self, manager) -> None:
+        """同一 approval_id 的 dict 重复注册保持幂等。"""
+        data = {
+            "approval_id": "appr-dict-idem",
+            "task_id": "task-idem",
+            "tool_name": "terminal.exec",
+            "tool_args_summary": "cmd=ls",
+            "risk_explanation": "需要审批",
+            "policy_label": "permission_check",
+            "side_effect_level": SideEffectLevel.REVERSIBLE,
+            "agent_runtime_id": "worker-idem",
+            "expires_at": datetime.now(UTC) + timedelta(seconds=120),
+        }
+        r1 = await manager.register(data)
+        r2 = await manager.register(data)
+        assert r1.request.approval_id == r2.request.approval_id
+
+    async def test_register_incomplete_dict_raises(self, manager) -> None:
+        """缺少必填字段时 Pydantic 应抛出 ValidationError。"""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            await manager.register({"approval_id": "appr-bad", "task_id": "t"})
+
+    async def test_register_dict_with_string_side_effect(self, manager) -> None:
+        """side_effect_level 传入字符串值时 Pydantic 自动转换为枚举。"""
+        data = {
+            "approval_id": "appr-dict-str-sel",
+            "task_id": "task-str",
+            "tool_name": "filesystem.write",
+            "tool_args_summary": "path=/tmp/x",
+            "risk_explanation": "写文件",
+            "policy_label": "permission_check",
+            "side_effect_level": "irreversible",  # 字符串而非枚举
+            "agent_runtime_id": "worker-str",
+            "expires_at": datetime.now(UTC) + timedelta(seconds=120),
+        }
+        record = await manager.register(data)
+        assert record.request.side_effect_level == SideEffectLevel.IRREVERSIBLE

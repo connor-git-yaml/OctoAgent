@@ -240,23 +240,22 @@ async def _request_approval(
     now = datetime.now(tz=UTC)
     timeout_s = 120.0
 
-    # 构建 ApprovalRequest（延迟导入避免循环依赖）
-    from octoagent.policy.models import ApprovalRequest
+    # 传 dict 而非 ApprovalRequest，避免 tooling→policy 循环导入。
+    # ApprovalManager.register() 接受 dict | ApprovalRequest 并在入口做转换。
+    request_data: dict[str, Any] = {
+        "approval_id": approval_id,
+        "task_id": ctx.task_id or "",
+        "tool_name": tool_name,
+        "tool_args_summary": _summarize_args(args),
+        "risk_explanation": f"工具 {tool_name} 需要用户审批（{effective_sel.value}）",
+        "policy_label": "permission_check",
+        "side_effect_level": effective_sel,
+        "agent_runtime_id": ctx.agent_runtime_id or "",
+        "expires_at": now + timedelta(seconds=timeout_s),
+        "created_at": now,
+    }
 
-    request = ApprovalRequest(
-        approval_id=approval_id,
-        task_id=ctx.task_id or "",
-        tool_name=tool_name,
-        tool_args_summary=_summarize_args(args),
-        risk_explanation=f"工具 {tool_name} 需要用户审批（{effective_sel.value}）",
-        policy_label="permission_check",
-        side_effect_level=effective_sel,
-        agent_runtime_id=ctx.agent_runtime_id or "",
-        expires_at=now + timedelta(seconds=timeout_s),
-        created_at=now,
-    )
-
-    record = await approval_manager.register(request)
+    record = await approval_manager.register(request_data)
 
     # 如果 register 已自动批准（always 覆盖命中），直接返回 decision
     if record.decision is not None:

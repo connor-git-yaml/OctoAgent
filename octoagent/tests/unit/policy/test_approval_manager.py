@@ -22,7 +22,7 @@ from octoagent.policy.models import (
     ApprovalRequest,
     ApprovalStatus,
 )
-from octoagent.tooling.models import SideEffectLevel
+from octoagent.core.models.enums import SideEffectLevel
 
 
 def _make_request(
