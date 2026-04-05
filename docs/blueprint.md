@@ -3312,6 +3312,48 @@ M5 说明：
 
 设计超前但功能完备。3 级 PipelineRegistry + 6 个 action（list/start/status/resume/cancel/retry）+ DELEGATE_GRAPH 决策模式。当前无结构性问题，待更多 Pipeline 定义积累后评估实际使用效果。
 
+## 14.8 代码架构全面审计（2026-04-05）
+
+> 基于包依赖方向、职责清晰度、模型层坏味道、概念一致性的全量扫描。
+
+### 🔴 A1: capability_pack.py God Object（5,112 行）
+
+`_register_builtin_tools()` 单方法 2,890 行，60+ 工具 handler 全部作为闭包内嵌。同一文件混合了工具注册、browser 会话管理、TTS、PDF/图片检查、Web 搜索等不相关领域。
+
+**改善方向**：将工具 handler 按域拆分为 `tools/filesystem.py`、`tools/browser.py`、`tools/memory.py` 等独立模块，每模块导出 `register(broker, deps)` 函数。`CapabilityPackService` 退化为编排层。
+
+### 🔴 A2: provider/dx → apps/gateway 反向依赖
+
+`setup_governance_adapter.py` 直接 import `CapabilityPackService` 和 `ControlPlaneService`，形成底层包引用顶层应用。
+
+**改善方向**：通过 Protocol 接口注入替代直接 import。或将 `dx/` 上移为独立包 `packages/management/`。
+
+### 🔴 A3: tooling ↔ policy 循环依赖
+
+`permission.py` 延迟 import `policy.models.ApprovalRequest`，`policy.models` import `tooling.models.SideEffectLevel`。
+
+**改善方向**：将 `SideEffectLevel` 下沉到 `core.models`；`permission.py` 依赖 `ApprovalManagerProtocol` 而非具体 `ApprovalRequest` 类。
+
+### 🟠 A4: provider/dx 定位模糊（72 文件 24K 行）
+
+CLI 命令、配置向导、backup、chat import、memory console 等管理面逻辑混在 "provider" 包中，依赖 memory + tooling + gateway。
+
+**改善方向**：将 `dx/` 提升为独立包 `packages/management/` 或 `apps/cli/`。
+
+### 🟠 A5: control_plane.py 56 个模型混在单文件
+
+所有 UI presentation DTO（session/worker/memory/vault/mcp/automation）混在一个 1,172 行文件中。
+
+**改善方向**：按领域拆分为子模块。
+
+### 🟠 A6: Butler 遗留概念未清理
+
+活跃代码注释和变量名中仍使用 "Butler"（约 20+ 处），与已统一的 Agent/Worker/Subagent 三层概念不一致。
+
+### 🟠 A7: 4 个状态枚举语义重叠
+
+TaskStatus(10 值)、WorkerExecutionStatus(3)、WorkerRuntimeState(6)、WorkStatus(13) 中 SUCCEEDED/FAILED/CANCELLED 重复定义。
+
 ---
 
 ## 15. 风险清单与缓解（Risks & Mitigations）
