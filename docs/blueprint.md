@@ -387,7 +387,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - ✅ A4: dx 运行时服务上移到 gateway（27 文件迁移，gateway→dx import 从 72→28）
 - ✅ A5: control_plane models 拆分为 8 领域子模块（已修复 2026-04-05）
 - ✅ A6: Butler 遗留概念清理（已修复 2026-04-05）
-- 🟠 A7: 4 个状态枚举语义重叠
+- ✅ A7: 状态枚举整理（WorkerExecutionStatus + SubagentOutcome 消除，统一用 TaskStatus 终态子集）
 
 ---
 
