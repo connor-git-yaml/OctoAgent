@@ -318,44 +318,49 @@ export default function ChatWorkbench() {
           },
         ]
       : [];
-  const activityItems: ChatActivityItem[] =
-    taskId && suppressHistoricalActivity
-      ? [
-          {
-            id: "agent-fresh-turn",
-            actor: "主助手",
-            stateLabel: "进行中",
-            tone: "running",
-            summary: "主助手正在开始处理这条新消息，稍后会替换成这轮真实的工具链和处理阶段。",
-            traceTitle: "主助手的直连处理轨迹",
-            traceEntries: [],
-          },
-        ]
-      : taskId
-        ? [
-            {
-              ...buildAgentActivity(
-                normalizedTaskStatus,
-                streaming,
-                hasInternalCollaboration,
-                activeConversationLatestType,
-                isDirectExecution
-              ),
-              traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
-              traceEntries: activeWork
-                ? buildAgentTraceEntries(
-                    activeWork,
-                    workEvents,
-                    activeConversationLatestType,
-                    normalizedTaskStatus,
-                    isDirectExecution
-                  )
-                : [],
-            },
-            ...workerActivities.slice(0, 2),
-            ...fallbackWorkerActivity,
-          ]
-        : [];
+  const activityItems: ChatActivityItem[] = useMemo(() => {
+    if (taskId && suppressHistoricalActivity) {
+      return [
+        {
+          id: "agent-fresh-turn",
+          actor: "主助手",
+          stateLabel: "进行中",
+          tone: "running" as const,
+          summary: "主助手正在开始处理这条新消息，稍后会替换成这轮真实的工具链和处理阶段。",
+          traceTitle: "主助手的直连处理轨迹",
+          traceEntries: [],
+        },
+      ];
+    }
+    if (!taskId) return EMPTY_ACTIVITY;
+    return [
+      {
+        ...buildAgentActivity(
+          normalizedTaskStatus,
+          streaming,
+          hasInternalCollaboration,
+          activeConversationLatestType,
+          isDirectExecution
+        ),
+        traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
+        traceEntries: activeWork
+          ? buildAgentTraceEntries(
+              activeWork,
+              workEvents,
+              activeConversationLatestType,
+              normalizedTaskStatus,
+              isDirectExecution
+            )
+          : [],
+      },
+      ...workerActivities.slice(0, 2),
+      ...fallbackWorkerActivity,
+    ];
+  }, [
+    taskId, suppressHistoricalActivity, normalizedTaskStatus, streaming,
+    hasInternalCollaboration, activeConversationLatestType, isDirectExecution,
+    activeWork, workEvents, workerActivities, fallbackWorkerActivity,
+  ]);
   const isRestoringConversation = restoring && messages.length === 0;
   const isEmptyConversation =
     messages.length === 0 && !isRestoringConversation;

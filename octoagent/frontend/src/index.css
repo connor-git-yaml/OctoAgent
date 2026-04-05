@@ -3138,7 +3138,7 @@
 .wb-chat-new-message-hint {
   flex: 0 0 auto;
   align-self: center;
-  margin-top: -20px;
+  margin-top: -20px; /* 视觉叠压到消息列表底边 */
   background: var(--cp-primary);
   color: #fff;
   border: none;
@@ -4221,7 +4221,7 @@
   :root:not(.light) .wb-chat-form textarea {
     background: rgba(40, 40, 40, 0.8);
     color: var(--cp-ink);
-    border-color: var(--cp-border);
+    border-color: rgba(255, 255, 255, 0.12);
   }
 
   :root:not(.light) .wb-chat-form button[type="submit"] {
@@ -4265,10 +4265,6 @@
     background: transparent;
   }
 
-  :root:not(.light) .wb-chat-form textarea {
-    border-color: rgba(255, 255, 255, 0.12);
-  }
-
   :root:not(.light) .wb-chat-form textarea::placeholder {
     color: var(--cp-muted);
   }
@@ -4285,9 +4281,38 @@
     border-color: var(--cp-border);
   }
 
+  /* 活动面板 */
+  :root:not(.light) .wb-message-activity {
+    border-color: rgba(255, 255, 255, 0.08);
+    background:
+      radial-gradient(circle at top left, rgba(15, 118, 110, 0.1), transparent 32%),
+      rgba(36, 40, 40, 0.92);
+  }
+
+  :root:not(.light) .wb-message-activity-line {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  :root:not(.light) .wb-message-activity-dot {
+    box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.04);
+  }
+
+  :root:not(.light) .wb-message-activity-dot.is-draft {
+    background: rgba(255, 255, 255, 0.3);
+  }
+
+  :root:not(.light) .wb-message-activity-copy > span {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
   /* 活动轨迹展开区域 */
   :root:not(.light) .wb-message-trace-detail {
     background: rgba(0, 0, 0, 0.2);
+  }
+
+  /* hint 按钮深色增强阴影 */
+  :root:not(.light) .wb-chat-new-message-hint {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   }
 
   /* 滚动条 */
