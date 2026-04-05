@@ -83,7 +83,7 @@ export function formatToolBoundaryLabel(mode: string): string {
 
 export function formatDiscoveryEntrypointLabel(entrypoint: string): string {
   switch (entrypoint.trim().toLowerCase()) {
-    case "workers.review":
+    case "work.plan":
       return "让系统重新评估是否需要额外角色";
     case "memory.search":
       return "补查已有背景记录";

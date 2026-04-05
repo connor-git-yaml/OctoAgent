@@ -1123,7 +1123,7 @@ class CapabilityPackService:
             "artifact.list",
             "sessions.list",
             "session.status",
-            "workers.review",
+            "work.plan",
             "subagents.spawn",
             "subagents.list",
             "subagents.steer",
@@ -1133,7 +1133,7 @@ class CapabilityPackService:
     @staticmethod
     def _profile_first_discovery_tool_names() -> set[str]:
         return {
-            "workers.review",
+            "work.plan",
             "subagents.spawn",
             "subagents.list",
             "subagents.steer",
@@ -1596,7 +1596,7 @@ class CapabilityPackService:
         )
         if mcp_status is not None:
             return mcp_status
-        if tool_name in {"subagents.spawn", "work.split"} and self._task_runner is None:
+        if tool_name == "subagents.spawn" and self._task_runner is None:
             return BuiltinToolAvailabilityStatus.UNAVAILABLE
         if tool_name in {"subagents.kill", "subagents.steer"} and self._task_runner is None:
             return BuiltinToolAvailabilityStatus.UNAVAILABLE
@@ -1631,7 +1631,7 @@ class CapabilityPackService:
             mcp_status, mcp_reason, _mcp_hint = self._mcp_registry.get_tool_status(tool_name)
             if mcp_status is not None:
                 return mcp_reason
-        if tool_name in {"subagents.spawn", "work.split"} and self._task_runner is None:
+        if tool_name == "subagents.spawn" and self._task_runner is None:
             return "task_runner_unbound"
         if tool_name in {"subagents.kill", "subagents.steer"} and self._task_runner is None:
             return "task_runner_unbound"
@@ -1692,10 +1692,9 @@ class CapabilityPackService:
             "browser.status": ["agent_runtime", "web"],
             "cron.list": ["agent_runtime", "web"],
             "nodes.list": ["agent_runtime", "web"],
-            "work.split": ["agent_runtime", "web"],
             "work.merge": ["agent_runtime", "web"],
             "work.delete": ["agent_runtime", "web"],
-            "workers.review": ["agent_runtime", "web"],
+            "work.plan": ["agent_runtime", "web"],
             "subagents.list": ["agent_runtime", "web"],
             "subagents.kill": ["agent_runtime", "web"],
             "subagents.steer": ["agent_runtime", "web"],
@@ -1716,7 +1715,7 @@ class CapabilityPackService:
     def _resolve_tool_runtime_kinds(tool_name: str) -> list[RuntimeKind]:
         if tool_name == "subagents.spawn":
             return [RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
-        if tool_name in {"subagents.list", "subagents.kill", "subagents.steer", "workers.review"}:
+        if tool_name in {"subagents.list", "subagents.kill", "subagents.steer", "work.plan"}:
             return [RuntimeKind.WORKER, RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
         if tool_name in {"gateway.inspect", "cron.list", "nodes.list", "runtime.inspect"}:
             return [RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME]

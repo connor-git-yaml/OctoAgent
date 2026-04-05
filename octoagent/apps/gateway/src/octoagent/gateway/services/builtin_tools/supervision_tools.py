@@ -2,7 +2,7 @@
 
 工具列表：
 - subagents.list
-- workers.review
+- work.plan
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ async def register(broker, deps: ToolDeps) -> None:
         _context, descendants = await descendant_works_for_current_context(deps)
         if not include_terminal:
             descendants = [
-                item for item in descendants if item.status not in WORK_TERMINAL_STATUSES
+                item for item in descendants if item.status.value not in WORK_TERMINAL_VALUES
             ]
         payload = []
         for item in descendants[: max(1, min(limit, 100))]:
@@ -63,7 +63,7 @@ async def register(broker, deps: ToolDeps) -> None:
                     if session is None
                     else session.model_dump(mode="json"),
                     "steerable": bool(session is not None and session.can_attach_input),
-                    "cancellable": item.status not in WORK_TERMINAL_STATUSES,
+                    "cancellable": item.status.value not in WORK_TERMINAL_VALUES,
                 }
             )
         return json.dumps(
@@ -76,18 +76,18 @@ async def register(broker, deps: ToolDeps) -> None:
         )
 
     @tool_contract(
-        name="workers.review",
+        name="work.plan",
         side_effect_level=SideEffectLevel.NONE,
         tool_group="supervision",
-        tags=["worker", "review", "governance"],
-        manifest_ref="builtin://workers.review",
+        tags=["worker", "plan", "governance"],
+        manifest_ref="builtin://work.plan",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
             "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
-    async def workers_review(objective: str = "") -> str:
-        """评审当前 work 的 worker 划分建议，但不直接执行。"""
+    async def work_plan(objective: str = "") -> str:
+        """评估当前 Work 的子任务划分方案并给出规划建议。"""
 
         context, _task = await current_work_context(deps)
         plan = await deps._pack_service.review_worker_plan(
@@ -98,6 +98,6 @@ async def register(broker, deps: ToolDeps) -> None:
 
     for handler in (
         subagents_list,
-        workers_review,
+        work_plan,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)

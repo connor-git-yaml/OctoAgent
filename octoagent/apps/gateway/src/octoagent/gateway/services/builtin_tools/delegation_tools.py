@@ -1,10 +1,9 @@
-"""delegation_tools：子 Agent 派发与 work 管理工具（7 个）。
+"""delegation_tools：子 Agent 派发与 work 管理工具（6 个）。
 
 工具列表：
-- subagents.spawn
+- subagents.spawn（支持单个或批量 objectives）
 - subagents.kill
 - subagents.steer
-- work.split
 - work.merge
 - work.delete
 - work.inspect（tool_group=supervision，逻辑上归属 delegation 文件）
@@ -76,24 +75,53 @@ async def register(broker, deps: ToolDeps) -> None:
         },
     )
     async def subagents_spawn(
-        objective: str,
+        objective: str = "",
+        objectives: list[str] | str = "",
         worker_type: str = "general",
         target_kind: str = "subagent",
         title: str = "",
     ) -> str:
-        """创建并启动真实 child task / subagent runtime。"""
+        """创建并启动 child task / subagent runtime。支持单个（objective）或批量（objectives）模式。
+        批量模式下 title 参数忽略，每个 child 自动命名。"""
 
-        payload = await launch_child(
-            deps,
-            objective=objective,
-            worker_type=worker_type,
-            target_kind=target_kind,
-            tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                objective=objective,
-            ),
-            title=title,
-        )
-        return json.dumps(payload, ensure_ascii=False)
+        items = coerce_objectives(objectives) if objectives else []
+        if not items and objective.strip():
+            items = [objective.strip()]
+        if not items:
+            raise RuntimeError("objective 或 objectives 至少需要提供一个")
+
+        if len(items) == 1:
+            payload = await launch_child(
+                deps,
+                objective=items[0],
+                worker_type=worker_type,
+                target_kind=target_kind,
+                tool_profile=deps._pack_service._effective_tool_profile_for_objective(
+                    objective=items[0],
+                ),
+                title=title,
+            )
+            return json.dumps(
+                {"requested": 1, "created": 1, "children": [payload]},
+                ensure_ascii=False,
+            )
+        else:
+            launched = []
+            for item in items:
+                payload = await launch_child(
+                    deps,
+                    objective=item,
+                    worker_type=worker_type,
+                    target_kind=target_kind,
+                    tool_profile=deps._pack_service._effective_tool_profile_for_objective(
+                        objective=item,
+                    ),
+                )
+                launched.append(payload)
+            return json.dumps(
+                {"requested": len(items), "created": len(launched), "children": launched},
+                ensure_ascii=False,
+            )
 
     @tool_contract(
         name="subagents.kill",
@@ -187,48 +215,6 @@ async def register(broker, deps: ToolDeps) -> None:
         )
 
     @tool_contract(
-        name="work.split",
-        side_effect_level=SideEffectLevel.REVERSIBLE,
-        tool_group="delegation",
-        tags=["work", "split", "child_work"],
-        manifest_ref="builtin://work.split",
-        metadata={
-            "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
-        },
-    )
-    async def work_split(
-        objectives: list[str] | str,
-        worker_type: str = "general",
-        target_kind: str = "subagent",
-    ) -> str:
-        """把当前 work 拆成多个 child tasks。"""
-
-        items = coerce_objectives(objectives)
-        if not items:
-            raise RuntimeError("split objectives must not be empty")
-        launched = [
-            await launch_child(
-                deps,
-                objective=item,
-                worker_type=worker_type,
-                target_kind=target_kind,
-                tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                    objective=item,
-                ),
-            )
-            for item in items
-        ]
-        return json.dumps(
-            {
-                "requested": len(items),
-                "created": len(launched),
-                "children": launched,
-            },
-            ensure_ascii=False,
-        )
-
-    @tool_contract(
         name="work.merge",
         side_effect_level=SideEffectLevel.REVERSIBLE,
         tool_group="delegation",
@@ -251,7 +237,7 @@ async def register(broker, deps: ToolDeps) -> None:
         if not children:
             raise RuntimeError("current work has no child works to merge")
         blocking = [
-            item.work_id for item in children if item.status not in WORK_TERMINAL_STATUSES
+            item.work_id for item in children if item.status.value not in WORK_TERMINAL_VALUES
         ]
         if blocking:
             raise RuntimeError(f"child works still active: {', '.join(blocking)}")
@@ -288,12 +274,12 @@ async def register(broker, deps: ToolDeps) -> None:
         active = [
             item.work_id
             for item in descendants
-            if item.status not in WORK_TERMINAL_STATUSES
+            if item.status.value not in WORK_TERMINAL_VALUES
         ]
         current = await deps.stores.work_store.get_work(context.work_id)
         if current is None:
             raise RuntimeError("current work no longer exists")
-        if current.status not in WORK_TERMINAL_STATUSES:
+        if current.status.value not in WORK_TERMINAL_VALUES:
             active.insert(0, current.work_id)
         if active:
             raise RuntimeError(f"work delete requires terminal status: {', '.join(active)}")
@@ -312,7 +298,6 @@ async def register(broker, deps: ToolDeps) -> None:
         subagents_spawn,
         subagents_kill,
         subagents_steer,
-        work_split,
         work_merge,
         work_delete,
     ):
