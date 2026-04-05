@@ -381,7 +381,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - W5: WAITING_INPUT deadline 无限重置
 
 **代码架构问题**：
-- 🔴 A1: capability_pack.py God Object（5,112 行）→ 按域拆分
+- ✅ A1: capability_pack.py God Object（5,112→2,052 行，47 工具迁移到 builtin_tools/ 子包）
 - 🔴 A2: provider/dx → apps/gateway 反向依赖 → Protocol 注入
 - ✅ A3: tooling ↔ policy 循环依赖（已修复 2026-04-05）
 - 🟠 A4-A7: dx 定位模糊 / control_plane 模型混合 / Butler 遗留命名 / 状态枚举重叠
