@@ -330,9 +330,7 @@ class ProjectWorkspaceMigrationService:
                 target_run.run_id,
                 target_run.rollback_plan.delete_binding_ids
             )
-            await store_group.project_store.delete_workspaces(
-                target_run.rollback_plan.delete_workspace_ids
-            )
+            # workspace 概念已废弃，跳过 delete_workspaces
             await store_group.project_store.delete_projects(
                 target_run.rollback_plan.delete_project_ids
             )

@@ -36,19 +36,9 @@ async def _seed_project(store_group):
         created_at=now,
         updated_at=now,
     )
-    workspace = Workspace(
-        workspace_id="workspace-primary",
-        project_id=project.project_id,
-        slug="primary",
-        name="Primary",
-        root_path="/tmp/project-alpha",
-        created_at=now,
-        updated_at=now,
-    )
     await store_group.project_store.create_project(project)
-    await store_group.project_store.create_workspace(workspace)
     await store_group.conn.commit()
-    return project, workspace
+    return project, None  # workspace 概念已废弃
 
 
 class TestMemoryBackendResolver:

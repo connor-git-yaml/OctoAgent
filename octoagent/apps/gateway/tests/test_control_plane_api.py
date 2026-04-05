@@ -3486,7 +3486,6 @@ class TestControlPlaneApi:
         assert new_result["data"]["previous_task_id"] == task_id
         assert new_result["data"]["new_conversation_token"]
         assert new_result["data"]["project_id"] == default_project.project_id
-        assert new_result["data"]["workspace_id"] == ""
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200
@@ -3495,7 +3494,6 @@ class TestControlPlaneApi:
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == new_result["data"]["new_conversation_token"]
         assert payload["new_conversation_project_id"] == default_project.project_id
-        assert payload["new_conversation_workspace_id"] == ""
         assert payload["new_conversation_agent_profile_id"] == ""
 
     async def test_session_new_can_prepare_explicit_agent_session_entry(
@@ -3584,7 +3582,6 @@ class TestControlPlaneApi:
         agent_session_id = result["data"]["agent_session_id"]
         thread_id = result["data"]["thread_id"]
         project_id = result["data"]["project_id"]
-        workspace_id = result["data"]["workspace_id"]
         assert projected_session_id == build_projected_session_id(
             thread_id=thread_id,
             surface="web",
@@ -3624,7 +3621,6 @@ class TestControlPlaneApi:
         internal_runtime = AgentRuntime(
             agent_runtime_id="runtime-internal-worker",
             project_id=project_id,
-            workspace_id=workspace_id,
             worker_profile_id=profile_id,
             role=AgentRuntimeRole.WORKER,
             name="internal worker",
@@ -3638,7 +3634,6 @@ class TestControlPlaneApi:
                 agent_runtime_id=internal_runtime.agent_runtime_id,
                 kind=AgentSessionKind.WORKER_INTERNAL,
                 project_id=project_id,
-                workspace_id=workspace_id,
                 surface="web",
                 thread_id="thread-worker-internal",
                 legacy_session_id="thread-worker-internal",
@@ -3714,7 +3709,6 @@ class TestControlPlaneApi:
         assert result["code"] == "SESSION_OPENED_EXISTING_PROJECT"
         assert result["data"]["agent_session_id"] != existing_session.agent_session_id
         assert result["data"]["project_id"] == project.project_id
-        assert result["data"]["workspace_id"] == ""
         reopened_session = await store_group.agent_context_store.get_active_session_for_project(
             project.project_id,
             kind=AgentSessionKind.MAIN_BOOTSTRAP,
@@ -4373,7 +4367,6 @@ class TestControlPlaneApi:
         assert reset_result["data"]["reset_agent_session_count"] >= 1
         assert reset_result["data"]["new_conversation_token"]
         assert reset_result["data"]["project_id"] == project.project_id
-        assert reset_result["data"]["workspace_id"] == ""
 
         session_state = await store_group.agent_context_store.get_session_context(
             "thread-reset-legacy"
@@ -4405,7 +4398,6 @@ class TestControlPlaneApi:
         assert payload["focused_thread_id"] == ""
         assert payload["new_conversation_token"] == reset_result["data"]["new_conversation_token"]
         assert payload["new_conversation_project_id"] == project.project_id
-        assert payload["new_conversation_workspace_id"] == ""
 
     async def test_backup_create_and_restore_plan_actions_refresh_diagnostics(
         self,
@@ -5355,7 +5347,6 @@ class TestControlPlaneApi:
         )
 
         assert target["dynamic_context"]["active_project_id"] == project.project_id
-        assert target["dynamic_context"]["active_workspace_id"] == ""
         assert target["dynamic_context"]["active_work_count"] == 1
         assert target["dynamic_context"]["running_work_count"] == 1
         assert target["dynamic_context"]["attention_work_count"] == 1

@@ -305,6 +305,11 @@ class ExecutionContext(BaseModel):
     agent_runtime_id: str = Field(default="", description="当前 agent runtime ID")
     agent_session_id: str = Field(default="", description="当前 agent session ID")
     work_id: str = Field(default="", description="当前 work ID")
+    # DEPRECATED: 兼容字段
+    profile: ToolProfile = Field(
+        default=ToolProfile.MINIMAL,
+        description="DEPRECATED: 已无实际作用，改用 permission_preset",
+    )
     permission_preset: PermissionPreset = Field(
         default=PermissionPreset.MINIMAL,
         description="当前 Agent 的权限 Preset（决定工具调用的 allow/ask 策略）",

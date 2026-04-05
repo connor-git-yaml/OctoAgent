@@ -27,7 +27,6 @@ class TestToolContractDecorator:
         assert hasattr(echo, "_tool_meta")
         meta = echo._tool_meta  # type: ignore[attr-defined]
         assert meta["side_effect_level"] == SideEffectLevel.NONE
-        assert meta["tool_profile"] == ToolProfile.MINIMAL
         assert meta["tool_group"] == "system"
 
     def test_default_name_from_func(self) -> None:

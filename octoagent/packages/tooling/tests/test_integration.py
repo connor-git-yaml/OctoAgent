@@ -82,6 +82,7 @@ def _make_context(profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionConte
         trace_id="integration-tr1",
         caller="integration_test",
         profile=profile,
+        permission_preset=PermissionPreset.FULL,
     )
 
 
@@ -101,7 +102,7 @@ class TestFullPipeline:
         await broker.register(meta, greet)
 
         # 3. 发现
-        tools = await broker.discover(profile=ToolProfile.MINIMAL)
+        tools = await broker.discover()
         assert len(tools) == 1
         assert tools[0].name == "greet"
 
@@ -276,13 +277,9 @@ class TestMultiToolBroker:
         all_tools = await broker.discover()
         assert len(all_tools) == 3
 
-        # minimal 只能发现 2 个（greet + generate_large_output）
-        minimal_tools = await broker.discover(profile=ToolProfile.MINIMAL)
-        assert len(minimal_tools) == 2
-
-        # standard 发现全部 3 个
-        standard_tools = await broker.discover(profile=ToolProfile.STANDARD)
-        assert len(standard_tools) == 3
+        # profile 过滤已移除，discover() 返回全部
+        # 验证全部工具可见
+        assert len(all_tools) == 3
 
         # group 过滤
         system_tools = await broker.discover(group="system")

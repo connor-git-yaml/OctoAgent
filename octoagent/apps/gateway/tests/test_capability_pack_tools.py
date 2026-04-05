@@ -803,7 +803,6 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
         await init_memory_db(store_group.conn)
         project = await store_group.project_store.get_default_project()
         assert project is not None
-        workspace = await store_group.project_store.get_primary_workspace(project.project_id)
         memory_service = await capability_pack._memory_runtime_service.memory_service_for_scope(
             project=project,
         )

@@ -1127,7 +1127,6 @@ class SessionDomainService(DomainServiceBase):
                 await ensure_main_runtime_and_session(
                     self._stores,
                     project,
-                    None,
                     agent_profile,
                 )
                 await self._stores.conn.commit()

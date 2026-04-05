@@ -290,20 +290,16 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
 
     service = AgentContextService(store_group, project_root=tmp_path)
     project = await store_group.project_store.get_project("project-alpha")
-    workspace = await store_group.project_store.get_workspace("workspace-alpha")
     assert project is not None
-    assert workspace is not None
 
     owner_profile = await service._ensure_owner_profile()
     agent_profile = await service._ensure_agent_profile(project)
     owner_overlay = await service._ensure_owner_overlay(
         owner_profile=owner_profile,
         project=project,
-        workspace=workspace,
     )
     bootstrap = await service._ensure_bootstrap_session(
         project=project,
-        workspace=workspace,
         owner_profile=owner_profile,
         owner_overlay=owner_overlay,
         agent_profile=agent_profile,

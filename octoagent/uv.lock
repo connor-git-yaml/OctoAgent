@@ -11,6 +11,7 @@ members = [
     "octoagent-policy",
     "octoagent-protocol",
     "octoagent-provider",
+    "octoagent-sdk",
     "octoagent-skills",
     "octoagent-tooling",
 ]
@@ -850,6 +851,7 @@ wheels = [
 name = "griffelib"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ad/06/eccbd311c9e2b3ca45dbc063b93134c57a1ccc7607c5e545264ad092c4a9/griffelib-2.0.0.tar.gz", hash = "sha256:e504d637a089f5cab9b5daf18f7645970509bf4f53eda8d79ed71cce8bd97934", size = 166312, upload-time = "2026-03-23T21:06:55.954Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/51/c936033e16d12b627ea334aaaaf42229c37620d0f15593456ab69ab48161/griffelib-2.0.0-py3-none-any.whl", hash = "sha256:01284878c966508b6d6f1dbff9b6fa607bc062d8261c5c7253cb285b06422a7f", size = 142004, upload-time = "2026-02-09T19:09:40.561Z" },
 ]
@@ -2017,7 +2019,6 @@ dependencies = [
     { name = "lancedb" },
     { name = "litellm", extra = ["proxy"] },
     { name = "octoagent-core" },
-    { name = "octoagent-gateway" },
     { name = "octoagent-memory" },
     { name = "pydantic" },
     { name = "python-dotenv" },
@@ -2047,7 +2048,6 @@ requires-dist = [
     { name = "lancedb", specifier = ">=0.21,<1.0" },
     { name = "litellm", extras = ["proxy"], specifier = ">=1.80,<2.0" },
     { name = "octoagent-core", editable = "packages/core" },
-    { name = "octoagent-gateway", editable = "apps/gateway" },
     { name = "octoagent-memory", editable = "packages/memory" },
     { name = "pydantic", specifier = ">=2.10,<3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -2061,6 +2061,50 @@ requires-dist = [
     { name = "torch", marker = "extra == 'local-embedding'", specifier = ">=2.6,<3.0" },
 ]
 provides-extras = ["dev", "local-embedding"]
+
+[[package]]
+name = "octoagent-sdk"
+version = "0.1.0"
+source = { editable = "packages/sdk" }
+dependencies = [
+    { name = "octoagent-core" },
+    { name = "octoagent-provider" },
+    { name = "octoagent-skills" },
+    { name = "octoagent-tooling" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "octoagent-memory" },
+    { name = "octoagent-policy" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+memory = [
+    { name = "octoagent-memory" },
+]
+policy = [
+    { name = "octoagent-policy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "octoagent-core", editable = "packages/core" },
+    { name = "octoagent-memory", marker = "extra == 'all'", editable = "packages/memory" },
+    { name = "octoagent-memory", marker = "extra == 'memory'", editable = "packages/memory" },
+    { name = "octoagent-policy", marker = "extra == 'all'", editable = "packages/policy" },
+    { name = "octoagent-policy", marker = "extra == 'policy'", editable = "packages/policy" },
+    { name = "octoagent-provider", editable = "packages/provider" },
+    { name = "octoagent-skills", editable = "packages/skills" },
+    { name = "octoagent-tooling", editable = "packages/tooling" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "structlog", specifier = ">=25.1,<26.0" },
+]
+provides-extras = ["memory", "policy", "all", "dev"]
 
 [[package]]
 name = "octoagent-skills"

@@ -220,7 +220,6 @@ class TestExecutionContext:
         assert ctx.task_id == "t1"
         assert ctx.trace_id == "tr1"
         assert ctx.caller == "system"
-        assert ctx.profile == ToolProfile.MINIMAL
 
     def test_custom_profile(self) -> None:
         ctx = ExecutionContext(
@@ -534,9 +533,9 @@ class TestCoreToolSet:
         defaults = CoreToolSet.default()
         assert "tool_search" in defaults.tool_names
 
-    def test_default_has_10_tools(self) -> None:
+    def test_default_has_9_tools(self) -> None:
         defaults = CoreToolSet.default()
-        assert len(defaults.tool_names) == 10
+        assert len(defaults.tool_names) == 9
 
     def test_is_core(self) -> None:
         ts = CoreToolSet(tool_names=["tool_search", "echo"])

@@ -470,7 +470,6 @@ class ResolvedContextBundle:
 
     request: ContextResolveRequest
     project: Project | None
-    workspace: Any | None
     agent_profile: AgentProfile
     owner_profile: OwnerProfile
     owner_overlay: OwnerProfileOverlay | None
@@ -491,7 +490,6 @@ class RecallPlanningContext:
 
     request: ContextResolveRequest
     project: Project | None
-    workspace: Any | None
     agent_profile: AgentProfile
     agent_runtime: AgentRuntime
     agent_session: AgentSession
@@ -577,7 +575,6 @@ class AgentContextService:
             recall_plan=recall_plan,
         )
         project = bundle.project
-        workspace = bundle.workspace
         agent_profile = bundle.agent_profile
         owner_profile = bundle.owner_profile
         owner_overlay = bundle.owner_overlay
@@ -1041,7 +1038,7 @@ class AgentContextService:
         query: str,
         recall_plan: RecallPlan | None = None,
     ) -> ResolvedContextBundle:
-        project, workspace = await self._resolve_project_scope(
+        project, _ws = await self._resolve_project_scope(
             task=task,
             surface=request.surface,
             project_id=request.project_id,
@@ -1148,7 +1145,6 @@ class AgentContextService:
 
         frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
         project = None
-        workspace = None
         state = None
         if frame is not None:
             project = (
@@ -1156,12 +1152,11 @@ class AgentContextService:
                 if frame.project_id
                 else None
             )
-            workspace = None
             if frame.session_id:
                 state = await self._stores.agent_context_store.get_session_context(frame.session_id)
 
         if state is None:
-            project, workspace = await self._resolve_project_scope(
+            project, _ = await self._resolve_project_scope(
                 task=task,
                 surface=task.requester.channel,
                 project_id=frame.project_id if frame is not None else "",
@@ -2783,7 +2778,6 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
         owner_profile: OwnerProfile,
         owner_overlay: OwnerProfileOverlay | None,
         agent_profile: AgentProfile,
@@ -2942,7 +2936,6 @@ class AgentContextService:
         *,
         task: Task,
         project: Project | None,
-        workspace: Any | None,
         session_id_hint: str = "",
     ) -> SessionContextState:
         existing = await self._load_session_context(
@@ -2974,7 +2967,6 @@ class AgentContextService:
         *,
         task: Task,
         project: Project | None,
-        workspace: Any | None,
         session_id_hint: str = "",
     ) -> SessionContextState | None:
         project_id = project.project_id if project is not None else ""
@@ -3026,7 +3018,6 @@ class AgentContextService:
         request: ContextResolveRequest,
         task: Task,
         project: Project | None,
-        workspace: Any | None,
         agent_profile: AgentProfile,
         agent_runtime: AgentRuntime,
         agent_session: AgentSession,
@@ -3387,7 +3378,6 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
         task: Task,
         current_user_text: str,
         agent_profile: AgentProfile,
@@ -3811,7 +3801,6 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
         task: Task,
         compiled: CompiledTaskContext,
         agent_profile: AgentProfile,
@@ -3866,7 +3855,7 @@ class AgentContextService:
 
         def _build_and_measure() -> tuple[list[dict[str, str]], list[str], int, int]:
             blocks, reasons = self._build_system_blocks(
-                project=project, workspace=workspace, task=task,
+                project=project, task=task,
                 current_user_text=compiled.latest_user_text or task.title,
                 agent_profile=agent_profile, owner_profile=owner_profile,
                 owner_overlay=owner_overlay, bootstrap=bootstrap,
@@ -3972,7 +3961,6 @@ class AgentContextService:
         self,
         *,
         project: Project | None,
-        workspace: Any | None,
         task: Task,
         agent_profile: AgentProfile,
         owner_profile: OwnerProfile,

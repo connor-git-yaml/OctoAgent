@@ -921,9 +921,7 @@ class TaskService:
         transcript_block = "\n".join(transcript_lines) or "N/A"
         summary = planning_context.recent_summary.strip() or "N/A"
         project_name = planning_context.project.name if planning_context.project is not None else "N/A"
-        workspace_name = (
-            planning_context.workspace.name if planning_context.workspace is not None else "N/A"
-        )
+        workspace_name = "N/A"
         return [
             {
                 "role": "system",

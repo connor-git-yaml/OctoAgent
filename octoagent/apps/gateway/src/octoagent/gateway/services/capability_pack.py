@@ -874,7 +874,7 @@ class CapabilityPackService:
                 profile_id=binding.profile_id,
                 profile_revision=binding.profile_revision,
                 worker_type=binding.worker_type,
-                tool_profile=context_profile.value,
+                tool_profile=context_profile,
                 resolution_mode="profile_first_core",
                 selected_tools=mounted_names,
                 recommended_tools=recommended_tools,

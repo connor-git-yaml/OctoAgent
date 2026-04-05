@@ -34,7 +34,6 @@ from octoagent.memory import (
     MemoryPartition,
     ProposalStatus,
     SENSITIVE_PARTITIONS,
-    VaultAccessDecision,
 )
 from octoagent.provider.dx.memory_console_service import (
     MemoryConsoleError,
@@ -293,7 +292,6 @@ class MemoryDomainService(DomainServiceBase):
             data={
                 "record_count": len(document.records),
                 "active_project_id": document.active_project_id,
-                "active_workspace_id": document.active_workspace_id,
             },
             resource_refs=[self._resource_ref("memory_console", "memory:overview")],
         )
@@ -958,7 +956,7 @@ class MemoryDomainService(DomainServiceBase):
         try:
             resolved_request, grant = await self._memory_console_service.resolve_vault_access(
                 request_id=request_id,
-                decision=VaultAccessDecision(decision_raw),
+                approved=decision_raw == "approve",
                 actor_id=request.actor.actor_id,
                 actor_label=request.actor.actor_label,
                 expires_in_seconds=self._param_int(

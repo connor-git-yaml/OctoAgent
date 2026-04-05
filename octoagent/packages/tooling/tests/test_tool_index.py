@@ -124,7 +124,7 @@ async def test_tool_index_standard_profile_can_match_minimal_tools() -> None:
 
     assert selection.is_fallback is False
     assert selection.selected_tools == ["runtime.inspect"]
-    assert "tool_profile" in selection.hits[0].matched_filters
+    assert "tool_group" in selection.hits[0].matched_filters
 
 
 # ============================================================

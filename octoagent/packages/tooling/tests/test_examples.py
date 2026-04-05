@@ -17,7 +17,11 @@ from octoagent.tooling.schema import reflect_tool_schema
 
 
 def _make_context(profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionContext:
-    return ExecutionContext(task_id="t1", trace_id="tr1", caller="test", profile=profile)
+    from octoagent.tooling.models import PermissionPreset
+    return ExecutionContext(
+        task_id="t1", trace_id="tr1", caller="test",
+        profile=profile, permission_preset=PermissionPreset.FULL,
+    )
 
 
 class TestEchoToolEndToEnd:
@@ -31,15 +35,14 @@ class TestEchoToolEndToEnd:
         meta = reflect_tool_schema(echo)
         assert meta.name == "echo"
         assert meta.side_effect_level == SideEffectLevel.NONE
-        assert meta.tool_profile == ToolProfile.MINIMAL
         assert meta.tool_group == "system"
 
         # 注册
         broker = ToolBroker(event_store=mock_event_store)
         await broker.register(meta, echo)
 
-        # 发现 -- minimal profile 可见
-        tools = await broker.discover(profile=ToolProfile.MINIMAL)
+        # 发现 -- discover() 返回全部已注册
+        tools = await broker.discover()
         assert len(tools) == 1
         assert tools[0].name == "echo"
 
@@ -75,19 +78,14 @@ class TestFileWriteToolEndToEnd:
         meta = reflect_tool_schema(file_write)
         assert meta.name == "file_write"
         assert meta.side_effect_level == SideEffectLevel.IRREVERSIBLE
-        assert meta.tool_profile == ToolProfile.STANDARD
         assert meta.tool_group == "filesystem"
 
         broker = ToolBroker(event_store=mock_event_store)
         await broker.register(meta, file_write)
 
-        # standard profile 可见
-        tools = await broker.discover(profile=ToolProfile.STANDARD)
+        # discover() 返回全部已注册（profile 过滤已移除）
+        tools = await broker.discover()
         assert any(t.name == "file_write" for t in tools)
-
-        # minimal profile 不可见（standard > minimal）
-        tools_minimal = await broker.discover(profile=ToolProfile.MINIMAL)
-        assert not any(t.name == "file_write" for t in tools_minimal)
 
     async def test_irreversible_no_checkpoint_allowed_feature_061(
         self, mock_event_store

@@ -144,8 +144,8 @@ class TestBrokerRegistration:
         assert diagnostics[0].error_type == "ToolRegistrationError"
         assert "already registered" in diagnostics[0].message
 
-    async def test_discover_by_profile_minimal(self, mock_event_store) -> None:
-        """profile=minimal 仅返回 minimal 工具"""
+    async def test_discover_returns_all_tools(self, mock_event_store) -> None:
+        """discover() 返回所有已注册工具（profile 过滤已移除）"""
         from octoagent.tooling.broker import ToolBroker
 
         broker = ToolBroker(event_store=mock_event_store)
@@ -153,35 +153,7 @@ class TestBrokerRegistration:
         await broker.register(reflect_tool_schema(read_file_tool), read_file_tool)
         await broker.register(reflect_tool_schema(http_get_tool), http_get_tool)
 
-        tools = await broker.discover(profile=ToolProfile.MINIMAL)
-        assert len(tools) == 1
-        assert tools[0].name == "echo_tool"
-
-    async def test_discover_by_profile_standard(self, mock_event_store) -> None:
-        """profile=standard 返回 minimal + standard"""
-        from octoagent.tooling.broker import ToolBroker
-
-        broker = ToolBroker(event_store=mock_event_store)
-        await broker.register(reflect_tool_schema(echo_tool), echo_tool)
-        await broker.register(reflect_tool_schema(read_file_tool), read_file_tool)
-        await broker.register(reflect_tool_schema(http_get_tool), http_get_tool)
-
-        tools = await broker.discover(profile=ToolProfile.STANDARD)
-        names = {t.name for t in tools}
-        assert "echo_tool" in names
-        assert "read_file_tool" in names
-        assert "http_get_tool" not in names
-
-    async def test_discover_by_profile_privileged(self, mock_event_store) -> None:
-        """profile=privileged 返回所有"""
-        from octoagent.tooling.broker import ToolBroker
-
-        broker = ToolBroker(event_store=mock_event_store)
-        await broker.register(reflect_tool_schema(echo_tool), echo_tool)
-        await broker.register(reflect_tool_schema(read_file_tool), read_file_tool)
-        await broker.register(reflect_tool_schema(http_get_tool), http_get_tool)
-
-        tools = await broker.discover(profile=ToolProfile.PRIVILEGED)
+        tools = await broker.discover()
         assert len(tools) == 3
 
     async def test_discover_by_group(self, mock_event_store) -> None:
@@ -196,8 +168,8 @@ class TestBrokerRegistration:
         assert len(tools) == 1
         assert tools[0].name == "read_file_tool"
 
-    async def test_discover_profile_and_group(self, mock_event_store) -> None:
-        """profile + group 同时过滤（AND 关系）"""
+    async def test_discover_by_group_only(self, mock_event_store) -> None:
+        """group 过滤（profile 过滤已移除）"""
         from octoagent.tooling.broker import ToolBroker
 
         broker = ToolBroker(event_store=mock_event_store)
@@ -205,12 +177,8 @@ class TestBrokerRegistration:
         await broker.register(reflect_tool_schema(read_file_tool), read_file_tool)
         await broker.register(reflect_tool_schema(write_file_tool), write_file_tool)
 
-        # minimal + filesystem -> 无匹配（read_file 和 write_file 都是 standard）
-        tools = await broker.discover(profile=ToolProfile.MINIMAL, group="filesystem")
-        assert len(tools) == 0
-
-        # standard + filesystem -> read_file + write_file
-        tools = await broker.discover(profile=ToolProfile.STANDARD, group="filesystem")
+        # filesystem -> read_file + write_file
+        tools = await broker.discover(group="filesystem")
         assert len(tools) == 2
 
     async def test_discover_empty_registry(self, mock_event_store) -> None:
@@ -319,6 +287,7 @@ class TestBrokerExecution:
 
     def _make_context(self, profile: ToolProfile = ToolProfile.STANDARD) -> ExecutionContext:
         """创建测试执行上下文"""
+        from octoagent.tooling.models import PermissionPreset
         return ExecutionContext(
             task_id="test-task-001",
             trace_id="test-trace-001",
@@ -327,6 +296,7 @@ class TestBrokerExecution:
             agent_session_id="session-test-001",
             work_id="work-test-001",
             profile=profile,
+            permission_preset=PermissionPreset.FULL,
         )
 
     async def test_execute_success(self, mock_event_store) -> None:

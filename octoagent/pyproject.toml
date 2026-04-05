@@ -46,6 +46,7 @@ members = [
     "packages/skills",
     "packages/policy",
     "packages/memory",
+    "packages/sdk",
     "apps/gateway",
 ]
 
