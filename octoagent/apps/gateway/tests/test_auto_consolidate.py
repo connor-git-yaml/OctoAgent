@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from octoagent.provider.dx.consolidation_service import (
+from octoagent.gateway.services.inference.consolidation_service import (
     ConsolidationScopeResult,
 )
 

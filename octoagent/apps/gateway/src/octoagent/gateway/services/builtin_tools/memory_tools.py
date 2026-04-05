@@ -28,7 +28,7 @@ from octoagent.memory import (
     SqliteMemoryStore,
     WriteAction,
 )
-from octoagent.provider.dx.memory_retrieval_profile import (
+from octoagent.gateway.services.memory.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
@@ -47,8 +47,8 @@ _VALID_PARTITIONS = {"core", "profile", "work", "health", "finance", "chat"}
 
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有记忆工具。"""
-    from octoagent.provider.dx.memory_console_service import MemoryConsoleService
-    from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
+    from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
+    from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
     from ..agent_context import (
         build_default_memory_recall_hook_options,
     )

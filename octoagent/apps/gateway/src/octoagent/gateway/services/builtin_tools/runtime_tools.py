@@ -7,7 +7,7 @@ import platform
 import socket
 from typing import Any
 
-from octoagent.provider.dx.automation_store import AutomationStore
+from octoagent.gateway.services.control_plane.automation_store import AutomationStore
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ._deps import ToolDeps

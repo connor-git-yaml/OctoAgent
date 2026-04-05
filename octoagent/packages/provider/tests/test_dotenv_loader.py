@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from octoagent.provider.dx.dotenv_loader import load_project_dotenv
+from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
 
 
 class TestDotenvLoaderExists:

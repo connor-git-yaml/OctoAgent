@@ -8,14 +8,14 @@ from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.onboarding_models import OnboardingStepStatus
-from octoagent.provider.dx.telegram_client import TelegramBotClient
+from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 

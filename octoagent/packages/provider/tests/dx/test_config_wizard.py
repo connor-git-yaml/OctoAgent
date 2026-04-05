@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ConfigParseError,
     CredentialLeakError,
     ModelAlias,
@@ -23,7 +23,7 @@ from octoagent.provider.dx.config_schema import (
     ProviderEntry,
     ProviderNotFoundError,
 )
-from octoagent.provider.dx.config_wizard import (
+from octoagent.gateway.services.config.config_wizard import (
     load_config,
     save_config,
     validate_no_plaintext_credentials,

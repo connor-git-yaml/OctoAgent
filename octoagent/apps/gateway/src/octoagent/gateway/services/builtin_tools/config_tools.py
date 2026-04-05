@@ -34,8 +34,8 @@ def _parse_setup_draft_json(raw: str) -> dict[str, Any]:
 
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有配置管理工具。"""
-    from octoagent.provider.dx.config_wizard import load_config as _load_config
-    from octoagent.provider.dx.config_wizard import save_config as _save_config
+    from octoagent.gateway.services.config.config_wizard import load_config as _load_config
+    from octoagent.gateway.services.config.config_wizard import save_config as _save_config
 
     @tool_contract(
         name="config.inspect",
@@ -125,7 +125,7 @@ async def register(broker, deps: ToolDeps) -> None:
             else (existing_provider.enabled if existing_provider is not None else True)
         )
 
-        from octoagent.provider.dx.config_schema import ProviderEntry
+        from octoagent.gateway.services.config.config_schema import ProviderEntry
         new_entry = ProviderEntry(
             id=provider_id,
             name=resolved_name,
@@ -200,7 +200,7 @@ async def register(broker, deps: ToolDeps) -> None:
                 {"error": "UNKNOWN_PROVIDER", "message": f"Provider '{provider}' 不存在", "available": sorted(provider_ids)},
                 ensure_ascii=False,
             )
-        from octoagent.provider.dx.config_schema import ModelAlias as _ModelAlias
+        from octoagent.gateway.services.config.config_schema import ModelAlias as _ModelAlias
         kwargs: dict[str, Any] = {
             "provider": provider.strip(),
             "model": model.strip(),
@@ -249,7 +249,7 @@ async def register(broker, deps: ToolDeps) -> None:
                     {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
                     ensure_ascii=False,
                 )
-            from octoagent.provider.dx.litellm_generator import generate_litellm_config as _gen_litellm
+            from octoagent.gateway.services.config.litellm_generator import generate_litellm_config as _gen_litellm
             out_path = _gen_litellm(config, deps.project_root)
             enabled_providers = [p.id for p in config.providers if p.enabled]
             enabled_aliases = [

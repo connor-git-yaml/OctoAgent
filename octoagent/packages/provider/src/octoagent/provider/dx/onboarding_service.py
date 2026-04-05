@@ -13,11 +13,11 @@ from .channel_verifier import (
     build_missing_verifier_result,
 )
 from .config_bootstrap import ConfigBootstrapResult, bootstrap_config
-from .config_schema import ConfigParseError
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import ConfigParseError
+from octoagent.gateway.services.config.config_wizard import load_config
 from .doctor import DoctorRunner
 from .doctor_remediation import DoctorGuidance, DoctorRemediationPlanner
-from .litellm_generator import check_litellm_sync_status
+from octoagent.gateway.services.config.litellm_generator import check_litellm_sync_status
 from .models import CheckStatus
 from .onboarding_models import (
     STEP_SEQUENCE,

@@ -8,9 +8,9 @@ from typing import Any
 import structlog
 import yaml
 
-from ..auth.oauth_provider import BUILTIN_PROVIDERS
-from ..models import ReasoningConfig
-from ..reasoning_support import supports_reasoning
+from octoagent.provider.auth.oauth_provider import BUILTIN_PROVIDERS
+from octoagent.provider.models import ReasoningConfig
+from octoagent.provider.reasoning_support import supports_reasoning
 from .config_wizard import load_config
 from .litellm_generator import LITELLM_CONFIG_NAME
 

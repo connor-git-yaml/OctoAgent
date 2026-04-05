@@ -27,14 +27,14 @@ from octoagent.gateway.services.telegram import (
 )
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.telegram_client import (
+from octoagent.gateway.services.telegram_client import (
     InlineKeyboardMarkup,
     TelegramChat,
     TelegramMessage,

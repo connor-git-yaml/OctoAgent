@@ -113,7 +113,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_normal_generation_6_dimensions(self):
         """LLM 正常返回 6 维度 JSON 时逐维度写入。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         # 准备足够多的 SoR 记录（>= 5）
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
@@ -140,7 +140,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_llm_unavailable(self):
         """LLM 不可用时返回 skipped + errors。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         store = _make_memory_store()
         svc = ProfileGeneratorService(
@@ -160,7 +160,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_insufficient_data(self):
         """SoR < 5 且 Derived < 3 时返回 skipped=True。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         # 只有 3 条 SoR，0 条 Derived
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(3)]
@@ -184,7 +184,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_null_dimension_skipped(self):
         """LLM 返回某维度为 null 时跳过该维度。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
         store = _make_memory_store(sor_records=sor_records)
@@ -209,7 +209,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_existing_profile_update(self):
         """已有画像维度执行 UPDATE，新维度执行 ADD。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
         # 已有画像：技术偏好 维度
@@ -252,7 +252,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_single_dimension_failure_continues(self):
         """单维度写入失败时记入 errors 但继续处理其他维度。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
         store = _make_memory_store(sor_records=sor_records)
@@ -291,7 +291,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_llm_output_invalid_json(self):
         """LLM 输出格式错误时返回 errors 且不写入。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
         store = _make_memory_store(sor_records=sor_records)
@@ -321,7 +321,7 @@ class TestProfileGeneratorService:
     @pytest.mark.asyncio
     async def test_scope_id_passed_to_propose_write(self):
         """scope_id 正确传递到 propose_write。"""
-        from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+        from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
         sor_records = [_make_sor_record(memory_id=f"mem-{i}") for i in range(10)]
         store = _make_memory_store(sor_records=sor_records)

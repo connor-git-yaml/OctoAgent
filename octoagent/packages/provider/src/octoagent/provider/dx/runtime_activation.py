@@ -17,8 +17,8 @@ from pathlib import Path
 
 import httpx
 
-from .config_wizard import load_config
-from .dotenv_loader import load_project_dotenv
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
 from .update_status_store import UpdateStatusStore
 
 

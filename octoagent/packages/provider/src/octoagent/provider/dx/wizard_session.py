@@ -11,7 +11,7 @@ from octoagent.core.models import Project
 from pydantic import BaseModel
 from ulid import ULID
 
-from .config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     MemoryConfig,
     ModelAlias,
@@ -21,7 +21,7 @@ from .config_schema import (
     TelegramChannelConfig,
     build_config_schema_document,
 )
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 from .control_plane_models import (
     ConfigSchemaDocument,
     WizardNextAction,

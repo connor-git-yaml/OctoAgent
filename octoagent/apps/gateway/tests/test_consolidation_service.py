@@ -30,12 +30,12 @@ from octoagent.memory.models.common import ProposalValidation
 from octoagent.memory.models.fragment import FragmentRecord
 from octoagent.memory.models.proposal import WriteProposal
 from octoagent.memory.models.sor import SorRecord
-from octoagent.provider.dx.consolidation_service import (
+from octoagent.gateway.services.inference.consolidation_service import (
     ConsolidationBatchResult,
     ConsolidationScopeResult,
     ConsolidationService,
 )
-from octoagent.provider.dx.llm_common import parse_llm_json_array
+from octoagent.gateway.services.inference.llm_common import parse_llm_json_array
 
 
 # ---------------------------------------------------------------------------

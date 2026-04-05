@@ -18,14 +18,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     RuntimeConfig,
 )
-from octoagent.provider.dx.config_wizard import load_config, save_config
-from octoagent.provider.dx.litellm_generator import (
+from octoagent.gateway.services.config.config_wizard import load_config, save_config
+from octoagent.gateway.services.config.litellm_generator import (
     GENERATED_MARKER,
     check_litellm_sync_status,
     generate_litellm_config,

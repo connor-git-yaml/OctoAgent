@@ -9,8 +9,8 @@ from pathlib import Path
 
 import structlog
 from fastapi import HTTPException, Request
-from octoagent.provider.dx.config_schema import FrontDoorConfig
-from octoagent.provider.dx.config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import FrontDoorConfig
+from octoagent.gateway.services.config.config_wizard import load_config
 from pydantic import ValidationError
 
 log = structlog.get_logger()

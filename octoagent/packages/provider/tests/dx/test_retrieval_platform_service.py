@@ -14,13 +14,13 @@ from octoagent.core.models import (
 from octoagent.provider.dx.project_migration import Workspace
 from octoagent.core.store import create_store_group
 from octoagent.memory import init_memory_db
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
 )
-from octoagent.provider.dx.retrieval_platform_service import (
+from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformError,
     RetrievalPlatformService,
 )

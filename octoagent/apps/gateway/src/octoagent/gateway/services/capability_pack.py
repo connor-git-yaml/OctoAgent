@@ -36,8 +36,8 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkStatus,
 )
-from octoagent.provider.dx.memory_console_service import MemoryConsoleService
-from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
+from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
+from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillDiscovery
 from octoagent.tooling import (
     ToolBroker,

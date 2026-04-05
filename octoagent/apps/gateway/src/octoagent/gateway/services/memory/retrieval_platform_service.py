@@ -26,11 +26,11 @@ from octoagent.memory import (
     SqliteMemoryStore,
 )
 from octoagent.memory.models.integration import MemoryMaintenanceRunStatus
-from octoagent.provider.dx.config_schema import ModelAlias
-from octoagent.provider.dx.config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import ModelAlias
+from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
-from .backup_service import resolve_project_root
+from octoagent.provider.dx.backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
 from .memory_retrieval_profile import (
     build_memory_retrieval_profile,

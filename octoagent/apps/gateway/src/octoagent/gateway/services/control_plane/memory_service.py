@@ -35,12 +35,12 @@ from octoagent.memory import (
     ProposalStatus,
     SENSITIVE_PARTITIONS,
 )
-from octoagent.provider.dx.memory_console_service import (
+from octoagent.gateway.services.memory.memory_console_service import (
     MemoryConsoleError,
     MemoryConsoleService,
 )
-from octoagent.provider.dx.memory_retrieval_profile import load_memory_retrieval_profile
-from octoagent.provider.dx.retrieval_platform_service import (
+from octoagent.gateway.services.memory.memory_retrieval_profile import load_memory_retrieval_profile
+from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformService,
 )
 
@@ -467,7 +467,7 @@ class MemoryDomainService(DomainServiceBase):
         # 延迟创建 ProfileGeneratorService
         try:
             from octoagent.memory import SqliteMemoryStore
-            from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+            from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
             memory_store = SqliteMemoryStore(self._stores.conn)
             llm_service = (

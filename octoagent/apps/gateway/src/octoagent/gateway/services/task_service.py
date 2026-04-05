@@ -72,7 +72,7 @@ from octoagent.memory import (
     MemoryPartition,
     init_memory_db,
 )
-from octoagent.provider.dx.memory_retrieval_profile import (
+from octoagent.gateway.services.memory.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
 from ulid import ULID

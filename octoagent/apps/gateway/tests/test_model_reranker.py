@@ -24,7 +24,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_rerank_candidates_lt_2_degraded():
     """candidates < 2 时返回 degraded=True，reason 包含 'candidates < 2'。"""
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     # auto_load=False 避免后台加载
     svc = ModelRerankerService(auto_load=False)
@@ -40,7 +40,7 @@ async def test_rerank_candidates_lt_2_degraded():
 @pytest.mark.asyncio
 async def test_rerank_model_not_loaded_degraded():
     """模型未加载时返回 degraded=True。"""
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
     assert svc.is_available is False
@@ -54,7 +54,7 @@ async def test_rerank_model_not_loaded_degraded():
 async def test_rerank_model_loaded_returns_scores():
     """模型正常加载后 rerank 返回与 candidates 对应的 scores。"""
     import octoagent.provider.dx.model_reranker_service as reranker_mod
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
     # 手动设置模型为已加载
@@ -90,7 +90,7 @@ async def test_rerank_model_loaded_returns_scores():
 async def test_rerank_inference_error_degraded():
     """推理异常时返回 degraded=True。"""
     import octoagent.provider.dx.model_reranker_service as reranker_mod
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
     mock_model = MagicMock()
@@ -118,7 +118,7 @@ async def test_rerank_inference_error_degraded():
 @pytest.mark.asyncio
 async def test_model_load_failure():
     """模型加载失败时 is_available=False。"""
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
     # 模拟加载失败
@@ -135,7 +135,7 @@ async def test_model_load_failure():
 
 def test_is_available_after_load():
     """模型正常加载后 is_available=True。"""
-    from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+    from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
     assert svc.is_available is False

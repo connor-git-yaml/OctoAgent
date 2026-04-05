@@ -17,7 +17,7 @@ from pathlib import Path
 import structlog
 import yaml
 
-from ..reasoning_support import supports_reasoning
+from octoagent.provider.reasoning_support import supports_reasoning
 from .config_schema import (
     THINKING_BUDGET_TOKENS,
     OctoAgentConfig,
@@ -96,8 +96,8 @@ def build_litellm_config_dict(config: OctoAgentConfig) -> dict:
             litellm_params["api_base"] = provider_entry.base_url
         # OAuth Provider：注入 api_base 和 headers（如 openai-codex → chatgpt.com/backend-api）
         if provider_entry.auth_type == "oauth":
-            from ..auth.oauth_flows import extract_account_id_from_jwt
-            from ..auth.oauth_provider import BUILTIN_PROVIDERS
+            from octoagent.provider.auth.oauth_flows import extract_account_id_from_jwt
+            from octoagent.provider.auth.oauth_provider import BUILTIN_PROVIDERS
 
             oauth_cfg = BUILTIN_PROVIDERS.get(provider_entry.id)
             if oauth_cfg:

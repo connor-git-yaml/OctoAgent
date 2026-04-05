@@ -11,9 +11,9 @@ from ulid import ULID
 
 from .backup_service import resolve_project_root
 from .config_bootstrap import bootstrap_config
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 from .console_output import create_console, render_panel
-from .litellm_generator import generate_litellm_config
+from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 from .update_status_store import UpdateStatusStore
 
 console = create_console()

@@ -51,9 +51,9 @@ from octoagent.provider.auth.credentials import ApiKeyCredential
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.backup_service import BackupService
-from octoagent.provider.dx.config_schema import OctoAgentConfig
-from octoagent.provider.dx.config_wizard import load_config, save_config
-from octoagent.provider.dx.litellm_generator import (
+from octoagent.gateway.services.config.config_schema import OctoAgentConfig
+from octoagent.gateway.services.config.config_wizard import load_config, save_config
+from octoagent.gateway.services.config.litellm_generator import (
     check_litellm_sync_status,
     generate_litellm_config,
 )

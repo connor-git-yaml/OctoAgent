@@ -26,17 +26,17 @@ from octoagent.provider import (
     LiteLLMClient,
     load_provider_config,
 )
-from octoagent.provider.dx.config_wizard import load_config
-from octoagent.provider.dx.dotenv_loader import load_project_dotenv
-from octoagent.provider.dx.litellm_runtime import (
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
+from octoagent.gateway.services.config.litellm_runtime import (
     resolve_codex_backend_aliases,
     resolve_codex_reasoning_aliases,
     resolve_reasoning_supported_aliases,
     resolve_responses_api_direct_params,
 )
-from octoagent.provider.dx.memory_console_service import MemoryConsoleService
+from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.telegram_client import TelegramBotClient
+from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.skills import SkillRunner
 from octoagent.skills.litellm_client import LiteLLMSkillClient
@@ -432,7 +432,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if provider_config.llm_mode == "litellm":
         # ProxyProcessManager: 在 LiteLLMClient 初始化之前确保 Proxy 进程就绪
         try:
-            from octoagent.provider.dx.proxy_process_manager import ProxyProcessManager
+            from octoagent.gateway.services.proxy_process_manager import ProxyProcessManager
 
             proxy_manager = ProxyProcessManager(
                 instance_root=project_root,

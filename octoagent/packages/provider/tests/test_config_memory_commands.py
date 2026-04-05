@@ -4,8 +4,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 from octoagent.provider.dx.cli import main
-from octoagent.provider.dx.config_wizard import save_config
-from octoagent.provider.dx.config_schema import OctoAgentConfig
+from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.config.config_schema import OctoAgentConfig
 
 
 def test_config_memory_show_uses_defaults_when_yaml_missing(tmp_path: Path) -> None:

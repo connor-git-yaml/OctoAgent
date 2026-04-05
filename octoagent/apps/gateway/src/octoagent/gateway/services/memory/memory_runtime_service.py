@@ -11,7 +11,7 @@ from octoagent.memory import MemoryBackendStatus, MemoryPartition, MemoryService
 
 _log = structlog.get_logger()
 
-from .backup_service import resolve_project_root
+from octoagent.provider.dx.backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
 from .memory_retrieval_profile import load_memory_retrieval_profile
 from .retrieval_platform_service import RetrievalPlatformService

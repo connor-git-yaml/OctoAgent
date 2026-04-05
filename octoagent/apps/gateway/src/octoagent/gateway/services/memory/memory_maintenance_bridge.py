@@ -19,7 +19,7 @@ from ._memory_console_base import (
     MemoryConsoleBase,
     MemoryConsoleError,
 )
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 
 
 class MemoryMaintenanceBridge:

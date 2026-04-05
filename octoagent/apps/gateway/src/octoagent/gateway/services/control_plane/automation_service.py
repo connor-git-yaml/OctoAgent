@@ -32,7 +32,7 @@ from octoagent.core.models import (
     ControlPlaneSurface,
     ControlPlaneTargetRef,
 )
-from octoagent.provider.dx.automation_store import AutomationStore
+from octoagent.gateway.services.control_plane.automation_store import AutomationStore
 from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase

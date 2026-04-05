@@ -27,14 +27,14 @@ import click
 from rich.table import Table
 
 from .config_bootstrap import ConfigBootstrapError, bootstrap_config
-from .config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ConfigParseError,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     ProviderNotFoundError,
 )
-from .config_wizard import (
+from octoagent.gateway.services.config.config_wizard import (
     load_config,
     save_config,
     wizard_disable_provider,
@@ -42,7 +42,7 @@ from .config_wizard import (
     wizard_update_provider,
 )
 from .console_output import create_console
-from .litellm_generator import build_litellm_config_dict, generate_litellm_config
+from octoagent.gateway.services.config.litellm_generator import build_litellm_config_dict, generate_litellm_config
 from .project_migration import ProjectWorkspaceMigrationService
 from .runtime_activation import RuntimeActivationService, RuntimeActivationSummary
 from .update_service import UpdateService
@@ -533,7 +533,7 @@ def provider_add(
             f"请输入 {api_key_env} 的值（API Key），留空跳过（可稍后手动配置 .env.litellm）："
         ).ask()
         if api_key_value:
-            from .litellm_generator import generate_env_litellm
+            from octoagent.gateway.services.config.litellm_generator import generate_env_litellm
 
             generate_env_litellm(
                 provider_id=provider_id,
@@ -849,7 +849,7 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
         # 预览：生成内容但不写文件（复用 build_litellm_config_dict 避免重复逻辑）
         import yaml as _yaml
 
-        from .litellm_generator import GENERATED_MARKER
+        from octoagent.gateway.services.config.litellm_generator import GENERATED_MARKER
 
         litellm_cfg = build_litellm_config_dict(cfg)
         preview = GENERATED_MARKER + "\n" + _yaml.dump(litellm_cfg, allow_unicode=True)

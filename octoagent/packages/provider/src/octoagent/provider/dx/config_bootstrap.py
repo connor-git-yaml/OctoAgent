@@ -15,7 +15,7 @@ from typing import Literal
 import click
 from pydantic import BaseModel
 
-from .config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     ModelAlias,
     OctoAgentConfig,
@@ -23,8 +23,8 @@ from .config_schema import (
     RuntimeConfig,
     TelegramChannelConfig,
 )
-from .config_wizard import save_config
-from .litellm_generator import generate_litellm_config
+from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 
 PromptFunc = Callable[[str, str], str]
 ChoicePromptFunc = Callable[[str, list[str], str], str]

@@ -57,11 +57,11 @@ from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.core.models.payloads import ControlPlaneAuditPayload
 from octoagent.core.models.task import RequesterInfo
 from octoagent.core.store import StoreGroup
-from octoagent.provider.dx.automation_store import AutomationStore
-from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+from octoagent.gateway.services.control_plane.automation_store import AutomationStore
+from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 from octoagent.provider.dx.import_workbench_service import ImportWorkbenchService
-from octoagent.provider.dx.memory_console_service import MemoryConsoleService
-from octoagent.provider.dx.retrieval_platform_service import (
+from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
+from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformError,
     RetrievalPlatformService,
 )

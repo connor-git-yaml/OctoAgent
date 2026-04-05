@@ -34,8 +34,8 @@ import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引
 from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.provider.dx.config_wizard import load_config
-from octoagent.provider.dx.litellm_generator import generate_litellm_config
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 from pydantic import SecretStr
 
 from ..mcp_registry import McpServerConfig

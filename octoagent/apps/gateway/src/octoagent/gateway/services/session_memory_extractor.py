@@ -30,7 +30,7 @@ from octoagent.memory import (
     MemoryService,
     WriteAction,
 )
-from octoagent.provider.dx.llm_common import LlmServiceProtocol, parse_llm_json_array
+from octoagent.gateway.services.inference.llm_common import LlmServiceProtocol, parse_llm_json_array
 
 log = structlog.get_logger()
 
@@ -157,7 +157,7 @@ class SessionMemoryExtractor:
         self._session_locks: dict[str, asyncio.Lock] = {}
         # 从配置读取记忆加工 model alias，对齐 Settings 页面"记忆加工"字段
         try:
-            from octoagent.provider.dx.llm_common import resolve_default_model_alias
+            from octoagent.gateway.services.inference.llm_common import resolve_default_model_alias
 
             self._model_alias = resolve_default_model_alias(project_root)
         except Exception:

@@ -5,13 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from octoagent.core.models import ManagedRuntimeDescriptor, SecretRefSourceType, utc_now
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     RuntimeConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.project_selector import ProjectSelectorService
 from octoagent.provider.dx.secret_service import SecretService
 from octoagent.provider.dx.update_status_store import UpdateStatusStore

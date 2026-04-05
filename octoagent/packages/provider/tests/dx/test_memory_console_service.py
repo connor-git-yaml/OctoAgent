@@ -15,7 +15,7 @@ from octoagent.memory import (
     WriteAction,
     init_memory_db,
 )
-from octoagent.provider.dx.memory_console_service import MemoryConsoleService
+from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from ulid import ULID
 
 

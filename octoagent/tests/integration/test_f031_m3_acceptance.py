@@ -35,13 +35,13 @@ from octoagent.core.store.transaction import create_task_with_initial_events
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.provider.dx.cli import main as provider_cli
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     RuntimeConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.doctor import DoctorRunner
 from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from octoagent.provider.dx.project_selector import ProjectSelectorService

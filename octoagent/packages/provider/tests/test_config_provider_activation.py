@@ -4,8 +4,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 from octoagent.provider.dx.cli import main
-from octoagent.provider.dx.config_schema import ModelAlias, OctoAgentConfig, ProviderEntry
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_schema import ModelAlias, OctoAgentConfig, ProviderEntry
+from octoagent.gateway.services.config.config_wizard import save_config
 
 
 def test_config_provider_add_supports_activate_flag(tmp_path: Path, monkeypatch) -> None:

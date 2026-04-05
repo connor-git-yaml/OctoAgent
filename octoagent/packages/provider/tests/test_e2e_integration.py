@@ -38,7 +38,7 @@ from octoagent.provider.auth.setup_token_adapter import SetupTokenAuthAdapter
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.auth.validators import validate_api_key, validate_setup_token
 from octoagent.provider.dx.doctor import DoctorRunner, format_report
-from octoagent.provider.dx.dotenv_loader import load_project_dotenv
+from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
 from octoagent.provider.dx.init_wizard import (
     InitConfig,
     generate_env_file,

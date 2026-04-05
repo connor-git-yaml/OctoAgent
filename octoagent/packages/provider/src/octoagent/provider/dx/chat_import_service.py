@@ -51,7 +51,7 @@ from octoagent.memory import (
 from ulid import ULID
 
 from .backup_service import resolve_artifacts_dir, resolve_db_path, resolve_project_root
-from .memory_runtime_service import MemoryRuntimeService
+from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from .project_migration import ProjectWorkspaceMigrationService
 
 _AUDIT_TASK_ID = "ops-chat-import"

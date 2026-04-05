@@ -13,7 +13,7 @@ from octoagent.memory import (
     init_memory_db,
 )
 from octoagent.provider.dx.chat_import_service import ChatImportService
-from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
+from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

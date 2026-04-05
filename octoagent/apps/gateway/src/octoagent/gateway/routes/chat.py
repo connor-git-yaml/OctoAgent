@@ -22,7 +22,7 @@ from octoagent.core.models import (
     TurnExecutorKind,
 )
 from octoagent.policy.models import ChatSendRequest, ChatSendResponse
-from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 
 from ..deps import get_store_group
 from ..services.connection_metadata import (

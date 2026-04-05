@@ -10,7 +10,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     ConfigParseError,
     FrontDoorConfig,

@@ -281,7 +281,7 @@ async def test_scheduler_consolidation_still_works(
     assert result.skipped_reason == "llm_unavailable"
 
     # 验证 ConsolidationService 可以被导入和实例化
-    from octoagent.provider.dx.consolidation_service import ConsolidationService
+    from octoagent.gateway.services.inference.consolidation_service import ConsolidationService
 
     # ConsolidationService 的 consolidate_all_pending 接口未被删除
     assert hasattr(ConsolidationService, "consolidate_all_pending")
@@ -309,7 +309,7 @@ async def test_console_consolidation_entry_preserved():
 
     验证 ConsolidationService.consolidate_scope 接口存在。
     """
-    from octoagent.provider.dx.consolidation_service import ConsolidationService
+    from octoagent.gateway.services.inference.consolidation_service import ConsolidationService
 
     # consolidate_scope 是管理台入口
     assert hasattr(ConsolidationService, "consolidate_scope")

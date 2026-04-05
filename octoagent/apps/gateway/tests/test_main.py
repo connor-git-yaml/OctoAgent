@@ -8,14 +8,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from octoagent.core.models import ManagedRuntimeDescriptor, RuntimeManagementMode, utc_now
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 
 
 def _write_litellm_config(tmp_path: Path, content: str) -> None:

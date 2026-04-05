@@ -55,7 +55,7 @@ class Workspace(_BaseModel):
 from octoagent.core.store import StoreGroup, create_store_group
 from ulid import ULID
 
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 from .recovery_status_store import RecoveryStatusStore
 
 DEFAULT_PROJECT_ID = "project-default"

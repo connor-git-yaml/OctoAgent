@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from octoagent.memory import MemoryPartition
-from octoagent.provider.dx.consolidation_service import CommittedSorInfo
+from octoagent.gateway.services.inference.consolidation_service import CommittedSorInfo
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_normal_extraction(self):
         """LLM 正常返回 JSON 数组时正确解析并写入 derived_type=tom 记录。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store(upsert_return=2)
         llm = _make_llm_service()
@@ -134,7 +134,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_llm_unavailable(self):
         """LLM 不可用时返回 errors 且 extracted=0。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store()
         svc = ToMExtractionService(
@@ -155,7 +155,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_llm_output_invalid_json(self):
         """LLM 输出格式错误时返回 errors。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store()
         llm = MagicMock()
@@ -181,7 +181,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_empty_committed_sors(self):
         """committed_sors 为空时立即返回 extracted=0。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store()
         llm = _make_llm_service()
@@ -204,7 +204,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_derived_write_failure(self):
         """derived_memory 写入失败时记入 errors。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store()
         store.upsert_derived_records = AsyncMock(side_effect=RuntimeError("DB error"))
@@ -228,7 +228,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_derived_id_format(self):
         """derived_id 格式验证: derived:tom:{scope_id}:{timestamp_ms}:{idx}。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store(upsert_return=2)
         llm = _make_llm_service()
@@ -257,7 +257,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_tom_payload_structure(self):
         """ToM payload 结构验证（包含 tom_dimension、domain、evidence 字段）。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         store = _make_memory_store(upsert_return=2)
         llm = _make_llm_service()
@@ -283,7 +283,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_confidence_range(self):
         """confidence 范围验证（0.0-1.0）。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         # 构建超出范围的 confidence
         items = [
@@ -317,7 +317,7 @@ class TestToMExtractionService:
     @pytest.mark.asyncio
     async def test_invalid_tom_dimension_skipped(self):
         """无效的 tom_dimension 会被跳过。"""
-        from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+        from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
         items = [
             {

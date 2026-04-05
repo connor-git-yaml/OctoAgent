@@ -26,7 +26,7 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.task_runner import TaskRunner
-from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 
 
 @pytest_asyncio.fixture

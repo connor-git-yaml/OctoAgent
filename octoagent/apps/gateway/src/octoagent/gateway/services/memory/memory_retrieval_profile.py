@@ -8,8 +8,8 @@ from octoagent.core.models import MemoryRetrievalBindingItem, MemoryRetrievalPro
 from octoagent.memory import MemoryBackendStatus
 from octoagent.memory.models.integration import MemoryRecallHookOptions
 
-from .config_schema import OctoAgentConfig
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import OctoAgentConfig
+from octoagent.gateway.services.config.config_wizard import load_config
 
 _BACKEND_LABELS = {
     "builtin": "内建记忆引擎",

@@ -17,8 +17,8 @@ import structlog
 from rich.table import Table
 
 from ..auth.store import CredentialStore
-from .config_schema import TelegramChannelConfig
-from .litellm_runtime import alias_uses_codex_backend
+from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
+from octoagent.gateway.services.config.litellm_runtime import alias_uses_codex_backend
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
 from .telegram_verifier import TelegramOnboardingVerifier
@@ -58,7 +58,7 @@ class DoctorRunner:
 
     def _resolve_runtime_context(self) -> RuntimeCheckContext:
         """解析 provider/runtime 配置来源，优先使用 octoagent.yaml.runtime。"""
-        from .config_wizard import load_config
+        from octoagent.gateway.services.config.config_wizard import load_config
 
         if (self._root / "octoagent.yaml").exists():
             try:
@@ -554,7 +554,7 @@ class DoctorRunner:
             (config, None)  — 成功加载
             (None, CheckResult) — 文件不存在或为空，调用方直接返回该 CheckResult
         """
-        from .config_wizard import load_config
+        from octoagent.gateway.services.config.config_wizard import load_config
 
         if not (self._root / "octoagent.yaml").exists():
             return None, CheckResult(
@@ -629,7 +629,7 @@ class DoctorRunner:
             cfg, skip = self._load_config_safe("litellm_sync")
             if skip is not None:
                 return skip
-            from .litellm_generator import check_litellm_sync_status
+            from octoagent.gateway.services.config.litellm_generator import check_litellm_sync_status
 
             in_sync, diffs = check_litellm_sync_status(cfg, self._root)
         except Exception as exc:

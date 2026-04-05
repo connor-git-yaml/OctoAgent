@@ -140,8 +140,8 @@ class TestLoadProviderConfig:
 
     def test_yaml_has_priority_over_env(self, monkeypatch, tmp_path):
         """存在 octoagent.yaml 时，runtime 配置优先于环境变量。"""
-        from octoagent.provider.dx.config_schema import OctoAgentConfig, RuntimeConfig
-        from octoagent.provider.dx.config_wizard import save_config
+        from octoagent.gateway.services.config.config_schema import OctoAgentConfig, RuntimeConfig
+        from octoagent.gateway.services.config.config_wizard import save_config
 
         save_config(
             OctoAgentConfig(

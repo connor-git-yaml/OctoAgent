@@ -14,7 +14,7 @@ from octoagent.memory import (
     SqliteMemoryStore,
 )
 
-from .backup_service import resolve_data_dir, resolve_project_root
+from octoagent.provider.dx.backup_service import resolve_data_dir, resolve_project_root
 
 
 class MemoryBackendResolver:

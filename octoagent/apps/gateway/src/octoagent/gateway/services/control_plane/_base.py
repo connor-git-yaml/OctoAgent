@@ -21,7 +21,7 @@ from octoagent.core.models import (
     ProjectSelectorState,
 )
 from octoagent.core.store import StoreGroup
-from octoagent.provider.dx.control_plane_state import ControlPlaneStateStore
+from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 
 log = structlog.get_logger()
 

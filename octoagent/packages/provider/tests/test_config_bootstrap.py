@@ -5,7 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 from octoagent.provider.dx.cli import main
 from octoagent.provider.dx.config_bootstrap import bootstrap_config, build_bootstrap_config
-from octoagent.provider.dx.config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 
 
 def test_build_bootstrap_config_echo() -> None:

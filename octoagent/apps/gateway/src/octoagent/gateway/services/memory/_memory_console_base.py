@@ -27,7 +27,7 @@ from octoagent.memory import (
     VaultAccessGrantStatus,
 )
 
-from .backup_service import resolve_project_root
+from octoagent.provider.dx.backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
 
 _log = structlog.get_logger()

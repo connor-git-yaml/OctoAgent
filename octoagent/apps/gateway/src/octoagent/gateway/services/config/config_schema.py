@@ -14,7 +14,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .control_plane_models import ConfigSchemaDocument
+from octoagent.provider.dx.control_plane_models import ConfigSchemaDocument
 
 # octoagent.yaml 文件头注释（不含凭证提示）
 _YAML_HEADER = (

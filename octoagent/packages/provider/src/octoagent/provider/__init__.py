@@ -43,8 +43,8 @@ from .refresh_coordinator import TokenRefreshCoordinator
 from .config import ProviderConfig, load_provider_config
 from .cost import CostTracker
 
-# Feature 003: DX 工具
-from .dx.dotenv_loader import load_project_dotenv
+# Feature 003: DX 工具（已迁移到 gateway/services/config/）
+from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
 from .echo_adapter import EchoMessageAdapter
 
 # 异常

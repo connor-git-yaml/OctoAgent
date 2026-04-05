@@ -3,13 +3,13 @@ from __future__ import annotations
 import warnings
 
 from octoagent.memory import MemoryBackendState, MemoryBackendStatus
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
 )
-from octoagent.provider.dx.memory_retrieval_profile import build_memory_retrieval_profile
+from octoagent.gateway.services.memory.memory_retrieval_profile import build_memory_retrieval_profile
 
 
 def _make_config(*, providers: list[ProviderEntry], aliases: dict[str, ModelAlias], memory: MemoryConfig) -> OctoAgentConfig:

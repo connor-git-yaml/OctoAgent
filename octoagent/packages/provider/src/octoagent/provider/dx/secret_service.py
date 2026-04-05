@@ -24,8 +24,8 @@ from ulid import ULID
 
 from ..auth.store import CredentialStore
 from .backup_service import resolve_artifacts_dir, resolve_db_path, resolve_project_root
-from .config_schema import OctoAgentConfig
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import OctoAgentConfig
+from octoagent.gateway.services.config.config_wizard import load_config
 from .project_migration import ProjectWorkspaceMigrationService
 from .secret_models import (
     RuntimeSecretMaterialization,

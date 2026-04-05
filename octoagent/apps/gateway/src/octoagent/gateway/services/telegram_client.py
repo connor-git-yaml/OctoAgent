@@ -10,8 +10,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config_schema import ConfigParseError
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import ConfigParseError
+from octoagent.gateway.services.config.config_wizard import load_config
 
 
 class TelegramBotClientError(RuntimeError):

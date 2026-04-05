@@ -66,13 +66,13 @@ from octoagent.memory import (
 from octoagent.provider.auth.credentials import OAuthCredential
 from octoagent.provider.auth.environment import EnvironmentContext
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.project_selector import ProjectSelectorService
 from pydantic import SecretStr
 from ulid import ULID

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from octoagent.memory import MemoryPartition
-from octoagent.provider.dx.consolidation_service import CommittedSorInfo
+from octoagent.gateway.services.inference.consolidation_service import CommittedSorInfo
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ def _make_memory_store(*, upsert_return: int = 0, upsert_side_effect=None) -> Ma
 @pytest.mark.asyncio
 async def test_normal_extraction():
     """LLM 正常返回 JSON 数组时正确解析并写入 derived 记录。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     llm_items = [
         {
@@ -120,7 +120,7 @@ async def test_normal_extraction():
 @pytest.mark.asyncio
 async def test_llm_unavailable():
     """LLM 不可用时返回 errors 列表且不抛异常。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     store = _make_memory_store()
     svc = DerivedExtractionService(
@@ -142,7 +142,7 @@ async def test_llm_unavailable():
 @pytest.mark.asyncio
 async def test_llm_call_failure():
     """LLM 调用异常时返回 errors。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     llm = MagicMock()
     llm.call = AsyncMock(side_effect=RuntimeError("API timeout"))
@@ -166,7 +166,7 @@ async def test_llm_call_failure():
 @pytest.mark.asyncio
 async def test_llm_bad_format():
     """LLM 输出格式错误时返回 errors。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     bad_response = MagicMock()
     bad_response.content = "这不是 JSON"
@@ -191,7 +191,7 @@ async def test_llm_bad_format():
 @pytest.mark.asyncio
 async def test_empty_committed_sors():
     """committed_sors 为空时返回 extracted=0。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     llm = _make_llm_service()
     store = _make_memory_store()
@@ -216,7 +216,7 @@ async def test_empty_committed_sors():
 @pytest.mark.asyncio
 async def test_partial_write_failure():
     """部分 derived 写入失败时已成功的保留，失败的记入 errors。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     llm_items = [
         {
@@ -250,7 +250,7 @@ async def test_partial_write_failure():
 @pytest.mark.asyncio
 async def test_derived_id_format():
     """derived_id 格式验证：derived:consolidate:{scope_id}:{ts}:{index}:{type}。"""
-    from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+    from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
     llm_items = [
         {

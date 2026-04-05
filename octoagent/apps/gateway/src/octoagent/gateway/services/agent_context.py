@@ -69,10 +69,10 @@ from octoagent.memory import (
     init_memory_db,
 )
 from octoagent.memory.partition_inference import infer_memory_partition
-from octoagent.provider.dx.memory_retrieval_profile import (
+from octoagent.gateway.services.memory.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
-from octoagent.provider.dx.memory_runtime_service import MemoryRuntimeService
+from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
 from .agent_decision import (
@@ -2419,7 +2419,7 @@ class AgentContextService:
         if not hasattr(self, "_consolidation_service"):
             try:
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.provider.dx.consolidation_service import ConsolidationService
+                from octoagent.gateway.services.inference.consolidation_service import ConsolidationService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -2448,7 +2448,7 @@ class AgentContextService:
         if not hasattr(self, "_derived_extraction_service"):
             try:
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.provider.dx.derived_extraction_service import DerivedExtractionService
+                from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -2469,7 +2469,7 @@ class AgentContextService:
         if not hasattr(self, "_tom_extraction_service"):
             try:
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.provider.dx.tom_extraction_service import ToMExtractionService
+                from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -2490,7 +2490,7 @@ class AgentContextService:
         if not hasattr(self, "_profile_generator_service"):
             try:
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.provider.dx.profile_generator_service import ProfileGeneratorService
+                from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -2534,7 +2534,7 @@ class AgentContextService:
         """
         if not hasattr(self, "_reranker_service"):
             try:
-                from octoagent.provider.dx.model_reranker_service import ModelRerankerService
+                from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
                 self._reranker_service = ModelRerankerService(auto_load=True)
             except Exception:

@@ -16,7 +16,7 @@ from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.channel_verifier import VerifierAvailability
 from octoagent.provider.dx.cli import main
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     ModelAlias,
     OctoAgentConfig,
@@ -24,11 +24,11 @@ from octoagent.provider.dx.config_schema import (
     RuntimeConfig,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.doctor import DoctorRunner, build_guidance, format_report
 from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from octoagent.provider.dx.onboarding_models import OnboardingStepStatus
-from octoagent.provider.dx.telegram_client import TelegramBotClient
+from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
 from pydantic import SecretStr
 

@@ -19,13 +19,13 @@ from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.telegram import TelegramGatewayService
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
-from octoagent.provider.dx.telegram_client import InlineKeyboardMarkup
+from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.telegram_client import InlineKeyboardMarkup
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
 

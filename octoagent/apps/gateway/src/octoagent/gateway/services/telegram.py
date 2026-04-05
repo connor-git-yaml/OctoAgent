@@ -13,8 +13,8 @@ from typing import Any, Protocol
 
 from octoagent.core.models import OperatorActionOutcome, OperatorInboxItem, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
-from octoagent.provider.dx.config_wizard import load_config
-from octoagent.provider.dx.telegram_client import InlineKeyboardButton, InlineKeyboardMarkup
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.telegram_client import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .operator_actions import decode_telegram_operator_action, encode_telegram_operator_action
 from .task_service import TaskService

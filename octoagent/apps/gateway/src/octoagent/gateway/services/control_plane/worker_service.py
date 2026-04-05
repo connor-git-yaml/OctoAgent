@@ -56,7 +56,7 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkerProfileViewItem,
 )
-from octoagent.provider.dx.config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
 from ..agent_decision import build_behavior_system_summary

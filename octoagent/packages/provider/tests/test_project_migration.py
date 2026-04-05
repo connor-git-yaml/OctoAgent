@@ -17,14 +17,14 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import create_store_group
 from octoagent.memory import init_chat_import_db, init_memory_db
-from octoagent.provider.dx.config_schema import (
+from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
     ProviderEntry,
     RuntimeConfig,
     TelegramChannelConfig,
 )
-from octoagent.provider.dx.config_wizard import save_config
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.provider.dx.recovery_status_store import RecoveryStatusStore
 

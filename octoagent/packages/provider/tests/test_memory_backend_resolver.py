@@ -12,8 +12,8 @@ from octoagent.core.models import (
 from octoagent.provider.dx.project_migration import Workspace
 from octoagent.core.store import create_store_group
 from octoagent.memory import MemoryBackendState
-from octoagent.provider.dx.builtin_memu_bridge import BuiltinMemUBridge
-from octoagent.provider.dx.memory_backend_resolver import MemoryBackendResolver
+from octoagent.gateway.services.memory.builtin_memu_bridge import BuiltinMemUBridge
+from octoagent.gateway.services.memory.memory_backend_resolver import MemoryBackendResolver
 
 
 @pytest_asyncio.fixture

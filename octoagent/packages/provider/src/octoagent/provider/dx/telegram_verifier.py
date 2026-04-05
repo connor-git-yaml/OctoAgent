@@ -14,10 +14,10 @@ from .channel_verifier import (
     ChannelVerifierRegistry,
     VerifierAvailability,
 )
-from .config_schema import ConfigParseError, TelegramChannelConfig
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_schema import ConfigParseError, TelegramChannelConfig
+from octoagent.gateway.services.config.config_wizard import load_config
 from .onboarding_models import NextAction, OnboardingStepStatus
-from .telegram_client import (
+from octoagent.gateway.services.telegram_client import (
     TelegramBotApiError,
     TelegramBotClient,
     TelegramBotClientConfigError,
