@@ -370,12 +370,9 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 ### 待办汇总
 
 > 已完成项详见 [blueprint/architecture-audit.md](blueprint/architecture-audit.md)
-> 短板 1-5 ✅ | 架构 A1-A7 ✅ | Worker W1/W4 ✅
+> 短板 1-5 ✅ | 架构 A1-A7 ✅ | Worker W1-W5 ✅
 
-**剩余待改善（🟠）**：
-- W2: DockerRuntimeBackend 空壳（删除或实现）
-- W3: Graph cancel_signal 未连接
-- W5: WAITING_INPUT deadline 无限重置
+**全部已完成。** 无剩余架构待办项。
 
 ---
 
