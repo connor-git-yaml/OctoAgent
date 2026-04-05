@@ -1,6 +1,8 @@
 """Memory 领域服务。"""
 
+import asyncio
 import math
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -547,6 +549,8 @@ class MemoryService:
     ) -> MemoryRecallResult:
         """构建 recall pack，供 Agent/runtime 复用。"""
 
+        _recall_start = time.monotonic()
+
         normalized_query = query.strip()
         selected_scope_ids = [item.strip() for item in scope_ids if item and item.strip()]
         normalized_hook_options = hook_options or MemoryRecallHookOptions()
@@ -570,13 +574,18 @@ class MemoryService:
         degraded_reasons = self._recall_degraded_reasons(backend_status)
         collected: list[tuple[int, int, int, MemorySearchHit]] = []
         seen: set[str] = set()
+        scope_hit_distribution: dict[str, int] = {}
+
         if self._should_use_backend_recall_contract(backend_status):
             search_options = self._build_backend_recall_search_options(
                 expanded_queries=expanded_queries,
                 hook_options=normalized_hook_options,
                 hook_trace=hook_trace,
             )
-            for scope_index, scope_id in enumerate(selected_scope_ids):
+
+            async def _search_scope_contract(scope_index: int, scope_id: str) -> list[tuple[int, int, int, MemorySearchHit]]:
+                """单个 scope 的 backend contract 搜索。"""
+                results: list[tuple[int, int, int, MemorySearchHit]] = []
                 hits = await self.search_memory(
                     scope_id=scope_id,
                     query=normalized_query,
@@ -585,11 +594,8 @@ class MemoryService:
                     search_options=search_options,
                 )
                 for ordinal, hit in enumerate(hits):
-                    if hit.record_id in seen:
-                        continue
-                    seen.add(hit.record_id)
                     resolved_search_query = str(hit.metadata.get("search_query", "")).strip()
-                    collected.append(
+                    results.append(
                         (
                             scope_index,
                             0,
@@ -605,11 +611,37 @@ class MemoryService:
                             ),
                         )
                     )
+                return results
+
+            scope_tasks = [
+                _search_scope_contract(i, sid)
+                for i, sid in enumerate(selected_scope_ids)
+            ]
+            scope_results = await asyncio.gather(*scope_tasks, return_exceptions=True)
+
+            for i, result in enumerate(scope_results):
+                if isinstance(result, BaseException):
+                    log.warning("recall_scope_failed", scope_id=selected_scope_ids[i], error=str(result))
+                    scope_hit_distribution[selected_scope_ids[i]] = 0
+                    continue
+                hit_count = 0
+                for item in result:
+                    _, _, _, hit = item
+                    if hit.record_id in seen:
+                        continue
+                    seen.add(hit.record_id)
+                    collected.append(item)
+                    hit_count += 1
+                scope_hit_distribution[selected_scope_ids[i]] = hit_count
+
             hook_trace.candidate_count = len(collected)
             hook_trace.delivered_count = min(len(collected), max(1, max_hits))
             selected_candidates = collected[: max(1, max_hits)]
         else:
-            for scope_index, scope_id in enumerate(selected_scope_ids):
+
+            async def _search_scope_fallback(scope_index: int, scope_id: str) -> list[tuple[int, int, int, MemorySearchHit]]:
+                """单个 scope 的 fallback 搜索（多 query 展开）。"""
+                results: list[tuple[int, int, int, MemorySearchHit]] = []
                 for query_index, search_query in enumerate(expanded_queries):
                     hits = await self.search_memory(
                         scope_id=scope_id,
@@ -618,10 +650,7 @@ class MemoryService:
                         limit=max(1, per_scope_limit),
                     )
                     for ordinal, hit in enumerate(hits):
-                        if hit.record_id in seen:
-                            continue
-                        seen.add(hit.record_id)
-                        collected.append(
+                        results.append(
                             (
                                 scope_index,
                                 query_index,
@@ -636,6 +665,28 @@ class MemoryService:
                                 ),
                             )
                         )
+                return results
+
+            scope_tasks = [
+                _search_scope_fallback(i, sid)
+                for i, sid in enumerate(selected_scope_ids)
+            ]
+            scope_results = await asyncio.gather(*scope_tasks, return_exceptions=True)
+
+            for i, result in enumerate(scope_results):
+                if isinstance(result, BaseException):
+                    log.warning("recall_scope_failed", scope_id=selected_scope_ids[i], error=str(result))
+                    scope_hit_distribution[selected_scope_ids[i]] = 0
+                    continue
+                hit_count = 0
+                for item in result:
+                    _, _, _, hit = item
+                    if hit.record_id in seen:
+                        continue
+                    seen.add(hit.record_id)
+                    collected.append(item)
+                    hit_count += 1
+                scope_hit_distribution[selected_scope_ids[i]] = hit_count
 
             collected.sort(key=self._recall_sort_key)
             selected_candidates, hook_trace = await self._apply_recall_hooks(
@@ -650,7 +701,7 @@ class MemoryService:
         for hit in selected:
             recall_hits.append(await self._build_recall_hit(hit=hit, policy=policy))
 
-        return MemoryRecallResult(
+        result = MemoryRecallResult(
             query=normalized_query,
             expanded_queries=expanded_queries,
             scope_ids=selected_scope_ids,
@@ -659,6 +710,21 @@ class MemoryService:
             degraded_reasons=degraded_reasons,
             hook_trace=hook_trace,
         )
+
+        _recall_latency_ms = int((time.monotonic() - _recall_start) * 1000)
+        log.info(
+            "memory_recall_completed",
+            query=query[:100] if query else "",
+            scope_count=len(selected_scope_ids),
+            candidate_count=len(collected),
+            delivered_count=len(result.hits),
+            empty=len(result.hits) == 0,
+            latency_ms=_recall_latency_ms,
+            backend_used=self._backend.backend_id if self._backend else "sqlite_only",
+            scope_hit_distribution=scope_hit_distribution,
+        )
+
+        return result
 
     def _should_use_backend_recall_contract(
         self,

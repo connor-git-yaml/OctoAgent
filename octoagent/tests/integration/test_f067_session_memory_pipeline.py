@@ -139,7 +139,7 @@ def _make_integration_extractor(store, llm_response_json=None):
     run_mock.backend_state = MagicMock(value="active")
     memory_service.run_memory_maintenance = AsyncMock(return_value=run_mock)
 
-    async def memory_service_factory(project=None, workspace=None):
+    async def memory_service_factory(project=None):
         return memory_service
 
     extractor = SessionMemoryExtractor(
@@ -181,7 +181,6 @@ async def test_full_conversation_auto_extract(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     # 验证结果
@@ -225,7 +224,7 @@ async def test_tool_calls_compressed_in_extraction_input(
     llm_service.call_with_fallback = capture_llm_call
 
     memory_service = AsyncMock()
-    async def memory_service_factory(project=None, workspace=None):
+    async def memory_service_factory(project=None):
         return memory_service
 
     extractor = SessionMemoryExtractor(
@@ -240,7 +239,6 @@ async def test_tool_calls_compressed_in_extraction_input(
     await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     # 检查传给 LLM 的 user prompt
@@ -278,7 +276,7 @@ async def test_scheduler_consolidation_still_works(
     assert session is not None
 
     result = await extractor.extract_and_commit(
-        agent_session=session, project=None, workspace=None,
+        agent_session=session, project=None,
     )
     assert result.skipped_reason == "llm_unavailable"
 

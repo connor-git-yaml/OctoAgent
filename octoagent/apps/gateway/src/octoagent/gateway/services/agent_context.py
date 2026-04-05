@@ -1324,7 +1324,6 @@ class AgentContextService:
                     extractor.extract_and_commit(
                         agent_session=agent_session,
                         project=project,
-                        workspace=workspace,
                     )
                 )
 

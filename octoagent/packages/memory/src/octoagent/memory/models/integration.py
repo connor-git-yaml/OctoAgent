@@ -132,6 +132,11 @@ class MemoryRecallHookTrace(BaseModel):
     delivered_count: int = Field(default=0, ge=0)
     fallback_applied: bool = Field(default=False)
 
+    # Parallel recall metrics
+    latency_ms: int = 0
+    backend_used: str = ""
+    scope_hit_distribution: dict[str, int] = Field(default_factory=dict)
+
     # Phase 3: Temporal Decay + MMR 执行轨迹
     temporal_decay_applied: bool = Field(default=False)
     temporal_decay_half_life_days: float = Field(default=0.0)

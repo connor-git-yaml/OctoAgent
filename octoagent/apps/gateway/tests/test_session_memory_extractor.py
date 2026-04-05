@@ -157,7 +157,7 @@ def _make_extractor(
 ):
     """构造 SessionMemoryExtractor 实例。"""
     ms = memory_service or _make_memory_service()
-    async def memory_service_factory(project=None, workspace=None):
+    async def memory_service_factory(project=None):
         return ms
 
     return SessionMemoryExtractor(
@@ -198,7 +198,6 @@ async def test_normal_flow_extracts_and_commits(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.session_id == "sess-ext-001"
@@ -236,7 +235,6 @@ async def test_empty_result_advances_cursor(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.skipped_reason == ""
@@ -267,7 +265,6 @@ async def test_llm_failure_skips_silently(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.turns_processed == 3
@@ -294,7 +291,6 @@ async def test_parse_failure_skips_silently(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert "parse_failed" in result.errors
@@ -325,12 +321,12 @@ async def test_try_lock_skips_concurrent(
 
     # 同时触发两次提取
     task1 = asyncio.create_task(
-        extractor.extract_and_commit(agent_session=session, project=None, workspace=None)
+        extractor.extract_and_commit(agent_session=session, project=None)
     )
     # 等一小段时间确保 task1 已获取锁
     await asyncio.sleep(0.05)
     task2 = asyncio.create_task(
-        extractor.extract_and_commit(agent_session=session, project=None, workspace=None)
+        extractor.extract_and_commit(agent_session=session, project=None)
     )
 
     result2 = await task2
@@ -370,7 +366,6 @@ async def test_subagent_session_skipped(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.skipped_reason == "unsupported_session_kind"
@@ -386,7 +381,6 @@ async def test_llm_unavailable_skips(store: SqliteAgentContextStore, setup_sessi
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.skipped_reason == "llm_unavailable"
@@ -406,7 +400,6 @@ async def test_no_new_turns_skips(store: SqliteAgentContextStore, setup_session:
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.skipped_reason == "no_new_turns"
@@ -566,7 +559,6 @@ async def test_incremental_processing_only_new_turns(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     # 只处理 turn 4-5（2 个 turn），不重复处理 turn 1-3
@@ -595,7 +587,6 @@ async def test_crash_recovery_cursor_not_advanced_on_llm_failure(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     # cursor 不变
@@ -616,7 +607,6 @@ async def test_crash_recovery_cursor_not_advanced_on_llm_failure(
     result2 = await extractor2.extract_and_commit(
         agent_session=session2,
         project=None,
-        workspace=None,
     )
 
     # cursor 已前进到 3，没有新 turns，直接跳过
@@ -640,7 +630,6 @@ async def test_first_extraction_from_new_session(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.turns_processed == 3
@@ -664,7 +653,6 @@ async def test_no_new_turns_returns_skipped(
     result = await extractor.extract_and_commit(
         agent_session=session,
         project=None,
-        workspace=None,
     )
 
     assert result.skipped_reason == "no_new_turns"

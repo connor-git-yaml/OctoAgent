@@ -34,6 +34,17 @@ from octoagent.provider.dx.llm_common import LlmServiceProtocol, parse_llm_json_
 
 log = structlog.get_logger()
 
+_PARTITION_MAP: dict[str, MemoryPartition] = {
+    "work": MemoryPartition.WORK,
+    "core": MemoryPartition.CORE,
+    "profile": MemoryPartition.PROFILE,
+    "chat": MemoryPartition.CHAT,
+    "health": MemoryPartition.HEALTH,
+    "solution": MemoryPartition.SOLUTION,
+    "personal": MemoryPartition.PROFILE,  # LLM 常见别名
+    "finance": MemoryPartition.FINANCE,
+}
+
 # 单次提取最多处理的 turn 数量（防止大量积压 turns 超出 LLM context window）
 _MAX_TURNS_PER_EXTRACTION = 50
 
@@ -132,7 +143,7 @@ class SessionMemoryExtractor:
     def __init__(
         self,
         agent_context_store: SqliteAgentContextStore,
-        memory_service_factory: Any,  # callable(project, workspace) -> MemoryService
+        memory_service_factory: Any,  # callable(project) -> MemoryService
         llm_service: LlmServiceProtocol | None = None,
         project_root: Path | None = None,
         llm_service_resolver: Any | None = None,  # callable() -> LlmServiceProtocol | None
@@ -157,7 +168,6 @@ class SessionMemoryExtractor:
         *,
         agent_session: AgentSession,
         project: Any | None,
-        workspace: Any | None,
     ) -> SessionExtractionResult:
         """从 Session 的新增 turns 中提取记忆并写入 SoR。
 
@@ -219,7 +229,6 @@ class SessionMemoryExtractor:
                 return await self._extract_under_lock(
                     agent_session=agent_session,
                     project=project,
-                    workspace=workspace,
                     result=result,
                 )
 
@@ -238,7 +247,6 @@ class SessionMemoryExtractor:
         *,
         agent_session: AgentSession,
         project: Any | None,
-        workspace: Any | None,
         result: SessionExtractionResult,
     ) -> SessionExtractionResult:
         """在持有 session lock 的情况下执行提取。"""
@@ -272,7 +280,6 @@ class SessionMemoryExtractor:
         scope_id = await self._resolve_scope_id(
             agent_session=agent_session,
             project=project,
-            workspace=workspace,
         )
         if not scope_id:
             result.skipped_reason = "no_scope"
@@ -391,7 +398,7 @@ class SessionMemoryExtractor:
 
         # 9. 通过 propose-validate-commit 写入 SoR
         memory_service = await self._memory_service_factory(
-            project=project, workspace=workspace
+            project=project,
         )
         committed_sor_ids: list[str] = []
         facts, solutions, entities, tom = await self._commit_extractions(
@@ -546,19 +553,6 @@ class SessionMemoryExtractor:
 
         for item in items:
             try:
-                # 将 partition 字符串映射为 MemoryPartition 枚举
-                # 注意：必须与 MemoryPartition 枚举值严格对齐
-                _PARTITION_MAP = {
-                    "work": MemoryPartition.WORK,
-                    "core": MemoryPartition.CORE,
-                    "profile": MemoryPartition.PROFILE,
-                    "chat": MemoryPartition.CHAT,
-                    "health": MemoryPartition.HEALTH,
-                    "solution": MemoryPartition.SOLUTION,
-                    # LLM 常见输出但不在枚举中的值，映射到最近似的分区
-                    "personal": MemoryPartition.PROFILE,
-                    "finance": MemoryPartition.FINANCE,
-                }
                 partition = _PARTITION_MAP.get(item.partition, MemoryPartition.WORK)
 
                 # 将 action 字符串映射为 WriteAction 枚举
@@ -702,7 +696,6 @@ class SessionMemoryExtractor:
         *,
         agent_session: AgentSession,
         project: Any | None,
-        workspace: Any | None,
     ) -> str | None:
         """从 AgentSession 推导目标 scope_id。
 
