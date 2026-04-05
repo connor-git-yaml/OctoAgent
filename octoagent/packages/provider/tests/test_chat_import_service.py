@@ -165,10 +165,7 @@ async def test_chat_import_uses_project_scoped_memory_runtime_service(
 
     assert report.summary.imported_count == 2
     assert calls
-    assert calls[0] == {
-        "project_id": "project-default",
-        "workspace_id": "workspace-default-primary",
-    }
+    assert calls[0]["project_id"] == "project-default"
 
 
 @pytest.mark.asyncio

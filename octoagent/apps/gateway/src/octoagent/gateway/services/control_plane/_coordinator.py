@@ -899,6 +899,14 @@ class ControlPlaneService:
     async def get_session_projection(self):
         return await self._session_service.get_session_projection()
 
+    async def _resolve_selection(self):
+        """Facade: 委托到 setup service 的 _resolve_selection。"""
+        return await self._setup_service._resolve_selection()
+
+    def _resolve_active_agent_profile_payload(self, **kwargs):
+        """Facade: 委托到 agent service。"""
+        return self._agent_service._resolve_active_agent_profile_payload(**kwargs)
+
     async def get_agent_profiles_document(self):
         return await self._agent_service.get_agent_profiles_document()
 

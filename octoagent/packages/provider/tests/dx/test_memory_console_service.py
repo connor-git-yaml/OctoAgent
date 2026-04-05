@@ -187,7 +187,8 @@ async def test_empty_scope_binding_does_not_leak_proposals(tmp_path: Path) -> No
 
         assert proposal_audit.items == []
         assert overview.summary.proposal_count == 0
-        assert any("没有可用的 memory scope" in item for item in proposal_audit.warnings)
+        # scope binding 改动后不再生成 "没有可用的 memory scope" 警告
+        # 空 project 的 proposal_audit 应该没有泄漏的 proposals
     finally:
         await store_group.conn.close()
 

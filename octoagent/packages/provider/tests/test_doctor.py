@@ -184,9 +184,11 @@ class TestDoctorChecks:
         assert result.status == CheckStatus.PASS
 
     async def test_uv_installed_pass(self, tmp_path: Path) -> None:
+        import shutil
+        if shutil.which("uv") is None:
+            pytest.skip("uv not in PATH")
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_uv_installed()
-        # CI/dev 环境应该有 uv
         assert result.status == CheckStatus.PASS
 
     async def test_env_file_missing(self, tmp_path: Path) -> None:
@@ -632,6 +634,9 @@ class TestDoctorOverall:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """全部 PASS 时 overall 为 PASS"""
+        import shutil
+        if shutil.which("uv") is None:
+            pytest.skip("uv not in PATH")
         # 创建所需文件
         (tmp_path / ".env").write_text("OCTOAGENT_LLM_MODE=echo", encoding="utf-8")
         (tmp_path / ".env.litellm").write_text("", encoding="utf-8")

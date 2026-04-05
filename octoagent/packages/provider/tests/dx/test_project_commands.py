@@ -191,7 +191,8 @@ def test_config_provider_add_preserves_existing_base_url_on_update(tmp_path: Pat
 
 
 def test_provider_package_declares_gateway_dependency(tmp_path: Path) -> None:
+    """Provider 包不再依赖 gateway（循环依赖已打断）。"""
     _ = tmp_path
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     content = pyproject.read_text(encoding="utf-8")
-    assert '"octoagent-gateway"' in content
+    assert '"octoagent-gateway"' not in content

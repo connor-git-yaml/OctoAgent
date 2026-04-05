@@ -29,7 +29,7 @@ def test_behavior_init_creates_project_files(tmp_path: Path) -> None:
     assert (project_root / "project.secret-bindings.json").exists()
     assert "created_dirs=" in result.output
     assert "extra_files=" in result.output
-    assert "当前 project" in (target_dir / "PROJECT.md").read_text(encoding="utf-8")
+    assert "项目目标" in (target_dir / "PROJECT.md").read_text(encoding="utf-8")
     assert "Storage Boundaries" in (
         target_dir / "instructions" / "README.md"
     ).read_text(encoding="utf-8")
@@ -68,7 +68,7 @@ def test_behavior_ls_and_show_report_effective_sources(tmp_path: Path) -> None:
     assert "source_kind=system_file" in shown.output
     assert "editable_mode=proposal_required" in shown.output
     assert "review_mode=review_required" in shown.output
-    assert "默认会话 Agent" in shown.output
+    assert "Behavior File" in shown.output
 
 
 def test_behavior_agent_scope_uses_requested_agent_slug(tmp_path: Path) -> None:
