@@ -385,8 +385,8 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 - ✅ A2: provider/dx → apps/gateway 反向依赖（已修复，CLI 改为 HTTP 调用 gateway API）
 - ✅ A3: tooling ↔ policy 循环依赖（已修复 2026-04-05）
 - ✅ A4: dx 运行时服务上移到 gateway（27 文件迁移，gateway→dx import 从 72→28）
-- 🟠 A5: control_plane.py 模型 56 个混在单文件
-- 🟠 A6: Butler 遗留命名在活跃代码中
+- ✅ A5: control_plane models 拆分为 8 领域子模块（已修复 2026-04-05）
+- ✅ A6: Butler 遗留概念清理（已修复 2026-04-05）
 - 🟠 A7: 4 个状态枚举语义重叠
 
 ---
