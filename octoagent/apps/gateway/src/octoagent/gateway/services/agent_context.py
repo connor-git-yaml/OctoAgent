@@ -2741,7 +2741,6 @@ class AgentContextService:
         *,
         owner_profile: OwnerProfile,
         project: Project | None,
-        workspace: Any | None,
     ) -> OwnerProfileOverlay | None:
         if project is None:
             return None

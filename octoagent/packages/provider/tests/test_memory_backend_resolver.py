@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest_asyncio
 from octoagent.core.models import (
     Project,
-    Workspace,
 )
+from octoagent.provider.dx.project_migration import Workspace
 from octoagent.core.store import create_store_group
 from octoagent.memory import MemoryBackendState
 from octoagent.provider.dx.builtin_memu_bridge import BuiltinMemUBridge
