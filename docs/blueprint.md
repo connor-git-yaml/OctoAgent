@@ -374,7 +374,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 **已完成（✅）**：短板 1-5 + 架构问题 1-7
 
 **待改善（🟠 Worker/Subagent）**：
-- W1: Worker 工具集膨胀（9 个 → 合并）
+- ✅ W1: Worker 工具精简（work.split 删除 + workers.review→work.plan + spawn 支持批量）
 - W2: DockerRuntimeBackend 空壳
 - W3: Graph cancel_signal 未连接
 - ✅ W4: Work 状态机形式化约束（已修复 2026-04-05）
