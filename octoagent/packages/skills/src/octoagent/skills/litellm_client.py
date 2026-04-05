@@ -143,10 +143,13 @@ class LiteLLMSkillClient:
         try:
             all_tools = await self._tool_broker.discover()
         except Exception:
+            log.warning("tool_discovery_failed", exc_info=True)
             return []
         result = []
         for tool_meta in all_tools:
-            if tool_meta.name in allowed_tool_names:
+            # MCP 动态工具额外放行（不受静态 tools_allowed 白名单限制）
+            is_mcp = getattr(tool_meta, "tool_group", "") == "mcp" and tool_meta.name.startswith("mcp.") and "." in tool_meta.name[4:]
+            if tool_meta.name in allowed_tool_names or is_mcp:
                 if responses_api:
                     result.append(
                         {
@@ -176,14 +179,20 @@ class LiteLLMSkillClient:
             return f"{base}/responses"
         return f"{base}/v1/responses"
 
-    @staticmethod
+    # System Message 字符预算（合并后超出则截断尾部）
+    # cheap/小模型建议 8K chars（~2K tokens），main/大模型 24K chars（~6K tokens）
+    _SYSTEM_MESSAGE_CHAR_BUDGET = 24_000
+
+    @classmethod
     def _merge_system_messages_to_front(
+        cls,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """将所有 system 消息合并为一条放在开头。
+        """将所有 system 消息合并为一条放在开头，并限制总长度。
 
         部分模型（Qwen、Gemma 等）只接受恰好一个 system 消息且必须在最前面。
         多个连续的 system 消息也会被拒绝。
+        合并后如果超过字符预算，截断尾部并加省略标记。
         """
         if not messages:
             return messages
@@ -198,10 +207,26 @@ class LiteLLMSkillClient:
                 non_system.append(msg)
         if not system_parts:
             return messages
-        # 已经只有一个 system 且在开头——不需要变
+        # 已经只有一个 system 且在开头——不需要变（但仍检查预算）
         if len(system_parts) == 1 and messages[0].get("role") == "system":
-            return messages
-        return [{"role": "system", "content": "\n\n".join(system_parts)}, *non_system]
+            content = messages[0].get("content", "")
+            if len(content) <= cls._SYSTEM_MESSAGE_CHAR_BUDGET:
+                return messages
+            # 超预算——截断
+            truncated = content[:cls._SYSTEM_MESSAGE_CHAR_BUDGET].rstrip()
+            return [{"role": "system", "content": truncated + "\n\n[system prompt truncated]"}, *non_system]
+
+        merged = "\n\n".join(system_parts)
+        if len(merged) > cls._SYSTEM_MESSAGE_CHAR_BUDGET:
+            original_len = len(merged)
+            merged = merged[:cls._SYSTEM_MESSAGE_CHAR_BUDGET].rstrip()
+            merged += f"\n\n[system prompt truncated: {original_len} → {len(merged)} chars]"
+            log.info(
+                "system_prompt_truncated",
+                original_chars=original_len,
+                budget_chars=cls._SYSTEM_MESSAGE_CHAR_BUDGET,
+            )
+        return [{"role": "system", "content": merged}, *non_system]
 
     @staticmethod
     def _normalize_history_messages(
@@ -460,12 +485,21 @@ class LiteLLMSkillClient:
                     item = event.get("item", {})
                     if isinstance(item, dict) and item.get("type") == "function_call":
                         item_id = str(item.get("id", ""))
-                        tool_calls_raw[item_id] = {
-                            "id": str(item.get("call_id") or item.get("id") or ""),
-                            "raw_name": str(item.get("name", "")),
-                            "tool_name": _from_fn_name(str(item.get("name", ""))),
-                            "arguments": str(item.get("arguments") or ""),
-                        }
+                        if item_id in tool_calls_raw:
+                            # 已有记录（从 output_item.added 创建）——只补充 call_id，
+                            # 不覆盖流式累积的 arguments
+                            existing = tool_calls_raw[item_id]
+                            call_id = str(item.get("call_id") or item.get("id") or "")
+                            if call_id and not existing.get("id"):
+                                existing["id"] = call_id
+                        else:
+                            # 没有 added 事件（异常路径）——用 done 的完整数据
+                            tool_calls_raw[item_id] = {
+                                "id": str(item.get("call_id") or item.get("id") or ""),
+                                "raw_name": str(item.get("name", "")),
+                                "tool_name": _from_fn_name(str(item.get("name", ""))),
+                                "arguments": str(item.get("arguments") or ""),
+                            }
                     continue
 
                 if event_type == "response.completed":
