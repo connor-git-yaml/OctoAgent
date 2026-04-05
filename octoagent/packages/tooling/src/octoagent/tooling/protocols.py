@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from .models import (
     BeforeHookResult,
@@ -75,6 +75,7 @@ class ToolHandler(Protocol):
         ...
 
 
+@runtime_checkable
 class BeforeHook(Protocol):
     """before hook Protocol -- 对齐 spec FR-019/020/021
 
@@ -106,6 +107,7 @@ class BeforeHook(Protocol):
         ...
 
 
+@runtime_checkable
 class AfterHook(Protocol):
     """after hook Protocol -- 对齐 spec FR-019/022
 

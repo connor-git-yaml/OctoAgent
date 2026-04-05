@@ -27,6 +27,7 @@ def tool_contract(
     version: str = "1.0.0",
     timeout_seconds: float | None = None,
     output_truncate_threshold: int | None = None,
+    path_escalation: bool = False,
     # DEPRECATED: 兼容参数，Feature 073 清理后忽略
     tool_profile: Any = None,
 ) -> Any:
@@ -61,6 +62,7 @@ def tool_contract(
             "version": version,
             "timeout_seconds": timeout_seconds,
             "output_truncate_threshold": output_truncate_threshold,
+            "path_escalation": path_escalation,
         }
         return func
 

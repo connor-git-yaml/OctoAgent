@@ -220,8 +220,7 @@ class ToolBroker:
         Args:
             hook: BeforeHook 或 AfterHook 实例
         """
-        # 通过检测方法名区分 hook 类型
-        if hasattr(hook, "before_execute"):
+        if isinstance(hook, BeforeHook):
             self._before_hooks.append(hook)  # type: ignore[arg-type]
             self._before_hooks.sort(key=lambda h: h.priority)
             logger.info(
@@ -230,7 +229,7 @@ class ToolBroker:
                 priority=hook.priority,
                 fail_mode=hook.fail_mode,
             )
-        elif hasattr(hook, "after_execute"):
+        if isinstance(hook, AfterHook):
             self._after_hooks.append(hook)  # type: ignore[arg-type]
             self._after_hooks.sort(key=lambda h: h.priority)
             logger.info(
@@ -497,6 +496,33 @@ class ToolBroker:
         else:
             return await coro
 
+    async def _emit_tool_event(
+        self,
+        event_type: EventType,
+        context: ExecutionContext,
+        payload_model: Any,
+    ) -> None:
+        """公共事件发射方法 — 构建 Event 并持久化。
+
+        Args:
+            event_type: 事件类型（STARTED / COMPLETED / FAILED）
+            context: 执行上下文
+            payload_model: Pydantic payload 实例（自动 model_dump + 脱敏）
+        """
+        raw_payload = payload_model.model_dump()
+        sanitized_payload = sanitize_for_event(raw_payload)
+        event = Event(
+            event_id=str(ULID()),
+            task_id=context.task_id,
+            task_seq=await self._event_store.get_next_task_seq(context.task_id),
+            ts=datetime.now(),
+            type=event_type,
+            actor=ActorType.TOOL,
+            payload=sanitized_payload,
+            trace_id=context.trace_id,
+        )
+        await self._persist_event(event)
+
     async def _emit_started_event(
         self,
         tool_name: str,
@@ -506,29 +532,20 @@ class ToolBroker:
     ) -> bool:
         """生成 TOOL_CALL_STARTED 事件"""
         try:
-            # FR-015: 参数摘要经过脱敏处理
-            raw_payload = ToolCallStartedPayload(
-                tool_name=tool_name,
-                tool_group=meta.tool_group,
-                side_effect_level=meta.side_effect_level.value,
-                args_summary=str(args)[:200],
-                agent_runtime_id=context.agent_runtime_id,
-                agent_session_id=context.agent_session_id,
-                work_id=context.work_id,
-                timeout_seconds=meta.timeout_seconds,
-            ).model_dump()
-            sanitized_payload = sanitize_for_event(raw_payload)
-            event = Event(
-                event_id=str(ULID()),
-                task_id=context.task_id,
-                task_seq=await self._event_store.get_next_task_seq(context.task_id),
-                ts=datetime.now(),
-                type=EventType.TOOL_CALL_STARTED,
-                actor=ActorType.TOOL,
-                payload=sanitized_payload,
-                trace_id=context.trace_id,
+            await self._emit_tool_event(
+                EventType.TOOL_CALL_STARTED,
+                context,
+                ToolCallStartedPayload(
+                    tool_name=tool_name,
+                    tool_group=meta.tool_group,
+                    side_effect_level=meta.side_effect_level.value,
+                    args_summary=str(args)[:200],
+                    agent_runtime_id=context.agent_runtime_id,
+                    agent_session_id=context.agent_session_id,
+                    work_id=context.work_id,
+                    timeout_seconds=meta.timeout_seconds,
+                ),
             )
-            await self._persist_event(event)
             return True
         except Exception as e:
             logger.error("failed_to_emit_started_event", error=str(e))
@@ -545,29 +562,20 @@ class ToolBroker:
     ) -> None:
         """生成 TOOL_CALL_COMPLETED 事件"""
         try:
-            # FR-015: payload 经过脱敏处理
-            raw_payload = ToolCallCompletedPayload(
-                tool_name=tool_name,
-                duration_ms=int(duration * 1000),
-                output_summary=output_summary[:200],
-                agent_runtime_id=context.agent_runtime_id,
-                agent_session_id=context.agent_session_id,
-                work_id=context.work_id,
-                truncated=truncated,
-                artifact_ref=artifact_ref,
-            ).model_dump()
-            sanitized_payload = sanitize_for_event(raw_payload)
-            event = Event(
-                event_id=str(ULID()),
-                task_id=context.task_id,
-                task_seq=await self._event_store.get_next_task_seq(context.task_id),
-                ts=datetime.now(),
-                type=EventType.TOOL_CALL_COMPLETED,
-                actor=ActorType.TOOL,
-                payload=sanitized_payload,
-                trace_id=context.trace_id,
+            await self._emit_tool_event(
+                EventType.TOOL_CALL_COMPLETED,
+                context,
+                ToolCallCompletedPayload(
+                    tool_name=tool_name,
+                    duration_ms=int(duration * 1000),
+                    output_summary=output_summary[:200],
+                    agent_runtime_id=context.agent_runtime_id,
+                    agent_session_id=context.agent_session_id,
+                    work_id=context.work_id,
+                    truncated=truncated,
+                    artifact_ref=artifact_ref,
+                ),
             )
-            await self._persist_event(event)
         except Exception as e:
             logger.error("failed_to_emit_completed_event", error=str(e))
 
@@ -581,29 +589,20 @@ class ToolBroker:
     ) -> None:
         """生成 TOOL_CALL_FAILED 事件"""
         try:
-            # FR-015: payload 经过脱敏处理
-            raw_payload = ToolCallFailedPayload(
-                tool_name=tool_name,
-                duration_ms=int(duration * 1000),
-                error_type=error_type,
-                error_message=error_message[:500],
-                agent_runtime_id=context.agent_runtime_id,
-                agent_session_id=context.agent_session_id,
-                work_id=context.work_id,
-                recoverable=error_type != "rejection",
-            ).model_dump()
-            sanitized_payload = sanitize_for_event(raw_payload)
-            event = Event(
-                event_id=str(ULID()),
-                task_id=context.task_id,
-                task_seq=await self._event_store.get_next_task_seq(context.task_id),
-                ts=datetime.now(),
-                type=EventType.TOOL_CALL_FAILED,
-                actor=ActorType.TOOL,
-                payload=sanitized_payload,
-                trace_id=context.trace_id,
+            await self._emit_tool_event(
+                EventType.TOOL_CALL_FAILED,
+                context,
+                ToolCallFailedPayload(
+                    tool_name=tool_name,
+                    duration_ms=int(duration * 1000),
+                    error_type=error_type,
+                    error_message=error_message[:500],
+                    agent_runtime_id=context.agent_runtime_id,
+                    agent_session_id=context.agent_session_id,
+                    work_id=context.work_id,
+                    recoverable=error_type != "rejection",
+                ),
             )
-            await self._persist_event(event)
         except Exception as e:
             logger.error("failed_to_emit_failed_event", error=str(e))
 

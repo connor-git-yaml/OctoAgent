@@ -1397,6 +1397,7 @@ class CapabilityPackService:
             tool_group="filesystem",
             tags=["filesystem", "directory", "list"],
             manifest_ref="builtin://filesystem.list_dir",
+            path_escalation=True,
             metadata={
                 "entrypoints": ["agent_runtime"],
                 "runtime_kinds": ["worker", "subagent", "graph_agent"],
@@ -1452,6 +1453,7 @@ class CapabilityPackService:
             tool_group="filesystem",
             tags=["filesystem", "file", "read"],
             manifest_ref="builtin://filesystem.read_text",
+            path_escalation=True,
             metadata={
                 "entrypoints": ["agent_runtime"],
                 "runtime_kinds": ["worker", "subagent", "graph_agent"],
@@ -1493,6 +1495,7 @@ class CapabilityPackService:
             tool_group="filesystem",
             tags=["filesystem", "file", "write"],
             manifest_ref="builtin://filesystem.write_text",
+            path_escalation=True,
             metadata={
                 "entrypoints": ["agent_runtime"],
                 "runtime_kinds": ["worker", "subagent", "graph_agent"],

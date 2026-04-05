@@ -28,14 +28,6 @@ from .models import (
 
 logger = structlog.get_logger(__name__)
 
-# 需要路径感知升级的 filesystem 工具（从 preset_hook.py 迁移）
-_FILESYSTEM_PATH_TOOLS = frozenset({
-    "filesystem.list_dir",
-    "filesystem.read_text",
-    "filesystem.write_text",
-})
-
-
 # ------------------------------------------------------------------
 # Protocol 接口（解耦 tooling 包和 policy 包）
 # ------------------------------------------------------------------
@@ -170,7 +162,7 @@ def effective_side_effect(
 
     # 路径感知升级（从 PresetBeforeHook._escalate_for_outside_workspace 迁移）
     if (
-        tool_meta.name in _FILESYSTEM_PATH_TOOLS
+        tool_meta.path_escalation
         and ctx.permission_preset != PermissionPreset.FULL
     ):
         sel = _escalate_for_outside_workspace(args, sel)

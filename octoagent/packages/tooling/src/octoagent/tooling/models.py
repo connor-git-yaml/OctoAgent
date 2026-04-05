@@ -231,6 +231,10 @@ class ToolMeta(BaseModel):
         default=ToolTier.DEFERRED,
         description="工具层级: CORE（始终加载 schema）或 DEFERRED（按需加载）",
     )
+    path_escalation: bool = Field(
+        default=False,
+        description="访问 workspace 外路径时是否升级为 IRREVERSIBLE（filesystem 类工具设为 True）",
+    )
 
 
 class ToolResult(BaseModel):

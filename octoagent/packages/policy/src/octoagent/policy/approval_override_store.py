@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -23,32 +24,50 @@ logger = structlog.get_logger(__name__)
 # ============================================================
 
 
-class ApprovalOverrideCache:
-    """ApprovalOverride 内存缓存 — O(1) 查询
+DEFAULT_TTL_SECONDS: float = 3600.0
 
-    运行时每次工具调用前由 ApprovalOverrideHook 查询。
+
+class ApprovalOverrideCache:
+    """ApprovalOverride 内存缓存 — O(1) 查询 + 惰性 TTL 过期
+
+    运行时每次工具调用前由权限检查查询。
     key: (agent_runtime_id, tool_name)
+    value: monotonic timestamp（写入时刻）
+
+    条目在 TTL 到期后惰性清除（has / list_for_agent 时检查）。
     """
 
-    def __init__(self) -> None:
-        self._cache: dict[tuple[str, str], bool] = {}
+    def __init__(self, ttl_seconds: float = DEFAULT_TTL_SECONDS) -> None:
+        self._ttl = ttl_seconds
+        self._cache: dict[tuple[str, str], float] = {}
+
+    def _is_expired(self, ts: float) -> bool:
+        return (time.monotonic() - ts) > self._ttl
 
     def has(self, agent_runtime_id: str, tool_name: str) -> bool:
-        """检查缓存中是否存在 always 覆盖"""
-        return self._cache.get((agent_runtime_id, tool_name), False)
+        """检查缓存中是否存在未过期的 always 覆盖"""
+        key = (agent_runtime_id, tool_name)
+        ts = self._cache.get(key)
+        if ts is None:
+            return False
+        if self._is_expired(ts):
+            del self._cache[key]
+            return False
+        return True
 
     def set(self, agent_runtime_id: str, tool_name: str) -> None:
-        """设置缓存条目"""
-        self._cache[(agent_runtime_id, tool_name)] = True
+        """设置缓存条目（记录当前 monotonic 时间戳）"""
+        self._cache[(agent_runtime_id, tool_name)] = time.monotonic()
 
     def remove(self, agent_runtime_id: str, tool_name: str) -> None:
         """移除缓存条目"""
         self._cache.pop((agent_runtime_id, tool_name), None)
 
     def load_from_records(self, records: list[ApprovalOverride]) -> None:
-        """从 Repository 记录批量加载缓存"""
+        """从 Repository 记录批量加载缓存（用当前 monotonic 时间戳初始化）"""
+        now = time.monotonic()
         for record in records:
-            self._cache[(record.agent_runtime_id, record.tool_name)] = True
+            self._cache[(record.agent_runtime_id, record.tool_name)] = now
 
     def clear_agent(self, agent_runtime_id: str) -> None:
         """清除指定 Agent 的所有缓存条目"""
@@ -67,16 +86,24 @@ class ApprovalOverrideCache:
             del self._cache[key]
 
     def list_for_agent(self, agent_runtime_id: str) -> list[str]:
-        """列出指定 Agent 的所有 always 授权工具名"""
-        return [
-            tool_name
-            for (rid, tool_name) in self._cache
-            if rid == agent_runtime_id
-        ]
+        """列出指定 Agent 的所有未过期 always 授权工具名"""
+        now = time.monotonic()
+        expired_keys: list[tuple[str, str]] = []
+        result: list[str] = []
+        for (rid, tool_name), ts in self._cache.items():
+            if rid != agent_runtime_id:
+                continue
+            if (now - ts) > self._ttl:
+                expired_keys.append((rid, tool_name))
+            else:
+                result.append(tool_name)
+        for key in expired_keys:
+            del self._cache[key]
+        return result
 
     @property
     def size(self) -> int:
-        """缓存条目总数"""
+        """缓存条目总数（含可能已过期但未惰性清除的条目）"""
         return len(self._cache)
 
 
