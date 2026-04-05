@@ -1198,7 +1198,7 @@ export interface WorkProjectionItem {
   child_work_count: number;
   merge_ready: boolean;
   a2a_conversation_id?: string;
-  butler_agent_session_id?: string;
+  main_agent_session_id?: string;
   worker_agent_session_id?: string;
   a2a_message_count?: number;
   runtime_summary: Record<string, unknown>;

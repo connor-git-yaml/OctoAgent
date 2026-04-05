@@ -293,7 +293,7 @@ function KindContent({
 
     case "decision": {
       const routeReason = String(event.payload?.route_reason || "");
-      const isDirectExec = routeReason.startsWith("butler_direct_execution:");
+      const isDirectExec = routeReason.startsWith("agent_direct_execution:") || routeReason.startsWith("butler_direct_execution:");
       return (
         <Section title={isDirectExec ? "Agent 直接处理" : "调度决策"}>
           <div className="tv-modal-meta">

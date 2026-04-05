@@ -9,6 +9,7 @@ function formatScopeLabel(scopeId: string): string {
   const lower = scopeId.toLowerCase();
   if (lower.includes("/shared/") || lower.includes("project_shared"))
     return SCOPE_LABELS.project_shared;
+  // butler_private / /butler/ 是历史数据兼容（数据库迁移后仍可能有旧 scope_id）
   if (lower.includes("agent_private") || lower.includes("butler_private") || lower.includes("/butler/"))
     return SCOPE_LABELS.agent_private;
   if (lower.includes("/private/")) return SCOPE_LABELS.worker_private;

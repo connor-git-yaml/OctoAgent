@@ -41,7 +41,7 @@ class WorkProjectionItem(BaseModel):
     child_work_count: int = Field(default=0, ge=0)
     merge_ready: bool = False
     a2a_conversation_id: str = Field(default="")
-    butler_agent_session_id: str = Field(default="")
+    main_agent_session_id: str = Field(default="")
     worker_agent_session_id: str = Field(default="")
     a2a_message_count: int = Field(default=0, ge=0)
     runtime_summary: dict[str, Any] = Field(default_factory=dict)

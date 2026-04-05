@@ -595,7 +595,7 @@ export function buildAgentActivity(
 
   if (normalizedStatus === "WAITING_INPUT") {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: "等你补充",
       tone: "warning",
@@ -604,7 +604,7 @@ export function buildAgentActivity(
   }
   if (normalizedStatus === "WAITING_APPROVAL") {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: "等你确认",
       tone: "warning",
@@ -613,7 +613,7 @@ export function buildAgentActivity(
   }
   if (hasInternalCollaboration && normalizedMessageType === "RESULT") {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: "整理中",
       tone: "running",
@@ -622,7 +622,7 @@ export function buildAgentActivity(
   }
   if (hasInternalCollaboration) {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: "协调中",
       tone: "running",
@@ -631,7 +631,7 @@ export function buildAgentActivity(
   }
   if (isDirectExecution) {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: normalizedStatus === "WAITING_APPROVAL" ? "等你确认" : "进行中",
       tone: normalizedStatus === "WAITING_APPROVAL" ? "warning" : "running",
@@ -643,7 +643,7 @@ export function buildAgentActivity(
   }
   if (streaming || normalizedStatus === "RUNNING" || normalizedStatus === "QUEUED") {
     return {
-      id: "butler",
+      id: "main-agent",
       actor: "主助手",
       stateLabel: "进行中",
       tone: "running",

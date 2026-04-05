@@ -584,7 +584,7 @@ function makeSingleNode(
 
     case "ORCH_DECISION": {
       const routeReason = String(event.payload?.route_reason || "");
-      const isDirectExec = routeReason.startsWith("butler_direct_execution:");
+      const isDirectExec = routeReason.startsWith("agent_direct_execution:") || routeReason.startsWith("butler_direct_execution:");
       return {
         ...base,
         id: event.event_id,
