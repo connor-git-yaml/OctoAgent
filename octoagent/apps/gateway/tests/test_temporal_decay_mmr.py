@@ -60,10 +60,9 @@ class TestTemporalDecay:
 
     def _make_service(self) -> MemoryService:
         """创建最小 MemoryService 实例（不需要真实 DB 连接）。"""
-        # MemoryService.__init__ 需要 db, project_root 等参数
-        # 但 _apply_temporal_decay 是纯计算方法，我们直接构造对象
-        import types
+        from octoagent.memory.recall_service import MemoryRecallService
         svc = object.__new__(MemoryService)
+        svc._recall = object.__new__(MemoryRecallService)
         return svc
 
     def test_today_memory_decay_factor_near_one(self):
@@ -167,7 +166,9 @@ class TestMMRDedup:
     """MMR 去重单元测试。"""
 
     def _make_service(self) -> MemoryService:
+        from octoagent.memory.recall_service import MemoryRecallService
         svc = object.__new__(MemoryService)
+        svc._recall = object.__new__(MemoryRecallService)
         return svc
 
     def test_identical_candidates_mmr_removes_duplicate(self):

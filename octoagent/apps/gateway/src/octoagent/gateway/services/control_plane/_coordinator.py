@@ -150,7 +150,11 @@ class ControlPlaneService:
         self._automation_service = AutomationDomainService(self._ctx)
         self._import_service = ImportDomainService(self._ctx)
         self._mcp_service = McpDomainService(self._ctx)
-        self._memory_service = MemoryDomainService(self._ctx)
+        self._memory_service = MemoryDomainService(
+            self._ctx,
+            memory_console_service=self._ctx.memory_console_service,
+            retrieval_platform_service=self._ctx.retrieval_platform_service,
+        )
         self._setup_service = SetupDomainService(
             self._ctx,
             telegram_state_store=telegram_state_store,
