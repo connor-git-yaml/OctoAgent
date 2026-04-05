@@ -77,6 +77,7 @@ class WorkerRuntimeConfig:
     first_output_timeout_seconds: float = 120.0
     between_output_timeout_seconds: float = 120.0
     max_execution_timeout_seconds: float = 7200.0  # 2 小时
+    waiting_input_timeout_seconds: float = 86400.0  # 单次等待输入超时（非累计），默认 24 小时
     docker_mode: str = "preferred"  # disabled/preferred/required
     default_tool_profile: str = "standard"
     privileged_approval_key: str = "privileged_approved"
@@ -122,6 +123,9 @@ class WorkerRuntimeConfig:
                 "OCTOAGENT_WORKER_TIMEOUT_BETWEEN_OUTPUT_S", 120.0
             ),
             max_execution_timeout_seconds=_float_env("OCTOAGENT_WORKER_TIMEOUT_MAX_EXEC_S", 7200.0),
+            waiting_input_timeout_seconds=_float_env(
+                "OCTOAGENT_WORKER_WAITING_INPUT_TIMEOUT_S", 86400.0
+            ),
             docker_mode=docker_mode,
             default_tool_profile=profile,
             privileged_approval_key=os.environ.get(
@@ -171,6 +175,7 @@ class RuntimeBackend(Protocol):
         envelope: DispatchEnvelope,
         llm_service,
         execution_context: ExecutionRuntimeContext | None = None,
+        cancel_signal: asyncio.Event | None = None,
     ) -> None:
         """执行一次 worker 步骤。"""
 
@@ -202,6 +207,7 @@ class InlineRuntimeBackend:
         envelope: DispatchEnvelope,
         llm_service,
         execution_context: ExecutionRuntimeContext | None = None,
+        cancel_signal: asyncio.Event | None = None,
     ) -> None:
         await task_service.process_task_with_llm(
             task_id=envelope.task_id,
@@ -216,12 +222,6 @@ class InlineRuntimeBackend:
             tool_profile=envelope.tool_profile,
             runtime_context=envelope.runtime_context,
         )
-
-
-class DockerRuntimeBackend(InlineRuntimeBackend):
-    """Docker backend（M1.5 先接入路由与探测，执行路径复用当前 TaskService）。"""
-
-    name = "docker"
 
 
 @dataclass
@@ -353,6 +353,7 @@ class GraphRuntimeBackend:
         envelope: DispatchEnvelope,
         llm_service,
         execution_context: ExecutionRuntimeContext | None = None,
+        cancel_signal: asyncio.Event | None = None,
     ) -> None:
         graph = self._graph_instance()
         deps = GraphRuntimeDeps(
@@ -360,7 +361,7 @@ class GraphRuntimeBackend:
             envelope=envelope,
             llm_service=llm_service,
             execution_context=execution_context,
-            cancel_signal=None,
+            cancel_signal=cancel_signal,
         )
         await graph.run(
             self._start_node(),
@@ -420,7 +421,6 @@ class WorkerRuntime:
         self._execution_console = execution_console
         self._a2a_observer = a2a_observer
         self._inline_backend = InlineRuntimeBackend()
-        self._docker_backend = DockerRuntimeBackend()
         self._graph_backend = GraphRuntimeBackend()
 
     async def run(self, envelope: DispatchEnvelope, *, worker_id: str) -> WorkerResult:
@@ -468,11 +468,7 @@ class WorkerRuntime:
                     task_id=envelope.task_id,
                     session_id=session.session_id,
                     backend_job_id=session.dispatch_id,
-                    backend=(
-                        ExecutionBackend.DOCKER
-                        if backend.name == "docker"
-                        else ExecutionBackend.INLINE
-                    ),
+                    backend=ExecutionBackend.INLINE,
                     interactive=True,
                     input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
                     worker_id=worker_id,
@@ -760,7 +756,7 @@ class WorkerRuntime:
             return self._inline_backend
 
         if docker_available:
-            return self._docker_backend
+            return self._inline_backend
 
         if docker_mode == "required":
             raise WorkerBackendUnavailableError("docker backend is required but unavailable")
@@ -792,9 +788,11 @@ class WorkerRuntime:
                 envelope=envelope,
                 llm_service=self._llm_service,
                 execution_context=execution_context,
+                cancel_signal=cancel_signal,
             )
         )
         deadline = time.monotonic() + self._config.max_execution_timeout_seconds
+        waiting_input_deadline: float | None = None
         try:
             while True:
                 if cancel_signal is not None and cancel_signal.is_set():
@@ -808,8 +806,20 @@ class WorkerRuntime:
                 except TimeoutError:
                     task = await task_service.get_task(envelope.task_id)
                     if task is not None and task.status == TaskStatus.WAITING_INPUT:
+                        if waiting_input_deadline is None:
+                            waiting_input_deadline = (
+                                time.monotonic()
+                                + self._config.waiting_input_timeout_seconds
+                            )
                         deadline = time.monotonic() + self._config.max_execution_timeout_seconds
+                        if time.monotonic() > waiting_input_deadline:
+                            backend_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await backend_task
+                            raise WorkerRuntimeTimeoutError("waiting_input_timeout")
                         continue
+                    else:
+                        waiting_input_deadline = None
                     if time.monotonic() > deadline:
                         backend_task.cancel()
                         with contextlib.suppress(asyncio.CancelledError):
