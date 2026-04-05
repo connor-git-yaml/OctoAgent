@@ -3259,6 +3259,59 @@ M5 说明：
 
 **已修复**：Feature 073 已删除 ToolProfile 枚举和 Workspace 概念从模型/Store/Gateway 全层。Memory 包的 vault 审计表 workspace_id 列为可选且调用方全部传 None，待后续版本清理。
 
+## 14.7 Worker 控制 + Subagent + Graph Pipeline 架构审计（2026-04-05）
+
+> 基于 Agent Zero / OpenClaw 源码横向对比，以下是 Butler-Worker-Subagent 体系的架构评估。
+
+### 架构优势（保持）
+
+- **A2A 持久化通信**：Butler↔Worker 通过 A2AConversation + A2AMessageRecord 持久化，进程重启可恢复（Agent Zero 纯内存递归、OpenClaw session 推送都不具备）
+- **Work 一等实体**：独立状态机（CREATED→ASSIGNED→RUNNING→终态），可查询/取消/合并（其他两个系统没有此抽象）
+- **Worker 不可级联委派**：`_enforce_child_target_kind_policy()` 硬限制（Agent Zero 无此保护）
+- **GraphPipelineTool**：结构化 DAG 编排能力（Agent Zero 和 OpenClaw 都不具备）
+
+### 🟠 待改善项
+
+#### W1: Worker 相关工具集过于膨胀（9 个 vs Agent Zero 的 1 个 / OpenClaw 的 2 个）
+
+**现状**：9 个工具 — `subagents.spawn/list/kill/steer` + `workers.review` + `work.split/merge/delete/inspect`。其中 `work.split` 与 `subagents.spawn` 高度重叠（split 就是批量 spawn）。
+
+**影响**：LLM 需要区分 9 个语义相近的工具，选择困难。Agent Zero 只用一个 `call_subordinate` 就完成了全部委派需求。
+
+**改善方向**：考虑合并 `subagents.spawn` 和 `work.split`（spawn 支持批量 objectives 参数即可消除 split）。`workers.review` 改名为更明确的 `work.plan` 以区分规划和管理语义。
+
+#### W2: DockerRuntimeBackend 是空壳
+
+**现状**：继承 InlineRuntimeBackend 未重写任何方法，Docker 隔离实际未实现。
+
+**改善方向**：M2 阶段实现或直接删除空壳类（Constitution #9 禁止保留无实际行为的代码）。
+
+#### W3: GraphRuntimeBackend cancel_signal 未连接
+
+**现状**：`cancel_signal=None` 传入 GraphRuntimeDeps，Graph backend 不可取消。
+
+**改善方向**：连接 WorkerCancellationRegistry 的 cancel_event 到 Graph backend。
+
+#### W4: Work 状态机无形式化约束
+
+**现状**：`complete_work()` 不校验当前状态是否允许转换到目标状态。
+
+**改善方向**：添加 `_validate_transition(from_status, to_status)` 方法，不合法转换抛异常。
+
+#### W5: WAITING_INPUT 时 deadline 无限重置
+
+**现状**：Worker runtime 中 task 处于 WAITING_INPUT 时 deadline 完全重置，可能永远不超时。
+
+**改善方向**：设置 WAITING_INPUT 的最大等待时间（如 30min），超过后自动超时。
+
+### Subagent 设计评估
+
+整体合理。独立 AsyncioTask + 独立 SkillRunner + A2A 通信 + `kill_subagent` 优雅清理。资源限制（max_steps=100, max_duration=1800s）比 Worker（200, 7200s）更保守，符合预期。
+
+### Graph Pipeline 设计评估
+
+设计超前但功能完备。3 级 PipelineRegistry + 6 个 action（list/start/status/resume/cancel/retry）+ DELEGATE_GRAPH 决策模式。当前无结构性问题，待更多 Pipeline 定义积累后评估实际使用效果。
+
 ---
 
 ## 15. 风险清单与缓解（Risks & Mitigations）
