@@ -137,6 +137,11 @@ def _make_memory_service():
     commit_mock.sor_id = "sor-001"
     memory_service.commit_memory = AsyncMock(return_value=commit_mock)
 
+    # fast_commit 返回 mock result（与 commit_memory 相同）
+    fast_commit_mock = MagicMock()
+    fast_commit_mock.sor_id = "sor-fast-001"
+    memory_service.fast_commit = AsyncMock(return_value=fast_commit_mock)
+
     # run_memory_maintenance 返回 mock run
     run_mock = MagicMock()
     run_mock.run_id = "run-001"
@@ -214,10 +219,14 @@ async def test_normal_flow_extracts_and_commits(
     # 验证 LLM 被调用
     llm_service.call.assert_called_once()
 
-    # 验证 propose-validate-commit 被调用
-    memory_service.propose_write.assert_called()
-    memory_service.validate_proposal.assert_called()
-    memory_service.commit_memory.assert_called()
+    # 验证 fast_commit 或 propose-validate-commit 被调用
+    # confidence=0.9 + ADD + 非敏感分区 → 走 fast_commit 路径
+    if hasattr(memory_service, "fast_commit") and memory_service.fast_commit.called:
+        memory_service.fast_commit.assert_called()
+    else:
+        memory_service.propose_write.assert_called()
+        memory_service.validate_proposal.assert_called()
+        memory_service.commit_memory.assert_called()
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -43,9 +44,28 @@ def parse_llm_json_array(text: str) -> list[dict[str, Any]] | None:
         cleaned = "\n".join(lines[start:end])
     try:
         parsed = json.loads(cleaned)
-        return parsed if isinstance(parsed, list) else None
-    except (json.JSONDecodeError, ValueError):
+        if isinstance(parsed, list):
+            return parsed
+        # JSON object 包裹了数组的情况
+        if isinstance(parsed, dict):
+            for v in parsed.values():
+                if isinstance(v, list):
+                    return v
         return None
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 回退：用正则从文本中提取 JSON 数组
+    match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
 
 
 def resolve_default_model_alias(project_root: Path) -> str:

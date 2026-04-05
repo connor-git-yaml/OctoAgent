@@ -821,6 +821,7 @@ class SqliteAgentContextStore:
             "UPDATE agent_sessions SET memory_cursor_seq = ? WHERE agent_session_id = ?",
             (new_cursor_seq, agent_session_id),
         )
+        await self._conn.commit()
 
     async def delete_agent_session_turns(self, *, agent_session_id: str) -> None:
         await self._conn.execute(

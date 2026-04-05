@@ -341,28 +341,16 @@ class SessionMemoryExtractor:
             result.new_cursor_seq = max_turn_seq
             return result
 
-        # 提取文本内容（兼容 thinking 模型——content 可能为空，JSON 在 reasoning_content 里）
+        # 提取文本内容（_build_result 已将 reasoning_content 合并到 content，此处无需重复处理）
         raw_text = ""
         if isinstance(llm_response, str):
             raw_text = llm_response
         elif hasattr(llm_response, "content"):
             raw_text = str(llm_response.content) if llm_response.content else ""
-            # Qwen3 等 thinking 模型：content 为空时尝试从 reasoning_content 提取
-            if not raw_text and hasattr(llm_response, "reasoning_content"):
-                raw_text = str(llm_response.reasoning_content) if llm_response.reasoning_content else ""
         elif hasattr(llm_response, "choices"):
             choices = llm_response.choices
             if choices and hasattr(choices[0], "message"):
-                msg = choices[0].message
-                raw_text = str(msg.content or "")
-                # 同上：thinking 模型 fallback
-                if not raw_text and hasattr(msg, "reasoning_content"):
-                    raw_text = str(msg.reasoning_content or "")
-                if not raw_text:
-                    # provider_specific_fields fallback
-                    psf = getattr(msg, "provider_specific_fields", None) or {}
-                    if isinstance(psf, dict):
-                        raw_text = str(psf.get("reasoning_content", "") or "")
+                raw_text = str(choices[0].message.content or "")
 
         # 8. 解析输出
         items = self._parse_extraction_output(raw_text)
@@ -659,8 +647,8 @@ class SessionMemoryExtractor:
                                     if commit_result.sor_id:
                                         committed_sor_ids.append(commit_result.sor_id)
                                     counts[item.type] = counts.get(item.type, 0) + 1
-                            except Exception:
-                                pass  # 降级场景，不阻塞其他条目
+                            except Exception as update_exc:
+                                errors.append(f"update_fallback_failed[{item.subject_key}]: {type(update_exc).__name__}: {update_exc}")
 
             except Exception as exc:
                 errors.append(f"commit_failed[{item.subject_key}]: {type(exc).__name__}: {exc}")
@@ -748,7 +736,7 @@ class SessionMemoryExtractor:
         except Exception:
             pass
 
-        # 降级 3: 合成一个基于 project_id 的 scope_id
+        # 降级 3: 合成一个基于 project_id 的 scope_id（防止空 project_id 产生退化 scope）
         if agent_session.project_id:
             return f"memory/auto/{agent_session.project_id}"
 
