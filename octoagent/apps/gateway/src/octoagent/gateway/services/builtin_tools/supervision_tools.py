@@ -9,23 +9,14 @@ from __future__ import annotations
 
 import json
 
-from octoagent.core.models import WorkStatus
 from octoagent.tooling import SideEffectLevel, tool_contract
 
 from ._deps import (
     ToolDeps,
+    WORK_TERMINAL_VALUES,
     current_work_context,
     descendant_works_for_current_context,
 )
-
-_WORK_TERMINAL_VALUES = {
-    WorkStatus.SUCCEEDED.value,
-    WorkStatus.FAILED.value,
-    WorkStatus.CANCELLED.value,
-    WorkStatus.MERGED.value,
-    WorkStatus.TIMED_OUT.value,
-    WorkStatus.DELETED.value,
-}
 
 
 async def register(broker, deps: ToolDeps) -> None:

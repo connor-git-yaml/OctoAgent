@@ -136,6 +136,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         )
         if target.is_dir():
             raise RuntimeError(f"path is a directory, not a file: {target}")
+        dirs_created = create_dirs and not target.parent.exists()
         if create_dirs:
             target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -145,7 +146,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 "workspace_root": str(instance_root),
                 "path": relative,
                 "bytes_written": len(content.encode("utf-8")),
-                "created_dirs": create_dirs and not target.parent.exists(),
+                "created_dirs": dirs_created,
             },
             ensure_ascii=False,
         )

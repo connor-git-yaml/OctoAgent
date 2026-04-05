@@ -241,22 +241,22 @@ class CapabilityPackService:
 
     def bind_task_runner(self, task_runner) -> None:
         self._task_runner = task_runner
-        if hasattr(self, '_tool_deps') and self._tool_deps is not None:
+        if self._tool_deps is not None:
             self._tool_deps._task_runner = task_runner
 
     def bind_delegation_plane(self, delegation_plane) -> None:
         self._delegation_plane = delegation_plane
-        if hasattr(self, '_tool_deps') and self._tool_deps is not None:
+        if self._tool_deps is not None:
             self._tool_deps._delegation_plane = delegation_plane
 
     def bind_mcp_registry(self, mcp_registry: McpRegistryService) -> None:
         self._mcp_registry = mcp_registry
-        if hasattr(self, '_tool_deps') and self._tool_deps is not None:
+        if self._tool_deps is not None:
             self._tool_deps._mcp_registry = mcp_registry
 
     def bind_mcp_installer(self, mcp_installer: McpInstallerService) -> None:
         self._mcp_installer = mcp_installer
-        if hasattr(self, '_tool_deps') and self._tool_deps is not None:
+        if self._tool_deps is not None:
             self._tool_deps._mcp_installer = mcp_installer
 
     @property

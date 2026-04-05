@@ -26,16 +26,8 @@ from ._deps import (
     descendant_works_for_current_context,
     launch_child,
     resolve_child_work,
+    WORK_TERMINAL_VALUES,
 )
-
-_WORK_TERMINAL_VALUES = {
-    WorkStatus.SUCCEEDED.value,
-    WorkStatus.FAILED.value,
-    WorkStatus.CANCELLED.value,
-    WorkStatus.MERGED.value,
-    WorkStatus.TIMED_OUT.value,
-    WorkStatus.DELETED.value,
-}
 
 
 async def register(broker, deps: ToolDeps) -> None:

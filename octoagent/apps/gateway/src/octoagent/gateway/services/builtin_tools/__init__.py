@@ -22,7 +22,7 @@ from . import (
 
 
 async def register_all(broker, deps: ToolDeps) -> None:
-    """注册所有内置工具（47 个）。"""
+    """注册所有内置工具。"""
     await runtime_tools.register(broker, deps)
     await session_tools.register(broker, deps)
     await filesystem_tools.register(broker, deps)

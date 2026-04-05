@@ -12,21 +12,10 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
 
 from octoagent.tooling import SideEffectLevel, tool_contract
 
-from ._browser_support import (
-    _BrowserSessionState,
-    _BrowserSnapshot,
-    _BrowserLinkRef,
-    _HtmlSnapshotParser,
-    _normalize_browser_text,
-)
 from ._deps import ToolDeps
-
-if TYPE_CHECKING:
-    pass
 
 
 async def register(broker, deps: ToolDeps) -> None:

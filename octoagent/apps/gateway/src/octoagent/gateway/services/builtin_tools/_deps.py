@@ -23,6 +23,12 @@ _MEMORY_BINDING_TYPES = {
     ProjectBindingType.IMPORT_SCOPE,
 }
 
+# Work 终态值集合（delegation/supervision 工具共用）
+WORK_TERMINAL_VALUES = {
+    "SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT",
+    "MERGED", "DELETED", "REJECTED",
+}
+
 
 @dataclass
 class ToolDeps:
@@ -72,7 +78,7 @@ class ToolDeps:
 async def current_parent(deps: ToolDeps) -> tuple[TaskService, Any, Any]:
     """返回 (TaskService, execution_context, task)。"""
     context = get_current_execution_context()
-    task_service = TaskService(deps.stores)
+    task_service = TaskService(deps.stores, project_root=deps.project_root)
     task = await deps.stores.task_store.get_task(context.task_id)
     if task is None:
         raise RuntimeError("current task not found for builtin tool")
@@ -99,7 +105,7 @@ async def resolve_runtime_project_context(
         task_service, _context, task = await current_parent(deps)
     except Exception:
         task = None
-        task_service = TaskService(deps.stores)
+        task_service = TaskService(deps.stores, project_root=deps.project_root)
     if task is not None:
         project, workspace = await task_service._agent_context.resolve_project_scope(
             task=task,
