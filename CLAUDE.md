@@ -48,14 +48,16 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 7. **User-in-Control** - 高风险动作必须可审批，任务必须可取消
 8. **Observability is a Feature** - 每个任务必须可查看状态、步骤、消耗、失败原因
 9. **Agent Autonomy** - 禁止用硬编码关键词/规则替代 LLM 决策；系统层只负责提供完整工具集和上下文，由 LLM 自主选择工具和决策路径
-10. **Policy-Driven Access** - 工具访问控制统一走 `check_permission()`（PermissionPreset × SideEffectLevel 矩阵 + ApprovalManager 审批），工具层不得自行做路径/权限拦截
+10. **Policy-Driven Access** - 工具访问控制统一走权限决策函数，工具层不得自行做路径/权限拦截；所有权限判断收敛到单一入口
 
 ## 里程碑
 
-- **M0（基础底座）**: Task/Event/Artifact + SSE 事件流 + 最小 Web UI
-- **M1（最小智能闭环）**: LiteLLM + Pydantic Skill + Tool Contract + Policy Engine
-- **M2（多渠道多 Worker）**: Telegram + Worker + A2A-Lite + JobRunner + Memory
-- **M3（增强）**: Chat Import + Vault + ToolIndex + Skill Pipeline Engine
+- **M0（基础底座）** ✅: Task/Event/Artifact + SSE 事件流 + 最小 Web UI
+- **M1（最小智能闭环）** ✅: LiteLLM + Pydantic Skill + Tool Contract + Policy
+- **M2（多渠道多 Worker）** ✅: Telegram + Worker + A2A-Lite + JobRunner + Memory
+- **M3（增强）** ✅: Chat Import + Vault + ToolIndex + Skill Pipeline Engine
+- **M4（引导式工作台）** 🔄: 用户 Ready 全链路（Feature 056/070/071b 进行中）
+- **M5（文件工作台）** ⏳: 语音/多模态/Companion/通知中心
 
 ## 协作行为准则
 
