@@ -197,6 +197,8 @@ export default function ChatWorkbench() {
   const sessionAliasInputRef = useRef<HTMLInputElement | null>(null);
   const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
   const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
+  // default_profile_name 由后端解析（包含 AgentProfile 回退），用于无会话时的名称降级
+  const defaultRootAgentName = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_name");
   const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
   const currentSession =
     taskId != null
@@ -505,6 +507,7 @@ export default function ChatWorkbench() {
     (activeSession ?? currentSession)?.session_owner_name?.trim() ||
     workerProfiles.find((p) => p.profile_id === currentSessionOwnerProfileId)?.name ||
     defaultRootAgent?.name ||
+    defaultRootAgentName ||
     "OctoAgent";
   const currentSessionAlias =
     currentSession?.alias?.trim() || activeSession?.alias?.trim() || "";
