@@ -14,6 +14,10 @@ from octoagent.core.models import (
     utc_now,
 )
 from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
+from octoagent.provider.dx.runtime_descriptor_defaults import (
+    build_frontend_build_command,
+    build_workspace_sync_command,
+)
 from octoagent.provider.dx.update_service import (
     _default_run_command,
     ActiveUpdateError,
@@ -54,8 +58,8 @@ def _descriptor(tmp_path: Path) -> ManagedRuntimeDescriptor:
         runtime_mode=RuntimeManagementMode.MANAGED,
         start_command=["uv", "run", "uvicorn", "octoagent.gateway.main:app"],
         verify_url="http://127.0.0.1:8000/ready?profile=core",
-        workspace_sync_command=["/bin/bash", "-lc", "git pull --ff-only origin master && uv sync"],
-        frontend_build_command=["/bin/bash", "-lc", "npm install && npm run build"],
+        workspace_sync_command=build_workspace_sync_command(),
+        frontend_build_command=build_frontend_build_command(),
         created_at=now,
         updated_at=now,
     )

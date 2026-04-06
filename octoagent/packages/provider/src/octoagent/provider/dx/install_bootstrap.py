@@ -14,6 +14,10 @@ from .config_bootstrap import bootstrap_config
 from octoagent.gateway.services.config.config_wizard import load_config
 from .console_output import create_console, render_panel
 from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
+from .runtime_descriptor_defaults import (
+    build_frontend_build_command,
+    build_workspace_sync_command,
+)
 from .update_status_store import UpdateStatusStore
 
 console = create_console()
@@ -78,25 +82,10 @@ def _build_runtime_descriptor(
         start_command=start_command,
         verify_url=f"http://127.0.0.1:{port}/ready?profile=core",
         workspace_sync_command=[
-            "/bin/bash",
-            "-lc",
-            "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) && "
-            "if [ -n \"$GIT_ROOT\" ]; then "
-            "  git -C \"$GIT_ROOT\" fetch origin master && "
-            "  if git -C \"$GIT_ROOT\" diff --quiet 2>/dev/null; then "
-            "    git -C \"$GIT_ROOT\" merge --ff-only origin/master; "
-            "  else "
-            "    echo 'Local changes detected, resetting to origin/master...' && "
-            "    git -C \"$GIT_ROOT\" checkout -- . && "
-            "    git -C \"$GIT_ROOT\" merge --ff-only origin/master; "
-            "  fi; "
-            "fi && "
-            "uv sync",
+            *build_workspace_sync_command(),
         ],
         frontend_build_command=[
-            "/bin/bash",
-            "-lc",
-            "npm install && npm run build",
+            *build_frontend_build_command(),
         ],
         environment_overrides=environment_overrides,
         created_at=now,

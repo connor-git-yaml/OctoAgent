@@ -24,6 +24,7 @@ from octoagent.core.models import (
 from pydantic import BaseModel
 
 from .backup_service import resolve_data_dir, resolve_project_root
+from .runtime_descriptor_defaults import normalize_runtime_descriptor
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -73,17 +74,23 @@ class UpdateStatusStore:
             default=None,
         )
         if descriptor is not None:
-            return descriptor
+            return self._normalize_descriptor_if_needed(descriptor)
         legacy_path = self._root / "app" / "octoagent" / "data" / "ops" / "managed-runtime.json"
         if legacy_path == self._descriptor_path or not legacy_path.exists():
             return None
         legacy_lock = FileLock(str(legacy_path) + ".lock")
-        return self._load_model(
+        descriptor = self._load_model(
             path=legacy_path,
             lock=legacy_lock,
             model_type=ManagedRuntimeDescriptor,
             default=None,
         )
+        if descriptor is None:
+            return None
+        normalized = self._normalize_descriptor_if_needed(descriptor)
+        if normalized != descriptor:
+            self._save_model(self._descriptor_path, self._descriptor_lock, normalized)
+        return normalized
 
     def save_runtime_descriptor(self, descriptor: ManagedRuntimeDescriptor) -> None:
         self._save_model(self._descriptor_path, self._descriptor_lock, descriptor)
@@ -151,6 +158,15 @@ class UpdateStatusStore:
         history_path = self._history_dir / f"{attempt.attempt_id}.json"
         history_lock = FileLock(str(history_path) + ".lock")
         self._save_model(history_path, history_lock, attempt)
+
+    def _normalize_descriptor_if_needed(
+        self,
+        descriptor: ManagedRuntimeDescriptor,
+    ) -> ManagedRuntimeDescriptor:
+        normalized, changed = normalize_runtime_descriptor(descriptor)
+        if changed:
+            self.save_runtime_descriptor(normalized)
+        return normalized
 
     def _load_model(
         self,

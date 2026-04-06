@@ -15,6 +15,10 @@ from octoagent.core.models import (
     utc_now,
 )
 from octoagent.provider.dx.update_status_store import UpdateStatusStore
+from octoagent.provider.dx.runtime_descriptor_defaults import (
+    build_frontend_build_command,
+    build_workspace_sync_command,
+)
 
 
 def _build_attempt(status: UpdateOverallStatus = UpdateOverallStatus.RUNNING) -> UpdateAttempt:
@@ -116,3 +120,28 @@ def test_home_instance_can_read_legacy_source_root_descriptor(tmp_path: Path) ->
     restored = store.load_runtime_descriptor()
     assert restored is not None
     assert restored.project_root == str(tmp_path / "app" / "octoagent")
+
+
+def test_runtime_descriptor_auto_normalizes_legacy_update_commands(tmp_path: Path) -> None:
+    store = UpdateStatusStore(tmp_path)
+    descriptor = _build_descriptor(tmp_path).model_copy(
+        update={
+            "workspace_sync_command": [
+                "/bin/bash",
+                "-lc",
+                "git pull --ff-only origin master && uv sync",
+            ],
+            "frontend_build_command": [
+                "/bin/bash",
+                "-lc",
+                "npm install && npm run build",
+            ],
+        }
+    )
+    store.save_runtime_descriptor(descriptor)
+
+    restored = store.load_runtime_descriptor()
+
+    assert restored is not None
+    assert restored.workspace_sync_command == build_workspace_sync_command()
+    assert restored.frontend_build_command == build_frontend_build_command()
