@@ -54,10 +54,10 @@ export default function TaskList() {
   if (loading) {
     return (
       <div>
-        <h1>Tasks</h1>
+        <h1>当前工作</h1>
         <OperatorInboxPanel />
         <RecoveryPanel />
-        <div className="loading">Loading tasks...</div>
+        <div className="loading">正在加载任务列表…</div>
       </div>
     );
   }
@@ -65,10 +65,10 @@ export default function TaskList() {
   if (error) {
     return (
       <div>
-        <h1>Tasks</h1>
+        <h1>当前工作</h1>
         <OperatorInboxPanel />
         <RecoveryPanel />
-        <div className="error">Error: {error}</div>
+        <div className="error">加载失败：{error}</div>
       </div>
     );
   }
@@ -76,11 +76,11 @@ export default function TaskList() {
   if (tasks.length === 0) {
     return (
       <div>
-        <h1>Tasks</h1>
+        <h1>当前工作</h1>
         <OperatorInboxPanel />
         <RecoveryPanel />
         <div className="card" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
-          No tasks yet
+          暂无进行中的工作
         </div>
       </div>
     );
@@ -88,7 +88,7 @@ export default function TaskList() {
 
   return (
     <div>
-      <h1>Tasks</h1>
+      <h1>当前工作</h1>
       <OperatorInboxPanel />
       <RecoveryPanel />
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
