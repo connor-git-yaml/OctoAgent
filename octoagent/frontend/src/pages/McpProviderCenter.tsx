@@ -228,7 +228,7 @@ function McpProviderModal({
 export default function McpProviderCenter() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const catalog = snapshot!.resources.mcp_provider_catalog;
-  const items = catalog.items;
+  const items = catalog?.items ?? [];
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
@@ -296,8 +296,8 @@ export default function McpProviderCenter() {
         <div className="wb-topbar-copy">
           <h2>MCP 服务商</h2>
           <p className="wb-topbar-meta">
-            已安装 {items.length} · 已启用 {Number(catalog.summary.enabled_count ?? 0)} · 健康{" "}
-            {Number(catalog.summary.healthy_count ?? 0)}
+            已安装 {items.length} · 已启用 {Number(catalog?.summary?.enabled_count ?? 0)} · 健康{" "}
+            {Number(catalog?.summary?.healthy_count ?? 0)}
           </p>
         </div>
         <div className="wb-inline-actions">

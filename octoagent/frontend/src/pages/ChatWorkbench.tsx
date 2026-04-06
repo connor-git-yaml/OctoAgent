@@ -83,10 +83,10 @@ export default function ChatWorkbench() {
   const sessions = ensureArray(sessionDocument?.sessions);
   const workerProfilesDocument = snapshot!.resources.worker_profiles;
   const workerProfiles = ensureArray(workerProfilesDocument?.profiles);
-  const delegationWorks = ensureArray(snapshot!.resources.delegation.works);
+  const delegationWorks = ensureArray(snapshot!.resources.delegation?.works);
   const context = snapshot!.resources.context_continuity;
-  const contextFrames = ensureArray(context.frames);
-  const a2aConversations = ensureArray(context.a2a_conversations);
+  const contextFrames = ensureArray(context?.frames);
+  const a2aConversations = ensureArray(context?.a2a_conversations);
   const storedRestoreTaskId = useMemo(() => readStoredTaskId(), []);
 
   // 当 URL 指定了 sessionId 时，直接用该 session；否则用首个 web session 作为默认

@@ -187,12 +187,13 @@ function readCapabilitySelectionMetadata(
 export function buildCapabilityProviderEntries(
   snapshot: ControlPlaneSnapshot
 ): CapabilityProviderEntry[] {
+  const skillGovernanceItems = snapshot.resources.skill_governance?.items ?? [];
   const governanceById = Object.fromEntries(
-    snapshot.resources.skill_governance.items.map((item) => [item.item_id, item])
-  ) as Record<string, (typeof snapshot.resources.skill_governance.items)[number]>;
+    skillGovernanceItems.map((item) => [item.item_id, item])
+  ) as Record<string, (typeof skillGovernanceItems)[number]>;
 
   // Feature 057: skill entries 直接从 skill_governance 获取
-  const skillEntries = snapshot.resources.skill_governance.items
+  const skillEntries = skillGovernanceItems
     .filter((item) => item.source_kind !== "mcp")
     .map((item) => ({
       providerId: item.item_id.replace(/^skill:/, ""),
@@ -207,7 +208,7 @@ export function buildCapabilityProviderEntries(
       tags: [item.source_kind],
     }));
 
-  const mcpEntries = snapshot.resources.mcp_provider_catalog.items.map((item) => {
+  const mcpEntries = (snapshot.resources.mcp_provider_catalog?.items ?? []).map((item) => {
     const governance = governanceById[item.selection_item_id];
     return {
       providerId: item.provider_id,
@@ -336,8 +337,8 @@ export function deriveAgentManagementView(
   snapshot: ControlPlaneSnapshot
 ): AgentManagementViewModel {
   const selector = snapshot.resources.project_selector;
-  const currentProjectId = selector.current_project_id;
-  const currentProjectName = formatProjectName(selector.available_projects, currentProjectId);
+  const currentProjectId = selector?.current_project_id ?? "";
+  const currentProjectName = formatProjectName(selector?.available_projects, currentProjectId);
   const workerProfilesDocument = snapshot.resources.worker_profiles;
   const profiles = workerProfilesDocument?.profiles ?? [];
   const summary = toRecord(workerProfilesDocument?.summary);
