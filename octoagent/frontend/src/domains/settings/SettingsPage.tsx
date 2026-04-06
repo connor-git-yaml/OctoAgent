@@ -32,6 +32,18 @@ import {
 const DEFAULT_GATEWAY_PROXY_URL = "http://localhost:4000";
 const DEFAULT_GATEWAY_MASTER_KEY_ENV = "LITELLM_MASTER_KEY";
 
+const EMPTY_REVIEW: SetupReviewSummary = {
+  ready: false,
+  risk_level: "unknown",
+  warnings: [],
+  blocking_reasons: [],
+  next_actions: [],
+  provider_runtime_risks: [],
+  channel_exposure_risks: [],
+  agent_autonomy_risks: [],
+  tool_skill_readiness_risks: [],
+};
+
 export default function SettingsPage() {
   const { snapshot, submitAction, busyActionId } = useWorkbench();
   const location = useLocation();
@@ -41,22 +53,22 @@ export default function SettingsPage() {
   const retrievalPlatform = snapshot!.resources.retrieval_platform ?? null;
   const setup = snapshot!.resources.setup_governance;
   const [fieldState, setFieldState] = useState<FieldState>(() =>
-    buildFieldState(config.ui_hints, config.current_value)
+    buildFieldState(config?.ui_hints ?? {}, config?.current_value ?? {})
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [review, setReview] = useState<SetupReviewSummary>(setup.review);
+  const [review, setReview] = useState<SetupReviewSummary>(setup?.review ?? EMPTY_REVIEW);
   const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [savedSecretEnvNames, setSavedSecretEnvNames] = useState<string[]>([]);
   const [pendingRuntimeRefresh, setPendingRuntimeRefresh] = useState(false);
 
   useEffect(() => {
-    setFieldState(buildFieldState(config.ui_hints, config.current_value));
+    setFieldState(buildFieldState(config?.ui_hints ?? {}, config?.current_value ?? {}));
     setFieldErrors({});
-  }, [config.generated_at]);
+  }, [config?.generated_at]);
 
   useEffect(() => {
-    setReview(setup.review);
-  }, [setup.generated_at]);
+    setReview(setup?.review ?? EMPTY_REVIEW);
+  }, [setup?.generated_at]);
 
   useEffect(() => {
     setSecretValues({});
@@ -75,7 +87,7 @@ export default function SettingsPage() {
     });
   }, [location.hash, config.generated_at]);
 
-  const groupedHints = Object.values(config.ui_hints)
+  const groupedHints = Object.values(config?.ui_hints ?? {})
     .sort((left, right) => left.order - right.order)
     .reduce<Record<string, ConfigFieldHint[]>>((groups, hint) => {
       const key = categoryForHint(hint);
@@ -88,7 +100,7 @@ export default function SettingsPage() {
   // memoryCorpus / retrievalPlatform 的 generation 相关变量暂不使用，
   // 待 Retrieval Platform 迁移管理 UI 合入后恢复
   void retrievalPlatform;
-  const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime.details);
+  const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime?.details ?? {});
   const providerDrafts = parseProviderDrafts(fieldState.providers);
   const aliasDrafts = normalizeAliasDrafts(parseAliasDrafts(fieldState.model_aliases));
   const activeProviders = providerDrafts.filter((item) => item.enabled);
@@ -99,7 +111,7 @@ export default function SettingsPage() {
       value: item.id,
       label: item.name?.trim() ? `${item.name} · ${item.id}` : item.id,
     }))
-    .filter((item) => item.value.trim());
+    .filter((item) => String(item.value ?? "").trim());
   const savedEnvNames = new Set([
     ...envPresence(providerRuntimeDetails),
     ...savedSecretEnvNames,

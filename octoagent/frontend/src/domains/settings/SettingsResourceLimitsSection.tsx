@@ -117,7 +117,7 @@ function buildTargetOptions(
   workerProfiles: WorkerProfilesDocument | null,
 ): TargetOption[] {
   const options: TargetOption[] = [];
-  if (agentProfiles) {
+  if (agentProfiles?.profiles) {
     for (const profile of agentProfiles.profiles) {
       options.push({
         type: "agent_profile",
@@ -127,7 +127,7 @@ function buildTargetOptions(
       });
     }
   }
-  if (workerProfiles) {
+  if (workerProfiles?.profiles) {
     for (const profile of workerProfiles.profiles) {
       options.push({
         type: "worker_profile",
@@ -146,11 +146,11 @@ function getResourceLimitsForTarget(
   workerProfiles: WorkerProfilesDocument | null,
 ): Record<string, unknown> {
   if (!target) return {};
-  if (target.type === "agent_profile" && agentProfiles) {
+  if (target.type === "agent_profile" && agentProfiles?.profiles) {
     const found = agentProfiles.profiles.find((p) => p.profile_id === target.id);
     return (found?.resource_limits as Record<string, unknown>) ?? {};
   }
-  if (target.type === "worker_profile" && workerProfiles) {
+  if (target.type === "worker_profile" && workerProfiles?.profiles) {
     const found = workerProfiles.profiles.find((p) => p.profile_id === target.id);
     return (found?.static_config?.resource_limits as Record<string, unknown>) ?? {};
   }

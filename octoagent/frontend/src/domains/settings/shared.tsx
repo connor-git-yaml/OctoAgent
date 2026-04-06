@@ -108,9 +108,10 @@ export const CUSTOM_PROVIDER_FIELD_PATHS = new Set([
 ]);
 
 export function buildFieldState(
-  hints: Record<string, ConfigFieldHint>,
+  hints: Record<string, ConfigFieldHint> | undefined | null,
   currentValue: Record<string, unknown>
 ): FieldState {
+  if (!hints) return {};
   return Object.fromEntries(
     Object.values(hints).map((hint) => [
       hint.field_path,
@@ -176,8 +177,8 @@ export function summaryTone(
   return "success";
 }
 
-export function renderRiskList(title: string, risks: SetupRiskItem[]) {
-  if (risks.length === 0) {
+export function renderRiskList(title: string, risks: SetupRiskItem[] | undefined | null) {
+  if (!risks || risks.length === 0) {
     return null;
   }
   return (

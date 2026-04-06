@@ -170,8 +170,8 @@ export function formatPermissionPreset(preset: string): string {
   return PRESET_LABELS[preset] ?? formatTokenLabel(preset);
 }
 
-export function formatProjectName(projects: ProjectOption[], projectId: string): string {
-  return projects.find((project) => project.project_id === projectId)?.name ?? projectId;
+export function formatProjectName(projects: ProjectOption[] | undefined | null, projectId: string): string {
+  return (projects ?? []).find((project) => project.project_id === projectId)?.name ?? projectId;
 }
 
 function readCapabilitySelectionMetadata(

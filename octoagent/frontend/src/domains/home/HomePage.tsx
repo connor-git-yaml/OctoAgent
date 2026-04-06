@@ -266,6 +266,7 @@ export default function HomePage() {
   const sessions = snapshot!.resources.sessions;
   const context = snapshot!.resources.context_continuity;
   const setup = snapshot!.resources.setup_governance;
+  const setupReview = setup?.review ?? { ready: false, next_actions: [], blocking_reasons: [], warnings: [], risk_level: "unknown", provider_runtime_risks: [], channel_exposure_risks: [], agent_autonomy_risks: [], tool_skill_readiness_risks: [] };
   const config = snapshot!.resources.config;
   const delegation = snapshot!.resources.delegation;
 
@@ -274,7 +275,7 @@ export default function HomePage() {
     null;
   const [selectedProjectId, setSelectedProjectId] = useState(selector.current_project_id);
   const operatorItems = (sessions.operator_items ?? []).filter((item) => item.state === "pending");
-  const activeWorks = delegation.works.filter((item) =>
+  const activeWorks = (delegation?.works ?? []).filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
   );
   const latestSession = useMemo(
@@ -294,15 +295,15 @@ export default function HomePage() {
   );
   const primaryState = buildPrimaryState({
     usingEchoMode,
-    setupReady: setup.review.ready,
+    setupReady: setupReview.ready,
     diagnosticsStatus: diagnostics.overall_status,
     operatorItems,
     activeWorks,
   });
   const echoModeGuidance = buildEchoModeGuidance({
-    setupReady: setup.review.ready,
-    nextActions: setup.review.next_actions,
-    blockingReasons: setup.review.blocking_reasons,
+    setupReady: setupReview.ready,
+    nextActions: setupReview.next_actions,
+    blockingReasons: setupReview.blocking_reasons,
   });
   const showContextSwitcher = selector.available_projects.length > 1;
   const latestSessionTitle = latestSession?.title?.trim() || "还没有最近对话";
@@ -341,7 +342,7 @@ export default function HomePage() {
             <div>
               <p className="wb-card-label">现在先做什么</p>
               <h3>
-                {usingEchoMode || !setup.review.ready
+                {usingEchoMode || !setupReview.ready
                   ? "先把这一步补上"
                   : operatorItems.length > 0
                     ? "现在需要你处理的事情"
@@ -366,10 +367,10 @@ export default function HomePage() {
                 去设置页处理
               </Link>
             </div>
-          ) : !setup.review.ready ? (
+          ) : !setupReview.ready ? (
             <div className="wb-note-stack">
-              {(setup.review.next_actions.length > 0
-                ? setup.review.next_actions
+              {(setupReview.next_actions.length > 0
+                ? setupReview.next_actions
                 : ["先到设置里接入一个真实模型。"]
               )
                 .slice(0, 2)
@@ -379,7 +380,7 @@ export default function HomePage() {
                     <span>{item}</span>
                   </div>
                 ))}
-              {setup.review.blocking_reasons.slice(0, 2).map((item) => (
+              {setupReview.blocking_reasons.slice(0, 2).map((item) => (
                 <div key={item} className="wb-note">
                   <strong>为什么现在先做这一步</strong>
                   <span>{item}</span>
@@ -448,7 +449,7 @@ export default function HomePage() {
               <span>
                 {usingEchoMode
                   ? "现在还能体验页面和对话流程，但回答不会代表真实能力。"
-                  : !setup.review.ready
+                  : !setupReview.ready
                     ? "基础对话可能还能继续，但先补齐设置会更稳。"
                     : "你现在可以直接开始对话，不需要先看控制台。"}
               </span>
@@ -458,7 +459,7 @@ export default function HomePage() {
               <span>
                 {buildAvailabilityImpact({
                   usingEchoMode,
-                  setupReady: setup.review.ready,
+                  setupReady: setupReview.ready,
                   diagnosticsStatus: diagnostics.overall_status,
                 })}
               </span>

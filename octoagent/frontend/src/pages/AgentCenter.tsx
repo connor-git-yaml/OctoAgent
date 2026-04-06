@@ -250,8 +250,8 @@ export default function AgentCenter() {
   );
   // 全局管理视图——行为文件区展示所有 agent profile，不按当前项目过滤
   const behaviorProfiles = useMemo(
-    () => agentProfilesDocument.profiles,
-    [agentProfilesDocument.generated_at]
+    () => agentProfilesDocument?.profiles ?? [],
+    [agentProfilesDocument?.generated_at]
   );
   const [selectedBehaviorProfileId, setSelectedBehaviorProfileId] = useState("");
 
@@ -439,7 +439,7 @@ export default function AgentCenter() {
   }
 
   function openAgentEditor(profileId: string) {
-    const profile = snapshot!.resources.worker_profiles?.profiles.find(
+    const profile = snapshot!.resources.worker_profiles?.profiles?.find(
       (item) => item.profile_id === profileId
     );
     if (!profile) {
@@ -493,7 +493,7 @@ export default function AgentCenter() {
   }
 
   function openTemplateCreate(templateId: string) {
-    const template = snapshot!.resources.worker_profiles?.profiles.find(
+    const template = snapshot!.resources.worker_profiles?.profiles?.find(
       (profile) => profile.profile_id === templateId
     );
     startTransition(() => {

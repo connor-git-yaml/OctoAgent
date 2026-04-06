@@ -289,7 +289,7 @@ export default function WorkbenchLayout() {
     String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
       .trim()
       .toLowerCase() || "echo";
-  const activeWorkCount = delegation.works.filter((item) =>
+  const activeWorkCount = (delegation?.works ?? []).filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
   ).length;
   const operatorItems = Array.isArray(sessions.operator_items) ? sessions.operator_items : [];
