@@ -2529,8 +2529,14 @@
     box-shadow var(--cp-transition-fast);
 }
 
+.wb-agent-card {
+  border-left: 3px solid var(--cp-muted);
+}
+
 .wb-agent-card.is-main {
+  border-left: 3px solid var(--cp-secondary);
   border-color: rgba(31, 106, 91, 0.18);
+  border-left-color: var(--cp-secondary);
   background: var(--cp-card);
 }
 
@@ -3170,6 +3176,12 @@
 
 .wb-toolbar-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1040px) and (min-width: 481px) {
+  .wb-toolbar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .wb-memory-layout {

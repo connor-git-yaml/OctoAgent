@@ -101,7 +101,7 @@ export default function MemoryResultsSection({
                 <div className="wb-memory-head">
                   <div>
                     <div className="wb-chip-row">
-                      <span className="wb-chip">{formatLayerLabel(record.layer)}</span>
+                      <span className={`wb-chip is-layer-${record.layer}`}>{formatLayerLabel(record.layer)}</span>
                       <span className="wb-chip">{formatPartitionLabel(record.partition)}</span>
                       {record.status === "archived" ? (
                         <span className="wb-chip is-muted">已归档</span>

@@ -186,6 +186,17 @@
   color: var(--cp-primary-ink);
 }
 
+.wb-chip.is-muted {
+  background: rgba(20, 32, 47, 0.04);
+  color: var(--cp-muted);
+}
+
+/* Memory layer 色标（参考 Agent Zero Area Badge） */
+.wb-chip.is-layer-sor { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+.wb-chip.is-layer-fragment { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+.wb-chip.is-layer-vault { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
+.wb-chip.is-layer-derived { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+
 .wb-chip-button {
   display: inline-flex;
   align-items: center;
