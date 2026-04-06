@@ -10,6 +10,7 @@ const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
 const SkillCenter = lazy(() => import("./pages/SkillCenter"));
 const TaskDetail = lazy(() => import("./pages/TaskDetail"));
+const TaskList = lazy(() => import("./pages/TaskList"));
 
 function RouteFallback() {
   return (
@@ -49,6 +50,7 @@ export default function App() {
             {/* 兼容旧路径 */}
             <Route path="agents/skills" element={<Navigate to="/skills" replace />} />
             <Route path="agents/mcp" element={<Navigate to="/mcp" replace />} />
+            <Route path="work" element={withRouteSuspense(<TaskList />)} />
             <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
             <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
           </Route>
