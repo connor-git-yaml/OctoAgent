@@ -606,11 +606,13 @@ class SqliteProjectStore:
 
     @staticmethod
     def _row_to_selector_state(row: aiosqlite.Row) -> ProjectSelectorState:
+        # 列顺序: selector_id(0), surface(1), active_project_id(2),
+        #         active_workspace_id(3), source(4), warnings(5), updated_at(6)
         return ProjectSelectorState(
             selector_id=row[0],
             surface=row[1],
             active_project_id=row[2],
-            source=row[3],
-            warnings=json.loads(row[4]),
-            updated_at=datetime.fromisoformat(row[5]),
+            source=row[4],
+            warnings=json.loads(row[5] or "[]"),
+            updated_at=datetime.fromisoformat(row[6]),
         )
