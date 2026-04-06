@@ -707,7 +707,10 @@ class AgentProfileDomainService(DomainServiceBase):
         await self._stores.agent_context_store.save_agent_runtime(worker_runtime)
 
         # 创建 AgentSession（Direct Worker，确保会话列表可见）
+        # thread_id 必须设置，否则 session projection 第二遍的 projected_session_id 会缺少
+        # scope: 段，导致用户发第一条消息后出现重复会话（Bug 075）。
         session_id = f"session-{str(ULID())}"
+        thread_id_seed = f"thread-{str(ULID())}"
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=runtime_id,
@@ -715,7 +718,9 @@ class AgentProfileDomainService(DomainServiceBase):
             workspace_id="",
             kind=AgentSessionKind.DIRECT_WORKER,
             status=AgentSessionStatus.ACTIVE,
-            surface="chat",
+            surface="web",
+            thread_id=thread_id_seed,
+            legacy_session_id=thread_id_seed,
             created_at=now,
             updated_at=now,
         )

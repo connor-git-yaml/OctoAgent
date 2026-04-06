@@ -322,6 +322,17 @@ class WorkerProfileDomainService(DomainServiceBase):
             (item for item in items if item.profile_id == default_profile_id),
             None,
         )
+        # default_profile_id 可能指向 AgentProfile（不在 WorkerProfiles 列表中）。
+        # 当 WorkerProfile 查不到时，额外查 AgentProfile 以获取正确名称（Bug 075）。
+        default_profile_name = default_profile.name if default_profile is not None else ""
+        default_profile_scope = default_profile.scope if default_profile is not None else ""
+        if not default_profile_name and default_profile_id:
+            agent_profile_fallback = await self._stores.agent_context_store.get_agent_profile(
+                default_profile_id
+            )
+            if agent_profile_fallback is not None:
+                default_profile_name = agent_profile_fallback.name or ""
+                default_profile_scope = str(agent_profile_fallback.scope) if agent_profile_fallback.scope else ""
 
         return WorkerProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
@@ -359,8 +370,8 @@ class WorkerProfileDomainService(DomainServiceBase):
                     [item for item in items if item.dynamic_context.attention_work_count > 0]
                 ),
                 "default_profile_id": default_profile_id,
-                "default_profile_name": default_profile.name if default_profile is not None else "",
-                "default_profile_scope": default_profile.scope if default_profile is not None else "",
+                "default_profile_name": default_profile_name,
+                "default_profile_scope": default_profile_scope,
             },
             capabilities=[
                 ControlPlaneCapability(
