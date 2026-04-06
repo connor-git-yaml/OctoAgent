@@ -37,6 +37,7 @@ def _make_task(task_id: str, status: TaskStatus) -> Task:
 async def db_conn():
     """内存 SQLite 连接，已初始化 schema"""
     conn = await aiosqlite.connect(":memory:")
+    conn.row_factory = aiosqlite.Row
     await init_db(conn)
     yield conn
     await conn.close()
