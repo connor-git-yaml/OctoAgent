@@ -6,6 +6,7 @@ import type { ConfigFieldHint, SetupReviewSummary } from "../../types";
 import SettingsHintFields from "./SettingsHintFields";
 import SettingsOverview from "./SettingsOverview";
 import SettingsProviderSection from "./SettingsProviderSection";
+import { translateWarning } from "../memory/shared";
 import SettingsResourceLimitsSection from "./SettingsResourceLimitsSection";
 import {
   CUSTOM_PROVIDER_FIELD_PATHS,
@@ -617,8 +618,8 @@ export default function SettingsPage() {
 
         {(memory.warnings ?? []).length > 0 ? (
           <div className="wb-inline-banner is-error" role="alert">
-            <strong>Memory 当前有提醒</strong>
-            <span>{(memory.warnings ?? []).join("；")}</span>
+            <strong>记忆服务提醒</strong>
+            <span>{(memory.warnings ?? []).map(translateWarning).join("；")}</span>
           </div>
         ) : null}
       </section>

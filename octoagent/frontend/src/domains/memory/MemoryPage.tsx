@@ -12,6 +12,7 @@ import {
   buildMemoryNarrative,
   formatLayerLabel,
   formatPartitionLabel,
+  translateWarning,
   type MemoryNarrative,
   uniqueOptions,
 } from "./shared";
@@ -261,7 +262,7 @@ export default function MemoryPage() {
       {narrative.memoryWarnings.length > 0 ? (
         <div className="wb-inline-banner is-error">
           <strong>注意</strong>
-          <span>{narrative.memoryWarnings.join("；")}</span>
+          <span>{narrative.memoryWarnings.map(translateWarning).join("；")}</span>
         </div>
       ) : null}
 

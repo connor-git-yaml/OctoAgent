@@ -6,6 +6,17 @@ import type {
   OperatorInboxItem,
 } from "../../types";
 
+const WARNING_LABELS: Record<string, string> = {
+  "memory snapshot unavailable": "记忆服务暂时不可用，数据不会丢失，稍后会自动恢复。",
+  "retrieval_platform snapshot unavailable": "检索服务暂时不可用，不影响已有记忆。",
+  "diagnostics snapshot unavailable": "诊断服务暂时不可用。",
+};
+
+/** 将后端原始 warning 翻译为用户友好文案 */
+export function translateWarning(raw: string): string {
+  return WARNING_LABELS[raw] ?? raw;
+}
+
 const LAYER_LABELS: Record<string, string> = {
   sor: "现行事实",
   fragment: "片段",
