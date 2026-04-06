@@ -3874,11 +3874,38 @@
 
 .wb-topbar-menu {
   display: none;
-  min-height: 40px;
-  padding: 0 12px;
-  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
   border: 1px solid var(--cp-border);
   background: var(--cp-card);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wb-topbar-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--cp-border);
+  border-radius: 8px;
+  background: var(--cp-card);
+  color: var(--cp-muted);
+  font-size: 1.15rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.wb-topbar-refresh:hover {
+  color: var(--cp-ink);
+  background: var(--cp-bg);
 }
 
 .wb-boot {
@@ -4045,8 +4072,6 @@
   }
 
   .wb-hero,
-  .wb-topbar,
-  .wb-topbar-leading,
   .wb-chat-head,
   .wb-chat-head-actions,
   .wb-panel-head,
@@ -4072,7 +4097,6 @@
     align-items: flex-start;
   }
 
-  .wb-topbar-actions,
   .wb-hero-actions,
   .wb-settings-hero-actions,
   .wb-chat-head-actions,
@@ -4100,6 +4124,28 @@
 
   .wb-chat-activity-item {
     grid-template-columns: auto 1fr;
+  }
+
+  .wb-topbar {
+    gap: var(--cp-space-2);
+    padding-bottom: 0;
+  }
+
+  .wb-topbar-leading {
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .wb-topbar-meta {
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .wb-topbar-actions {
+    gap: 6px;
+    flex-shrink: 0;
   }
 
   .wb-hero-insights {

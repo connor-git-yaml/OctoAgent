@@ -436,13 +436,11 @@ export default function WorkbenchLayout() {
                 onClick={() => setNavOpen((current) => !current)}
                 aria-label="切换导航"
               >
-                导航
+                ☰
               </button>
-              <div className="wb-topbar-copy">
-                <p className="wb-topbar-meta">
-                  更新于 {formatDateTime(snapshot.generated_at)}
-                </p>
-              </div>
+              <p className="wb-topbar-meta">
+                {formatDateTime(snapshot.generated_at)}
+              </p>
             </div>
             <div className="wb-topbar-actions">
               <span className={`wb-status-pill is-${diagnostics.overall_status}`}>
@@ -450,10 +448,12 @@ export default function WorkbenchLayout() {
               </span>
               <button
                 type="button"
-                className="wb-button wb-button-secondary wb-button-inline"
+                className="wb-topbar-refresh"
                 onClick={() => void workbench.refreshSnapshot()}
+                aria-label="刷新"
+                title="刷新"
               >
-                刷新
+                ↻
               </button>
             </div>
           </header>
