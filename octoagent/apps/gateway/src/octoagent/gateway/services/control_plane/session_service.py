@@ -573,6 +573,12 @@ class SessionDomainService(DomainServiceBase):
             )
         # ── 第二遍：从 agent_sessions 补充没有 task 的会话 ──
         existing_session_ids = {item.session_id for item in session_items}
+        # 二级去重：按 (thread_id, project_id) 对防止格式差异导致的重复（075-fix）
+        existing_thread_project_pairs = {
+            (item.thread_id, item.project_id)
+            for item in session_items
+            if item.thread_id and item.project_id
+        }
         all_agent_sessions = await self._stores.agent_context_store.list_agent_sessions(
             limit=50,
         )
@@ -597,6 +603,10 @@ class SessionDomainService(DomainServiceBase):
                 project_id=agent_sess.project_id,
             )
             if projected_session_id in existing_session_ids:
+                continue
+            # 二级去重：同一 (thread_id, project_id) 对已经在第一遍出现过则跳过
+            session_thread = agent_sess.thread_id or agent_sess.agent_session_id
+            if (session_thread, agent_sess.project_id) in existing_thread_project_pairs:
                 continue
             proj = await self._stores.project_store.get_project(agent_sess.project_id)
             project_name = proj.name if proj else "未命名对话"
