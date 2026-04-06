@@ -26,8 +26,16 @@ export function useWorkbench() {
   return value;
 }
 
-function formatActionResult(message: { message: string; code: string }): string {
-  const normalized = String(message.message ?? "").trim();
+function formatActionResultMessage(message: string, code: string): string {
+  const normalized = String(message ?? "").trim();
+  // 把后端技术性错误翻译为用户友好文案
+  if (
+    normalized.startsWith("Expecting value:") ||
+    normalized.startsWith("JSONDecodeError") ||
+    code === "ACTION_EXECUTION_FAILED"
+  ) {
+    return "操作执行时遇到内部错误，请刷新页面后重试。";
+  }
   return normalized || "刚才的操作已经处理完成。";
 }
 
@@ -466,9 +474,31 @@ export default function WorkbenchLayout() {
           ) : null}
 
           {workbench.lastAction && !suppressChatSetupReviewBanner ? (
-            <div className="wb-inline-banner is-muted">
-              <strong>{formatActionResult(workbench.lastAction)}</strong>
-              <span>{formatDateTime(workbench.lastAction.handled_at)}</span>
+            <div
+              className={
+                workbench.lastAction.status === "rejected"
+                  ? "wb-inline-banner is-error"
+                  : "wb-inline-banner is-muted"
+              }
+            >
+              <strong>
+                {workbench.lastAction.status === "rejected"
+                  ? "刚才的操作没有成功。"
+                  : formatActionResultMessage(
+                      workbench.lastAction.message,
+                      workbench.lastAction.code
+                    )}
+              </strong>
+              {workbench.lastAction.status === "rejected" ? (
+                <span>
+                  {formatActionResultMessage(
+                    workbench.lastAction.message,
+                    workbench.lastAction.code
+                  )}
+                </span>
+              ) : (
+                <span>{formatDateTime(workbench.lastAction.handled_at)}</span>
+              )}
             </div>
           ) : null}
 
