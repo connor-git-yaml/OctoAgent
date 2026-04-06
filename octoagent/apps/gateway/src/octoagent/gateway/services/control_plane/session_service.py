@@ -1089,6 +1089,11 @@ class SessionDomainService(DomainServiceBase):
             )
             for item in candidates:
                 _append(item)
+            # 旧会话的 legacy_session_id 可能为空（075 fix 之前创建的 DIRECT_WORKER），
+            # 但 thread_id 可能等于 agent_session_id，尝试直接按 ID 查找。
+            direct = await self._stores.agent_context_store.get_agent_session(normalized)
+            if direct is not None and (not project_id or direct.project_id == project_id):
+                _append(direct)
 
         related_sessions.sort(key=lambda item: item.updated_at, reverse=True)
         return related_sessions
@@ -1588,6 +1593,13 @@ class SessionDomainService(DomainServiceBase):
         task_ids: list[str] = []
         if session_state is not None:
             task_ids = list(session_state.task_ids) if session_state.task_ids else []
+        # 回退：session_state 可能不存在（旧会话或 DIRECT_WORKER 无 task），
+        # 通过投影匹配收集关联 task（075-fix）。
+        if not task_ids:
+            session_tasks = await self._list_tasks_for_projected_session(
+                session_id=session.session_id,
+            )
+            task_ids = [t.task_id for t in session_tasks]
 
         active_task_statuses = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"}
         active_tasks: list[tuple[str, str]] = []
