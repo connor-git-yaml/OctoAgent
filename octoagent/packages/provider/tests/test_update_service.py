@@ -15,6 +15,7 @@ from octoagent.core.models import (
 )
 from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from octoagent.provider.dx.update_service import (
+    _default_run_command,
     ActiveUpdateError,
     UpdateActionError,
     UpdateService,
@@ -58,6 +59,23 @@ def _descriptor(tmp_path: Path) -> ManagedRuntimeDescriptor:
         created_at=now,
         updated_at=now,
     )
+
+
+def test_default_run_command_preserves_stdout_and_stderr_on_failure(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError) as exc_info:
+        _default_run_command(
+            [
+                "/bin/bash",
+                "-lc",
+                "printf 'frontend build failed\\n'; printf 'npm warn deprecated\\n' >&2; exit 1",
+            ],
+            tmp_path,
+        )
+
+    message = str(exc_info.value)
+    assert "命令执行失败" in message
+    assert "[stdout]\nfrontend build failed" in message
+    assert "[stderr]\nnpm warn deprecated" in message
 
 
 @pytest.mark.asyncio

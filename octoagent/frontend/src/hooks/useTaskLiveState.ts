@@ -17,25 +17,20 @@ import { readExecutionSessionDocument } from "../domains/chat/session";
 import { TERMINAL_TASK_STATUSES } from "../domains/chat/constants";
 import type {
   ApprovalListItem,
+  ControlPlaneResourceRef,
   ExecutionSessionDocument,
   TaskDetailResponse,
 } from "../types";
 
-interface SnapshotResourceRef {
-  resource_type: string;
-  resource_id: string;
-  schema_version: string;
-}
-
 interface UseTaskLiveStateParams {
-  taskId: string | undefined;
+  taskId: string | null | undefined;
   /** 外部强制轮询信号（如 streaming 中） */
   shouldPoll: boolean;
   approvalSignal: number;
   /** 需要刷新的 snapshot resource refs */
-  snapshotResourceRefs: SnapshotResourceRef[];
+  snapshotResourceRefs: ControlPlaneResourceRef[];
   /** useWorkbench().refreshResources */
-  refreshResources: (refs: SnapshotResourceRef[]) => Promise<void>;
+  refreshResources: (refs?: ControlPlaneResourceRef[]) => Promise<void>;
 }
 
 interface FetchedLiveState {
@@ -107,7 +102,16 @@ export function useTaskLiveState({
       return;
     }
     const cancelledRef = { current: false };
-    void fetchAll(taskId, cancelledRef);
+    void (async () => {
+      await fetchAll(taskId, cancelledRef);
+      if (cancelledRef.current) {
+        return;
+      }
+      const refs = snapshotResourceRefsRef.current;
+      if (refs.length > 0) {
+        await refreshResourcesRef.current(refs);
+      }
+    })();
     return () => { cancelledRef.current = true; };
   }, [taskId, fetchAll]);
 

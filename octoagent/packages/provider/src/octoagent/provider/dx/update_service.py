@@ -67,6 +67,22 @@ class ActiveUpdateError(UpdateActionError):
         )
 
 
+def _format_command_failure(
+    command: list[str],
+    *,
+    stdout: str,
+    stderr: str,
+) -> str:
+    parts = [f"命令执行失败: {' '.join(command)}"]
+    normalized_stdout = stdout.strip()
+    normalized_stderr = stderr.strip()
+    if normalized_stdout:
+        parts.append(f"[stdout]\n{normalized_stdout}")
+    if normalized_stderr:
+        parts.append(f"[stderr]\n{normalized_stderr}")
+    return "\n\n".join(parts)
+
+
 def _default_run_command(command: list[str], cwd: Path) -> str:
     result = subprocess.run(
         command,
@@ -76,8 +92,13 @@ def _default_run_command(command: list[str], cwd: Path) -> str:
         text=True,
     )
     if result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(stderr or f"命令执行失败: {' '.join(command)}")
+        raise RuntimeError(
+            _format_command_failure(
+                command,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        )
     return result.stdout.strip()
 
 

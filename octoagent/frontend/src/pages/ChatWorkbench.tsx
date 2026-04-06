@@ -46,6 +46,7 @@ import { useAutoScroll } from "../hooks/useAutoScroll";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
 import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
+  ControlPlaneResourceRef,
   OperatorActionKind,
   OperatorInboxItem,
 } from "../types";
@@ -166,10 +167,14 @@ export default function ChatWorkbench() {
   const { containerRef: chatScrollRef, endRef: messagesEndAutoRef, showNewMessageHint, scrollToBottom } =
     useAutoScroll([messages], taskId);
 
-  const snapshotResourceRefs = useMemo(() => {
+  const snapshotResourceRefs = useMemo<ControlPlaneResourceRef[]>(() => {
     const res = snapshot?.resources;
     if (!res) return [];
-    return [res.sessions, res.delegation, res.context_continuity];
+    return [res.sessions, res.delegation, res.context_continuity].map((resource) => ({
+      resource_type: resource.resource_type,
+      resource_id: resource.resource_id,
+      schema_version: resource.schema_version,
+    }));
   }, [snapshot?.resources]);
 
   const { taskDetail, executionSession, pendingApprovals, refreshNow: refreshTaskLiveState } = useTaskLiveState({
@@ -608,24 +613,8 @@ export default function ChatWorkbench() {
       title: "这轮确认已经处理",
       message: result.message || "主助手会基于你的确认继续往下执行。",
     });
-    if (taskId) {
-      void refreshResources([
-        {
-          resource_type: snapshot!.resources.sessions.resource_type,
-          resource_id: snapshot!.resources.sessions.resource_id,
-          schema_version: snapshot!.resources.sessions.schema_version,
-        },
-        {
-          resource_type: snapshot!.resources.delegation.resource_type,
-          resource_id: snapshot!.resources.delegation.resource_id,
-          schema_version: snapshot!.resources.delegation.schema_version,
-        },
-        {
-          resource_type: snapshot!.resources.context_continuity.resource_type,
-          resource_id: snapshot!.resources.context_continuity.resource_id,
-          schema_version: snapshot!.resources.context_continuity.schema_version,
-        },
-      ]);
+    if (taskId && snapshotResourceRefs.length > 0) {
+      void refreshResources(snapshotResourceRefs);
     }
   }
 
