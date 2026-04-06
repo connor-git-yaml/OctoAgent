@@ -1766,6 +1766,22 @@
   gap: 10px;
 }
 
+@media (max-width: 720px) {
+  .wb-settings-section-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .wb-settings-section-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .wb-settings-section-nav .wb-section-chip {
+    flex-shrink: 0;
+  }
+}
+
 .wb-section-chip {
   display: inline-flex;
   align-items: center;
@@ -3978,12 +3994,27 @@
   }
 
   .wb-sidebar {
-    position: static;
+    position: fixed;
+    inset: 0;
+    z-index: 900;
     display: none;
+    border-radius: 0;
+    padding: 14px;
+    padding-top: max(14px, env(safe-area-inset-top));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .wb-sidebar.is-open {
-    display: grid;
+    display: flex;
+  }
+
+  .wb-sidebar.is-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: rgba(0, 0, 0, 0.45);
   }
 
   .wb-topbar-menu {
@@ -4069,6 +4100,21 @@
 
   .wb-chat-activity-item {
     grid-template-columns: auto 1fr;
+  }
+
+  .wb-hero-insights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .wb-hero-metric {
+    min-height: 80px;
+    padding: 10px;
+    font-size: 0.84rem;
+  }
+
+  .wb-hero-metric strong {
+    font-size: 1.1rem;
   }
 
   .wb-chat-activity-item .wb-status-pill {

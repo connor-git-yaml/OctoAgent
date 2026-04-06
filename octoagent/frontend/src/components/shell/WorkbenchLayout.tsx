@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import NewSessionModal from "../ChatUI/NewSessionModal";
 import DeleteSessionModal from "../ChatUI/DeleteSessionModal";
@@ -225,6 +225,22 @@ function ChatNavSection({
 export default function WorkbenchLayout() {
   const workbench = useWorkbenchData();
   const [navOpen, setNavOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+
+  // 移动端点击 sidebar 外部关闭
+  useEffect(() => {
+    if (!navOpen) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (sidebarRef.current?.contains(target)) return;
+      if (menuBtnRef.current?.contains(target)) return;
+      setNavOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [navOpen]);
+
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [newSessionBusy, setNewSessionBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SessionProjectionItem | null>(null);
@@ -353,7 +369,7 @@ export default function WorkbenchLayout() {
   return (
     <WorkbenchContext.Provider value={workbench}>
       <div className="wb-shell">
-        <aside className={`wb-sidebar ${navOpen ? "is-open" : ""}`}>
+        <aside ref={sidebarRef} className={`wb-sidebar ${navOpen ? "is-open" : ""}`}>
             <div className="wb-sidebar-card wb-sidebar-brand">
               <p className="wb-kicker">你的工作台</p>
               <div className="wb-brand-lockup">
@@ -414,6 +430,7 @@ export default function WorkbenchLayout() {
           <header className="wb-topbar">
             <div className="wb-topbar-leading">
               <button
+                ref={menuBtnRef}
                 type="button"
                 className="wb-topbar-menu"
                 onClick={() => setNavOpen((current) => !current)}
