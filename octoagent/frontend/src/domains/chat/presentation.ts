@@ -1,5 +1,5 @@
 export function formatTaskStatusLabel(status: string): string {
-  switch (status.trim().toUpperCase()) {
+  switch (String(status ?? "").trim().toUpperCase()) {
     case "QUEUED":
       return "排队中";
     case "RUNNING":
@@ -24,7 +24,7 @@ export function formatTaskStatusLabel(status: string): string {
 }
 
 export function formatTaskStatusTone(status: string): string {
-  switch (status.trim().toUpperCase()) {
+  switch (String(status ?? "").trim().toUpperCase()) {
     case "SUCCEEDED":
       return "success";
     case "RUNNING":
@@ -49,7 +49,7 @@ export function formatAgentRoleLabel(
   agent: string,
   opts?: { isMainAgent?: boolean },
 ): string {
-  const normalized = agent.trim().toLowerCase();
+  const normalized = String(agent ?? "").trim().toLowerCase();
   if (!normalized) {
     return "未分配";
   }
@@ -69,7 +69,7 @@ export function formatAgentRoleLabel(
 }
 
 export function formatToolBoundaryLabel(mode: string): string {
-  switch (mode.trim().toLowerCase()) {
+  switch (String(mode ?? "").trim().toLowerCase()) {
     case "profile_first_core":
       return "优先沿用当前模板的工具范围";
     case "runtime_first":
@@ -82,7 +82,7 @@ export function formatToolBoundaryLabel(mode: string): string {
 }
 
 export function formatDiscoveryEntrypointLabel(entrypoint: string): string {
-  switch (entrypoint.trim().toLowerCase()) {
+  switch (String(entrypoint ?? "").trim().toLowerCase()) {
     case "work.plan":
       return "让系统重新评估是否需要额外角色";
     case "memory.search":

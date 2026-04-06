@@ -193,7 +193,7 @@ function buildMetadataEntries(
 }
 
 function buildRecordTitle(record: MemoryRecordProjection): string {
-  const subjectKey = record.subject_key.trim();
+  const subjectKey = String(record.subject_key ?? "").trim();
   if (record.layer === "derived") {
     if (subjectKey) {
       return subjectKey;
@@ -314,7 +314,7 @@ export function formatRecordTitle(record: MemoryRecordProjection): string {
 }
 
 export function formatRecordStatus(record: MemoryRecordProjection): string {
-  const normalized = record.status.trim().toLowerCase();
+  const normalized = String(record.status ?? "").trim().toLowerCase();
   switch (normalized) {
     case "current":
       return "当前结论";
@@ -330,7 +330,7 @@ export function formatRecordStatus(record: MemoryRecordProjection): string {
 }
 
 export function describeRecord(record: MemoryRecordProjection): string {
-  if (record.summary.trim()) {
+  if (String(record.summary ?? "").trim()) {
     return record.summary;
   }
   if (record.layer === "fragment") {

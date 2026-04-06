@@ -111,10 +111,10 @@ export function isAgentDirectExecution(work: WorkProjectionItem | null | undefin
   if (!work) {
     return false;
   }
-  const runtimeId = work.runtime_id.trim().toLowerCase();
-  const selectedWorkerType = work.selected_worker_type.trim().toLowerCase();
-  const targetKind = work.target_kind.trim().toLowerCase();
-  const routeReason = work.route_reason.trim().toLowerCase();
+  const runtimeId = String(work.runtime_id ?? "").trim().toLowerCase();
+  const selectedWorkerType = String(work.selected_worker_type ?? "").trim().toLowerCase();
+  const targetKind = String(work.target_kind ?? "").trim().toLowerCase();
+  const routeReason = String(work.route_reason ?? "").trim().toLowerCase();
   return (
     runtimeId === "worker.llm.default" &&
     selectedWorkerType === "general" &&

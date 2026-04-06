@@ -52,13 +52,13 @@
 }
 
 .wb-button-secondary {
-  background: rgba(255, 255, 255, 0.9);
-  border-color: rgba(20, 32, 47, 0.1);
+  background: var(--cp-card);
+  border-color: var(--cp-border);
   color: var(--cp-ink);
 }
 
 .wb-button-tertiary {
-  background: rgba(20, 32, 47, 0.04);
+  background: var(--cp-bg);
   color: var(--cp-ink);
 }
 
@@ -71,12 +71,12 @@
 }
 
 .wb-inline-banner.is-error {
-  border-color: rgba(194, 65, 12, 0.22);
-  background: rgba(255, 240, 233, 0.92);
+  border-color: var(--cp-danger-border, rgba(194, 65, 12, 0.22));
+  background: var(--cp-danger-bg, rgba(255, 240, 233, 0.92));
 }
 
 .wb-inline-banner.is-muted {
-  background: rgba(247, 250, 251, 0.9);
+  background: var(--cp-bg);
 }
 
 .wb-callout-copy {

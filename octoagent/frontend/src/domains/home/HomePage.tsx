@@ -147,7 +147,7 @@ function buildAvailabilityImpact(options: {
   if (!options.setupReady) {
     return "当前配置还没完全收口；先补齐阻塞项，再开始会更稳。";
   }
-  if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
+  if (!READY_DIAGNOSTIC_STATUSES.has(String(options.diagnosticsStatus ?? "").trim().toLowerCase())) {
     return "普通聊天还能继续，但联网查询、外部连接或后台能力可能会变慢或失败。";
   }
   return "普通聊天、联网查询和多 Agent 协作都已经可以直接开始。";
@@ -227,7 +227,7 @@ function buildPrimaryState(options: {
     };
   }
 
-  if (!READY_DIAGNOSTIC_STATUSES.has(options.diagnosticsStatus.trim().toLowerCase())) {
+  if (!READY_DIAGNOSTIC_STATUSES.has(String(options.diagnosticsStatus ?? "").trim().toLowerCase())) {
     return {
       title: "部分能力受限",
       summary: "基础对话正常，联网查询或后台任务可能不稳定。",

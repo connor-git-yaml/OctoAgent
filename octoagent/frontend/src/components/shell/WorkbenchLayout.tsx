@@ -27,12 +27,12 @@ export function useWorkbench() {
 }
 
 function formatActionResult(message: { message: string; code: string }): string {
-  const normalized = message.message.trim();
+  const normalized = String(message.message ?? "").trim();
   return normalized || "刚才的操作已经处理完成。";
 }
 
 function formatDiagnosticsLabel(status: string): string {
-  const normalized = status.trim().toLowerCase();
+  const normalized = String(status ?? "").trim().toLowerCase();
   if (["ready", "ok", "healthy"].includes(normalized)) {
     return "可直接使用";
   }
@@ -52,7 +52,7 @@ function buildShellStatus(options: {
   diagnosticsStatus: string;
   activeWorkCount: number;
 }): { title: string; summary: string } {
-  const diagnosticsNormalized = options.diagnosticsStatus.trim().toLowerCase();
+  const diagnosticsNormalized = String(options.diagnosticsStatus ?? "").trim().toLowerCase();
   if (options.runtimeMode === "echo") {
     return {
       title: "还在体验模式",

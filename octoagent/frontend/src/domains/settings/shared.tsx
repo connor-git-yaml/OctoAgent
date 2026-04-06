@@ -315,7 +315,7 @@ export function parseProviderDrafts(rawValue: string | boolean | undefined): Pro
       base_url: String(item.base_url ?? ""),
       enabled: item.enabled !== false,
     }))
-    .filter((item) => item.id.trim());
+    .filter((item) => String(item.id ?? "").trim());
 }
 
 export function stringifyProviderDrafts(items: ProviderDraftItem[]): string {
@@ -356,9 +356,9 @@ export function stringifyAliasDrafts(items: ModelAliasDraftItem[]): string {
   return JSON.stringify(
     Object.fromEntries(
       items
-        .filter((item) => item.alias.trim())
+        .filter((item) => String(item.alias ?? "").trim())
         .map((item) => [
-          item.alias.trim(),
+          String(item.alias ?? "").trim(),
           {
             provider: item.provider,
             model: item.model,
@@ -470,8 +470,8 @@ export function reasoningSupportStateForAlias(
   providerId: string,
   modelName: string
 ): ReasoningSupportState {
-  const provider = providerId.trim().toLowerCase();
-  const model = modelName.trim().toLowerCase();
+  const provider = String(providerId ?? "").trim().toLowerCase();
+  const model = String(modelName ?? "").trim().toLowerCase();
   if (!provider || !model) {
     return "pending";
   }
