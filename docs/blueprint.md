@@ -12,7 +12,7 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered（2026-03-08 同步）
+- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered / M4-Delivered（2026-04-06 同步）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
@@ -364,7 +364,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | M1.5 Agent 闭环 | ✅ | Orchestrator + Worker + Policy |
 | M2 多渠道多 Worker | ✅ | Telegram + A2A + JobRunner + Memory |
 | M3 增强 | ✅ | Chat Import + Vault + ToolIndex + Pipeline |
-| M4 引导式工作台 | 🔄 | 063 Phase 3 + 071b 剩余 Slice 待完成 |
+| M4 引导式工作台 | ✅ | 30 Feature 全部完成（071b-D 高层工具 + 063-P3 Compactor 推迟到 M5） |
 | M5 文件工作台 | ⏳ | 语音/多模态/Companion/通知中心 |
 
 ### 待办汇总

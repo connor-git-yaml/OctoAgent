@@ -379,43 +379,34 @@ $PROJECT_ROOT (~/.octoagent)/
 - [x] Feature 054：Builtin Memory Engine & Shared Retrieval Platform（`local_only` 已升级为内建 Memory Engine，默认优先使用本地 `Qwen3-Embedding-0.6B`，不可用时回退到双语 hash embedding；`memory_reasoning / memory_expand / memory_embedding / memory_rerank` 已接入 Settings / CLI / runtime；`EmbeddingProfile / IndexGeneration / IndexBuildJob / CorpusKind` 已形成共享 retrieval platform contract，Memory 与未来 knowledge base 共用 generation lifecycle；embedding 迁移已支持后台 build、进度展示、cutover / cancel / rollback，且迁移期间旧 generation 持续服务；facts / Vault 候选仍走 proposal / commit / grant / audit 治理链）
 - [x] Feature 053：Session-Scoped Project Activation（对齐 Agent Zero 的 `each chat/context has its own active project` 语义；**Project ↔ Session 一一对应**——每个 Project 同时只有一个活跃 Session，每个 Session 锁定一个 Project；`session.new` 现在会冻结当前 `project_id/workspace_id` 并形成待消费的新会话 snapshot；chat 首条消息会透传 token + project/workspace 并写入 `workspace:<workspace_id>:chat:<channel>:<thread_id>` durable scope；`session.focus / session.reset` 会恢复目标会话自己的 project/workspace 到 control-plane selector；Web `useChatStream / ChatWorkbench` 也已支持 pending snapshot 的刷新恢复，不再把新会话 project 绑定退回 surface-selected selector）
 - [x] Feature 058：MCP Install Lifecycle & Session Pool（MCP server 完整安装生命周期管理：npm/pip 一键安装向导、安装注册表持久化 `mcp-installs.json`、McpSessionPool 持久连接池（auto-reconnect + health check）、McpInstallerService 异步安装任务与子进程 env 隔离、control plane 新增 `mcp_provider.install / install_status / uninstall` 三个 action、前端 McpInstallWizard 五步安装向导；MCP 工具继续走 ToolBroker / Policy / Audit 主链，McpServerConfig 与 McpRegistryService 保持不变仅扩展）
-- [ ] Feature 050：Agent Management Simplification（把 `Agents` 收口为"当前项目主 Agent + 已创建 Agent 列表 + 模板创建流"，并将结构化编辑控件替代技术字段编辑主路径）
-- [ ] Feature 063：Behavior File Lifecycle & Smart Loading（Bootstrap 双触发完成检测、BehaviorLoadProfile 差异化加载（FULL/WORKER/MINIMAL）、head/tail 截断策略、session 级缓存、Behavior Compactor LLM 智能合并）
+- [x] Feature 050：Agent Management Simplification（`Agents` 页已收口为"当前项目主 Agent + 已创建 Agent 列表 + 模板创建流"，结构化编辑控件已替代技术字段编辑主路径；经代码核查确认已实现）
+- [x] Feature 063：Behavior File Lifecycle & Smart Loading（Phase 1/2 已完成：Bootstrap 双触发完成检测、BehaviorLoadProfile 差异化加载（FULL/WORKER/MINIMAL）、head/tail 截断策略、session 级缓存；Phase 3 Behavior Compactor LLM 智能合并推迟到 M5，M4 仅保留 FR-7 运行时监控指标）
 - [x] Feature 070b：工具系统简化重构（check_permission 单函数替代三套 Hook 体系；PathAccessPolicy 黑名单拦截）
 - [x] Feature 071：Session Owner / Execution Target Separation（session owner / turn executor / delegation target 语义拆分完成）
 - [x] Feature 072b：Core/Deferred 工具分层接通（LLM 首轮 tools schema 从 56 降到 9；tool_search 提升链路连通）
 - [x] Feature 073：Deprecated 残留全面清理（ToolProfile 枚举 + Workspace 概念 + Butler 遗留命名全部清除）
+- [x] Feature 074：Dead Route 修复与 Echo Mode 警示（`/work` 路由注册到 `TaskList`；TaskList 标题/加载态/空态全部中文化）
+- [x] Feature 075：UI 多语言一致性（ApprovalCard 按钮中文化；导航标签 Agents→智能体 / Skills→技能 / Memory→记忆 / Settings→设置；全部加载/空态文案统一中文；22 个文件 75 处文案修正）
+- [x] Feature 076：新会话流程简化（单 Agent 场景直接创建跳过 Modal；多 Agent 默认选中当前 Agent；会话名预填"对话 MM-DD HH:mm"格式）
+- [x] Feature 071b：Align LLM Config Flow（Slice A/B/D/E 核心已实现 + Slice C 文案对齐完成；config.sync/add_provider/set_model_alias description 明确事实源关系；CLI help 与 SKILL.md v2.0.0 对齐；Slice D 高层工具暴露推迟到 M5）
 
 ### M4 当前状态（2026-04-06 更新）
 
-**已完成**（约 24 个 Feature）：032-041, 048-053, 055-056, 058, 070, 070b, 071, 072b, 073
+**已完成**（30 个 Feature）：032-041, 048-056, 058, 063, 070, 070b, 071, 071b, 072b, 073, 074, 075, 076
 
-**部分实现**：
-- 063: Behavior File Lifecycle — Phase 1/2 完成（BehaviorLoadProfile + Bootstrap 完成检测 + 截断策略 + 缓存），Phase 3 未实现（Behavior Compactor LLM 智能合并）
-- 071b: Align LLM Config Flow — Slice A/B/D/E 核心逻辑已实现，Slice C（文案统一）和部分高层工具未完成
-
-**M4 完成标准**：063 Phase 3 和 071b 剩余 Slice 完成后签收。050/056/070 经代码核查确认已实现。
+**M4 签收状态**：全部 Feature 已完成。071b Slice D 高层工具暴露 + 063 Phase 3 Behavior Compactor 推迟到 M5。
 
 M4 约束：
 
 - M4 能力必须建立在 M3 的 project、session、automation、runtime console 之上，不得倒逼重做核心产品对象
-- 上下文压缩与 runtime lineage 类能力必须优先作用于主 Agent / Worker 的真实运行链，并保留 artifact/event/evidence 审计链
-- 主 Agent 默认仍是 supervisor 与最终责任人；但在治理允许且任务有界时，可以直接使用已挂载的受治理工具。只有在并行、专业化、权限隔离或上下文隔离明显更优时，才优先委派给 `research / dev / ops / subagent / graph`
-- 若系统已经具备 delegated `web.search / web.fetch / browser.*` 路径，则 Butler/Worker 必须把"实时/外部事实问题"优先解释为可治理 delegation，而不是直接退回"没有实时能力"的静态回答
-- 默认行为主路径必须来自显式 `BehaviorWorkspace` 与 `RuntimeHintBundle`，由 Butler 产出结构化决策；天气、推荐、排期等问题不得继续扩张为硬编码分类树
-- 049 负责"显式行为文件 + 决策 contract"；051 负责把 session、memory、tooling 真正推进到 agent-native 主链，不得继续把这部分长期停留在 control-plane 预取或弱引用 reconstruction
-- 052 负责把默认工具面从"默认不给工具"收口到"默认给足可逆标准工具、危险动作单独 gate"；后续不得再把 MCP / Skills 的默认配置退回到 `minimal + explicit enable everything`
-- 053 负责把 project 激活从 `surface-selected` 收口到 `session-scoped snapshot`；`/new`、focus、reset、首条消息 scope 与续聊恢复不得再依赖全局 surface selector 漂移
-- deterministic 兼容路径必须显式标记为 compatibility fallback，并在 work / request metadata 中暴露 provenance，避免回退路径再次变成隐藏主路径
-- live dispatch 必须真的经过 `ButlerSession -> A2AConversation -> WorkerSession` 的 message-native 主链，并保留 runtime context / work lineage；不能只有 A2A adapter 或测试样例
-- 每个 Agent 都必须拥有完整上下文管理：session、Memory namespaces、recall、persona、project markdown、policy/tool/auth context 与 scratchpad
-- `WorkerSession` 不得退化为纯运行态结构（如 loop_step/max_steps/tool_profile）；它必须是完整的对话/记忆/召回承载体
-- `AgentSession` 不得长期停留在 `recent_turn_refs -> task/event reconstruction` 形态；recent conversation、follow-up、compaction/export 必须逐步收口到 transcript-native session
-- memory 主链不得长期停留在 system-prefetch-only 模式；051 后默认应支持 agent-led recall，控制面只保留 namespace、预算、审计与降级策略
-- 工作台/图形化配置类能力必须优先复用 015 wizard、026 control-plane canonical API、027 memory console、030 delegation/runtime truth、033 context provenance 与 034 compaction status，不得新造平行 backend
-- 初始化配置/权限治理类能力必须优先复用 015 onboarding、025 wizard/session、026 control-plane actions/resources、030 capability/MCP runtime truth 与 035 workbench 设置入口；不得让 Web 与 CLI 各维护一套 setup 语义
-- 035/036/040 必须显式处理 `context_continuity` 的实际运行状态；若未来再次 degraded，不能把缺失的上下文连续性静默隐藏
-- 本轮从架构纠偏到实现落地的正式执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
+- 主 Agent 默认仍是 supervisor 与最终责任人；治理允许且任务有界时可直接使用受治理工具，仅在并行/专业化/隔离明显更优时才委派 Worker/Subagent
+- 若系统已具备 delegated `web.search / web.fetch / browser.*` 路径，主 Agent/Worker 必须把"实时/外部事实问题"优先解释为可治理 delegation，而非退回"没有实时能力"
+- 默认行为主路径来自 `BehaviorWorkspace` 与 `RuntimeHintBundle`，由主 Agent 产出结构化决策；不得继续扩张硬编码分类树
+- 兼容路径必须显式标记为 compatibility fallback，在 work/request metadata 中暴露 provenance
+- live dispatch 必须经过 `MainAgentSession -> A2AConversation -> WorkerSession` 的 message-native 主链，保留 runtime context / work lineage
+- 每个 Agent 必须拥有完整上下文管理：session、Memory namespaces、recall、persona、project markdown、policy/tool/auth context 与 scratchpad
+- UX 收尾（074-076）以用户可感知的体验改进为目标，不引入新的后端架构变更
+- 本轮执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
 
 ### M5（文件工作台 / 语音多模态 / Companion / Attention）
 
@@ -423,10 +414,13 @@ M4 约束：
 - [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
 - [ ] Progressive Web App / companion surfaces / remote tunnel polish
 - [ ] 更完整的通知中心与 attention model（提醒、升级提示、后台任务完成通知、多端同步提示）
+- [ ] Behavior Compactor LLM 智能合并（从 M4 Feature 063 Phase 3 推迟）
+- [ ] 071b Slice C 文案统一（已合并到 M4 Feature 075 的核心部分，剩余深度 i18n 留到 M5）
 
 M5 说明：
 
 - 这些内容原先放在 M4，但在当前升级波次里不是阻塞用户可用、也不是阻塞三层结构成立的核心项
-- M5 建立在 035/036/039/040 收口完成之后推进，避免继续把"入口闭环"和"未来表面增强"混在同一阶段
+- M5 建立在 M4 收口完成之后推进，避免继续把"入口闭环"和"未来表面增强"混在同一阶段
+- Behavior Compactor 从 063 推迟：Phase 1/2 的截断+缓存已足够支撑当前 behavior 文件规模，LLM 合并属于高级优化
 
 ---

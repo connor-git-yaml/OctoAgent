@@ -56,7 +56,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 - **M1（最小智能闭环）** ✅: LiteLLM + Pydantic Skill + Tool Contract + Policy
 - **M2（多渠道多 Worker）** ✅: Telegram + Worker + A2A-Lite + JobRunner + Memory
 - **M3（增强）** ✅: Chat Import + Vault + ToolIndex + Skill Pipeline Engine
-- **M4（引导式工作台）** 🔄: 用户 Ready 全链路（Feature 056/070/071b 进行中）
+- **M4（引导式工作台）** ✅: 30 Feature 全部完成（071b-D + 063-P3 推迟到 M5）
 - **M5（文件工作台）** ⏳: 语音/多模态/Companion/通知中心
 
 ## 协作行为准则
