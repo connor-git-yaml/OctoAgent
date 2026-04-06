@@ -122,29 +122,33 @@ class SqliteTaskStore:
         )
 
     @staticmethod
-    def _row_to_task(row: aiosqlite.Row) -> Task:
-        """将数据库行转换为 Task 模型
+    def _load_json(value: str | None, default: object) -> object:
+        """防御性 JSON 解析：空值或格式错误时返回 default。"""
+        if not value:
+            return default
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
 
-        列顺序（对应 _TASKS_DDL + migrations）:
-        0=task_id, 1=created_at, 2=updated_at, 3=status, 4=title,
-        5=thread_id, 6=scope_id, 7=requester, 8=risk_level,
-        9=pointers, 10=trace_id, 11=parent_task_id
-        """
-        requester_data = json.loads(row[7])  # requester 列
-        pointers_data = json.loads(row[9])   # pointers 列
+    @classmethod
+    def _row_to_task(cls, row: aiosqlite.Row) -> Task:
+        """将数据库行转换为 Task 模型（name-based 列访问）。"""
+        requester_data = cls._load_json(row["requester"], {})
+        pointers_data = cls._load_json(row["pointers"], {})
         return Task(
-            task_id=row[0],
-            created_at=datetime.fromisoformat(row[1]),
-            updated_at=datetime.fromisoformat(row[2]),
-            status=row[3],
-            title=row[4],
-            thread_id=row[5],
-            scope_id=row[6],
+            task_id=row["task_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            status=row["status"],
+            title=row["title"],
+            thread_id=row["thread_id"],
+            scope_id=row["scope_id"],
             requester=RequesterInfo(**requester_data),
-            risk_level=row[8],
+            risk_level=row["risk_level"],
             pointers=TaskPointers(**pointers_data),
-            trace_id=row[10] if len(row) > 10 else "",  # Feature 011: 追踪 ID
-            parent_task_id=row[11] if len(row) > 11 else None,  # Feature 064: 父任务 ID
+            trace_id=row["trace_id"] if "trace_id" in row.keys() else "",
+            parent_task_id=row["parent_task_id"] if "parent_task_id" in row.keys() else None,
         )
 
     async def delete_tasks(self, task_ids: list[str]) -> int:

@@ -25,6 +25,16 @@ class SqliteProjectStore:
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
 
+    @staticmethod
+    def _load_json(value: str | None, default: object) -> object:
+        """防御性 JSON 解析：空值或格式错误时返回 default。"""
+        if not value:
+            return default
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
     async def save_project(self, project: Project) -> Project:
         await self._conn.execute(
             """
@@ -503,116 +513,79 @@ class SqliteProjectStore:
         row = await cursor.fetchone()
         return int(row[0]) if row is not None else 0
 
-    @staticmethod
-    def _read_row_value(
-        row: aiosqlite.Row,
-        key: str,
-        fallback_index: int,
-    ) -> str:
-        try:
-            return row[key]
-        except (KeyError, TypeError):
-            return row[fallback_index]
-
-    @staticmethod
-    def _row_to_project(row: aiosqlite.Row) -> Project:
+    @classmethod
+    def _row_to_project(cls, row: aiosqlite.Row) -> Project:
         return Project(
-            project_id=row[0],
-            slug=row[1],
-            name=row[2],
-            description=row[3],
-            status=row[4],
-            is_default=bool(row[5]),
-            default_agent_profile_id=row[6],
-            metadata=json.loads(row[7]),
-            created_at=datetime.fromisoformat(row[8]),
-            updated_at=datetime.fromisoformat(row[9]),
-            primary_agent_id=row[10] if len(row) > 10 else "",
+            project_id=row["project_id"],
+            slug=row["slug"],
+            name=row["name"],
+            description=row["description"],
+            status=row["status"],
+            is_default=bool(row["is_default"]),
+            default_agent_profile_id=row["default_agent_profile_id"] if "default_agent_profile_id" in row.keys() else "",
+            metadata=cls._load_json(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            primary_agent_id=row["primary_agent_id"] if "primary_agent_id" in row.keys() else "",
         )
 
-    @staticmethod
-    def _row_to_binding(row: aiosqlite.Row) -> ProjectBinding:
-        binding_type = SqliteProjectStore._read_row_value(row, "binding_type", 2)
-        binding_offset = 0
-        if binding_type not in {item.value for item in ProjectBindingType}:
-            binding_type = SqliteProjectStore._read_row_value(row, "binding_type", 3)
-            binding_offset = 1
+    @classmethod
+    def _row_to_binding(cls, row: aiosqlite.Row) -> ProjectBinding:
         return ProjectBinding(
-            binding_id=SqliteProjectStore._read_row_value(row, "binding_id", 0),
-            project_id=SqliteProjectStore._read_row_value(row, "project_id", 1),
-            binding_type=binding_type,
-            binding_key=SqliteProjectStore._read_row_value(
-                row,
-                "binding_key",
-                3 + binding_offset,
-            ),
-            binding_value=SqliteProjectStore._read_row_value(
-                row,
-                "binding_value",
-                4 + binding_offset,
-            ),
-            source=SqliteProjectStore._read_row_value(row, "source", 5 + binding_offset),
-            metadata=json.loads(
-                SqliteProjectStore._read_row_value(row, "metadata", 6 + binding_offset)
-                or "{}"
-            ),
-            migration_run_id=SqliteProjectStore._read_row_value(
-                row,
-                "migration_run_id",
-                7 + binding_offset,
-            ),
-            created_at=datetime.fromisoformat(
-                SqliteProjectStore._read_row_value(row, "created_at", 8 + binding_offset)
-            ),
-            updated_at=datetime.fromisoformat(
-                SqliteProjectStore._read_row_value(row, "updated_at", 9 + binding_offset)
-            ),
+            binding_id=row["binding_id"],
+            project_id=row["project_id"],
+            binding_type=row["binding_type"],
+            binding_key=row["binding_key"],
+            binding_value=row["binding_value"],
+            source=row["source"],
+            metadata=cls._load_json(row["metadata"], {}),
+            migration_run_id=row["migration_run_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
-    @staticmethod
-    def _row_to_migration_run(row: aiosqlite.Row) -> ProjectMigrationRun:
+    @classmethod
+    def _row_to_migration_run(cls, row: aiosqlite.Row) -> ProjectMigrationRun:
         return ProjectMigrationRun(
-            run_id=row[0],
-            project_root=row[1],
-            status=row[2],
-            started_at=datetime.fromisoformat(row[3]),
-            completed_at=datetime.fromisoformat(row[4]) if row[4] else None,
-            summary=json.loads(row[5]),
-            validation=json.loads(row[6]),
-            rollback_plan=json.loads(row[7]),
-            error_message=row[8],
+            run_id=row["run_id"],
+            project_root=row["project_root"],
+            status=row["status"],
+            started_at=datetime.fromisoformat(row["started_at"]),
+            completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+            summary=cls._load_json(row["summary"], {}),
+            validation=cls._load_json(row["validation"], {}),
+            rollback_plan=cls._load_json(row["rollback_plan"], {}),
+            error_message=row["error_message"],
         )
 
-    @staticmethod
-    def _row_to_secret_binding(row: aiosqlite.Row) -> ProjectSecretBinding:
+    @classmethod
+    def _row_to_secret_binding(cls, row: aiosqlite.Row) -> ProjectSecretBinding:
         return ProjectSecretBinding(
-            binding_id=row[0],
-            project_id=row[1],
-            target_kind=row[2],
-            target_key=row[3],
-            env_name=row[4],
-            ref_source_type=row[5],
-            ref_locator=json.loads(row[6]),
-            display_name=row[7],
-            redaction_label=row[8],
-            status=row[9],
-            last_audited_at=datetime.fromisoformat(row[10]) if row[10] else None,
-            last_applied_at=datetime.fromisoformat(row[11]) if row[11] else None,
-            last_reloaded_at=datetime.fromisoformat(row[12]) if row[12] else None,
-            metadata=json.loads(row[13]),
-            created_at=datetime.fromisoformat(row[14]),
-            updated_at=datetime.fromisoformat(row[15]),
+            binding_id=row["binding_id"],
+            project_id=row["project_id"],
+            target_kind=row["target_kind"],
+            target_key=row["target_key"],
+            env_name=row["env_name"],
+            ref_source_type=row["ref_source_type"],
+            ref_locator=cls._load_json(row["ref_locator"], {}),
+            display_name=row["display_name"],
+            redaction_label=row["redaction_label"],
+            status=row["status"],
+            last_audited_at=datetime.fromisoformat(row["last_audited_at"]) if row["last_audited_at"] else None,
+            last_applied_at=datetime.fromisoformat(row["last_applied_at"]) if row["last_applied_at"] else None,
+            last_reloaded_at=datetime.fromisoformat(row["last_reloaded_at"]) if row["last_reloaded_at"] else None,
+            metadata=cls._load_json(row["metadata"], {}),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
-    @staticmethod
-    def _row_to_selector_state(row: aiosqlite.Row) -> ProjectSelectorState:
-        # 列顺序: selector_id(0), surface(1), active_project_id(2),
-        #         active_workspace_id(3), source(4), warnings(5), updated_at(6)
+    @classmethod
+    def _row_to_selector_state(cls, row: aiosqlite.Row) -> ProjectSelectorState:
         return ProjectSelectorState(
-            selector_id=row[0],
-            surface=row[1],
-            active_project_id=row[2],
-            source=row[4],
-            warnings=json.loads(row[5] or "[]"),
-            updated_at=datetime.fromisoformat(row[6]),
+            selector_id=row["selector_id"],
+            surface=row["surface"],
+            active_project_id=row["active_project_id"],
+            source=row["source"],
+            warnings=cls._load_json(row["warnings"], []),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
         )

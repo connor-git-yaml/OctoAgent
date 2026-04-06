@@ -27,6 +27,7 @@ async def core_db(core_db_path: Path) -> AsyncGenerator[aiosqlite.Connection, No
     from octoagent.core.store.sqlite_init import init_db
 
     conn = await aiosqlite.connect(str(core_db_path))
+    conn.row_factory = aiosqlite.Row
     await init_db(conn)
     yield conn
     await conn.close()
