@@ -13,11 +13,9 @@
   display: grid;
   gap: var(--cp-space-4);
   padding: var(--cp-space-5);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-xl);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 242, 232, 0.88)),
-    var(--cp-card-strong);
+  background: var(--cp-card-strong);
   box-shadow: var(--cp-shadow);
   backdrop-filter: blur(18px);
 }
@@ -176,8 +174,8 @@
 
 .cp-secondary-button,
 .cp-link-button {
-  background: rgba(255, 255, 255, 0.88);
-  border-color: rgba(20, 32, 47, 0.1);
+  background: var(--cp-card);
+  border-color: var(--cp-border);
   color: var(--cp-ink);
 }
 
@@ -226,9 +224,7 @@
 .cp-hero-panel {
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 28%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(253, 244, 230, 0.92));
+  background: var(--cp-card-strong);
 }
 
 .cp-hero-panel::after {
@@ -418,9 +414,9 @@
 .cp-select,
 .cp-textarea {
   width: 100%;
-  border: 1px solid rgba(20, 32, 47, 0.12);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-md);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--cp-card);
   color: var(--cp-ink);
 }
 
@@ -443,8 +439,8 @@
   min-height: 42px;
   padding: 0 12px;
   border-radius: var(--cp-radius-md);
-  border: 1px solid rgba(20, 32, 47, 0.12);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .cp-config-field small {
@@ -498,7 +494,7 @@
 .timeline-item {
   padding: var(--cp-space-3);
   border-radius: var(--cp-radius-md);
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--cp-card);
   border: 1px solid var(--cp-border);
 }
 
@@ -621,11 +617,9 @@
   display: grid;
   gap: var(--cp-space-4);
   padding: var(--cp-space-5);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-xl);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 242, 232, 0.88)),
-    var(--cp-card-strong);
+  background: var(--cp-card-strong);
   box-shadow: var(--cp-shadow);
   backdrop-filter: blur(18px);
 }
@@ -733,9 +727,7 @@
 }
 
 .hero-panel {
-  background:
-    radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 28%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(253, 244, 230, 0.92));
+  background: var(--cp-card-strong);
 }
 
 .control-lead {
@@ -754,9 +746,9 @@
   display: grid;
   gap: 8px;
   padding: var(--cp-space-3);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-md);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--cp-bg);
 }
 
 .control-summary-card strong {
@@ -780,9 +772,9 @@
   flex: 1 1 180px;
   min-height: 64px;
   padding: var(--cp-space-3);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-lg);
-  background: rgba(255, 255, 255, 0.68);
+  background: var(--cp-bg);
   text-align: left;
   color: var(--cp-ink);
   transition:
@@ -929,8 +921,8 @@
 
 .secondary-button,
 .ghost-button {
-  background: rgba(255, 255, 255, 0.88);
-  border-color: rgba(20, 32, 47, 0.1);
+  background: var(--cp-card);
+  border-color: var(--cp-border);
   color: var(--cp-ink);
 }
 
@@ -960,9 +952,9 @@
 .form-grid select,
 .config-editor {
   width: 100%;
-  border: 1px solid rgba(20, 32, 47, 0.12);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-md);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--cp-card);
   color: var(--cp-ink);
 }
 
@@ -1051,9 +1043,9 @@
 .disclosure-card {
   margin-top: var(--cp-space-3);
   padding: var(--cp-space-3);
-  border: 1px dashed rgba(20, 32, 47, 0.14);
+  border: 1px dashed var(--cp-border);
   border-radius: var(--cp-radius-md);
-  background: rgba(255, 255, 255, 0.54);
+  background: var(--cp-bg);
 }
 
 .disclosure-card summary {
@@ -1128,9 +1120,9 @@
 .wb-sidebar-card,
 .wb-boot-card,
 .wb-inline-banner {
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--cp-card);
   box-shadow: var(--cp-shadow);
   backdrop-filter: blur(18px);
 }
@@ -1142,9 +1134,7 @@
   padding: var(--cp-space-4);
   min-height: 0;
   overflow-y: auto;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(250, 249, 246, 0.7)),
-    rgba(255, 255, 255, 0.72);
+  background: var(--cp-bg);
 }
 
 .wb-sidebar {
@@ -1154,10 +1144,7 @@
   padding: 14px;
   min-height: 0;
   overflow-y: auto;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 245, 239, 0.92)),
-    radial-gradient(circle at top right, rgba(183, 106, 43, 0.12), transparent 40%),
-    rgba(255, 255, 255, 0.94);
+  background: var(--cp-card-strong);
 }
 
 .wb-sidebar-brand h1,
@@ -1289,7 +1276,7 @@
   gap: 8px;
   padding: 6px 36px 6px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(20, 32, 47, 0.06);
+  border: 1px solid var(--cp-border);
   border-left: 3px solid transparent;
   background: transparent;
   cursor: pointer;
@@ -1369,12 +1356,12 @@
 
 .wb-nav-session-item:hover .wb-nav-session-delete {
   display: flex;
-  background: linear-gradient(to right, transparent, #f0f5f3 24px);
+  background: linear-gradient(to right, transparent, var(--cp-soft) 24px);
 }
 
 .wb-nav-session-item.is-active .wb-nav-session-delete,
 .wb-nav-session-item.is-active:hover .wb-nav-session-delete {
-  background: linear-gradient(to right, transparent, #e3edea 24px);
+  background: linear-gradient(to right, transparent, var(--cp-soft) 24px);
 }
 
 .wb-nav-session-delete:hover {
@@ -1460,9 +1447,7 @@
 }
 
 .wb-card-accent {
-  background:
-    radial-gradient(circle at top right, rgba(236, 204, 169, 0.92), transparent 30%),
-    rgba(255, 255, 255, 0.9);
+  background: var(--cp-card);
 }
 
 .wb-card-accent.is-success {
@@ -1515,11 +1500,8 @@
   gap: var(--cp-space-3);
   padding: 18px 20px;
   border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.12), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(183, 106, 43, 0.12), transparent 30%),
-    rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: var(--cp-card);
+  border: 1px solid var(--cp-border);
   box-shadow: var(--cp-shadow);
 }
 
@@ -1551,10 +1533,8 @@
   min-height: 108px;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(250, 247, 242, 0.74)),
-    rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .wb-hero-metric strong {
@@ -1610,8 +1590,8 @@
   gap: 6px;
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(244, 247, 249, 0.86);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-action-card strong,
@@ -1631,8 +1611,8 @@
 
 .wb-list-row:is(button) {
   width: 100%;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(244, 247, 249, 0.86);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
   text-align: left;
 }
 
@@ -1695,9 +1675,9 @@
   width: 100%;
   min-height: 40px;
   padding: 10px 12px;
-  border: 1px solid rgba(20, 32, 47, 0.12);
+  border: 1px solid var(--cp-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--cp-card);
   color: var(--cp-ink);
 }
 
@@ -1713,9 +1693,7 @@
 }
 
 .wb-hero-agent {
-  background:
-    radial-gradient(circle at top right, rgba(183, 106, 43, 0.18), transparent 28%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 244, 238, 0.92));
+  background: var(--cp-card-strong);
 }
 
 .wb-settings-page,
@@ -1724,11 +1702,8 @@
 }
 
 .wb-settings-hero {
-  border-color: rgba(31, 106, 91, 0.14);
-  background:
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.16), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(183, 106, 43, 0.16), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 242, 0.94));
+  border-color: var(--cp-border);
+  background: var(--cp-card-strong);
 }
 
 .wb-settings-hero-refined {
@@ -1755,9 +1730,8 @@
 
 .wb-cli-snippet {
   gap: 10px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 245, 0.9));
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .wb-cli-snippet.is-active {
@@ -1799,8 +1773,8 @@
   min-height: 34px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   color: var(--cp-ink);
   font-size: 0.84rem;
   font-weight: 600;
@@ -1813,7 +1787,7 @@
 .wb-section-chip:hover {
   transform: translateY(-1px);
   border-color: rgba(31, 106, 91, 0.18);
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--cp-card);
 }
 
 .wb-settings-layout {
@@ -1836,11 +1810,8 @@
 }
 
 .wb-butler-hero {
-  border-color: rgba(31, 106, 91, 0.14);
-  background:
-    radial-gradient(circle at top right, rgba(183, 106, 43, 0.18), transparent 30%),
-    radial-gradient(circle at bottom left, rgba(31, 106, 91, 0.16), transparent 34%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 243, 0.94));
+  border-color: var(--cp-border);
+  background: var(--cp-card-strong);
 }
 
 .wb-butler-summary-grid {
@@ -1855,8 +1826,8 @@
   min-height: 116px;
   padding: 16px;
   border-radius: 20px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   box-shadow: var(--cp-shadow);
 }
 
@@ -1884,9 +1855,7 @@
 
 .wb-butler-summary-card.is-warning {
   border-color: rgba(217, 119, 6, 0.22);
-  background:
-    radial-gradient(circle at top right, rgba(251, 191, 36, 0.18), transparent 34%),
-    rgba(255, 251, 235, 0.94);
+  background: var(--cp-warning-soft);
 }
 
 .wb-agent-rule-grid {
@@ -1900,9 +1869,8 @@
   gap: 8px;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 244, 238, 0.9));
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   box-shadow: var(--cp-shadow);
 }
 
@@ -1923,9 +1891,7 @@
 
 .wb-butler-panel {
   gap: var(--cp-space-4);
-  background:
-    radial-gradient(circle at top right, rgba(183, 106, 43, 0.08), transparent 32%),
-    rgba(255, 255, 255, 0.92);
+  background: var(--cp-card);
 }
 
 .wb-butler-stack,
@@ -1983,10 +1949,8 @@
   gap: 10px;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 242, 236, 0.9)),
-    rgba(250, 248, 244, 0.88);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .wb-butler-toggle-card {
@@ -2026,9 +1990,9 @@
   gap: 6px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid rgba(20, 32, 47, 0.1);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-lg);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--cp-bg);
   text-align: left;
   transition:
     transform 120ms ease,
@@ -2067,9 +2031,9 @@
   display: grid;
   gap: var(--cp-space-3);
   padding: var(--cp-space-3);
-  border: 1px solid rgba(20, 32, 47, 0.1);
+  border: 1px solid var(--cp-border);
   border-radius: var(--cp-radius-lg);
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--cp-bg);
 }
 
 .wb-worker-hub {
@@ -2108,10 +2072,8 @@
 .wb-root-agent-runtime-panel {
   padding: 16px;
   border-radius: 20px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 250, 0.92)),
-    rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   box-shadow: var(--cp-shadow);
 }
 
@@ -2144,8 +2106,8 @@
   gap: 12px;
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(246, 248, 250, 0.86);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-root-agent-library-item {
@@ -2162,17 +2124,13 @@
 .wb-root-agent-library-item:focus-visible {
   transform: translateY(-1px);
   border-color: rgba(15, 118, 110, 0.16);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 34%),
-    rgba(255, 255, 255, 0.96);
+  background: var(--cp-card);
   box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
 }
 
 .wb-root-agent-library-item.is-active {
   border-color: rgba(183, 106, 43, 0.22);
-  background:
-    radial-gradient(circle at top right, rgba(183, 106, 43, 0.12), transparent 34%),
-    rgba(255, 250, 245, 0.96);
+  background: var(--cp-card-strong);
 }
 
 .wb-root-agent-studio-panel,
@@ -2208,10 +2166,8 @@
   gap: var(--cp-space-3);
   padding: 12px 14px;
   border-radius: 18px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.92)),
-    rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   box-shadow: var(--cp-shadow);
   transition:
     border-color 120ms ease,
@@ -2222,17 +2178,13 @@
 .wb-root-agent-card:hover,
 .wb-root-agent-card:focus-within {
   border-color: rgba(31, 106, 91, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.08), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(245, 248, 246, 0.94));
+  background: var(--cp-card);
   box-shadow: 0 18px 34px rgba(20, 32, 47, 0.08);
 }
 
 .wb-root-agent-card.has-warning {
   border-color: rgba(217, 119, 6, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 251, 235, 0.92));
+  background: var(--cp-warning-soft);
 }
 
 .wb-root-agent-card-head,
@@ -2256,8 +2208,8 @@
   gap: var(--cp-space-3);
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px solid rgba(20, 32, 47, 0.07);
-  background: rgba(244, 247, 249, 0.74);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-root-agent-column-head strong,
@@ -2281,9 +2233,9 @@
   gap: 8px;
   width: 100%;
   padding: 14px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: 18px;
-  background: rgba(246, 248, 250, 0.88);
+  background: var(--cp-soft);
   text-align: left;
   transition:
     transform 120ms ease,
@@ -2305,9 +2257,7 @@
 .wb-agent-workflow-button.is-active {
   transform: translateY(-1px);
   border-color: rgba(15, 118, 110, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
-    rgba(255, 255, 255, 0.96);
+  background: var(--cp-card);
   box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
 }
 
@@ -2322,9 +2272,9 @@
   gap: 8px;
   width: 100%;
   padding: 14px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   border-radius: 18px;
-  background: rgba(246, 248, 250, 0.88);
+  background: var(--cp-soft);
   text-align: left;
   transition:
     transform 120ms ease,
@@ -2346,9 +2296,7 @@
 .wb-agent-tab.is-active {
   transform: translateY(-1px);
   border-color: rgba(15, 118, 110, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
-    rgba(255, 255, 255, 0.96);
+  background: var(--cp-card);
   box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
 }
 
@@ -2411,8 +2359,8 @@
   gap: var(--cp-space-3);
   padding: 16px 18px;
   border-radius: 20px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(248, 250, 251, 0.88);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-agent-details summary {
@@ -2427,9 +2375,7 @@
 }
 
 .wb-agent-details[open] {
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 32%),
-    rgba(248, 250, 251, 0.96);
+  background: var(--cp-card);
 }
 
 .wb-agent-management-page,
@@ -2485,8 +2431,7 @@
   overflow-y: auto;
   border-radius: var(--cp-radius-xl);
   border: 1px solid var(--cp-border);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(246, 248, 250, 0.95));
+  background: var(--cp-card);
   box-shadow: 0 24px 48px rgba(20, 32, 47, 0.18);
 }
 
@@ -2539,9 +2484,7 @@
 .wb-behavior-file-row:hover,
 .wb-behavior-file-row.is-active {
   border-color: rgba(15, 118, 110, 0.24);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 36%),
-    rgba(248, 251, 250, 0.96);
+  background: var(--cp-card);
   box-shadow: 0 12px 22px rgba(20, 32, 47, 0.07);
 }
 
@@ -2561,10 +2504,8 @@
   gap: 10px;
   padding: 14px 16px;
   border-radius: 18px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 250, 0.92)),
-    rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   transition:
     transform 120ms ease,
     border-color 120ms ease,
@@ -2574,9 +2515,7 @@
 
 .wb-agent-card.is-main {
   border-color: rgba(31, 106, 91, 0.18);
-  background:
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.1), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(244, 248, 246, 0.93));
+  background: var(--cp-card);
 }
 
 .wb-agent-template-card,
@@ -2696,8 +2635,8 @@
   gap: 8px;
   padding: 12px 14px;
   border-radius: 16px;
-  background: rgba(246, 248, 246, 0.92);
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  background: var(--cp-soft);
+  border: 1px solid var(--cp-border);
 }
 
 .wb-field-guide strong,
@@ -2823,8 +2762,8 @@
   gap: 12px;
   padding: 18px;
   border-radius: 22px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(247, 250, 251, 0.88);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
   text-align: left;
   transition:
     transform 140ms ease,
@@ -2845,17 +2784,13 @@
 .wb-mode-card.is-active {
   transform: translateY(-1px);
   border-color: rgba(15, 118, 110, 0.22);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 34%),
-    rgba(255, 255, 255, 0.94);
+  background: var(--cp-card);
   box-shadow: 0 16px 28px rgba(15, 118, 110, 0.08);
 }
 
 .wb-provider-item.is-default {
   border-color: rgba(31, 106, 91, 0.22);
-  background:
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.1), transparent 36%),
-    rgba(255, 255, 255, 0.94);
+  background: var(--cp-card);
 }
 
 .wb-provider-card-head,
@@ -2900,8 +2835,8 @@
   min-height: 44px;
   padding: 0 14px;
   border-radius: 14px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   color: var(--cp-ink);
 }
 
@@ -2943,9 +2878,7 @@
   min-height: 0;
   padding: 18px 20px;
   gap: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 249, 246, 0.88));
+  background: var(--cp-bg);
 }
 
 .wb-chat-head {
@@ -3033,10 +2966,8 @@
 .wb-chat-activity {
   padding: 14px 16px;
   border-radius: 18px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 28%),
-    rgba(247, 250, 249, 0.92);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-chat-activity-list {
@@ -3181,8 +3112,8 @@
   max-height: 220px;
   padding: 14px 16px;
   border-radius: 20px;
-  border: 1px solid rgba(20, 32, 47, 0.12);
-  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
   resize: vertical;
   line-height: 1.5;
   font: inherit;
@@ -3198,7 +3129,7 @@
 .wb-note,
 .wb-priority-card,
 .wb-memory-card {
-  background: rgba(251, 251, 248, 0.9);
+  background: var(--cp-soft);
 }
 
 .wb-work-head {
@@ -3235,8 +3166,8 @@
   gap: 8px;
   padding: 14px 16px;
   border-radius: 18px;
-  background: rgba(244, 247, 249, 0.82);
-  border: 1px solid rgba(20, 32, 47, 0.07);
+  background: var(--cp-soft);
+  border: 1px solid var(--cp-border);
 }
 
 .wb-key-value-list {
@@ -3277,9 +3208,7 @@
 
 .wb-priority-card {
   border: 1px solid rgba(15, 118, 110, 0.1);
-  background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 30%),
-    rgba(250, 252, 252, 0.94);
+  background: var(--cp-card);
 }
 
 .wb-toolbar-grid .wb-field {
@@ -3301,8 +3230,8 @@
   min-height: 44px;
   padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid rgba(20, 32, 47, 0.1);
-  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .wb-toggle span {
@@ -3334,7 +3263,7 @@
   max-width: min(720px, 78%);
   padding: 14px 16px;
   border-radius: 22px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
+  border: 1px solid var(--cp-border);
   box-shadow: 0 10px 24px rgba(20, 32, 47, 0.06);
   word-break: break-word;
 }
@@ -3347,7 +3276,7 @@
 
 .wb-message-card.is-agent {
   border-top-left-radius: 8px;
-  background: rgba(248, 250, 251, 0.96);
+  background: var(--cp-card);
   color: var(--cp-ink);
 }
 
@@ -3538,10 +3467,8 @@
 .wb-message-activity {
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
-    rgba(248, 251, 250, 0.92);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-soft);
 }
 
 .wb-message-activity-list {
@@ -3862,7 +3789,7 @@
 }
 
 .wb-message-approval.is-agent {
-  background: rgba(255, 243, 224, 0.92);
+  background: var(--cp-warning-soft);
   color: #9a3412;
 }
 
@@ -3871,9 +3798,9 @@
   gap: 8px;
   margin-top: 8px;
   padding: 10px;
-  border: 1px solid rgba(20, 32, 47, 0.12);
+  border: 1px solid var(--cp-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--cp-card);
   box-shadow: 0 18px 36px rgba(20, 32, 47, 0.08);
 }
 
@@ -3934,8 +3861,8 @@
   min-height: 40px;
   padding: 0 12px;
   border-radius: 999px;
-  border: 1px solid rgba(20, 32, 47, 0.12);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
 }
 
 .wb-boot {
@@ -3978,10 +3905,8 @@
   overflow-y: auto;
   padding: 20px 22px;
   border-radius: 22px;
-  border: 1px solid rgba(20, 32, 47, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 249, 246, 0.96)),
-    rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card-strong);
   box-shadow:
     0 8px 32px rgba(20, 32, 47, 0.12),
     0 2px 6px rgba(20, 32, 47, 0.06);
