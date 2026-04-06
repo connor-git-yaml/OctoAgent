@@ -42,6 +42,7 @@ const EMPTY_REVIEW: SetupReviewSummary = {
   channel_exposure_risks: [],
   agent_autonomy_risks: [],
   tool_skill_readiness_risks: [],
+  secret_binding_risks: [],
 };
 
 export default function SettingsPage() {
