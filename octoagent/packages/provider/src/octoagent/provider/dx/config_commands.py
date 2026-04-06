@@ -210,7 +210,7 @@ def _activate_runtime_for_config(project_root: Path, config: OctoAgentConfig) ->
 @click.option("--yaml-path", default=None, help="指定 octoagent.yaml 路径（供测试用）")
 @click.pass_context
 def config(ctx: click.Context, yaml_path: str | None) -> None:
-    """OctoAgent 统一配置管理（FR-008）"""
+    """OctoAgent 统一配置管理。octoagent.yaml 为单一事实源，litellm-config.yaml 为自动生成的衍生文件。"""
     ctx.ensure_object(dict)
     ctx.obj["yaml_path"] = yaml_path
 
@@ -414,7 +414,7 @@ def config_init(
 
 @config.group("provider")
 def provider_group() -> None:
-    """管理 Provider 配置"""
+    """管理 Provider 配置（写入 octoagent.yaml）"""
 
 
 @provider_group.command("add")
@@ -673,7 +673,7 @@ def provider_disable(ctx: click.Context, provider_id: str, yes: bool, activate: 
 
 @config.group("alias")
 def alias_group() -> None:
-    """管理 model alias"""
+    """管理模型别名（写入 octoagent.yaml）"""
 
 
 @alias_group.command("list")
@@ -834,7 +834,7 @@ def memory_show(ctx: click.Context) -> None:
 @click.option("--dry-run", is_flag=True, default=False, help="仅预览，不写文件")
 @click.pass_context
 def config_sync(ctx: click.Context, dry_run: bool) -> None:
-    """手动重新生成 LiteLLM 衍生配置（FR-007，NFR-001）"""
+    """从 octoagent.yaml（单一事实源）重新生成 litellm-config.yaml（衍生配置）。只同步衍生文件，不自动重启 runtime；如需一键保存并启用真实模型，请使用 octo setup。"""
     yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
     project_root = _resolve_project_root(yaml_path)
     cfg = _load_or_none(project_root)

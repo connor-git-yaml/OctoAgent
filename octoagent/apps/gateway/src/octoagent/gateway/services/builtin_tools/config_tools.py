@@ -87,7 +87,7 @@ async def register(broker, deps: ToolDeps) -> None:
         enabled: bool | None = None,
         clear_base_url: bool = False,
     ) -> str:
-        """添加或更新一个 LLM Provider 到 octoagent.yaml。修改后可执行 config.sync 重新生成 LiteLLM 衍生配置。"""
+        """添加或更新一个 LLM Provider 到 octoagent.yaml（单一事实源）。修改后需执行 config.sync 重新生成衍生配置，或使用 setup.quick_connect 一键保存并启用。"""
         config = _load_config(deps.project_root)
         if config is None:
             return json.dumps(
@@ -180,7 +180,7 @@ async def register(broker, deps: ToolDeps) -> None:
         description: str = "",
         thinking_level: str = "",
     ) -> str:
-        """设置模型别名（如 main, cheap）到具体 Provider + 模型。修改后可执行 config.sync 重新生成 LiteLLM 衍生配置。"""
+        """设置模型别名（如 main, cheap）到具体 Provider + 模型，写入 octoagent.yaml（单一事实源）。修改后需执行 config.sync 重新生成衍生配置，或使用 setup.quick_connect 一键保存并启用。"""
         config = _load_config(deps.project_root)
         if config is None:
             return json.dumps(
@@ -241,7 +241,7 @@ async def register(broker, deps: ToolDeps) -> None:
         },
     )
     async def config_sync() -> str:
-        """把 octoagent.yaml 重新生成到 litellm-config.yaml。等同于 `octo config sync`，但不会自动重启 runtime。"""
+        """从 octoagent.yaml（单一事实源）重新生成 litellm-config.yaml（衍生配置）。等同于 CLI `octo config sync`。注意：本工具只同步衍生配置，不会自动重启 runtime 或切换到真实模型；如需一键保存并启用，请使用 setup.quick_connect 或 CLI `octo setup`。"""
         try:
             config = _load_config(deps.project_root)
             if config is None:
