@@ -47,6 +47,13 @@ select:focus-visible {
   min-height: 100vh;
 }
 
+/* 全局 scrollbar */
+::-webkit-scrollbar { width: var(--cp-scrollbar-size); height: var(--cp-scrollbar-size); }
+::-webkit-scrollbar-track { background: var(--cp-scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--cp-scrollbar-thumb); border-radius: var(--cp-scrollbar-size); }
+::-webkit-scrollbar-thumb:hover { background: var(--cp-scrollbar-thumb-hover); }
+* { scrollbar-width: thin; scrollbar-color: var(--cp-scrollbar-thumb) var(--cp-scrollbar-track); }
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

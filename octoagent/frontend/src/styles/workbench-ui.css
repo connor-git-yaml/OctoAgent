@@ -28,10 +28,10 @@
   font-size: 0.9rem;
   font-weight: 600;
   transition:
-    transform 140ms ease,
-    box-shadow 140ms ease,
-    background 140ms ease,
-    border-color 140ms ease;
+    transform var(--cp-transition-normal),
+    box-shadow var(--cp-transition-normal),
+    background var(--cp-transition-normal),
+    border-color var(--cp-transition-normal);
 }
 
 .wb-button:hover {
@@ -199,9 +199,9 @@
   font-size: 0.76rem;
   font-weight: 600;
   transition:
-    transform 120ms ease,
-    border-color 120ms ease,
-    background 120ms ease;
+    transform var(--cp-transition-fast),
+    border-color var(--cp-transition-fast),
+    background var(--cp-transition-fast);
 }
 
 .wb-chip-button:hover {
@@ -270,10 +270,10 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+    border-color var(--cp-transition-normal),
+    background var(--cp-transition-normal),
+    color var(--cp-transition-normal),
+    transform var(--cp-transition-normal);
 }
 
 .wb-hover-reveal-trigger.wb-button-inline {
@@ -352,7 +352,7 @@
   font-size: 0.9rem;
   color: var(--cp-ink);
   box-sizing: border-box;
-  transition: border-color 120ms ease;
+  transition: border-color var(--cp-transition-fast);
 }
 
 .wb-input:focus,

@@ -31,6 +31,7 @@
   --cp-radius-xl: 22px;
   --cp-radius-lg: 16px;
   --cp-radius-md: 10px;
+  --cp-space-0: 2px;
   --cp-space-1: 4px;
   --cp-space-2: 8px;
   --cp-space-3: 12px;
@@ -44,6 +45,17 @@
   --cp-warning-soft: rgba(153, 107, 30, 0.12);
   --cp-danger-border: rgba(194, 65, 12, 0.22);
   --cp-danger-bg: rgba(255, 240, 233, 0.92);
+  --cp-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --cp-duration-fast: 120ms;
+  --cp-duration-normal: 160ms;
+  --cp-duration-slow: 300ms;
+  --cp-transition-fast: var(--cp-duration-fast) var(--cp-ease);
+  --cp-transition-normal: var(--cp-duration-normal) var(--cp-ease);
+  --cp-transition-slow: var(--cp-duration-slow) var(--cp-ease);
+  --cp-scrollbar-size: 6px;
+  --cp-scrollbar-thumb: rgba(155, 155, 155, 0.4);
+  --cp-scrollbar-thumb-hover: rgba(155, 155, 155, 0.6);
+  --cp-scrollbar-track: transparent;
   --color-bg: var(--cp-soft);
   --color-border: var(--cp-border);
   --color-text-secondary: var(--cp-muted);
@@ -84,5 +96,7 @@
     --cp-warning-soft: rgba(196, 153, 58, 0.15);
     --cp-danger-border: rgba(224, 120, 96, 0.25);
     --cp-danger-bg: rgba(80, 30, 20, 0.6);
+    --cp-scrollbar-thumb: rgba(255, 255, 255, 0.15);
+    --cp-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
   }
 }
