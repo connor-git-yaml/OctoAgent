@@ -388,14 +388,13 @@ $PROJECT_ROOT (~/.octoagent)/
 
 ### M4 当前状态（2026-04-06 更新）
 
-**已完成**（约 20 个 Feature）：032-041, 048-049, 051-053, 055, 058, 070b, 071, 072b, 073
+**已完成**（约 24 个 Feature）：032-041, 048-053, 055-056, 058, 070, 070b, 071, 072b, 073
 
-**进行中**：
-- 056: clean-install-skeleton-bootstrap
-- 070: direct-agent-chat-closure
-- 071b: align-llm-config-flow
+**部分实现**：
+- 063: Behavior File Lifecycle — Phase 1/2 完成（BehaviorLoadProfile + Bootstrap 完成检测 + 截断策略 + 缓存），Phase 3 未实现（Behavior Compactor LLM 智能合并）
+- 071b: Align LLM Config Flow — Slice A/B/D/E 核心逻辑已实现，Slice C（文案统一）和部分高层工具未完成
 
-**M4 完成标准**：上述 3 个进行中 Feature 完成后签收。
+**M4 完成标准**：063 Phase 3 和 071b 剩余 Slice 完成后签收。050/056/070 经代码核查确认已实现。
 
 M4 约束：
 

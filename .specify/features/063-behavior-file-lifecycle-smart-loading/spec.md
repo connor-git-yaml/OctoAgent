@@ -2,7 +2,7 @@
 feature_id: "063"
 title: "Behavior File Lifecycle & Smart Loading"
 milestone: "M2"
-status: "Draft"
+status: "partially-implemented"
 created: "2026-03-18"
 updated: "2026-03-18"
 research_mode: "cross-product-benchmark"

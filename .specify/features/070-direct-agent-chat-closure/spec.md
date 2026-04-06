@@ -2,7 +2,7 @@
 feature_id: "070"
 title: "Direct Agent Chat Closure"
 milestone: "M4"
-status: "In Progress"
+status: "implemented"
 created: "2026-03-20"
 updated: "2026-03-20"
 predecessor: "Feature 055"

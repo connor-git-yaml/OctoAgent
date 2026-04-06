@@ -364,7 +364,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | M1.5 Agent 闭环 | ✅ | Orchestrator + Worker + Policy |
 | M2 多渠道多 Worker | ✅ | Telegram + A2A + JobRunner + Memory |
 | M3 增强 | ✅ | Chat Import + Vault + ToolIndex + Pipeline |
-| M4 引导式工作台 | 🔄 | Feature 050, 063 待完成 |
+| M4 引导式工作台 | 🔄 | 063 Phase 3 + 071b 剩余 Slice 待完成 |
 | M5 文件工作台 | ⏳ | 语音/多模态/Companion/通知中心 |
 
 ### 待办汇总

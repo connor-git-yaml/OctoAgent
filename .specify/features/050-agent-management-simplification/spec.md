@@ -2,7 +2,7 @@
 feature_id: "050"
 title: "Agent Management Simplification"
 milestone: "M4"
-status: "Draft"
+status: "implemented"
 created: "2026-03-14"
 updated: "2026-03-14"
 research_mode: "full"

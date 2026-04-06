@@ -2,7 +2,7 @@
 feature_id: "071"
 title: "Align LLM Config Flow"
 milestone: "M4"
-status: "In Progress"
+status: "partially-implemented"
 created: "2026-03-20"
 updated: "2026-03-20"
 predecessor: "Feature 014 / Feature 036 / Feature 044"
