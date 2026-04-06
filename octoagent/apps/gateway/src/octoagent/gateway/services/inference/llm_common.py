@@ -75,7 +75,7 @@ def resolve_default_model_alias(project_root: Path) -> str:
         模型别名字符串，默认 "main"。
     """
     try:
-        from .config_wizard import load_config
+        from octoagent.gateway.services.config.config_wizard import load_config
 
         config = load_config(project_root)
         return (config.memory.reasoning_model_alias if config else "") or "main"

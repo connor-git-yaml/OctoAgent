@@ -149,3 +149,63 @@ class TestProjectStore:
         assert bindings[0].redaction_label == "LITELLM_MASTER_KEY=***"
         assert resolved_selector is not None
         assert resolved_selector.active_project_id == project.project_id
+
+    async def test_get_binding_tolerates_project_bindings_schema_with_workspace_id(self, core_db):
+        store = SqliteProjectStore(core_db)
+        project = Project(
+            project_id="project-default",
+            slug="default",
+            name="Default Project",
+            is_default=True,
+        )
+        await store.create_project(project)
+        await core_db.execute("DROP TABLE project_bindings")
+        await core_db.execute(
+            """
+            CREATE TABLE project_bindings (
+                binding_id        TEXT PRIMARY KEY,
+                project_id        TEXT NOT NULL,
+                workspace_id      TEXT,
+                binding_type      TEXT NOT NULL,
+                binding_key       TEXT NOT NULL,
+                binding_value     TEXT NOT NULL DEFAULT '',
+                source            TEXT NOT NULL DEFAULT '',
+                metadata          TEXT NOT NULL DEFAULT '{}',
+                migration_run_id  TEXT NOT NULL,
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL
+            )
+            """
+        )
+        await core_db.execute(
+            """
+            INSERT INTO project_bindings (
+                binding_id, project_id, workspace_id, binding_type, binding_key,
+                binding_value, source, metadata, migration_run_id, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            """,
+            (
+                "binding-scope-legacy",
+                project.project_id,
+                "workspace-default",
+                ProjectBindingType.SCOPE.value,
+                "ops/default",
+                "ops/default",
+                "",
+                '{"task_ids":["task-1"]}',
+                "run-legacy",
+            ),
+        )
+        await core_db.commit()
+
+        binding = await store.get_binding(
+            project.project_id,
+            ProjectBindingType.SCOPE,
+            "ops/default",
+        )
+
+        assert binding is not None
+        assert binding.binding_id == "binding-scope-legacy"
+        assert binding.source == ""
+        assert binding.metadata == {"task_ids": ["task-1"]}

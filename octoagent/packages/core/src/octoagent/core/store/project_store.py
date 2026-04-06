@@ -504,6 +504,17 @@ class SqliteProjectStore:
         return int(row[0]) if row is not None else 0
 
     @staticmethod
+    def _read_row_value(
+        row: aiosqlite.Row,
+        key: str,
+        fallback_index: int,
+    ) -> str:
+        try:
+            return row[key]
+        except (KeyError, TypeError):
+            return row[fallback_index]
+
+    @staticmethod
     def _row_to_project(row: aiosqlite.Row) -> Project:
         return Project(
             project_id=row[0],
@@ -521,17 +532,41 @@ class SqliteProjectStore:
 
     @staticmethod
     def _row_to_binding(row: aiosqlite.Row) -> ProjectBinding:
+        binding_type = SqliteProjectStore._read_row_value(row, "binding_type", 2)
+        binding_offset = 0
+        if binding_type not in {item.value for item in ProjectBindingType}:
+            binding_type = SqliteProjectStore._read_row_value(row, "binding_type", 3)
+            binding_offset = 1
         return ProjectBinding(
-            binding_id=row[0],
-            project_id=row[1],
-            binding_type=row[2],
-            binding_key=row[3],
-            binding_value=row[4],
-            source=row[5],
-            metadata=json.loads(row[6]),
-            migration_run_id=row[7],
-            created_at=datetime.fromisoformat(row[8]),
-            updated_at=datetime.fromisoformat(row[9]),
+            binding_id=SqliteProjectStore._read_row_value(row, "binding_id", 0),
+            project_id=SqliteProjectStore._read_row_value(row, "project_id", 1),
+            binding_type=binding_type,
+            binding_key=SqliteProjectStore._read_row_value(
+                row,
+                "binding_key",
+                3 + binding_offset,
+            ),
+            binding_value=SqliteProjectStore._read_row_value(
+                row,
+                "binding_value",
+                4 + binding_offset,
+            ),
+            source=SqliteProjectStore._read_row_value(row, "source", 5 + binding_offset),
+            metadata=json.loads(
+                SqliteProjectStore._read_row_value(row, "metadata", 6 + binding_offset)
+                or "{}"
+            ),
+            migration_run_id=SqliteProjectStore._read_row_value(
+                row,
+                "migration_run_id",
+                7 + binding_offset,
+            ),
+            created_at=datetime.fromisoformat(
+                SqliteProjectStore._read_row_value(row, "created_at", 8 + binding_offset)
+            ),
+            updated_at=datetime.fromisoformat(
+                SqliteProjectStore._read_row_value(row, "updated_at", 9 + binding_offset)
+            ),
         )
 
     @staticmethod

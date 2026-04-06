@@ -38,7 +38,9 @@ class MemoryMaintenanceBridge:
         if consolidation_service is not None:
             self._consolidation_service = consolidation_service
         else:
-            from .consolidation_service import ConsolidationService
+            from octoagent.gateway.services.inference.consolidation_service import (
+                ConsolidationService,
+            )
             self._consolidation_service = ConsolidationService(
                 memory_store=self._base._memory_store,
                 llm_service=llm_service,

@@ -47,7 +47,7 @@ from octoagent.memory import (
     VaultRecord,
 )
 
-from .config_wizard import load_config
+from octoagent.gateway.services.config.config_wizard import load_config
 
 _log = structlog.get_logger()
 
