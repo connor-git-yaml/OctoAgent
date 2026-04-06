@@ -15,20 +15,31 @@ export interface AgentOption {
 interface NewSessionModalProps {
   agents: AgentOption[];
   busy: boolean;
+  defaultAgentId?: string;
   onConfirm: (agentProfileId: string, projectName: string) => void;
   onClose: () => void;
+}
+
+function generateDefaultSessionName(): string {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  return `对话 ${mm}-${dd} ${hh}:${min}`;
 }
 
 export default function NewSessionModal({
   agents,
   busy,
+  defaultAgentId,
   onConfirm,
   onClose,
 }: NewSessionModalProps) {
   const [selectedAgentId, setSelectedAgentId] = useState(
-    agents.length === 1 ? agents[0].profile_id : ""
+    defaultAgentId || (agents.length === 1 ? agents[0].profile_id : "")
   );
-  const [projectName, setProjectName] = useState("");
+  const [projectName, setProjectName] = useState(generateDefaultSessionName);
   const [error, setError] = useState("");
 
   const handleSubmit = (e: FormEvent) => {

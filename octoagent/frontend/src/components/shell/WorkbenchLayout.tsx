@@ -128,6 +128,15 @@ function sessionAccentColor(agentProfileId: string): string {
   return SESSION_ACCENT_PALETTE[Math.abs(hash) % SESSION_ACCENT_PALETTE.length];
 }
 
+function generateSessionName(): string {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  return `对话 ${mm}-${dd} ${hh}:${min}`;
+}
+
 function ChatNavSection({
   sessions,
   currentPath,
@@ -135,6 +144,7 @@ function ChatNavSection({
   onNewSession,
   onDeleteSession,
   resolveAgentName,
+  newSessionBusy,
 }: {
   sessions: SessionProjectionDocument;
   currentPath: string;
@@ -142,6 +152,7 @@ function ChatNavSection({
   onNewSession: () => void;
   onDeleteSession: (session: SessionProjectionItem) => void;
   resolveAgentName: (agentProfileId: string) => string;
+  newSessionBusy: boolean;
 }) {
   const navigate = useNavigate();
   const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
@@ -202,8 +213,9 @@ function ChatNavSection({
           type="button"
           className="wb-nav-session-item wb-nav-session-new"
           onClick={onNewSession}
+          disabled={newSessionBusy}
         >
-          + 新建对话
+          {newSessionBusy ? "创建中…" : "+ 新建对话"}
         </button>
       </div>
     </div>
@@ -289,6 +301,51 @@ export default function WorkbenchLayout() {
     diagnosticsStatus: diagnostics.overall_status,
     activeWorkCount,
   });
+  const agentOptions = workerProfileList
+    .filter((p) => p.status === "active" && p.origin_kind !== "builtin")
+    .map((p) => ({
+      profile_id: p.profile_id,
+      name: p.name,
+    }));
+
+  // 检测当前聚焦会话的 Agent，用于 Modal 默认选中
+  const allSessionItems = Array.isArray(sessions?.sessions) ? sessions.sessions : [];
+  const currentSessionId = location.pathname.startsWith("/chat/")
+    ? location.pathname.slice("/chat/".length)
+    : null;
+  const currentSession = currentSessionId
+    ? allSessionItems.find((s) => s.session_id === currentSessionId)
+    : null;
+  const currentAgentProfileId = currentSession
+    ? resolveSessionOwnerProfileId(currentSession)
+    : "";
+
+  const handleCreateSession = async (agentProfileId: string, projectName: string) => {
+    setNewSessionBusy(true);
+    try {
+      const result = await workbench.submitAction("session.create_with_project", {
+        agent_profile_id: agentProfileId,
+        project_name: projectName,
+      });
+      if (result?.data?.session_id) {
+        setShowNewSessionModal(false);
+        navigate(`/chat/${result.data.session_id}`);
+      }
+    } finally {
+      setNewSessionBusy(false);
+    }
+  };
+
+  const handleNewSession = () => {
+    if (newSessionBusy) return;
+    if (agentOptions.length === 1) {
+      // 单 Agent：跳过 Modal，直接创建
+      void handleCreateSession(agentOptions[0].profile_id, generateSessionName());
+    } else {
+      setShowNewSessionModal(true);
+    }
+  };
+
   const suppressChatSetupReviewBanner =
     (location.pathname === "/" || location.pathname.startsWith("/chat")) &&
     workbench.lastAction?.code === "SETUP_REVIEW_READY";
@@ -319,9 +376,10 @@ export default function WorkbenchLayout() {
               sessions={sessions}
               currentPath={location.pathname}
               onNavigate={() => setNavOpen(false)}
-              onNewSession={() => setShowNewSessionModal(true)}
+              onNewSession={handleNewSession}
               onDeleteSession={setDeleteTarget}
               resolveAgentName={resolveAgentName}
+              newSessionBusy={newSessionBusy}
             />
             {[
               { to: "/agents", label: "Agents" },
@@ -400,43 +458,15 @@ export default function WorkbenchLayout() {
           <Outlet />
         </div>
 
-        {showNewSessionModal && (() => {
-          // 用 worker_profiles 而非 agent_profiles——每个 WorkerProfile 代表一个唯一 Agent，
-          // 避免 bootstrap AgentProfile 与 mirror AgentProfile 造成重复
-          const workerProfiles = snapshot.resources.worker_profiles;
-          const profiles = Array.isArray(workerProfiles?.profiles) ? workerProfiles.profiles : [];
-          const agentOptions = profiles
-            .filter((p) => p.status === "active" && p.origin_kind !== "builtin")
-            .map((p) => ({
-              profile_id: p.profile_id,
-              name: p.name,
-            }));
-
-          const handleCreateSession = async (agentProfileId: string, projectName: string) => {
-            setNewSessionBusy(true);
-            try {
-              const result = await workbench.submitAction("session.create_with_project", {
-                agent_profile_id: agentProfileId,
-                project_name: projectName,
-              });
-              if (result?.data?.session_id) {
-                setShowNewSessionModal(false);
-                navigate(`/chat/${result.data.session_id}`);
-              }
-            } finally {
-              setNewSessionBusy(false);
-            }
-          };
-
-          return (
-            <NewSessionModal
-              agents={agentOptions}
-              busy={newSessionBusy}
-              onConfirm={handleCreateSession}
-              onClose={() => setShowNewSessionModal(false)}
-            />
-          );
-        })()}
+        {showNewSessionModal && (
+          <NewSessionModal
+            agents={agentOptions}
+            defaultAgentId={currentAgentProfileId}
+            busy={newSessionBusy}
+            onConfirm={handleCreateSession}
+            onClose={() => setShowNewSessionModal(false)}
+          />
+        )}
         {deleteTarget && (
           <DeleteSessionModal
             sessionTitle={formatSessionTitle(deleteTarget)}
