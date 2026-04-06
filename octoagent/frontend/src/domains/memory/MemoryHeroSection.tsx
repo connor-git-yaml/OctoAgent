@@ -42,7 +42,7 @@ export default function MemoryHeroSection({
   return (
     <section className="wb-hero wb-hero-memory">
       <div className="wb-hero-copy">
-        <p className="wb-kicker">Memory</p>
+        <p className="wb-kicker">记忆</p>
         <h1>{heroTitle}</h1>
         <p>{heroSummary}</p>
         <div className="wb-chip-row">

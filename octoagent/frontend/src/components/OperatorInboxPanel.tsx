@@ -33,15 +33,15 @@ export default function OperatorInboxPanel() {
     <section className="card recovery-panel">
       <div className="recovery-header">
         <div>
-          <h2>Operator Inbox</h2>
+          <h2>运维收件箱</h2>
           <p className="muted">统一处理 approvals、alerts、retry 和 Telegram pairing</p>
         </div>
         <span className="status-badge RUNNING">
-          {summary ? `${summary.total_pending} Pending` : error ? "Unavailable" : "--"}
+          {summary ? `${summary.total_pending} 待处理` : error ? "不可用" : "--"}
         </span>
       </div>
 
-      {loading ? <div className="muted">Loading operator inbox...</div> : null}
+      {loading ? <div className="muted">加载运维收件箱…</div> : null}
       {error ? <div className="error-inline">{error}</div> : null}
       {degradedText ? <div className="notice-inline">{degradedText}</div> : null}
       {lastResult ? (
@@ -52,19 +52,19 @@ export default function OperatorInboxPanel() {
 
       <div className="recovery-grid">
         <div className="recovery-item">
-          <div className="muted">Approvals</div>
+          <div className="muted">审批</div>
           <strong>{summary?.approvals ?? "-"}</strong>
         </div>
         <div className="recovery-item">
-          <div className="muted">Alerts</div>
+          <div className="muted">告警</div>
           <strong>{summary?.alerts ?? "-"}</strong>
         </div>
         <div className="recovery-item">
-          <div className="muted">Retryables</div>
+          <div className="muted">可重试</div>
           <strong>{summary?.retryable_failures ?? "-"}</strong>
         </div>
         <div className="recovery-item">
-          <div className="muted">Pairings</div>
+          <div className="muted">配对</div>
           <strong>{summary?.pairing_requests ?? "-"}</strong>
         </div>
       </div>

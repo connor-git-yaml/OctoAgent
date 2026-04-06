@@ -491,7 +491,7 @@ describe("MemoryPage", () => {
     );
 
     // hero 区存在且展示正常状态
-    expect(await screen.findByText("Memory")).toBeInTheDocument();
+    expect(await screen.findByText("记忆")).toBeInTheDocument();
 
     // 不再有下一步引导和已删除的面板
     expect(screen.queryByText("下一步")).not.toBeInTheDocument();

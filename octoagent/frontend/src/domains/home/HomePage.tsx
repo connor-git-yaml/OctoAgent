@@ -16,9 +16,9 @@ const CHANNEL_LABELS: Record<string, string> = {
 };
 const WORKER_LABELS: Record<string, string> = {
   general: "主助手",
-  research: "Research",
-  ops: "Ops",
-  dev: "Dev",
+  research: "调研",
+  ops: "运维",
+  dev: "开发",
 };
 
 interface HomePrimaryState {
@@ -317,7 +317,7 @@ export default function HomePage() {
   return (
     <div className="wb-page">
       <PageIntro
-        kicker="Home"
+        kicker="主页"
         title={primaryState.title}
         summary={primaryState.summary}
         compact

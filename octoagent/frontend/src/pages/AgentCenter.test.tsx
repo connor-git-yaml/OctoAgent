@@ -666,7 +666,7 @@ describe("AgentCenter", () => {
 
     // 当前组件展示「行为文件」标题和 Agents 标签
     expect(await screen.findByRole("heading", { name: "行为文件" })).toBeInTheDocument();
-    expect(screen.getByText("Agents")).toBeInTheDocument();
+    expect(screen.getByText("智能体")).toBeInTheDocument();
 
     // 主 Agent 卡片应带 "主 Agent" 标记
     expect(screen.getByText("主 Agent")).toBeInTheDocument();

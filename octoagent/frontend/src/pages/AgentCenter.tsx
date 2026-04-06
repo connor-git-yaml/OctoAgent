@@ -614,7 +614,7 @@ export default function AgentCenter() {
       publish: true,
       set_as_default: editorState.mode === "main",
       change_summary:
-        editorState.mode === "main" ? "通过 Agents 页面更新主 Agent" : "通过 Agents 页面更新 Agent",
+        editorState.mode === "main" ? "通过智能体页面更新主 Agent" : "通过智能体页面更新 Agent",
     });
 
     if (!result) {
@@ -710,7 +710,7 @@ export default function AgentCenter() {
         <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
           <div className="wb-panel-head">
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <p className="wb-card-label">Agents</p>
+              <p className="wb-card-label">智能体</p>
               <span className="wb-chip">{1 + agentView.projectAgents.length}</span>
             </div>
             <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>

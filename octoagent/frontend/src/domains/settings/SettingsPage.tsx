@@ -528,7 +528,7 @@ export default function SettingsPage() {
       <section id="settings-group-memory" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>Memory</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>记忆</h3>
           </div>
         </div>
 
@@ -688,7 +688,7 @@ export default function SettingsPage() {
                 <strong>检查、保存或一键接入</strong>
               </div>
               <span className={`wb-status-pill ${review.ready ? "is-ready" : "is-warning"}`}>
-                {review.ready ? "Ready" : "Needs review"}
+                {review.ready ? "就绪" : "需要检查"}
               </span>
             </div>
             <div className="wb-inline-actions wb-inline-actions-wrap">

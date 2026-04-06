@@ -38,7 +38,7 @@ export default function SettingsOverview({
         className="wb-hero wb-settings-hero wb-settings-hero-refined"
       >
         <div className="wb-hero-copy">
-          <h1 style={{ fontSize: "1.75rem" }}>Settings</h1>
+          <h1 style={{ fontSize: "1.75rem" }}>设置</h1>
           {subtitle ? <p style={{ margin: 0, color: "var(--cp-muted)" }}>{subtitle}</p> : null}
         </div>
         <div className="wb-settings-hero-actions" style={{ display: "flex", gap: 10, width: "auto" }}>
@@ -61,18 +61,18 @@ export default function SettingsOverview({
         </div>
       </section>
 
-      <nav className="wb-settings-section-nav" aria-label="Settings sections">
+      <nav className="wb-settings-section-nav" aria-label="设置导航">
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("overview")}>
           概览
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("models")}>
-          Providers
+          供应商
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("aliases")}>
           模型别名
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
-          Memory
+          记忆
         </button>
         <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("channels")}>
           渠道

@@ -34,7 +34,7 @@ export default function TaskList() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load tasks");
+          setError(err instanceof Error ? err.message : "加载任务失败");
           setLoading(false);
         }
       }

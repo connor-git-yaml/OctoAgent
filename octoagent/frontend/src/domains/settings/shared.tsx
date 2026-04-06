@@ -142,11 +142,11 @@ export function buildConfigPayload(
 export function groupLabel(groupId: string): { title: string; description: string } {
   switch (groupId) {
     case "models":
-      return { title: "Model Providers 配置", description: "" };
+      return { title: "模型供应商配置", description: "" };
     case "channels":
       return { title: "渠道接入", description: "" };
     case "memory":
-      return { title: "Memory", description: "" };
+      return { title: "记忆", description: "" };
     default:
       return { title: "更多设置", description: "" };
   }

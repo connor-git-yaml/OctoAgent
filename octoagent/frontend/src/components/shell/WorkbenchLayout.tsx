@@ -258,7 +258,7 @@ export default function WorkbenchLayout() {
     return (
       <div className="wb-boot">
         <div className="wb-boot-card wb-boot-card-error">
-          <p className="wb-kicker">Workbench Error</p>
+          <p className="wb-kicker">工作台错误</p>
           <h1>工作台暂时打不开</h1>
           <p>{workbench.error}</p>
           <button
@@ -382,11 +382,11 @@ export default function WorkbenchLayout() {
               newSessionBusy={newSessionBusy}
             />
             {[
-              { to: "/agents", label: "Agents" },
-              { to: "/skills", label: "Skills" },
+              { to: "/agents", label: "智能体" },
+              { to: "/skills", label: "技能" },
               { to: "/mcp", label: "MCP" },
-              { to: "/memory", label: "Memory" },
-              { to: "/settings", label: "Settings" },
+              { to: "/memory", label: "记忆" },
+              { to: "/settings", label: "设置" },
             ].map((item) => (
               <NavLink
                 key={item.to}

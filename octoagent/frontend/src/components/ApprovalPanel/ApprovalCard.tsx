@@ -160,7 +160,7 @@ export function ApprovalCard({ approval, onResolve }: ApprovalCardProps) {
             fontSize: "13px",
           }}
         >
-          Allow Once
+          允许一次
         </button>
         <button
           onClick={() => handleResolve("allow-always")}
@@ -176,7 +176,7 @@ export function ApprovalCard({ approval, onResolve }: ApprovalCardProps) {
             fontSize: "13px",
           }}
         >
-          Always Allow
+          始终允许
         </button>
         <button
           onClick={() => handleResolve("deny")}
@@ -192,7 +192,7 @@ export function ApprovalCard({ approval, onResolve }: ApprovalCardProps) {
             fontSize: "13px",
           }}
         >
-          Deny
+          拒绝
         </button>
       </div>
     </div>

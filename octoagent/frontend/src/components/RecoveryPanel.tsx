@@ -99,7 +99,7 @@ export default function RecoveryPanel() {
       setNotice(`已创建备份: ${bundle.output_path}`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Backup failed");
+      setError(err instanceof Error ? err.message : "备份失败");
     } finally {
       setBusy(null);
     }
@@ -111,7 +111,7 @@ export default function RecoveryPanel() {
       const manifest = await triggerExportChats();
       setNotice(`已导出 chats: ${manifest.output_path}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed");
+      setError(err instanceof Error ? err.message : "导出失败");
     } finally {
       setBusy(null);
     }
@@ -125,7 +125,7 @@ export default function RecoveryPanel() {
       setNotice("已完成 update dry-run。");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Update dry-run failed");
+      setError(err instanceof Error ? err.message : "更新预检失败");
     } finally {
       setBusy(null);
     }
@@ -139,7 +139,7 @@ export default function RecoveryPanel() {
       setNotice("已接受 update 请求，正在后台执行。");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Update apply failed");
+      setError(err instanceof Error ? err.message : "更新应用失败");
     } finally {
       setBusy(null);
     }
@@ -153,7 +153,7 @@ export default function RecoveryPanel() {
       setNotice("已触发 restart。");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Restart failed");
+      setError(err instanceof Error ? err.message : "重启失败");
     } finally {
       setBusy(null);
     }
@@ -167,7 +167,7 @@ export default function RecoveryPanel() {
       setNotice("已完成 verify。");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verify failed");
+      setError(err instanceof Error ? err.message : "验证失败");
     } finally {
       setBusy(null);
     }
@@ -177,15 +177,15 @@ export default function RecoveryPanel() {
     <section className="card recovery-panel">
       <div className="recovery-header">
         <div>
-          <h2>Recovery</h2>
+          <h2>恢复</h2>
           <p className="muted">最近一次备份与恢复准备度摘要</p>
         </div>
         <span className={`status-badge ${summary?.ready_for_restore ? "SUCCEEDED" : "FAILED"}`}>
-          {summary?.ready_for_restore ? "READY" : "NOT READY"}
+          {summary?.ready_for_restore ? "就绪" : "未就绪"}
         </span>
       </div>
 
-      {loading ? <div className="muted">Loading recovery summary...</div> : null}
+      {loading ? <div className="muted">加载恢复摘要…</div> : null}
       {error ? <div className="error-inline">{error}</div> : null}
       {notice ? <div className="notice-inline">{notice}</div> : null}
 
@@ -270,7 +270,7 @@ export default function RecoveryPanel() {
           onClick={() => void handleUpdatePreview()}
           disabled={busy !== null}
         >
-          {busy === "update-preview" ? "预检中..." : "Update Dry Run"}
+          {busy === "update-preview" ? "预检中..." : "更新预检"}
         </button>
         <button
           type="button"
@@ -286,7 +286,7 @@ export default function RecoveryPanel() {
           onClick={() => void handleRestart()}
           disabled={busy !== null}
         >
-          {busy === "restart" ? "重启中..." : "Restart"}
+          {busy === "restart" ? "重启中..." : "重启"}
         </button>
         <button
           type="button"
@@ -294,7 +294,7 @@ export default function RecoveryPanel() {
           onClick={() => void handleVerify()}
           disabled={busy !== null}
         >
-          {busy === "verify" ? "验证中..." : "Verify"}
+          {busy === "verify" ? "验证中..." : "验证"}
         </button>
       </div>
     </section>

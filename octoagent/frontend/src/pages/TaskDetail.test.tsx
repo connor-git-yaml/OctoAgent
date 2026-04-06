@@ -300,11 +300,11 @@ describe("TaskDetail", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    await user.click(screen.getByRole("button", { name: "Raw Data" }));
+    await user.click(screen.getByRole("button", { name: "原始数据" }));
 
-    await screen.findByRole("heading", { name: "Artifacts (1)" });
+    await screen.findByRole("heading", { name: "产出物 (1)" });
     expect(screen.getByText("lane-screenshot.png")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Events (2)" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "事件 (2)" })).toBeTruthy();
   });
 
   it("标题优先使用 session alias，而不是 task.title", async () => {

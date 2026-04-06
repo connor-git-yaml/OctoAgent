@@ -29,7 +29,7 @@ export function ApprovalPanel() {
         }}
       >
         <h2 style={{ margin: 0, fontSize: "18px" }}>
-          Pending Approvals
+          待审批
           {total > 0 && (
             <span
               style={{
@@ -58,7 +58,7 @@ export function ApprovalPanel() {
             fontSize: "13px",
           }}
         >
-          {loading ? "Loading..." : "Refresh"}
+          {loading ? "加载中…" : "刷新"}
         </button>
       </div>
 
@@ -95,7 +95,7 @@ export function ApprovalPanel() {
             padding: "40px 0",
           }}
         >
-          Loading approvals...
+          加载审批列表…
         </div>
       ) : (
         <div
@@ -106,7 +106,7 @@ export function ApprovalPanel() {
             fontSize: "14px",
           }}
         >
-          No pending approvals
+          暂无待审批项
         </div>
       )}
     </div>

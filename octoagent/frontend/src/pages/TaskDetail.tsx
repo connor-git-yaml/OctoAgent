@@ -140,7 +140,7 @@ export default function TaskDetail() {
       const data = await fetchTaskDetail(taskId);
       applyTaskDetail(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load task");
+      setError(err instanceof Error ? err.message : "加载任务失败");
       setAuthError(isFrontDoorApiError(err) ? err : null);
     } finally {
       setLoading(false);
@@ -239,18 +239,18 @@ export default function TaskDetail() {
   );
 
   if (loading) {
-    return <div className="loading">Loading task...</div>;
+    return <div className="loading">加载任务详情…</div>;
   }
 
   if (authError) {
-    return <FrontDoorGate error={authError} title="Task Detail" onRetry={loadTask} />;
+    return <FrontDoorGate error={authError} title="任务详情" onRetry={loadTask} />;
   }
 
   if (error || !task) {
     return (
       <div className="tv-page">
         <Link to="/" className="tv-detail-back">&larr;</Link>
-        <div className="error">Error: {error || "Task not found"}</div>
+        <div className="error">错误: {error || "未找到任务"}</div>
       </div>
     );
   }
@@ -330,7 +330,7 @@ export default function TaskDetail() {
       {viewMode === "raw" && (
         <>
           {/* 事件时间线 */}
-          <h2>Events ({events.length})</h2>
+          <h2>事件 ({events.length})</h2>
           <div className="timeline">
             {events.map((event) => (
               <div key={event.event_id} className="timeline-item">
@@ -346,7 +346,7 @@ export default function TaskDetail() {
           {/* Artifacts */}
           {artifacts.length > 0 && (
             <>
-              <h2 style={{ marginTop: "var(--space-lg)" }}>Artifacts ({artifacts.length})</h2>
+              <h2 style={{ marginTop: "var(--space-lg)" }}>产出物 ({artifacts.length})</h2>
               {artifacts.map((artifact) => (
                 <div key={artifact.artifact_id} className="card">
                   <div style={{ fontWeight: 600 }}>{artifact.name}</div>

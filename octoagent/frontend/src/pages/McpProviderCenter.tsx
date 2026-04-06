@@ -294,7 +294,7 @@ export default function McpProviderCenter() {
       {/* 顶栏：标题 + 新建按钮 */}
       <div className="wb-topbar">
         <div className="wb-topbar-copy">
-          <h2>MCP Providers</h2>
+          <h2>MCP 服务商</h2>
           <p className="wb-topbar-meta">
             已安装 {items.length} · 已启用 {Number(catalog.summary.enabled_count ?? 0)} · 健康{" "}
             {Number(catalog.summary.healthy_count ?? 0)}

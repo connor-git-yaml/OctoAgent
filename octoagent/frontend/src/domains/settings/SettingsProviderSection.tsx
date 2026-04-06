@@ -58,7 +58,7 @@ export default function SettingsProviderSection({
       <section id="settings-group-models" className="wb-panel">
         <div className="wb-panel-head">
           <div>
-            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>Model Providers 配置</h3>
+            <h3 style={{ fontSize: "1.1rem", margin: 0 }}>模型供应商配置</h3>
           </div>
           <span className="wb-status-pill is-active">共 {providerDrafts.length} 个</span>
         </div>

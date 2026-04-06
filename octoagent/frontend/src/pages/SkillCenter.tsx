@@ -471,7 +471,7 @@ export default function SkillCenter() {
     <div className="wb-page">
       <section className="wb-hero wb-hero-compact">
         <div className="wb-hero-copy">
-          <p className="wb-kicker">Skills</p>
+          <p className="wb-kicker">技���</p>
           <h1>Skill 管理中心</h1>
           <p>
             通过 SKILL.md 文件定义的可加载指令集。在 Chat 中输入"列出可用 Skill"即可让 AI

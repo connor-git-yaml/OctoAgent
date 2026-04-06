@@ -11,7 +11,7 @@ interface SegmentedToggleProps {
 
 const OPTIONS: { value: ViewMode; label: string }[] = [
   { value: "visual", label: "可视化" },
-  { value: "raw", label: "Raw Data" },
+  { value: "raw", label: "原始数据" },
 ];
 
 export default function SegmentedToggle({ value, onChange }: SegmentedToggleProps) {

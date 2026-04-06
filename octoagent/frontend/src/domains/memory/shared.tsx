@@ -487,14 +487,14 @@ export function buildMemoryNarrative(
   );
 
   let heroTone: MemoryNarrative["heroTone"] = "success";
-  let heroTitle = "Memory";
+  let heroTitle = "记忆";
   let heroSummary = "";
   let stateLabel = "运行中";
 
   if (isDegraded) {
     heroTone = "danger";
     stateLabel = "异常";
-    heroTitle = "Memory 连接异常";
+    heroTitle = "记忆连接异常";
     heroSummary = "已有数据不会丢失。请检查 Settings > Memory 配置是否正确。";
   } else if (!hasVisibleRecords && hasStoredRecords) {
     heroTone = "warning";
