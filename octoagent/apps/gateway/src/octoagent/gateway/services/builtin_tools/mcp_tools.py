@@ -14,13 +14,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import structlog
-
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ._deps import ToolDeps
-
-_log = structlog.get_logger()
 
 
 async def register(broker, deps: ToolDeps) -> None:
@@ -218,17 +214,8 @@ async def register(broker, deps: ToolDeps) -> None:
                     encoding="utf-8",
                 )
 
-                # 触发 MCP 发现 + 刷新 pack 缓存
-                try:
-                    await deps.mcp_registry.discover_and_register()
-                except Exception as disc_exc:
-                    _log.warning(
-                        "mcp_local_register_discover_failed",
-                        server_name=server_name,
-                        error=str(disc_exc),
-                    )
-                # MCP 工具注入到 ToolBroker 后必须刷新 pack 缓存，
-                # 否则后续 resolve_profile_first_tools 用的仍是旧 pack（不含 MCP 工具）
+                # 刷新 pack 缓存即可：_pack_service.refresh() 内部会调
+                # mcp_registry.refresh() 完成 MCP 工具发现 + 注入到 ToolBroker。
                 deps._pack_service.invalidate_pack()
                 await deps._pack_service.refresh()
 
@@ -306,10 +293,11 @@ async def register(broker, deps: ToolDeps) -> None:
                 ensure_ascii=False,
             )
         result = task.model_dump(mode="json")
-        # 安装完成后自动刷新 capability pack，让新 MCP 工具立即可发现
+        # 安装完成后从当前 pack 读取 MCP 工具清单（不再触发 refresh）。
+        # _finalize_install 已在安装完成时刷新过一次；这里每次轮询都重刷会和
+        # _finalize_install / 其他入口的 refresh 并发，放大 try_register 冲突。
         if task.status == "completed":
             try:
-                await deps._pack_service.refresh()
                 pack = deps._pack_service._pack
                 mcp_tools = [
                     t.tool_name

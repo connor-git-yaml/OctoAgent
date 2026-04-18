@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -88,6 +89,10 @@ class McpRegistryService:
         self._tool_records: dict[str, McpToolRecord] = {}
         self._registered_tool_names: set[str] = set()
         self._last_config_error = ""
+        # refresh() 内多个 await 点（_clear_registered_tools / _discover_server_tools /
+        # try_register）都会让出事件循环；并发 refresh 交错会导致同名工具在 broker
+        # 已存在时 try_register 失败，进而 _tool_records 残缺。用实例级锁串行化。
+        self._refresh_lock = asyncio.Lock()
 
     @property
     def config_path(self) -> Path:
@@ -106,6 +111,10 @@ class McpRegistryService:
             await self._session_pool.close_all()
 
     async def refresh(self) -> None:
+        async with self._refresh_lock:
+            await self._refresh_locked()
+
+    async def _refresh_locked(self) -> None:
         configs = self._load_configs()
         await self._clear_registered_tools()
         self._server_records = {}
