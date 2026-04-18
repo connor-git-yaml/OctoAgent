@@ -151,6 +151,32 @@ async def get_recovery_summary(store_group=Depends(get_store_group)):
     return service.get_recovery_summary().model_dump(mode="json")
 
 
+@router.get("/api/ops/tool-registry/diagnostics")
+async def get_tool_registry_diagnostics(request: Request):
+    """ToolBroker 注册失败明细。
+
+    /ready 只暴露 diagnostics_count，排查 try_register 失败时拿不到具体 message。
+    本端点把 ToolBroker.registry_diagnostics 列表直出（含 tool_name/error_type/
+    message/timestamp），用于 MCP 注册冲突等场景的现场取证。
+    """
+    tool_broker = getattr(request.app.state, "tool_broker", None)
+    if tool_broker is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "TOOL_BROKER_UNAVAILABLE",
+                    "message": "ToolBroker 未挂载。",
+                }
+            },
+        )
+    diagnostics = getattr(tool_broker, "registry_diagnostics", [])
+    if callable(diagnostics):
+        diagnostics = diagnostics()
+    items = [_model_dump(item) for item in (diagnostics or [])]
+    return {"count": len(items), "items": items}
+
+
 @router.post("/api/ops/backup/create")
 async def create_backup(
     body: BackupCreateRequest,

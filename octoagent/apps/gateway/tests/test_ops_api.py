@@ -354,3 +354,42 @@ class TestOpsApi:
         payload = resp.json()
         assert payload["error"]["code"] == "VERIFY_FAILED"
         assert payload["summary"]["failure_report"]["message"] == "ready timeout"
+
+    async def test_tool_registry_diagnostics_returns_items(
+        self, client: AsyncClient, test_app
+    ):
+        from octoagent.tooling.models import RegistryDiagnostic
+
+        app, _, _ = test_app
+
+        class _FakeBroker:
+            registry_diagnostics = [
+                RegistryDiagnostic(
+                    tool_name="mcp.openrouter_perplexity.ask_model",
+                    error_type="ToolRegistrationError",
+                    message="Tool 'mcp.openrouter_perplexity.ask_model' already registered.",
+                    timestamp=datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC),
+                ),
+            ]
+
+        app.state.tool_broker = _FakeBroker()
+
+        resp = await client.get("/api/ops/tool-registry/diagnostics")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["count"] == 1
+        item = payload["items"][0]
+        assert item["tool_name"] == "mcp.openrouter_perplexity.ask_model"
+        assert item["error_type"] == "ToolRegistrationError"
+        assert "already registered" in item["message"]
+
+    async def test_tool_registry_diagnostics_503_when_broker_missing(
+        self, client: AsyncClient, test_app
+    ):
+        app, _, _ = test_app
+        if hasattr(app.state, "tool_broker"):
+            delattr(app.state, "tool_broker")
+
+        resp = await client.get("/api/ops/tool-registry/diagnostics")
+        assert resp.status_code == 503
+        assert resp.json()["error"]["code"] == "TOOL_BROKER_UNAVAILABLE"
