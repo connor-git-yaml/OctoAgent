@@ -157,27 +157,27 @@ class LiteLLMSkillClient:
             if tool_meta.name not in allowed_tool_names and not is_mcp:
                 filtered_out.append(tool_meta.name)
                 continue
-            if tool_meta.name in allowed_tool_names or is_mcp:
-                if responses_api:
-                    result.append(
-                        {
-                            "type": "function",
+            # 能到这里说明：工具在白名单内 或 MCP 豁免工具
+            if responses_api:
+                result.append(
+                    {
+                        "type": "function",
+                        "name": _to_fn_name(tool_meta.name),
+                        "description": tool_meta.description,
+                        "parameters": tool_meta.parameters_json_schema,
+                    }
+                )
+            else:
+                result.append(
+                    {
+                        "type": "function",
+                        "function": {
                             "name": _to_fn_name(tool_meta.name),
                             "description": tool_meta.description,
                             "parameters": tool_meta.parameters_json_schema,
-                        }
-                    )
-                else:
-                    result.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": _to_fn_name(tool_meta.name),
-                                "description": tool_meta.description,
-                                "parameters": tool_meta.parameters_json_schema,
-                            },
-                        }
-                    )
+                        },
+                    }
+                )
         if mcp_extra:
             log.info(
                 "mcp_tools_injected",

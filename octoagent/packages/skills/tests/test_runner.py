@@ -11,11 +11,42 @@ from octoagent.skills.models import (
     SkillPermissionMode,
     SkillRunStatus,
 )
+from octoagent.skills.models import is_runtime_exempt_tool
 from octoagent.skills.runner import SkillRunner
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolResult
 from pydantic import BaseModel
+import pytest
 
 from .conftest import EchoInput, QueueModelClient
+
+
+@pytest.mark.parametrize(
+    "tool_name,tool_group,expected",
+    [
+        # 正向：标准 mcp.<server>.<tool> 格式
+        ("mcp.perplexity.search", "mcp", True),
+        ("mcp.filesystem.read", "mcp", True),
+        # 反向：tool_group 不是 mcp
+        ("mcp.perplexity.search", "builtin", False),
+        ("mcp.perplexity.search", "", False),
+        # 反向：name 不以 mcp. 开头
+        ("filesystem.read", "mcp", False),
+        # 反向：缺 tool 段（只有 mcp.<server>）
+        ("mcp.perplexity", "mcp", False),
+        # 反向：只有 "mcp." 前缀无后续
+        ("mcp.", "mcp", False),
+        ("mcp", "mcp", False),
+        # 边界：双点 "mcp..evil"（server 段为空），必须拒绝
+        ("mcp..evil", "mcp", False),
+        ("mcp...", "mcp", False),
+        # 边界：空字符串
+        ("", "mcp", False),
+        ("", "", False),
+    ],
+)
+def test_is_runtime_exempt_tool_edge_cases(tool_name: str, tool_group: str, expected: bool) -> None:
+    """Feature 077: MCP 豁免边界 —— 拒绝双点（mcp..evil）等被误用豁免通道的形式。"""
+    assert is_runtime_exempt_tool(tool_name, tool_group) is expected
 
 
 class StrictOutput(BaseModel):
@@ -179,6 +210,9 @@ async def test_runner_mcp_tool_exempt_from_allowlist(
     """Feature 077: LiteLLM schema 层放行 mcp.* 工具后，runner 执行层也必须
     同步放行（is_runtime_exempt_tool），否则 LLM 看得见但调不动，且会在
     history 留下孤立 function_call 触发 Responses API 400。"""
+    # 显式锁定前提：echo_manifest 必须处于 RESTRICT 模式，否则白名单校验
+    # 被跳过，豁免逻辑未被测试到，会产生假阳性通过
+    assert echo_manifest.permission_mode == SkillPermissionMode.RESTRICT
     tool_broker.set_tool_meta(
         "mcp.servers.list",
         ToolMeta(

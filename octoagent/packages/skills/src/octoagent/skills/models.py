@@ -460,9 +460,12 @@ def is_runtime_exempt_tool(tool_name: str, tool_group: str) -> bool:
     当前豁免类别：MCP 动态工具（tool_group == "mcp"）。MCP 工具在注册时
     不可预知具体名称，由 LiteLLM schema 层动态放行给 LLM；执行层通过本
     函数保持与 schema 层一致的豁免判断，避免 LLM 看得见但调不动。
+
+    要求工具名至少为三段形式 `mcp.<server>.<tool>`，其中 server 段非空。
+    显式拒绝 `mcp.` / `mcp..evil` 等形状以避免被误用豁免通道。
     """
-    return (
-        tool_group == "mcp"
-        and tool_name.startswith("mcp.")
-        and "." in tool_name[4:]
-    )
+    if tool_group != "mcp" or not tool_name.startswith("mcp."):
+        return False
+    remainder = tool_name[4:]
+    # remainder 必须是 "<server>.<tool>"：首字符非 '.'（防双点），且仍含 '.'
+    return bool(remainder) and not remainder.startswith(".") and "." in remainder
