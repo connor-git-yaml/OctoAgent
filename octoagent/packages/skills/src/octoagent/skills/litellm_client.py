@@ -430,10 +430,28 @@ class LiteLLMSkillClient:
         # Codex Backend 不认别名，必须用真实模型名（如 gpt-5.4）
         wire_model = (direct.get("model") if direct else None) or manifest.model_alias
 
+        responses_input = self._history_to_responses_input(history)
+        if not responses_input:
+            # 所有 message 被过滤（纯 system、孤立 function_call_output 被剥离、
+            # compactor 激进压缩等）→ input=[] 会直接踩 Responses API 400
+            # `missing_required_parameter`。提前 fail-fast，给上层一个明确错误
+            # 分类而不是把空 body 甩给 API。不可重试：重发结果一样。
+            log.error(
+                "responses_input_empty_after_filter",
+                history_count=len(history),
+                tools_count=len(tools or []),
+            )
+            raise LLMCallError(
+                "empty_input",
+                "Responses API input 为空：history 全部被系统消息/孤立 call_id 过滤掉，"
+                "无可用上下文发送。请检查 history 压缩或 tool_call 配对。",
+                retriable=False,
+            )
+
         body: dict[str, Any] = {
             "model": wire_model,
             "instructions": self._build_responses_instructions(manifest, history),
-            "input": self._history_to_responses_input(history),
+            "input": responses_input,
             "store": False,
             "stream": True,
         }

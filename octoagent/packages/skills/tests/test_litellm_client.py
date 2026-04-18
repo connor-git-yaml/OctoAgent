@@ -542,3 +542,49 @@ def test_history_to_responses_input_legacy_orphan_filtered() -> None:
     assert not any(
         item.get("type") == "function_call_output" for item in items
     ), "旧格式的孤立 function_call_output 也必须被过滤"
+
+
+@pytest.mark.asyncio
+async def test_call_proxy_responses_fails_fast_on_empty_input(monkeypatch) -> None:
+    """history 全部被过滤（纯 system / 孤立 tool message）时，不发 Responses API 请求，
+    直接 raise LLMCallError('empty_input') 让上层 fail-fast。
+
+    避免 `input=[]` 触发 Responses API 400 `missing_required_parameter`，并且
+    用 retriable=False 阻止 runner 盲目重试。
+    """
+    from octoagent.skills.litellm_client import LLMCallError
+
+    captures: list[dict[str, Any]] = []
+    client = LiteLLMSkillClient(
+        proxy_url="http://127.0.0.1:4000",
+        master_key="sk-test",
+        tool_broker=_FakeToolBroker(),
+    )
+    monkeypatch.setattr(
+        client,
+        "_http_client",
+        _FakeAsyncClient([], captures),
+    )
+
+    # history 里只有 system + 孤立 tool message（无 assistant.tool_calls 配对）
+    history = [
+        {"role": "system", "content": "ignored"},
+        {"role": "tool", "tool_call_id": "call_orphan", "content": "no pair"},
+    ]
+    manifest = SkillManifest(
+        skill_id="test.inline",
+        input_model=_SkillIO,
+        output_model=_SkillIO,
+        model_alias="main",
+        description="",
+        permission_mode=SkillPermissionMode.RESTRICT,
+        tools_allowed=[],
+    )
+
+    with pytest.raises(LLMCallError) as excinfo:
+        await client._call_proxy_responses(manifest=manifest, history=history, tools=[])
+
+    assert excinfo.value.error_type == "empty_input"
+    assert excinfo.value.retriable is False
+    # 请求从未发出
+    assert captures == []

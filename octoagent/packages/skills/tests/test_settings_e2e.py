@@ -166,9 +166,14 @@ class TestSettingsImmediateEffect:
 
     @pytest.mark.asyncio
     async def test_default_without_settings(self) -> None:
-        """无 Settings 覆盖时使用全局默认值。"""
+        """无 Settings 覆盖时使用 runtime 兜底默认值。
+
+        UsageLimits 类层 max_steps=None（API 契约"不限制"语义），但
+        get_global_defaults() 注入 _RUNTIME_FALLBACK_MAX_STEPS=30，避免
+        LLM 误解 intent 时无限循环烧资源。
+        """
         limits = _simulate_settings_pipeline()
-        assert limits.max_steps is None  # 不限步数
+        assert limits.max_steps == 30  # runtime 兜底
         assert limits.max_budget_usd is None
         assert limits.max_duration_seconds == 7200.0  # 2 小时
 
@@ -212,7 +217,7 @@ class TestSettingsMultiDimensionIntegration:
         limits = _simulate_settings_pipeline(
             profile_resource_limits={"max_duration_seconds": 600.0},
         )
-        assert limits.max_steps is None  # 全局默认保留（不限）
+        assert limits.max_steps == 30  # runtime 兜底保留
         assert limits.max_budget_usd is None  # 全局默认保留
         assert limits.max_duration_seconds == 600.0  # 被覆盖
         assert limits.max_tool_calls is None  # 全局默认保留
@@ -227,7 +232,7 @@ class TestSettingsMultiDimensionIntegration:
                 "max_duration_seconds": None,
             },
         )
-        assert limits.max_steps is None  # None 不覆盖
+        assert limits.max_steps == 30  # None 不覆盖 → runtime 兜底保留
         assert limits.max_budget_usd is None  # 0 不覆盖
         assert limits.max_duration_seconds == 7200.0  # None 不覆盖
 

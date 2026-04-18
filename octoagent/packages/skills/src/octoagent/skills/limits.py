@@ -30,6 +30,15 @@ _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
     f"{_ENV_PREFIX}MAX_TOOL_CALLS": ("max_tool_calls", int),
 }
 
+# Runtime 兜底默认：UsageLimits 类签名层 max_steps=None（"不限制"语义，对齐
+# Claude SDK / Agent Zero）。但 runtime 入口需要安全上限，否则 LLM 误解 intent
+# 时会陷入"connectivity test"等无意义循环消耗 token + duration（实测有过 6.8min
+# 跑 29 轮 ask_model 都是 "Reply with exactly: OK" 的案例）。
+# 30 是经验值：足够覆盖中等复杂度多步任务，又能在 Agent 走偏时及时熔断。
+# 用户可以通过 OCTOAGENT_DEFAULT_MAX_STEPS / WorkerProfile.resource_limits /
+# SKILL.md resource_limits 任一层覆盖。
+_RUNTIME_FALLBACK_MAX_STEPS = 30
+
 
 def _read_env_defaults() -> dict[str, Any]:
     """从环境变量读取全局默认值覆盖。
@@ -54,16 +63,20 @@ def _read_env_defaults() -> dict[str, Any]:
 def get_global_defaults() -> UsageLimits:
     """获取合并了环境变量覆盖后的全局默认 UsageLimits。
 
-    优先级: 环境变量 > 代码硬编码默认值。
+    优先级: 环境变量 > runtime 兜底默认值（max_steps=30）> 类签名默认（None 不限制）。
+
+    UsageLimits 类层 max_steps 默认 None 是 API 契约语义（"显式不限制"），
+    但 runtime 必须有兜底上限防止 LLM 误循环烧资源，所以这里注入
+    _RUNTIME_FALLBACK_MAX_STEPS=30，仍允许用户通过环境变量 / Profile /
+    SKILL.md 逐层覆盖。
     """
+    base_dict = UsageLimits().model_dump()
+    base_dict["max_steps"] = _RUNTIME_FALLBACK_MAX_STEPS
     env_overrides = _read_env_defaults()
-    if not env_overrides:
-        return UsageLimits()
-    base = UsageLimits().model_dump()
     for key, value in env_overrides.items():
-        if key in base:
-            base[key] = value
-    return UsageLimits(**base)
+        if key in base_dict:
+            base_dict[key] = value
+    return UsageLimits(**base_dict)
 
 
 def merge_usage_limits(base: UsageLimits, *overrides: dict[str, Any]) -> UsageLimits:

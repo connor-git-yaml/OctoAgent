@@ -32,9 +32,14 @@ from octoagent.skills.models import UsageLimits
 
 class TestGetGlobalDefaults:
     def test_default_values(self) -> None:
-        """无环境变量时返回代码硬编码默认。"""
+        """无环境变量时返回 runtime 兜底默认。
+
+        UsageLimits 类层 max_steps=None（"显式不限制"语义），但 runtime 入口
+        get_global_defaults() 注入 _RUNTIME_FALLBACK_MAX_STEPS=30 防止 LLM
+        误循环烧资源（实测有过 29 轮 ask_model 连续 connectivity test 的案例）。
+        """
         defaults = get_global_defaults()
-        assert defaults.max_steps is None  # 不限步数
+        assert defaults.max_steps == 30  # runtime 兜底
         assert defaults.max_tool_calls is None  # 不限工具调用
         assert defaults.max_budget_usd is None
         assert defaults.max_duration_seconds == 7200.0  # 2 小时
@@ -59,7 +64,7 @@ class TestMergeUsageLimits:
     def test_empty_override(self) -> None:
         base = get_global_defaults()
         merged = merge_usage_limits(base, {})
-        assert merged.max_steps is None
+        assert merged.max_steps == 30  # runtime fallback 被继承
         assert merged.max_duration_seconds == 7200.0
 
     def test_single_field_override(self) -> None:
@@ -153,22 +158,22 @@ class TestEnvVarPriority:
     def test_empty_env_var_ignored(self) -> None:
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": ""}):
             defaults = get_global_defaults()
-            assert defaults.max_steps is None  # 代码默认（不限）
+            assert defaults.max_steps == 30  # runtime fallback 生效
 
     def test_invalid_env_var_ignored(self) -> None:
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": "not_a_number"}):
             defaults = get_global_defaults()
-            assert defaults.max_steps is None  # 代码默认
+            assert defaults.max_steps == 30  # runtime fallback 生效
 
     def test_negative_env_var_ignored(self) -> None:
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": "-5"}):
             defaults = get_global_defaults()
-            assert defaults.max_steps is None  # 负数不覆盖
+            assert defaults.max_steps == 30  # 负数不覆盖 → runtime fallback 生效
 
     def test_zero_env_var_ignored(self) -> None:
         with patch.dict(os.environ, {"OCTOAGENT_DEFAULT_MAX_STEPS": "0"}):
             defaults = get_global_defaults()
-            assert defaults.max_steps is None  # 0 不覆盖
+            assert defaults.max_steps == 30  # 0 不覆盖 → runtime fallback 生效
 
     def test_settings_override_env(self) -> None:
         """Settings (Profile) > 环境变量。"""
