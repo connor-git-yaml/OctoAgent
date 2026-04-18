@@ -294,9 +294,12 @@ class McpRegistryService:
             self._last_config_error = f"{type(exc).__name__}: {exc}"
             return []
 
-        raw_servers = payload.get("servers", payload) if isinstance(payload, dict) else payload
+        raw_servers = self._normalize_payload_to_servers_list(payload)
         if not isinstance(raw_servers, list):
-            self._last_config_error = "config payload must be a list or {\"servers\": [...]}"
+            self._last_config_error = (
+                "config payload must be a list, "
+                "{\"servers\": [...]}, or Claude Code-style {\"<name>\": {...}}"
+            )
             return []
 
         configs: list[McpServerConfig] = []
@@ -306,6 +309,41 @@ class McpRegistryService:
             except Exception as exc:
                 self._last_config_error = f"{type(exc).__name__}: {exc}"
         return configs
+
+    def _normalize_payload_to_servers_list(self, payload: Any) -> Any:
+        """把多种 schema 归一为 list[dict]。
+
+        支持：
+        - 顶层 list：直接返回
+        - {"servers": [...]}：取 servers 字段
+        - Claude Code 风格 {"<name>": {"command": ..., ...}, ...}：
+          按启发式识别（所有 value 均为含 `command` 字段的 dict），
+          转换为 list 形式 `[{"name": "<name>", ...}, ...]`，并打 warning
+          提示用户迁移到标准格式。
+        """
+        if isinstance(payload, list):
+            return payload
+
+        if not isinstance(payload, dict):
+            return payload  # 非法形状，交给上层报错
+
+        if "servers" in payload:
+            return payload.get("servers")
+
+        # Claude Code 风格启发式识别：所有 value 都是含 command 的 dict
+        # （Agent 写配置时容易误用该 schema，兼容识别避免用户陷入不可恢复状态）
+        values = list(payload.values())
+        if values and all(
+            isinstance(v, dict) and isinstance(v.get("command"), str)
+            for v in values
+        ):
+            return [
+                {**config, "name": name}
+                for name, config in payload.items()
+            ]
+
+        # 既不是 {"servers": ...} 也不是 Claude Code 风格，保留原值让上层报错
+        return payload
 
     def _write_configs(self, configs: list[McpServerConfig]) -> None:
         path = self._resolve_config_path()
