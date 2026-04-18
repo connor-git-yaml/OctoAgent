@@ -184,15 +184,14 @@ class LiteLLMSkillClient:
                 mcp_tools=mcp_extra,
                 total_tools=len(result),
             )
-        if log.isEnabledFor(10):  # DEBUG
-            log.debug(
-                "tool_schema_resolved",
-                total=len(result),
-                allowed=len(allowed_tool_names),
-                discovered=len(all_tools),
-                filtered_out_count=len(filtered_out),
-                mcp_extra_count=len(mcp_extra),
-            )
+        log.debug(
+            "tool_schema_resolved",
+            total=len(result),
+            allowed=len(allowed_tool_names),
+            discovered=len(all_tools),
+            filtered_out_count=len(filtered_out),
+            mcp_extra_count=len(mcp_extra),
+        )
         return result
 
     @staticmethod
