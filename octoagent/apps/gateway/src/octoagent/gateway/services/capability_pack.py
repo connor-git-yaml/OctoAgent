@@ -1891,6 +1891,18 @@ class CapabilityPackService:
                     last_error = f"{type(exc).__name__}: {exc}"
                     continue
 
+                # Fail-fast：DuckDuckGo 触发反爬检测（CAPTCHA/anomaly 页）时
+                # HTML 没有任何搜索结果，所有 DDG 入口都被同一 IP 的 rate limit
+                # 覆盖，继续尝试其他 DDG URL 也是徒劳。立即抛出明确信号，让
+                # Agent 感知"被拦截"而非"真无结果"，切换到其他搜索通道
+                # （例如 MCP ask_model + perplexity/sonar-*）。
+                if self._is_ddg_anomaly_page(response.text):
+                    raise RuntimeError(
+                        "web search blocked by DuckDuckGo anomaly/captcha check; "
+                        "retry from a different IP or switch to another search channel "
+                        "(e.g. MCP ask_model with perplexity/sonar-*)"
+                    )
+
                 results = self._parse_duckduckgo_results(response.text, limit=effective_limit)
                 if not results:
                     last_error = "no_search_results_parsed"
@@ -1904,6 +1916,16 @@ class CapabilityPackService:
                 }
 
         raise RuntimeError(f"web search failed: {last_error or 'unknown_error'}")
+
+    @staticmethod
+    def _is_ddg_anomaly_page(payload: str) -> bool:
+        """检测 DuckDuckGo 反爬/CAPTCHA 拦截页。
+
+        DDG 在触发 bot 检测时会返回一个只含 `anomaly-modal__*` 样式组件的
+        简化页面（没有任何搜索结果 anchor）。静态标记稳定，命中后直接
+        fail-fast 比继续尝试其他 DDG 入口更实用。
+        """
+        return "anomaly-modal__" in payload
 
     @classmethod
     def _parse_duckduckgo_results(
