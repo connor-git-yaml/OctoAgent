@@ -3112,7 +3112,12 @@ class AgentContextService:
                         scope_ids=selected_scope_ids,
                         query=recall_plan.query.strip() or query,
                         policy=effective_memory_access_policy(agent_profile).model_copy(
-                            update={"allow_vault": recall_plan.allow_vault}
+                            update={
+                                "allow_vault": recall_plan.allow_vault,
+                                "actor_id": agent_runtime.agent_runtime_id or agent_session.agent_session_id,
+                                "actor_label": agent_runtime.role.value,
+                                "project_id": project.project_id if project is not None else "",
+                            }
                         ),
                         per_scope_limit=memory_recall_per_scope_limit(
                             agent_profile,

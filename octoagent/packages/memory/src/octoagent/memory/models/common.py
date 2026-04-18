@@ -45,6 +45,12 @@ class MemoryAccessPolicy(BaseModel):
 
     allow_vault: bool = Field(default=False)
     include_history: bool = Field(default=False)
+    actor_id: str = Field(
+        default="",
+        description="请求方 actor（worker_id / session_id）。Vault 授权校验与审计均依赖此字段。",
+    )
+    actor_label: str = Field(default="")
+    project_id: str = Field(default="")
 
 
 class CompactionFlushResult(BaseModel):

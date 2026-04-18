@@ -19,6 +19,7 @@ from typing import Any
 
 import structlog
 from octoagent.memory import (
+    SENSITIVE_PARTITIONS,
     EvidenceRef,
     MemoryPartition,
     MemoryService,
@@ -166,6 +167,9 @@ class ProfileGeneratorService:
             sor_records = await self._memory_store.search_sor(
                 scope_id, query=None, include_history=False, limit=200,
             )
+            # 过滤敏感分区：画像写回 partition=profile（非敏感），若带入 HEALTH/
+            # FINANCE 源记录会导致敏感内容脱离 Vault 保护出现在 profile 里。
+            sor_records = [s for s in sor_records if s.partition not in SENSITIVE_PARTITIONS]
             derived_records = await self._memory_store.list_derived_records(
                 DerivedMemoryQuery(
                     scope_id=scope_id,
@@ -173,6 +177,9 @@ class ProfileGeneratorService:
                     limit=100,
                 )
             )
+            derived_records = [
+                d for d in derived_records if d.partition not in SENSITIVE_PARTITIONS
+            ]
             existing_profile = await self._memory_store.search_sor(
                 scope_id, query="用户画像", include_history=False, limit=20,
             )

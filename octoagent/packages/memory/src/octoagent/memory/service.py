@@ -106,6 +106,7 @@ class MemoryService:
             fallback_backend=self._fallback_backend,
             reranker_service=reranker_service,
             facade=self,
+            backend_manager=self._backend_manager,
         )
 
     # ------------------------------------------------------------------

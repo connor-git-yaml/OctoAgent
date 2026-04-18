@@ -253,10 +253,17 @@ class MemoryWriteService:
         ]
         meta = metadata or {}
 
+        # fast_commit 仅在"非敏感分区 + 高置信度 + ADD + 无引用型 evidence"时生效；
+        # 只要 evidence_refs 含 fragment/sor 引用，就必须走 validate_proposal
+        # 确保引用确实存在，避免 LLM 幻觉引用直接落盘。
+        has_referential_evidence = any(
+            ref.ref_type in {"fragment", "sor"} for ref in refs
+        )
         if (
             confidence < 0.75
             or action != WriteAction.ADD
             or partition in SENSITIVE_PARTITIONS
+            or has_referential_evidence
         ):
             proposal = await self.propose_write(
                 scope_id=scope_id,
@@ -277,6 +284,7 @@ class MemoryWriteService:
                 )
             return await self.commit_memory(proposal.proposal_id)
 
+        now = datetime.now(UTC)
         proposal_id = str(ULID())
         proposal = WriteProposal(
             proposal_id=proposal_id,
@@ -291,7 +299,8 @@ class MemoryWriteService:
             expected_version=None,
             status=ProposalStatus.VALIDATED,
             metadata=meta,
-            created_at=datetime.now(UTC),
+            created_at=now,
+            validated_at=now,
         )
         await self._store.save_proposal(proposal)
 

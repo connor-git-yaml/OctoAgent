@@ -55,16 +55,18 @@ class MemoryRecallService:
         backend: MemoryBackend,
         fallback_backend: SqliteMemoryBackend,
         reranker_service: Any | None = None,
-        # 由 Facade 注入的宿主引用，避免 sub-service 反向 import MemoryService
-        # 使用 Any 类型以避免循环导入
+        # 由 Facade 注入的宿主引用——仅用于单向借用其他子服务（get_memory /
+        # resolve_memory_evidence / _vault）。search_memory 已不再绕 facade 回
+        # 调 self，破除"Facade → 子服务 → Facade → 子服务"的双向调用路径。
         facade: Any = None,
+        backend_manager: Any = None,
     ) -> None:
         self._store = store
         self._backend = backend
         self._fallback_backend = fallback_backend
         self._reranker_service = reranker_service
-        # 宿主 Facade 引用——recall 所需的跨子服务方法通过 facade 晚绑定调用
         self._facade = facade
+        self._backend_manager = backend_manager
 
     # ------------------------------------------------------------------
     # 公共方法
@@ -182,9 +184,20 @@ class MemoryRecallService:
                 hook_trace=hook_trace,
             )
 
-        policy = policy or MemoryAccessPolicy()
+        policy_input = policy or MemoryAccessPolicy()
+        vault_grant_map, vault_denial_reason = await self._resolve_vault_grants(
+            policy=policy_input,
+            scope_ids=selected_scope_ids,
+        )
+        policy = (
+            policy_input.model_copy(update={"allow_vault": False})
+            if vault_denial_reason
+            else policy_input
+        )
         expanded_queries = self._expand_recall_queries(normalized_query)
         degraded_reasons = self._recall_degraded_reasons(backend_status)
+        if vault_denial_reason and vault_denial_reason not in degraded_reasons:
+            degraded_reasons.append(vault_denial_reason)
         collected: list[_Candidate] = []
         seen: set[str] = set()
         scope_hit_distribution: dict[str, int] = {}
@@ -203,7 +216,7 @@ class MemoryRecallService:
                 search_options=search_options,
                 use_expanded=False,
             )
-            collected, seen, scope_hit_distribution = self._collect_and_dedup(
+            collected, seen, scope_hit_distribution, failed_scopes = self._collect_and_dedup(
                 scope_ids=selected_scope_ids,
                 scope_results=scope_results,
             )
@@ -219,7 +232,7 @@ class MemoryRecallService:
                 expanded_queries=expanded_queries,
                 use_expanded=True,
             )
-            collected, seen, scope_hit_distribution = self._collect_and_dedup(
+            collected, seen, scope_hit_distribution, failed_scopes = self._collect_and_dedup(
                 scope_ids=selected_scope_ids,
                 scope_results=scope_results,
             )
@@ -236,6 +249,23 @@ class MemoryRecallService:
         recall_hits: list[MemoryRecallHit] = []
         for hit in selected:
             recall_hits.append(await self._build_recall_hit(hit=hit, policy=policy))
+
+        # scope 级失败不能静默吞——明确暴露在 degraded_reasons，
+        # 让调用方知道返回的 hits 可能不覆盖所有请求的 scope。
+        for failed_scope in failed_scopes:
+            reason = f"scope_failed:{failed_scope}"
+            if reason not in degraded_reasons:
+                degraded_reasons.append(reason)
+
+        if policy_input.allow_vault:
+            await self._emit_vault_audits(
+                policy=policy_input,
+                query=normalized_query,
+                scope_ids=selected_scope_ids,
+                recall_hits=recall_hits,
+                vault_grant_map=vault_grant_map,
+                vault_denial_reason=vault_denial_reason,
+            )
 
         result = MemoryRecallResult(
             query=normalized_query,
@@ -283,7 +313,7 @@ class MemoryRecallService:
             results: list[_Candidate] = []
             if use_expanded and expanded_queries:
                 for query_index, search_query in enumerate(expanded_queries):
-                    hits = await self._facade.search_memory(
+                    hits = await self._search_with_backend_manager(
                         scope_id=scope_id,
                         query=search_query,
                         policy=policy,
@@ -304,7 +334,7 @@ class MemoryRecallService:
                             ),
                         ))
             else:
-                hits = await self._facade.search_memory(
+                hits = await self._search_with_backend_manager(
                     scope_id=scope_id,
                     query=query,
                     policy=policy,
@@ -332,22 +362,58 @@ class MemoryRecallService:
         tasks = [_search_one_scope(i, sid) for i, sid in enumerate(scope_ids)]
         return await asyncio.gather(*tasks, return_exceptions=True)  # type: ignore[return-value]
 
+    async def _search_with_backend_manager(
+        self,
+        *,
+        scope_id: str,
+        query: str | None = None,
+        policy: MemoryAccessPolicy | None = None,
+        limit: int = 10,
+        search_options: MemorySearchOptions | None = None,
+    ) -> list[MemorySearchHit]:
+        """内部 search 包装——把 backend_manager 状态/回调拼接进 search_memory。
+
+        曾经这段逻辑在 ``MemoryService.search_memory`` 里，recall 通过
+        ``self._facade.search_memory`` 反向调回 Facade，形成双向依赖。现在
+        recall 自己持有 backend_manager，不再绕 Facade。
+        """
+
+        bm = self._backend_manager
+        return await self.search_memory(
+            scope_id=scope_id,
+            query=query,
+            policy=policy,
+            limit=limit,
+            search_options=search_options,
+            backend_degraded=bool(bm.backend_degraded) if bm is not None else False,
+            should_force_fallback_fn=(bm._should_force_fallback if bm is not None else None),
+            mark_backend_healthy_fn=(bm.mark_backend_healthy if bm is not None else None),
+            mark_backend_degraded_fn=(bm.mark_backend_degraded if bm is not None else None),
+        )
+
     @staticmethod
     def _collect_and_dedup(
         *,
         scope_ids: list[str],
         scope_results: list[list[_Candidate] | BaseException],
-    ) -> tuple[list[_Candidate], set[str], dict[str, int]]:
-        """将并行搜索结果合并去重，返回 (collected, seen, scope_hit_distribution)。"""
+    ) -> tuple[list[_Candidate], set[str], dict[str, int], list[str]]:
+        """合并去重并行搜索结果。
+
+        返回 (collected, seen, scope_hit_distribution, failed_scope_ids)。
+        失败的 scope 之前被静默吞掉——现在显式返回让调用方写入
+        ``degraded_reasons``，避免调用方误以为所有 scope 都覆盖了。
+        """
 
         collected: list[_Candidate] = []
         seen: set[str] = set()
         scope_hit_distribution: dict[str, int] = {}
+        failed_scope_ids: list[str] = []
 
         for i, result in enumerate(scope_results):
             if isinstance(result, BaseException):
                 log.warning("recall_scope_failed", scope_id=scope_ids[i], error=str(result))
                 scope_hit_distribution[scope_ids[i]] = 0
+                failed_scope_ids.append(scope_ids[i])
                 continue
             hit_count = 0
             for item in result:
@@ -359,7 +425,7 @@ class MemoryRecallService:
                 hit_count += 1
             scope_hit_distribution[scope_ids[i]] = hit_count
 
-        return collected, seen, scope_hit_distribution
+        return collected, seen, scope_hit_distribution, failed_scope_ids
 
     # ------------------------------------------------------------------
     # Recall hooks
@@ -469,6 +535,121 @@ class MemoryRecallService:
         bounded_max_hits = max(1, max_hits)
         trace.delivered_count = min(len(candidates), bounded_max_hits)
         return candidates[:bounded_max_hits], trace
+
+    # ------------------------------------------------------------------
+    # Vault grant 校验与审计
+    # ------------------------------------------------------------------
+
+    async def _resolve_vault_grants(
+        self,
+        *,
+        policy: MemoryAccessPolicy,
+        scope_ids: list[str],
+    ) -> tuple[dict[str, str], str]:
+        """校验 actor 在各 scope 下的 Vault 授权。
+
+        返回 (grant_map, denial_reason)。denial_reason 非空时意味着需要降级整个
+        recall 的 allow_vault。此处保守策略：任一 scope 无 grant 即降级，
+        避免 per-scope 混合 policy 带来的实现复杂度。
+        """
+
+        if not policy.allow_vault or not scope_ids:
+            return {}, ""
+        if not policy.actor_id:
+            return {}, "vault_no_actor"
+        vault = getattr(self._facade, "_vault", None)
+        if vault is None:
+            return {}, "vault_service_unavailable"
+
+        grant_map: dict[str, str] = {}
+        for sid in scope_ids:
+            grant = await vault.get_latest_valid_vault_grant(
+                actor_id=policy.actor_id,
+                project_id=policy.project_id,
+                scope_id=sid,
+            )
+            if grant is None:
+                return {}, "vault_no_grant"
+            grant_map[sid] = grant.grant_id
+        return grant_map, ""
+
+    async def _emit_vault_audits(
+        self,
+        *,
+        policy: MemoryAccessPolicy,
+        query: str,
+        scope_ids: list[str],
+        recall_hits: list[MemoryRecallHit],
+        vault_grant_map: dict[str, str],
+        vault_denial_reason: str,
+    ) -> None:
+        """写入 Vault 检索审计。
+
+        - 每个命中 Vault 的 scope 记一条授权审计（含 grant_id 与 vault_ids）。
+        - 若整个 recall 被降级（denial_reason 非空），为每个请求的 scope 各记
+          一条拒绝审计——让 actor/scope 的拒绝流水可查。
+        - 若 actor 有 grant 但 query 没命中任何 Vault 记录，不写授权审计
+          （避免空查询噪声）。
+        """
+
+        vault = getattr(self._facade, "_vault", None)
+        if vault is None:
+            return
+
+        # VaultRetrievalAuditRecord.scope_id / actor_id 都要求 min_length=1，
+        # denial 路径下 actor_id 可能为空（vault_no_actor），此处用占位符让
+        # "有人以空 actor 尝试开 vault"这条事实可查询；scope_ids 为空时也
+        # 至少记一条拒绝审计。
+        fallback_actor_id = policy.actor_id or "<unknown>"
+        target_scopes = scope_ids or ["<no-scope>"]
+
+        if vault_denial_reason:
+            for sid in target_scopes:
+                try:
+                    await vault.record_vault_retrieval_audit(
+                        actor_id=fallback_actor_id,
+                        actor_label=policy.actor_label,
+                        project_id=policy.project_id,
+                        scope_id=sid,
+                        query=query,
+                        reason_code=vault_denial_reason,
+                        authorized=False,
+                        result_count=0,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "vault_audit_denial_failed",
+                        reason=vault_denial_reason,
+                        scope_id=sid,
+                        error=str(exc),
+                    )
+            return
+
+        vault_hits_by_scope: dict[str, list[MemoryRecallHit]] = {}
+        for hit in recall_hits:
+            if hit.layer is MemoryLayer.VAULT:
+                vault_hits_by_scope.setdefault(hit.scope_id, []).append(hit)
+
+        for sid, hits in vault_hits_by_scope.items():
+            try:
+                await vault.record_vault_retrieval_audit(
+                    actor_id=policy.actor_id,
+                    actor_label=policy.actor_label,
+                    project_id=policy.project_id,
+                    scope_id=sid,
+                    query=query,
+                    reason_code="vault_recall_granted",
+                    authorized=True,
+                    result_count=len(hits),
+                    grant_id=vault_grant_map.get(sid) or "",
+                    retrieved_vault_ids=[hit.record_id for hit in hits],
+                )
+            except Exception as exc:
+                log.warning(
+                    "vault_audit_grant_failed",
+                    scope_id=sid,
+                    error=str(exc),
+                )
 
     # ------------------------------------------------------------------
     # Recall hit 构建

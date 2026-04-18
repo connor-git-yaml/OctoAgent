@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 from octoagent.memory import (
+    SENSITIVE_PARTITIONS,
     EvidenceRef,
     FragmentRecord,
     MemoryPartition,
@@ -340,9 +341,17 @@ class ConsolidationService:
                 evidence_refs = [EvidenceRef(ref_id=pending[0].fragment_id, ref_type="fragment")]
                 consolidated_fragment_ids.add(pending[0].fragment_id)
 
-            # 推断 partition：从 source fragment 中取众数
+            # 推断 partition：敏感级别不降级——
+            # 任一源 fragment 属于 SENSITIVE_PARTITIONS 时，结果 partition 从敏感
+            # 子集中取众数；否则再走整体众数逻辑。防止大量非敏感 fragment 稀释
+            # 少数 HEALTH/FINANCE 片段导致敏感内容被"洗白"到 WORK 分区。
             partitions = [fragment_map[fid].partition for fid in source_ids if fid in fragment_map]
-            partition = max(set(partitions), key=partitions.count) if partitions else MemoryPartition.WORK
+            if not partitions:
+                partition = MemoryPartition.WORK
+            else:
+                sensitive_subset = [p for p in partitions if p in SENSITIVE_PARTITIONS]
+                pool = sensitive_subset or partitions
+                partition = max(set(pool), key=pool.count)
 
             # T051-T055: 判断写入策略（ADD / UPDATE / MERGE / REPLACE）
             llm_action = fact.get("action", "").strip().lower()

@@ -303,7 +303,7 @@ class TestMemoryService:
     ):
         created_at = datetime(2026, 3, 10, tzinfo=UTC)
 
-        async def fake_search_memory(self, scope_id, *, query=None, policy=None, limit=20):
+        async def fake_search_memory(self, *, scope_id, query=None, policy=None, limit=20, **_kwargs):
             return [
                 MemorySearchHit(
                     record_id="memory-beta",
@@ -353,7 +353,7 @@ class TestMemoryService:
                 created_at=hit.created_at,
             )
 
-        monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
+        monkeypatch.setattr(MemoryRecallService, "search_memory", fake_search_memory)
         monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
         monkeypatch.setattr(MemoryRecallService, "_build_recall_hit", fake_build_recall_hit)
 
@@ -388,7 +388,7 @@ class TestMemoryService:
     ):
         created_at = datetime(2026, 3, 10, tzinfo=UTC)
 
-        async def fake_search_memory(self, scope_id, *, query=None, policy=None, limit=20):
+        async def fake_search_memory(self, *, scope_id, query=None, policy=None, limit=20, **_kwargs):
             return [
                 MemorySearchHit(
                     record_id="memory-beta",
@@ -428,7 +428,7 @@ class TestMemoryService:
                 created_at=hit.created_at,
             )
 
-        monkeypatch.setattr(type(memory_service), "search_memory", fake_search_memory)
+        monkeypatch.setattr(MemoryRecallService, "search_memory", fake_search_memory)
         monkeypatch.setattr(type(memory_service), "get_backend_status", fake_get_backend_status)
         monkeypatch.setattr(MemoryRecallService, "_build_recall_hit", fake_build_recall_hit)
 
@@ -502,6 +502,133 @@ class TestMemoryService:
         )
         assert audits
         assert audits[0].retrieval_id == audit.retrieval_id
+
+
+    async def test_recall_vault_denied_when_actor_missing(self, memory_service, monkeypatch):
+        """allow_vault=True 但 policy.actor_id 为空 → 降级 allow_vault + 写拒绝审计。"""
+
+        async def fake_search_memory(
+            self, *, scope_id, query=None, policy=None, limit=20, **_kwargs
+        ):
+            return []
+
+        monkeypatch.setattr(MemoryRecallService, "search_memory", fake_search_memory)
+
+        result = await memory_service.recall_memory(
+            scope_ids=["memory/project-x"],
+            query="敏感内容",
+            policy=MemoryAccessPolicy(allow_vault=True, project_id="project-default"),
+        )
+        assert "vault_no_actor" in result.degraded_reasons
+
+        audits = await memory_service.list_vault_retrieval_audits(
+            project_id="project-default",
+        )
+        assert any(a.reason_code == "vault_no_actor" and not a.authorized for a in audits)
+
+    async def test_recall_vault_denied_when_grant_missing(self, memory_service, monkeypatch):
+        """allow_vault=True + actor_id 非空 + 无 grant → 降级 + 写拒绝审计。"""
+
+        async def fake_search_memory(
+            self, *, scope_id, query=None, policy=None, limit=20, **_kwargs
+        ):
+            return []
+
+        monkeypatch.setattr(MemoryRecallService, "search_memory", fake_search_memory)
+
+        result = await memory_service.recall_memory(
+            scope_ids=["memory/project-x"],
+            query="敏感内容",
+            policy=MemoryAccessPolicy(
+                allow_vault=True,
+                actor_id="user:web",
+                project_id="project-default",
+            ),
+        )
+        assert "vault_no_grant" in result.degraded_reasons
+
+        audits = await memory_service.list_vault_retrieval_audits(
+            project_id="project-default",
+            actor_id="user:web",
+        )
+        assert any(a.reason_code == "vault_no_grant" and not a.authorized for a in audits)
+
+    async def test_recall_vault_authorized_writes_audit_with_grant(
+        self, memory_service, monkeypatch
+    ):
+        """有 grant + 命中 Vault → 写授权审计（带 grant_id 与 retrieved_vault_ids）。"""
+
+        request = await memory_service.create_vault_access_request(
+            project_id="project-default",
+            scope_id="memory/project-x",
+            partition=MemoryPartition.HEALTH,
+            subject_key="profile.user.health.note",
+            requester_actor_id="user:web",
+            reason="recall 审计测试",
+        )
+        _, grant = await memory_service.resolve_vault_access_request(
+            request.request_id,
+            decision=VaultAccessDecision.APPROVE,
+            granted_by_actor_id="owner",
+        )
+        assert grant is not None
+
+        created_at = datetime(2026, 3, 10, tzinfo=UTC)
+
+        async def fake_search_memory(
+            self, *, scope_id, query=None, policy=None, limit=20, **_kwargs
+        ):
+            return [
+                MemorySearchHit(
+                    record_id="vault-alpha",
+                    layer=MemoryLayer.VAULT,
+                    scope_id=scope_id,
+                    partition=MemoryPartition.HEALTH,
+                    subject_key="profile.user.health.note",
+                    summary="敏感摘要",
+                    created_at=created_at,
+                )
+            ]
+
+        async def fake_build_recall_hit(self, *, hit, policy):
+            return MemoryRecallHit(
+                record_id=hit.record_id,
+                layer=hit.layer,
+                scope_id=hit.scope_id,
+                partition=hit.partition,
+                summary=hit.summary,
+                subject_key=hit.subject_key or "",
+                search_query="",
+                citation=f"memory://{hit.scope_id}/{hit.record_id}",
+                content_preview=hit.summary,
+                metadata=dict(hit.metadata),
+                created_at=hit.created_at,
+            )
+
+        monkeypatch.setattr(MemoryRecallService, "search_memory", fake_search_memory)
+        monkeypatch.setattr(MemoryRecallService, "_build_recall_hit", fake_build_recall_hit)
+
+        result = await memory_service.recall_memory(
+            scope_ids=["memory/project-x"],
+            query="health note",
+            policy=MemoryAccessPolicy(
+                allow_vault=True,
+                actor_id="user:web",
+                project_id="project-default",
+            ),
+        )
+        assert "vault_no_grant" not in result.degraded_reasons
+        assert any(hit.layer is MemoryLayer.VAULT for hit in result.hits)
+
+        audits = await memory_service.list_vault_retrieval_audits(
+            project_id="project-default",
+            actor_id="user:web",
+        )
+        granted = [a for a in audits if a.reason_code == "vault_recall_granted"]
+        assert granted
+        assert granted[0].authorized is True
+        assert granted[0].grant_id == grant.grant_id
+        assert "vault-alpha" in granted[0].retrieved_vault_ids
 
 
 class TestFastCommit:

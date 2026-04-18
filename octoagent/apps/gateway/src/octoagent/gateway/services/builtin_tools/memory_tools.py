@@ -33,6 +33,7 @@ from octoagent.gateway.services.memory.memory_retrieval_profile import (
 )
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
+from ..execution_context import get_current_execution_context
 from ._deps import (
     ToolDeps,
     current_parent,
@@ -278,10 +279,22 @@ async def register(broker, deps: ToolDeps) -> None:
             ),
             retrieval_profile,
         )
+        try:
+            exec_ctx = get_current_execution_context()
+            actor_id = exec_ctx.worker_id or exec_ctx.agent_session_id or exec_ctx.session_id
+            actor_label = exec_ctx.runtime_kind or ""
+        except RuntimeError:
+            actor_id = ""
+            actor_label = ""
         recall = await memory_service.recall_memory(
             scope_ids=scope_ids[:4],
             query=query,
-            policy=MemoryAccessPolicy(allow_vault=allow_vault),
+            policy=MemoryAccessPolicy(
+                allow_vault=allow_vault,
+                actor_id=actor_id,
+                actor_label=actor_label,
+                project_id=project.project_id if project is not None else "",
+            ),
             per_scope_limit=min(4, bounded_limit),
             max_hits=bounded_limit,
             hook_options=MemoryRecallHookOptions.model_validate(hook_options),
