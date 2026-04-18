@@ -88,6 +88,11 @@ class UsageLimits(BaseModel):
     max_budget_usd: float | None = Field(default=None, ge=0.0)
     max_duration_seconds: float = Field(default=7200.0, ge=1.0)
     repeat_signature_threshold: int = Field(default=100, ge=2, le=200)
+    # Feature follow-up: 早期 loop warning 阈值。比 repeat_signature_threshold
+    # 更激进，在到达"硬"loop-detected 阈值前先向 LLM 注入一条 _loop_guard
+    # feedback，引导 LLM 停止无效重复调用（如枚举类工具反复 poll）。
+    # 默认 3 表示"第 3 轮相同 tool_calls signature 即提醒"。
+    repeat_warning_threshold: int = Field(default=3, ge=1, le=50)
 
 
 @dataclass

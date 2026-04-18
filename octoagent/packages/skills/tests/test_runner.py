@@ -282,6 +282,100 @@ async def test_runner_non_mcp_tool_not_exempted(
     assert all(call[0] != "danger.exec" for call in tool_broker.calls)
 
 
+async def test_runner_repeat_warning_injects_loop_guard_feedback(
+    echo_manifest, tool_broker, event_store
+) -> None:
+    """Feature follow-up: 连续相同 tool_calls signature 达到 warning 阈值时，
+    runner 向 feedback 注入 _loop_guard 条目，驱动 LLM 打破无效循环。"""
+    from octoagent.skills.models import (
+        SkillExecutionContext,
+        UsageLimits,
+    )
+
+    # warning_threshold=2 → 第 2 轮相同 signature 即注入 warning
+    ctx = SkillExecutionContext(
+        task_id="task-loop",
+        trace_id="trace-loop",
+        caller="worker",
+        usage_limits=UsageLimits(repeat_warning_threshold=2, max_steps=8),
+    )
+
+    # 模拟 Agent 连续调同一工具同一参数，第 3 轮让它收手结束（避免用完 max_steps）
+    same_call = [{"tool_name": "system.echo", "arguments": {"text": "poll"}}]
+    outputs = [
+        SkillOutputEnvelope(content="round 1", complete=False, tool_calls=same_call),
+        SkillOutputEnvelope(content="round 2", complete=False, tool_calls=same_call),
+        SkillOutputEnvelope(content="done", complete=True),
+    ]
+    client = CaptureFeedbackClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    await runner.run(
+        manifest=echo_manifest,
+        execution_context=ctx,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    # 第 3 轮 LLM 调用时（complete=True 终结前），feedback 里应包含 _loop_guard
+    final_feedback = client.feedback_snapshots[-1]
+    loop_guard_msgs = [fb for fb in final_feedback if fb.tool_name == "_loop_guard"]
+    assert len(loop_guard_msgs) == 1, (
+        f"期望恰好 1 条 _loop_guard feedback，实际得到 {len(loop_guard_msgs)}"
+    )
+    assert "system.echo" in loop_guard_msgs[0].error
+    assert "连续第 2 轮" in loop_guard_msgs[0].error
+
+
+async def test_runner_different_tool_calls_no_warning(
+    echo_manifest, tool_broker, event_store
+) -> None:
+    """回归保护：不同 tool_calls signature 不累计 repeat_count，不触发 warning。"""
+    from octoagent.skills.models import (
+        SkillExecutionContext,
+        UsageLimits,
+    )
+
+    ctx = SkillExecutionContext(
+        task_id="task-varied",
+        trace_id="trace-varied",
+        caller="worker",
+        usage_limits=UsageLimits(repeat_warning_threshold=2, max_steps=8),
+    )
+
+    outputs = [
+        SkillOutputEnvelope(
+            content="call A",
+            complete=False,
+            tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "a"}}],
+        ),
+        SkillOutputEnvelope(
+            content="call B",  # 不同 args → 不同 signature
+            complete=False,
+            tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "b"}}],
+        ),
+        SkillOutputEnvelope(
+            content="call C",
+            complete=False,
+            tool_calls=[{"tool_name": "system.echo", "arguments": {"text": "c"}}],
+        ),
+        SkillOutputEnvelope(content="done", complete=True),
+    ]
+    client = CaptureFeedbackClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    await runner.run(
+        manifest=echo_manifest,
+        execution_context=ctx,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    # 整个运行中都不应出现 _loop_guard
+    for snapshot in client.feedback_snapshots:
+        assert not any(fb.tool_name == "_loop_guard" for fb in snapshot)
+
+
 async def test_runner_inherit_mode_uses_runtime_mounted_tools(
     echo_manifest, execution_context, tool_broker, event_store
 ) -> None:

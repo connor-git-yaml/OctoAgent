@@ -214,6 +214,31 @@ class SkillRunner:
                     last_signature = signature
                     repeat_count = 1
 
+                # Feature follow-up: 到达 warning 阈值时注入 _loop_guard feedback，
+                # 向下一轮 LLM 显性提示"这组 tool_calls 已重复 N 轮且结果未变"，
+                # 促使 LLM 打破无效循环。不终止任务（loop_detected 兜底仍有效）。
+                if (
+                    repeat_count == limits.repeat_warning_threshold
+                    and repeat_count < limits.repeat_signature_threshold
+                ):
+                    tool_names = ", ".join(
+                        sorted({call.tool_name for call in output.tool_calls})
+                    )
+                    feedback.append(
+                        ToolFeedbackMessage(
+                            tool_name="_loop_guard",
+                            is_error=True,
+                            output="",
+                            error=(
+                                f"警告：工具 [{tool_names}] 已连续第 {repeat_count} 轮"
+                                f"以相同参数返回相同结果。请停止重复查询，"
+                                f"改用已有信息推进任务或尝试其他策略；"
+                                f"如需再次查询必须变更参数或换工具。"
+                            ),
+                            duration_ms=0,
+                        )
+                    )
+
                 if repeat_count >= limits.repeat_signature_threshold:
                     result = await self._fail_result(
                         manifest=manifest,
