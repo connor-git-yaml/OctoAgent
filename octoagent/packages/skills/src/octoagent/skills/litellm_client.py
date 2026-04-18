@@ -754,12 +754,22 @@ class LiteLLMSkillClient:
             # 统一使用 Chat Completions tool role 格式回填
             # 如果 LLM 没提供 tool_call_id，合成一个（避免降级为自然语言 user message）
             for fb in feedback:
-                call_id = fb.tool_call_id or f"call_{fb.tool_name}_{step}"
-                history.append({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                })
+                call_id = fb.tool_call_id or ""
+                if call_id:
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                    })
+                else:
+                    # 系统错误 feedback（如 _tool/_runner）没有对应的 function_call，
+                    # 不能作为 tool role 发送，否则 Responses API 会因找不到 call_id 报 400。
+                    # 降级为 user role 的错误提示。
+                    error_text = fb.error or fb.output or "工具执行异常"
+                    history.append({
+                        "role": "user",
+                        "content": f"[系统提示] 工具 {fb.tool_name} 执行失败: {error_text}",
+                    })
 
         # ---- Feature 064 P2-A: 上下文压缩 ----
         # 在构建 LLM 请求前检测并压缩对话历史。
