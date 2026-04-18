@@ -64,6 +64,7 @@ from .routes import (
     watchdog,
 )
 from .services.agent_session_turn_hook import AgentSessionTurnHook
+from .services.auth_refresh import build_auth_refresh_callback
 from .services.automation_scheduler import AutomationSchedulerService
 from .services.capability_pack import CapabilityPackService
 from .services.control_plane import ControlPlaneService
@@ -454,6 +455,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.proxy_manager = None
 
         # LiteLLM 模式：LiteLLMClient + FallbackManager
+        # 构造 OAuth token 自动刷新回调（Feature 064c 接入 LiteLLM 调用链）：
+        # Responses API 预检查 + 401 重试时触发 PkceOAuthAdapter.resolve()，
+        # 刷新后同步 os.environ[api_key_env] 供 litellm-config.yaml 引用。
+        auth_refresh_callback = build_auth_refresh_callback(
+            project_root=project_root,
+            event_store=store_group.event_store,
+        )
         litellm_client = LiteLLMClient(
             proxy_base_url=provider_config.proxy_base_url,
             proxy_api_key=provider_config.proxy_api_key.get_secret_value(),
@@ -463,6 +471,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             responses_direct_params=resolve_responses_api_direct_params(project_root),
             responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
             reasoning_supported_aliases=resolve_reasoning_supported_aliases(project_root),
+            auth_refresh_callback=auth_refresh_callback,
         )
         echo_adapter = EchoMessageAdapter()
         fallback_manager = FallbackManager(

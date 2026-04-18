@@ -646,3 +646,169 @@ class TestLiteLLMClientReasoning:
 
         call_kwargs = mock_acompletion.call_args.kwargs
         assert "reasoning_effort" not in call_kwargs
+
+
+class TestResponsesApiAuthRefresh:
+    """Responses API 预检查 / direct_params api_key 优先级 -- Feature 064c 接入"""
+
+    def _make_fake_async_client(
+        self, captured: list[tuple[str, dict[str, str], dict]]
+    ):
+        class FakeResponse:
+            def raise_for_status(self) -> None:  # noqa: D401
+                return None
+
+            async def aiter_lines(self):
+                yield (
+                    'data: {"type":"response.completed","response":{"model":"gpt-5.4",'
+                    '"output":[{"content":[{"type":"output_text","text":"ok"}]}]}}'
+                )
+                yield "data: [DONE]"
+
+        class _StreamContext:
+            async def __aenter__(self):
+                return FakeResponse()
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+        class FakeAsyncClient:
+            def __init__(self, *, timeout: float) -> None:
+                self.timeout = timeout
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                del exc_type, exc, tb
+
+            def stream(
+                self,
+                method: str,
+                url: str,
+                *,
+                headers: dict[str, str],
+                json: dict,
+            ):
+                del method
+                captured.append((url, headers, json))
+                return _StreamContext()
+
+        return FakeAsyncClient
+
+    async def test_responses_api_invokes_callback_before_request(self):
+        """进入 Responses API 分支时会调用 auth_refresh_callback 做预检查。"""
+        callback_calls: list[int] = []
+
+        class FakeRefreshResult:
+            credential_value = "refreshed-token"
+            api_base_url = "https://chatgpt.com/backend-api/codex"
+            extra_headers = {"chatgpt-account-id": "acct-fresh"}
+
+        async def _callback():
+            callback_calls.append(1)
+            return FakeRefreshResult()
+
+        captured: list[tuple[str, dict[str, str], dict]] = []
+        FakeClient = self._make_fake_async_client(captured)
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+            auth_refresh_callback=_callback,
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeClient):
+            await client.complete(
+                messages=[{"role": "user", "content": "你好"}],
+                model_alias="main",
+            )
+
+        assert callback_calls == [1]
+        assert len(captured) == 1
+        _, headers, _ = captured[0]
+        assert headers["Authorization"] == "Bearer refreshed-token"
+        assert headers["chatgpt-account-id"] == "acct-fresh"
+
+    async def test_refreshed_api_key_overrides_direct_params_snapshot(self):
+        """direct_params 静态 api_key 不应覆盖 callback 刷新后的新 token。"""
+
+        class FakeRefreshResult:
+            credential_value = "refreshed-token"
+            api_base_url = "https://chatgpt.com/backend-api/codex"
+            extra_headers = {"chatgpt-account-id": "acct-fresh"}
+
+        async def _callback():
+            return FakeRefreshResult()
+
+        captured: list[tuple[str, dict[str, str], dict]] = []
+        FakeClient = self._make_fake_async_client(captured)
+
+        # direct_params 携带启动快照的"过期" api_key，应被 callback 刷新结果覆盖
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+            responses_direct_params={
+                "main": {
+                    "api_base": "https://chatgpt.com/backend-api/codex",
+                    "api_key": "stale-token",
+                    "model": "gpt-5.4",
+                    "headers": {"originator": "pi"},
+                }
+            },
+            auth_refresh_callback=_callback,
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeClient):
+            await client.complete(
+                messages=[{"role": "user", "content": "你好"}],
+                model_alias="main",
+            )
+
+        assert len(captured) == 1
+        url, headers, body = captured[0]
+        assert url.startswith("https://chatgpt.com/backend-api/codex")
+        assert headers["Authorization"] == "Bearer refreshed-token"
+        # direct_params 中的静态 headers 仍然生效（originator），account_id 来自刷新结果
+        assert headers["originator"] == "pi"
+        assert headers["chatgpt-account-id"] == "acct-fresh"
+        assert body["model"] == "gpt-5.4"
+
+    async def test_callback_failure_falls_back_to_direct_params(self):
+        """auth_refresh_callback 抛异常时使用 direct_params 的 api_key 继续调用。"""
+
+        async def _callback():
+            raise RuntimeError("boom")
+
+        captured: list[tuple[str, dict[str, str], dict]] = []
+        FakeClient = self._make_fake_async_client(captured)
+
+        client = LiteLLMClient(
+            proxy_base_url="http://localhost:4001",
+            proxy_api_key="sk-test",
+            timeout_s=30,
+            responses_model_aliases={"main"},
+            responses_direct_params={
+                "main": {
+                    "api_base": "https://chatgpt.com/backend-api/codex",
+                    "api_key": "snapshot-token",
+                    "model": "gpt-5.4",
+                    "headers": {},
+                }
+            },
+            auth_refresh_callback=_callback,
+        )
+
+        with patch("octoagent.provider.client.httpx.AsyncClient", FakeClient):
+            await client.complete(
+                messages=[{"role": "user", "content": "你好"}],
+                model_alias="main",
+            )
+
+        assert len(captured) == 1
+        _, headers, _ = captured[0]
+        assert headers["Authorization"] == "Bearer snapshot-token"

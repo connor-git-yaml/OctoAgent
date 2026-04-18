@@ -493,10 +493,38 @@ class LiteLLMClient:
         if model_alias in self._responses_model_aliases:
             # Responses API 调用直连 Codex Backend，绕过 Proxy，
             # 避免 Proxy 内部 fallback 到不支持 Responses API 的 Provider
+            # Responses API 直连绕过 LiteLLM SDK 的 "os.environ/KEY" 解析，
+            # direct_params 是启动快照；调用前主动触发 auth_refresh_callback，
+            # 让其内部做预过期检查（PkceOAuthAdapter.resolve() 5 分钟 buffer）。
+            if self._auth_refresh_callback is not None:
+                try:
+                    refreshed = await self._auth_refresh_callback()
+                except Exception:
+                    log.warning(
+                        "responses_api_precheck_refresh_failed",
+                        model_alias=model_alias,
+                        exc_info=True,
+                    )
+                    refreshed = None
+                if refreshed is not None:
+                    api_key = (
+                        getattr(refreshed, "credential_value", None) or api_key
+                    )
+                    api_base = (
+                        getattr(refreshed, "api_base_url", None) or api_base
+                    )
+                    extra_headers = (
+                        getattr(refreshed, "extra_headers", None) or extra_headers
+                    )
+                    resolved_api_base = api_base or self._proxy_base_url
+                    resolved_api_key = api_key or self._proxy_api_key or "no-key"
+
             direct = self._responses_direct_params.get(model_alias)
             if direct:
                 direct_base = direct.get("api_base", resolved_api_base)
-                direct_key = direct.get("api_key", resolved_api_key)
+                # 显式传入的 api_key 优先于启动快照；让预检查/401 重试刷新后的
+                # 新 token 覆盖 direct_params 里过期的静态值。
+                direct_key = api_key or direct.get("api_key", resolved_api_key)
                 direct_headers = {**(extra_headers or {}), **direct.get("headers", {})}
                 # Codex Backend 不认别名，必须用真实模型名（如 gpt-5.4）
                 direct_model = direct.get("model") or model_alias
