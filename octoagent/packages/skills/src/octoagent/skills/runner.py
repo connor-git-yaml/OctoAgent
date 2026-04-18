@@ -439,7 +439,10 @@ class SkillRunner:
                 # 避免 LLM 在 schema 中看得见 mcp.* 但执行层拒绝导致孤立 tool_call。
                 tool_meta = await self._tool_broker.get_tool_meta(call.tool_name)
                 tool_group = tool_meta.tool_group if tool_meta else ""
-                if is_runtime_exempt_tool(call.tool_name, tool_group):
+                tool_metadata = (
+                    getattr(tool_meta, "metadata", None) if tool_meta else None
+                )
+                if is_runtime_exempt_tool(call.tool_name, tool_group, tool_metadata):
                     continue
                 raise SkillToolExecutionError(
                     f"工具 '{call.tool_name}' 不在当前 skill 可用工具集合中"

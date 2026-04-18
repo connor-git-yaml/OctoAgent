@@ -653,12 +653,18 @@ class CapabilityPackService:
                         },
                     )
                 )
-            elif bundled.tool_group == "mcp":
-                # Feature 077/079: MCP 工具由 litellm_client 的 is_runtime_exempt
+            elif (
+                bundled.tool_group == "mcp"
+                and str(bundled.metadata.get("source", "")).strip() == "mcp"
+            ):
+                # Feature 077/079: 动态注册的 MCP 工具（mcp_registry 写入
+                # metadata.source="mcp"）由 litellm_client 的 is_runtime_exempt
                 # 豁免直接以完整 schema 注入 LLM tools 参数，不再进 deferred 清单。
                 # 避免 system prompt 的 "tool_search 激活" 提示与 schema 层可直接
-                # 调用的信号冲突，LLM 收到矛盾信号会退化成反复调 mcp.servers.list
-                # / mcp.tools.list 做"验证"并触发工具交替循环熔断。
+                # 调用的信号冲突，LLM 收到矛盾信号会退化成反复调具体 MCP 工具
+                # 做"验证"并触发工具交替循环熔断。
+                # builtin 管理工具（mcp.servers.list / mcp.install 等）没有
+                # source 标记，仍按下面的 else 走 deferred 路径。
                 continue
             else:
                 # Deferred: 只保留名称和描述
@@ -705,8 +711,11 @@ class CapabilityPackService:
                             },
                         )
                     )
-                elif bundled.tool_group == "mcp":
-                    # 同上：MCP 工具走 is_runtime_exempt 豁免，不进 deferred。
+                elif (
+                    bundled.tool_group == "mcp"
+                    and str(bundled.metadata.get("source", "")).strip() == "mcp"
+                ):
+                    # 同上：动态 MCP 工具走 is_runtime_exempt 豁免，不进 deferred。
                     continue
                 else:
                     deferred_entries.append(

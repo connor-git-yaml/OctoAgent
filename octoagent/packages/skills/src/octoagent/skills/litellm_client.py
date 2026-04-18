@@ -151,7 +151,11 @@ class LiteLLMSkillClient:
         filtered_out = []
         for tool_meta in all_tools:
             # MCP 动态工具额外放行（不受静态 tools_allowed 白名单限制）
-            is_mcp = is_runtime_exempt_tool(tool_meta.name, getattr(tool_meta, "tool_group", ""))
+            is_mcp = is_runtime_exempt_tool(
+                tool_meta.name,
+                getattr(tool_meta, "tool_group", ""),
+                getattr(tool_meta, "metadata", None),
+            )
             if is_mcp and tool_meta.name not in allowed_tool_names:
                 mcp_extra.append(tool_meta.name)
             if tool_meta.name not in allowed_tool_names and not is_mcp:

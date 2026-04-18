@@ -45,8 +45,41 @@ from .conftest import EchoInput, QueueModelClient
     ],
 )
 def test_is_runtime_exempt_tool_edge_cases(tool_name: str, tool_group: str, expected: bool) -> None:
-    """Feature 077: MCP 豁免边界 —— 拒绝双点（mcp..evil）等被误用豁免通道的形式。"""
+    """Feature 077: MCP 豁免边界 —— 拒绝双点（mcp..evil）等被误用豁免通道的形式。
+
+    不传 metadata 时按形状判定（向后兼容旧调用方）。
+    """
     assert is_runtime_exempt_tool(tool_name, tool_group) is expected
+
+
+@pytest.mark.parametrize(
+    "tool_name,tool_group,metadata,expected",
+    [
+        # 动态注册的 MCP 工具：metadata.source=="mcp" → 豁免
+        ("mcp.perplexity.search", "mcp", {"source": "mcp"}, True),
+        ("mcp.openrouter_perplexity.ask_model", "mcp", {"source": "mcp", "title": "X"}, True),
+        # builtin 管理工具：tool_group=="mcp" 但 metadata 没 source 标记 → 不豁免
+        # 这是关键回归：避免 LLM 看到 mcp.servers.list / mcp.tools.list 反复调
+        # 做"验证"触发工具交替循环。
+        ("mcp.servers.list", "mcp", {"entrypoints": ["agent_runtime", "web"]}, False),
+        ("mcp.tools.list", "mcp", {}, False),
+        ("mcp.tools.refresh", "mcp", {"source": ""}, False),
+        # 形状非法：即使 source=="mcp" 也不豁免（防御）
+        ("mcp.perplexity", "mcp", {"source": "mcp"}, False),
+        ("mcp..evil", "mcp", {"source": "mcp"}, False),
+        # tool_group 不是 mcp：即使 source=="mcp" 也不豁免
+        ("mcp.perplexity.search", "builtin", {"source": "mcp"}, False),
+    ],
+)
+def test_is_runtime_exempt_tool_metadata_source_filter(
+    tool_name: str, tool_group: str, metadata: dict, expected: bool
+) -> None:
+    """Feature 079: 收紧豁免，只放行 metadata.source=="mcp" 的动态 MCP 工具。
+
+    builtin 管理工具（mcp.servers.list 等）即使名字形如 mcp.X.Y 也不被豁免，
+    避免 LLM 把它们当作"验证 MCP 状态"的入口反复调用。
+    """
+    assert is_runtime_exempt_tool(tool_name, tool_group, metadata) is expected
 
 
 class StrictOutput(BaseModel):
@@ -207,27 +240,29 @@ async def test_runner_disallowed_tool(
 async def test_runner_mcp_tool_exempt_from_allowlist(
     echo_manifest, execution_context, tool_broker, event_store
 ) -> None:
-    """Feature 077: LiteLLM schema 层放行 mcp.* 工具后，runner 执行层也必须
-    同步放行（is_runtime_exempt_tool），否则 LLM 看得见但调不动，且会在
-    history 留下孤立 function_call 触发 Responses API 400。"""
+    """Feature 077 + 079: LiteLLM schema 层对**动态注册** MCP 工具
+    (metadata.source=="mcp") 放行后，runner 执行层也必须同步放行
+    (is_runtime_exempt_tool)，否则 LLM 看得见但调不动，且会在 history
+    留下孤立 function_call 触发 Responses API 400。"""
     # 显式锁定前提：echo_manifest 必须处于 RESTRICT 模式，否则白名单校验
     # 被跳过，豁免逻辑未被测试到，会产生假阳性通过
     assert echo_manifest.permission_mode == SkillPermissionMode.RESTRICT
     tool_broker.set_tool_meta(
-        "mcp.servers.list",
+        "mcp.perplexity.ask_model",
         ToolMeta(
-            name="mcp.servers.list",
-            description="列出已注册的 MCP 服务",
+            name="mcp.perplexity.ask_model",
+            description="向 Perplexity 提问",
             parameters_json_schema={"type": "object", "properties": {}},
             side_effect_level=SideEffectLevel.NONE,
             tool_group="mcp",
+            metadata={"source": "mcp", "mcp_server_name": "perplexity"},
         ),
     )
     outputs = [
         SkillOutputEnvelope(
-            content="check mcp",
+            content="ask mcp",
             complete=False,
-            tool_calls=[{"tool_name": "mcp.servers.list", "arguments": {}}],
+            tool_calls=[{"tool_name": "mcp.perplexity.ask_model", "arguments": {}}],
         ),
         SkillOutputEnvelope(content="done", complete=True),
     ]
@@ -242,7 +277,51 @@ async def test_runner_mcp_tool_exempt_from_allowlist(
     )
 
     assert result.status == SkillRunStatus.SUCCEEDED
-    assert any(call[0] == "mcp.servers.list" for call in tool_broker.calls)
+    assert any(call[0] == "mcp.perplexity.ask_model" for call in tool_broker.calls)
+
+
+async def test_runner_mcp_builtin_admin_tool_not_exempted(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 079 回归保护：builtin 管理工具（mcp.servers.list 等）即使
+    tool_group=="mcp" 也不被豁免，避免 LLM 把它们当作"验证 MCP 状态"的
+    入口反复调用并触发工具交替循环。
+
+    LLM schema 层与 runner 执行层都不会暴露/放行这类工具；它们走标准
+    deferred / tool_search 激活路径。
+    """
+    assert echo_manifest.permission_mode == SkillPermissionMode.RESTRICT
+    tool_broker.set_tool_meta(
+        "mcp.servers.list",
+        ToolMeta(
+            name="mcp.servers.list",
+            description="列出已注册的 MCP 服务",
+            parameters_json_schema={"type": "object", "properties": {}},
+            side_effect_level=SideEffectLevel.NONE,
+            tool_group="mcp",
+            metadata={"entrypoints": ["agent_runtime", "web"]},  # 无 source="mcp"
+        ),
+    )
+    outputs = [
+        SkillOutputEnvelope(
+            content="check mcp",
+            complete=False,
+            tool_calls=[{"tool_name": "mcp.servers.list", "arguments": {}}],
+        ),
+    ] * 4
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    # 白名单拒绝 → 反复重试 → 进入失败终态
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.TOOL_EXECUTION_ERROR
 
 
 async def test_runner_non_mcp_tool_not_exempted(

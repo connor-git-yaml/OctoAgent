@@ -459,18 +459,38 @@ def resolve_effective_tool_allowlist(
     return [str(item).strip() for item in tools_allowed if str(item).strip()]
 
 
-def is_runtime_exempt_tool(tool_name: str, tool_group: str) -> bool:
+def is_runtime_exempt_tool(
+    tool_name: str,
+    tool_group: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
     """判断工具是否属于 runtime 豁免类别（不受静态白名单限制）。
 
-    当前豁免类别：MCP 动态工具（tool_group == "mcp"）。MCP 工具在注册时
-    不可预知具体名称，由 LiteLLM schema 层动态放行给 LLM；执行层通过本
-    函数保持与 schema 层一致的豁免判断，避免 LLM 看得见但调不动。
+    当前豁免类别：**动态注册的** MCP 工具（由 mcp_registry._build_tool_meta
+    设置 metadata={"source": "mcp", ...}）。这类工具在注册时不可预知具体
+    名称，由 LiteLLM schema 层动态放行给 LLM；执行层通过本函数保持与
+    schema 层一致的豁免判断，避免 LLM 看得见但调不动。
 
-    要求工具名至少为三段形式 `mcp.<server>.<tool>`，其中 server 段非空。
-    显式拒绝 `mcp.` / `mcp..evil` 等形状以避免被误用豁免通道。
+    **不豁免** builtin 管理工具（`mcp.servers.list` / `mcp.install` 等用
+    `@tool_contract` 注册的工具）：
+    - 它们名字虽然形如 `mcp.X.Y`、tool_group 也是 "mcp"，但属于 owner-facing
+      的治理工具，不应该让 LLM 凭"工具名前缀"就直接调用。
+    - 让它们走标准 deferred / tool_search 激活路径，避免 LLM 看到管理工具
+      就反复调来"验证 MCP 状态"，触发工具交替循环。
+
+    判定标准（必须全满足）：
+    1. tool_group == "mcp"
+    2. tool_name 形如 `mcp.<server>.<tool>` 三段（非 `mcp.` / `mcp..evil` 等）
+    3. metadata 显式标记 source == "mcp"
+       —— 兼容旧调用方：`metadata is None` 时回退到只看前两条（旧行为，
+       仅用于不传 metadata 的测试用例）；调用方应尽量传 metadata。
     """
     if tool_group != "mcp" or not tool_name.startswith("mcp."):
         return False
     remainder = tool_name[4:]
     # remainder 必须是 "<server>.<tool>"：首字符非 '.'（防双点），且仍含 '.'
-    return bool(remainder) and not remainder.startswith(".") and "." in remainder
+    if not (remainder and not remainder.startswith(".") and "." in remainder):
+        return False
+    if metadata is None:
+        return True  # 旧调用方未传 metadata，按形状判定（向后兼容）
+    return str(metadata.get("source", "")).strip() == "mcp"
