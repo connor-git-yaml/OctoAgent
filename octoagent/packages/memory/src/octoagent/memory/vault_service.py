@@ -200,7 +200,11 @@ class VaultAccessService:
         partition: MemoryPartition | None = None,
         subject_key: str | None = None,
     ) -> VaultAccessGrantRecord | None:
-        """查找 actor 在给定范围下最近仍有效的授权。"""
+        """查找 actor 在给定范围下最近仍有效的授权。
+
+        发现过期条目时会把它们收集起来一次性 commit，避免之前的"每条过期就
+        commit 一次"在读路径上产生多次写事务。
+        """
 
         now = datetime.now(UTC)
         grants = await self._store.list_vault_access_grants(
@@ -211,16 +215,23 @@ class VaultAccessService:
             statuses=[VaultAccessGrantStatus.ACTIVE.value],
             limit=50,
         )
+        expired_batch: list[VaultAccessGrantRecord] = []
+        chosen: VaultAccessGrantRecord | None = None
         for grant in grants:
             if grant.expires_at is not None and grant.expires_at <= now:
-                expired = grant.model_copy(update={"status": VaultAccessGrantStatus.EXPIRED})
-                await self._store.replace_vault_access_grant(expired)
-                await self._conn.commit()
+                expired_batch.append(
+                    grant.model_copy(update={"status": VaultAccessGrantStatus.EXPIRED})
+                )
                 continue
             if partition is not None and grant.partition not in {None, partition}:
                 continue
-            return grant
-        return None
+            if chosen is None:
+                chosen = grant
+        if expired_batch:
+            for expired in expired_batch:
+                await self._store.replace_vault_access_grant(expired)
+            await self._conn.commit()
+        return chosen
 
     async def record_vault_retrieval_audit(
         self,

@@ -410,7 +410,10 @@ class SqliteMemoryStore:
                 limit=limit,
             )
 
-        # 确定分组键的 SQL 表达式
+        # group_by 必须严格走白名单——group_expr 最终要拼进 f-string SQL，
+        # 任何进入此分支的字符串都是固定字面量，不会允许用户输入落地。
+        if group_by not in {"partition", "prefix", "scope"}:
+            group_by = "partition"
         if group_by == "prefix":
             # 按 subject_key 的第一个 "/" 前缀分组
             group_expr = (
@@ -421,7 +424,6 @@ class SqliteMemoryStore:
         elif group_by == "scope":
             group_expr = "scope_id"
         else:
-            # 默认按 partition 分组
             group_expr = "partition"
 
         # 查询分组统计

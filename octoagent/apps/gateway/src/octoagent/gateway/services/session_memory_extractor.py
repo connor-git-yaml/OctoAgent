@@ -502,6 +502,16 @@ class SessionMemoryExtractor:
             if not item_type or not content:
                 continue
 
+            # LLM 输出清洗：长度上限防 DoS、路径穿越样式防 browse 污染、
+            # 控制字符剔除。subject_key 会进 browse_sor 的 LIKE ? % 查询，
+            # 必须约束形状。
+            subject_key = subject_key.replace("\x00", "")
+            if ".." in subject_key:
+                subject_key = subject_key.replace("..", "")
+            if len(subject_key) > 256:
+                subject_key = subject_key[:256]
+            content = content[:4000]
+
             items.append(
                 ExtractionItem(
                     type=item_type,
