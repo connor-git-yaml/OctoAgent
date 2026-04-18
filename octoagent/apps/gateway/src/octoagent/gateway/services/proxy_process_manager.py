@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
+from octoagent.provider.dx.docker_daemon import ensure_docker_daemon
 
 log = structlog.get_logger()
 
@@ -56,6 +57,12 @@ class ProxyProcessManager:
             else self._instance_root / _DEFAULT_ENV_NAME
         )
         self._port = self._parse_port(self._proxy_url)
+        try:
+            self._docker_autostart_timeout_s = float(
+                os.environ.get("OCTOAGENT_DOCKER_DAEMON_TIMEOUT", "60")
+            )
+        except ValueError:
+            self._docker_autostart_timeout_s = 60.0
 
     # ------------------------------------------------------------------
     # 公共 API
@@ -97,18 +104,35 @@ class ProxyProcessManager:
     async def _start(self, *, timeout_s: float) -> bool:
         compose_file = self._find_compose_file()
 
-        # 策略 1: Docker Compose
-        if compose_file is not None and await self._docker_available():
-            log.info(
-                "proxy_start_docker",
-                compose_file=str(compose_file),
-                proxy_url=self._proxy_url,
+        # 策略 1: Docker Compose（先尝试自动启动 Docker daemon）
+        if compose_file is not None:
+            daemon_status = await ensure_docker_daemon(
+                timeout_s=self._docker_autostart_timeout_s,
             )
-            ok = await self._start_docker(compose_file)
-            if ok:
-                return await self._wait_for_proxy(timeout_s)
-            # Docker Compose 失败（daemon 未运行等），fallback 到直接进程
-            log.warning("proxy_docker_failed_fallback_to_direct")
+            if daemon_status.available:
+                log.info(
+                    "proxy_docker_daemon_ready",
+                    auto_started=daemon_status.auto_started,
+                    elapsed_s=daemon_status.elapsed_s,
+                    platform=daemon_status.platform,
+                )
+                log.info(
+                    "proxy_start_docker",
+                    compose_file=str(compose_file),
+                    proxy_url=self._proxy_url,
+                )
+                ok = await self._start_docker(compose_file)
+                if ok:
+                    return await self._wait_for_proxy(timeout_s)
+                # Docker Compose 失败（daemon 未运行等），fallback 到直接进程
+                log.warning("proxy_docker_failed_fallback_to_direct")
+            else:
+                log.warning(
+                    "proxy_docker_daemon_unavailable",
+                    platform=daemon_status.platform,
+                    attempts=daemon_status.attempts,
+                    error=daemon_status.error,
+                )
 
         # 策略 2: 直接进程
         if self._config_path.exists():
@@ -270,17 +294,9 @@ class ProxyProcessManager:
     # ------------------------------------------------------------------
 
     async def _docker_available(self) -> bool:
-        """检查 Docker daemon 是否可用（不仅是 CLI 安装）。"""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "info",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            return await proc.wait() == 0
-        except Exception:
-            return False
+        """检查 Docker daemon 是否可用（委派给 ensure_docker_daemon 单一事实源）。"""
+        status = await ensure_docker_daemon(auto_start=False)
+        return status.available
 
     # ------------------------------------------------------------------
     # compose 文件搜索

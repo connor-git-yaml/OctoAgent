@@ -539,4 +539,10 @@ load_dotenv()  # 开发便利；生产环境由容器 env_file 覆盖
 - `litellm` 模式：先确认 litellm-proxy 容器运行 → 启动 Gateway
 - `full` 模式（M2+）：`docker compose up -d` 启动全部服务
 
+Docker daemon 未运行时，由 `octoagent.provider.dx.docker_daemon.ensure_docker_daemon`
+统一检测并在 macOS / Linux 下自动启动（macOS: `open -a "Docker Desktop"`；
+Linux: `systemctl --user start docker` → `sudo -n systemctl start docker`）。
+超时仍未就绪则降级至直接进程路径，不阻断 gateway 启动。相关环境变量：
+`OCTOAGENT_AUTOSTART_DOCKER=0` 禁用预热；`OCTOAGENT_DOCKER_DAEMON_TIMEOUT` 调整超时（秒）。
+
 ---
