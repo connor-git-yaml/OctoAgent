@@ -201,7 +201,16 @@ class McpRegistryService:
     def list_tools(self, *, server_name: str = "") -> list[McpToolRecord]:
         tools = list(self._tool_records.values())
         if server_name:
-            return [item for item in tools if item.server_name == server_name]
+            # 双向 slugify 容错：LLM 容易把 registered_name 中段（下划线）当作
+            # server_name 回传，和实际存的 server_name（可能带连字符）对不上。
+            # 用 _slugify 归一化两侧，避免精确字符串匹配失败返回空列表，
+            # 进而触发 LLM 反复 list/filter 的交替循环。
+            target = self._slugify(server_name)
+            return [
+                item
+                for item in tools
+                if self._slugify(item.server_name) == target
+            ]
         return tools
 
     def get_mount_policy(self, server_name: str) -> str:

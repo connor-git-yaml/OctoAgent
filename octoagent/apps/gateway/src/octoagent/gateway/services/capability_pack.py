@@ -653,6 +653,13 @@ class CapabilityPackService:
                         },
                     )
                 )
+            elif bundled.tool_group == "mcp":
+                # Feature 077/079: MCP 工具由 litellm_client 的 is_runtime_exempt
+                # 豁免直接以完整 schema 注入 LLM tools 参数，不再进 deferred 清单。
+                # 避免 system prompt 的 "tool_search 激活" 提示与 schema 层可直接
+                # 调用的信号冲突，LLM 收到矛盾信号会退化成反复调 mcp.servers.list
+                # / mcp.tools.list 做"验证"并触发工具交替循环熔断。
+                continue
             else:
                 # Deferred: 只保留名称和描述
                 deferred_entries.append(
@@ -698,6 +705,9 @@ class CapabilityPackService:
                             },
                         )
                     )
+                elif bundled.tool_group == "mcp":
+                    # 同上：MCP 工具走 is_runtime_exempt 豁免，不进 deferred。
+                    continue
                 else:
                     deferred_entries.append(
                         DeferredToolEntry(

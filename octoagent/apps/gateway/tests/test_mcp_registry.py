@@ -13,7 +13,11 @@ from pathlib import Path
 
 import pytest
 from octoagent.core.models.event import Event
-from octoagent.gateway.services.mcp_registry import McpRegistryService
+from octoagent.core.models import BuiltinToolAvailabilityStatus
+from octoagent.gateway.services.mcp_registry import (
+    McpRegistryService,
+    McpToolRecord,
+)
 
 
 class _StubEventStore:
@@ -145,3 +149,63 @@ def test_load_configs_json_parse_error(tmp_path: Path) -> None:
     )
     assert registry._load_configs() == []
     assert "JSONDecodeError" in registry.last_config_error
+
+
+def _seed_tool_record(
+    registry: McpRegistryService, *, registered_name: str, server_name: str
+) -> None:
+    registry._tool_records[registered_name] = McpToolRecord(
+        registered_name=registered_name,
+        server_name=server_name,
+        source_tool_name=registered_name.rsplit(".", 1)[-1],
+        availability=BuiltinToolAvailabilityStatus.AVAILABLE,
+    )
+
+
+def test_list_tools_server_name_filter_is_slug_tolerant(tmp_path: Path) -> None:
+    """LLM 常把带连字符的 server_name 写成下划线（或反过来），过滤不能精确字符串匹配。"""
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=tmp_path / "mcp-servers.json",
+    )
+    _seed_tool_record(
+        registry,
+        registered_name="mcp.openrouter_perplexity.ask_model",
+        server_name="openrouter-perplexity",
+    )
+
+    # 严格匹配：连字符命中
+    hit_dashed = registry.list_tools(server_name="openrouter-perplexity")
+    assert [t.registered_name for t in hit_dashed] == ["mcp.openrouter_perplexity.ask_model"]
+
+    # slug 容错：下划线也应命中
+    hit_underscored = registry.list_tools(server_name="openrouter_perplexity")
+    assert [t.registered_name for t in hit_underscored] == ["mcp.openrouter_perplexity.ask_model"]
+
+    # 其他大小写 / 混合分隔符也应命中（slugify 会归一化）
+    hit_mixed = registry.list_tools(server_name="OpenRouter-Perplexity")
+    assert len(hit_mixed) == 1
+
+    # 不相关的 server_name 仍然返回空
+    assert registry.list_tools(server_name="other-server") == []
+
+
+def test_list_tools_empty_filter_returns_all(tmp_path: Path) -> None:
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=tmp_path / "mcp-servers.json",
+    )
+    _seed_tool_record(
+        registry,
+        registered_name="mcp.alpha.one",
+        server_name="alpha",
+    )
+    _seed_tool_record(
+        registry,
+        registered_name="mcp.beta.two",
+        server_name="beta",
+    )
+    names = {t.registered_name for t in registry.list_tools()}
+    assert names == {"mcp.alpha.one", "mcp.beta.two"}
